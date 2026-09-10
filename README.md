@@ -86,6 +86,8 @@ migrations/
 docs/
   adr/                  architecture decision records
   design/THEME.md       "The Reading Room" — the visual specification
+  spec.md               the 18-milestone implementation plan every decision is measured against
+  spec-gaps-ficnexus.md features the older FicNexus build has that this plan does not; review draft, not adopted
   tutorial/             build it yourself, milestone by milestone
   requirements.csv      every requirement and its status
   verification.md       what has actually been run, and what has not
