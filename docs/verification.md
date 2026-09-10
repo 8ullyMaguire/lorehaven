@@ -26,7 +26,7 @@ the result. Where a claim could only be checked by hand, it says so.
 | Field | Value |
 |---|---|
 | Date of last verification | 2026-09-10 |
-| Commit | `11f0bb8` at first commit; see `git log` |
+| Commit | `v0.01-running-app` (`0d51c19`); the running binary reports `0.1.0+0d51c19` at `/health/live` |
 | Environment | Linux, Rust 1.98.0, Node 26.8.1, SQLite 3.53.4 |
 | PostgreSQL available | **No** |
 
@@ -85,9 +85,21 @@ Graceful shutdown was observed by sending SIGTERM: the log records
 Frontend commands actually run:
 
 ```text
-node node_modules/vitest/vitest.mjs run   # 4 files, 25 tests passed
-node node_modules/vite/bin/vite.js build  # 133 modules; 66.4 kB JS (25.6 kB gzip), 17.2 kB CSS
+node node_modules/vitest/vitest.mjs run   # 5 files, 30 tests passed
+node node_modules/vite/bin/vite.js build  # 133 modules; 65.7 kB JS (25.3 kB gzip), 17.2 kB CSS
 ```
+
+The suite includes a shell-level test (`frontend/src/App.test.ts`) that renders
+the application against mocked API responses and changes the appearance control.
+It exists because of a real defect found while testing by hand: the selector used
+`bind:value` *and* `onchange`, so persistence depended on which listener Svelte
+attached first, and a chosen theme was applied for the session but never
+remembered. The fix passes the value explicitly through one handler, and the
+test now pins it.
+
+Appearance persistence was also confirmed by hand in the browser: choosing Clear
+Day stored `lorehaven.theme=clear-day`, and a reload came back with
+`data-theme="clear-day"` and a white page background.
 
 Note on this machine: the checkout lives on an NFS-mounted share where
 `node_modules/.bin` symlinks cannot be executed (`Operation not permitted`), so

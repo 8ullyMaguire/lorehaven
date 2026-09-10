@@ -32,6 +32,12 @@
 
   let preference = $state<ThemePreference>(readPreference(window.localStorage));
 
+  /** Apply a choice and remember it. */
+  function chooseTheme(next: ThemePreference) {
+    preference = next;
+    writePreference(window.localStorage, next);
+  }
+
   const darkQuery =
     typeof window.matchMedia === 'function'
       ? window.matchMedia('(prefers-color-scheme: dark)')
@@ -111,10 +117,15 @@
 
     <div class="controls">
       <label class="visually-hidden" for="theme-select">Appearance</label>
+      <!--
+        `value` + an explicit handler rather than `bind:value` + `onchange`:
+        with both, persistence depends on which listener Svelte attaches first,
+        which is not a guarantee worth relying on for a saved preference.
+      -->
       <select
         id="theme-select"
-        bind:value={preference}
-        onchange={() => writePreference(window.localStorage, preference)}
+        value={preference}
+        onchange={(event) => chooseTheme(event.currentTarget.value as ThemePreference)}
       >
         {#each themeOptions as option (option.value)}
           <option value={option.value}>{option.label}</option>
@@ -169,8 +180,8 @@
     id="theme-select-mobile"
     label="Appearance"
     options={themeOptions}
-    bind:value={preference}
-    onchange={() => writePreference(window.localStorage, preference)}
+    value={preference}
+    onchange={(event) => chooseTheme(event.currentTarget.value as ThemePreference)}
   />
 </Drawer>
 
