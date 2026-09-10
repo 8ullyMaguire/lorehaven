@@ -20,6 +20,7 @@ pub mod imports;
 pub mod limiter;
 pub mod logging;
 pub mod privacy;
+pub mod revisions;
 pub mod routes;
 pub mod safety;
 pub mod secrets;

@@ -25,6 +25,25 @@ pub fn now_rfc3339() -> String {
     format_rfc3339(OffsetDateTime::now_utc())
 }
 
+/// A moment this many seconds from now, as RFC 3339 text.
+///
+/// The counterpart to [`now_rfc3339`] for the columns that mean "until": a
+/// cached revision's expiry, a lease deadline. Computed from the same clock and
+/// formatted by the same function, so an expiry can never disagree with a
+/// creation time about the offset.
+///
+/// # Panics
+/// Never: a duration of that many seconds is representable for any input this
+/// codebase passes, and `saturating` bounds it if not.
+#[must_use]
+pub fn in_seconds(seconds: i64) -> String {
+    let now = OffsetDateTime::now_utc();
+    let at = now
+        .checked_add(time::Duration::seconds(seconds))
+        .unwrap_or(now);
+    format_rfc3339(at)
+}
+
 /// A moment as RFC 3339 text, the format every timestamp column stores.
 ///
 /// Public because the job queue computes a *future* moment (a lease expiry, the

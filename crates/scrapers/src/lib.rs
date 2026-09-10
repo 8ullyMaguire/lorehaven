@@ -456,6 +456,22 @@ pub trait Fetcher: Send + Sync {
     /// redirect into a private network, and must bound the response size.
     async fn get(&self, url: &str) -> SourceResult<Fetched>;
 
+    /// Retrieve a URL, telling the source which revision we already hold.
+    ///
+    /// The default ignores the validators and performs an ordinary fetch, which
+    /// is the honest behaviour for a fetcher that cannot do better: a conditional
+    /// request is an optimisation, and a fetcher that pretended to make one
+    /// would report `Fetched` every time while the caller believed a `304` was
+    /// possible. [`safety::SafeFetcher`] overrides this and treats a real `304`
+    /// as [`ConditionalFetch::NotModified`].
+    async fn get_conditional(
+        &self,
+        url: &str,
+        _known: Option<&RevisionValidators>,
+    ) -> SourceResult<ConditionalFetch> {
+        Ok(ConditionalFetch::Fetched(self.get(url).await?))
+    }
+
     /// The host this fetcher considers the source's own, for credential
     /// purposes. A credential is offered only to a request to this host, so a
     /// redirect to another origin cannot carry it (spec §11.5: "Avoid forwarding
@@ -483,6 +499,53 @@ pub struct Fetched {
     pub body: String,
     /// The `Content-Type` header, when the server sent one.
     pub content_type: Option<String>,
+    /// The `ETag` the source gave for this revision, when it gave one.
+    ///
+    /// Kept so the *next* fetch of this URL can say `If-None-Match` and be
+    /// answered `304` instead of re-sending a page nothing has changed on. It
+    /// is a validator, not a secret, so it is safe to store beside the cached
+    /// bytes (spec §10.4).
+    pub etag: Option<String>,
+    /// The `Last-Modified` the source gave, when it gave one. The weaker of the
+    /// two validators, and useful precisely because a source that sends no ETag
+    /// often sends this.
+    pub last_modified: Option<String>,
+}
+
+/// The validators a page was last seen with.
+///
+/// A pair rather than a single value because HTTP has two mechanisms and the
+/// header that applies depends on which one the source published. Sending both
+/// is correct: a server that only understands one ignores the other.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RevisionValidators {
+    /// The `ETag` from the previous fetch, when the source sent one.
+    pub etag: Option<String>,
+    /// The `Last-Modified` from the previous fetch, when the source sent one.
+    pub last_modified: Option<String>,
+}
+
+impl RevisionValidators {
+    /// Whether these validators are worth sending — at least one is set.
+    #[must_use]
+    pub fn is_usable(&self) -> bool {
+        self.etag.is_some() || self.last_modified.is_some()
+    }
+}
+
+/// What a conditional fetch produced.
+///
+/// `NotModified` is not a failure and not an empty page: it means the source
+/// confirmed the revision we already hold is still current, so the caller should
+/// serve what it has. Collapsing it into an error would make every cached read
+/// look like a broken source.
+#[derive(Debug, Clone)]
+pub enum ConditionalFetch {
+    /// The source says the revision we hold is still current. Nothing came back
+    /// but the confirmation.
+    NotModified,
+    /// A page came back — either changed, or the source ignored the condition.
+    Fetched(Fetched),
 }
 
 /// One site, one adapter (spec §11.1).
