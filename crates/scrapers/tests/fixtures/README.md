@@ -163,20 +163,33 @@ link. The three content-warning recordings are named for the id each page's own
 acknowledgement link carries, which is how the requested story is recoverable
 from an interstitial that does not otherwise name it.
 
-### The two-page shape
+### One work, three pages, and only one of them is the reading view
 
 eFiction serves one work across more than one kind of page, and this is the fact
 the port got wrong:
 
 * **The work page** (`viewstory.php?sid=N&index=1`) carries the title, the
   metadata labels, the summary and the chapter list. It carries no chapter prose.
-* **A chapter page** (`viewstory.php?sid=N&chapter=K`) carries one chapter. Its
-  metadata — including the summary — is in `div.infobox`, its heading is
-  `.chaptertitle`, and the author's notes are `.notes` / `.noteinfo`.
-* **A chapter's text view** (`...&textsize=0&chapter=K`) is the same chapter
-  under a different skin, and it is the one that renders the prose in `div#story`
-  with the story block in `div.storyinfo`. `div#story` does **not** exist on the
-  plain chapter page.
+* **A chapter's reading view** (`viewstory.php?sid=N&textsize=0&chapter=K`) is
+  the reader's page. It links the member's own `style.css`, runs no script on
+  load, and renders the prose in `div#story`. It carries **no**
+  `div.chaptertitle`, so a page of this shape cannot say which chapter it is.
+* **A chapter's print view** (`viewstory.php?sid=N&chapter=K`) is the *same
+  chapter* — byte-identical prose — rendered by the print template. It links
+  `printable.css` and fires `window.print()` on load, in a bare
+  `if (window.print)` rather than in a fallback branch. Its metadata block is
+  `div.infobox`, its heading `.chaptertitle` (`TITLE by AUTHOR`), the prose is in
+  `div.chapter`, and the author's notes are `.notes` / `.noteinfo`.
+
+**A table of contents links to the print view.** That is the trap awaiting
+anyone who follows the site's own links to find the chapter URL: `chapter=K`
+without `textsize=0` is what a work page's chapter list points at, and it is a
+request to print. On `ninelivesarchive.com` that matters concretely — its
+`robots.txt` disallows `viewstory.php?action=printable&*` by name while leaving
+the reading view alone. Importing a library is reading, so the adapter asks for
+the reading view and reads `div#story`, falling back to `div.chapter` for a
+member that answers with the print template anyway. Both recordings are here so
+the two views can be compared rather than trusted.
 
 An earlier note in this repository recorded that the ported adapter's `infobox`
 selector "matched zero markup". That was wrong twice over, and the mistake is
@@ -185,13 +198,44 @@ does not appear. `div.infobox` is exactly where a *chapter* page keeps the
 summary and the labels. The selector was not dead; it was pointed at the wrong
 page, and the conclusion drawn from that was wrong with it.
 
+### The headings are not where the title is
+
+`tgstorytime.com`'s work page carries **two** elements with `id="pagetitle"`: the
+header holding `<a>TITLE</a> by <a href="viewuser.php?uid=N">AUTHOR</a>`, and a
+second, beside it, holding only a `Report` link. An adapter that took the first
+`#pagetitle` on the page is reading whichever of the two the skin happens to emit
+first. The header is the one that contains a `viewuser.php` link, and that is how
+it is found.
+
+### Labels, values, and what is not a value
+
+A metadata block is a run of `<span class="label">Name:</span> value` pairs, and
+the value ends where the next label begins. Two things about that are worth
+writing down, because both are visible in these recordings and both are easy to
+get wrong:
+
+* **A class value is a link to `browse.php`, and everything else in a block is
+  furniture.** `tgstorytime.com` writes `Rated: Adult <a
+  href="modules/epubversion/…">Download ePub</a>`, so a walk that harvested every
+  anchor's text reads the work's rating as `Adult Download ePub`. Matching the
+  browse script and disregarding other anchors is what separates a value from the
+  chrome around it.
+* **Where the member rendered values as links, the links are the values.** On
+  `tgstorytime.com`, `Characters` is a *single* link whose text contains a comma —
+  `Male to Female, Young Adult (20-26 yrs)` — while on `giantessworld.net`,
+  `Categories` is one link per value. Splitting the rendered text on commas gets
+  the first wrong and the second right by accident; and splitting on `/` breaks
+  the family's own vocabulary, turning `Slow/Gradual Change` into `Slow` and
+  `FF/m` into `FF`.
+
 ### The chapter key is on the work page, but not behind one selector
 
-`div#chapterlist` holds one line per chapter for tgstorytime: its ordinal, a link
-to `viewstory.php?sid=N&chapter=K`, the chapter's title, the author, and a
-**review link carrying `chapid=NNNN`**. That `chapid` is the site's own
-identifier for the chapter, and it is available at preview time without fetching
-a single chapter.
+`div#chapterlist` holds the chapter list for tgstorytime — **one such element per
+chapter**, all sharing the id, which is invalid HTML that every browser accepts.
+It carries the ordinal, a link to `viewstory.php?sid=N&chapter=K`, the title, the
+author, and a **review link carrying `chapid=NNNN`**. That `chapid` is the site's
+own identifier for the chapter, and it is available at preview time without
+fetching a single chapter.
 
 **But `div#chapterlist` belongs to that member's skin, not to the family.**
 giantessworld's work page has no such container, and still carries thirteen
@@ -207,10 +251,14 @@ a position, not an identity, and it changes the moment a chapter is inserted.
 
 | | tgstorytime | giantessworld |
 |---|---|---|
-| Chapter list container | `div#chapterlist` | none; links are loose in the page |
+| Chapter list container | `div#chapterlist`, one per chapter | none; links are loose in the page |
 | Summary on the work page | `div.summarytext` | a `Summary:` label span |
+| Where the rating lives | `div.storyinfo`, beside the block | `Rated:` inside the block |
+| Date format | `08/06/21` | `January 18 2022` |
 | Chapter titles | the author's own (`In the beginning - Chapter 1`) | generated (`Chapter 1`) |
 | Chapter count | 19 | 13 |
+| Rating | `Adult` | `X` |
+| `Warnings` label | absent | one, whose text is a sentence |
 
 Both carry `Completed:`, `Word count:`, `Read:`, `Published:` and `Updated:` as
 label spans, with the value in the markup that follows the span — and they
@@ -242,7 +290,15 @@ a title and no chapters.
 `narutofic-content-warning.html` also carries `Members:`, `Series:`, `Stories:`,
 `Chapters:`, `Word count:` and `Reviewers:` as label spans. Those are that site's
 *archive statistics*, not the requested story's metadata. A parser that reads
-label spans generically picks up a story whose word count is the whole archive's.
+label spans generically picks up a story whose word count is the whole archive's
+— 47,323,633 words over 25,318 chapters, which is implausible rather than
+obviously impossible, and so survives a glance.
+
+The two are told apart **structurally, not by name**: archive statistics sit in
+`div#infoblock` and story metadata sits in a `div.content` that also carries
+`Completed:`. Every one of the three gate recordings confirms it — none of them
+contains a `div.content` at all. A block that has `Chapters:` and `Word count:`
+but no `Completed:` is the archive, not the work.
 
 ### One member is behind a challenge
 
@@ -251,3 +307,58 @@ label spans generically picks up a story whose word count is the whole archive's
 reason a class of these archives cannot be read by a plain request, and because a
 fetched page that looks like this must be recognised as a block rather than
 parsed as a story with no title.
+
+### What the members actually answer
+
+These recordings say what the *markup* looks like. They do not say which members
+will serve it, and that is a separate question with a separate answer — asked on
+2026-09-11 by reading each member's `robots.txt` and requesting its work page, and
+recorded here because the adapter's own allow-list claims eighteen hosts and a
+reader deserves to know how many of them are real.
+
+| Members | Answer |
+|---|---|
+| `giantessworld.net`, `gluttonyfiction.com`, `narutofic.org`, `ncisfiction.com`, `spikeluver.com`, `starslibrary.net`, `thedelphicexpanse.com`, `thehookupzone.net`, `valentchamber.com` | reachable; work page and chapters open |
+| `ninelivesarchive.com` | reachable; `Crawl-Delay: 10`, work page open, **chapter views disallowed** (`viewstory.php?sid=*&chapter=*`) |
+| `tgstorytime.com`, `sinfuldreams.com` | `User-agent: * / Disallow: /` — the whole archive |
+| `dark-solace.org`, `sunnydaleafterdark.com` | Cloudflare 403 to a plain request |
+| `libraryofmoria.com`, `mttjustonce.net`, `mugglenetfanfiction.com`, `naiceanilme.net` | the domain no longer resolves |
+| one unspecified member | a Cloudflare JS challenge (`cloudflare-challenge.html`) |
+
+Three consequences, and none of them is the adapter's to fix:
+
+* **`tgstorytime.com` is unimportable**, and it is one of the two members whose
+  markup this directory records. The parser reads it; the archive's own
+  instruction is `Disallow: /`; the import refuses. That refusal is asserted in
+  `tests/live_verification.rs` rather than merely noted here, because an adapter
+  that quietly worked around it would be ignoring the only instruction the
+  archive gave.
+* **`ninelivesarchive.com` permits a work page and forbids every chapter.** The
+  import is therefore allowed to see the metadata and forbidden to read the
+  prose, which is the archive's choice and produces a failed import rather than a
+  partial one.
+* **Four hosts in the adapter's allow-list are dead.** They are kept because the
+  list is what the adapter *claims* rather than what currently answers, and a
+  member that comes back should not need an adapter change — but an operator
+  counting the family's reach should count nine, not eighteen.
+
+`valentchamber.com` is the one member with a considered position rather than a
+blanket rule: `Allow: /` for `User-agent: *`, with `Content-Signal: search=yes,
+ai-train=no, use=reference` and explicit `Disallow` for the named AI-training
+crawlers. Nothing there forbids an import that stores a work for readers to read
+from this instance; it does forbid training a model on it, which this import
+does not do and which the operator of an instance is the one who has to keep
+true.
+
+### The bytes are not what the pages say they are
+
+Every one of these recordings declares `charset=ISO-8859-1` in its
+`Content-Type` and then emits Windows-1252: byte `0x92` where the author typed a
+right single quote, `0xA3` for a pound sign. Decoded as true Latin-1 the first is
+a C1 control character; decoded as UTF-8 it is a replacement character; either
+way the chapter title a reader sees is corrupted and nothing fails. These files
+are therefore read through `lorehaven_scrapers::safety::decode_body`, which
+follows the WHATWG alias table and reads the label `ISO-8859-1` the way every
+browser does — as windows-1252. A fixture read with `std::fs::read_to_string`
+does not decode at all, and one read lossily loses the apostrophes that
+`tests/efiction_fixtures.rs` asserts on.

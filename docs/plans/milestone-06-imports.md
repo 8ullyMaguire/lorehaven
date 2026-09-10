@@ -15,20 +15,26 @@ absent, which means the plan's own journey cannot be walked.
 
 | Piece | Where | Tests |
 |---|---|---|
-| The adapter crate, its trait and the registry | `crates/scrapers/src/{lib,registry,sites}.rs` | 177 in-crate |
+| The adapter crate, its trait and the registry | `crates/scrapers/src/{lib,registry,sites}.rs` | 146 in-crate |
 | The safe fetcher and URL guard | `crates/scrapers/src/safety.rs` | in-crate |
-| `robots.txt`: the source's own pace and path rules | `crates/scrapers/src/robots.rs` | 20 |
+| Charset decoding for fetched pages | `crates/scrapers/src/safety.rs` (`decode_body`) | 9 in-crate |
+| `robots.txt`: the source's own pace and path rules | `crates/scrapers/src/robots.rs` | 21 |
 | Chapter sanitation | `crates/scrapers/src/sanitize.rs` | in-crate |
-| The Archive-software adapter | `crates/scrapers/src/sites/ao3.rs` | 9 fixture tests |
+| The Archive-software adapter | `crates/scrapers/src/sites/ao3.rs` | 7 unit + 9 fixture tests |
 | The Royal Road adapter | `crates/scrapers/src/sites/royalroad.rs` | 13 unit + 21 fixture tests |
 | The Syosetu adapter | `crates/scrapers/src/sites/syosetu.rs` | 16 unit + 31 fixture tests |
-| Recorded fixtures | `crates/scrapers/tests/fixtures/{ao3,royalroad,syosetu}/` | provenance in `fixtures/README.md` |
+| The eFiction family adapter | `crates/scrapers/src/sites/efiction.rs` | 18 unit + 37 fixture tests |
+| Recorded fixtures | `crates/scrapers/tests/fixtures/{ao3,royalroad,syosetu,efiction}/` | provenance in `fixtures/README.md` |
+| Live verification, by hand | `crates/scrapers/tests/live_verification.rs` | 6 `#[ignore]`d, network |
 | The planning rules | `crates/domain/src/imports.rs` | 24 |
 | Migration 0006, both dialects | `migrations/{sqlite,postgres}/0006_imports.sql` | applied by every acceptance test |
+| Migration 0007, both dialects | `migrations/{sqlite,postgres}/0007_revision_cache.sql` | applied by every acceptance test |
 | The repositories | `crates/db/src/imports.rs`, `crates/db/src/secrets.rs` | through the acceptance tests |
+| The revision cache | `crates/app/src/revisions.rs`, `crates/db/src/revisions.rs` | 10 |
 | The import service | `crates/app/src/imports.rs` | through the acceptance tests |
-| The routes | `crates/app/src/routes/imports.rs` | 17 acceptance tests |
-| Acceptance tests | `crates/app/tests/milestone_6.rs` | 17 |
+| The source health sweep | `crates/db/src/imports.rs`, `crates/app/src/worker.rs` | 6 acceptance tests |
+| The routes | `crates/app/src/routes/imports.rs` | 28 acceptance tests |
+| Acceptance tests | `crates/app/tests/milestone_6.rs` | 28 |
 
 ---
 
@@ -97,20 +103,13 @@ destination field exists and accepts only `library`. Nothing in M6 could be
 mistaken for the authorisation. `M6-10`.
 
 **The remaining tier-1 adapters.** ffnet/fictionpress, the XenForo board family,
-scribblehub, wattpad, the eFiction family, ficbook. Three — AO3, Royal Road,
-Syosetu — are built. Of the rest, the eFiction family now has its reconnaissance
-committed and the others do not:
+scribblehub, wattpad, the eFiction family, ficbook. Four — AO3, Royal Road,
+Syosetu, eFiction — are built. Of the rest, none has fixtures:
 
-* **eFiction** is the family worth doing next: one script, many archives, so one
-  adapter covers nineteen hosts. Its fixtures are recorded in
-  `crates/scrapers/tests/fixtures/efiction/` across five members, and
-  `tests/fixtures/README.md` writes down what they establish — including that the
-  ported `infobox` selector was never dead but pointed at the wrong page, that
-  `div#chapterlist` is one member's skin rather than the family's, that a
-  chapter's stable key is the `chapid` on its review link, and that these archives
-  answer with three distinct outcomes (the story, an unvalidated-story refusal,
-  and a content-warning gate) where the old design assumed two. What is left is
-  the adapter, its variant layer and its fixture test.
+* ~~**eFiction**~~ — **built**, and §7 is about it. It was the family worth doing
+  first: one script, many archives, so one adapter covers nineteen hosts. Its
+  fixtures are recorded in `crates/scrapers/tests/fixtures/efiction/` across five
+  members, and `tests/fixtures/README.md` writes down what they establish.
 * **ffnet/fictionpress, the XenForo boards and scribblehub** answer `403` to a
   plain request, and `cloudflare-challenge.html` records what that looks like.
   Reading them needs TLS impersonation or a browser, and the plan's §6 weighs
@@ -258,7 +257,141 @@ where this crate's adapters receive a `&dyn Fetcher` and cannot construct a clie
 
 ---
 
-## 7. Rate limits come from the source
+## 7. The eFiction family, and the five things it taught
+
+One module, `crates/scrapers/src/sites/efiction.rs`, covering nineteen archives
+across eighteen hosts — the largest single piece of M6's adapter work, and the one
+where recording pages first paid for itself twice over: the port's table was wrong
+about the markup *and* about the dates, and neither error was visible without a
+page to check against.
+
+### The port's date table cannot read either recorded member
+
+`parse_common_date` tries `%B %d, %Y` and `%d %b %Y`. The two members that were
+recorded write `08/06/21` (tgstorytime) and `January 18 2022` — the second has no
+comma, and `%B %d, %Y` requires one. So **both** worked members returned no date at
+all from the port's parser, and the failure is silent: `Option<NaiveDate>` becomes
+`None`, `None` becomes the epoch or the fetch time, and the work arrives looking
+like it was posted today. A table of expected formats is a table of the formats
+someone remembered.
+
+Dates are parsed by shape instead, and the one genuinely ambiguous shape is
+handled by naming the ambiguity rather than hiding it. `08/06/21` is 8 June or
+6 August and the page cannot say which; the adapter reads it day-first — eFiction's
+own default, and both members that use the numeric form are British archives — and
+disambiguates against the future where the two readings straddle it, because a
+publication date cannot be in the future. A date in a shape that is not recognised
+becomes `None` rather than a guess.
+
+### A chapter has two URLs, and the site's own link points at the print view
+
+`viewstory.php?sid=N&chapter=K` is what a work page's chapter list links to, and it
+is the **print** view: it links `printable.css` and runs `window.print()` on load,
+in a bare `if (window.print)` rather than a fallback. `&textsize=0&chapter=K` is the
+reading view. Both render byte-identical prose, in different containers —
+`div.chapter` against `div#story` — and both members recorded behave the same way.
+
+Following the site's own links is normally how a parser finds the right URL, and
+here it finds the wrong one. The consequence is not theoretical:
+`ninelivesarchive.com` disallows `viewstory.php?action=printable&*` in its
+`robots.txt` by name. **Importing a library is reading**, so the adapter asks for
+the reading view and reads `div#story`, with `div.chapter` as the fallback for a
+member that answers with the print template anyway. The fixtures assert the prose
+is identical either way, so the choice is about what is being asked of the archive
+and not about what can be parsed.
+
+### A value is what the member rendered as a value, and not the furniture around it
+
+The metadata block is a run of `<span class="label">Name:</span> value` pairs, and
+two things follow that are not obvious from that description:
+
+* **Every class value is a link to `browse.php`, and everything else is chrome.**
+  tgstorytime writes `Rated: Adult <a href="modules/epubversion/…">Download
+  ePub</a>`, so a walk that harvested every anchor's text read the rating as
+  `Adult Download ePub` — a rating that is not a rating, from a rule that looked
+  reasonable. Distinguishing by the script a link points at is what separates a
+  value from the furniture, without a list of label names to maintain.
+* **Where values were rendered as links, the links are the values.** tgstorytime's
+  `Characters` is one link whose text contains a comma —
+  `Male to Female, Young Adult (20-26 yrs)` — and giantessworld's `Categories` is
+  one link per value. Splitting rendered text on commas gets the first wrong and
+  the second right by accident, and splitting on `/` breaks the family's own
+  vocabulary, turning `Slow/Gradual Change` into `Slow` and `FF/m` into `FF`. The
+  markup already says where the boundaries are; the text does not.
+
+### Archive statistics and story metadata look identical, and are told apart structurally
+
+Two of the three recorded content gates carry the archive's own totals —
+`Members:`, `Series:`, `Stories:`, `Chapters:`, `Word count:`, `Reviewers:` — and
+`Chapters:` and `Word count:` are also story fields. A parser that reads label
+spans generically reports narutofic's 25,318 chapters and 47,323,633 words as one
+work's. That is implausible rather than impossible, so it survives a glance, and it
+would have survived into a reader's library.
+
+The distinction is structural, not a name list: archive statistics sit in
+`div#infoblock`, story metadata sits in a `div.content` that also carries
+`Completed:`, and none of the three gates contains a `div.content` at all. The
+adapter requires the block and the label together, and the fixture test asserts the
+archive's totals are never read as the work's.
+
+### Three outcomes that are not a story, and a fourth
+
+An archive that will not serve a work answers **HTTP 200** with a page of its
+ordinary furniture, so there is no status code to read. Four distinct outcomes were
+being folded into two, and each now has its own error because each sends an
+operator somewhere different:
+
+| What the page is | Error | Why it is not one of the others |
+|---|---|---|
+| A moderation hold (`Access denied. This story has not been validated…`) | `Withheld` — **new in this milestone** | The work exists and the archive will not serve it. `NotFound` would send an operator looking for a typo in a URL |
+| A content gate (age acknowledgement) | `AuthRequired` | The job pauses and asks the reader; a credential with `adult_allowed` satisfies it by following the page's own link, once |
+| A challenge wall | `Blocked` | Detected by the interstitial's own markers, not by the absence of content — identification by absence turns the next new gate into "no such work" |
+| Nothing at all | `NotFound` | |
+
+`Withheld` is the milestone's only new error variant, and it is `is_transient() ==
+false` and `needs_the_reader() == false`, which is the point: no retry lifts a
+moderation hold and there is nothing for a reader to fix.
+
+### The find that was not about eFiction at all
+
+Every page in this family declares `charset=ISO-8859-1` in its `Content-Type` and
+then emits Windows-1252 — byte `0x92` where the author typed a right single quote.
+`SafeFetcher` decoded bodies with `String::from_utf8_lossy`, so every such byte
+became `U+FFFD` and **a chapter title a reader would see was corrupted with nothing
+failing anywhere**. Titles like `This week\u{fffd}s shows` pass every assertion a
+test would think to make.
+
+Bodies are now decoded by the declared charset through `encoding_rs`, which
+implements the WHATWG alias table — the rule every browser applies, under which the
+label `ISO-8859-1` *means* windows-1252 — with the document's own `<meta>` as the
+fallback and a lossy decode only when there is nothing to go on. Valid UTF-8 wins
+over a wrong declaration, because that is the case that cannot be wrong. The fix is
+in the fetcher rather than in this adapter: it applies to every source, and it was
+found by reading a recording as bytes instead of as a string.
+
+### What is deliberately not done
+
+* **Author's notes** (`div.notes` / `div.noteinfo`) are parsed and dropped. Folding
+  them into `content_html` would mean inventing markup to delimit them inside prose
+  the author wrote, and a chapter body here is the chapter's prose. The selector is
+  recorded so the follow-up is a change to one function.
+* **No bibliography**, so `bibliography` is false: a member's author page has not
+  been recorded, and an adapter written against a page nobody has looked at is a
+  guess.
+* **Chapter-list pagination is refused rather than followed.** If a member's
+  chapter list is paginated, the stated `Chapters:` count and the number of links
+  found disagree and the adapter refuses loudly, naming both numbers, rather than
+  importing the first page of a long work. Neither recorded member paginates, so
+  the refusal is asserted by damaging a fixture rather than observed.
+* **One source key for nineteen archives** means the fetcher's allow-list for
+  `efiction` is eighteen hosts wide. That is inherent in treating the family as one
+  source, and it is bounded by the list being a compile-time constant rather than
+  anything a page can influence — but the widening is real and worth saying out
+  loud.
+
+---
+
+## 8. Rate limits come from the source
 
 Decided during this milestone, and written into the spec rather than left in the
 code (spec §11.5, "Rate limits come from the source, and the floor is one request
@@ -317,7 +450,7 @@ from the letter of the standard, in the safe direction, and it has its own test.
 
 ---
 
-## 8. Source reachability, measured
+## 9. Source reachability, measured
 
 Recorded on 2026-09-10 with a plain HTTPS request and a browser `User-Agent`,
 against the URL taken from the ficnexus adapter for each source:
@@ -327,7 +460,7 @@ against the URL taken from the ficnexus adapter for each source:
 | Archive of Our Own | `200` | Adapter built, fixtures recorded |
 | Royal Road | `200` | Adapter built, fixtures recorded |
 | Syosetu | `200` | Adapter built, fixtures recorded |
-| the eFiction family: tgstorytime.com, giantessworld.net, gluttonyfiction.com, narutofic.org, ninelivesarchive.com, and thirteen more listed by the port | `200` | **Reachable; reconnaissance recorded, adapter not built yet** |
+| the eFiction family: nine of the eighteen hosts the port lists | `200` | Adapter built; the other nine refuse or no longer resolve (below) |
 | **www.fanfiction.net** | **`403`** | Cloudflare |
 | **www.scribblehub.com** | **`403`** | Cloudflare |
 | **www.fimfiction.net** | **`403`** | Cloudflare |
@@ -336,18 +469,44 @@ against the URL taken from the ficnexus adapter for each source:
 FictionPress runs the same software as FanFiction.net and is therefore behind the
 same wall.
 
-One row says *reachable* and no more. The eFiction members answer plain requests, so
-an adapter for them can be verified and is ordinary work. It is still not done, and
-the table says so rather than implying a delay is a difficulty — but the
-reconnaissance behind it is not pending any more: fixtures from five members are
-committed under `crates/scrapers/tests/fixtures/efiction/`, and
-`tests/fixtures/README.md` records what they establish. Three of those five record
-something other than a work page, which is itself the finding: these archives gate a
-warned story behind a content-warning interstitial, and the recording shows the gate
-rather than the story. The port's member list is eighteen hosts, and the four names an
-earlier draft of this table carried — fanficauthors.net, lcfanfic.com, phoenixsong.net,
-mediaminer.org — appear in none of them; they were invented, and the real list is now
-in the fixtures README where it can be checked.
+One row says *reachable* and no more, and *reachable* turned out not to be the
+same question as *importable*. Answered for the whole family on 2026-09-11, by
+reading each member's `robots.txt` and then requesting its work page:
+
+| Members | Answer | Consequence |
+|---|---|---|
+| giantessworld.net, gluttonyfiction.com, narutofic.org, ncisfiction.com, spikeluver.com, starslibrary.net, thedelphicexpanse.com, thehookupzone.net, valentchamber.com | reachable; rules and pages both open | importable; giantessworld is read live by `live_verification.rs` |
+| ninelivesarchive.com | `Crawl-Delay: 10`; work page open, **`viewstory.php?sid=*&chapter=*` disallowed** | a work page may be listed and no chapter may be read: the archive permits browsing and forbids reading |
+| tgstorytime.com, sinfuldreams.com | `User-agent: *` / `Disallow: /` | **unimportable**, by the archive's own instruction |
+| dark-solace.org, sunnydaleafterdark.com | `403` (Cloudflare) | blocked, as the four largest sources are |
+| libraryofmoria.com, mttjustonce.net, mugglenetfanfiction.com, naiceanilme.net | the domain does not resolve | dead hosts sitting in a compile-time allow-list |
+
+**Nine of eighteen are importable**, which is a smaller claim than eighteen and the
+honest one. Two findings matter more than the count:
+
+* **`tgstorytime.com` is one of the two members whose markup is recorded in full,
+  and it is unimportable.** Its `robots.txt` is a single `Disallow: /`. The parser
+  reads that site's pages correctly and the import still has to refuse them, and
+  the refusal is asserted in `live_verification.rs` rather than assumed — an
+  archive's own instructions are the one thing an importer does not get to
+  override, and a parser that "worked" here would be a parser that ignored them.
+* **A chapter has two URLs, and the obvious one is the wrong one.** `&chapter=K`
+  is the *print* view — `printable.css`, `window.print()` on load — and it is what
+  a table of contents links to; `&textsize=0&chapter=K` is the reading view.
+  `ninelivesarchive.com` disallows `viewstory.php?action=printable&*` by name while
+  leaving the reading view alone, so following the site's own links to find the
+  chapter URL arrives at the one address the site has asked not to be fetched.
+  §7 has the rest of it.
+
+Fixtures from five members are committed under
+`crates/scrapers/tests/fixtures/efiction/`, and `tests/fixtures/README.md` records
+what they establish. Three of those five record something other than a work page,
+which is itself the finding: these archives gate a warned story behind a
+content-warning interstitial, and the recording shows the gate rather than the
+story. The port's member list is eighteen hosts, and the four names an earlier
+draft of this table carried — fanficauthors.net, lcfanfic.com, phoenixsong.net,
+mediaminer.org — appear in none of them; they were invented, and the real list is
+now in the fixtures README where it can be checked.
 
 ### What that means, and the decision it forces
 
@@ -392,7 +551,7 @@ operator rather than to the implementer.
 
 ---
 
-## 9. Before this milestone can be tagged
+## 10. Before this milestone can be tagged
 
 1. The two pages, and a browser journey over them.
 2. The remaining tier-1 adapters, each with recorded fixtures.

@@ -455,6 +455,14 @@ fn classify(error: lorehaven_scrapers::SourceError, source_key: &str) -> Handler
             "{source_key} sent a page this build cannot read: {message}"
         )),
         E::Refused(message) => fatal(format!("{source_key}: {message}")),
+        // A moderation hold, a withdrawn work, a takedown in progress: the source
+        // answered, and its answer is no. Fatal rather than transient because a
+        // hold is a state the *source* is in rather than a refusal aimed at us —
+        // retrying asks the same question and gets the same answer, five times,
+        // while a reader waits for an import that will never arrive.
+        E::Withheld(message) => fatal(format!(
+            "the {source_key} source holds that work but will not serve it: {message}"
+        )),
         // Blocked and rate-limited are the same instruction to us: wait. A
         // retry budget is the queue's job, not this function's.
         E::RateLimited(message) => {

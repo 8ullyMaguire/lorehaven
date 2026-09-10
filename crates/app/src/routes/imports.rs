@@ -673,6 +673,15 @@ fn preview_error(error: lorehaven_scrapers::SourceError) -> ApiError {
         E::Blocked => ApiError(AppError::SourceUnavailable {
             domain: "the source (it refused the request as automated traffic)".to_owned(),
         }),
+        // The source answered and the answer was no: a moderation hold, a work
+        // withdrawn by its author, a takedown in progress. Not `NotFound`, which
+        // would send a reader to edit a URL that is correct, and not a
+        // `Validation` error for the same reason. `SourceUnavailable` is the
+        // closest existing shape — the work is not coming from that source today
+        // — and the detail says whose decision it was.
+        E::Withheld(detail) => ApiError(AppError::SourceUnavailable {
+            domain: format!("the source ({detail})"),
+        }),
         E::Network(detail) => ApiError(AppError::SourceUnavailable {
             domain: format!("the source ({detail})"),
         }),

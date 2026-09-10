@@ -368,6 +368,18 @@ pub enum SourceError {
     /// The work does not exist on that source.
     #[error("the source has no work at that URL")]
     NotFound,
+    /// The source holds the work and will not serve it: a moderation hold, a
+    /// work withdrawn by its author, a takedown in progress.
+    ///
+    /// Distinct from [`SourceError::NotFound`] because the two send an operator
+    /// to different places — one is a typo in a URL and one is a work the source
+    /// has stopped publishing — and distinct from [`SourceError::Blocked`]
+    /// because a hold is a state the *source* is in rather than a refusal aimed
+    /// at us, so no amount of waiting or re-requesting resolves it. An import
+    /// that reported a moderation hold as "no work at that URL" would send a
+    /// reader looking for a mistake they did not make.
+    #[error("the source holds that work but is not serving it: {0}")]
+    Withheld(String),
     /// The source is refusing us: a challenge wall, a ban, an IP block.
     #[error("the source refused the request")]
     Blocked,
@@ -427,6 +439,7 @@ impl SourceError {
     pub const fn category(&self) -> &'static str {
         match self {
             Self::NotFound => "not_found",
+            Self::Withheld(_) => "withheld",
             Self::Blocked => "blocked",
             Self::Network(_) => "network",
             Self::Parse(_) => "parse",
@@ -849,6 +862,9 @@ mod tests {
         assert!(!SourceError::NotFound.is_transient());
         assert!(!SourceError::Parse("no chapter div".into()).is_transient());
         assert!(!SourceError::AuthRequired("expired".into()).is_transient());
+        // A hold is the source's own state, not a refusal aimed at us: waiting
+        // does not lift it.
+        assert!(!SourceError::Withheld("not validated".into()).is_transient());
         // Only one category is the reader's to fix.
         assert!(SourceError::AuthRequired("expired".into()).needs_the_reader());
         assert!(!SourceError::Network("reset".into()).needs_the_reader());
@@ -864,6 +880,7 @@ mod tests {
             "auth_required"
         );
         assert_eq!(SourceError::Refused("x".into()).category(), "refused");
+        assert_eq!(SourceError::Withheld("x".into()).category(), "withheld");
     }
 
     #[test]

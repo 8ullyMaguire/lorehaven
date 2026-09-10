@@ -29,6 +29,12 @@ axum = { version = "0.8", default-features = false, features = [
 ] }
 base64 = "0.22"
 clap = { version = "4", features = ["derive", "env", "wrap_help"] }
+# Charset decoding for fetched pages. The importer reads old PHP archives that
+# declare `ISO-8859-1` and emit Windows-1252, and this crate implements the
+# WHATWG alias table that browsers use to resolve exactly that (see
+# `scrapers::safety::decode_body`). Already in the tree transitively via
+# reqwest's `charset` feature.
+encoding_rs = "0.8"
 hex = "0.4"
 mime_guess = "2"
 rand = "0.8"

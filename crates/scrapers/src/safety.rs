@@ -449,7 +449,8 @@ impl SafeFetcher {
                 .get(reqwest::header::LAST_MODIFIED)
                 .and_then(|v| v.to_str().ok())
                 .map(str::to_owned);
-            let body = read_bounded(response, self.policy.max_bytes).await?;
+            let charset = content_type.as_deref().and_then(charset_of_content_type);
+            let body = read_bounded(response, self.policy.max_bytes, charset).await?;
             return Ok(ConditionalFetch::Fetched(Fetched {
                 final_url: current.to_string(),
                 body,
@@ -995,7 +996,11 @@ pub async fn resolve_public(host: &str, timeout: Duration) -> SourceResult<Vec<S
 }
 
 /// Read a body, refusing to buffer more than `max_bytes`.
-async fn read_bounded(mut response: reqwest::Response, max_bytes: usize) -> SourceResult<String> {
+async fn read_bounded(
+    mut response: reqwest::Response,
+    max_bytes: usize,
+    declared_charset: Option<&str>,
+) -> SourceResult<String> {
     let mut collected: Vec<u8> = Vec::with_capacity(64 * 1024);
     while let Some(chunk) = response
         .chunk()
@@ -1009,10 +1014,141 @@ async fn read_bounded(mut response: reqwest::Response, max_bytes: usize) -> Sour
         }
         collected.extend_from_slice(&chunk);
     }
-    // Sources are not consistent about declaring their charset, and a mis-decode
-    // corrupts every title in the import, so this is lossy on purpose rather
-    // than "probably ASCII".
-    Ok(String::from_utf8_lossy(&collected).into_owned())
+    Ok(decode_body(&collected, declared_charset))
+}
+
+/// Pull the `charset` parameter out of a `Content-Type` value.
+///
+/// A `Content-Type` is a media type followed by parameters —
+/// `text/html; charset=ISO-8859-1` — and only the parameter is a charset. Passing
+/// the whole header to a decoder label lookup would be passing `text/html;
+/// charset=iso-8859-1` as the label, which matches nothing and silently falls
+/// back to a lossy decode.
+#[must_use]
+fn charset_of_content_type(content_type: &str) -> Option<&str> {
+    content_type
+        .split(';')
+        .skip(1)
+        .map(str::trim)
+        .find_map(|param| {
+            let (name, value) = param.split_once('=')?;
+            name.trim()
+                .eq_ignore_ascii_case("charset")
+                .then(|| value.trim().trim_matches(['"', '\'']))
+        })
+        .filter(|charset| !charset.is_empty())
+}
+
+/// Turn a fetched body into text using the charset the source declared.
+///
+/// # Why this is not `String::from_utf8_lossy`
+///
+/// Because the sources this reads from are old PHP archives that declare a
+/// charset they do not use. `tgstorytime.com` says `charset=ISO-8859-1` — as do
+/// three other members of the eFiction family — and then emits byte `0x92`, the
+/// Windows-1252 right single quote, in the middle of chapter titles. Decoded as
+/// true Latin-1 that byte becomes a C1 control character; decoded lossily it
+/// becomes `U+FFFD`; either way the title is corrupted and the corruption is
+/// invisible until somebody reads it. A reader importing a work whose title is
+/// rendered `This week\u{fffd}s shows` has been handed a bad import that every
+/// test would have passed.
+///
+/// The WHATWG encoding standard resolves exactly this ambiguity in the direction
+/// the real web needs: the label `iso-8859-1` **means** `windows-1252`, because
+/// every browser has read it that way for thirty years and the declared label is
+/// the only thing an archive's author ever chose. `encoding_rs` implements that
+/// table, so `ISO-8859-1` here gets the reader's decoding rather than the
+/// standard's.
+///
+/// Three sources of the charset, in order of authority:
+///
+/// 1. The `Content-Type` header, which is what the HTTP layer actually said.
+/// 2. A `<meta>` declaration in the first `SNIFF_BYTES` of the body, which is
+///    where every one of these archives puts it.
+/// 3. UTF-8, with replacement on error.
+///
+/// A body that is valid UTF-8 is taken as UTF-8 regardless of what was declared,
+/// because that is the case that cannot be wrong: if the bytes decode cleanly as
+/// UTF-8 they are UTF-8 with overwhelming likelihood, and honouring a wrong
+/// `ISO-8859-1` label over them would mangle text that was never broken. This is
+/// the same preference order browsers apply, and it is why the fixture recordings
+/// — which contain real cp1252 bytes — still round-trip.
+#[must_use]
+pub fn decode_body(body: &[u8], declared_charset: Option<&str>) -> String {
+    // A clean UTF-8 read ends the question. See rule 3 above.
+    if let Ok(text) = std::str::from_utf8(body) {
+        return text.to_owned();
+    }
+
+    let label = declared_charset
+        .map(str::to_owned)
+        .or_else(|| sniff_charset(body));
+
+    let Some(label) = label else {
+        return String::from_utf8_lossy(body).into_owned();
+    };
+
+    // `encoding_rs::Encoding::for_label` knows the WHATWG aliases, which is the
+    // whole reason this crate is a dependency rather than a `match` on a few
+    // strings: it is the table that maps `iso-8859-1` to windows-1252, `latin1`
+    // to the same, and refuses labels it does not recognise.
+    let Some(encoding) = encoding_rs::Encoding::for_label(label.trim().as_bytes()) else {
+        return String::from_utf8_lossy(body).into_owned();
+    };
+
+    let (text, _, _) = encoding.decode(body);
+    text.into_owned()
+}
+
+/// How much of a body to search for a `<meta>` charset declaration.
+///
+/// Every archive in this family declares its charset inside the first kilobyte —
+/// it is emitted by the template's `<head>` before any content. Reading more
+/// would mean scanning prose for a string that a work could legitimately contain.
+const SNIFF_BYTES: usize = 4096;
+
+/// Find a charset declared in the document itself.
+///
+/// Both spellings the family uses: `<meta charset="...">` and the HTML 4 form
+/// `<meta http-equiv="Content-Type" content="text/html; charset=...">`. The
+/// scan is byte-wise and ASCII-only on purpose — it runs before the encoding is
+/// known, so it cannot assume a decoding.
+fn sniff_charset(body: &[u8]) -> Option<String> {
+    let head = &body[..body.len().min(SNIFF_BYTES)];
+    let lower: Vec<u8> = head.iter().map(u8::to_ascii_lowercase).collect();
+    let needle = b"charset";
+    let mut search_from = 0usize;
+    while let Some(offset) = find_bytes(&lower[search_from..], needle) {
+        let at = search_from + offset + needle.len();
+        // Skip `=` and any quoting or space between it and the value.
+        let rest = &head[at.min(head.len())..];
+        let value: Vec<u8> = rest
+            .iter()
+            .copied()
+            .skip_while(|b| matches!(b, b'=' | b' ' | b'"' | b'\''))
+            .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+            .collect();
+        // A `<meta charset=x-user-defined>` or a stray word containing "charset"
+        // yields something unusable; `for_label` rejects it and we fall through.
+        if value.len() >= 3 {
+            return String::from_utf8(value).ok();
+        }
+        search_from = at;
+        if search_from >= lower.len() {
+            break;
+        }
+    }
+    None
+}
+
+/// Find a byte substring, without pulling in a search crate for eight lines.
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 /// Map a transport error onto a category the import knows how to act on.
@@ -1047,7 +1183,7 @@ pub fn encode_form(fields: &mut [(&str, &str)]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::describe_status;
+    use super::{charset_of_content_type, decode_body, describe_status, sniff_charset};
 
     /// A code with a reason phrase keeps it.
     #[test]
@@ -1451,6 +1587,118 @@ mod tests {
             Duration::from_secs(2)
         );
         assert!(fetcher.robots_for("example.com").await.was_found());
+    }
+
+    // --- charset decoding -------------------------------------------------
+    //
+    // Every byte sequence below is taken from a real recording under
+    // `crates/scrapers/tests/fixtures/efiction/`, which is the only reason to
+    // trust them: these are the pages the decoder exists for.
+
+    /// A page that declares ISO-8859-1 and means Windows-1252 is read the way a
+    /// browser reads it.
+    ///
+    /// The bytes are `tgstorytime-work.html`'s own: `0x92` where the author
+    /// typed a right single quote. Decoded as true Latin-1 this is a C1 control
+    /// character, and lossily it is `U+FFFD` — either way the chapter title,
+    /// which is the text a reader sees in their library, is corrupted.
+    #[test]
+    fn a_windows_1252_byte_in_a_latin1_declaration_is_a_quote() {
+        let body = [
+            b'T', b'h', b'i', b's', b' ', b'w', b'e', b'e', b'k', 0x92, b's',
+        ];
+        let text = decode_body(&body, Some("ISO-8859-1"));
+        assert_eq!(text, "This week\u{2019}s");
+        assert!(
+            !text.contains('\u{fffd}'),
+            "no replacement character is introduced: {text:?}"
+        );
+    }
+
+    /// The same, for the pound sign the same archive produces.
+    #[test]
+    fn a_windows_1252_pound_sign_survives() {
+        let body = *b"\xa35";
+        assert_eq!(decode_body(&body, Some("ISO-8859-1")), "\u{a3}5");
+    }
+
+    /// Valid UTF-8 wins over a wrong declaration.
+    ///
+    /// An archive that says `ISO-8859-1` while emitting UTF-8 is common, and
+    /// honouring the label there would turn every accented character into two
+    /// mojibake bytes. The bytes below are valid UTF-8 and must be read as such.
+    #[test]
+    fn valid_utf8_is_read_as_utf8_whatever_was_declared() {
+        let body = "café — naïve".as_bytes();
+        assert_eq!(decode_body(body, Some("ISO-8859-1")), "café — naïve");
+    }
+
+    /// With nothing declared at all, the document's own `<meta>` is used.
+    #[test]
+    fn the_documents_own_declaration_is_used_when_the_header_has_none() {
+        let mut body = Vec::new();
+        body.extend_from_slice(
+            b"<html><head><meta http-equiv=\"Content-Type\" \
+              content=\"text/html; charset=ISO-8859-1\">",
+        );
+        body.push(0x92); // right single quote, invalid on its own
+        let text = decode_body(&body, None);
+        assert!(text.ends_with('\u{2019}'), "sniffed the meta: {text:?}");
+    }
+
+    /// The HTML5 spelling of the same declaration.
+    #[test]
+    fn a_meta_charset_element_is_sniffed() {
+        assert_eq!(
+            sniff_charset(b"<head><meta charset=\"windows-1252\">").as_deref(),
+            Some("windows-1252")
+        );
+    }
+
+    /// A page that declares nothing at all still decodes lossily rather than
+    /// failing, because a body with one bad byte is still a page worth reading.
+    #[test]
+    fn an_undeclared_body_decodes_lossily_rather_than_failing() {
+        let text = decode_body(&[b'o', b'k', 0x92], None);
+        assert!(text.starts_with("ok"));
+    }
+
+    /// A label nobody recognises falls back rather than panicking.
+    #[test]
+    fn an_unknown_label_falls_back_to_a_lossy_decode() {
+        let text = decode_body(&[b'a', 0x92], Some("definitely-not-a-charset"));
+        assert!(text.starts_with('a'));
+    }
+
+    // --- Content-Type parsing ---------------------------------------------
+
+    /// Only the parameter is a charset; the media type is not.
+    #[test]
+    fn a_content_type_yields_its_charset_parameter() {
+        assert_eq!(
+            charset_of_content_type("text/html; charset=ISO-8859-1"),
+            Some("ISO-8859-1")
+        );
+        assert_eq!(
+            charset_of_content_type("text/html;charset=utf-8"),
+            Some("utf-8")
+        );
+        assert_eq!(
+            charset_of_content_type("text/html; charset=\"utf-8\""),
+            Some("utf-8"),
+            "a quoted parameter is the same parameter"
+        );
+    }
+
+    /// A `Content-Type` with no charset is `None`, not the whole header.
+    ///
+    /// This is the difference between falling back to the document's own
+    /// declaration and looking up the label `text/html`, which matches nothing
+    /// and quietly degrades every page that omits the parameter.
+    #[test]
+    fn a_content_type_without_a_charset_yields_nothing() {
+        assert_eq!(charset_of_content_type("text/html"), None);
+        assert_eq!(charset_of_content_type(""), None);
     }
 
     // The expiry path — an entry older than the TTL being re-read — is not

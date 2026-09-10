@@ -32,7 +32,7 @@
 use std::time::Duration;
 
 use lorehaven_scrapers::safety::{FetchPolicy, SafeFetcher};
-use lorehaven_scrapers::{sites, SourceAdapter, SourceKey, WorkStatus};
+use lorehaven_scrapers::{sites, SourceAdapter, SourceError, SourceKey, WorkStatus};
 use url::Url;
 
 /// A fetcher for one source, built the way the importer builds it.
@@ -58,6 +58,7 @@ fn fetcher_for(key: &str) -> SafeFetcher {
 fn adapter_for(key: &str) -> Box<dyn SourceAdapter> {
     match key {
         "ao3" => Box::new(sites::ao3::ArchiveSoftware::new()),
+        "efiction" => Box::new(sites::efiction::Efiction::new()),
         "royalroad" => Box::new(sites::royalroad::RoyalRoad::new()),
         "syosetu" => Box::new(sites::syosetu::Syosetu::new()),
         other => panic!("no owned constructor for {other}"),
@@ -218,6 +219,148 @@ async fn a_chapter_body_still_comes_back_with_text() {
     let missing = adapter.fetch_chapter(&fetch, &work, 5000, None).await;
     assert!(
         missing.is_err(),
+        "a chapter past the end of the work was reported as read"
+    );
+}
+
+#[tokio::test]
+#[ignore = "reaches the network; run deliberately"]
+async fn the_efiction_family_still_reads() {
+    // giantessworld.net publishes no robots.txt at all, so the fallback pacing of
+    // one request a second applies and the work page and its chapters are open.
+    // It is one of nine reachable members of the family; see
+    // `tests/fixtures/README.md` for what the other thirteen answer with.
+    let work = preview(
+        "efiction",
+        "https://www.giantessworld.net/viewstory.php?sid=11369&index=1",
+    )
+    .await;
+    println!(
+        "giantessworld: {:?} by {:?}, {} chapters, {:?} words, {:?}, {:?}",
+        work.title,
+        work.author_text,
+        work.chapter_count(),
+        work.word_count,
+        work.status,
+        work.rating_text
+    );
+    assert!(!work.title.trim().is_empty(), "no title");
+    assert!(!work.author_text.trim().is_empty(), "no author");
+    assert!(
+        work.chapter_count() >= 1,
+        "no chapters listed, so the chapter walk found nothing"
+    );
+    assert!(
+        work.chapters
+            .iter()
+            .all(|chapter| !chapter.source_chapter_key.is_empty()),
+        "a chapter has no source key"
+    );
+    assert!(
+        work.chapters
+            .windows(2)
+            .all(|pair| pair[0].ordinal < pair[1].ordinal),
+        "the chapter list is not in order"
+    );
+    assert!(
+        !work.summary.trim().is_empty(),
+        "no summary, so neither the label nor the summary element was read"
+    );
+    // Every key must be the member's own `chapid` rather than the ordinal. A
+    // fallback key is indistinguishable from a real one until an author inserts a
+    // chapter, which is exactly when a reader's place in the work is lost.
+    assert!(
+        work.chapters.iter().all(|chapter| chapter
+            .source_chapter_key
+            .chars()
+            .all(|c| c.is_ascii_digit())),
+        "a chapter key is not a chapid: {:?}",
+        work.chapters
+            .iter()
+            .map(|chapter| chapter.source_chapter_key.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+#[ignore = "reaches the network; run deliberately"]
+async fn an_efiction_member_that_disallows_the_archive_is_refused_by_its_own_rules() {
+    // `tgstorytime.com` serves `User-agent: *` / `Disallow: /` and nothing else.
+    // It is one of the two members whose markup is recorded under
+    // `tests/fixtures/efiction/`, so the parser is known to read it — and the
+    // import must still refuse it, because the archive's own instructions are the
+    // one thing an importer does not get to override. This asserts the refusal
+    // comes from the rules and not from the parser: a 403 or a parse failure here
+    // would mean the fetcher never consulted robots.txt at all.
+    let adapter = adapter_for("efiction");
+    let fetch = fetcher_for("efiction");
+    let url = Url::parse("https://www.tgstorytime.com/viewstory.php?sid=6369&index=1")
+        .expect("the URL parses");
+
+    let error = adapter
+        .preview(&fetch, &url, None)
+        .await
+        .expect_err("tgstorytime disallows the whole site, so nothing may be read");
+    println!("tgstorytime: {error}");
+    assert!(
+        matches!(error, SourceError::Refused(_)),
+        "a robots refusal is a refusal, not {error:?}"
+    );
+    assert!(
+        format!("{error}").contains("robots.txt"),
+        "the refusal must name the rule it came from: {error}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "reaches the network; run deliberately"]
+async fn an_efiction_chapter_body_still_comes_back_with_text() {
+    // The failure this guards against is the one the ported code had: a failed
+    // chapter fetch that returned an empty string and reported success.
+    let adapter = adapter_for("efiction");
+    let url = Url::parse("https://www.giantessworld.net/viewstory.php?sid=11369&index=1")
+        .expect("the URL parses");
+    let fetch = fetcher_for("efiction");
+    let work = adapter
+        .preview(&fetch, &url, None)
+        .await
+        .expect("the work reads");
+
+    assert!(
+        adapter.capabilities().per_chapter_fetch,
+        "the adapter advertises per-chapter fetch, so this path must exist"
+    );
+    let chapter = adapter
+        .fetch_chapter(&fetch, &work, 1, None)
+        .await
+        .expect("chapter 1 reads on its own");
+    println!(
+        "efiction chapter {}: {:?}, {} bytes of html",
+        chapter.ordinal,
+        chapter.title,
+        chapter.content_html.len()
+    );
+    assert_eq!(chapter.ordinal, 1, "the ordinal is not the one asked for");
+    assert!(
+        !chapter.source_chapter_key.is_empty(),
+        "the chapter has no source key"
+    );
+    assert!(
+        chapter.content_html.len() > 500,
+        "chapter 1 came back with {} bytes: an empty body reported as success",
+        chapter.content_html.len()
+    );
+    // ^ A live run says the chapter is still readable; *which* URL was asked for
+    // is asserted against a recording fetcher in `efiction_fixtures.rs`, because
+    // `SafeFetcher` does not keep a log of what it fetched and a test that read
+    // its own request would be testing the wrong object.
+    //
+    // A chapter the work does not have is refused rather than invented.
+    assert!(
+        adapter
+            .fetch_chapter(&fetch, &work, 5000, None)
+            .await
+            .is_err(),
         "a chapter past the end of the work was reported as read"
     );
 }
