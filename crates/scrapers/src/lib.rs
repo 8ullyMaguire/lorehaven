@@ -558,6 +558,20 @@ pub trait SourceAdapter: Send + Sync {
     /// This adapter's key.
     fn key(&self) -> SourceKey;
 
+    /// What this source is called, for a reader.
+    ///
+    /// Required rather than defaulted to the key, because the key is a
+    /// machine's name for the source and every screen that shows it has to
+    /// translate it anyway. A trait that defaulted to `royalroad` would put that
+    /// string in front of a reader and leave nobody responsible for it, which is
+    /// exactly what happened: the import page fell back to the key on a fresh
+    /// instance and read "on royalroad".
+    ///
+    /// The instance's `sources` row carries its own copy, which an operator may
+    /// change. This is what the build calls the source before anybody decides
+    /// otherwise.
+    fn display_name(&self) -> &'static str;
+
     /// What this adapter can do.
     fn capabilities(&self) -> SourceCapabilities;
 

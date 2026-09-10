@@ -17,6 +17,24 @@ if (!window.matchMedia) {
 }
 
 /**
+ * jsdom does not implement `ResizeObserver` either. `ClampedText` uses one to
+ * re-measure its clamp when the width changes, and in jsdom there is no layout
+ * and no resize, so a stub that observes and never fires is the truthful
+ * behaviour here — the component measures once on mount regardless.
+ *
+ * Tests that need the measurement itself to differ stub `scrollHeight` and
+ * `clientHeight` on the element, which is where the real difference lives.
+ */
+if (!('ResizeObserver' in globalThis)) {
+  class ResizeObserverStub implements ResizeObserver {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+}
+
+/**
  * Node 22+ ships a `localStorage` global that is inert unless the process was
  * started with `--localstorage-file`, and it can shadow the one jsdom provides.
  * The application reads `window.localStorage` for the theme preference, so the

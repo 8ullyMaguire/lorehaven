@@ -1295,6 +1295,16 @@ export interface LibraryItem {
   summary: string;
   language: string | null;
   word_count: number | null;
+  /**
+   * How many chapters of this work are stored and readable.
+   *
+   * Counted by the server from what it holds, not copied from the source, so a
+   * partial import reads as partial rather than as a complete copy of a work the
+   * source describes in full.
+   */
+  chapter_count: number;
+  /** What the source is called, for a reader. Falls back to the key. */
+  source_display_name: string;
   status: string;
   source_updated_at: string | null;
   last_synced_at: string | null;

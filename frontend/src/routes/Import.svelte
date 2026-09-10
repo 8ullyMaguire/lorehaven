@@ -35,6 +35,7 @@
   import { handleLinkClick } from '../lib/router';
   import { session } from '../lib/session.svelte';
   import Button from '../lib/components/Button.svelte';
+  import ClampedText from '../lib/components/ClampedText.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Select from '../lib/components/Select.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
@@ -281,7 +282,17 @@
           {#if preview.language}<li>{preview.language}</li>{/if}
         </ul>
         {#if preview.summary}
-          <p class="summary">{preview.summary}</p>
+          <!--
+            The same treatment the library gives a work's summary, because it is
+            the same text and could be the same mistake. Six lines rather than
+            four: the reader is here to decide on this one work, so the summary
+            carries more of the decision than it does in a list.
+          -->
+          <ClampedText
+            text={preview.summary}
+            lines={6}
+            moreLabel="Show the whole summary"
+          />
         {/if}
         <p class="meta">
           Source address:
@@ -511,9 +522,7 @@
     padding: 0 var(--space-2);
   }
 
-  .summary {
-    max-width: 68ch;
-  }
+
 
   .plan {
     font-weight: 600;

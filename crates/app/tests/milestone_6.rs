@@ -156,6 +156,10 @@ impl SourceAdapter for FixtureArchive {
         SourceKey::new(SOURCE)
     }
 
+    fn display_name(&self) -> &'static str {
+        "Archive of Our Own"
+    }
+
     fn capabilities(&self) -> SourceCapabilities {
         let mut capabilities = self.inner.capabilities();
         if self.requires_auth {
@@ -291,6 +295,36 @@ impl Harness {
         let harness = Self { dir, db };
         harness.seed_source(true, None).await;
         harness
+    }
+
+    /// A harness with migrations applied and no source rows at all.
+    ///
+    /// What a real instance looks like the moment it is set up: the `sources`
+    /// table is instance state and nothing writes to it for a source nobody has
+    /// used. Tests that need a row call [`Harness::new`]; tests about what an
+    /// instance reports *before* any row exists need this, because the seeding in
+    /// the other constructor is exactly the state under test.
+    async fn empty(tag: &str) -> Self {
+        set_trust_proxy(false);
+        let _ = lorehaven_app::logging::init(&lorehaven_app::config::LoggingConfig {
+            filter: "error".to_owned(),
+            format: lorehaven_app::config::LogFormat::Pretty,
+        });
+
+        let dir = scratch_dir(tag);
+        let db = Database::connect(&DatabaseConfig::new(format!(
+            "sqlite://{}/lorehaven.sqlite?mode=rwc",
+            dir.display()
+        )))
+        .await
+        .expect("connect");
+        let report = db.migrate().await.expect("migrate");
+        assert!(
+            report.applied.contains(&"0006_imports".to_owned()),
+            "the imports migration must apply: {report:?}"
+        );
+
+        Self { dir, db }
     }
 
     /// The source row the importer consults before it fetches anything.
@@ -1773,6 +1807,103 @@ async fn clearing_the_revision_cache_does_not_delete_stored_bytes() {
             .expect("read the blob")
             .is_some(),
         "clearing the revision cache must not delete content_blobs"
+    );
+
+    harness.cleanup().await;
+}
+
+/// The catalogue lists what the build can read, even before anything has been
+/// imported and before any `sources` row exists.
+///
+/// This is the bug the browser journey found: `GET /imports/sources` used to be
+/// driven by the `sources` table, which holds *instance* state — enabled, health,
+/// last check — and which nothing creates for a source nobody has used. A fresh
+/// instance with three working adapters therefore answered `{"items": []}`, and
+/// the import page's own "What this instance can read" section said nothing while
+/// a preview of the same URL would have worked. The page was wrong about the
+/// instance in the direction that stops a reader trying.
+///
+/// The harness deliberately starts from a database with no `sources` rows at all,
+/// which is what a real instance looks like before its first import.
+#[tokio::test]
+async fn the_catalogue_lists_the_builds_sources_before_any_row_exists() {
+    let harness = Harness::empty("catalogue-fresh").await;
+    assert!(
+        imports::list_sources(&harness.db)
+            .await
+            .expect("list sources")
+            .is_empty(),
+        "the fixture is only meaningful with no rows"
+    );
+
+    let (mut client, _account, _pseud) = signed_in(&harness, "fresh@example.org", "fresh").await;
+    let (status, body) = client.get("/api/v1/imports/sources").await;
+    assert_eq!(status, StatusCode::OK, "sources: {body}");
+
+    let items = body["items"].as_array().expect("items");
+    assert!(
+        !items.is_empty(),
+        "a build with adapters must not report an empty catalogue: {body}"
+    );
+
+    // The one the fixture registry carries, named as a reader should see it and
+    // not as its key.
+    let source = items
+        .iter()
+        .find(|item| item["key"] == SOURCE)
+        .expect("the fixture adapter is in the catalogue");
+    assert_eq!(source["display_name"], "Archive of Our Own");
+    assert_eq!(
+        source["enabled"], true,
+        "no row means nobody has switched it off"
+    );
+    assert_eq!(
+        source["health"], "unknown",
+        "nothing has been tried, so nothing is claimed about it"
+    );
+    assert_eq!(source["capabilities"]["known"], true);
+    assert_eq!(source["capabilities"]["chapters"], true);
+
+    harness.cleanup().await;
+}
+
+/// The library says how many chapters of a work it actually holds.
+///
+/// Counted from what was stored, not copied from the source's own number. The
+/// two answer different questions and diverge the moment an import is partial:
+/// a card showing the source's count would describe a complete copy of a work
+/// the reader holds a third of. The browser journey is where this was noticed —
+/// the card carried the author, the status, the word count and both dates, and
+/// never said how many chapters had arrived.
+#[tokio::test]
+async fn the_library_reports_how_many_chapters_are_stored() {
+    let harness = Harness::new("library-count").await;
+    let (_client, account, pseud) = signed_in(&harness, "counted@example.org", "counted").await;
+
+    // The count is read before the import, when there is no item at all: a
+    // library that reported a count only after a second visit would be reporting
+    // on the wrong thing.
+    let before = imports::list_library_items(&harness.db, &account.to_string(), 50, None)
+        .await
+        .expect("list the empty library");
+    assert!(before.is_empty(), "nothing is imported yet");
+
+    let import_id = run_import(&harness, account, &pseud, FixtureArchive::new(), false).await;
+    let stored = imports::list_import_chapters(&harness.db, &import_id)
+        .await
+        .expect("the import's chapters")
+        .iter()
+        .filter(|chapter| chapter.state == "stored")
+        .count();
+    assert_eq!(stored, 3, "the fixture holds three chapters");
+
+    let items = imports::list_library_items(&harness.db, &account.to_string(), 50, None)
+        .await
+        .expect("list the library");
+    let item = items.first().expect("the imported item");
+    assert_eq!(
+        item.chapter_count, 3,
+        "the copy reports the chapters it holds, not the source's claim"
     );
 
     harness.cleanup().await;

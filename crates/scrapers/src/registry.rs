@@ -137,6 +137,7 @@ impl Registry {
                     enabled: self.is_enabled(&key),
                     disabled_reason: self.disabled_reason(&key).map(str::to_owned),
                     key,
+                    display_name: adapter.display_name().to_owned(),
                     capabilities: adapter.capabilities(),
                 }
             })
@@ -149,6 +150,8 @@ impl Registry {
 pub struct CatalogueEntry {
     /// The source's key.
     pub key: SourceKey,
+    /// What the build calls this source, for a reader.
+    pub display_name: String,
     /// Its declared capabilities.
     pub capabilities: crate::SourceCapabilities,
     /// Whether it may be used.
@@ -173,6 +176,9 @@ mod tests {
     impl SourceAdapter for Fake {
         fn key(&self) -> SourceKey {
             SourceKey::new(self.key)
+        }
+        fn display_name(&self) -> &'static str {
+            "A Fake Source"
         }
         fn capabilities(&self) -> SourceCapabilities {
             SourceCapabilities::public_read()

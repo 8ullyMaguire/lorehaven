@@ -52,7 +52,7 @@ use serde::{Deserialize, Serialize};
 use lorehaven_db::{imports, revisions, secrets};
 use lorehaven_domain::imports::{plan_import, ChapterIdentity, ImportedWork};
 use lorehaven_domain::{AppError, PseudId};
-use lorehaven_scrapers::{FetchPolicy, SafeFetcher, SourceKey};
+use lorehaven_scrapers::{FetchPolicy, SafeFetcher, SourceAdapter, SourceKey};
 
 use crate::auth::{RequirePseud, RequireSession};
 use crate::http::{ApiError, ApiResult};
@@ -257,42 +257,91 @@ struct SourceView {
     capabilities: serde_json::Value,
 }
 
+/// The catalogue a reader is shown: every source this build can read, with this
+/// instance's own state laid over it.
+///
+/// # Why it is driven by the registry and not by the rows
+///
+/// It used to be the other way round, and on a fresh instance it reported
+/// nothing at all. The `sources` table is *instance* state — whether an operator
+/// switched a source off, what its health is, when it was last checked — and
+/// nothing creates a row for a source that has never been used. So a build with
+/// three working adapters offered a reader an empty list, and the import page's
+/// own "What this instance can read" section said nothing, while the preview for
+/// the very same URLs would have worked. The page was wrong about the instance
+/// in the direction that stops a reader trying.
+///
+/// The build knows what it can read. The row knows what the operator has since
+/// decided. So the adapter list comes first and the row refines it, and a row
+/// whose source this build cannot read is still reported — with `known: false`,
+/// because a record that a source exists is not a claim that it can be read.
 async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
     let rows = imports::list_sources(state.db()).await?;
     let registry = state.registry();
-    let items: Vec<SourceView> = rows
-        .into_iter()
-        .map(|row| {
-            let capabilities = registry
-                .by_key(&SourceKey::new(row.key.clone()))
-                .map_or_else(
-                    |_| serde_json::json!({ "known": false }),
-                    |adapter| {
-                        let capabilities = adapter.capabilities();
-                        serde_json::json!({
-                            "known": true,
-                            "metadata": capabilities.metadata,
-                            "chapters": capabilities.chapters,
-                            "per_chapter_fetch": capabilities.per_chapter_fetch,
-                            "bibliography": capabilities.bibliography,
-                            "incremental": capabilities.incremental,
-                            "authentication": capabilities.authentication.as_str(),
-                        })
-                    },
-                );
+
+    let mut items: Vec<SourceView> = registry
+        .adapters()
+        .iter()
+        .map(|adapter| {
+            let key = adapter.key();
+            let row = rows.iter().find(|row| row.key == key.as_str());
             SourceView {
-                key: row.key,
-                display_name: row.display_name,
-                adapter_version: row.adapter_version,
-                enabled: row.enabled,
-                disabled_reason: row.disabled_reason,
-                health: row.health,
-                last_checked_at: row.last_checked_at,
-                capabilities,
+                key: key.as_str().to_owned(),
+                // The row wins when it has a name: an operator who renamed a
+                // source meant it, and the build's name is only the default.
+                display_name: row.map_or_else(
+                    || adapter.display_name().to_owned(),
+                    |row| row.display_name.clone(),
+                ),
+                adapter_version: row.map_or_else(
+                    || "unrecorded".to_owned(),
+                    |row| row.adapter_version.clone(),
+                ),
+                // No row is not "disabled": it means nobody has ever switched
+                // this source off, which is the only thing `enabled` records.
+                enabled: row.is_none_or(|row| row.enabled),
+                disabled_reason: row.and_then(|row| row.disabled_reason.clone()),
+                health: row.map_or_else(|| "unknown".to_owned(), |row| row.health.clone()),
+                last_checked_at: row.and_then(|row| row.last_checked_at.clone()),
+                capabilities: capabilities_of(adapter.as_ref()),
             }
         })
         .collect();
+
+    // A row for a source this build cannot read. Reported rather than hidden:
+    // somebody recorded it, and a catalogue that silently dropped it would make
+    // an operator's own note about a source disappear.
+    items.extend(
+        rows.iter()
+            .filter(|row| registry.by_key(&SourceKey::new(row.key.clone())).is_err())
+            .map(|row| SourceView {
+                key: row.key.clone(),
+                display_name: row.display_name.clone(),
+                adapter_version: row.adapter_version.clone(),
+                enabled: row.enabled,
+                disabled_reason: row.disabled_reason.clone(),
+                health: row.health.clone(),
+                last_checked_at: row.last_checked_at.clone(),
+                capabilities: serde_json::json!({ "known": false }),
+            }),
+    );
+
+    items.sort_by(|left, right| left.key.cmp(&right.key));
     Ok(Json(serde_json::json!({ "items": items })))
+}
+
+/// What an adapter can do, as the catalogue reports it.
+fn capabilities_of(adapter: &dyn SourceAdapter) -> serde_json::Value {
+    let capabilities = adapter.capabilities();
+    serde_json::json!({
+        "known": true,
+        "metadata": capabilities.metadata,
+        "chapters": capabilities.chapters,
+        "per_chapter_fetch": capabilities.per_chapter_fetch,
+        "bibliography": capabilities.bibliography,
+        "incremental": capabilities.incremental,
+        "authentication": capabilities.authentication.as_str(),
+    })
 }
 
 /// Wrap a fetcher so a preview reuses what the source says has not changed.
@@ -988,7 +1037,15 @@ async fn list_library(
     Ok(Json(serde_json::json!({
         "items": rows
             .into_iter()
-            .map(|row| serde_json::json!({
+            .map(|row| {
+                let source_display_name = state
+                    .registry()
+                    .by_key(&SourceKey::new(row.source_key.clone()))
+                    .map_or_else(
+                        |_| row.source_key.clone(),
+                        |adapter| adapter.display_name().to_owned(),
+                    );
+                serde_json::json!({
                 "id": row.id,
                 "source_key": row.source_key,
                 "source_work_key": row.source_work_key,
@@ -999,12 +1056,15 @@ async fn list_library(
                 "summary": row.summary,
                 "language": row.language,
                 "word_count": row.word_count,
+                "chapter_count": row.chapter_count,
+                "source_display_name": source_display_name,
                 "status": row.status,
                 "source_updated_at": row.source_updated_at,
                 "last_synced_at": row.last_synced_at,
                 "created_at": row.created_at,
                 "updated_at": row.updated_at,
-            }))
+                })
+            })
             .collect::<Vec<_>>(),
         "next_cursor": next_cursor,
     })))

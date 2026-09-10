@@ -22,11 +22,16 @@
   import { handleLinkClick, navigate } from '../lib/router';
   import { session } from '../lib/session.svelte';
   import Button from '../lib/components/Button.svelte';
-  import EmptyState from '../lib/components/EmptyState.svelte';
+  import ClampedText from '../lib/components/ClampedText.svelte';
+import EmptyState from '../lib/components/EmptyState.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
   let items = $state<LibraryItem[]>([]);
+
+  function chapters(count: number): string {
+    return `${count} ${count === 1 ? 'chapter' : 'chapters'}`;
+  }
   let loading = $state(true);
   let error = $state<unknown>(null);
   let busy = $state<string | null>(null);
@@ -138,7 +143,7 @@
         <li class="item">
           <div class="head">
             <h2 class="title">{item.title}</h2>
-            <span class="source">{item.source_key}</span>
+            <span class="source">{item.source_display_name || item.source_key}</span>
           </div>
 
           <p class="byline">
@@ -152,6 +157,7 @@
           </p>
 
           <ul class="facts">
+            <li>{chapters(item.chapter_count)}</li>
             <li>{item.status}</li>
             <li>{words(item.word_count)}</li>
             {#if item.language}<li>{item.language}</li>{/if}
@@ -162,7 +168,7 @@
           </ul>
 
           {#if item.summary}
-            <p class="summary">{item.summary}</p>
+            <ClampedText text={item.summary} />
           {/if}
 
           <p class="meta break">
@@ -242,7 +248,10 @@
 
   .source {
     font-size: var(--text-sm);
-    text-transform: lowercase;
+    /* No `text-transform: lowercase` here. It was right while this badge held a
+       machine key — `royalroad` reads the same either way — and it is wrong now
+       that it holds the source's name, because the transform renders
+       "Royal Road" as "royal road" and a proper noun is not ours to recase. */
     padding: 0 var(--space-2);
     border: var(--border-width) solid var(--color-border);
     border-radius: var(--radius-sm);
@@ -264,9 +273,7 @@
     color: var(--color-muted);
   }
 
-  .summary {
-    max-width: 68ch;
-  }
+
 
   .answer {
     border-left: 3px solid var(--color-accent);
