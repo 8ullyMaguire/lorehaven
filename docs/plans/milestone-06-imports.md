@@ -119,6 +119,68 @@ whose foreign keys have never been exercised, and this is where they were.
 
 ---
 
+## 6. Source reachability, measured
+
+Recorded on 2026-09-10 with a plain HTTPS request and a browser `User-Agent`,
+against the URL taken from the ficnexus adapter for each source:
+
+| Source | Result | Consequence |
+|---|---|---|
+| Archive of Our Own | `200` | Adapter built, fixtures recorded |
+| Royal Road | `200` | Adapter built, fixtures recorded |
+| Syosetu | `200` | Adapter built, fixtures recorded |
+| www.fanficauthors.net, www.lcfanfic.com, www.phoenixsong.net, www.mediaminer.org | `200` | The eFiction family is reachable |
+| **www.fanfiction.net** | **`403`** | Cloudflare |
+| **www.scribblehub.com** | **`403`** | Cloudflare |
+| **www.fimfiction.net** | **`403`** | Cloudflare |
+| **forums.spacebattles.com** | **`403`** | Cloudflare (and the XenForo board family generally) |
+
+FictionPress runs the same software as FanFiction.net and is therefore behind the
+same wall.
+
+### What that means, and the decision it forces
+
+For the blocked sources, an adapter cannot be **verified**, and a parser that
+cannot be verified is the failure the plan's third pitfall names: a selector that
+matches nothing returns zero chapters, the import records an empty work, and the
+reader sees a success.
+
+ficnexus carries a Cloudflare path: TLS impersonation via `primp` with a
+`chromium --dump-dom` fallback. Porting it wholesale would undo part of the
+security work M6 just did, and it is worth being explicit about why rather than
+letting this look like an oversight:
+
+* `SafeFetcher` resolves a hostname, checks the answers, and then **pins** them
+  for the request, so a name cannot resolve to a public address for the check and
+  a private one for the connection. A browser started as a subprocess cannot be
+  pinned that way — it does its own resolution, follows its own redirects, and
+  loads subresources.
+* A `chromium --dump-dom` render also fetches images, stylesheets, fonts and
+  anything a page's script asks for. Through the guard, every one of those is a
+  decision we make in advance; through a browser, none of them is.
+
+So the options are, in order of how much I would trust them:
+
+1. **Do not support the blocked sources.** Honest, loses FanFiction.net, which is
+   probably the single largest source for a fanfiction platform.
+2. **A sanctioned browser path with its own guard.** Pre-validate the URL and
+   every redirect target against the same IP rules, run the browser with no
+   network access of its own (a proxy that enforces the allow-list, or a
+   network namespace), cap the response size, and document the boundary as
+   weaker than `SafeFetcher`'s. Real work, and testable — the guard's refusals
+   can be asserted even when the site's page cannot be recorded.
+3. **Port the ficnexus path as it stands.** Fastest, and the only one I would not
+   recommend: it puts an unpinned fetcher into the one code path whose entire
+   purpose is that a user-supplied URL cannot make the server read its own
+   network.
+
+Option 2 is the one I would build, and it is larger than the rest of M6's adapter
+work. It needs a decision because it trades a documented security property for
+coverage, which is the kind of trade the spec (§11.5, §11.7) leaves to the
+operator rather than to the implementer.
+
+---
+
 ## 5. Before this milestone can be tagged
 
 1. The two pages, and a browser journey over them.
