@@ -676,11 +676,22 @@ fn parse_status(document: &Html) -> WorkStatus {
 }
 
 /// The published and last-changed dates, when the page states them.
+///
+/// The stats block carries one dated row besides `Published:` and labels it by
+/// the work's own state: `Updated:` while it is being written, `Completed:` once
+/// it is finished. Both are the source's statement of when the work last
+/// changed, so both answer `updated_at`.
+///
+/// Reading only `Updated:` would leave every completed work with no last-change
+/// date at all — which is worse than a null, because it looks like the source
+/// never said, and an update check that trusts it would decide there is nothing
+/// to compare against.
 fn parse_dates(document: &Html) -> (Option<OffsetDateTime>, Option<OffsetDateTime>) {
     let published = text_of(document, "dl.stats > dd.published").and_then(|raw| parse_date(&raw));
     let status_text = text_of(document, "dl.stats > dt.status").unwrap_or_default();
     let status_date = text_of(document, "dl.stats > dd.status").and_then(|raw| parse_date(&raw));
-    let updated = if status_text.to_lowercase().starts_with("updated") {
+    let status_label = status_text.to_lowercase();
+    let updated = if status_label.starts_with("updated") || status_label.starts_with("completed") {
         status_date
     } else {
         None
@@ -803,19 +814,39 @@ mod tests {
     }
 
     #[test]
-    fn an_updated_date_is_only_reported_when_the_work_was_updated() {
-        let document = Html::parse_document(
+    fn a_completed_works_last_change_is_its_completion_date() {
+        // The two fetches differ only in the label AO3 uses for the work's own
+        // state, which is how the site says "still being written" versus
+        // "finished". Both are a last-change date and both must reach
+        // `updated_at`; reading only `Updated:` loses the date for every
+        // completed work.
+        let completed = Html::parse_document(
             r#"<dl class="stats">
                  <dt class="published">Published:</dt><dd class="published">2026-09-01</dd>
                  <dt class="status">Completed:</dt><dd class="status">2026-09-10</dd>
                </dl>"#,
         );
-        let (published, updated) = parse_dates(&document);
-        assert!(published.is_some());
-        // A completed work's status date is its completion, not a revision, and
-        // reporting it as an update would have every finished work claim to
-        // have been edited on the day it finished.
-        assert!(updated.is_none());
+        let ongoing = Html::parse_document(
+            r#"<dl class="stats">
+                 <dt class="published">Published:</dt><dd class="published">2026-09-01</dd>
+                 <dt class="status">Updated:</dt><dd class="status">2026-09-10</dd>
+               </dl>"#,
+        );
+
+        for document in [&completed, &ongoing] {
+            let (published, updated) = parse_dates(document);
+            assert!(published.is_some());
+            assert_eq!(
+                updated.map(|at| at.date().to_string()),
+                Some("2026-09-10".to_owned()),
+                "the label is how the site spells the same fact"
+            );
+        }
+
+        // A work with no dated row at all reports neither rather than guessing.
+        let bare = Html::parse_document(r#"<dl class="stats"></dl>"#);
+        let (published, updated) = parse_dates(&bare);
+        assert!(published.is_none() && updated.is_none());
     }
 
     #[test]

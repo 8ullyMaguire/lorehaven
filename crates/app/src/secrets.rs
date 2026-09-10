@@ -395,6 +395,10 @@ pub async fn seal_secret(
         name,
     };
     let sealed = cipher.encrypt(owner, plaintext)?;
+    // The key must be a row before a secret can name it: `secrets.key_id` is a
+    // foreign key, and a key the table has never heard of is a key this database
+    // will not let anything be encrypted with.
+    lorehaven_db::secrets::ensure_encryption_key(db, &sealed.key_id, "XChaCha20-Poly1305").await?;
     lorehaven_db::secrets::put_secret(
         db,
         owner_type,

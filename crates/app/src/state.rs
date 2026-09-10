@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use lorehaven_db::Database;
+use lorehaven_scrapers::registry::Registry;
 
 use crate::config::Config;
 use crate::limiter::RateLimiter;
@@ -19,6 +20,13 @@ struct Inner {
     db: Database,
     rate_limiter: RateLimiter,
     started_at: Instant,
+    /// The source adapters.
+    ///
+    /// One instance for the whole process, shared by the preview a reader waits
+    /// on and the import the worker runs later. Two registries would mean a URL
+    /// could route to one adapter when previewed and another when imported, and
+    /// the reader would have confirmed a plan that nothing then followed.
+    registry: Registry,
 }
 
 impl AppState {
@@ -32,6 +40,7 @@ impl AppState {
                 db,
                 rate_limiter,
                 started_at: Instant::now(),
+                registry: lorehaven_scrapers::sites::default_registry(),
             }),
         }
     }
@@ -40,6 +49,25 @@ impl AppState {
     #[must_use]
     pub fn config(&self) -> &Config {
         &self.inner.config
+    }
+
+    /// The source adapters.
+    #[must_use]
+    pub fn registry(&self) -> &Registry {
+        &self.inner.registry
+    }
+
+    /// Replace the adapters.
+    ///
+    /// For tests, which need an adapter that answers from a recorded page: a
+    /// test that reaches the network fails on a plane, and an import rule that
+    /// is only exercised against a live site is a rule nobody has pinned.
+    #[must_use]
+    pub fn with_registry(mut self, registry: Registry) -> Self {
+        Arc::get_mut(&mut self.inner)
+            .expect("state is configured before it is shared")
+            .registry = registry;
+        self
     }
 
     /// The database handle.

@@ -686,9 +686,15 @@ pub async fn touch_library_item_synced(db: &Database, item_id: &str) -> Result<(
 // ---------------------------------------------------------------------------
 
 /// Record an import, bound to the queue row that carries it.
+///
+/// The id is the caller's to choose so that the queue row can name the import in
+/// its payload before the import exists. The other way round leaves a claimable
+/// job that points at nothing, which the worker would fail for a reason that is
+/// nobody's fault.
 #[allow(clippy::too_many_arguments)]
 pub async fn create_import_job(
     db: &Database,
+    id: &str,
     queue_job_id: &str,
     account_id: &str,
     pseud_id: &str,
@@ -697,7 +703,6 @@ pub async fn create_import_job(
     destination_type: &str,
     dry_run: bool,
 ) -> Result<ImportJob> {
-    let id = lorehaven_domain::ImportJobId::new().to_string();
     let now = now_rfc3339();
     let sql = db.sql(
         "INSERT INTO import_jobs (id, job_id, account_id, pseud_id, source_key, source_url,
@@ -711,7 +716,7 @@ pub async fn create_import_job(
     );
     run!(db, &sql, |query| {
         query
-            .bind(&id)
+            .bind(id)
             .bind(queue_job_id)
             .bind(account_id)
             .bind(pseud_id)
@@ -725,7 +730,7 @@ pub async fn create_import_job(
     .await
     .with_context(|| format!("recording an import of {source_key}"))?;
 
-    get_import_job(db, &id)
+    get_import_job(db, id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("the import job vanished after insert"))
 }
@@ -791,27 +796,47 @@ pub async fn get_import_job_for(
 }
 
 /// A page of one reader's imports, newest first.
+///
+/// The state filter and the cursor are both applied in SQL rather than in Rust,
+/// so a page is still one page: filtering after the limit would return fewer
+/// rows than asked for and make a client believe it had reached the end.
 pub async fn list_import_jobs(
     db: &Database,
     account_id: &str,
+    state: Option<&str>,
     limit: i64,
+    after: Option<(&str, &str)>,
 ) -> Result<Vec<ImportJob>> {
     let limit = limit.clamp(1, 200);
+    let (after_at, after_id) = after.map_or((None::<&str>, None::<&str>), |(at, id)| {
+        (Some(at), Some(id))
+    });
     let sql = sql_owned(
         db,
         format!(
             "SELECT {IMPORT_JOB_COLUMNS} FROM import_jobs
-             WHERE account_id = ? ORDER BY created_at DESC, id DESC LIMIT ?"
+             WHERE account_id = ?
+               AND (? IS NULL OR state = ?)
+               AND (? IS NULL OR (created_at, id) < (?, ?))
+             ORDER BY created_at DESC, id DESC LIMIT ?"
         ),
         format!(
             "SELECT {IMPORT_JOB_COLUMNS_PG} FROM import_jobs
-             WHERE account_id = ?::uuid ORDER BY created_at DESC, id DESC LIMIT ?"
+             WHERE account_id = ?::uuid
+               AND (?::text IS NULL OR state = ?::text)
+               AND (?::text IS NULL OR (created_at, id) < (?::text, ?::uuid))
+             ORDER BY created_at DESC, id DESC LIMIT ?"
         ),
     );
     let rows: Vec<ImportJobRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
                 .bind(account_id)
+                .bind(state)
+                .bind(state)
+                .bind(after_at)
+                .bind(after_at)
+                .bind(after_id)
                 .bind(limit)
                 .fetch_all(db.sqlite_pool().expect("sqlite handle"))
                 .await?
@@ -819,12 +844,64 @@ pub async fn list_import_jobs(
         Backend::Postgres => {
             sqlx::query_as(&sql)
                 .bind(account_id)
+                .bind(state)
+                .bind(state)
+                .bind(after_at)
+                .bind(after_at)
+                .bind(after_id)
                 .bind(limit)
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
                 .await?
         }
     };
     rows.into_iter().map(decode_import_job).collect()
+}
+
+/// The queue row that runs this import, so cancelling one cancels both.
+pub async fn job_for_import(db: &Database, import_id: &str) -> Result<Option<String>> {
+    let sql = db.sql(
+        "SELECT job_id FROM import_jobs WHERE id = ?",
+        "SELECT job_id FROM import_jobs WHERE id = ?::uuid",
+    );
+    let row: Option<(Option<String>,)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(import_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(import_id)
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(row.and_then(|(id,)| id))
+}
+
+/// One credential, by id. Metadata only; the value lives in `secrets`.
+pub async fn get_source_credential(db: &Database, id: &str) -> Result<Option<SourceCredential>> {
+    let sql = sql_owned(
+        db,
+        format!("SELECT {CREDENTIAL_COLUMNS} FROM source_credentials WHERE id = ?"),
+        format!("SELECT {CREDENTIAL_COLUMNS_PG} FROM source_credentials WHERE id = ?::uuid"),
+    );
+    let row: Option<SourceCredentialRow> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(id)
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    row.map(decode_credential).transpose()
 }
 
 /// Move an import to a new state, optionally recording its report and item.
@@ -1205,30 +1282,6 @@ pub async fn find_credential_by_label(
     row.map(decode_credential).transpose()
 }
 
-/// One credential, by identifier.
-pub async fn get_source_credential(db: &Database, id: &str) -> Result<Option<SourceCredential>> {
-    let sql = sql_owned(
-        db,
-        format!("SELECT {CREDENTIAL_COLUMNS} FROM source_credentials WHERE id = ?"),
-        format!("SELECT {CREDENTIAL_COLUMNS_PG} FROM source_credentials WHERE id = ?::uuid"),
-    );
-    let row: Option<SourceCredentialRow> = match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query_as(&sql)
-                .bind(id)
-                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
-                .await?
-        }
-        Backend::Postgres => {
-            sqlx::query_as(&sql)
-                .bind(id)
-                .fetch_optional(db.postgres_pool().expect("postgres handle"))
-                .await?
-        }
-    };
-    row.map(decode_credential).transpose()
-}
-
 /// A pseud's connections, optionally for one source.
 ///
 /// Scoped to the pseud, never the account: spec §11.6 requires that one pseud's
@@ -1323,11 +1376,21 @@ pub async fn delete_source_credential(
         // the route can answer 404 without disclosing that the row exists.
         return Ok(None);
     }
+    // The secret is what is deleted, and the credential goes with it: the schema
+    // declares `source_credentials.secret_id` as `REFERENCES secrets(id) ON
+    // DELETE CASCADE`, so removing the ciphertext removes the row that names it.
+    //
+    // That direction is deliberate. A revocation that left the ciphertext behind
+    // would leave a reader's source password sitting in the database after they
+    // asked for it to be gone, and "the caller also has to remember to delete
+    // the secret" is exactly the kind of instruction that gets forgotten by the
+    // second caller. The foreign key is the guarantee; this function only has to
+    // not fight it.
     let sql = db.sql(
-        "DELETE FROM source_credentials WHERE id = ? AND pseud_id = ?",
-        "DELETE FROM source_credentials WHERE id = ?::uuid AND pseud_id = ?::uuid",
+        "DELETE FROM secrets WHERE id = ?",
+        "DELETE FROM secrets WHERE id = ?::uuid",
     );
-    run!(db, &sql, |query| query.bind(id).bind(pseud_id)).await?;
+    run!(db, &sql, |query| query.bind(&existing.secret_id)).await?;
     Ok(Some(existing.secret_id))
 }
 

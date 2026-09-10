@@ -34,7 +34,6 @@ use lorehaven_db::storage::BlobStore;
 use lorehaven_db::{jobs, outbox};
 use lorehaven_domain::jobs::{JobKind, JobState, RetryPolicy};
 use lorehaven_domain::JobId;
-use lorehaven_scrapers::registry::Registry;
 use time::OffsetDateTime;
 
 use crate::state::AppState;
@@ -135,11 +134,6 @@ impl PassReport {
 struct Inner {
     options: WorkerOptions,
     handlers: HashMap<String, TopicHandler>,
-    /// The adapters an import may use. In the worker's hands rather than the
-    /// state's because it is a worker-only dependency — the web path never
-    /// fetches a source — and because a test that wants to prove an import does
-    /// not reach the network can hand this worker a probe adapter.
-    registry: Registry,
 }
 
 /// The worker. Cloneable, because a unit of work runs on its own task so a
@@ -162,7 +156,6 @@ impl Worker {
             inner: Arc::new(Inner {
                 options,
                 handlers: HashMap::new(),
-                registry: lorehaven_scrapers::sites::default_registry(),
             }),
         }
     }
@@ -175,19 +168,6 @@ impl Worker {
             .expect("a worker is built before it is shared")
             .handlers
             .insert(topic.into(), handler);
-        self
-    }
-
-    /// Run with a different set of adapters.
-    ///
-    /// The acceptance tests use this to install an adapter that answers from a
-    /// fixture, which is the only way to prove an import's retry, resume and
-    /// reporting rules without a network.
-    #[must_use]
-    pub fn with_registry(mut self, registry: Registry) -> Self {
-        Arc::get_mut(&mut self.inner)
-            .expect("a worker is built before it is shared")
-            .registry = registry;
         self
     }
 
@@ -416,7 +396,7 @@ impl Worker {
                 let payload = serde_json::from_str(&job.payload).map_err(|error| {
                     HandlerError::Fatal(format!("the import job's payload is not JSON: {error}"))
                 })?;
-                crate::imports::run(state, &self.inner.registry, id, &payload).await
+                crate::imports::run(state, state.registry(), id, &payload).await
             }
             JobKind::Notify => {
                 let (_, _, failed) = self

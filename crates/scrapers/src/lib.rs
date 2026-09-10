@@ -43,7 +43,12 @@ pub mod sites;
 
 use std::fmt;
 
-use async_trait::async_trait;
+// Re-exported so a crate that implements `SourceAdapter` writes
+// `#[lorehaven_scrapers::async_trait]` and gets the same macro this trait was
+// declared with. Two versions of the macro in one build would produce impls
+// that do not satisfy the trait.
+pub use async_trait::async_trait;
+
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
