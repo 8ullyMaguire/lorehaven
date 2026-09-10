@@ -84,6 +84,21 @@ pub async fn serve(config: Config, db: Database, args: &ServeArgs) -> Result<()>
 
     let state = AppState::new(config.clone(), db);
     let backend = state.db().backend().as_str();
+
+    // One process is the easier deployment for a self-hosted instance; a second
+    // `lorehaven worker` process is the better one when the queue is busy. Both
+    // are supported and both stop on the same signal.
+    if args.with_worker {
+        let worker = crate::worker::Worker::new(crate::worker::WorkerOptions::default());
+        let worker_state = state.clone();
+        tracing::info!(worker = %worker.options().id, "worker running in this process");
+        tokio::spawn(async move {
+            if let Err(error) = worker.run(&worker_state, shutdown_signal()).await {
+                tracing::error!(%error, "the worker stopped with an error");
+            }
+        });
+    }
+
     let router = build_router(state);
 
     let address = format!("{}:{}", config.server.bind, config.server.port);
@@ -240,6 +255,20 @@ pub fn build_router(state: AppState) -> Router {
             &state,
         ))
         .merge(routes::reading::authed_router())
+        // The job queue: a caller's own jobs, and the cancel action.
+        .merge(classified(
+            routes::jobs::router(),
+            RouteClass::Write,
+            &state,
+        ))
+        // The operator surface. Gated on configuration inside the handlers,
+        // because "who is an operator" is a decision about an account and not
+        // about a route tree.
+        .merge(classified(
+            routes::jobs::admin_router(),
+            RouteClass::Write,
+            &state,
+        ))
         .merge(account_routes)
         // Session loading wraps everything under /api/v1 so that the CSRF layer
         // and the limiter installed per subtree can both see who is asking.
@@ -464,7 +493,11 @@ pub async fn security_headers(request: Request, next: Next) -> Response {
 pub struct HstsFlag;
 
 /// Resolve when the process is asked to stop.
-async fn shutdown_signal() {
+///
+/// Public because the worker uses it too, so `serve --with-worker` and
+/// `lorehaven worker` both stop on the same `SIGTERM`/`SIGINT` a container
+/// runtime sends.
+pub async fn shutdown_signal() {
     let ctrl_c = async {
         let _ = tokio::signal::ctrl_c().await;
     };
@@ -499,7 +532,10 @@ mod tests {
     fn production_never_auto_migrates() {
         let mut config = Config::development_defaults();
         config.environment = Environment::Production;
-        let args = ServeArgs { no_migrate: false };
+        let args = ServeArgs {
+            no_migrate: false,
+            with_worker: false,
+        };
         assert_eq!(
             MigrationPolicy::for_config(&config, &args),
             MigrationPolicy::VerifyOnly
@@ -510,11 +546,23 @@ mod tests {
     fn development_applies_and_can_opt_out() {
         let config = Config::development_defaults();
         assert_eq!(
-            MigrationPolicy::for_config(&config, &ServeArgs { no_migrate: false }),
+            MigrationPolicy::for_config(
+                &config,
+                &ServeArgs {
+                    no_migrate: false,
+                    with_worker: false
+                }
+            ),
             MigrationPolicy::Apply
         );
         assert_eq!(
-            MigrationPolicy::for_config(&config, &ServeArgs { no_migrate: true }),
+            MigrationPolicy::for_config(
+                &config,
+                &ServeArgs {
+                    no_migrate: true,
+                    with_worker: false
+                }
+            ),
             MigrationPolicy::Ignore
         );
     }

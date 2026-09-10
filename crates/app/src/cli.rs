@@ -85,6 +85,16 @@ pub struct GlobalArgs {
     #[arg(long, global = true, env = "LOREHAVEN_LOG", value_name = "FILTER")]
     pub log: Option<String>,
 
+    /// Account allowed to reach the `/admin` routes, until Milestone 13 builds
+    /// the trust model that replaces this.
+    #[arg(
+        long,
+        global = true,
+        env = "LOREHAVEN_OPERATOR_ACCOUNT_ID",
+        value_name = "ACCOUNT_ID"
+    )]
+    pub operator_account_id: Option<String>,
+
     /// Log output format: `pretty` or `json`.
     #[arg(
         long,
@@ -109,6 +119,9 @@ pub enum Command {
 
     /// Check configuration, database, storage and converters.
     Doctor(DoctorArgs),
+
+    /// Run the background worker: jobs and outbox delivery.
+    Worker(WorkerArgs),
 }
 
 /// Options for `serve`.
@@ -117,6 +130,26 @@ pub struct ServeArgs {
     /// Never apply migrations on startup, even outside production.
     #[arg(long)]
     pub no_migrate: bool,
+
+    /// Run the background worker in this process as well as the HTTP server.
+    ///
+    /// One process is the easier deployment for a self-hosted instance; a
+    /// separate `worker` process is the better one when the queue is busy.
+    #[arg(long)]
+    pub with_worker: bool,
+}
+
+/// Options for `worker`.
+#[derive(Debug, Args)]
+pub struct WorkerArgs {
+    /// Drain what is waiting and exit, rather than looping. For cron, for tests,
+    /// and for an operator who wants to see the queue move once.
+    #[arg(long)]
+    pub once: bool,
+
+    /// How many pending outbox events to deliver per pass.
+    #[arg(long, value_name = "N", default_value_t = 50)]
+    pub batch: i64,
 }
 
 /// Options for `migrate`.

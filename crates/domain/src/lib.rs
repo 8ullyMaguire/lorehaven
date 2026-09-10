@@ -13,6 +13,7 @@ pub mod content;
 pub mod document;
 pub mod error;
 pub mod ids;
+pub mod jobs;
 pub mod policy;
 pub mod reading;
 

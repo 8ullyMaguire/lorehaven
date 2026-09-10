@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use lorehaven_db::DatabaseConfig;
+use lorehaven_domain::AccountId;
 use serde::Deserialize;
 
 use crate::cli::GlobalArgs;
@@ -63,6 +64,16 @@ impl Environment {
     #[must_use]
     pub const fn is_production(self) -> bool {
         matches!(self, Self::Production)
+    }
+
+    /// Whether this is a local development instance.
+    ///
+    /// Development-only affordances are gated on this rather than on a feature
+    /// flag, so a route that exists to make the interface drivable before its
+    /// real caller arrives cannot be reached in a deployment.
+    #[must_use]
+    pub const fn is_development(self) -> bool {
+        matches!(self, Self::Development)
     }
 }
 
@@ -111,10 +122,26 @@ pub struct Config {
     pub accounts: AccountsConfig,
     /// Age-policy settings.
     pub age: AgeConfig,
+    /// Operator-only settings.
+    pub administration: AdministrationConfig,
     /// Rate limits.
     pub rate_limits: crate::limiter::Limits,
     /// Where the configuration file was read from, if any.
     pub config_path: Option<PathBuf>,
+}
+
+/// Operator-only settings.
+///
+/// **There is no staff model yet.** Milestone 5 needs somebody who may look at
+/// the queue, and the trust model arrives in Milestone 13, so this names *one
+/// account* — never a boolean, never a role, and never a column on `accounts`.
+/// M13 replaces it with a trust level (see
+/// `docs/plans/junior-implementation-plan.md` §M13), and a `is_admin` flag would
+/// have survived until then and been wrong in every query that read it.
+#[derive(Debug, Clone, Default)]
+pub struct AdministrationConfig {
+    /// The account allowed to reach `/admin` routes, if any.
+    pub operator_account_id: Option<AccountId>,
 }
 
 /// Account creation settings.
@@ -185,6 +212,8 @@ pub struct StorageConfig {
 pub struct SecurityConfig {
     /// Whether cookies carry the `Secure` attribute.
     pub cookie_secure: bool,
+    /// Where the secret key lives, when it is not in `LOREHAVEN_SECRET_KEY`.
+    pub secret_key_file: Option<PathBuf>,
     /// Session lifetime.
     pub session_ttl: Duration,
     /// Whether state-changing cookie-authenticated requests need a CSRF token.
@@ -344,6 +373,7 @@ impl Config {
             ),
             csrf_required: security_file.csrf_required.unwrap_or(true),
             trust_proxy: security_file.trust_proxy.unwrap_or(false),
+            secret_key_file: security_file.secret_key_file,
         };
 
         // --- logging --------------------------------------------------------
@@ -377,6 +407,21 @@ impl Config {
         };
 
         // --- development ----------------------------------------------------
+        // The operator: an argument, then the environment (clap resolves those
+        // two), then the file. A malformed id is a startup error rather than a
+        // silently missing operator, because the failure mode of the latter is
+        // an admin page nobody can open.
+        let administration_file = file.administration.unwrap_or_default();
+        let operator_account_id = global
+            .operator_account_id
+            .clone()
+            .or(administration_file.operator_account_id)
+            .map(|raw| {
+                raw.parse::<AccountId>()
+                    .with_context(|| format!("the operator account id {raw:?} is not a UUID"))
+            })
+            .transpose()?;
+
         let dev_file = file.dev.unwrap_or_default();
         let dev = DevConfig {
             seed_enabled: dev_file.seed_enabled.unwrap_or(!production),
@@ -438,6 +483,9 @@ impl Config {
             security,
             logging,
             assets,
+            administration: AdministrationConfig {
+                operator_account_id,
+            },
             dev,
             accounts,
             age,
@@ -472,6 +520,7 @@ impl Config {
             },
             security: SecurityConfig {
                 cookie_secure: false,
+                secret_key_file: None,
                 session_ttl: Duration::from_secs(60 * 60 * 24 * 30),
                 csrf_required: true,
                 trust_proxy: false,
@@ -481,6 +530,9 @@ impl Config {
                 format: LogFormat::Pretty,
             },
             assets: AssetsConfig { dir: None },
+            administration: AdministrationConfig {
+                operator_account_id: None,
+            },
             dev: DevConfig { seed_enabled: true },
             accounts: AccountsConfig {
                 registration_open: true,
@@ -574,6 +626,7 @@ struct FileConfig {
     security: Option<SecuritySection>,
     logging: Option<LoggingSection>,
     assets: Option<AssetsSection>,
+    administration: Option<AdministrationSection>,
     dev: Option<DevSection>,
     accounts: Option<AccountsSection>,
     age: Option<AgeSection>,
@@ -619,6 +672,8 @@ struct SecuritySection {
     session_ttl_days: Option<u32>,
     csrf_required: Option<bool>,
     trust_proxy: Option<bool>,
+    /// Where the secret key lives, when it is not in the environment.
+    secret_key_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -659,6 +714,12 @@ struct LoggingSection {
 #[serde(deny_unknown_fields)]
 struct AssetsSection {
     dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AdministrationSection {
+    operator_account_id: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

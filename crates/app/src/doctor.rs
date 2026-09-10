@@ -208,6 +208,54 @@ pub async fn run(config: &Config, _args: &DoctorArgs) -> Report {
         ),
     }
 
+    // --- secret key ---------------------------------------------------------
+    //
+    // Milestone 5 ships the encrypted-secret store; Milestone 6 is what puts
+    // source credentials in it. The key is still checked here, because an
+    // instance that cannot load one must not find that out when it first tries
+    // to store a credential.
+    match crate::secrets::load_cipher(
+        &config.storage.root,
+        config.security.secret_key_file.as_deref(),
+        config.environment.is_production(),
+    ) {
+        Ok(cipher) => {
+            let owner = crate::secrets::Record {
+                owner_type: "doctor",
+                owner_id: "self",
+                name: "round-trip",
+            };
+            let secret = crate::secrets::Secret::new("doctor probe");
+            match cipher
+                .encrypt(owner, &secret)
+                .and_then(|sealed| cipher.decrypt(owner, &sealed))
+            {
+                Ok(opened) if opened.expose() == secret.expose() => report.ok(
+                    "secret-key",
+                    format!(
+                        "key {} loaded, and a round trip through it returned what went in",
+                        cipher.active_key_id()
+                    ),
+                ),
+                Ok(_) => report.fail(
+                    "secret-key",
+                    "a secret did not decrypt to what was encrypted with the same key",
+                    "do not store credentials on this instance; the key material is wrong",
+                ),
+                Err(error) => report.fail(
+                    "secret-key",
+                    format!("the key loads but cannot encrypt: {error:#}"),
+                    "set LOREHAVEN_SECRET_KEY to a valid 32-byte hex key",
+                ),
+            }
+        }
+        Err(error) => report.fail(
+            "secret-key",
+            format!("no usable secret key: {error:#}"),
+            "set LOREHAVEN_SECRET_KEY, or create the configured key file",
+        ),
+    }
+
     // --- optional converters ------------------------------------------------
     for binary in ["ebook-convert", "pandoc"] {
         match which(binary) {

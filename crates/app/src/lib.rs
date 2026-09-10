@@ -21,10 +21,12 @@ pub mod logging;
 pub mod privacy;
 pub mod routes;
 pub mod safety;
+pub mod secrets;
 pub mod seed;
 pub mod server;
 pub mod state;
 pub mod version;
+pub mod worker;
 
 use std::process::ExitCode;
 
@@ -34,6 +36,7 @@ use lorehaven_db::Database;
 
 use crate::cli::{Cli, Command};
 use crate::config::Config;
+use crate::state::AppState;
 
 /// Parse arguments, load configuration, and dispatch.
 pub async fn run(cli: Cli) -> Result<ExitCode> {
@@ -72,6 +75,22 @@ pub async fn run(cli: Cli) -> Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
 
+        Command::Worker(args) => {
+            let db = connect(&config).await?;
+            let state = AppState::new(config.clone(), db);
+            let worker = worker::Worker::new(worker::WorkerOptions::default());
+            let shutdown = server::shutdown_signal();
+            if args.once {
+                let report = worker.run_once(&state).await?;
+                print_pass_report(&report);
+            } else {
+                tracing::info!(worker = %worker.options().id, "worker started");
+                worker.run(&state, shutdown).await?;
+            }
+            state.db().close().await;
+            Ok(ExitCode::SUCCESS)
+        }
+
         Command::Doctor(args) => {
             let report = doctor::run(&config, &args).await;
             print!("{}", doctor::render(&report));
@@ -82,6 +101,18 @@ pub async fn run(cli: Cli) -> Result<ExitCode> {
                 ExitCode::SUCCESS
             })
         }
+    }
+}
+
+/// What one `worker --once` pass did, for an operator watching the queue move.
+fn print_pass_report(report: &worker::PassReport) {
+    println!(
+        "outbox: {} delivered, {} failed, {} deferred (no handler in this build)",
+        report.outbox_delivered, report.outbox_failed, report.outbox_deferred
+    );
+    match &report.job {
+        Some((id, state)) => println!("job {id}: {}", state.as_str()),
+        None => println!("job: none was waiting"),
     }
 }
 

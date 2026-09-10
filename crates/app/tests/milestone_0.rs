@@ -501,7 +501,10 @@ async fn production_startup_is_refused_with_development_settings() {
     let db = scratch_database(&dir).await;
     db.migrate().await.expect("migrate");
 
-    let args = lorehaven_app::cli::ServeArgs { no_migrate: true };
+    let args = lorehaven_app::cli::ServeArgs {
+        no_migrate: true,
+        with_worker: false,
+    };
     let error = server::serve(config, db, &args)
         .await
         .expect_err("production must refuse to start");
