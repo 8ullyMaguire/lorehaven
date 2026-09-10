@@ -261,28 +261,58 @@ published work*. The wording now distinguishes the two cases.
 | 8 | Typography is account-scoped and stale-write protected | Implemented and locally tested | `milestone_4.rs::typography_follows_the_account_not_the_pseud`; `a_stale_typography_patch_returns_conflict` asserts `409 REVISION_CONFLICT`. |
 | 9 | A review is private until its writer publishes it | Implemented and locally tested | `milestone_4.rs::a_review_stays_private_until_it_is_published` — an unpublished review is invisible to a visitor, and publishing it makes it visible under the active pseud's handle. `a_withdrawn_review_leaves_the_public_list` also asserts that a *stranger* withdrawing the same work's review withdraws nothing. |
 | 10 | A stale rating write is refused rather than overwriting | Implemented and locally tested | `PUT /works/:id/rating` honours `expected_version` the same way typography does; `get_rating` exists so the interface can show what the reader already gave (`null` when there is none, because "I gave nothing" is an answer, not a missing resource). |
-| 11 | Private notes are per pseud and are never rendered in the reading text | Partially implemented | The routes and the repository exist (`notes_for`, `save_note`, `delete_note`, `milestone_4` does not yet cover them) and `NotePanel.svelte` is a side panel, not part of the prose. **No acceptance test drives a note end to end** — that is the gap. |
-| 12 | Search within the current work | Unsupported | Not built. Spec §9.2 lists it; it needs the inverted index of Milestone 9 and is deferred there. |
-| 13 | Whole-work mode without rendering every paragraph at once | Unsupported | Not built. Spec §9.2 requires pagination in whole-work mode; the reader currently reads one chapter at a time with previous/next, which satisfies "must not require rendering every paragraph at once" but does not offer the mode itself. |
-| 14 | Spoiler reveal | Implemented, not exercised end to end | A public review marked `contains_spoilers` is rendered behind a `<details>` element in `WorkPage.svelte`, so it is a deliberate click and never automatic. No test covers the rendering. |
+| 11 | Private notes are per pseud and are never rendered in the reading text | Implemented and locally tested | `milestone_4.rs::a_note_is_private_to_its_writer_and_visible_only_to_them` drives a note end to end: written, listed by its writer, invisible to the account's other pseud and to a stranger, undeletable by another face, then deleted. `saving_the_same_note_twice_updates_it_in_place` and `notes_filter_to_the_exact_subject` pin the repository's key. `NotePanel.svelte` is a side panel, never part of the prose. |
+| 12 | Search within the current work | Moved to Milestone 9 | Re-scoped on 2026-09-10, with the operator's agreement: spec §9.2 lists it, but a search of a work's text is the same index Milestone 9 builds (`docs/spec.md` §17, "search within one work"), and building a second, client-side scanner here would be the second implementation of one rule that this project forbids. The requirement is tracked as `M9-02`. |
+| 13 | Whole-work mode without rendering every paragraph at once | Moved to Milestone 8 | Re-scoped on 2026-09-10: the mode is a reader *mode*, and the reader's library — shelves, saved views and the mode that walks a whole work — is Milestone 8's subject. Tracked as `M8-02`. Reading one chapter at a time with previous/next already satisfies "long works must not require rendering every paragraph at once". |
+| 14 | Spoiler reveal | Implemented; rendered, not automatically tested | A public review marked `contains_spoilers` renders behind a `<details>` element in `WorkPage.svelte`, so it is a deliberate click and never automatic. Driven in the browser journey below; still no automated test covers the rendering. |
 
 Commands actually run, with their result:
 
 ```text
-cargo test --workspace            232 passed, 0 failed (11 test binaries)
+cargo test --workspace            236 passed, 0 failed (11 test binaries)
 cargo clippy --all-targets --all-features -- -D warnings    clean
 cargo fmt --all -- --check        clean
-vitest (frontend)                 82 passed (13 files)
-vite build                        entry 153.09 kB JS (52.17 kB gzip) + 37.94 kB CSS,
+vitest (frontend)                 96 passed (15 files)
+vite build                        entry 153.75 kB JS (52.46 kB gzip) + 38.34 kB CSS,
                                   editor split to a separate 331.34 kB chunk (106 kB gzip)
 bash frontend/scripts/fe.sh build succeeded
 ```
 
-**The Milestone 4 browser journey has not been driven by hand.** The API
-journeys above are pinned by acceptance tests that run against the real router, a
-real SQLite file and a cookie jar that mimics a browser; the pages compile and
-the frontend suite passes. That is `implemented and locally tested`, not
-`verified in a browser`, and the difference is written here rather than glossed.
+### The Milestone 4 browser journey
+
+Driven by hand on 2026-09-10 against the compiled binary serving its embedded
+bundle, on a seeded development instance
+(`lorehaven migrate && lorehaven seed --development`, `serve` on `127.0.0.1:8110`,
+SQLite at `/tmp/lh-m4-journey/lorehaven.sqlite`), signed in as `@devwriter`:
+
+1. **Write, then read.** A draft work and one chapter with text were created in
+   the Writing Desk, saved (74 words, one revision) and published.
+2. **The work page** showed the work's metadata, the chapter list, the rating
+   control and the note panel.
+3. **Rating.** Five stars plus *share publicly*, saved; the control then read
+   `Update rating` / `Remove` and said `Saved`.
+4. **Notes.** A note written on the work page appeared under *Your notes* on
+   both the work page and the reader, with `Delete note` beside it.
+5. **The reader** rendered the chapter's sanitized HTML with its word count,
+   reading time and revision number, and the end-of-work actions said
+   `Bookmarks arrive in Milestone 8` and `Downloads arrive in Milestone 7`
+   rather than offering buttons the server would refuse.
+6. **History.** After reading, `/library/history` listed *1 entry for @devwriter
+   — The Salt Road by devwriter*. Before the fix below it listed nothing at all.
+7. **Appearance.** The reading settings panel set 1.3 text, line height 2, the
+   `Dark` preset and distraction-free; both the type and the chrome changed, and
+   both survived a reload. A request for the *server's* copy, not the browser's,
+   is what proves the cross-device promise the panel makes.
+8. **Keyboard and width.** `Tab` walked Edit → Reading settings → Delete note →
+   the note field → Back to the chapter list → Rate this work without a trap. At
+   320 CSS pixels the document does not scroll horizontally
+   (`scrollWidth == innerWidth`).
+9. **Three themes.** The reading surface was measured in Reading Room, After
+   Hours and Clear Day: the reader's own preset stays independent of the site
+   theme (as spec §9 requires), and its text contrast was 14.2:1 in all three.
+
+That journey found eight defects, all of them in the wiring no acceptance test
+could see. They are listed below, each with the test that now pins it.
 
 Six defects were found while doing this milestone, and none of them by reading:
 
@@ -309,6 +339,56 @@ Six defects were found while doing this milestone, and none of them by reading:
    typography test three tests later read `null`. The fix is an `afterEach`
    `vi.restoreAllMocks`, which is the reason the suite is now green rather than
    green-by-ordering.
+
+Eight more were found by driving the site in a browser after those tests were
+green, which is the argument for the Playwright suite spec §23 asks for:
+
+7. **Every edit of a note appended a second note.** `save_note` used
+   `ON CONFLICT DO UPDATE` against `(pseud, subject, anchor)`, and the schema has
+   no unique index for that key — an anchor may be `NULL`, which both engines
+   treat as distinct, so a constraint cannot express it. With nothing to
+   conflict on, the statement degrades to a plain insert: two saves, two notes.
+   The upsert is written out in one transaction now.
+   `saving_the_same_note_twice_updates_it_in_place` is the test that catches it.
+8. **The two note acceptance tests asserted nothing.** Both built their URL from
+   a plain string containing a literal `{work_id}`, so every list request asked
+   for a subject that does not exist and "the writer sees their own note" was
+   asserted against an empty result that was expected. The URLs are interpolated
+   now, and the tests fail when the note is not there.
+9. **The reader's appearance was never applied on load.** The pre-paint script
+   in `frontend/index.html` was inline, and the server sends
+   `Content-Security-Policy: script-src 'self'`, so the browser refused it — with
+   no error the page could see. The stored typography survived in
+   `localStorage` and nothing applied it. It is `frontend/static/prepaint.js`
+   now, a same-origin file, and `src/lib/prepaint.test.ts` fails if an inline
+   script returns.
+10. **The reader's theme control changed no pixel.** `applyTypography` wrote
+    `data-reader-theme`; `tokens.css` selects `[data-reader='sepia']` and four
+    presets (`paper`, `white`, `sepia`, `dark`). The attribute matched nothing,
+    and the panel's options were the three *site* themes rather than the
+    reader's presets. Both ends use the reader's vocabulary now, and an unknown
+    stored value resolves to the default instead of being written through.
+11. **`distraction_free` was stored, applied to the document, and read by
+    nobody.** The checkbox now hides the shell's header and footer.
+12. **`/library/history` was empty for every reader.** `touch_history` had no
+    caller anywhere in the application: the reading surface reported a position
+    and nothing recorded that a work had been opened. The acceptance tests called
+    the repository directly, so they were green while the running site showed an
+    empty list. `reading_a_chapter_records_it_in_history` drives the reader's own
+    two requests.
+13. **The reader never wrote the local position cache.** `reading.ts` documents
+    "the local copy is written first so a lost request still leaves a position",
+    and the reader's flush callback skipped `savePosition` entirely, so the
+    promise was false; a signed-out reader's position was kept nowhere at all.
+14. **Arriving in a chapter was not a reading.** A position was reported only on
+    scroll, so opening a chapter and reading without scrolling recorded nothing.
+    The reader reports on arrival too, debounced, which is also what makes the
+    history entry above exist.
+
+The Milestone 4 plan's own instruction — "add an inline bootstrap in
+`frontend/index.html`" — is what defect 9 followed, and it cannot work under this
+project's CSP. The plan is corrected in the same commit, as §4.6 of
+`docs/plans/junior-implementation-plan.md` requires.
 
 Two further things were changed because `-D warnings` is a gate, not because
 they were broken: `save_progress` took ten positional arguments (five of them
@@ -349,11 +429,13 @@ would have compiled.
    honest — the flow cannot silently pretend a message was sent — but it is not
    a shipped flow. SMTP is spec §2.2 optional infrastructure and has not been
    chosen.
-8. **No page has automated browser coverage.** The Milestone 2 and 3 journeys
-   were driven by hand; Vitest covers the store, the router, the API client,
-   the autosave and three of the pages. Both frontend defects found in
-   Milestone 3 were invisible to the unit tests, which is the argument for the
-   Playwright suite spec §23 asks for.
+8. **No page has automated *browser* coverage.** Milestones 2, 3 and 4 were
+   driven by hand; Vitest covers the store, the router, the API client, the
+   autosave, the pre-paint script, the reading surface and four of the pages.
+   Every frontend defect found in Milestone 3 and eight of the fourteen found in
+   Milestone 4 were invisible to those unit tests, which is the argument for the
+   Playwright suite spec §23 asks for. The two that a component test *could*
+   see — the unapplied typography and the unrecorded reading — now have one.
 9. **Two tabs can still collide on the settings forms and on a work's details.**
    The server refuses a stale version and the interface shows the conflict, but
    the loser of the race has to re-apply their change by hand. A chapter's text
@@ -371,7 +453,11 @@ would have compiled.
 
 ## What was *not* done, stated plainly
 
-Milestones 4 through 18 are **not implemented**. `docs/requirements.csv` records
+Milestones 5 through 18 are **not implemented**. Milestone 4 is complete for the
+criteria it still owns: two of its original rows were re-scoped with the
+operator's agreement on 2026-09-10 — search within a work to Milestone 9, which
+builds the index it needs (`M9-02`), and whole-work mode to Milestone 8, the
+reader's library (`M8-02`). `docs/requirements.csv` records
 each as `unsupported`, and `docs/plans/` is the build plan for them. Within
 Milestone 2, block and mute primitives are still tables with no behaviour
 (M2-06). No screen in the application displays mock

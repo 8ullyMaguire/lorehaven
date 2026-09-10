@@ -701,7 +701,10 @@ the_export_privacy_notice_must_be_acknowledged
 
 ### Milestone 8 — Library, saved views, bookmarks and updates
 
-Spec §16. Tag `v0.09-library`.
+Spec §16. Tag `v0.09-library`. **Also carries whole-work mode**, re-scoped from
+M4 on 2026-09-10 (`M8-02`): the mode walks a whole work and belongs with the
+reader's library. It must paginate — append the next chapter when the reader
+approaches the end — never render one long DOM (spec §9.2).
 
 #### The journey
 
@@ -792,7 +795,10 @@ storage_usage_matches_the_sum_of_the_items
 
 ### Milestone 9 — Taxonomy, body search and the query language
 
-Spec §17. Tag `v0.10-search`.
+Spec §17. Tag `v0.10-search`. **Also carries search within a single work**,
+re-scoped from M4 on 2026-09-10 (`M9-02`): it is the same index this milestone
+builds, and a separate client-side scanner would be the second implementation of
+one rule, which Part 1 forbids.
 
 #### The journey
 

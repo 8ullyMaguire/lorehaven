@@ -10,9 +10,9 @@ all live in this repository.
 
 ## Status
 
-**Milestones 0 (running application), 1 (design system and navigation) and 2
-(accounts, pseuds, privacy, age policy) are complete. Milestones 3–18 are not
-implemented.**
+**Milestones 0 through 4 are complete**: the running application, the design
+system, accounts and pseuds, writing and publishing, and the reader with
+ratings, reviews, notes and history. Milestones 5–18 are not implemented.
 
 That is the honest summary; `docs/requirements.csv` lists every requirement with
 a status, and `docs/verification.md` records the evidence behind each claim.
@@ -22,7 +22,9 @@ a status, and `docs/verification.md` records the evidence behind each claim.
 | 0 | Repository, tooling, running application | Done, tested |
 | 1 | Design system and navigation | Done, tested, with two gaps listed in the verification log |
 | 2 | Accounts, pseuds, privacy, age policy | Done: API and pages, tested, and driven in a browser |
-| 3–18 | Writing, reading, jobs, imports, offline, library, search, discovery, community, events, governance, economy, extensions, integrations, operations | Not implemented |
+| 3 | Drafts, chapters, publishing, revisions | Done, tested, driven in a browser — tag `v0.04-publishing` |
+| 4 | Reader, ratings, reviews, notes, history | Done, tested, driven in a browser — tag `v0.05-reader` |
+| 5–18 | Jobs, imports, offline, library, search, discovery, community, events, governance, economy, extensions, integrations, operations | Not implemented |
 
 No screen in this repository displays mock data. Pages that exist show real
 values from the server; routes that are linked but unbuilt say so plainly.
