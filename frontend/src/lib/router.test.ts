@@ -39,3 +39,39 @@ describe('routing', () => {
     expect(isPlainLeftClick(prevented)).toBe(false);
   });
 });
+
+describe('Milestone 2 routes', () => {
+  it('resolves the identity pages the shell now links to', () => {
+    expect(matchRoute('/register').id).toBe('register');
+    expect(matchRoute('/sign-in').id).toBe('sign-in');
+    expect(matchRoute('/password-reset').id).toBe('password-reset');
+    expect(matchRoute('/account').id).toBe('account');
+  });
+
+  it('resolves the owner’s pseud page, which is no longer a placeholder', () => {
+    const match = matchRoute('/pseud');
+    expect(match.id).toBe('pseuds');
+    expect(match.planned).toBeUndefined();
+  });
+
+  it('reads a public profile handle from the path', () => {
+    const match = matchRoute('/pseud/Quill');
+    expect(match.id).toBe('pseud-profile');
+    expect(match.params?.handle).toBe('Quill');
+  });
+
+  it('decodes an escaped handle, because handles are compared as text', () => {
+    expect(matchRoute('/pseud/Ada%20Lovelace').params?.handle).toBe('Ada Lovelace');
+  });
+
+  it('treats a trailing slash as the same page', () => {
+    expect(matchRoute('/pseud/').id).toBe('pseuds');
+    expect(matchRoute('/account/').id).toBe('account');
+  });
+
+  it('does not treat an empty handle as a profile', () => {
+    // `/pseud/` is the owner's page; `/pseud//` must not become a profile
+    // with an empty handle that would be fetched as a real one.
+    expect(matchRoute('/pseud//').id).toBe('pseuds');
+  });
+});

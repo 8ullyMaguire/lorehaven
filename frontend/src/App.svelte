@@ -2,10 +2,17 @@
   import Button from './lib/components/Button.svelte';
   import Drawer from './lib/components/Drawer.svelte';
   import Select from './lib/components/Select.svelte';
+  import Account from './routes/Account.svelte';
   import Home from './routes/Home.svelte';
   import NotFound from './routes/NotFound.svelte';
+  import PasswordReset from './routes/PasswordReset.svelte';
   import Planned from './routes/Planned.svelte';
-  import { isPlainLeftClick, matchRoute, navigate } from './lib/router';
+  import PseudProfile from './routes/PseudProfile.svelte';
+  import Pseuds from './routes/Pseuds.svelte';
+  import Register from './routes/Register.svelte';
+  import SignIn from './routes/SignIn.svelte';
+  import { handleLinkClick, matchRoute } from './lib/router';
+  import { session } from './lib/session.svelte';
   import {
     THEME_LABELS,
     applyTheme,
@@ -31,6 +38,12 @@
   let route = $derived(matchRoute(path));
 
   let preference = $state<ThemePreference>(readPreference(window.localStorage));
+
+  // Ask once, at boot, who is signed in. The store de-duplicates, and reading
+  // no reactive state here keeps this effect from re-running on its own writes.
+  $effect(() => {
+    void session.refresh();
+  });
 
   /** Apply a choice and remember it. */
   function chooseTheme(next: ThemePreference) {
@@ -70,15 +83,19 @@
   });
 
   function onLinkClick(event: MouseEvent, href: string) {
-    if (!isPlainLeftClick(event)) return;
-    event.preventDefault();
-    navigate(href);
+    if (moreOpen) moreOpen = false;
+    handleLinkClick(event, href);
   }
 
   const themeOptions = (Object.keys(THEME_LABELS) as ThemePreference[]).map((value) => ({
     value,
     label: THEME_LABELS[value],
   }));
+
+  async function signOut() {
+    moreOpen = false;
+    await session.signOutNow();
+  }
 </script>
 
 <a class="skip-link" href="#main">Skip to content</a>
@@ -116,6 +133,29 @@
     </nav>
 
     <div class="controls">
+      <!--
+        Identity (Milestone 2). The switcher itself lives on the pages where a
+        pseud is chosen; the header says which face is acting, so a writer is
+        never in doubt about who they are speaking as.
+      -->
+      {#if session.isSignedIn}
+        {#if session.activePseud}
+          <a
+            class="writing-as"
+            href="/pseud"
+            onclick={(event) => onLinkClick(event, '/pseud')}
+            data-testid="writing-as"
+          >
+            Writing as <strong>@{session.activePseud.handle}</strong>
+          </a>
+        {/if}
+        <a href="/account" onclick={(event) => onLinkClick(event, '/account')}>Account</a>
+        <Button variant="quiet" size="sm" onclick={signOut}>Sign out</Button>
+      {:else}
+        <a href="/sign-in" onclick={(event) => onLinkClick(event, '/sign-in')}>Sign in</a>
+        <a href="/register" onclick={(event) => onLinkClick(event, '/register')}>Register</a>
+      {/if}
+
       <label class="visually-hidden" for="theme-select">Appearance</label>
       <!--
         `value` + an explicit handler rather than `bind:value` + `onchange`:
@@ -152,6 +192,18 @@
 <main id="main" class="container" tabindex="-1">
   {#if route.id === 'home'}
     <Home />
+  {:else if route.id === 'register'}
+    <Register />
+  {:else if route.id === 'sign-in'}
+    <SignIn />
+  {:else if route.id === 'password-reset'}
+    <PasswordReset />
+  {:else if route.id === 'account'}
+    <Account />
+  {:else if route.id === 'pseuds'}
+    <Pseuds />
+  {:else if route.id === 'pseud-profile'}
+    <PseudProfile handle={route.params?.handle ?? ''} />
   {:else if route.id === 'planned' && route.planned}
     <Planned route={route.planned} />
   {:else}
@@ -175,6 +227,18 @@
       <a href={item.href} onclick={(event) => onLinkClick(event, item.href)}>{item.label}</a>
     {/each}
   </nav>
+
+  <nav class="drawer-nav" aria-label="Your account">
+    {#if session.isSignedIn}
+      <a href="/account" onclick={(event) => onLinkClick(event, '/account')}>Your account</a>
+      <a href="/pseud" onclick={(event) => onLinkClick(event, '/pseud')}>Your pseuds</a>
+      <Button variant="secondary" size="sm" onclick={signOut}>Sign out</Button>
+    {:else}
+      <a href="/sign-in" onclick={(event) => onLinkClick(event, '/sign-in')}>Sign in</a>
+      <a href="/register" onclick={(event) => onLinkClick(event, '/register')}>Register</a>
+    {/if}
+  </nav>
+
   <label class="drawer-label" for="theme-select-mobile">Appearance</label>
   <Select
     id="theme-select-mobile"
@@ -264,6 +328,25 @@
 
   .controls {
     margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .controls > a {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--color-muted);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .controls > a:hover {
+    color: var(--color-text);
+  }
+
+  .writing-as {
+    font-weight: 400;
   }
 
   .controls select {
@@ -317,6 +400,7 @@
   .drawer-nav {
     display: flex;
     flex-direction: column;
+    align-items: flex-start;
     gap: var(--space-2);
     margin-bottom: var(--space-5);
   }
@@ -330,6 +414,14 @@
   .drawer-label {
     font-size: var(--text-sm);
     color: var(--color-muted);
+  }
+
+  /* The mobile header keeps only the appearance control; identity links live
+     in the drawer, next to the rest of the secondary navigation. */
+  @media (max-width: 51.99rem) {
+    .controls > a {
+      display: none;
+    }
   }
 
   /* Desktop layout: full navigation, no mobile strip. */
