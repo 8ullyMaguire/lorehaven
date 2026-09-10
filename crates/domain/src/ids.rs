@@ -130,6 +130,24 @@ uuid_id! {
     /// A stored file (export, upload, avatar).
     MediaAssetId
 }
+uuid_id! {
+    /// An invitation for a pseud to contribute to a work.
+    CollaborationInviteId
+}
+uuid_id! {
+    /// A recorded publication, withdrawal or scheduling action.
+    PublicationEventId
+}
+uuid_id! {
+    /// A queued side effect (notification, index update) written in the same
+    /// transaction as the change that caused it.
+    OutboxEventId
+}
+uuid_id! {
+    /// An idempotency key presented by a client, so a retried publication does
+    /// not notify twice.
+    IdempotencyKey
+}
 
 /// A per-request correlation identifier.
 ///
