@@ -54,7 +54,7 @@ use reqwest::redirect::Policy;
 use tokio::sync::{Mutex, Semaphore};
 use url::Url;
 
-use crate::{Fetched, Fetcher, SourceError, SourceResult};
+use crate::{Fetched, Fetcher, SourceCapabilities, SourceError, SourceResult};
 
 /// How much, how long, and how often a fetch may be.
 #[derive(Debug, Clone)]
@@ -92,6 +92,24 @@ impl Default for FetchPolicy {
             min_interval_per_host: Duration::from_millis(500),
             max_concurrent_per_host: 2,
         }
+    }
+}
+
+impl FetchPolicy {
+    /// The policy for one source.
+    ///
+    /// Only the politeness interval comes from the adapter, because the adapter
+    /// is the only code that knows what its site tolerates. Every other limit
+    /// is the instance's floor: an adapter able to ask for a ten-gigabyte body
+    /// or an hour-long timeout could undo the guard it is running behind, which
+    /// would make the guard advisory.
+    #[must_use]
+    pub fn for_source(capabilities: SourceCapabilities) -> Self {
+        let mut policy = Self::default();
+        if let Some(millis) = capabilities.min_interval_millis {
+            policy.min_interval_per_host = Duration::from_millis(millis);
+        }
+        policy
     }
 }
 

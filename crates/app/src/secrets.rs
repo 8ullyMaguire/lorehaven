@@ -372,6 +372,72 @@ fn write_private(path: &PathBuf, contents: &str) -> Result<()> {
     Ok(())
 }
 
+/// Store a secret, returning the row id that names it.
+///
+/// The plaintext is encrypted here and then never held again: the caller gets an
+/// id, and reading the value back is a separate act that [`open_secret`]
+/// performs. Keeping those two acts apart is what stops a route handler from
+/// holding a credential it did not mean to hold, and therefore from logging one.
+///
+/// # Errors
+/// Returns an error if the key cannot encrypt, or the row cannot be written.
+pub async fn seal_secret(
+    db: &lorehaven_db::Database,
+    cipher: &SecretCipher,
+    owner_type: &str,
+    owner_id: &str,
+    name: &str,
+    plaintext: &Secret,
+) -> anyhow::Result<String> {
+    let owner = Record {
+        owner_type,
+        owner_id,
+        name,
+    };
+    let sealed = cipher.encrypt(owner, plaintext)?;
+    lorehaven_db::secrets::put_secret(
+        db,
+        owner_type,
+        owner_id,
+        name,
+        &sealed.key_id,
+        &sealed.nonce,
+        &sealed.ciphertext,
+    )
+    .await
+}
+
+/// Read a stored secret back, given the row that names it.
+///
+/// `None` means the row is gone, which a caller should treat as a credential it
+/// no longer has rather than as a decryption failure: those two need different
+/// messages, because only one of them is a bug.
+///
+/// # Errors
+/// Returns an error if the row exists and cannot be decrypted — a retired key
+/// that has been dropped, or a row written by a different instance.
+pub async fn open_secret(
+    db: &lorehaven_db::Database,
+    cipher: &SecretCipher,
+    secret_id: &str,
+) -> anyhow::Result<Option<String>> {
+    let Some(row) = lorehaven_db::secrets::get_secret_by_id(db, secret_id).await? else {
+        return Ok(None);
+    };
+    let owner = Record {
+        owner_type: &row.owner_type,
+        owner_id: &row.owner_id,
+        name: &row.name,
+    };
+    let sealed = Encrypted {
+        key_id: row.key_id,
+        nonce: row.nonce,
+        ciphertext: row.ciphertext,
+    };
+    let opened = cipher.decrypt(owner, &sealed)?;
+    Ok(Some(opened.expose().to_owned()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

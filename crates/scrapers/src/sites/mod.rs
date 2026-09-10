@@ -23,7 +23,7 @@
 
 pub mod ao3;
 
-use crate::Registry;
+use crate::{Registry, SourceAdapter};
 
 /// Every adapter this build ships, with every source enabled.
 ///
@@ -43,17 +43,10 @@ pub fn default_registry() -> Registry {
 /// hosts, so a page cannot direct the importer to an unrelated origin.
 #[must_use]
 pub fn hosts_of(registry: &Registry, key: &str) -> Vec<String> {
-    let key = crate::SourceKey::new(key);
-    match registry.by_key(&key) {
-        Ok(adapter) => match key.as_str() {
-            "ao3" => ao3::ArchiveSoftware::new().hosts(),
-            _ => {
-                let _ = adapter;
-                Vec::new()
-            }
-        },
-        Err(_) => Vec::new(),
-    }
+    registry
+        .by_key(&crate::SourceKey::new(key))
+        .map(SourceAdapter::hosts)
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

@@ -379,6 +379,10 @@ impl SourceAdapter for ArchiveSoftware {
         self.host_matches(host) && ArchiveSoftware::work_id(url).is_some()
     }
 
+    fn hosts(&self) -> Vec<String> {
+        ArchiveSoftware::hosts(self)
+    }
+
     async fn preview(
         &self,
         fetch: &dyn Fetcher,

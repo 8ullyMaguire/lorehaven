@@ -498,6 +498,14 @@ pub trait SourceAdapter: Send + Sync {
     /// host and path and never has to parse hostile text itself.
     fn can_handle(&self, url: &url::Url) -> bool;
 
+    /// The hosts this adapter reads from, and the only hosts it may reach.
+    ///
+    /// The importer builds its fetcher's allow-list from this, so a link on a
+    /// page cannot get an unrelated origin fetched. An adapter that lists a host
+    /// it does not use is widening the importer's reach, not its own, which is
+    /// why the registry test asserts every listed host is claimed by the adapter.
+    fn hosts(&self) -> Vec<String>;
+
     /// Read a work's metadata and chapter list, and no chapter bodies.
     ///
     /// This is what `POST /imports/preview` calls, so it must not write

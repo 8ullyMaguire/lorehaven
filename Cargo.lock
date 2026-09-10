@@ -1507,6 +1507,7 @@ dependencies = [
  "hex",
  "lorehaven-db",
  "lorehaven-domain",
+ "lorehaven-scrapers",
  "mime_guess",
  "rand 0.8.8",
  "rust-embed",
@@ -1521,6 +1522,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
 ]
 
