@@ -40,7 +40,12 @@ pub const MAX_TEXT_BYTES: usize = 2 * 1024 * 1024;
 /// Longest heading level we accept: four levels is already more structure than
 /// fiction needs, and an unbounded `level` is an attribute we would have to
 /// validate for no benefit.
-const MAX_HEADING_LEVEL: u8 = 4;
+///
+/// Public because [`Block::Heading`]'s documentation states the bound and a
+/// client assembling a document needs to know it before it is refused — the
+/// same reason [`MAX_TEXT_BYTES`] is public. A private constant behind a public
+/// promise leaves the number with two homes and only one of them readable.
+pub const MAX_HEADING_LEVEL: u8 = 4;
 
 /// Why a document was refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
