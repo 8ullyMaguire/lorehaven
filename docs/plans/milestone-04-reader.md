@@ -224,18 +224,25 @@ planned until M8, `/library/history` resolves now).
 
 Behaviour to implement carefully:
 
-* **Typography and theme are applied before first paint.** Add an inline
-  bootstrap in `frontend/index.html` (like the existing theme bootstrap) that
-  reads the stored preference and sets the CSS custom properties, so a reader
-  does not see a flash of the wrong size.
+* **Typography and theme are applied before first paint — from a file, never
+  inline.** `frontend/static/prepaint.js`, referenced as
+  `<script src="/prepaint.js"></script>`. *Corrected 2026-09-10:* this plan
+  originally said "add an inline bootstrap in `frontend/index.html`", and that
+  cannot work here — the server sends `Content-Security-Policy: script-src
+  'self'`, so the browser refuses an inline block **silently**. The reader's
+  saved typography sat in `localStorage` and was never applied, and an inline
+  script will fail the same way again. `src/lib/prepaint.test.ts` now fails if
+  the shell ships one.
 * **A position is saved on scroll-end and on `visibilitychange`**, debounced,
   and the local copy is written to `localStorage` first so a lost request still
   leaves a position. Reuse the shape of `frontend/src/lib/autosave.ts`.
-* **Whole-work mode is paginated, not one long DOM.** Spec §9.2: "Long works
-  must not require rendering every paragraph at once." Render one chapter at a
-  time in whole-work mode, and append the next when the reader approaches the
-  end (an `IntersectionObserver` on a sentinel). Say in a comment that this is
-  the reason, or someone will "simplify" it back into one render.
+* **Whole-work mode is paginated, not one long DOM — moved to Milestone 8.**
+  Re-scoped on 2026-09-10 with the operator's agreement: the mode walks a whole
+  work and belongs with the reader's library (`M8-02`). Spec §9.2: "Long works
+  must not require rendering every paragraph at once" — which reading one
+  chapter at a time already satisfies, and which any implementation of the mode
+  must still satisfy by appending the next chapter when the reader approaches
+  the end rather than rendering one long DOM.
 * **Spoiler reveal and private notes are per reader**, and a note is never
   shown in the reading text — it is a side panel.
 * **End-of-work actions** (spec §9.8): next in series, rate, bookmark (M8),
@@ -253,7 +260,10 @@ Behaviour to implement carefully:
 * Drive all six journeys above in a real browser against the compiled binary
   serving its embedded bundle, and write each step into `docs/verification.md`.
 * Update `docs/requirements.csv`: every `M4-*` row moves off `unsupported`,
-  with a real `evidence` value.
+  with a real `evidence` value. *Corrected 2026-09-10:* two rows could not —
+  search within a work (to Milestone 9, whose index it needs) and whole-work
+  mode (to Milestone 8) — and they were re-scoped with the operator's agreement
+  rather than left `unsupported` inside a milestone that is then tagged.
 * Commit, then `git tag v0.05-reader`.
 
 ## Acceptance for the milestone, restated as tests
@@ -268,6 +278,17 @@ Spec §9 `Acceptance` requires, and these must each be a named test:
 | The aggregate states its method and count | `the_aggregate_reports_its_count_and_method` |
 | History is per pseud | `switching_pseud_shows_a_different_history` |
 | A reader can erase their history | `clearing_history_removes_only_the_callers_rows` |
+
+## Corrections made after this plan was written
+
+Kept here rather than silently edited, because both were wrong in a way that
+cost a milestone's worth of "done" that was not:
+
+1. **The inline pre-paint bootstrap (Task 5) cannot work.** The instance's CSP is
+   `script-src 'self'`; the browser refuses an inline script without reporting
+   anything the page can see. It is a same-origin file now.
+2. **Search within the current work and whole-work mode are not M4's.** They are
+   re-scoped to M9 and M8 in `docs/requirements.csv` (`M9-02`, `M8-02`).
 
 ## Pitfalls specific to this milestone
 
