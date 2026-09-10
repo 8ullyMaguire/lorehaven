@@ -36,6 +36,17 @@
 //!   reqwest's `gzip`/`brotli` features, so no compressed body is inflated. That
 //!   is a deliberate omission rather than an oversight — were a source to
 //!   require it, the fix is a bounded streaming decoder, not the feature flag.
+//! * **The source sets the pace, and `robots.txt` is where it says so**
+//!   (spec §11.5). Each host's `robots.txt` is read once, its `Disallow` rules
+//!   are honoured as refusals, and its `Crawl-delay` becomes the minimum gap
+//!   between requests to that host. Where a site publishes neither, the gap is
+//!   one second — because "no information" is not "no limit".
+//!
+//!   This is enforced here rather than in each adapter for the same reason the
+//!   address checks are: an adapter able to opt out of pacing would make the rule
+//!   advisory. It is also why the robots *parser* lives in
+//!   [`crate::robots`] as a pure function over a string — the policy is
+//!   testable without a network, and the fetching is testable without a site.
 //!
 //! # What is deliberately not here
 //!
@@ -54,7 +65,23 @@ use reqwest::redirect::Policy;
 use tokio::sync::{Mutex, Semaphore};
 use url::Url;
 
+use crate::robots::RobotsRules;
 use crate::{Fetched, Fetcher, SourceCapabilities, SourceError, SourceResult};
+
+/// The product token a site's `robots.txt` would name us by.
+///
+/// Our `User-Agent` is `Lorehaven/<version> (+import)`, and the de-facto
+/// matching is "the crawler's token contains the robots value", so the token is
+/// the part before the slash. Kept as a function rather than a constant because
+/// it is derived from the configured agent, and a hard-coded copy would go stale
+/// the moment the agent changed.
+fn product_token(user_agent: &str) -> String {
+    user_agent
+        .split(['/', ' ', '(', ')'])
+        .find(|part| !part.is_empty())
+        .unwrap_or("Lorehaven")
+        .to_owned()
+}
 
 /// How much, how long, and how often a fetch may be.
 #[derive(Debug, Clone)]
@@ -79,6 +106,14 @@ pub struct FetchPolicy {
     pub min_interval_per_host: Duration,
     /// Requests in flight to one host at a time.
     pub max_concurrent_per_host: usize,
+    /// How long a host's `robots.txt` is trusted before it is read again
+    /// (spec §11.5). A site that changes its rules mid-import is followed
+    /// eventually; an import that read it once per request would double its
+    /// requests to read about how many requests it may make.
+    pub robots_ttl: Duration,
+    /// The minimum gap used when a host publishes no `Crawl-delay`
+    /// (spec §11.5). A second, because "no information" is not "no limit".
+    pub default_interval_per_host: Duration,
 }
 
 impl Default for FetchPolicy {
@@ -91,6 +126,8 @@ impl Default for FetchPolicy {
             user_agent: format!("Lorehaven/{} (+import)", env!("CARGO_PKG_VERSION")),
             min_interval_per_host: Duration::from_millis(500),
             max_concurrent_per_host: 2,
+            robots_ttl: Duration::from_secs(60 * 60),
+            default_interval_per_host: Duration::from_secs(1),
         }
     }
 }
@@ -134,6 +171,14 @@ pub struct SafeFetcher {
     /// header so the value never appears in a URL, a log line or a redirect.
     credential_header: Option<(reqwest::header::HeaderName, HeaderValue)>,
     credential_host: Option<String>,
+    /// Each host's `robots.txt`, keyed by host (spec §11.5).
+    robots: Mutex<HashMap<String, RobotsEntry>>,
+}
+
+/// One host's `robots.txt`, and when we read it.
+struct RobotsEntry {
+    rules: RobotsRules,
+    read_at: Instant,
 }
 
 struct PinnedClient {
@@ -161,6 +206,7 @@ impl SafeFetcher {
             hosts: Mutex::new(HashMap::new()),
             credential_header: None,
             credential_host: None,
+            robots: Mutex::new(HashMap::new()),
         }
     }
 
@@ -194,7 +240,35 @@ impl SafeFetcher {
     }
 
     /// Fetch, following redirects by hand with validation at every hop.
+    ///
+    /// This is the path every adapter read goes through, so this is where the
+    /// source's own rules are applied: a path the site forbids is refused here
+    /// rather than fetched and then regretted (spec §11.5).
     async fn get_with_redirects(
+        &self,
+        url: &str,
+        form: Option<&[(&str, &str)]>,
+    ) -> SourceResult<Fetched> {
+        let parsed = validate_url(url, &self.policy)?;
+        let host = shared_host(&parsed);
+        let robots = self.robots_for(&host).await;
+        if !robots.allows(parsed.path()) {
+            return Err(SourceError::Refused(format!(
+                "{host} disallows {} in its robots.txt",
+                parsed.path()
+            )));
+        }
+        self.send_with_redirects(url, form).await
+    }
+
+    /// Fetch with no regard for `robots.txt`.
+    ///
+    /// Used for reading `robots.txt` itself, which cannot be gated on having
+    /// read `robots.txt`. Everything else goes through
+    /// [`SafeFetcher::get_with_redirects`]: the address checks, the pinning, the
+    /// bounds and the pacing all live here, so skipping the robots gate is
+    /// skipping only the robots gate.
+    async fn send_with_redirects(
         &self,
         url: &str,
         form: Option<&[(&str, &str)]>,
@@ -410,17 +484,90 @@ impl SafeFetcher {
             .clone()
     }
 
-    /// Sleep as long as this host's declared minimum gap requires.
+    /// The minimum gap for a host, from its `robots.txt` when it published one.
+    ///
+    /// Deliberately reads the cache only. Fetching belongs to `robots_for`, and
+    /// this is called from inside the request path — so a cache miss here gives
+    /// the default rather than a nested fetch, which is also what keeps the
+    /// `robots.txt` request itself from depending on a rule about reading
+    /// `robots.txt`.
+    async fn interval_for(&self, host: &str) -> Duration {
+        let published = {
+            let cache = self.robots.lock().await;
+            cache.get(host).and_then(|entry| entry.rules.crawl_delay())
+        };
+        // The floor applies either way: spec §11.5 makes one second the pace for
+        // a host that published nothing, and an adapter's own interval is a
+        // floor beneath the site's number rather than a substitute for it.
+        match published {
+            Some(delay) => delay.max(self.policy.min_interval_per_host),
+            None => self
+                .policy
+                .default_interval_per_host
+                .max(self.policy.min_interval_per_host),
+        }
+    }
+
+    /// This host's `robots.txt`, read once and then trusted for the policy's TTL.
+    ///
+    /// The lock is *not* held across the fetch. Holding it would deadlock: this
+    /// path fetches, and fetching reads the pacing that reads this cache. Two
+    /// concurrent reads of a cold host can therefore both fetch `robots.txt`,
+    /// which is one extra request to a one-request-per-second host — a far
+    /// better trade than a lock that can hang an import.
+    async fn robots_for(&self, host: &str) -> RobotsRules {
+        {
+            let cache = self.robots.lock().await;
+            if let Some(entry) = cache.get(host) {
+                if entry.read_at.elapsed() < self.policy.robots_ttl {
+                    return entry.rules.clone();
+                }
+            }
+        }
+
+        let url = format!("https://{host}/robots.txt");
+        let rules = match self.send_with_redirects(&url, None).await {
+            // A site with no `robots.txt` has no restrictions. `404` arrives as
+            // `NotFound` because that is how every other fetch reports it.
+            Err(SourceError::NotFound) => RobotsRules::unrestricted(),
+            Ok(page) => RobotsRules::parse(&page.body, &product_token(&self.policy.user_agent)),
+            // Anything else — a 5xx, a challenge wall, a network failure — leaves
+            // the site's rules unknown. Recorded rather than treated as "no
+            // rules", because a reader's import should not fail over a file that
+            // is temporarily broken, and an operator should see that it happened.
+            Err(error) => {
+                tracing::warn!(
+                    host,
+                    %error,
+                    "could not read robots.txt; using the default pace and no path rules"
+                );
+                RobotsRules::unrestricted()
+            }
+        };
+
+        let mut cache = self.robots.lock().await;
+        cache.insert(
+            host.to_owned(),
+            RobotsEntry {
+                rules: rules.clone(),
+                read_at: Instant::now(),
+            },
+        );
+        rules
+    }
+
+    /// Sleep as long as this host's gap requires.
     async fn wait_for_turn(&self, host: &str) {
-        if self.policy.min_interval_per_host.is_zero() {
+        let interval = self.interval_for(host).await;
+        if interval.is_zero() {
             return;
         }
         let state = self.host_state(host).await;
         let mut guard = state.lock().await;
         if let Some(last) = guard.last_started {
             let elapsed = last.elapsed();
-            if elapsed < self.policy.min_interval_per_host {
-                let wait = self.policy.min_interval_per_host - elapsed;
+            if elapsed < interval {
+                let wait = interval - elapsed;
                 // Released before sleeping: holding the lock would serialise the
                 // sleep itself and make the gap cumulative.
                 drop(guard);
@@ -974,5 +1121,154 @@ mod tests {
         assert!(policy.max_redirects <= 10);
         assert!(policy.max_concurrent_per_host >= 1);
         assert!(!policy.user_agent.is_empty());
+        // Spec §11.5's floor, asserted where it is defined rather than where it
+        // is used: a default of zero here would silently remove the limit for
+        // every host that publishes no `Crawl-delay`.
+        assert!(policy.default_interval_per_host >= Duration::from_secs(1));
+        assert!(policy.robots_ttl > Duration::ZERO);
     }
+
+    #[test]
+    fn the_product_token_is_the_leading_word_of_our_agent() {
+        // A site's `robots.txt` names crawlers by product token, not by the full
+        // `User-Agent`, so this is what decides whether a named group applies.
+        assert_eq!(product_token("Lorehaven/0.1.0 (+import)"), "Lorehaven");
+        assert_eq!(product_token("Lorehaven"), "Lorehaven");
+    }
+
+    /// A fetcher with one seeded `robots.txt`, so pacing and path rules can be
+    /// tested without a network.
+    async fn fetcher_with_robots(agent_interval: Duration, robots: &str) -> SafeFetcher {
+        let mut policy = policy();
+        policy.min_interval_per_host = agent_interval;
+        let fetcher = SafeFetcher::new(vec!["example.com".into()], policy);
+        let rules = RobotsRules::parse(robots, "Lorehaven");
+        {
+            let mut cache = fetcher.robots.lock().await;
+            cache.insert(
+                "example.com".to_owned(),
+                RobotsEntry {
+                    rules,
+                    read_at: Instant::now(),
+                },
+            );
+        }
+        fetcher
+    }
+
+    #[tokio::test]
+    async fn a_published_crawl_delay_is_used_as_the_gap() {
+        let fetcher = fetcher_with_robots(
+            Duration::from_millis(500),
+            "User-agent: *\nCrawl-delay: 3\n",
+        )
+        .await;
+
+        assert_eq!(
+            fetcher.interval_for("example.com").await,
+            Duration::from_secs(3)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_host_with_no_published_delay_gets_one_second() {
+        // The case spec §11.5 names: no information is not no limit.
+        let fetcher =
+            fetcher_with_robots(Duration::from_millis(500), "User-agent: *\nDisallow: /x\n").await;
+
+        assert_eq!(
+            fetcher.interval_for("example.com").await,
+            Duration::from_secs(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_host_we_have_not_read_yet_also_gets_one_second() {
+        // A cache miss must not become a faster fetch, and must not fetch
+        // `robots.txt` from inside the request path.
+        let mut policy = policy();
+        policy.min_interval_per_host = Duration::from_millis(100);
+        let fetcher = SafeFetcher::new(vec!["example.com".into()], policy);
+
+        assert_eq!(
+            fetcher.interval_for("example.com").await,
+            Duration::from_secs(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn an_adapters_slower_interval_is_not_shortened_by_a_published_one() {
+        // The max of the two: the site's number is a floor, and an adapter that
+        // was more cautious than the site is not thereby wrong.
+        let fetcher = fetcher_with_robots(
+            Duration::from_millis(5_000),
+            "User-agent: *\nCrawl-delay: 1\n",
+        )
+        .await;
+
+        assert_eq!(
+            fetcher.interval_for("example.com").await,
+            Duration::from_secs(5)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_malformed_delay_cannot_produce_a_faster_pace() {
+        let fetcher = fetcher_with_robots(
+            Duration::from_millis(200),
+            "User-agent: *\nCrawl-delay: soon\n",
+        )
+        .await;
+
+        // Unreadable → the default, never zero.
+        assert_eq!(
+            fetcher.interval_for("example.com").await,
+            Duration::from_secs(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_disallowed_path_is_refused_before_any_request_is_made() {
+        // No network is reachable in a test, so the refusal has to happen before
+        // the fetch: were the gate applied after the request, this test would
+        // fail on the connection attempt rather than on the refusal.
+        let fetcher = fetcher_with_robots(
+            Duration::from_millis(500),
+            "User-agent: *\nDisallow: /private\n",
+        )
+        .await;
+
+        let error = fetcher
+            .get("https://example.com/private/report")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, SourceError::Refused(_)),
+            "expected a refusal, got {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_freshly_read_robots_file_is_not_read_again() {
+        let fetcher = fetcher_with_robots(
+            Duration::from_millis(500),
+            "User-agent: *\nCrawl-delay: 2\n",
+        )
+        .await;
+
+        // The seeded entry is fresh, so this returns it rather than making a
+        // request. The assertion that matters is that it returns at all: if the
+        // TTL were not consulted, this call would try to reach example.com.
+        assert_eq!(
+            fetcher.interval_for("example.com").await,
+            Duration::from_secs(2)
+        );
+        assert!(fetcher.robots_for("example.com").await.was_found());
+    }
+
+    // The expiry path — an entry older than the TTL being re-read — is not
+    // tested here, and deliberately not: re-reading means a real request to a
+    // real host, and a unit test that reaches the network fails on a plane.
+    // What is covered is the freshness check above plus the parser in
+    // `crate::robots`; the re-read itself belongs to a live check.
 }

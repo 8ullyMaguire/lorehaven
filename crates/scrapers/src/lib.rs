@@ -37,6 +37,7 @@
 //! timestamps to the moment of the fetch. See the milestone record for the rest.
 
 pub mod registry;
+pub mod robots;
 pub mod safety;
 pub mod sanitize;
 pub mod sites;

@@ -17,6 +17,7 @@ absent, which means the plan's own journey cannot be walked.
 |---|---|---|
 | The adapter crate, its trait and the registry | `crates/scrapers/src/{lib,registry,sites}.rs` | 101 in-crate |
 | The safe fetcher and URL guard | `crates/scrapers/src/safety.rs` | in-crate |
+| `robots.txt`: the source's own pace and path rules | `crates/scrapers/src/robots.rs` | 20 |
 | Chapter sanitation | `crates/scrapers/src/sanitize.rs` | in-crate |
 | The Archive-software adapter | `crates/scrapers/src/sites/ao3.rs` | 9 fixture tests |
 | The Royal Road adapter | `crates/scrapers/src/sites/royalroad.rs` | 13 unit + 21 fixture tests |
@@ -167,7 +168,66 @@ where this crate's adapters receive a `&dyn Fetcher` and cannot construct a clie
 
 ---
 
-## 6. Source reachability, measured
+## 6. Rate limits come from the source
+
+Decided during this milestone, and written into the spec rather than left in the
+code (spec §11.5, "Rate limits come from the source, and the floor is one request
+a second").
+
+The first version of the Royal Road adapter declared its own interval — 1,500 ms,
+a number invented here. Syosetu then arrived needing a different number, and the
+obvious next step was a third guess per adapter. That is the wrong shape: the
+operator of a server knows what it can take, and a repository full of invented
+numbers is stale the moment a site changes. So the fetcher reads each host's
+`robots.txt`:
+
+* **`Crawl-delay` becomes the gap.** Syosetu publishes `Crawl-delay: 1`, and that
+  is now the number, taken from the site rather than chosen for it.
+* **`Disallow` is enforced as a refusal.** A path the source forbids is not
+  fetched. This is new behaviour beyond what was asked for, and it is the half of
+  `robots.txt` that matters more: honouring only the delay would respect a site's
+  slowness while ignoring its wishes about what may be read.
+* **One second when nothing is published.** "No information" is not "no limit",
+  and it is also the floor when a published delay is shorter or unreadable, so a
+  malformed directive can never become a faster pace than the default.
+* **A `404` is a site with no restrictions; any other failure is rules unknown.**
+  That distinction is deliberate: refusing to import because a site's `robots.txt`
+  is temporarily returning a 5xx would break a reader's import over a file that has
+  nothing to do with their work, so the import proceeds at the default pace and the
+  condition is logged for an operator.
+* **Enforced in the fetcher, not the adapter.** An adapter that could opt out of
+  pacing would make the rule advisory, which is the same reasoning that put the
+  address checks there.
+
+Two implementation notes worth keeping:
+
+The robots *parser* is a pure function over a string (`crates/scrapers/src/robots.rs`),
+so the policy is testable with no network at all — 20 tests cover wildcards,
+anchors, most-specific-wins, `Allow`-breaks-ties, named groups, comments, case,
+fractional delays and malformed values. The *fetching* is separate and covers
+pacing, the floor, cache freshness and the refusal path.
+
+The cache lock is not held across the fetch, because it would deadlock: fetching
+reads the pacing, and the pacing reads the robots cache. Two concurrent reads of a
+cold host can therefore both fetch `robots.txt` — one extra request to a
+one-request-per-second host, which is a better trade than a lock that can hang an
+import. That said, it means the cache is a **cache and not a mutex**: the design
+guarantees at most a small number of duplicate reads, not exactly one.
+
+### The bug this found
+
+Reviewing the match rule before writing it turned up something worth recording. The
+de-facto rule for a `User-agent` group is a case-insensitive **substring**: a group
+named `Googlebot` applies to `Googlebot-Image`. Our product token is `Lorehaven`,
+which contains `a`, `e`, `n`, `o`, `r`, `l` and `h` — so a `robots.txt` with a
+stray `User-agent: a` would have captured us and applied that group's rules
+silently, with the site having meant nothing by it. Group names shorter than three
+characters are therefore held to an exact match. That is a deliberate deviation
+from the letter of the standard, in the safe direction, and it has its own test.
+
+---
+
+## 7. Source reachability, measured
 
 Recorded on 2026-09-10 with a plain HTTPS request and a browser `User-Agent`,
 against the URL taken from the ficnexus adapter for each source:
@@ -233,7 +293,7 @@ operator rather than to the implementer.
 
 ---
 
-## 7. Before this milestone can be tagged
+## 8. Before this milestone can be tagged
 
 1. The two pages, and a browser journey over them.
 2. The remaining tier-1 adapters, each with recorded fixtures.

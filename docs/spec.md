@@ -1225,6 +1225,18 @@ A source credential does not justify an SSRF exception. Trusted administrative i
 
 Do not implement CAPTCHA, paywall, or access-control circumvention.
 
+### Rate limits come from the source, and the floor is one request a second
+
+"Respect source rate limits" means the source's published number, not one chosen here. For every host an import reads:
+
+- Fetch that host's `robots.txt` and read it as the source's own statement of how it wants to be read. Its `Crawl-delay` sets the minimum gap between requests to that host. Adapter-declared intervals are a fallback, not an override: the operator of a server knows what it can take, and a number in this repository is a guess that goes stale.
+- Honor `Disallow` as a refusal, not a warning. A path the source forbids is not fetched, and an import that needs it reports the restriction rather than a parse failure. Matching is the de-facto standard's: `*` and trailing `$` supported, most-specific rule wins, `Allow` breaks a tie, and a group naming our product token applies ahead of the `*` group. The token is our `User-Agent`'s leading word (`Lorehaven`).
+- Use **one request per second** when no delay is published. "No information" must not be read as "no limit", and absence is not permission to go faster. One second is also the floor for a host whose published delay is shorter or unreadable, so a malformed directive can never become a faster pace.
+- Treat a `404` or `410` for `robots.txt` as a site with no restrictions. Treat any other failure to read it as rules unknown: proceed at the default pace, and record the condition against the source's health rather than refusing a reader's import over a file that is temporarily broken.
+- Read it once per host per import run, and cache it for a bounded interval when a process outlives one run.
+
+This is enforced inside the shared fetcher, for the same reason the address checks are: an adapter that could opt out of pacing would make the rule advisory. An import is resumable, so a slow import is a cost the reader can wait out; an import that hammers a volunteer-run archive is a cost somebody else pays.
+
 ## 11.6 Per-source credential vault
 
 Support source authentication only for adapters with a documented authentication method. Prefer source-issued tokens or scoped credentials. Password or session-cookie storage requires explicit consent and adapter-specific documentation.
