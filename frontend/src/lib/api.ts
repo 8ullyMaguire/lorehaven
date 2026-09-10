@@ -1089,3 +1089,78 @@ export function patchTypography(request: TypographyRequest): Promise<TypographyV
     body: JSON.stringify(request),
   });
 }
+
+// ---------------------------------------------------------------------------
+// The job queue (spec §10.1)
+// ---------------------------------------------------------------------------
+
+/** One job, as the server describes it. */
+export interface Job {
+  id: string;
+  kind: string;
+  state: string;
+  payload: string;
+  progress_permille: number;
+  checkpoint: string | null;
+  last_error: string | null;
+  attempts: number;
+  max_attempts: number;
+  available_at: string;
+  created_at: string;
+  updated_at: string;
+  version: number;
+  /** The account that asked for the job, when one did. */
+  requested_by: string | null;
+  /**
+   * Whether the server will accept a cancel. Computed server-side so the button
+   * is not offered where the answer would be a refusal.
+   */
+  cancellable: boolean;
+}
+
+/** The job envelope returned by `GET /jobs` and `GET /admin/jobs`. */
+export interface JobList {
+  items: Job[];
+  next_cursor: string | null;
+}
+
+/** The caller's own queue. */
+export function fetchJobs(cursor?: string, signal?: AbortSignal): Promise<JobList> {
+  const url = cursor ? `/jobs?cursor=${encodeURIComponent(cursor)}` : '/jobs';
+  return apiFetch<JobList>(url, { signal });
+}
+
+/** Cancel one of the caller's own jobs. */
+export function cancelJob(id: string): Promise<Job> {
+  return apiFetch<Job>(`/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+}
+
+/**
+ * Start a job from a request.
+ *
+ * Development only, and the server refuses anything but the diagnostic
+ * maintenance job: the endpoints that need a queue arrive in Milestone 6.
+ */
+export function startJob(payload: Record<string, unknown> = { task: 'probe' }): Promise<Job> {
+  return apiFetch<Job>('/jobs', {
+    method: 'POST',
+    body: JSON.stringify({ kind: 'maintenance', payload }),
+  });
+}
+
+/** Every job on the instance. Operators only; everyone else gets a 404. */
+export function fetchAllJobs(
+  options: { state?: string; cursor?: string } = {},
+  signal?: AbortSignal,
+): Promise<JobList> {
+  const query = new URLSearchParams();
+  if (options.state) query.set('state', options.state);
+  if (options.cursor) query.set('cursor', options.cursor);
+  const suffix = query.toString();
+  return apiFetch<JobList>(`/admin/jobs${suffix ? `?${suffix}` : ''}`, { signal });
+}
+
+/** Queue a fresh attempt at a job that has finished failing. Operators only. */
+export function retryJob(id: string): Promise<Job> {
+  return apiFetch<Job>(`/admin/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' });
+}

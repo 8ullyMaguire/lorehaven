@@ -3,7 +3,9 @@
   import Drawer from './lib/components/Drawer.svelte';
   import Select from './lib/components/Select.svelte';
   import Account from './routes/Account.svelte';
+  import AdminJobs from './routes/AdminJobs.svelte';
   import History from './routes/History.svelte';
+  import Jobs from './routes/Jobs.svelte';
   import Home from './routes/Home.svelte';
   import NotFound from './routes/NotFound.svelte';
   import PasswordReset from './routes/PasswordReset.svelte';
@@ -219,6 +221,10 @@
     <Reader workId={route.params?.workId ?? ''} chapterId={route.params?.chapterId ?? ''} />
   {:else if route.id === 'history'}
     <History />
+  {:else if route.id === 'jobs'}
+    <Jobs />
+  {:else if route.id === 'admin-jobs'}
+    <AdminJobs />
   {:else if route.id === 'planned' && route.planned}
     <Planned route={route.planned} />
   {:else}
@@ -250,6 +256,12 @@
       <a href="/library/history" onclick={(event) => onLinkClick(event, '/library/history')}>
         Reading history
       </a>
+      <!--
+        The caller's own queue (Milestone 5). The operator's view of the whole
+        queue is deliberately not linked: it answers 404 to anyone who is not
+        the configured operator, and a link would tell them the surface exists.
+      -->
+      <a href="/jobs" onclick={(event) => onLinkClick(event, '/jobs')}>Jobs</a>
       <Button variant="secondary" size="sm" onclick={signOut}>Sign out</Button>
     {:else}
       <a href="/sign-in" onclick={(event) => onLinkClick(event, '/sign-in')}>Sign in</a>
