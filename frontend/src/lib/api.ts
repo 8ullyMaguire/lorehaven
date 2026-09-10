@@ -1164,3 +1164,232 @@ export function fetchAllJobs(
 export function retryJob(id: string): Promise<Job> {
   return apiFetch<Job>(`/admin/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' });
 }
+
+// ---------------------------------------------------------------------------
+// Imports and the library (spec §11)
+//
+// These mirror `crates/app/src/routes/imports.rs`. Two rules shape them:
+//
+//  * A preview is not a lesser fetch. It runs the same guard, the same adapter
+//    and the same planner the worker will, so what the reader confirms is what
+//    will happen.
+//  * A credential is never returned. There is no field here for a secret, so
+//    there is no way for a page to depend on one.
+// ---------------------------------------------------------------------------
+
+/** What an adapter can do, as the catalogue reports it. */
+export interface SourceCapabilities {
+  /** False for a source this build has no adapter for. */
+  known: boolean;
+  metadata?: boolean;
+  chapters?: boolean;
+  /** Whether a single chapter can be re-read without the whole work. */
+  per_chapter_fetch?: boolean;
+  bibliography?: boolean;
+  incremental?: boolean;
+  /** `none`, `token`, `password` or `session_cookie`. */
+  authentication?: string;
+}
+
+/** One source, as `GET /imports/sources` describes it. */
+export interface ImportSource {
+  key: string;
+  display_name: string;
+  adapter_version: string;
+  enabled: boolean;
+  disabled_reason: string | null;
+  /** `ok`, `degraded`, `unavailable`, `paused` or `unknown`. */
+  health: string;
+  last_checked_at: string | null;
+  capabilities: SourceCapabilities;
+}
+
+/** What a preview decided the import would do. */
+export interface PlanView {
+  /** `create`, `update` or `no_change`. */
+  plan: string;
+  added: number;
+  removed: number;
+  reordered: number;
+  retitled: number;
+  changes: unknown[];
+}
+
+/** One chapter as a preview lists it: identity, and no text. */
+export interface PreviewChapter {
+  ordinal: number;
+  source_chapter_key: string;
+  title: string;
+}
+
+/** The answer to a preview: what was read, and what confirming would do. */
+export interface PreviewView {
+  source_key: string;
+  source_work_key: string;
+  source_url: string;
+  title: string;
+  author_text: string;
+  author_url: string | null;
+  summary: string;
+  language: string | null;
+  word_count: number | null;
+  status: string;
+  chapter_count: number;
+  chapters: PreviewChapter[];
+  plan: PlanView;
+  is_new: boolean;
+  /** An apparent copy already held under another source. A warning, not a refusal. */
+  duplicate_warning: string | null;
+}
+
+/** What starting an import answered with. */
+export interface ImportStarted {
+  import_id: string;
+  job_id: string;
+  source_key: string;
+  destination: string;
+  dry_run: boolean;
+  state: string;
+  created_at: string;
+}
+
+/** One import, as a list or a detail view describes it. */
+export interface ImportJobView {
+  id: string;
+  source_key: string;
+  source_url: string;
+  destination: string;
+  state: string;
+  dry_run: boolean;
+  library_item_id: string | null;
+  report: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+  cancellable: boolean;
+}
+
+/** One stored chapter of an import, as the detail view lists it. */
+export interface ImportChapterView {
+  ordinal: number;
+  source_chapter_key: string;
+  title: string;
+  state: string;
+  checksum: string | null;
+  note: string | null;
+}
+
+/** An import plus its chapters. */
+export interface ImportDetail extends ImportJobView {
+  chapters: ImportChapterView[];
+}
+
+/** An imported work in the reader's library, with its provenance. */
+export interface LibraryItem {
+  id: string;
+  source_key: string;
+  source_work_key: string;
+  source_url: string;
+  title: string;
+  author_text: string;
+  author_url: string | null;
+  summary: string;
+  language: string | null;
+  word_count: number | null;
+  status: string;
+  source_updated_at: string | null;
+  last_synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** An envelope for the import and library listings. */
+export interface ImportList<T> {
+  items: T[];
+  next_cursor: string | null;
+}
+
+/** The sources this instance can import from, and what each one can do. */
+export function fetchImportSources(signal?: AbortSignal): Promise<{ items: ImportSource[] }> {
+  return apiFetch<{ items: ImportSource[] }>('/imports/sources', { signal });
+}
+
+/**
+ * Ask what an import would do, without doing any of it.
+ *
+ * A preview writes nothing. That is what makes the confirmation screen honest
+ * rather than decorative, and it is why this is a `POST`: the URL is data, and
+ * a URL in a query string ends up in access logs.
+ */
+export function previewImport(url: string, pseudId?: string): Promise<PreviewView> {
+  return apiFetch<PreviewView>('/imports/preview', {
+    method: 'POST',
+    body: JSON.stringify(pseudId ? { url, pseud_id: pseudId } : { url }),
+    // Longer than the default: a preview waits on a foreign site, and the
+    // server's own clock for one is 20 seconds.
+    timeoutMs: 30_000,
+  });
+}
+
+/**
+ * Start an import.
+ *
+ * `confirmed_plan` is the plan the reader was shown. The server re-derives it
+ * and refuses the import if it has changed, so a confirmation cannot be
+ * applied to something other than what it described.
+ */
+export function startImport(request: {
+  url: string;
+  destination?: string;
+  dry_run?: boolean;
+  confirmed_plan?: string;
+  pseud_id?: string;
+}): Promise<ImportStarted> {
+  return apiFetch<ImportStarted>('/imports', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+/** The caller's imports, newest first. */
+export function fetchImports(
+  options: { state?: string; cursor?: string } = {},
+  signal?: AbortSignal,
+): Promise<ImportList<ImportJobView>> {
+  const query = new URLSearchParams();
+  if (options.state) query.set('state', options.state);
+  if (options.cursor) query.set('cursor', options.cursor);
+  const suffix = query.toString();
+  return apiFetch<ImportList<ImportJobView>>(`/imports${suffix ? `?${suffix}` : ''}`, { signal });
+}
+
+/** One import, with the state of each of its chapters. */
+export function fetchImport(id: string, signal?: AbortSignal): Promise<ImportDetail> {
+  return apiFetch<ImportDetail>(`/imports/${encodeURIComponent(id)}`, { signal });
+}
+
+/** Stop an import. Cancelling a finished one is not an error. */
+export function cancelImport(id: string): Promise<{ import_id: string; state: string }> {
+  return apiFetch<{ import_id: string; state: string }>(
+    `/imports/${encodeURIComponent(id)}/cancel`,
+    { method: 'POST' },
+  );
+}
+
+/** Queue another attempt at the chapters that failed, and only those. */
+export function retryFailedChapters(
+  id: string,
+): Promise<{ import_id: string; job_id: string; state: string; failed_chapters: number }> {
+  return apiFetch<{ import_id: string; job_id: string; state: string; failed_chapters: number }>(
+    `/imports/${encodeURIComponent(id)}/retry-failed-chapters`,
+    { method: 'POST' },
+  );
+}
+
+/** Imported works held by the caller, with the source each came from. */
+export function fetchLibraryItems(
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<ImportList<LibraryItem>> {
+  const suffix = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+  return apiFetch<ImportList<LibraryItem>>(`/library/items${suffix}`, { signal });
+}

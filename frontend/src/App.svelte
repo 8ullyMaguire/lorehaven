@@ -5,6 +5,8 @@
   import Account from './routes/Account.svelte';
   import AdminJobs from './routes/AdminJobs.svelte';
   import History from './routes/History.svelte';
+  import Import from './routes/Import.svelte';
+  import Library from './routes/Library.svelte';
   import Jobs from './routes/Jobs.svelte';
   import Home from './routes/Home.svelte';
   import NotFound from './routes/NotFound.svelte';
@@ -34,6 +36,7 @@
     { href: '/discover', label: 'Discover', primary: true },
     { href: '/search', label: 'Search', primary: true },
     { href: '/library', label: 'Library', primary: true },
+    { href: '/import', label: 'Import', primary: true },
     { href: '/write', label: 'Write', primary: true },
     { href: '/community', label: 'Community', primary: false },
     { href: '/notifications', label: 'Notifications', primary: false },
@@ -221,6 +224,10 @@
     <Reader workId={route.params?.workId ?? ''} chapterId={route.params?.chapterId ?? ''} />
   {:else if route.id === 'history'}
     <History />
+  {:else if route.id === 'import'}
+    <Import />
+  {:else if route.id === 'library'}
+    <Library />
   {:else if route.id === 'jobs'}
     <Jobs />
   {:else if route.id === 'admin-jobs'}
@@ -261,6 +268,7 @@
         queue is deliberately not linked: it answers 404 to anyone who is not
         the configured operator, and a link would tell them the surface exists.
       -->
+      <a href="/import" onclick={(event) => onLinkClick(event, '/import')}>Import a work</a>
       <a href="/jobs" onclick={(event) => onLinkClick(event, '/jobs')}>Jobs</a>
       <Button variant="secondary" size="sm" onclick={signOut}>Sign out</Button>
     {:else}
