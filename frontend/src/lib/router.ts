@@ -12,7 +12,16 @@
  * (spec §1.1).
  */
 
-export type RouteId = 'home' | 'planned' | 'not-found';
+export type RouteId =
+  | 'home'
+  | 'register'
+  | 'sign-in'
+  | 'password-reset'
+  | 'account'
+  | 'pseuds'
+  | 'pseud-profile'
+  | 'planned'
+  | 'not-found';
 
 export interface PlannedRoute {
   title: string;
@@ -56,12 +65,21 @@ export const PLANNED_ROUTES: Record<string, PlannedRoute> = {
     milestone: 'Milestone 16',
     summary: 'Outbox-driven in-app, email and push delivery, with lock-screen text kept generic.',
   },
-  '/pseud': {
-    title: 'Your pseud',
-    milestone: 'Milestone 2',
-    summary:
-      'Pseud profiles, privacy settings, blocks and mutes, and the age-policy state machine.',
-  },
+};
+
+/**
+ * Fixed paths that resolve to a view.
+ *
+ * `/pseud` is the owner's own pseuds; `/pseud/<handle>` is somebody's public
+ * profile, and is matched separately below.
+ */
+const FIXED_ROUTES: Record<string, RouteId> = {
+  '/': 'home',
+  '/register': 'register',
+  '/sign-in': 'sign-in',
+  '/password-reset': 'password-reset',
+  '/account': 'account',
+  '/pseud': 'pseuds',
 };
 
 export interface RouteMatch {
@@ -70,12 +88,23 @@ export interface RouteMatch {
   path: string;
   /** Set when `id` is `planned`. */
   planned?: PlannedRoute;
+  /** Path parameters, e.g. the handle for a public profile. */
+  params?: Record<string, string>;
 }
 
 /** Map a path to a view. */
 export function matchRoute(path: string): RouteMatch {
   const normalised = path.replace(/\/+$/, '') || '/';
-  if (normalised === '/') return { id: 'home', path: normalised };
+
+  const fixed = FIXED_ROUTES[normalised];
+  if (fixed) return { id: fixed, path: normalised };
+
+  // `/pseud/<handle>`: a public profile. The handle is decoded because it
+  // arrives percent-encoded and the server compares it to the stored handle.
+  if (normalised.startsWith('/pseud/')) {
+    const handle = decodeURIComponent(normalised.slice('/pseud/'.length));
+    if (handle) return { id: 'pseud-profile', path: normalised, params: { handle } };
+  }
 
   const planned = PLANNED_ROUTES[normalised];
   if (planned) return { id: 'planned', path: normalised, planned };
@@ -99,4 +128,16 @@ export function isPlainLeftClick(event: MouseEvent): boolean {
 export function navigate(to: string, history: History = window.history): void {
   history.pushState({}, '', to);
   window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
+/**
+ * Handle a click on an in-app link.
+ *
+ * Modified clicks (new tab, new window, download) are left to the browser: only
+ * a plain left click becomes a client-side navigation.
+ */
+export function handleLinkClick(event: MouseEvent, href: string): void {
+  if (!isPlainLeftClick(event)) return;
+  event.preventDefault();
+  navigate(href);
 }

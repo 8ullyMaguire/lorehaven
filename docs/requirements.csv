@@ -12,22 +12,23 @@ M0-10,platform,Production startup rejects unsafe development configuration,M0,im
 M0-11,platform,Continuous integration,M0,implemented-not-executed,.github/workflows/ci.yml,Workflow is written; no runner has executed it
 M1-01,design,Design tokens implement the Reading Room theme,M1,implemented-locally-tested,frontend/src/styles/tokens.css + docs/design/THEME.md,
 M1-02,design,Three polished presets plus system preference,M1,implemented-locally-tested,frontend/src/lib/theme.test.ts,
-M1-03,design,Reusable component primitives exist,M1,partially-implemented,frontend/src/lib/components/,15 of the listed components exist; combobox and work-card variants remain
+M1-03,design,Reusable component primitives exist,M1,partially-implemented,frontend/src/lib/components/,18 of the listed components exist; combobox and work-card variants remain
 M1-04,design,Controls work with a keyboard and show visible focus,M1,implemented-locally-tested,frontend/src/lib/components/Dialog.test.ts and component CSS,:focus-visible rule in app.css
 M1-05,design,Dialog traps focus and restores it on close,M1,implemented-locally-tested,frontend/src/lib/components/Dialog.test.ts,
 M1-06,design,Layout works at 320 CSS pixels,M1,implemented-not-executed,--,Responsive rules exist (48rem breakpoint) but no device-width measurement has been taken
 M1-07,design,Reduced-motion preference is respected,M1,implemented-locally-tested,frontend/src/app.css,+ component-level overrides
 M1-08,design,Navigation: desktop and mobile shells,M1,implemented-locally-tested,browser check,/discover /search /library /write /community /notifications /pseud
-M2-01,identity,Registration and login,M2,implemented-locally-tested,crates/app/tests/milestone_2.rs,API only; no page yet
+M2-01,identity,Registration and login,M2,implemented-locally-tested,crates/app/tests/milestone_2.rs + frontend/src/routes/Register.test.ts,API and pages; driven through a real browser
 M2-02,identity,Opaque server-managed sessions in secure cookies,M2,implemented-locally-tested,crates/app/src/auth.rs + crates/db/src/sessions.rs,Tokens stored only as SHA-256 hashes; cookie flags asserted in tests
-M2-03,identity,CSRF protection for cookie-authenticated writes,M2,implemented-locally-tested,crates/app/tests/milestone_2.rs,Double-submit against a session-stored hash; GET is exempt
-M2-04,identity,Pseud creation switching and isolation,M2,implemented-locally-tested,crates/app/tests/milestone_2.rs,API only; no page yet
-M2-05,identity,Privacy settings stored from onboarding,M2,implemented-locally-tested,crates/app/src/routes/settings.rs,Defaults written at registration and readable through the settings API
+M2-03,identity,CSRF protection for cookie-authenticated writes,M2,implemented-locally-tested,crates/app/tests/milestone_2.rs,Double-submit against a session-stored hash; GET is exempt; observed as 403 against the running server
+M2-04,identity,Pseud creation switching and isolation,M2,implemented-locally-tested,crates/app/tests/milestone_2.rs + frontend/src/routes/Pseuds.svelte,Create edit activate and switch all have pages; a hidden pseud is a 404 to the outside
+M2-05,identity,Privacy settings stored from onboarding,M2,implemented-locally-tested,crates/app/src/routes/settings.rs + frontend/src/lib/components/PrivacySettings.svelte,Defaults written at registration; the form renders the server's own key schema
 M2-06,identity,Block and mute primitives,M2,unsupported,--,Tables exist only
 M2-07,identity,Age-policy state machine,M2,implemented-locally-tested,crates/domain/src/policy.rs,
 M2-08,identity,One shared content-eligibility service,M2,implemented-locally-tested,crates/domain/src/policy.rs,No caller uses it yet because no content endpoints exist
 M2-09,identity,Rate limiting keyed by address and account,M2,implemented-locally-tested,crates/app/src/limiter.rs + crates/app/tests/milestone_2.rs,Per-route-class token buckets; fails closed when a route declares no class
-M2-10,identity,Password reset with single-use tokens,M2,implemented-locally-tested,crates/app/tests/milestone_2.rs,No email transport; the token is returned in the response outside production and only logged inside it
+M2-10,identity,Password reset with single-use tokens,M2,implemented-locally-tested,crates/app/tests/milestone_2.rs + frontend/src/routes/PasswordReset.test.ts,No email transport; the token is returned in the response outside production and only logged inside it
+M2-11,identity,Reading preferences with a policy ceiling,M2,implemented-locally-tested,frontend/src/lib/components/ContentPreferences.svelte + crates/app/tests/milestone_2.rs,The interface reports the ceiling and the effective rating rather than letting a preference look as though it took effect
 M3-01,writing,Drafts chapters publishing and revisions,M3,unsupported,--,
 M3-02,writing,Optimistic concurrency with REVISION_CONFLICT,M3,partially-implemented,crates/domain/src/error.rs,Error and status contract implemented and tested; no resource enforces it yet
 M3-03,writing,Autosave with local recovery,M3,unsupported,--,

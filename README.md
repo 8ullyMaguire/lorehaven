@@ -10,8 +10,9 @@ all live in this repository.
 
 ## Status
 
-**Milestone 0 (running application) and Milestone 1 (design system and
-navigation) are complete. Milestones 2–18 are not implemented.**
+**Milestones 0 (running application), 1 (design system and navigation) and 2
+(accounts, pseuds, privacy, age policy) are complete. Milestones 3–18 are not
+implemented.**
 
 That is the honest summary; `docs/requirements.csv` lists every requirement with
 a status, and `docs/verification.md` records the evidence behind each claim.
@@ -19,8 +20,8 @@ a status, and `docs/verification.md` records the evidence behind each claim.
 | Milestone | Area | State |
 |---|---|---|
 | 0 | Repository, tooling, running application | Done, tested |
-| 1 | Design system and navigation | Done, tested |
-| 2 | Accounts, pseuds, privacy, age policy | Schema and policy exist; no endpoints |
+| 1 | Design system and navigation | Done, tested, with two gaps listed in the verification log |
+| 2 | Accounts, pseuds, privacy, age policy | Done: API and pages, tested, and driven in a browser |
 | 3–18 | Writing, reading, jobs, imports, offline, library, search, discovery, community, events, governance, economy, extensions, integrations, operations | Not implemented |
 
 No screen in this repository displays mock data. Pages that exist show real
