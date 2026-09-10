@@ -18,6 +18,17 @@
     hint,
     error,
     required = false,
+    /*
+     * `value` is bindable, and writing to it is what makes `bind:value` work.
+     *
+     * Without `$bindable()` the compiler accepts the binding and the runtime
+     * quietly drops it: the input looks right, keeps its own text, and the
+     * parent never hears about a keystroke. That failure is invisible in a
+     * screenshot and shows up as "the form submits empty", so it is worth the
+     * explicit declaration and the test next to this file.
+     */
+    value = $bindable(''),
+    oninput,
     ...rest
   }: Props = $props();
 
@@ -36,6 +47,11 @@
 
   <input
     {id}
+    {value}
+    oninput={(event) => {
+      value = event.currentTarget.value;
+      oninput?.(event);
+    }}
     aria-invalid={error ? 'true' : undefined}
     aria-describedby={describedBy}
     aria-required={required ? 'true' : undefined}

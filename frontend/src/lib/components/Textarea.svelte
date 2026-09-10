@@ -21,6 +21,9 @@
     error,
     required = false,
     rows = 6,
+    /** Bindable; see the note in `TextField.svelte`. */
+    value = $bindable(''),
+    oninput,
     ...rest
   }: Props = $props();
 
@@ -40,6 +43,11 @@
   <textarea
     {id}
     {rows}
+    {value}
+    oninput={(event) => {
+      value = event.currentTarget.value;
+      oninput?.(event);
+    }}
     aria-invalid={error ? 'true' : undefined}
     aria-describedby={describedBy}
     aria-required={required ? 'true' : undefined}

@@ -495,3 +495,333 @@ export function patchContentSettings(patch: {
     body: JSON.stringify(patch),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Milestone 3 — works, chapters, revisions and publication
+//
+// These mirror `crates/app/src/routes/{works,collaborators}.rs`. Where the
+// server omits a field — a public work carries no owner, a public chapter
+// carries no editor document — there is no field here to depend on.
+// ---------------------------------------------------------------------------
+
+/** A work as it appears in the acting pseud's own list. */
+export interface WorkSummary {
+  id: string;
+  title: string;
+  lifecycle: string;
+  visibility: string;
+  completion: string;
+  rating: string;
+  updated_at: string;
+  published_at: string | null;
+  version: number;
+  chapter_count: number;
+  word_count: number;
+  role: string;
+}
+
+/** A chapter without its text. */
+export interface ChapterSummary {
+  id: string;
+  title: string;
+  order_key: number;
+  word_count: number;
+  revision_count: number;
+  version: number;
+  updated_at: string;
+  created_at: string;
+  has_content: boolean;
+  current_revision_id: string | null;
+}
+
+/** A contributor, as the author's own view shows them. */
+export interface Contributor {
+  pseud_id: string;
+  handle: string;
+  display_name: string;
+  role: string;
+  public_attribution: boolean;
+}
+
+/** A work as a contributor sees it: drafts, versions, blockers and all. */
+export interface AuthorWork {
+  id: string;
+  title: string;
+  summary: string;
+  language: string;
+  rating: string;
+  visibility: string;
+  lifecycle: string;
+  completion: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  published_at: string | null;
+  withdrawn_at: string | null;
+  show_public_ratings: boolean;
+  role: string;
+  chapters: ChapterSummary[];
+  contributors: Contributor[];
+  /** Why it cannot be published yet, in the interface's own language. */
+  publication_blockers: string[];
+}
+
+/** A publicly credited author. */
+export interface PublicAuthor {
+  handle: string;
+  display_name: string;
+  role: string;
+}
+
+/** A work as the public sees it. */
+export interface PublicWork {
+  id: string;
+  title: string;
+  summary: string;
+  language: string;
+  rating: string;
+  visibility: string;
+  completion: string;
+  published_at: string | null;
+  show_public_ratings: boolean;
+  authors: PublicAuthor[];
+  chapters: ChapterSummary[];
+}
+
+/**
+ * Whether a work response is the author's view.
+ *
+ * The server answers the same URL with one of two shapes, so the client must
+ * decide which it received rather than casting and hoping: `contributors` only
+ * exists on the author's view.
+ */
+export function isAuthorWork(work: AuthorWork | PublicWork): work is AuthorWork {
+  return (work as AuthorWork).contributors !== undefined;
+}
+
+/** A chapter's text, and what may be done with it. */
+export interface ChapterContent {
+  chapter: ChapterSummary;
+  document: unknown | null;
+  sanitized_html: string;
+  plain_text: string;
+  word_count: number;
+  revision_number: number | null;
+  revision_id: string | null;
+  editable: boolean;
+  previous_chapter_id: string | null;
+  next_chapter_id: string | null;
+  work: {
+    id: string;
+    title: string;
+    lifecycle: string;
+    authors: PublicAuthor[];
+  };
+}
+
+/** One entry in a chapter's revision history. */
+export interface RevisionEntry {
+  id: string;
+  revision_number: number;
+  word_count: number;
+  note: string | null;
+  created_at: string;
+  restored_from_id: string | null;
+  author_handle: string;
+  current: boolean;
+}
+
+/** An invitation, as either side sees it. */
+export interface Invitation {
+  id: string;
+  work_id: string;
+  work_title: string;
+  invited_handle: string;
+  invited_by_handle: string;
+  role: string;
+  role_label: string;
+  status: string;
+  message: string | null;
+  created_at: string;
+  version: number;
+}
+
+/** The acting pseud's own works. */
+export function fetchWorks(signal?: AbortSignal): Promise<WorkSummary[]> {
+  return apiFetch<WorkSummary[]>('/works', { signal });
+}
+
+/** Start a draft. */
+export function createWork(title: string): Promise<AuthorWork> {
+  return apiFetch<AuthorWork>('/works', { method: 'POST', body: JSON.stringify({ title }) });
+}
+
+/**
+ * Read a work.
+ *
+ * The same URL answers a contributor with their draft and a visitor with the
+ * published work, so the caller must narrow the result.
+ */
+export function fetchWork(id: string, signal?: AbortSignal): Promise<AuthorWork | PublicWork> {
+  return apiFetch<AuthorWork | PublicWork>(`/works/${encodeURIComponent(id)}`, { signal });
+}
+
+/** Change a work's metadata. */
+export function updateWork(
+  id: string,
+  patch: {
+    expected_version: number;
+    title?: string;
+    summary?: string;
+    language?: string;
+    rating?: string;
+    visibility?: string;
+    completion?: string;
+    show_public_ratings?: boolean;
+  },
+): Promise<AuthorWork> {
+  return apiFetch<AuthorWork>(`/works/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+/**
+ * Publish (or republish) a work.
+ *
+ * `idempotency_key` makes a retry safe: the same key twice publishes and
+ * notifies once.
+ */
+export function publishWork(
+  id: string,
+  expectedVersion: number,
+  idempotencyKey?: string,
+): Promise<AuthorWork> {
+  return apiFetch<AuthorWork>(`/works/${encodeURIComponent(id)}/publish`, {
+    method: 'POST',
+    body: JSON.stringify({ expected_version: expectedVersion, idempotency_key: idempotencyKey }),
+  });
+}
+
+/** Withdraw a published work. */
+export function withdrawWork(
+  id: string,
+  expectedVersion: number,
+  idempotencyKey?: string,
+): Promise<AuthorWork> {
+  return apiFetch<AuthorWork>(`/works/${encodeURIComponent(id)}/withdraw`, {
+    method: 'POST',
+    body: JSON.stringify({ expected_version: expectedVersion, idempotency_key: idempotencyKey }),
+  });
+}
+
+/** Append a chapter. */
+export function addChapter(workId: string, title: string): Promise<ChapterSummary> {
+  return apiFetch<ChapterSummary>(`/works/${encodeURIComponent(workId)}/chapters`, {
+    method: 'POST',
+    body: JSON.stringify({ title }),
+  });
+}
+
+/** Reorder the chapters of a work. The list must be the complete one. */
+export function reorderChapters(workId: string, chapters: string[]): Promise<ChapterSummary[]> {
+  return apiFetch<ChapterSummary[]>(`/works/${encodeURIComponent(workId)}/reorder-chapters`, {
+    method: 'POST',
+    body: JSON.stringify({ chapters }),
+  });
+}
+
+/**
+ * Rename a chapter and/or save its text.
+ *
+ * Saving text appends a revision, so `expected_version` is the chapter version
+ * the editor last received; a mismatch is a `REVISION_CONFLICT`.
+ */
+export function updateChapter(
+  id: string,
+  patch: { expected_version: number; title?: string; document?: unknown; note?: string },
+): Promise<ChapterSummary> {
+  return apiFetch<ChapterSummary>(`/chapters/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+/** A chapter's text. `document` is present only for a contributor. */
+export function fetchChapter(
+  workId: string,
+  chapterId: string,
+  signal?: AbortSignal,
+): Promise<ChapterContent> {
+  return apiFetch<ChapterContent>(
+    `/works/${encodeURIComponent(workId)}/chapters/${encodeURIComponent(chapterId)}`,
+    { signal },
+  );
+}
+
+/** A chapter's revision history, newest first. */
+export function fetchRevisions(
+  chapterId: string,
+  signal?: AbortSignal,
+): Promise<RevisionEntry[]> {
+  return apiFetch<RevisionEntry[]>(`/chapters/${encodeURIComponent(chapterId)}/revisions`, {
+    signal,
+  });
+}
+
+/** Bring an old revision back, as a new revision. */
+export function restoreRevision(chapterId: string, revisionId: string): Promise<ChapterSummary> {
+  return apiFetch<ChapterSummary>(
+    `/chapters/${encodeURIComponent(chapterId)}/restore-revision`,
+    { method: 'POST', body: JSON.stringify({ revision_id: revisionId }) },
+  );
+}
+
+/** Invite a pseud to contribute. */
+export function inviteContributor(
+  workId: string,
+  invite: { handle: string; role: string; message?: string },
+): Promise<Invitation> {
+  return apiFetch<Invitation>(
+    `/works/${encodeURIComponent(workId)}/contributors/invitations`,
+    { method: 'POST', body: JSON.stringify(invite) },
+  );
+}
+
+/** Change a contributor's role or public credit. */
+export function updateContributor(
+  workId: string,
+  pseudId: string,
+  patch: { role?: string; public_attribution?: boolean },
+): Promise<void> {
+  return apiFetch<void>(
+    `/works/${encodeURIComponent(workId)}/contributors/${encodeURIComponent(pseudId)}`,
+    { method: 'PATCH', body: JSON.stringify(patch) },
+  );
+}
+
+/** Remove a contributor. */
+export function removeContributor(workId: string, pseudId: string): Promise<void> {
+  return apiFetch<void>(
+    `/works/${encodeURIComponent(workId)}/contributors/${encodeURIComponent(pseudId)}`,
+    { method: 'DELETE' },
+  );
+}
+
+/** Invitations waiting on the acting pseud. */
+export function fetchInvitations(signal?: AbortSignal): Promise<Invitation[]> {
+  return apiFetch<Invitation[]>('/invitations', { signal });
+}
+
+/** Accept or decline an invitation. */
+export function respondToInvitation(id: string, accept: boolean): Promise<Invitation> {
+  return apiFetch<Invitation>(
+    `/invitations/${encodeURIComponent(id)}/${accept ? 'accept' : 'decline'}`,
+    { method: 'POST', body: JSON.stringify({}) },
+  );
+}
+
+/** Revoke a pending invitation. */
+export function revokeInvitation(id: string): Promise<void> {
+  return apiFetch<void>(`/invitations/${encodeURIComponent(id)}/revoke`, { method: 'POST' });
+}

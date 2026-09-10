@@ -15,9 +15,32 @@ describe('routing', () => {
   });
 
   it('does not pretend an unknown path exists', () => {
-    const match = matchRoute('/works/6f2a9c');
+    const match = matchRoute('/nowhere/6f2a9c');
     expect(match.id).toBe('not-found');
-    expect(match.path).toBe('/works/6f2a9c');
+    expect(match.path).toBe('/nowhere/6f2a9c');
+  });
+
+  it('resolves the writing and reading paths of Milestone 3', () => {
+    expect(matchRoute('/write').id).toBe('write');
+
+    const editor = matchRoute('/write/6f2a9c-1');
+    expect(editor.id).toBe('work-editor');
+    expect(editor.params?.workId).toBe('6f2a9c-1');
+
+    const work = matchRoute('/works/6f2a9c-1');
+    expect(work.id).toBe('work-read');
+    expect(work.params?.workId).toBe('6f2a9c-1');
+
+    const chapter = matchRoute('/works/6f2a9c-1/chapters/aaa-2');
+    expect(chapter.id).toBe('chapter-read');
+    expect(chapter.params?.workId).toBe('6f2a9c-1');
+    expect(chapter.params?.chapterId).toBe('aaa-2');
+  });
+
+  it('decodes percent-encoded identifiers, because a URL is not a request', () => {
+    const match = matchRoute('/works/a%20b/chapters/c%2Fd');
+    expect(match.params?.workId).toBe('a b');
+    expect(match.params?.chapterId).toBe('c/d');
   });
 
   it('ignores trailing slashes so links and URLs agree', () => {

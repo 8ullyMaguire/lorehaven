@@ -20,6 +20,10 @@ export type RouteId =
   | 'account'
   | 'pseuds'
   | 'pseud-profile'
+  | 'write'
+  | 'work-editor'
+  | 'work-read'
+  | 'chapter-read'
   | 'planned'
   | 'not-found';
 
@@ -49,12 +53,6 @@ export const PLANNED_ROUTES: Record<string, PlannedRoute> = {
     milestone: 'Milestone 8',
     summary: 'Imported works, shelves, private tags, update checking and storage usage.',
   },
-  '/write': {
-    title: 'Write',
-    milestone: 'Milestone 3',
-    summary:
-      'Drafts, chapters, autosave with conflict detection, publishing, and revision history.',
-  },
   '/community': {
     title: 'Community',
     milestone: 'Milestone 11',
@@ -80,6 +78,7 @@ const FIXED_ROUTES: Record<string, RouteId> = {
   '/password-reset': 'password-reset',
   '/account': 'account',
   '/pseud': 'pseuds',
+  '/write': 'write',
 };
 
 export interface RouteMatch {
@@ -104,6 +103,39 @@ export function matchRoute(path: string): RouteMatch {
   if (normalised.startsWith('/pseud/')) {
     const handle = decodeURIComponent(normalised.slice('/pseud/'.length));
     if (handle) return { id: 'pseud-profile', path: normalised, params: { handle } };
+  }
+
+  /*
+   * `/works/<id>` and `/works/<id>/chapters/<chapterId>` are the reader's URLs,
+   * and the same work URL answers its author with the editing view. The router
+   * therefore resolves both to the work route and lets the page decide: which
+   * view to render depends on the server's answer, not on the path.
+   */
+  const chapterMatch = normalised.match(/^\/works\/([^/]+)\/chapters\/([^/]+)$/);
+  if (chapterMatch) {
+    return {
+      id: 'chapter-read',
+      path: normalised,
+      params: {
+        workId: decodeURIComponent(chapterMatch[1]),
+        chapterId: decodeURIComponent(chapterMatch[2]),
+      },
+    };
+  }
+
+  const workMatch = normalised.match(/^\/works\/([^/]+)$/);
+  if (workMatch) {
+    return {
+      id: 'work-read',
+      path: normalised,
+      params: { workId: decodeURIComponent(workMatch[1]) },
+    };
+  }
+
+  // `/write/<id>`: the author's editor for one work.
+  if (normalised.startsWith('/write/')) {
+    const workId = decodeURIComponent(normalised.slice('/write/'.length));
+    if (workId) return { id: 'work-editor', path: normalised, params: { workId } };
   }
 
   const planned = PLANNED_ROUTES[normalised];

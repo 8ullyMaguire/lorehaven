@@ -21,6 +21,9 @@
     options,
     hint,
     error,
+    /** Bindable; see the note in `TextField.svelte`. */
+    value = $bindable(''),
+    onchange,
     ...rest
   }: Props = $props();
 
@@ -35,6 +38,11 @@
   <label for={id}>{label}</label>
   <select
     {id}
+    {value}
+    onchange={(event) => {
+      value = event.currentTarget.value;
+      onchange?.(event);
+    }}
     aria-invalid={error ? 'true' : undefined}
     aria-describedby={describedBy}
     {...rest}
