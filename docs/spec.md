@@ -2,19 +2,40 @@
 
 This is a dependency-ordered specification for building the entire platform—not a prototype. It defines architecture, data structures, workflows, implementation milestones, and verification requirements.
 
-It incorporates compatible FicNexus features while retaining Lorehaven’s privacy, safety, governance, and operational principles.
-
-The three foundational priorities are:
-
-1. **Reliable importing and private-library management.**
-2. **Safe, low-friction writing and publishing.**
-3. **Excellent reading, downloading, and offline access.**
-
-Community, recommendations, governance, credits, and extensions build on those foundations.
-
-The administrator’s tastes remain private. They influence discovery automatically through an opt-out recommendation layer; the administrator does not have to curate lists or publicly explain personal preferences.
-
 This document specifies intended behavior. It does not claim that any feature, adapter, integration, or performance target has already been implemented or verified.
+
+---
+
+# 0. Site Premise
+
+## 0.1 In one sentence
+
+Lorehaven is a self-hosted, self-governing fanfiction platform that lets users shape their own experience through extensions, grows the body of available fiction through frictionless importing and writing, keeps authors motivated through a positivity-first feedback culture, and uses trust-level and quorum-based community governance so the administrator can focus on curating taste rather than policing behavior.
+
+## 0.2 Priority stack
+
+When two goals conflict, the higher-numbered priority yields to the lower-numbered one.
+
+1. **Fully customizable website** through installable themes, recommendation engines, widgets, writing tools, challenge variants, and reader enhancements.
+2. **Maximize available high-quality fiction** through aggressive importing, low-friction writing, effective discovery, and reader-behavior quality signals.
+3. **Maximize positive feedback and suppress destructive negativity.** Only positive or constructive criticism reaches authors. Constructive critique requires opt-in.
+4. **Grow admin-aligned fiction without becoming monothematic.** Private taste influence guided by deliberate diversity mechanisms.
+5. **Trust-level self-governance with minimal administrator involvement.** Community moderates itself under stated policy.
+6. **Quorum-based moderation and curation.** Significant decisions require multiple reviewers.
+7. **Translate everything.** Interface fully translated; content translation available on demand.
+8. **Revenue** through credits, subscriptions, and marketplace fees for resource-intensive operations.
+
+## 0.3 Foundational protections
+
+These are not priorities that yield to others. They constrain every priority above.
+
+- Private libraries, drafts, reading history, source credentials, and pseud linkage stay private.
+- Authors control their work. Readers control their data.
+- Core reading, writing, publishing, and basic community participation remain free.
+- Bounded resource use at every trust and payment level.
+- Accessibility, child safety, and harassment protection are foundational.
+- No purchased trust, purchased ranking, or purchased moderation authority.
+- Honest verification claims. Feature presence in this document is not evidence of implementation.
 
 ---
 
@@ -45,69 +66,65 @@ Maintain `docs/verification.md` with these statuses:
 - Partially implemented.
 - Unsupported.
 
-Importer support must use the same distinction. Never count an adapter skeleton as a supported source.
-
-Documentation in an older project is evidence of intended behavior, not proof that the behavior works in Lorehaven.
+Importer, extension, translation-provider, and payment-provider support use the same distinction. Never count a skeleton as a supported integration.
 
 ## 1.3 Build vertical slices
 
 Complete small end-to-end workflows before expanding them.
 
-For example:
+Priority slices:
 
-> Create draft → save chapter → publish → read → edit → read updated version.
+> Install extension → configure → use → uninstall.
 
-And:
+> Paste URL → private import → read → download → offline read.
 
-> Paste source URL → preview → import privately → read → download → read offline.
+> Publish chapter → reader appreciates → author sees positive feedback.
+
+> Report negative comment → quorum review → hide or approve.
+
+> Request translation → pay credits → review → publish.
 
 Do not build fifty backend endpoints before connecting the first frontend page.
 
-## 1.4 Use architectural decision records
+## 1.4 Architectural decision records
 
-Store decisions in:
+Store decisions in `docs/adr/`:
 
 ```text
-docs/adr/0001-stack.md
-docs/adr/0002-content-model.md
-docs/adr/0003-pseud-isolation.md
-docs/adr/0004-import-storage-and-deduplication.md
-docs/adr/0005-source-credentials.md
-docs/adr/0006-cross-source-identity.md
-docs/adr/0007-analytics-and-retention.md
-...
+0001-stack.md
+0002-content-model.md
+0003-pseud-isolation.md
+0004-extension-marketplace-architecture.md
+0005-import-storage-and-deduplication.md
+0006-source-credentials.md
+0007-cross-source-identity.md
+0008-positivity-filter-model.md
+0009-quorum-and-trust-thresholds.md
+0010-translation-pipeline.md
+0011-credit-and-billing-model.md
+0012-analytics-and-retention.md
 ```
 
-Each record contains:
+## 1.5 Features do not override foundational protections
 
-- Problem.
-- Decision.
-- Alternatives.
-- Consequences.
-- Conditions that would justify revisiting it.
+No feature—including a paid or admin-configured one—may:
 
-## 1.5 Features do not override foundational policies
+- Reveal hidden pseud linkage.
+- Bypass content eligibility checks.
+- Purchase trust, ranking, or moderation authority.
+- Disable meaningful recommendation opt-out.
+- Remove the free core.
+- Publish machine translations as human work.
+- Expose private libraries or reading history.
 
-Every added feature must preserve:
-
-- Private-library isolation.
-- Pseud compartmentalization.
-- Content eligibility enforcement.
-- Meaningful recommendation opt-out.
-- Free core reading, writing, and publishing.
-- Bounded resource use.
-- Accessible non-gamified operation.
-- Honest verification claims.
-
-No feature may introduce a hidden exception to these rules.
-
-## 1.6 Requirements are traceable
+## 1.6 Requirements traceability
 
 Maintain `docs/requirements.csv` with:
 
 ```text
 requirement_id
 description
+priority (1-8, foundational)
 milestone
 backend_owner
 frontend_surface
@@ -117,7 +134,7 @@ verification_status
 documentation_path
 ```
 
-Features described as optional integrations must still have working disabled, unavailable, misconfigured, and failed states.
+Every optional integration also has disabled, unavailable, misconfigured, and failed states.
 
 ---
 
@@ -144,35 +161,26 @@ Features described as optional integrations must still have working disabled, un
 | Service management | systemd |
 | Default storage | Local filesystem |
 | Optional billing | Stripe adapter, with billing-disabled operation |
-| Optional semantic search | Provider interface; local or external implementation |
+| Optional AI (translation, summarization) | Provider interface with pluggable adapters |
 
 Pin compatible versions and commit lockfiles.
 
 ### Why Rust
 
-Rust satisfies the native-compilation, memory-efficiency, expressive-type-system, and ARM64 requirements.
+Native compilation, memory efficiency, an expressive type system, and ARM64 support.
 
 ### Why Svelte and TypeScript
 
-This combination keeps interactive frontend code reasonably concise and works well with browser APIs. Production does not require a Node.js server.
+Concise interactive frontend code that works well with browser APIs and does not require Node.js in production.
 
 ### Why a modular monolith
 
-It simplifies:
-
-- Local development.
-- Transactions.
-- Deployment.
-- Backups.
-- Debugging.
-- Resource control.
-
-A separate worker process is an optional operating mode of the same executable, not a separate service architecture.
+Simplified local development, transactions, deployment, backups, debugging, and resource control. A separate worker process is an optional operating mode of the same executable.
 
 ## 2.2 Runtime components
 
 ```text
-Browser / Installed PWA / Authorized API Client
+Browser / Installed PWA / Authorized API Client / Bot
                        |
                      HTTPS
                        |
@@ -182,12 +190,15 @@ Browser / Installed PWA / Authorized API Client
                 ├── HTTP/API
                 ├── Embedded frontend
                 ├── Public page rendering
+                ├── Extension host (WASM)
                 ├── Job scheduler
                 ├── Import workers
                 ├── Export workers
+                ├── Translation workers
                 ├── Search indexing
+                ├── Positivity filter service
                 ├── Notification delivery
-                └── Optional extension workers
+                └── Federation workers
                        |
                SQLite or PostgreSQL
                        |
@@ -200,14 +211,12 @@ Optional integrations:
 - Browser push infrastructure.
 - Payment processor.
 - Document converters.
-- AI providers.
+- AI providers for translation, summarization, and comment classification.
 - ActivityPub servers.
 - Chat platforms.
 - Redis.
 
-Core reading, writing, publishing, and private importing must remain functional without optional cloud services.
-
-Redis is an optional transport and coordination optimization. Durable application state must not depend on Redis pub/sub delivery.
+Core reading, writing, publishing, private importing, and basic community must remain functional without optional cloud services.
 
 ## 2.3 Repository structure
 
@@ -226,9 +235,11 @@ lorehaven/
 │   ├── search/
 │   ├── discovery/
 │   ├── community/
+│   ├── positivity/
 │   ├── governance/
 │   ├── economy/
 │   ├── extensions/
+│   ├── translation/
 │   └── integrations/
 ├── frontend/
 │   ├── src/
@@ -244,38 +255,16 @@ lorehaven/
 │   ├── sqlite/
 │   └── postgres/
 ├── fixtures/
-│   ├── importers/
-│   ├── documents/
-│   ├── search/
-│   └── malicious-inputs/
 ├── scripts/
 ├── packaging/
-│   ├── systemd/
-│   └── caddy/
 └── docs/
-    ├── adr/
-    ├── tutorial/
-    ├── help/
-    ├── operator/
-    ├── api/
-    ├── verification.md
-    └── requirements.csv
 ```
-
-Do not create a crate for every small feature. These boundaries are the maximum initial decomposition; closely related modules can share a crate.
 
 ## 2.4 Distribution
 
-Use AGPL-3.0-or-later for first-party application code, with compatible dependency licensing and documented third-party notices.
+Use AGPL-3.0-or-later for first-party application code with compatible dependency licensing and documented notices. Include license notices, source-code link in the application, operator guidance for modified deployments, and a dependency inventory.
 
-Include:
-
-- License and copyright notices.
-- A source-code link in the application.
-- Operator guidance for distributing modified deployments.
-- A software bill of materials or equivalent dependency inventory.
-
-Imported fiction remains subject to its own rights and permissions. The application’s license does not license hosted or imported works.
+Imported fiction remains subject to its own rights and permissions.
 
 ---
 
@@ -283,24 +272,18 @@ Imported fiction remains subject to its own rights and permissions. The applicat
 
 ## 3.1 IDs and timestamps
 
-Use UUIDs for primary identifiers.
+Use UUIDs for primary identifiers. Store as native UUID (PostgreSQL) or consistently encoded UUID (SQLite). Public API uses UUID strings. Timestamps are UTC internally, RFC 3339 in APIs. Display in the user's locale.
 
-- PostgreSQL: native UUID columns.
-- SQLite: consistently encoded UUID text or 16-byte blobs.
-- Public API: UUID strings.
-- Timestamps: UTC internally, RFC 3339 in APIs.
-- Display times in the user’s locale.
-
-Do not expose sequential account IDs or account ownership through public URLs.
+Do not expose sequential IDs or ownership through public URLs.
 
 ## 3.2 Money, credits, and counts
 
 - Money: integer minor currency units.
 - Credits: integer units.
 - Word counts: nonnegative integers.
-- Never use floating-point values for financial balances.
+- Never use floating-point for balances.
 
-Statistical estimates and recommendation scores may use floating-point values, with documented interpretation.
+Statistical estimates, recommendation scores, and positivity classifications may use floating-point with documented interpretation.
 
 ## 3.3 API conventions
 
@@ -328,7 +311,7 @@ Errors:
 }
 ```
 
-Important error codes include:
+Important error codes:
 
 ```text
 AUTH_REQUIRED
@@ -350,48 +333,26 @@ JOB_FAILED
 CONVERTER_UNAVAILABLE
 INSUFFICIENT_CREDITS
 EXTENSION_PERMISSION_DENIED
+EXTENSION_QUOTA_EXCEEDED
+COMMENT_HELD_FOR_REVIEW
+TRANSLATION_UNAVAILABLE
+TRANSLATION_PERMISSION_REQUIRED
+QUORUM_INSUFFICIENT
 ```
 
-Use `404` rather than revealing the existence of inaccessible private objects where appropriate.
+Use `404` rather than revealing inaccessible private objects.
 
-Translate user-facing messages without changing machine-readable codes.
+Translate user-facing messages without changing machine codes.
 
 ## 3.4 Concurrency
 
-Every editable resource gets a monotonically increasing `version`.
-
-Updates include:
-
-```json
-{
-  "expected_version": 12,
-  "changes": {}
-}
-```
-
-Return `409 REVISION_CONFLICT` if the version differs.
-
-Never silently overwrite another device’s or coauthor’s work.
+Every editable resource has a monotonically increasing `version`. Updates include `expected_version`. Version mismatch returns `409 REVISION_CONFLICT`.
 
 ## 3.5 Authentication
 
-Use opaque server-managed sessions in secure cookies.
-
-Cookie settings:
-
-- `HttpOnly`.
-- `Secure` in production.
-- Appropriate `SameSite`.
-- Narrow path/domain.
-- Explicit expiry and revocation.
-
-Use CSRF protection for state-changing cookie-authenticated requests.
-
-API integrations use separately issued, scoped tokens whose hashes are stored server-side.
+Use opaque server-managed sessions in secure cookies (`HttpOnly`, `Secure` in production, appropriate `SameSite`, narrow path/domain, explicit expiry and revocation). CSRF protection for state-changing cookie-authenticated requests. API integrations use separately issued, scoped tokens with hashed storage.
 
 ## 3.6 Authorization
-
-Every resource operation follows:
 
 ```text
 authenticate or establish anonymous actor
@@ -402,17 +363,7 @@ authenticate or establish anonymous actor
 → record required audit event
 ```
 
-Put authorization rules in policy functions, not scattered frontend checks.
-
-```rust
-fn can_edit_work(
-    actor: &Actor,
-    work: &Work,
-    contributors: &[Contributor],
-) -> Decision;
-```
-
-Frontend visibility is convenience, not security.
+Policy lives in policy functions, not scattered frontend checks. Frontend visibility is convenience, not security.
 
 ## 3.7 Privacy classifications
 
@@ -428,60 +379,23 @@ Classify data and endpoints as:
 - Aggregate-public.
 - Aggregate-internal.
 
-Unlisted content is not private or encrypted.
+Cache keys, search indexes, analytics, notifications, and background jobs preserve these classifications.
 
-Cache keys, search indexes, analytics, notifications, and background jobs must preserve these classifications.
+## 3.8 Rate limiting
 
-## 3.8 Rate limiting and abuse controls
-
-Use layered limits rather than one global IP bucket:
-
-- Account or API token.
-- Anonymous first-party client identifier, where appropriate.
-- IP/network ceiling.
-- Endpoint/resource class.
-- Source domain.
-- Concurrent job count.
-- Expensive operation budget.
-
-An anonymous client identifier is untrusted and resettable. It must not permit bypassing aggregate network limits.
-
-Avoid punishing an entire campus or household for one client where possible. Do not claim that `(ip, client_id)` alone solves abuse.
-
-Trust forwarded IP headers only from configured reverse proxies.
+Layered limits: account or API token, anonymous first-party client identifier, IP/network ceiling, endpoint/resource class, source domain, concurrent job count, expensive-operation budget. An anonymous client identifier is untrusted and does not bypass network ceilings. Trust forwarded IP headers only from configured proxies.
 
 ---
 
 # 4. Database Plan
 
-Use database-specific migrations and repository implementations where SQL differs. Do not assume SQLite and PostgreSQL are interchangeable.
-
-Run integration tests against both from the beginning.
+Use database-specific migrations and repository implementations where SQL differs. Run integration tests against SQLite and PostgreSQL from the beginning.
 
 ## 4.1 Shared table conventions
 
-Unless inappropriate, mutable tables contain:
+Unless inappropriate, mutable tables contain `id`, `created_at`, `updated_at`, `version`. Index foreign keys used in lookups, owner+time pairs, status+next-processing time for jobs, unique normalized handles, canonical source identifiers, composite filter keys, and search document scope+revision.
 
-```text
-id
-created_at
-updated_at
-version
-```
-
-Index:
-
-- Foreign keys used in lookups.
-- Owner plus creation/update time.
-- Status plus next-processing time for jobs.
-- Unique normalized handles.
-- Canonical source identifiers.
-- Composite relationship/filter keys.
-- Search document scope and revision.
-
-Use JSON for flexible documents and extension manifests, not as a substitute for searchable relationship data.
-
-For every migration, document deletion and retention behavior.
+Use JSON for flexible documents and extension manifests, not as a substitute for searchable relationship data. Document deletion and retention behavior per migration.
 
 ## 4.2 Identity tables
 
@@ -504,7 +418,7 @@ For every migration, document deletion and retention behavior.
 
 Only specifically authorized staff may retrieve private pseud ownership.
 
-## 4.3 Content and cross-source identity tables
+## 4.3 Content and identity tables
 
 | Table | Important fields |
 |---|---|
@@ -518,26 +432,13 @@ Only specifically authorized staff may retrieve private pseud ownership.
 | `work_relations` | source_work_id, target_work_id, relation_type |
 | `media_assets` | owner_id, storage_key, media_type, size, checksum |
 | `collaboration_invites` | work_id, invited_pseud_id, role, status |
-| `story_identities` | canonical bibliographic metadata, visibility, status |
+| `story_identities` | canonical metadata, visibility, status |
 | `story_identity_members` | identity_id, work_id/external_record_id, edition_relation |
 | `identity_merge_proposals` | proposed members, evidence, status |
 | `identity_merge_history` | previous identities, resulting identity, decision_reference |
+| `work_feedback_preferences` | work_id, accepts_critique, accepts_anonymous_thanks, custom_note |
 
-The structured editor document is the source of truth. Sanitized HTML and plain text are derived representations.
-
-A `story_identity` groups confirmed editions or cross-postings. It does not own their content or grant access to them.
-
-Do not automatically equate:
-
-- A translation and its original.
-- A rewrite and its earlier edition.
-- A sequel and its predecessor.
-- Two works sharing a title.
-- Matching author labels on different sites.
-
-These may require typed relations rather than identity merges.
-
-## 4.4 Private import and storage tables
+## 4.4 Import and storage tables
 
 | Table | Important fields |
 |---|---|
@@ -560,12 +461,7 @@ These may require typed relations rather than identity merges.
 | `content_blobs` | storage_key, checksum, size, media_type, retention_class |
 | `content_references` | blob_id, authorized_resource_type, authorized_resource_id |
 | `source_revision_cache_entries` | source_key, revision_key, security_scope, blob_id, expiry |
-
-Do not reuse public `works` ownership semantics for external copies.
-
-Public source metadata may be shared only when it is genuinely public. Credentialed or restricted-source metadata must be kept in an appropriately private record.
-
-Physical deduplication must never imply shared authorization.
+| `author_watches` | owner_pseud_id, source_key, last_seen_bibliography_revision |
 
 ## 4.5 Taxonomy tables
 
@@ -587,40 +483,36 @@ tag_merge_history
 metadata_completeness
 metadata_correction_proposals
 metadata_suggestions
+mood_tags
+work_moods
 ```
 
-Important constraints:
-
-- Alias uniqueness is scoped by type and namespace.
-- Relationship participant sets have a stable canonical signature.
-- Character attributes belong to an identified work-character assertion.
-- Relationship prominence belongs to the work’s assertion.
-- Spoiler status belongs to the assertion or displayed metadata item.
-- Merges preserve redirects and history.
-- Suggestions do not become author assertions without the appropriate approval.
+Alias uniqueness is scoped by type and namespace. Relationship participant sets have a stable canonical signature. Character attributes belong to an identified work-character assertion. Relationship prominence belongs to the work's assertion. Spoiler status belongs to the assertion. Merges preserve redirects and history. Suggestions do not become author assertions without appropriate approval.
 
 ## 4.6 Other entity groups
 
 | Module | Tables |
 |---|---|
-| Library | bookmarks, notes, shelves, shelf_entries, reading_progress, reading_events, reading_aggregates, saved_searches |
-| Reader feedback | ratings, reviews, review_revisions, work_metric_aggregates |
+| Library | bookmarks, notes, shelves, shelf_entries, reading_progress, reading_events, reading_aggregates, saved_searches, author_watches |
+| Reader feedback | ratings, reviews, review_revisions, work_metric_aggregates, quick_reactions, appreciation_notes, cheer_events |
+| Positivity | comment_classifications, feedback_holds, moderation_queue_entries, author_visible_feedback |
 | Jobs | jobs, job_attempts, job_events, outbox_events |
 | Search | search_documents, search_index_state, search_demand_aggregates |
 | Community | comments, reactions, follows, groups, memberships, boards, topics, posts, polls, poll_votes |
 | Forum depth | topic_read_states, topic_tags, topic_tag_assignments, watch_preferences, mention_events |
 | Messaging | conversations, conversation_members, messages, chat_rooms |
 | Collections | collections, collection_roles, collection_submissions, collection_entries |
-| Writing events | challenges, prompts, signups, assignments, claims, fulfillments, mentorships, sprints |
-| Governance | trust_policies, trust_history, expertise, role_assignments, reports, cases, proposals, votes, sanctions, appeals, audit_events, process_feedback |
-| Economy | wallets, ledger_transactions, ledger_entries, credit_holds, subscriptions, payment_events, bounties |
-| Extensions | packages, package_versions, manifests, installations, grants, reviews, approvals, execution_usage, revocations, entitlements |
-| Discovery | user_preferences, taste_profiles, taste_profile_versions, permitted_signals, exposure_events, aggregate_affinities, similarity_suggestions, similarity_votes, recommendation_recipes, recipe_versions |
+| Writing events | challenges, prompts, signups, assignments, claims, fulfillments, mentorships, sprints, wishlist_items |
+| Governance | trust_policies, trust_history, expertise, role_assignments, reports, cases, proposals, votes, sanctions, appeals, audit_events, process_feedback, quorum_records |
+| Economy | wallets, ledger_transactions, ledger_entries, credit_holds, subscriptions, payment_events, bounties, entitlements |
+| Extensions | packages, package_versions, manifests, installations, grants, reviews, approvals, execution_usage, revocations, extension_purchases, extension_ratings |
+| Discovery | user_preferences, taste_profiles, taste_profile_versions, permitted_signals, exposure_events, aggregate_affinities, similarity_suggestions, similarity_votes, recommendation_recipes, recipe_versions, diversity_budgets |
 | Interface | dashboard_layouts, widget_instances, user_locale_preferences |
-| Integrations | notifications, notification_preferences, push_subscriptions, feed_tokens, federation_actors, federation_deliveries, delivery_addresses, bot_links, translation_jobs, translation_reviews |
+| Integrations | notifications, notification_preferences, push_subscriptions, feed_tokens, federation_actors, federation_deliveries, delivery_addresses, bot_links |
+| Translation | translation_requests, translation_jobs, translation_reviews, translated_works, translation_permissions |
 | Operations | aggregate_site_metrics, security_events, retention_runs |
 
-Do not create every table in Milestone 0. Introduce each schema through its owning vertical slice.
+Introduce each schema through its owning vertical slice.
 
 ---
 
@@ -650,58 +542,30 @@ lorehaven seed --development
 lorehaven doctor
 ```
 
-Configuration precedence:
-
-```text
-command-line argument
-→ environment variable
-→ configuration file
-→ documented default
-```
+Configuration precedence: command-line → environment variable → configuration file → documented default.
 
 Never log secrets, full authenticated URLs, private feed tokens, or source credential material.
 
 ## Acceptance
 
-- A clean checkout builds.
+- Clean checkout builds.
 - SQLite and PostgreSQL startup both work.
-- A frontend page loads from the Rust executable.
-- `/health/live` checks process liveness.
-- `/health/ready` checks essential dependencies.
+- Frontend page loads from the Rust executable.
+- `/health/live` and `/health/ready` work.
 - Production startup rejects unsafe development configuration.
-- OpenAPI output is generated from implemented endpoints, not aspirational examples.
-
-## Tutorial
-
-Explain the browser/backend boundary, configuration, migrations, embedded assets, and API contract.
+- OpenAPI reflects implemented endpoints only.
 
 ---
 
-# 6. Milestone 1: Design System, Navigation, Localisation, and Help
+# 6. Milestone 1: Design System, Navigation, Localisation, and Extension Slots
+
+Priority 1 (customization) and priority 7 (translation) start here.
 
 ## 6.1 Reusable components
 
-Implement:
+Buttons, links, inputs, labels, selects, comboboxes, dialogs, drawers, tabs, pagination, toasts, error summaries, loading skeletons, work cards, metadata chips, identity switcher, empty-state panels, job-progress panel, source-health badge, visibility selector, permission-request panel, positivity-context banner, feedback-preferences panel, extension-slot boundaries.
 
-- Buttons and links.
-- Inputs and labels.
-- Selects and comboboxes.
-- Dialogs and drawers.
-- Tabs.
-- Pagination.
-- Toasts.
-- Error summaries.
-- Loading skeletons.
-- Work cards.
-- Metadata chips.
-- Identity switcher.
-- Empty-state panels.
-- Job-progress panel.
-- Source-health badge.
-- Visibility selector.
-- Permission-request panel.
-
-Use design tokens:
+Design tokens:
 
 ```text
 color.background
@@ -710,19 +574,14 @@ color.text
 color.muted
 color.primary
 color.danger
+color.positive
 space.*
 radius.*
 font.interface
 font.reader
 ```
 
-Visual direction:
-
-- Warm neutral surfaces.
-- Deep plum accent.
-- Restrained teal secondary accent.
-- Generous spacing.
-- Light, dark, and system modes.
+Visual direction: warm neutral surfaces, deep plum accent, restrained teal secondary accent, generous spacing, light/dark/system modes.
 
 ## 6.2 Navigation
 
@@ -740,27 +599,28 @@ Discover | Search | Library | Write | More
 
 Reader pages may use a reduced shell.
 
-## 6.3 Command palette
+## 6.3 Extension slot architecture
 
-Provide `Ctrl+K` / `Cmd+K` and a visible menu entry.
+Establish extension slots from Milestone 1 so the marketplace has stable integration points:
 
-Initial commands:
+- Dashboard widget slots.
+- Reader sidebar slots.
+- Work-page metadata slots.
+- Search-result decorator slots.
+- Writing-tool panel slots.
+- Theme override tokens.
 
-- Search works.
-- Paste URL to import.
-- Open library.
-- Resume reading.
-- Create draft.
-- Switch pseud.
-- Open saved view.
-- Open help.
-- Change appearance.
+Slots have documented data contracts, size constraints, and permission requirements. The extension host does not exist yet (Milestone 15), but slot contracts do so first-party features use the same mechanism third-party extensions will.
 
-Commands that mutate data still require their ordinary confirmation and authorization.
+## 6.4 Command palette
 
-Do not intercept editor or assistive-technology shortcuts indiscriminately.
+Provide `Ctrl+K` / `Cmd+K`.
 
-## 6.4 Interface localisation
+Initial commands: search works, paste URL to import, open library, resume reading, create draft, switch pseud, open saved view, install extension, open help, change appearance, change language.
+
+Mutating commands require ordinary confirmation. Do not intercept editor or assistive-technology shortcuts.
+
+## 6.5 Interface localisation
 
 Localise interface chrome, not just work metadata.
 
@@ -769,44 +629,26 @@ Requirements:
 - Message catalogs from the beginning.
 - Locale-aware pluralization.
 - Date, number, and currency formatting.
-- No sentence construction by concatenating translated fragments.
+- No sentence construction by concatenating fragments.
 - Language selector independent of work-language preferences.
 - Document `lang` and direction attributes.
-- Layout support for longer translations and right-to-left text.
+- Support for longer translations and right-to-left text.
 - Locale fallback without blank labels.
 
-Initial release catalogs:
+Initial catalogs: English and Spanish. Additional locales through the same contribution workflow. Do not advertise a locale as complete until reviewed.
 
-- English.
-- Spanish.
+## 6.6 Contextual help
 
-Additional locales are supported through the same contribution workflow. Do not advertise a locale as complete until its catalog and critical journeys are reviewed.
+Contextual `?` links, in-app help panel or modal, direct links to documentation, "try it" links that prefill forms, searchable help, non-JavaScript help where practical. Help and tutorial share topic identifiers. Never put credentials, private draft text, or sensitive queries into help deep-link URLs.
 
-## 6.5 Contextual help
+## 6.7 Appearance modes
 
-Provide:
-
-- Contextual `?` links.
-- In-app help panel or modal.
-- Direct links to the relevant documentation section.
-- “Try it” links that prefill a form without submitting it.
-- Searchable help.
-- Help available without JavaScript where practical.
-
-Help and tutorial material share stable topic identifiers. Do not copy divergent explanations into several places.
-
-Never put credentials, private draft text, or sensitive search queries into help deep-link URLs.
-
-## 6.6 Appearance modes
-
-Provide two first-party layout presets:
+Two first-party layout presets:
 
 - **Modern:** card-oriented discovery and contemporary navigation.
-- **Archive:** compact metadata, list-oriented browsing, restrained decoration.
+- **Archive:** compact metadata, list-oriented browsing.
 
-These are presets over shared components, not separate applications.
-
-Reader typography remains independently configurable. Neither preset may hide safety controls, attribution, or essential metadata.
+Themes and layout presets from the marketplace override these. Reader typography remains independently configurable. Neither preset may hide safety controls, attribution, or essential metadata.
 
 ## Acceptance
 
@@ -817,8 +659,8 @@ Reader typography remains independently configurable. Neither preset may hide sa
 - Accessible error announcements.
 - Critical journeys work in English and Spanish.
 - Pseudolocalisation catches clipping.
-- Appearance changes do not remove functionality.
-- Help links remain valid in CI.
+- Extension slots render placeholder content until Milestone 15.
+- Help links validated in CI.
 
 ---
 
@@ -826,9 +668,7 @@ Reader typography remains independently configurable. Neither preset may hide sa
 
 ## 7.1 Implement
 
-- Registration and login.
-- Password reset.
-- Email verification.
+- Registration, login, password reset, email verification.
 - Session listing and revocation.
 - TOTP and recovery codes.
 - Pseud creation and switching.
@@ -836,108 +676,67 @@ Reader typography remains independently configurable. Neither preset may hide sa
 - Block and mute primitives.
 - Age-policy state.
 - Scoped API tokens.
-- Per-pseud learning and reading-history controls.
+- Per-pseud learning, reading-history, and feedback-visibility controls.
 
 Use an established password-hashing implementation with reviewed parameters.
 
 ## 7.2 Pseud behavior
 
-Each pseud has separate:
+Each pseud has separate: public profile, works, follows, messages, recommendation settings, ratings and reviews, feedback preferences, public bookmarks, reading history, dashboard layout, installed extensions, source credential grants, notification preferences, and language preferences.
 
-- Public profile.
-- Works.
-- Follows.
-- Messages.
-- Recommendation settings.
-- Ratings and reviews.
-- Public bookmarks.
-- Reading history.
-- Dashboard layout.
-- Source credential grants.
-- Notification preferences.
-
-The account shares:
-
-- Credentials.
-- Security state.
-- Private wallet.
-- Trust eligibility.
+The account shares: credentials, security state, private wallet, and trust eligibility.
 
 Do not publicly reveal shared ownership.
 
-A scoped integration token should bind to an explicitly selected pseud unless it genuinely needs account-level security functions.
+A scoped integration token binds to an explicitly selected pseud unless it genuinely needs account-level functions.
 
 ## 7.3 Age implementation
 
-Use a state machine:
+State machine:
 
 ```text
-unknown
-→ declared_minor
-→ declared_adult
-→ authorization_required
-→ authorized_under_policy
-→ restricted
+unknown → declared_minor → declared_adult
+       → authorization_required → authorized_under_policy → restricted
 ```
 
-Do not treat a self-declared adult as independently verified.
-
-For a Spain-based operator:
-
-- Anonymous reading of suitable public fiction remains available.
-- Registered child participation must follow the configured legal basis and authorization policy.
-- Spain generally uses 14 as the relevant threshold for a child’s own data-processing consent; this does not settle every age-related obligation.
-- If an under-threshold authorization workflow has not been legally and operationally established, do not enable unrestricted child registration through a checkbox.
+Do not treat self-declared adult as verified. For a Spain-based operator, Spain generally uses 14 as the threshold for child data-processing consent; this does not settle all age-related obligations. Do not enable unrestricted child registration through a checkbox without a legally and operationally established workflow.
 
 Avoid collecting full birth dates unless necessary.
 
 ## 7.4 Shared content eligibility
 
-Implement:
-
 ```text
 can_access_content(actor, content_rating, visibility, policy)
 ```
 
-Use it for:
+Use for reader, search, downloads, feeds, notifications, recommendations, API, extensions, bots, translations, and public statistics.
 
-- Reader.
-- Search and snippets.
-- Downloads and email delivery.
-- Feeds.
-- Notifications.
-- Recommendations.
-- Direct API access.
-- Extensions.
-- Chat bots.
-- Public statistics where content categories could expose restricted material.
-
-## 7.5 Core API
-
-All paths below use `/api/v1`.
+## 7.5 API
 
 ```text
-POST   /auth/register
-POST   /auth/login
-POST   /auth/logout
-POST   /auth/password-reset
-POST   /auth/password-reset/complete
-GET    /auth/sessions
-DELETE /auth/sessions/:id
+POST   /api/v1/auth/register
+POST   /api/v1/auth/login
+POST   /api/v1/auth/logout
+POST   /api/v1/auth/password-reset
+POST   /api/v1/auth/password-reset/complete
+GET    /api/v1/auth/sessions
+DELETE /api/v1/auth/sessions/:id
 
-GET    /pseuds
-POST   /pseuds
-PATCH  /pseuds/:id
-POST   /pseuds/:id/activate
+GET    /api/v1/pseuds
+POST   /api/v1/pseuds
+PATCH  /api/v1/pseuds/:id
+POST   /api/v1/pseuds/:id/activate
 
-GET    /settings/privacy
-PATCH  /settings/privacy
-GET    /settings/content
-PATCH  /settings/content
+GET    /api/v1/settings/privacy
+PATCH  /api/v1/settings/privacy
+GET    /api/v1/settings/content
+PATCH  /api/v1/settings/content
+GET    /api/v1/settings/feedback
+PATCH  /api/v1/settings/feedback
 
-GET    /api-tokens
-POST   /api-tokens
-DELETE /api-tokens/:id
+GET    /api/v1/api-tokens
+POST   /api/v1/api-tokens
+DELETE /api/v1/api-tokens/:id
 ```
 
 ## Acceptance
@@ -946,99 +745,77 @@ DELETE /api-tokens/:id
 - No hidden linkage in public responses.
 - Revocation takes effect.
 - Frontend bypass cannot retrieve restricted content.
-- Sensitive data is absent from logs.
-- Minor-protective messaging defaults are persisted.
-- Private history and source credentials remain compartmentalized after pseud switching.
+- Sensitive data absent from logs.
+- Minor-protective messaging defaults persisted.
+- Private history, source credentials, and extension grants remain compartmentalized after pseud switching.
 
 ---
 
-# 8. Milestone 3: Drafts, Chapters, Publishing, and Revisions
+# 8. Milestone 3: Drafts, Chapters, Publishing, and Feedback Preferences
 
 ## 8.1 First vertical slice
 
-1. Create draft.
-2. Enter title.
-3. Add chapter.
-4. Save.
-5. Preview.
-6. Publish.
-7. Read publicly.
-8. Edit and republish.
+Create draft → add chapter → save → preview → publish → read publicly → edit → republish.
 
 ## 8.2 Work states
 
 ```text
-Lifecycle:
-draft | scheduled | published | withdrawn | deleted
-
-Visibility:
-public | unlisted | restricted
-
-Completion:
-in_progress | complete | hiatus | abandoned
+Lifecycle: draft | scheduled | published | withdrawn | deleted
+Visibility: public | unlisted | restricted
+Completion: in_progress | complete | hiatus | abandoned
 ```
 
-Explain that unlisted content can be accessed by anyone with the URL who satisfies applicable restrictions.
+Explain that unlisted content is accessible to anyone with the URL under applicable restrictions.
 
 ## 8.3 Editor
 
-Restricted Tiptap schema:
+Restricted Tiptap schema: paragraphs, headings, emphasis, strong, lists, blockquotes, links, scene breaks.
 
-- Paragraphs.
-- Headings.
-- Emphasis.
-- Strong text.
-- Lists.
-- Blockquotes.
-- Links.
-- Scene breaks.
+No arbitrary HTML, scripts, iframes, or embedded objects initially.
 
-No arbitrary HTML, scripts, iframes, or custom embedded objects initially.
+Autosave: debounce → local recovery save → versioned server update → visible saved/saving/offline/conflict state. Preserve local text when server rejects.
 
-Autosave:
+Imported DOCX, HTML, EPUB, and Markdown convert into the same restricted schema before becoming editable drafts.
 
-```text
-debounce
-→ local recovery save
-→ versioned server update
-→ visible saved/saving/offline/conflict state
-```
+## 8.4 Feedback preferences
 
-Preserve local text when the server rejects a save.
+Per work, per pseud, and per account default:
 
-Imported DOCX, HTML, EPUB, and Markdown content must be converted into the same restricted schema before becoming an editable draft.
+- Accept public comments (yes/no/moderated).
+- Accept anonymous appreciation notes.
+- Accept quick reactions.
+- Accept private thank-you messages.
+- Accept constructive critique (opt-in, default off).
+- Custom author note shown to readers before commenting.
 
-## 8.4 Publishing transaction
+These preferences drive the positivity filter (Milestone 12).
 
-In one transaction:
+## 8.5 Publishing transaction
 
-- Validate required metadata.
-- Verify contributor permissions.
-- Update publication state.
-- Record publication event.
-- Insert outbox events for notifications and indexing.
+In one transaction: validate metadata, verify contributor permissions, update publication state, record publication event, insert outbox events for notifications and indexing.
 
-Do not send email inside the transaction.
+Do not send email inside the transaction. Scheduled publication uses the same idempotent service.
 
-Scheduled publication uses the same idempotent publication service.
-
-## 8.5 API
+## 8.6 API
 
 ```text
-POST   /works
-GET    /works/:id
-PATCH  /works/:id
-POST   /works/:id/publish
-POST   /works/:id/withdraw
+POST   /api/v1/works
+GET    /api/v1/works/:id
+PATCH  /api/v1/works/:id
+POST   /api/v1/works/:id/publish
+POST   /api/v1/works/:id/withdraw
 
-POST   /works/:id/chapters
-PATCH  /chapters/:id
-POST   /works/:id/reorder-chapters
-GET    /chapters/:id/revisions
-POST   /chapters/:id/restore-revision
+POST   /api/v1/works/:id/chapters
+PATCH  /api/v1/chapters/:id
+POST   /api/v1/works/:id/reorder-chapters
+GET    /api/v1/chapters/:id/revisions
+POST   /api/v1/chapters/:id/restore-revision
 
-POST   /works/:id/contributors/invitations
-PATCH  /works/:id/contributors/:pseudId
+GET    /api/v1/works/:id/feedback-preferences
+PATCH  /api/v1/works/:id/feedback-preferences
+
+POST   /api/v1/works/:id/contributors/invitations
+PATCH  /api/v1/works/:id/contributors/:pseudId
 ```
 
 ## Acceptance
@@ -1049,11 +826,11 @@ PATCH  /works/:id/contributors/:pseudId
 - Repeated publication with one idempotency key does not duplicate notifications.
 - Pseud switching does not change ownership.
 - Invitations identify the exposed pseud.
-- Withdrawn or newly restricted content disappears from public indexes and caches.
+- Feedback preferences apply before comments are stored.
 
 ---
 
-# 9. Milestone 4: Reader, Ratings, History, and Work Pages
+# 9. Milestone 4: Reader, Ratings, Reactions, and History
 
 ## 9.1 Routes
 
@@ -1066,55 +843,43 @@ PATCH  /works/:id/contributors/:pseudId
 /series/:id
 ```
 
-Private imported content uses authenticated library routes rather than becoming public through these routes.
+Private imported content uses authenticated library routes.
 
 ## 9.2 Reader features
 
-- Chapter navigation.
-- Whole-work mode.
-- Table of contents.
-- Typography settings.
-- Light, dark, and sepia reader themes.
-- Width and line-height controls.
-- Distraction-free mode.
-- Spoiler reveal.
-- Progress.
-- Private notes.
-- Search within the current work.
-- Reading-time estimates.
-- End-of-work actions.
+Chapter navigation, whole-work mode, table of contents, typography settings, light/dark/sepia themes, width/line-height controls, distraction-free mode, spoiler reveal, progress, private notes, search within current work, reading-time estimates, end-of-work actions.
 
 Long works must not require rendering every paragraph at once.
 
 ## 9.3 Progress
 
-Store:
+Store `work_or_library_item_id`, `chapter_id`, `content_revision`, `paragraph_anchor`, `position_fraction`, `updated_at`, `device_id`.
 
-```text
-work_or_library_item_id
-chapter_id
-content_revision
-paragraph_anchor
-position_fraction
-updated_at
-device_id
-```
+Use stable paragraph anchors where possible with approximate fallback after content changes. When devices disagree, present a choice.
 
-Use stable paragraph anchors where possible, with approximate fallback after content changes.
+## 9.4 Quick reactions
 
-When devices disagree, present a choice rather than always taking the furthest position.
+One-click labeled reactions on chapters and works:
 
-## 9.4 Ratings and reviews
+- "made me cry"
+- "the banter!"
+- "I need more of this"
+- "this scene!"
+- "comforting"
+- "worldbuilding!"
+- Additional labels defined by the extension marketplace over time.
 
-Support:
+Reactions:
 
-- Optional 1–5-star personal rating.
-- Optional written review.
-- Spoiler marking.
-- Edit and delete.
-- Independent rating/review visibility.
-- Reporting and blocking.
-- Inclusion in personal discovery only under the relevant learning setting.
+- Do not require typing.
+- Are subject to the author's feedback preferences.
+- Aggregate publicly if the author permits.
+- Count once per reader per target.
+- Bypass the positivity filter (they are pre-classified positive).
+
+## 9.5 Ratings and reviews
+
+Support optional 1–5-star personal rating, optional written review, spoiler marking, edit and delete, independent rating/review visibility, reporting and blocking, inclusion in personal discovery only under the relevant learning setting.
 
 Defaults:
 
@@ -1123,110 +888,63 @@ Defaults:
 - Public review identity is the active pseud.
 - Private ratings never contribute to public averages.
 
-Public aggregate ratings:
+Public aggregate ratings include only explicitly public ratings, display count and method, use a minimum publication threshold, and are not a default ranking signal.
 
-- Include only explicitly public ratings.
-- Display the count and aggregation method.
-- Use a minimum publication threshold.
-- Are not a default ranking signal.
-- Are not applied to authors as a reputation score.
+Work owners may disable display of public rating aggregates.
 
-Work owners may disable display of public rating aggregates on their work pages. This does not erase readers’ private ratings.
+Public reviews are subject to positivity filtering (Milestone 12).
 
-Reviews are distinguished from conversational comments.
-
-## 9.5 Reading history and personal analytics
-
-Implement:
+## 9.6 Reading history and personal analytics
 
 ```text
 /library/history
 /library/reading-stats
 ```
 
-History contains:
+History contains recently opened, resumable, finished works with timestamps and removal controls.
 
-- Recently opened works.
-- Resumable works.
-- Explicitly finished works.
-- Relevant timestamps.
-- Removal controls.
+Settings separately control progress sync, detailed history retention, personal aggregate statistics, and recommendation learning. Disabling learning does not disable resume.
 
-Settings separately control:
+Personal analytics: works marked finished, chapters read, estimated words read, approximate reading time, optional personal streak.
 
-- Progress synchronization.
-- Detailed history retention.
-- Personal aggregate statistics.
-- Recommendation learning.
+Do not count opens as proof of reading. Label estimates as such. Streaks are private, opt-in, grant nothing, and produce no loss warnings.
 
-Disabling learning must not disable resume.
+## 9.7 Views and completion rates
 
-Personal analytics may include:
-
-- Works marked finished.
-- Chapters read.
-- Estimated words read.
-- Approximate reading time.
-- Optional personal reading-day streak.
-
-Do not count a chapter open as proof that every word was read. Label inferred measures as estimates and distinguish them from explicit completion.
-
-Streaks:
-
-- Are private and opt-in.
-- Grant no trust, credits, or access.
-- Produce no loss warnings or compulsory reminders.
-
-Provide pause, clear, and configurable retention controls.
-
-## 9.6 Reading-time estimates
-
-Use word count and configurable reading speed as the baseline.
-
-A dialogue-density adjustment may be added only after benchmarking and documentation. Display an approximate value or range rather than false precision.
-
-Support language-sensitive tokenization where available and document fallback behavior.
-
-## 9.7 Views and hit counts
-
-Implement clearly defined aggregate view counts.
-
-Rules:
+Aggregate view counts:
 
 - Deduplicate repeated opens within a documented window.
-- Filter known automated traffic where feasible.
+- Filter known automated traffic.
 - Do not claim perfect human uniqueness.
-- Do not publish visitor identities.
-- Avoid long-lived fingerprinting.
-- Exclude private imports from public counts.
-- Make public work-level count display configurable by the author.
+- Exclude private imports.
+- Author-configurable public display.
 
-Metric collection and public display are separate decisions.
+Completion rate:
 
-## 9.8 End-of-work page
+- Track fraction of readers who start a work and mark it finished.
+- Author-configurable public display.
+- Used as a quality signal in discovery.
+- Minimum sample threshold before display.
+- Never used to penalize experimental or unpublished-length works.
 
-Show:
+## 9.8 Reading-time estimates
 
-- Appreciation.
-- Bookmark.
-- Rating or review.
-- Comment.
-- Mark finished.
-- Next in series.
-- Another work by the author.
-- Configurable next reads.
-- Optional writing opportunity.
+Baseline: word count and configurable reading speed. Optional dialogue-density adjustment after benchmarking. Display approximate range rather than false precision. Language-sensitive tokenization where available.
+
+## 9.9 End-of-work page
+
+Appreciation, bookmark, rating or review, quick reactions, positive comment prompt, mark finished, next in series, another work by the author, configurable next reads, optional writing opportunity, "recommend to a friend" with personal note.
 
 ## Acceptance
 
 - Progress survives refresh.
 - Content updates do not crash resume.
 - Sanitized content cannot execute scripts.
-- Public eligible work pages have meaningful sharing metadata and useful non-JavaScript content.
-- Clearing history removes retained detailed events.
-- Private ratings never appear in public APIs or public averages.
+- Public eligible pages have meaningful sharing metadata and non-JavaScript content.
+- Clearing history removes retained events.
+- Private ratings never appear in public APIs or averages.
 - Repeated refreshes do not inflate views without bound.
-- Reading estimates are not presented as measured attention.
+- Completion rate calculation excludes automated traffic.
 
 ---
 
@@ -1243,78 +961,31 @@ running → failed
 queued/running → canceled
 ```
 
-Fields:
-
-```text
-kind
-owner_account_id
-owner_pseud_id
-resource_class
-priority_class
-payload
-idempotency_key
-attempt_count
-run_after
-lease_owner
-lease_expires_at
-progress
-error_code
-```
+Fields include `kind`, `owner_account_id`, `owner_pseud_id`, `resource_class`, `priority_class`, `payload`, `idempotency_key`, `attempt_count`, `run_after`, `lease_owner`, `lease_expires_at`, `progress`, `error_code`.
 
 Batch jobs contain durable child-job references and resumable enumeration cursors.
 
 ## 10.2 Worker behavior
 
-- Transactional job claims.
-- Leases and renewal.
-- Backoff for transient errors.
-- Bounded attempts.
-- Abandoned-job recovery.
-- Cancellation between safe checkpoints.
-- Idempotent handlers.
-
-Delivery is at least once.
+Transactional job claims, leases and renewal, backoff for transient errors, bounded attempts, abandoned-job recovery, cancellation between safe checkpoints, idempotent handlers. Delivery is at least once.
 
 ## 10.3 Storage
 
-Use generated or content-addressed storage keys, never user-supplied paths.
+Generated or content-addressed storage keys, never user-supplied paths. Temporary upload directory, atomic finalization, checksums, logical and physical storage accounting, quotas, reference-aware orphan cleanup, disk-pressure warnings, safe path resolution, extraction limits.
 
-Implement:
-
-- Temporary upload directory.
-- Atomic finalization.
-- Checksums.
-- Logical and physical storage accounting.
-- Quotas.
-- Reference-aware orphan cleanup.
-- Disk-pressure warnings.
-- Safe path resolution.
-- Extraction limits.
-
-Define whether quotas charge logical ownership or physical bytes. Users must not infer another user’s holdings from quota discounts.
+Define whether quotas charge logical ownership or physical bytes. Users must not infer another user's holdings from quota discounts.
 
 ## 10.4 Revision cache and physical deduplication
-
-Adopt shared storage infrastructure, not a universal publicly searchable archive of everything imported.
 
 Separate:
 
 1. **Authorized user snapshots:** durable copies referenced by private library items.
-2. **Temporary fetch cache:** reusable bytes under a documented scope and expiry.
+2. **Temporary fetch cache:** reusable bytes under documented scope and expiry.
 3. **Approved public preservation corpus:** content explicitly authorized for public archival use.
 
-Cache keys include:
+Cache keys include source identity, source revision or validated fingerprint, adapter extraction version, and security scope.
 
-```text
-source identity
-source revision or validated fingerprint
-adapter extraction version
-security scope
-```
-
-Security scopes distinguish public cache-eligible fetches from credentialed and private imports.
-
-Requirements:
+Rules:
 
 - Credentialed fetches are private-scoped by default.
 - A checksum is not an authorization credential.
@@ -1324,27 +995,13 @@ Requirements:
 - A shared byte store does not automatically create a shared search corpus.
 - Retained cache entries expire independently of user-owned snapshots.
 - Deletion removes references and eventually collects unreferenced blobs.
-- Public preservation is an explicit workflow, never a side effect of importing.
-
-Automatic storage growth is bounded by quotas and retention, not “keep every scraped body forever.”
+- Public preservation is an explicit workflow, never a side effect.
 
 ## 10.5 Secret encryption
 
-Provide authenticated encryption for recoverable integration secrets.
+Provide authenticated encryption for recoverable integration secrets. Use a reviewed AEAD implementation (such as AES-256-GCM) with unique nonces, authenticated context binding, versioned ciphertext, key identifiers, key rotation, keys stored outside the database, backup and recovery documentation.
 
-Use a reviewed AEAD implementation, such as AES-256-GCM, with:
-
-- Unique nonces.
-- Authenticated context binding.
-- Versioned ciphertext.
-- Key identifiers.
-- Key rotation.
-- Keys stored outside the database.
-- Backup and recovery documentation.
-
-Encryption at rest does not protect against a fully compromised running server. State that limitation.
-
-Jobs store secret references, not plaintext credentials.
+Encryption at rest does not protect against a fully compromised running server. State that limitation. Jobs store secret references, not plaintext.
 
 ## Acceptance
 
@@ -1355,125 +1012,81 @@ Jobs store secret references, not plaintext credentials.
 - Errors are redacted.
 - Cross-user cache reuse cannot bypass authorization.
 - Credential ciphertext cannot be decrypted without the configured key material.
-- Cache eviction does not delete a referenced private snapshot.
+- Cache eviction does not delete a referenced snapshot.
 
 ---
 
-# 11. Milestone 6: Imports, Source Credentials, Batches, and Preservation
+# 11. Milestone 6: Imports, Credentials, Batches, Watches, and Preservation
+
+Priority 2 (maximize fiction) is centered here.
 
 ## 11.1 Adapter abstraction
 
 ```rust
 trait SourceAdapter {
     fn identify(&self, url: &Url) -> Option<SourceKey>;
-
-    async fn fetch_metadata(
-        &self,
-        request: ImportRequest,
-    ) -> Result<SourceMetadata, ImportError>;
-
-    async fn fetch_chapter(
-        &self,
-        chapter: SourceChapter,
-    ) -> Result<ImportedChapter, ImportError>;
+    async fn fetch_metadata(&self, request: ImportRequest) -> Result<SourceMetadata, ImportError>;
+    async fn fetch_chapter(&self, chapter: SourceChapter) -> Result<ImportedChapter, ImportError>;
 }
 ```
 
-Add optional capability interfaces for:
+Optional capability interfaces for bibliography enumeration, update checking, source authentication, conditional requests, and source-specific revision identifiers.
 
-- Bibliography enumeration.
-- Update checking.
-- Source authentication.
-- Conditional requests.
-- Source-specific revision identifiers.
-
-Capability absence must be visible. Do not simulate bibliography support by guessing URLs.
-
-Adapters use the shared safe fetcher.
+Capability absence must be visible. Adapters use the shared safe fetcher.
 
 ## 11.2 Destinations
 
-Require an explicit choice:
+Explicit choice:
 
 - Private library.
 - Own draft.
 - Republication with permission.
 - Approved preservation batch, for authorized operators.
 
-Default URL imports to private library.
-
-A source login demonstrates access, not permission to republish.
+Default URL imports to private library. A source login demonstrates access, not permission to republish.
 
 ## 11.3 Entry points
 
-Provide:
-
-- Paste-a-URL box on the home page and library page.
+- Paste-a-URL box on home and library pages.
 - `/library/imports/new`.
 - File upload.
 - Command-palette action.
 - Drag-to-bookmarks-bar bookmarklet.
 - PWA share target where supported.
+- Clipboard paste of raw text.
+- Drag-and-drop text selection.
 
-The bookmarklet:
+The bookmarklet transfers only the selected page URL, does not scrape cookies or content, opens Lorehaven's confirmation screen, never imports through state-changing GET, and warns about source URLs containing private tokens.
 
-- Transfers only the selected page URL.
-- Does not scrape cookies or page content.
-- Opens Lorehaven’s confirmation screen.
-- Never imports or publishes through a state-changing GET.
-- Warns about source URLs containing private tokens.
-
-Prefer transient client-side transfer and immediate URL cleanup for sensitive source URLs. Redact importer entry URLs from access logs.
+Prefer transient client-side transfer and immediate URL cleanup for sensitive URLs. Redact importer entry URLs from access logs.
 
 ## 11.4 Workflow
 
 ```text
-URL/file
-→ source detection
-→ source status and authentication check
-→ metadata preview
-→ destination selection
-→ confirmation
-→ queued import
-→ chapter fetching
-→ sanitation
-→ duplicate/update review
-→ completed library item
+URL/file/text → source detection → source status and authentication check
+→ metadata preview → destination selection → confirmation → queued import
+→ chapter fetching → sanitation → duplicate/update review → completed library item
 ```
 
 ## 11.5 Safe fetching
 
-The shared fetcher must:
+Reject unsupported schemes, loopback, link-local, private-network, and metadata-service targets. Validate every redirect. Address DNS rebinding. Limit bytes, time, redirects, decompression, concurrency. Strip or proxy unsafe embedded resources. Avoid forwarding credentials to unrelated origins. Respect source rate limits. Redact credential material.
 
-- Reject unsupported schemes.
-- Reject loopback, link-local, private-network, and metadata-service targets.
-- Validate every redirect and connection destination.
-- Address DNS rebinding.
-- Limit bytes, time, redirects, decompression, and concurrency.
-- Strip or proxy unsafe embedded resources.
-- Avoid forwarding credentials to unrelated origins.
-- Respect source rate limits and relevant retry instructions.
-- Redact credential material.
-
-A source credential does **not** justify an SSRF exception.
-
-Any trusted administrative integration that needs an internal destination uses a separate explicitly configured capability, not a user-controlled importer escape hatch.
+A source credential does not justify an SSRF exception. Trusted administrative integrations that need internal destinations use separate explicitly configured capabilities.
 
 Do not implement CAPTCHA, paywall, or access-control circumvention.
 
 ## 11.6 Per-source credential vault
 
-Support source authentication only for adapters with a documented authentication method.
-
-Prefer source-issued tokens or scoped credentials where available. Password or session-cookie storage requires explicit consent and adapter-specific documentation.
+Support source authentication only for adapters with a documented authentication method. Prefer source-issued tokens or scoped credentials. Password or session-cookie storage requires explicit consent and adapter-specific documentation.
 
 Vault behavior:
 
 - Pseud-scoped by default.
 - Encrypted at rest.
 - Plaintext never returned by an endpoint.
-- Decrypted only for the required operation, for the shortest practical lifetime.
-- Default expiry of 30 days or the source credential’s earlier expiry.
+- Decrypted only for the required operation, briefly.
+- Default expiry of 30 days or the source's earlier expiry.
 - Shorter configurable expiry.
 - Immediate revocation.
 - Re-consent for renewal.
@@ -1482,30 +1095,20 @@ Vault behavior:
 - No automatic copying across pseuds.
 - No credentials in job payloads, exports, logs, traces, or analytics.
 
-Expired credentials pause affected jobs with an actionable status. Do not repeatedly retry authentication failures.
-
-API:
+Expired credentials pause affected jobs with actionable status. Do not repeatedly retry authentication failures.
 
 ```text
-GET    /source-credentials
-POST   /source-credentials
-DELETE /source-credentials/:id
-POST   /source-credentials/:id/test
+GET    /api/v1/source-credentials
+POST   /api/v1/source-credentials
+DELETE /api/v1/source-credentials/:id
+POST   /api/v1/source-credentials/:id/test
 ```
 
-Responses expose metadata only: source, label, expiry, status, and last successful use.
-
-Deleting a credential does not automatically delete already imported copies. Explain both actions separately.
+Responses expose metadata only. Deleting a credential does not automatically delete already imported copies.
 
 ## 11.7 Initial formats and adapters
 
-Implement local file import first:
-
-1. Plain text.
-2. HTML.
-3. EPUB.
-4. DOCX.
-5. Markdown.
+Local file import first: plain text, HTML, EPUB, DOCX, Markdown.
 
 Then implement website adapters individually.
 
@@ -1520,137 +1123,64 @@ For each adapter:
 7. Test malformed input.
 8. Test updates.
 9. Test authentication where supported.
-10. Perform live verification when permitted and available.
+10. Perform live verification when permitted.
 11. Record evidence and status.
 
-Do not promise a source count.
+Do not promise a source count in advance.
 
 ## 11.8 Runtime source health
 
-Track source health separately from verification status.
+Health states: `unknown | healthy | degraded | unavailable | paused`.
 
-Health states:
+Distinguish failures: source outage, rate limiting, authentication failure, parser incompatibility, policy restriction, network failure, user-specific access denial.
 
-```text
-unknown | healthy | degraded | unavailable | paused
-```
+Rolling outcome windows, bounded retry, per-domain concurrency, circuit breakers, operator pause/resume, recovery probes, user-visible incident messages, adapter-version attribution.
 
-Distinguish failures:
+Do not label a source unavailable because one user's credentials expired. Public source status omits private import volumes, credential use, and user identities.
 
-- Source outage.
-- Rate limiting.
-- Authentication failure.
-- Parser incompatibility.
-- Policy restriction.
-- Network failure.
-- User-specific access denial.
-
-Implement:
-
-- Rolling outcome windows.
-- Bounded retry.
-- Per-domain concurrency.
-- Circuit breakers.
-- Operator pause/resume.
-- Recovery probes.
-- User-visible incident messages.
-- Adapter-version attribution.
-
-Do not label a whole source unavailable because one user’s credentials expired.
-
-Public source status omits private import volumes, credential use, and user identities.
-
-## 11.9 Author and bibliography batch import
+## 11.9 Author bibliography imports and watches
 
 Accept supported author, user, or bibliography URLs.
 
-Workflow:
-
 ```text
-identify bibliography
-→ enumerate resumably
-→ preview discovered works
-→ select/filter
-→ estimate size and limits
-→ confirm destination
-→ enqueue child imports
-→ show per-work progress
+identify bibliography → enumerate resumably → preview discovered works
+→ select/filter → estimate size and limits → confirm destination
+→ enqueue child imports → show per-work progress
 ```
 
-Support:
+Support select all or subset, exclude already imported, update existing, cancellation, resume, per-entry retry, pagination and enumeration limits, rate-limit-aware scheduling.
 
-- Select all or a subset.
-- Exclude already imported works.
-- Update existing items.
-- Cancellation.
-- Resume.
-- Per-entry retry.
-- Pagination and enumeration limits.
-- Rate-limit-aware scheduling.
+**Author watches:** an existing library item or explicit bookmark of an author URL can be marked as watched. The scheduler checks periodically, respecting source rate limits, and queues new works for private import with notification. Watch frequency is bounded and configurable.
 
 Bibliography importing does not bypass permission requirements or default to republication.
 
 ## 11.10 Cross-source identity
 
-Distinguish:
+Distinguish duplicate imports from the same source, confirmed cross-posting, different editions, translations, adaptations, similar but unrelated works.
 
-- Duplicate import from the same source.
-- Confirmed cross-posting.
-- Different edition.
-- Translation.
-- Adaptation.
-- Similar but unrelated work.
+Users may privately group their own copies without changing the public catalog. Public identity merges require evidence and review.
 
-Users may privately group their own copies without changing the public catalog.
+A unified story page may list public source editions and the viewer's own private copies. It must never expose another user's private holdings.
 
-Public identity merges require evidence and review.
-
-A unified story page may list public source editions and the viewer’s own private copies. It must never expose another user’s private holdings.
-
-Merges:
-
-- Preserve source records and provenance.
-- Do not combine private notes or ownership.
-- Do not grant access to another edition’s body.
-- Are reversible.
-- Preserve redirects and decision history.
+Merges preserve source records and provenance, do not combine private notes or ownership, do not grant access to another edition's body, are reversible, preserve redirects and decision history.
 
 ## 11.11 Preservation and archive migration batches
 
-Support Open Doors-style preservation workflows without implying affiliation.
+Support archive-migration workflows without implying affiliation.
 
-Require:
-
-- Authorized operator role.
-- Import manifest.
-- Source archive identity.
-- Documented permission or other reviewed legal basis.
-- Original author attribution.
-- Source URLs and timestamps.
-- Destination collection.
-- Claiming and correction procedure.
-- Dry-run report.
-- Idempotent execution.
-- Duplicate review.
-- Batch rollback or withdrawal strategy.
+Require authorized operator role, import manifest, source archive identity, documented permission or reviewed legal basis, original author attribution, source URLs and timestamps, destination collection, claiming and correction procedure, dry-run report, idempotent execution, duplicate review, batch rollback strategy.
 
 Never assign imported authors to local accounts solely by matching names or email strings.
 
 Preservation batches may initially remain private or review-only. Public release is a separate approval step.
 
-## 11.12 Updates
+## 11.12 Cross-posting to external sites
 
-Never overwrite imported copies destructively.
+Support publishing local Lorehaven works to external sites through the same adapter framework in reverse (for adapters that provide cross-posting capability). Requires explicit user authentication with the destination site, per-post confirmation, and permission handling. Cross-post status tracked per work per destination.
 
-Create a new snapshot and preserve:
+## 11.13 Updates
 
-- Notes.
-- Shelves.
-- Bookmarks.
-- Ratings.
-- Progress where mappable.
-
-Show review notices for removed, reordered, or substantially changed chapters.
+Never overwrite imported copies destructively. Create a new snapshot and preserve notes, shelves, bookmarks, ratings, and progress where mappable. Show review notices for removed, reordered, or substantially changed chapters.
 
 ## Acceptance
 
@@ -1658,118 +1188,166 @@ Show review notices for removed, reordered, or substantially changed chapters.
 - Failed chapter fetching resumes.
 - External content never becomes public automatically.
 - Malicious archives cannot escape extraction storage.
-- Unsupported sources are excluded from support counts.
+- Unsupported sources excluded from support counts.
 - Credentials cannot leak through redirects.
 - Expiry pauses rather than loops jobs.
 - Batch progress survives restart.
 - Identity merging does not alter content permissions.
 - Preservation dry runs do not publish anything.
+- Author watches respect rate limits and can be paused.
+- Cross-posting requires explicit destination authentication.
 
 ---
 
-# 12. Milestone 7: Exports, Device Delivery, and Offline Reading
+# 12. Milestone 7: Positivity Filter and Feedback Delivery
 
-## 12.1 Export order
+Priority 3 (positivity-first) has its own milestone because it constrains every feedback surface.
 
-Implement:
+## 12.1 Positivity model
 
-1. Plain text.
-2. Sanitized standalone HTML.
-3. Markdown.
-4. EPUB.
-5. PDF converter integration.
-6. AZW3 converter integration.
-7. MOBI converter integration.
+Every comment, review, and forum reply on a work or author-facing surface passes through a classification pipeline before the author sees it:
+
+```text
+submitted → classified → held for review or auto-delivered → author-visible or hidden
+```
+
+Classifications:
+
+- **Positive:** appreciation, encouragement, non-critical engagement.
+- **Constructive critique:** identifies specific craft issues respectfully.
+- **Ambiguous:** insufficient signal to classify confidently.
+- **Negative/destructive:** hostility, personal attacks, gratuitous harshness, spam.
+
+## 12.2 Classification implementation
+
+Layered approach:
+
+1. **Rules and heuristics** (deterministic, fast, offline): profanity signals, harassment patterns, all-caps ratios, known hostility phrases in the requesting locale.
+2. **Optional AI classifier** (when configured): a plug-in provider returns a confidence score for each classification. Costs credits or subscription budget.
+3. **Author self-hosted rules** (advanced): authors may add per-work keyword filters.
+
+When no AI provider is configured, classification falls back to rules and heuristics with a wider "ambiguous" band.
+
+## 12.3 Delivery rules
+
+Based on the author's feedback preferences (Milestone 8):
+
+- **Positive comments:** delivered directly to the author with a "positive" indicator.
+- **Constructive critique:** delivered only if the author has opted in to critique; otherwise held or hidden.
+- **Ambiguous:** held for community moderator review unless the author has enabled auto-delivery for ambiguous.
+- **Negative/destructive:** hidden from the author, held for moderator review, and never surfaces publicly on the work page.
+
+Public visibility of a comment on the work page follows the same rules. A negative comment is not silently allowed to appear publicly while being hidden from the author only.
+
+## 12.4 Commenter experience
+
+The commenter is not told their comment was classified as negative. They see:
+
+- "Comment posted." (positive, constructive-accepted, ambiguous auto-delivered)
+- "Comment held for moderator review." (ambiguous held, negative)
+
+The commenter can edit or delete their held comment. They cannot see the classification score.
+
+Repeated negative comments trigger rate limits and eventually account-level moderation review.
+
+## 12.5 Quorum review of classification
+
+When a comment is held, it enters the moderation queue. Trusted community moderators (Milestone 13) review it. A single moderator can:
+
+- Approve for delivery.
+- Reject and hide.
+- Reclassify (for classifier training data).
+
+A second moderator's confirmation is required for accounts with a pattern of held comments (repeated review or sanction).
+
+The line between constructive and destructive is set here, by the moderator quorum, not by the author or the automated classifier.
+
+## 12.6 Author overrides
+
+Authors may:
+
+- View a "held feedback" queue for their own works (opt-in, off by default). This shows only comment presence and category, not text, unless the author explicitly requests to read it.
+- Whitelist trusted commenters (their comments skip classification for that author).
+- Blacklist commenters (all their comments are hidden without review).
+- Disable comments entirely on a work.
+
+Authors cannot override moderator decisions to hide destructive comments from the public work page. They can only decide whether to read the content of held comments themselves.
+
+## 12.7 Appreciation and quick reactions
+
+Quick reactions (Milestone 9) and appreciation notes bypass the positivity filter because they are pre-classified positive. Anonymous thank-you notes go through a lighter check (spam and known-hostile-account filters).
+
+## 12.8 Forum and community context
+
+Forum posts, group discussions, and general community messages have their own positivity policy, weighted less strictly than direct author feedback. The default is that constructive disagreement is allowed in forum threads. Direct hostility and personal attacks are still filtered.
+
+Forum quorum moderation applies to disputed posts.
+
+## 12.9 Author-visible feedback view
+
+Authors have a dedicated view separate from public work-page comments:
+
+- Positive comments received.
+- Constructive critique (if opted in).
+- Aggregate reaction counts.
+- Anonymous appreciation notes.
+- Cheer count for WIPs.
+
+Notifications for author feedback default to positive-only.
+
+## Acceptance
+
+- Destructive comments never appear on public work pages.
+- Destructive comments never reach the author without their explicit opt-in to read held comments.
+- Commenter is not told which classification their comment received.
+- Rules-only mode functions without an AI provider configured.
+- Moderator queue processes held comments.
+- Author whitelist and blacklist take effect immediately.
+- Reactions and appreciation notes bypass the filter.
+- Repeated negativity from one account triggers rate limits.
+- Public work-page comment visibility matches author-visible comment set (for public comments).
+
+---
+
+# 13. Milestone 8: Exports, Device Delivery, and Offline Reading
+
+## 13.1 Export order
+
+Plain text, sanitized standalone HTML, Markdown, EPUB, PDF converter, AZW3 converter, MOBI converter.
 
 Markdown export documents which rich-text features are simplified.
 
-For converters:
-
-- Discover availability at startup.
-- Build fixed arguments.
-- Avoid unsafe shell interpolation.
-- Enforce time, memory, and output limits.
-- Disable unavailable formats with installation guidance.
-- Record converter version in verification evidence.
+For converters: discover availability at startup, build fixed arguments, no unsafe shell interpolation, enforce time/memory/output limits, disable unavailable formats with installation guidance, record converter version in verification evidence.
 
 Format support and device-delivery support are separate claims.
 
-## 12.2 Export behavior
+## 13.2 Export behavior
 
-Exports include, as applicable:
+Exports include title and author attribution, chapter ordering, table of contents, language, source provenance, edition/snapshot information, applicable license or permission statement, user-selected typography where supported.
 
-- Title and author attribution.
-- Chapter ordering.
-- Table of contents.
-- Language.
-- Source provenance.
-- Edition or snapshot information.
-- Applicable license or permission statement.
-- User-selected typography where supported.
+Private notes excluded by default. Generated download URLs are authenticated or short-lived and scoped.
 
-Private notes are excluded by default and require explicit inclusion.
+## 13.3 EPUB validation
 
-Generated download URLs are authenticated or short-lived and scoped. Shared export caches preserve source and owner security boundaries.
+Validate ZIP structure, MIME declaration, package metadata, navigation, chapter order, Unicode, attribution, source provenance.
 
-## 12.3 EPUB validation
+## 13.4 Send-to-Kindle and device email
 
-Validate:
-
-- ZIP structure.
-- MIME declaration.
-- Package metadata.
-- Navigation.
-- Chapter order.
-- Unicode.
-- Attribution.
-- Source provenance.
-
-## 12.4 Send-to-Kindle and device email
-
-Implement an optional export-delivery adapter using SMTP.
-
-Initial workflow:
+Optional export-delivery adapter using SMTP.
 
 ```text
-add device address
-→ verify address or complete documented ownership check
-→ configure approved sender where required
-→ choose work and format
-→ review privacy notice
-→ queue export and delivery
+add device address → verify ownership → configure approved sender if required
+→ choose work and format → review privacy notice → queue export and delivery
 → show delivery status
 ```
 
-Requirements:
+Device addresses are private. Destination changes require confirmation. Rate and size limits. No arbitrary public mail relay. No untrusted user-controlled mail headers. Attachment and export limits. Bounce/failure handling. Revocation and address deletion. Explicit disclosure that the delivery provider receives content.
 
-- Device addresses are private.
-- Destination changes require appropriate confirmation.
-- Rate and size limits.
-- No arbitrary public mail relay.
-- No untrusted user-controlled mail headers.
-- Attachment and export limits.
-- Bounce/failure handling where available.
-- Revocation and address deletion.
-- Explicit disclosure that the delivery provider receives the content.
+Use a format supported by the destination's current documented delivery workflow. "SMTP accepted" is not "arrived on device."
 
-Use a format supported by the destination’s current documented delivery workflow. Do not assume AZW3 or MOBI export implies acceptance by Kindle email delivery.
+## 13.5 PWA
 
-“SMTP accepted” is not “arrived on device.”
-
-## 12.5 PWA
-
-Implement:
-
-- Web manifest.
-- Icons.
-- Service worker.
-- IndexedDB schema.
-- Download manager.
-- Offline reader route.
-- Update notification.
-- Supported-platform share target.
-
-Caching:
+Web manifest, icons, service worker, IndexedDB schema, download manager, offline reader route, update notification, supported-platform share target.
 
 | Data | Strategy |
 |---|---|
@@ -1779,17 +1357,11 @@ Caching:
 | Private authenticated responses | No blanket shared caching |
 | Reading progress | Local first, queued synchronization |
 
-## 12.6 Offline privacy
+## 13.6 Offline privacy
 
-On logout, offer removal of local private downloads, with a privacy-protective default on shared devices.
+On logout, offer removal of local private downloads with a privacy-protective default on shared devices.
 
-Explain:
-
-- Browser storage may be evicted.
-- Downloaded copies cannot always be remotely revoked.
-- Device access can expose offline content.
-- Service-worker caching is not encryption.
-- Account deletion on the server does not guarantee deletion from disconnected devices.
+Explain that browser storage may be evicted, downloaded copies cannot always be remotely revoked, device access can expose offline content, service-worker caching is not encryption, account deletion does not guarantee deletion from disconnected devices.
 
 ## Acceptance
 
@@ -1797,15 +1369,15 @@ Explain:
 - Missing chapters show actionable offline states.
 - Interrupted downloads recover.
 - Quota errors preserve existing downloads.
-- IndexedDB upgrades are tested.
+- IndexedDB upgrades tested.
 - Private data does not cross accounts or pseuds.
 - Foreground synchronization works without Background Sync.
 - Device delivery cannot be used as an open relay.
-- Unavailable converters are honestly disabled.
+- Unavailable converters honestly disabled.
 
 ---
 
-# 13. Milestone 8: Library, Saved Views, Bookmarks, and Updates
+# 14. Milestone 9: Library, Saved Views, Bookmarks, and Updates
 
 ## Routes
 
@@ -1824,69 +1396,31 @@ Explain:
 /library/views
 /library/views/:id
 /library/source-credentials
+/library/watches
 ```
 
-## 13.1 Core library features
+## 14.1 Core library features
 
-- Shelves.
-- Reading statuses.
-- Private tags.
-- Bookmark notes.
-- Batch actions.
-- Source filters.
-- Update checking.
-- Duplicate review.
-- Cross-source edition grouping.
-- Storage usage.
-- Import provenance.
-- Source health.
-- Credential-expiry notices.
+Shelves, reading statuses, private tags, bookmark notes, batch actions, source filters, update checking, duplicate review, cross-source edition grouping, storage usage, import provenance, source health, credential-expiry notices, watch management.
 
-Default bookmarks to private.
+Default bookmarks to private. Deleting a shelf does not delete its works.
 
-Deleting a shelf does not delete its works.
+## 14.2 Saved searches and named views
 
-## 13.2 Saved searches and named views
+A saved view contains `name`, `versioned_query_ast`, `sort`, `scope`, `display_preferences`, `pinned`, `visibility`.
 
-A saved view contains:
-
-```text
-name
-versioned_query_ast
-sort
-scope
-display_preferences
-pinned
-visibility
-```
-
-Support:
-
-- Save current search.
-- Rename.
-- Duplicate.
-- Pin to navigation or dashboard.
-- Edit through visual filters or query syntax.
-- Delete.
-- Optional public sharing of safe public-work views.
+Support save current search, rename, duplicate, pin to navigation or dashboard, edit through visual filters or query syntax, delete, optional public sharing of safe public-work views.
 
 Private-library views are private. Public view serialization must not expose private shelf IDs, notes, reading state, or hidden pseud information.
 
-Relative filters such as “updated in the last seven days” retain relative meaning.
+Relative filters ("updated in the last seven days") retain relative meaning. After a search-schema upgrade, migrate the AST or show an explicit repair state.
 
-After a search-schema upgrade, migrate the AST or show an explicit repair state.
-
-## 13.3 Batch outcomes
+## 14.3 Batch outcomes
 
 ```json
 {
   "succeeded": ["..."],
-  "failed": [
-    {
-      "id": "...",
-      "code": "ACCESS_DENIED"
-    }
-  ]
+  "failed": [{"id": "...", "code": "ACCESS_DENIED"}]
 }
 ```
 
@@ -1898,12 +1432,13 @@ After a search-schema upgrade, migrate the AST or show an explicit repair state.
 - Pinned views survive refresh and pseud switching correctly.
 - Shared views cannot expose private filters.
 - History and statistics deletion controls work independently of library ownership.
+- Watches can be paused and resumed.
 
 ---
 
-# 14. Milestone 9: Structured Taxonomy, Body Search, and Query Language
+# 15. Milestone 10: Structured Taxonomy, Mood Search, and Query Language
 
-## 14.1 Character assertions
+## 15.1 Character assertions
 
 ```text
 Character A:
@@ -1912,7 +1447,7 @@ Character A:
   attributes = [vampire, BAMF]
 ```
 
-## 14.2 Relationship assertions
+## 15.2 Relationship assertions
 
 ```text
 Participants = [A, B]
@@ -1923,19 +1458,12 @@ Dynamics = [enemies_to_lovers]
 
 Support more than two participants.
 
-## 14.3 Typed query AST
+## 15.3 Typed query AST
 
 ```text
-And
-Or
-Not
-Text
-Phrase
-WorkField
-ExistsCharacter
-ExistsRelationship
-TagMatch
-MetadataCompleteness
+And | Or | Not | Text | Phrase | WorkField
+ExistsCharacter | ExistsRelationship
+TagMatch | MoodMatch | MetadataCompleteness
 ```
 
 Example:
@@ -1943,79 +1471,43 @@ Example:
 ```json
 {
   "and": [
-    {
-      "exists_character": {
-        "character_id": "A",
-        "prominence": ["protagonist"],
-        "attributes_all": ["BAMF"]
-      }
-    },
-    {
-      "not": {
-        "exists_relationship": {
-          "participant_any": ["A"],
-          "kind_any": ["romantic", "sexual"]
-        }
-      }
-    }
+    {"exists_character": {
+      "character_id": "A",
+      "prominence": ["protagonist"],
+      "attributes_all": ["BAMF"]
+    }},
+    {"not": {"exists_relationship": {
+      "participant_any": ["A"],
+      "kind_any": ["romantic", "sexual"]
+    }}}
   ]
 }
 ```
 
-Compile bound predicates into SQL `EXISTS` clauses. Never allow one character to satisfy another character’s attributes accidentally.
+Compile bound predicates into SQL `EXISTS` clauses. Never allow one character to satisfy another character's attributes.
 
-## 14.4 User-facing query language
+## 15.4 User-facing query language
 
-Support:
-
-- Quoted phrases.
-- `AND`, `OR`, `NOT`.
-- Parentheses.
-- Leading `-` exclusions.
-- Fielded search.
-- Documented escaping.
-- Autocomplete and error locations.
+Quoted phrases, `AND`/`OR`/`NOT`, parentheses, leading `-` exclusions, fielded search, documented escaping, autocomplete and error locations.
 
 Initial fields:
 
 ```text
-title:
-author:
-fandom:
-character:
-relationship:
-tag:
-summary:
-body:
-language:
-status:
+title: author: fandom: character: relationship: tag: mood:
+summary: body: language: status:
 ```
 
 Examples:
 
 ```text
 fandom:"Example Fandom" AND title:"winter"
-```
-
-```text
 body:"we were never alone" -tag:"major character death"
+mood:comfort AND status:complete
 ```
 
-```text
-(author:"Writer A" OR author:"Writer B") AND status:complete
-```
+Define operator precedence and implicit conjunction explicitly. Parser produces the same typed AST as the visual filter builder. Malformed syntax produces helpful errors. Never pass user query text directly as SQL.
 
-Define operator precedence and implicit conjunction explicitly.
-
-The parser produces the same typed AST as the visual filter builder. Do not create separate semantics for text and form searches.
-
-Advanced bound character predicates may use visual controls initially. The interface must show when a query contains predicates that cannot be represented by a simpler text shorthand.
-
-Malformed syntax produces a helpful error, not a silently different query.
-
-Never pass user query text directly as SQL or raw database-specific FTS syntax.
-
-## 14.5 Metadata completeness
+## 15.5 Metadata completeness
 
 Negative filters support:
 
@@ -2025,387 +1517,208 @@ Negative filters support:
 
 Missing ship metadata is not proof that a story contains no ship.
 
-## 14.6 Filters
+## 15.6 Filters
 
-Implement:
+Characters and prominence, relationships and prominence, relationship kinds and exclusions, character attributes and roles, fandom and crossovers, completion, word/chapter ranges, rating and warnings, language, dates, author, collection, series, tropes, settings, moods, content notes (worldbuilding-heavy, dialogue-driven, etc.), length histogram, public works/private library scope, read/unread, user mutes.
 
-- Characters and prominence.
-- Relationships and prominence.
-- Relationship kinds and exclusions.
-- Character attributes and roles.
-- Fandom and crossovers.
-- Completion.
-- Word/chapter ranges.
-- Rating and warnings.
-- Language.
-- Dates.
-- Author.
-- Collection.
-- Series.
-- Tropes.
-- Settings.
-- Vibes.
-- Public works/private library scope.
-- Read/unread.
-- User mutes.
+Bound query depth, clause count, result windows, execution time.
 
-Bound query depth, clause count, result windows, and execution time.
+## 15.7 Mood and tone taxonomy
 
-## 14.7 Full-text body search
+Curated initial mood tags: comfort, angst-with-happy-ending, angst, cozy, adventure, slow-burn, fast-paced, episodic, dark, hopeful, humorous, bittersweet, catharsis.
 
-Index permitted body text for:
+Authors assign moods to their works. Readers filter by mood. Community proposals extend the taxonomy through quorum.
 
-- Published eligible local works.
-- The requesting pseud’s private imported copies.
-- Explicitly authorized public preservation content.
+Moods are distinct from plot tags: they describe reading experience, not plot elements.
 
-Support:
+## 15.8 Full-text body search
 
-- Phrase search.
-- Prose and dialogue search.
-- Chapter-level matches.
-- Highlighted snippets.
-- Jump-to-match anchors.
-- Search within one work.
-- Explicit metadata-only, body-only, or combined modes.
+Index permitted body text for published eligible local works, the requesting pseud's private imported copies, and explicitly authorized public preservation content.
 
-Body search does not require a globally shared body cache.
+Phrase search, prose and dialogue search, chapter-level matches, highlighted snippets, jump-to-match anchors, search within one work, explicit metadata-only/body-only/combined modes.
 
-Permission checks apply before counts, facets, snippets, and result serialization. Inaccessible content must not leak through “three hidden matches” or autocomplete.
+Body search does not require a globally shared body cache. Permission checks apply before counts, facets, snippets, and result serialization. Inaccessible content must not leak through counts or autocomplete.
 
-Sanitize highlighting output. Strip executable markup before indexing.
+Sanitize highlighting output. Strip executable markup before indexing. Index revision state so stale snippets can be invalidated.
 
-Index revision state so stale snippets can be invalidated after withdrawal, restriction, update, or deletion.
+## 15.9 Ranking
 
-## 14.8 Ranking
+Only primary tags add tag-ranking boosts. Secondary tags remain filterable. Exact search is not taste-steered. Document scoring differences between database backends while keeping filtering and authorization consistent.
 
-Only primary tags add tag-ranking boosts. Secondary tags remain filterable.
+Additional signals for non-exact discovery:
 
-Exact search is not taste-steered.
+- Completion rate.
+- Aggregate positive-feedback ratio (reactions and public positive comments).
+- Recency and update velocity.
+- Author bibliography quality signals.
 
-Database backends may differ in relevance scoring. Document those differences while keeping filtering and authorization semantics consistent.
-
-## 14.9 Canonicalization and metadata correction
+## 15.10 Canonicalization and metadata correction
 
 Tag workflow:
 
 ```text
-proposal
-→ review
-→ quorum
-→ apply
-→ reindex
-→ preserve redirect/history
+proposal → review → quorum → apply → reindex → preserve redirect/history
 ```
 
-Cross-source identity proposals use an equivalent evidence-based workflow.
+Cross-source identity proposals use an equivalent workflow.
 
-Metadata correction supports:
+Metadata correction supports title, author attribution, summary, completion status, language, source mapping, taxonomy assertions.
 
-- Title.
-- Author attribution.
-- Summary.
-- Completion status.
-- Language.
-- Source mapping.
-- Taxonomy assertions.
+Authors control their authored work metadata under moderation policy. Curators cannot silently rewrite author text. Private imported metadata may be corrected locally without changing shared records. Source updates do not silently discard local overrides. Every shared correction records provenance and history.
 
-Rules:
+Auto-tag suggestions use deterministic rules first and optional AI later. They enter a review queue.
 
-- Authors control their authored work metadata, subject to clearly defined moderation policies.
-- Curators cannot silently rewrite author text.
-- Private imported metadata may be corrected locally without changing a shared record.
-- Source updates do not silently discard local overrides.
-- Every shared correction records provenance and history.
+## 15.11 People directory
 
-Auto-tag suggestions use deterministic rules first and optional AI later. They enter a review queue and are never presented as confirmed author declarations.
-
-## 14.10 People directory
-
-Implement `/people` with:
-
-- A–Z browsing.
-- Handle/display-name search.
-- Fandom filtering.
-- Author/reader role filters where voluntarily declared.
-- Pagination.
-- Discoverability controls.
+`/people` with A–Z browsing, handle/display-name search, fandom filtering, author/reader role filters where voluntarily declared, pagination, discoverability controls.
 
 Include only pseuds that permit directory listing. Do not infer fandom interests from private reading or imports.
 
-## 14.11 Zero-result demand insights
+## 15.12 Zero-result demand insights
 
-Provide an optional privacy-preserving curator view of unmet search demand.
+Optional privacy-preserving curator view of unmet search demand.
 
-Requirements:
+Clear collection setting and policy, exclude private-library and sensitive queries by default, avoid storing raw queries when aggregate buckets suffice, redact likely personal data, suppress low-count cohorts, bound retention, no public list of individual searches, no automatic import/publication/challenge creation.
 
-- Clear collection setting and policy.
-- Exclude private-library and sensitive queries by default.
-- Avoid storing raw queries when aggregate taxonomy buckets suffice.
-- Redact likely personal data.
-- Suppress low-count cohorts.
-- Bound retention.
-- No public list of individual searches.
-- No automatic import, publication, or challenge creation.
+External AI clustering requires separate explicit consent. Label clusters as observed demand, not proof that content does not exist.
 
-Any external AI clustering of query text requires separate explicit consent and configuration.
+## 15.13 Length histogram in search
 
-Label clusters as observed search demand, not proof that content does not exist.
+Show a histogram of matching works by length. Filter by "under 5k", "5k–20k", "20k–100k", "100k+". Helps readers find fiction that fits available time.
 
 ## Acceptance fixture
 
-Include contrasting works:
+Include contrasting works: A protagonist/B vampire, A vampire protagonist, A supporting vampire, A/B central, A/B background, A with unknown relationship metadata, A with confirmed no romantic/sexual relationship, a private imported body containing a unique phrase, a withdrawn work containing the same phrase, works with each mood tag.
 
-- A protagonist/B vampire.
-- A vampire protagonist.
-- A supporting vampire.
-- A/B central.
-- A/B background.
-- A with unknown relationship metadata.
-- A with confirmed no romantic/sexual relationship.
-- A private imported body containing a unique phrase.
-- A withdrawn work containing the same phrase.
-
-Test both databases for:
-
-- Correct binding.
-- Negative-filter semantics.
-- Query parser round trips.
-- Phrase search.
-- Snippet sanitation.
-- Permission-safe counts.
-- Index invalidation.
-- Query complexity limits.
+Test both databases for correct binding, negative-filter semantics, query parser round trips, phrase search, snippet sanitation, permission-safe counts, index invalidation, query complexity limits, mood filtering.
 
 ---
 
-# 15. Milestone 10: Discovery, Private Taste Influence, Recipes, and Dashboards
+# 16. Milestone 11: Discovery, Taste Influence, Recipes, and Dashboards
 
-## 15.1 Baseline engines
+Priority 4 (admin-enjoyable without monothematic) is centered here.
 
-Implement:
+## 16.1 Baseline engines
 
-- Recent.
-- Trending by time window.
-- Content similarity.
-- Also bookmarked.
-- Similar by bookmarks.
-- Blind Date.
-- User-preference matching.
-- Community-suggested similarity.
+Recent, trending by time window, content similarity, also bookmarked, similar by bookmarks, Blind Date, user-preference matching, community-suggested similarity, completion-rate weighted, mood-matched, cross-fandom dynamic matching, complete-and-under-read.
 
 Each engine implements:
 
 ```text
-generate_candidates(context, limit)
-→ candidate IDs and baseline scores
+generate_candidates(context, limit) → candidate IDs and baseline scores
 ```
 
 All candidates pass shared eligibility rules.
 
-Private bookmark and rating data are not silently pooled into collaborative signals. Use explicitly permitted signals, aggregation thresholds, and documented retention.
+Private bookmark and rating data are not silently pooled. Use explicitly permitted signals, aggregation thresholds, documented retention.
 
-## 15.2 Administrator taste profile
+## 16.2 Administrator taste profile
 
-Use an explicitly selected taste-source profile.
+Explicitly selected taste-source profile. Exclude moderation sessions, troubleshooting, import tests, accidental opens, activity marked private-from-learning.
 
-Exclude:
+Signals: explicit likes/dislikes, selected bookmarks, private ratings, optional completion events, admin seed prompts, wishlist items.
 
-- Moderation sessions.
-- Troubleshooting.
-- Import tests.
-- Accidental opens.
-- Activity marked private-from-learning.
-
-Signals:
-
-- Explicit likes/dislikes.
-- Selected bookmarks.
-- Private ratings.
-- Optional completion events.
-
-Maintain long-term and recent profiles:
+Long-term and recent profiles:
 
 ```text
 profile = 0.65 × long_term + 0.35 × recent
 ```
 
-Use configurable decay and versioning.
+Configurable decay and versioning.
 
-## 15.3 Influence layer
+## 16.3 Influence layer
 
 Reference scoring:
 
 ```text
-score =
-  0.80 × user_relevance
-  + 0.12 × administrator_affinity
-  + 0.08 × bridge_relevance
+score = 0.65 × user_relevance
+      + 0.15 × administrator_affinity
+      + 0.10 × bridge_relevance
+      + 0.10 × quality_signals
 ```
 
 Initial values are tunable, not universal guarantees.
 
-Add:
+Additions: relevance floor, author concentration limits, repetition limits, negative-feedback cooldowns, diversity reranking, completion preference, positivity ratio consideration.
 
-- Relevance floor.
-- Author concentration limits.
-- Repetition limits.
-- Negative-feedback cooldowns.
-- Diversity reranking.
-- Completion preference.
+## 16.4 Diversity budget
 
-## 15.4 Meaningful opt-out
+Explicitly reserve configurable percentages of recommendation slots for:
+
+- Outside-admin-taste content.
+- New authors (below a threshold of works or readers).
+- Underrepresented fandoms.
+- Different moods than the reader's usual preferences.
+
+Diversity budgets prevent taste-profile collapse into a feedback loop. Configurable per user and by admin. Default budgets are non-zero.
+
+## 16.5 Meaningful opt-out
 
 Setting:
 
-> Include this instance’s evolving discovery preferences alongside your own interests.
+> Include this instance's evolving discovery preferences alongside your own interests.
 
-Turning it off removes administrator influence from:
-
-- Candidate generation.
-- Ranking.
-- Reranking.
-- Recipes.
-- Dashboard widgets.
-- Prompts.
-- Challenges.
-- Notifications.
-- Cached recommendations.
+Turning it off removes administrator influence from candidate generation, ranking, reranking, recipes, dashboard widgets, prompts, challenges, notifications, and cached recommendations.
 
 Individual recommendations need not carry administrator-specific labels, but explanations must not be fabricated.
 
-Private taste profiles are not returned to users, recipes, or plugins. External engines receive baseline context and have the host apply any permitted private influence afterward.
+Private taste profiles are not returned to users, recipes, or plugins. External engines receive baseline context; the host applies any permitted private influence afterward.
 
-Public behavior may permit broad inference; do not promise mathematical secrecy. Avoid fine-grained explanation or score endpoints that reveal individual private signals.
+Public behavior may permit broad inference; do not promise mathematical secrecy.
 
-## 15.5 Community similarity suggestions
+## 16.6 Community similarity suggestions
 
-Readers may suggest:
+Readers may suggest "If you liked this, you may like that."
 
-> If you liked this work, you may like that work.
+Optional rationale, spoiler marking, up/down usefulness votes, reporting, withdrawal, duplicate consolidation, eligibility and block enforcement.
 
-Support:
+Separate from machine-generated similarity. Votes count unique accounts internally, do not reveal hidden pseud linkage, affect this recommendation signal only, grant no trust or moderation authority.
 
-- Optional rationale.
-- Spoiler marking.
-- Up/down usefulness votes.
-- Reporting.
-- Withdrawal.
-- Duplicate consolidation.
-- Eligibility and block enforcement.
-
-These suggestions are separate from machine-generated similarity.
-
-Votes:
-
-- Count unique accounts internally.
-- Do not reveal hidden pseud linkage.
-- Affect this recommendation signal only.
-- Grant no trust or moderation authority.
-
-## 15.6 Recommendation recipe builder
+## 16.7 Recommendation recipe builder
 
 A recipe is declarative configuration, not arbitrary code.
 
-It may combine:
+Combines baseline engines, weights, filters, diversity settings, exclusions, completion preference, bounded boosts, reranking options.
 
-- Baseline engines.
-- Weights.
-- Filters.
-- Diversity settings.
-- Exclusions.
-- Completion preference.
-- Bounded boosts.
-- Reranking options.
+Support preview, save privately, publish, install, duplicate, remix/fork, version history, reset.
 
-Support:
+Recipes cannot override eligibility, re-enable opted-out administrator influence, access hidden taste vectors, search someone else's library, buy ranking, or grant execution permissions.
 
-- Preview.
-- Save privately.
-- Publish.
-- Install.
-- Duplicate.
-- Remix/fork.
-- Version history.
-- Reset.
+Public recipes remove private object references. Installation validates schema and resource cost. Marketplace-listed recipes integrate with paid extensions without requiring WASM execution.
 
-Recipes cannot:
+## 16.8 Widget-composed dashboard
 
-- Override eligibility.
-- Re-enable opted-out administrator influence.
-- Access hidden taste vectors.
-- Search someone else’s library.
-- Buy ranking.
-- Grant execution permissions.
+First-party widget registry and default layout factory.
 
-Public recipes must remove private object references. Installation validates schema and resource cost.
+Initial widgets: continue reading, recent library updates, import progress, saved views, drafts, followed authors, selected recommendation engine, community subscriptions, optional writing opportunity, watched authors, cheer received (for authors), positive feedback received (for authors).
 
-When extensions arrive, the recipe gallery integrates with the marketplace without requiring recipes to execute WASM.
+Add/remove, reorder, resize within accessible constraints, per-pseud layouts, mobile adaptation, reset, safe mode.
 
-## 15.7 Widget-composed dashboard
+Dashboard is not the only route to essential features. Third-party widgets use extension permissions and bounded data APIs.
 
-Provide a first-party widget registry and default layout factory.
+## 16.9 Automatic and admin-seeded writing opportunities
 
-Initial widgets:
+Generate optional trope combinations, weekend prompts, response-fic opportunities, challenges, "write next" suggestions.
 
-- Continue reading.
-- Recent library updates.
-- Import progress.
-- Saved views.
-- Drafts.
-- Followed authors.
-- Selected recommendation engine.
-- Community subscriptions.
-- Optional writing opportunity.
+**Admin seed prompts:** administrator plants specific prompt ideas into the public prompt pool, tagged as "instance prompt." Writers can respond. Distinct from algorithmic generation.
 
-Support:
+**Wishlist board:** any user (including admin) posts "I'd love to read a fic where X." Others can claim, write, and link fulfillments. Admin wishes appear as one stream among many, not preferentially featured.
 
-- Add/remove.
-- Reorder.
-- Resize within accessible constraints.
-- Per-pseud layouts.
-- Mobile adaptation.
-- Reset.
-- Safe mode.
+Use deterministic pools first. AI is optional. Combine writer interests with instance affinity only when enabled. Never invent human sponsors, commissions, or community demand.
 
-Do not make the dashboard the only route to essential features.
+## 16.10 Blind-spot and surprise-me modes
 
-Third-party widgets later use extension permissions and bounded data APIs.
+- **Blind-spot suggestions:** "You've never read Fandom B, but it has 40 works matching your preferred dynamics."
+- **Surprise-me mode:** reader explicitly requests recommendations outside their profile. The system inverts usual weighting.
+- **Temporary taste boosts:** admin can temporarily boost a trope, fandom, or dynamic for a month without altering the long-term profile.
 
-## 15.8 Automatic writing opportunities
-
-Generate optional:
-
-- Trope combinations.
-- Weekend prompts.
-- Response-fic opportunities.
-- Challenges.
-- “Write next” suggestions.
-
-Use deterministic pools first. AI is optional.
-
-Combine writer interests with instance affinity only when enabled.
-
-Never invent human sponsors, commissions, or community demand.
-
-## 15.9 Administration
+## 16.11 Administration
 
 ```text
 /admin/discovery
 ```
 
-Controls:
-
-- Taste source.
-- Signal inclusion.
-- Learning pause.
-- Influence pause.
-- Recency.
-- Weights.
-- Profile history.
-- Reset and rollback.
-- Aggregate evaluation.
-- Recommendation cache invalidation.
+Controls: taste source, signal inclusion, learning pause, influence pause, recency, weights, profile history, reset and rollback, aggregate evaluation, recommendation cache invalidation, diversity budget tuning, temporary boosts.
 
 ## Acceptance
 
@@ -2413,250 +1726,125 @@ Controls:
 - Exact and chronological sorts remain exact.
 - Missing profiles fall back to baseline.
 - Blocked or ineligible content never enters displayed results.
-- Minors receive policy-appropriate discovery rather than default behavioral steering.
+- Minors receive policy-appropriate discovery.
 - Recipes cannot bypass host policies.
 - Dashboard reset works even with a broken widget.
 - Taste alignment never affects governance or trust.
+- Diversity budgets are honored under load.
 
 ---
 
-# 16. Milestone 11: Comments, Forums, Groups, and Messaging
+# 17. Milestone 12: Comments, Forums, Groups, and Messaging
 
-## 16.1 Comments and reviews
+## 17.1 Comments and reviews
 
-Implement:
+Work/chapter comments, replies, appreciation, spoiler formatting, appropriate edit history, author locking, reporting, block/mute enforcement, review moderation under the positivity framework.
 
-- Work/chapter comments.
-- Replies.
-- Appreciation.
-- Spoiler formatting.
-- Appropriate edit history.
-- Author locking.
-- Reporting.
-- Block/mute enforcement.
-- Review moderation under the same safety framework.
+All work/chapter comments and reviews pass through the positivity filter (Milestone 12).
 
 Limit nesting depth and flatten deeper replies clearly.
 
-## 16.2 Forums
+## 17.2 Forums
 
-Implement:
+Categories, boards, topics, posts, polls, reactions, pins, locks, subscriptions, pagination, topic tags, forum full-text search, mentions, read state and unread badges.
 
-- Categories.
-- Boards.
-- Topics.
-- Posts.
-- Polls.
-- Reactions.
-- Pins.
-- Locks.
-- Subscriptions.
-- Pagination.
-- Topic tags.
-- Forum full-text search.
-- Mentions.
-- Read state and unread badges.
+Forum posts have a lighter positivity policy: constructive disagreement is allowed; hostility and personal attacks are filtered.
 
-## 16.3 Read state
+## 17.3 Read state
 
-Store a per-pseud topic high-water mark using stable post ordering.
+Per-pseud topic high-water mark using stable post ordering. Opening a topic marks only content actually presented under the documented read policy. Paginated entry does not mark unseen later pages read. Writes bounded, monotonic, idempotent. "Mark topic/category read" is explicit. Deleted or hidden posts do not break cursors. Counts exclude inaccessible categories.
 
-Behavior:
+## 17.4 Forum search and tags
 
-- Opening a topic marks only the content actually presented under the documented read policy.
-- Paginated entry does not mark unseen later pages read.
-- Writes are bounded, monotonic where appropriate, and idempotent.
-- “Mark topic/category read” is explicit.
-- Deleted or hidden posts do not break cursors.
-- Counts exclude inaccessible categories.
+Search includes topic titles, post bodies, category scope, author, topic tags, dates, safe highlighted snippets.
 
-## 16.4 Forum search and tags
+Permissions apply before counts and snippets. Topic tags are distinct from fiction taxonomy but may share canonicalization infrastructure. Support scoped tag aliases, merge history, tag pages.
 
-Search includes:
+## 17.5 Mentions and notification preferences
 
-- Topic titles.
-- Post bodies.
-- Category scope.
-- Author.
-- Topic tags.
-- Dates.
-- Safe highlighted snippets.
+`@handle` mentions with disambiguation. Mention creation checks visibility, blocks, unsolicited-contact restrictions, rate limits, minor-protective policy.
 
-Permissions apply before counts and snippets.
+Per-category/topic watch levels: `muted | normal | tracking | watching`.
 
-Topic tags are distinct from fiction taxonomy but may share canonicalization infrastructure.
+Notification settings: in-app, email, push, immediate versus digest, quiet periods, followed topics, mentions and replies.
 
-Support scoped tag aliases, merge history, and tag pages.
+Email digests optional and unsubscribeable without login where safely possible.
 
-## 16.5 Mentions and notification preferences
+## 17.6 Groups
 
-Support `@handle` mentions with disambiguation.
+Roles: `owner | manager | member`. Visibility: `public | approval_required | private`.
 
-Mention creation checks:
+## 17.7 Messaging
 
-- Visibility.
-- Blocks.
-- Unsolicited-contact restrictions.
-- Rate limits.
-- Minor-protective policy.
+Conversation invitations, direct messages, group conversations, chat rooms, leave/mute/block/report, unsolicited-message restrictions, minor-protective defaults.
 
-Per-category/topic watch levels:
+Persisted messages authoritative; live delivery is optimization. Do not claim end-to-end encryption.
 
-```text
-muted | normal | tracking | watching
-```
+## 17.8 Real-time delivery and catch-up
 
-Notification settings cover:
+Common event envelope with durable cursors. WebSocket delivery, SSE read-only delivery where suitable, polling fallback, catch-up through opaque `after` cursor, duplicate suppression, reauthorization on reconnect and catch-up, gap recovery when cursor expires.
 
-- In-app.
-- Email.
-- Push.
-- Immediate versus digest.
-- Quiet periods.
-- Followed topics.
-- Mentions and replies.
+Single-process operation uses in-process fan-out plus durable storage. Optional Redis pub/sub distributes across processes; it is not the event history.
 
-Email digests are optional and unsubscribeable without requiring a login where safely possible.
+## 17.9 Scoped sanctions
 
-## 16.6 Groups
+Category- or group-scoped posting timeout, reply restriction, topic-creation restriction, access ban where policy permits.
 
-Roles:
+Every sanction records scope, reason, start, expiry, issuer, review reference, appeal path.
 
-```text
-owner | manager | member
-```
+Forum reputation points and posting-volume leaderboards are not implemented.
 
-Visibility:
+## 17.10 Reading clubs
 
-```text
-public | approval_required | private
-```
-
-## 16.7 Messaging
-
-Implement:
-
-- Conversation invitations.
-- Direct messages.
-- Group conversations.
-- Chat rooms.
-- Leave/mute/block/report.
-- Unsolicited-message restrictions.
-- Minor-protective defaults.
-
-Persisted messages are authoritative. Live delivery is an optimization.
-
-Do not claim end-to-end encryption.
-
-## 16.8 Real-time delivery and catch-up
-
-Use a common event envelope with durable cursors.
-
-Support:
-
-- WebSocket delivery.
-- SSE read-only delivery where suitable.
-- Polling fallback.
-- Catch-up through an opaque `after` cursor.
-- Duplicate suppression.
-- Reauthorization on reconnect and catch-up.
-- Gap recovery when a cursor expires.
-
-Single-process operation uses in-process fan-out plus durable storage.
-
-Optional Redis pub/sub may distribute events across processes. It is not the event history. When unavailable, degrade to supported local delivery or database-backed catch-up.
-
-## 16.9 Scoped sanctions
-
-Support category- or group-scoped:
-
-- Posting timeout.
-- Reply restriction.
-- Topic-creation restriction.
-- Access ban where policy permits.
-
-Every sanction records:
-
-- Scope.
-- Reason.
-- Start.
-- Expiry.
-- Issuer.
-- Review reference.
-- Appeal path.
-
-Forum reputation points and posting-volume leaderboards are not implemented. Reliability, expertise, and staff roles remain separate.
+Groups can form reading clubs: pick a work, read on a schedule, discuss chapter by chapter in a linked forum thread. Reading club discussions bypass the individual author feedback filter but remain subject to forum policy.
 
 ## Acceptance
 
 - Removed members lose access.
 - Private topics cannot be fetched by ID.
-- Read badges are accurate under pagination.
+- Read badges accurate under pagination.
 - Mentions do not bypass blocks.
 - Digests omit newly inaccessible content.
 - Reconnection does not duplicate messages.
 - Redis failure does not lose persisted posts.
 - Expired sanctions cease to apply.
 - Reporting exposes only appropriately scoped evidence.
+- Reading club discussions do not leak private content.
 
 ---
 
-# 17. Milestone 12: Collections, Challenges, Requests, and Writing Events
+# 18. Milestone 13: Collections, Challenges, Requests, Wishlists, and Writing Events
 
-## 17.1 Collections
+## 18.1 Collections
 
 ```text
 submitted → approved/rejected
 approved → withdrawn/removed
 ```
 
-Implement:
-
-- Curator roles.
-- Invitations.
-- Submission approval.
-- Sections and ordering.
-- Work-owner withdrawal.
-- Preservation-batch provenance links.
+Curator roles, invitations, submission approval, sections and ordering, work-owner withdrawal, preservation-batch provenance links.
 
 Collections do not grant permission to republish or expose private imports.
 
-## 17.2 Challenges
+## 18.2 Challenges
 
-Support:
-
-- Signups.
-- Prompt pools.
-- Assignments.
-- Claims.
-- Deadlines.
-- Reveal dates.
-- Anonymous-until-reveal submissions.
-- Fulfillment.
-- Withdrawal.
+Signups, prompt pools, assignments, claims, deadlines, reveal dates, anonymous-until-reveal submissions, fulfillment, withdrawal.
 
 Represent variants through a shared configurable workflow.
 
-## 17.3 Mentorship
+**Finished-work reading challenges:** "Read 5 completed fics under 10k words this month." Encourages completed-work reading.
 
-- Applications.
-- Availability.
-- Interest matching.
-- Invitations.
-- Session/task completion.
-- Reporting.
-- Private participation settings.
+## 18.3 Mentorship and beta-reading
 
-## 17.4 Sprints
+Applications, availability, interest matching, invitations, session/task completion, reporting, private participation settings.
 
-- Start/end time.
-- Optional shared room.
-- Private/public counters.
-- Manual word-count updates.
-- No publication requirement.
-- No compulsory streaks.
+**Reciprocal beta-reading matching:** authors opt in with fandoms, strengths, and needs. System matches pairs for mutual beta reading.
 
-## 17.5 Requests and bounties
+## 18.4 Sprints
+
+Start/end time, optional shared room, private/public counters, manual word-count updates, no publication requirement, no compulsory streaks.
+
+## 18.5 Requests, bounties, and wishlists
 
 Implement request handling now. Attach credit escrow after the ledger milestone.
 
@@ -2665,10 +1853,21 @@ Distinguish:
 - Search help.
 - Recommendation request.
 - Writing prompt.
-- Commission or bounty, where enabled.
+- Wishlist item (no obligation).
+- Commission or bounty (with escrow).
 - Preservation request.
 
-Do not convert zero-result search analytics into public requests without user action.
+Wishlists are public boards where anyone can post "I'd love a fic where X." Others can claim. Fulfillments link back to the wishlist item.
+
+Admin wishlist items are marked as such but do not receive preferential featuring.
+
+## 18.6 Editorial curator picks
+
+Trusted curators (and the administrator) may feature works with short rationales. Displayed in a dedicated discovery slot separate from algorithmic recommendations.
+
+## 18.7 "Best of" community-voted lists
+
+Periodic community votes for completed works by category (fandom, mood, length, etc.). Separate from algorithmic trending. Voting requires trust level and completes with quorum review.
 
 ## Acceptance
 
@@ -2677,12 +1876,16 @@ Do not convert zero-result search analytics into public requests without user ac
 - Missed deadlines have defined outcomes.
 - Withdrawals preserve required audit and attribution history.
 - Generated events do not fabricate human sponsorship.
+- Wishlist admin markers do not confer ranking advantage.
+- Curator picks are attributed.
 
 ---
 
-# 18. Milestone 13: Trust, Reports, Quorum, Appeals, and Process Feedback
+# 19. Milestone 14: Trust, Reports, Quorum, Appeals, and Process Feedback
 
-## 18.1 Trust model
+Priorities 5 and 6 are centered here.
+
+## 19.1 Trust model
 
 Separate:
 
@@ -2700,42 +1903,25 @@ Separate:
 | TL5 | Senior independent reviewer |
 | TL6 | Explicitly appointed trustee |
 
-Higher levels require reviewed conduct, not merely point totals.
+Higher levels require reviewed conduct, not merely point totals. Core publishing and reading remain available at TL0.
 
-Core publishing and reading remain available at TL0.
+## 19.2 Effects
 
-## 18.2 Effects
-
-Trust may increase:
-
-- Rate limits.
-- Batch sizes.
-- Proposal eligibility.
-- Curator eligibility.
-- Extension quotas.
-- Gift/bounty limits.
+Trust may increase rate limits, batch sizes, proposal eligibility, curator eligibility, extension resource ceilings, gift/bounty limits, moderation queue eligibility, wishlist claim priority.
 
 It does not automatically grant private-message access or administrator powers.
 
 Credits, ratings, views, posting volume, reading streaks, and marketplace purchases do not buy trust.
 
-## 18.3 Reports
+## 19.3 Reports
 
 ```text
-submitted
-→ triaged
-→ investigating
-→ proposal
-→ decision
-→ appealed
-→ closed/reversed
+submitted → triaged → investigating → proposal → decision → appealed → closed/reversed
 ```
 
-Trust may prioritize review; it does not establish guilt.
+Trust may prioritize review; it does not establish guilt. Use account identity privately to prevent multiple pseuds from counting as independent reporters or voters.
 
-Use account identity privately to prevent multiple pseuds from counting as independent reporters or voters.
-
-## 18.4 Quorum defaults
+## 19.4 Quorum defaults
 
 - Routine tag change: two independent approvals.
 - High-impact tag or public identity merge: three.
@@ -2743,59 +1929,54 @@ Use account identity privately to prevent multiple pseuds from counting as indep
 - Permanent ban: three eligible reviewers where staffing permits.
 - Appeal: reviewers independent of the original decision.
 - Emergency containment: one authorized moderator, followed by review.
+- Positivity filter classification override: single moderator; repeated overrides for one account trigger secondary review.
+- Metadata correction: two reviewers for shared records.
+- Extension approval: three reviewers with permission-review expertise.
 
 Preservation releases and significant metadata corrections use explicitly assigned review policies.
 
-## 18.5 Emergency actions
+## 19.5 Emergency actions
 
-- Temporarily hide content.
-- Freeze replies.
-- Restrict messaging.
-- Suspend posting.
-- Disable an extension.
-- Pause an unsafe importer.
+Temporarily hide content, freeze replies, restrict messaging, suspend posting, disable an extension, pause an unsafe importer, escalate the positivity threshold for a work under attack.
 
-Require reason, review deadline, escalation, and audit entry.
+Require reason, review deadline, escalation, audit entry.
 
-## 18.6 Bootstrap mode
+## 19.6 Bootstrap mode
 
-If only one administrator is available, label single-person decisions honestly. Do not call them quorum.
+If only one administrator is available, label single-person decisions honestly. Do not call them quorum. The site can operate in bootstrap mode indefinitely; the administrator makes governance decisions until trusted community moderators exist.
 
-## 18.7 Public modlog
+Bootstrap-to-community transition is a deliberate action: appoint initial trusted users, transfer moderation queue access, document policy handoff.
+
+## 19.7 Admin-quorum relationship
+
+The administrator can:
+
+- Set policy that governs quorum decisions.
+- Appoint and remove trusted users.
+- Override quorum decisions in emergencies (with audit and stated reason).
+- Reserve certain decisions to administrator only (marked explicitly).
+
+The administrator should not:
+
+- Routinely override quorum decisions on individual moderation cases.
+- Punish moderators for good-faith decisions the administrator disagrees with.
+- Curate every moderation queue personally (defeats the purpose).
+
+## 19.8 Public modlog
 
 Publish redacted decision summaries, not private evidence.
 
-Do not expose:
+Do not expose hidden pseud linkage, private messages, child-related evidence, reporter identity, source credentials, sensitive search or reading history, positivity classifier scores.
 
-- Hidden pseud linkage.
-- Private messages.
-- Child-related evidence.
-- Reporter identity.
-- Source credentials.
-- Sensitive search or reading history.
+## 19.9 Community feedback on moderation process
 
-## 18.8 Community feedback on moderation process
+Process feedback, not popularity-based verdicts.
 
-Adopt process feedback, not popularity-based verdicts.
+Eligible participants assess redacted decision summaries for clarity, consistency with published policy, procedural fairness, adequacy of explanation.
 
-Allow eligible participants to assess redacted decision summaries for:
+Optional participation, aggregation thresholds, anti-brigading controls, no disclosure of private case evidence, no automatic reversal or punishment, no public moderator popularity leaderboard, independent review of persistent process concerns.
 
-- Clarity.
-- Consistency with published policy.
-- Procedural fairness.
-- Adequacy of explanation.
-
-Requirements:
-
-- Optional participation.
-- Aggregation thresholds.
-- Anti-brigading controls.
-- No disclosure of private case evidence.
-- No automatic reversal or punishment.
-- No public moderator popularity leaderboard.
-- Independent review of persistent process concerns.
-
-Feedback is not a substitute for appeals and must be labeled as participant opinion, not a factual finding about the case.
+Feedback is not a substitute for appeals and is labeled as participant opinion.
 
 ## Acceptance
 
@@ -2806,14 +1987,18 @@ Feedback is not a substitute for appeals and must be labeled as participant opin
 - Public summaries are redacted.
 - Process feedback cannot directly impose sanctions.
 - Financial activity has no effect on eligibility.
+- Bootstrap-to-community transition is auditable.
+- Administrator overrides are logged with reason.
 
 ---
 
-# 19. Milestone 14: Credits, Fair Queues, Bounties, and Billing
+# 20. Milestone 15: Credits, Fair Queues, Bounties, and Billing
 
-## 19.1 Ledger
+Priority 8 is centered here, but revenue is a foundational operating requirement.
 
-Use balanced entries, not balance mutation without history.
+## 20.1 Ledger
+
+Balanced entries, not balance mutation without history.
 
 ```text
 transaction_id
@@ -2824,43 +2009,31 @@ entries[]
 created_at
 ```
 
-Separate:
+Separate earned credits, subscription grants, purchased credits (if enabled), held credits. Balances transactional or derived from verified cached totals.
 
-- Earned credits.
-- Subscription grants.
-- Purchased credits, if enabled.
-- Held credits.
-
-Balances are transactional or derived from verified cached totals.
-
-## 19.2 Job charging
+## 20.2 Job charging
 
 ```text
-quote
-→ reserve
-→ submit
-→ complete
-→ capture actual charge
+quote → reserve → submit → complete → capture actual charge
 ```
 
-Failure:
+Failure: release hold or apply documented partial charge.
 
-```text
-release hold or apply documented partial charge
-```
+Quotes cover batch imports, device delivery, conversion, translation, AI features.
 
-Quotes cover batch imports, device delivery, conversion, and AI where applicable.
-
-## 19.3 Initial economy
+## 20.3 Initial credit economy
 
 | Action | Credits |
 |---|---:|
-| Daily regeneration | 10, capped regenerated balance |
-| First publication | 20, once and abuse-reviewed |
+| Daily regeneration | 10, capped |
+| First publication | 20, once, abuse-reviewed |
 | Accepted challenge completion | 10, monthly cap |
-| Reviewed mentorship | 10, monthly cap |
-| Recognized constructive review | 2, strict caps |
-| Reviewed governance contribution | 5 per approved batch, not per sanction |
+| Reviewed mentorship or beta-reading | 10, monthly cap |
+| Recognized constructive feedback (opted-in author) | 2, strict caps |
+| Reviewed governance contribution | 5 per approved batch |
+| Fulfilled wishlist item | 15 |
+| Cross-posting a work | 3 |
+| Approved translation contribution | 5 per chapter |
 
 Do not reward raw reading surveillance, posting volume, sanctions issued, or positive star ratings.
 
@@ -2870,50 +2043,55 @@ Do not reward raw reading surveillance, posting volume, sanctions issued, or pos
 | Additional 20-chapter batch | 1 |
 | EPUB/HTML/text/Markdown priority | 1 |
 | PDF/AZW3/MOBI priority | 3 |
+| Send-to-Kindle delivery | 2 |
+| Author bibliography batch import | 5 base + 1 per 10 works |
+| Author watch (per watched author per month) | 2 |
 | Background report | 5 |
-| AI | Explicit estimate |
+| AI translation | Explicit estimate per word count |
+| AI summarization | Explicit estimate |
+| AI comment classification (per author, monthly quota) | Included with subscription tiers |
+| Extension execution beyond free ceiling | Variable per plugin |
 
 Standard jobs remain free within fair-use limits.
 
-## 19.4 Scheduling
+## 20.4 Scheduling
 
-Use weighted queues with aging.
+Weighted queues with aging. Reserve capacity for standard jobs. Paid demand must not starve free users.
 
-Reserve capacity for standard jobs. Paid demand must not starve free users.
+Separate resource classes: a large converter cannot block all small imports; a translation job cannot block all imports.
 
-Maintain separate resource classes so a large converter cannot block all small imports.
-
-## 19.5 Bounties
+## 20.5 Bounties
 
 ```text
 funded → claimed → submitted → accepted → paid
 ```
 
-Alternatives:
-
-```text
-expired | disputed | refunded | canceled
-```
+Alternatives: `expired | disputed | refunded | canceled`.
 
 Define deadlines, evidence, disputes, and acceptance authority before enabling transfers.
 
-## 19.6 Billing
+Wishlist items may optionally be funded with a bounty. Non-funded wishlist items remain valid.
+
+## 20.6 Subscriptions
 
 Optional configurable reference plans:
 
-- Supporter: €3/month.
-- Creator: €8/month.
-- Patron: €15/month.
+- **Reader:** €3/month. Higher credit regeneration, larger download quotas, AI translation quota, ad-free supporter status.
+- **Author:** €6/month. All Reader benefits plus larger publishing quotas, priority queue slots, AI-assisted comment classification for own works, cross-posting quota.
+- **Curator:** €12/month. All Author benefits plus larger extension resource ceilings, priority marketplace review, larger batch import quotas.
+- **Patron:** €25/month. All Curator benefits plus custom recognition, direct support channel.
 
-No unlimited compute, purchased trust, or search-ranking advantage.
+No unlimited compute, no purchased trust, no search-ranking advantage, no moderation authority, no positivity filter bypass.
 
-Webhook handling:
+## 20.7 Marketplace revenue
 
-- Signature verification.
-- Event-ID storage.
-- Idempotency.
-- Out-of-order handling.
-- Reconciliation.
+Paid extensions and themes (Milestone 16) generate revenue split with developers. Configurable reference split of 85/15 (developer/platform). Operator handles tax and invoicing setup.
+
+Marketplace ratings and reviews do not affect account trust. Popular extensions do not receive preferential trust or moderation authority.
+
+## 20.8 Webhook handling
+
+Signature verification, event-ID storage, idempotency, out-of-order handling, reconciliation.
 
 ## Acceptance
 
@@ -2923,12 +2101,16 @@ Webhook handling:
 - Standard jobs execute under paid load.
 - Billing-disabled operation retains the core archive.
 - Credits and monetary marketplace revenue remain distinct ledgers.
+- Subscription tiers do not grant ranking, trust, or moderation authority.
+- Wishlist bounties escrow correctly.
 
 ---
 
-# 20. Milestone 15: Marketplace, Extension Isolation, and Gallery Mechanics
+# 21. Milestone 16: Marketplace, Extension Isolation, and Gallery Mechanics
 
-## 20.1 Manifest
+Priority 1 (customization) is centered here.
+
+## 21.1 Manifest
 
 ```text
 id
@@ -2941,137 +2123,83 @@ resource_limits
 supported_surfaces
 license
 network_allowlist
+pricing (free | paid)
 ```
 
-## 20.2 Categories
+## 21.2 Categories
 
 - Reader widgets.
 - Dashboard widgets.
-- Themes.
+- Themes and layout presets.
 - Recommendation engines.
 - Declarative recipes.
 - Search helpers.
 - Writing tools.
 - Challenge variants.
+- Positivity filter rules extensions.
+- Mood tag extensions.
 - Integrations.
 
-## 20.3 Capabilities
+## 21.3 Capabilities
 
-Examples:
+Examples: public metadata, selected preferences, user-selected draft, approved network domains, specific widget slots, mood classification, comment classification suggestions (never final classification without moderator review).
 
-- Public metadata.
-- Selected preferences.
-- User-selected draft.
-- Approved network domains.
-- Specific widget slots.
+No implicit access to all drafts, messages, hidden pseud linkage, administrator taste profiles, arbitrary network destinations, source credentials, private feedback queues.
 
-No implicit access to:
-
-- All drafts.
-- Messages.
-- Hidden pseud linkage.
-- Administrator taste profiles.
-- Arbitrary network destinations.
-- Source credentials.
-
-Source-authentication secrets stay inside the host’s approved integration pathway.
-
-## 20.4 WASM execution
+## 21.4 WASM execution
 
 Use `wasmi` initially.
 
-Enforce:
+Enforce fuel, memory ceilings, output limits, host-call limits, bounded concurrency, process isolation where practical, worker termination for hard wall-clock limits, host-I/O timeouts.
 
-- Fuel.
-- Memory ceilings.
-- Output limits.
-- Host-call limits.
-- Bounded concurrency.
-- Process isolation where practical.
-- Worker termination for hard wall-clock limits.
-- Host-I/O timeouts.
-
-Trust changes resource ceilings, not permissions.
+Trust and subscription tiers change resource ceilings, not permissions.
 
 Reference memory tiers:
 
 ```text
-TL0 16 MiB
-TL1 24 MiB
-TL2 32 MiB
-TL3 48 MiB
-TL4 64 MiB
-TL5 96 MiB
-TL6 128 MiB
+TL0 free 16 MiB
+TL1 free 24 MiB
+TL2 free 32 MiB
+TL3 free 48 MiB
+TL4 free 64 MiB
+TL5 free 96 MiB
+TL6 free 128 MiB
+
+Reader subscription: +16 MiB
+Author subscription: +32 MiB
+Curator subscription: +64 MiB
 ```
 
-Benchmark fuel rather than assuming a direct milliseconds conversion.
+Benchmark fuel rather than assuming direct milliseconds conversion.
 
-## 20.5 Review workflow
+## 21.5 Review workflow
 
 ```text
-submitted
-→ automated checks
-→ permission review
-→ security review
-→ independent approval
-→ published
+submitted → automated checks → permission review → security review
+→ independent quorum approval → published
 ```
 
-New permissions require renewed user consent.
+New permissions require renewed user consent. Provide emergency revocation and rollback.
 
-Provide emergency revocation and rollback.
+Free extensions and paid extensions follow the same review process. Paid status never bypasses security review.
 
-## 20.6 Gallery mechanics
+## 21.6 Gallery mechanics
 
-Support:
-
-- Idempotent installation.
-- One active installation per package and pseud scope unless explicitly designed otherwise.
-- Version pinning and update policy.
-- Uninstall.
-- Optional star rating and written review.
-- Review reporting.
-- Install counts with documented semantics.
-- Remix/fork lineage.
-- License compatibility checks.
-- Attribution preservation.
+Idempotent installation, one active installation per package and pseud scope unless explicitly designed otherwise, version pinning and update policy, uninstall, optional star rating and written review (subject to positivity filter for extension developers), review reporting, install counts with documented semantics, remix/fork lineage, license compatibility checks, attribution preservation.
 
 Forking does not bypass review or copy user grants.
 
 Do not inflate install counts through reinstalls or expose individual installation histories publicly.
 
-Marketplace ratings do not affect account trust.
+## 21.7 Themes and layout safety
 
-## 20.7 Themes and layout safety
+Tokens, constrained layout slots, scoped styling. Preview, reset, safe mode, accessibility checks, protected security and recovery controls, no arbitrary JavaScript disguised as styling, no uncontrolled remote-resource loading through CSS.
 
-Use tokens, constrained layout slots, and scoped styling.
+Themes cannot hide the positivity filter status, the feedback delivery mechanism, safety controls, or the extension management interface.
 
-Provide:
+## 21.8 Paid marketplace
 
-- Preview.
-- Reset.
-- Safe mode.
-- Accessibility checks.
-- Protected security and recovery controls.
-- No arbitrary JavaScript disguised as styling.
-- No uncontrolled remote-resource loading through CSS.
-
-Modern and archive presets are first-party themes over the same functional surfaces.
-
-## 20.8 Paid marketplace
-
-Separate from credits:
-
-- Purchases.
-- Entitlements.
-- Refunds.
-- Developer revenue accounting.
-- Optional processor-backed payouts.
-- Configurable reference split of 85/15.
-- Operator tax/invoicing setup.
-
-Paid status never bypasses security review.
+Separate from credits: purchases, entitlements, refunds, developer revenue accounting, optional processor-backed payouts, configurable reference split of 85/15, operator tax/invoicing setup.
 
 ## Acceptance
 
@@ -3083,169 +2211,27 @@ Paid status never bypasses security review.
 - Reset remains accessible after a broken theme.
 - Forks preserve attribution and request their own grants.
 - Custom engines and recipes honor opt-out.
+- Extension reviews subject to the same positivity filter as work reviews.
+- Subscription tier changes affect resource ceilings without opening new permissions.
 
 ---
 
-# 21. Milestone 16: Public API, Bots, Feeds, Push, Federation, and AI
+# 22. Milestone 17: Translation Pipeline
 
-## 21.1 Public developer API
+Priority 7 is centered here.
 
-The application API is a documented supported interface, not merely an internal frontend detail.
+## 22.1 Scope
 
-Deliver:
+Two layers:
 
-- OpenAPI specification.
-- Interactive documentation.
-- Scoped tokens.
-- Explicit acting pseud.
-- Cursor pagination.
-- Rate-limit documentation and response headers.
-- Idempotency conventions.
-- Versioning and deprecation policy.
-- Example clients.
-- Error-code reference.
-- Security reporting guidance.
+1. **Interface translation:** all UI chrome, help text, error messages, documentation. Human-reviewed message catalogs. Established in Milestone 1.
+2. **Content translation:** works, comments, forum posts, summaries, tags. On-demand AI with human review queue.
 
-Publish only supported endpoints. Administrative and experimental APIs are marked separately.
-
-Third-party tools receive the same authorization, content, privacy, and rate-limit checks as the frontend.
-
-## 21.2 Chat bots as thin REST clients
-
-Provide a bot-client framework and reference adapters for:
-
-- Discord.
-- Telegram.
-- Matrix.
-
-Each adapter gets separate fixture and live-verification status.
-
-Supported initial actions:
-
-- Search eligible public works.
-- Fetch public metadata.
-- Start an authorized private import.
-- Check job status.
-- Request a permitted export.
-- Save a bookmark.
-- Return a link to continue on Lorehaven.
-
-Linking:
+## 22.2 Content translation flow
 
 ```text
-bot issues short-lived linking challenge
-→ user opens Lorehaven
-→ signs in on Lorehaven only
-→ selects pseud and scopes
-→ confirms
-→ bot receives revocable limited authorization
-```
-
-Bots never receive the user’s Lorehaven password.
-
-Security:
-
-- Tokens stored securely by the bot deployment.
-- No private library results posted to public channels.
-- Private actions require private delivery or a Lorehaven link.
-- Destination/channel context checked before every response.
-- Revocation and unlinking.
-- Explicit disclosure that the chat provider receives submitted messages.
-
-A bot is a separate client, not a privileged path around application policy.
-
-## 21.3 Notifications
-
-```text
-domain event
-→ notification eligibility
-→ in-app record
-→ optional email/push job
-```
-
-Apply privacy and rating restrictions before generating text and again where necessary before delayed delivery.
-
-Support mention alerts, replies, source-update notices, credential expiry, batch completion, digests, and delivery failures.
-
-## 21.4 Push
-
-- Request permission after relevant user action.
-- Store subscriptions per device.
-- Remove invalid subscriptions.
-- Generic lock-screen text by default.
-- Best-effort delivery.
-- No sensitive excerpts by default.
-
-## 21.5 RSS, Atom, and OPDS
-
-Provide:
-
-- Public feeds.
-- Scoped revocable private feeds.
-- OPDS catalogs with eligible download links.
-- Documented token rotation and revocation.
-
-Never log private feed tokens.
-
-Private feed URLs are bearer secrets and require explicit disclosure.
-
-## 21.6 ActivityPub
-
-Initial scope:
-
-- Public opted-in pseud actors.
-- Follow/unfollow.
-- Work announcements.
-- Updates.
-- Deletion notices.
-
-Implement:
-
-- Signature verification.
-- Retry.
-- Replay and abuse controls.
-- SSRF defenses.
-- Remote actor cache.
-- Instance blocks.
-- Opt-out and deletion documentation.
-
-Do not federate private imports, reading history, hidden account linkage, or private ratings.
-
-Explain that remote copies may persist after a deletion notice.
-
-## 21.7 AI provider interface
-
-Tasks:
-
-- Summarization.
-- Translation.
-- Grammar assistance.
-- Prompt assistance.
-- Embeddings.
-- Optional metadata suggestions.
-
-Requirements:
-
-- Disabled without configuration.
-- Explicit private-text consent.
-- Quoted costs.
-- Cancellation.
-- No automatic publication.
-- Generated output distinguished from author text.
-- Same permissions and exclusions as ordinary search.
-- Provider-specific retention and data-use disclosure.
-
-## 21.8 Translation review
-
-Translation states:
-
-```text
-requested
-→ generated/imported
-→ private draft
-→ submitted for review
-→ changes_requested/approved/rejected
-→ published
+requested → generated/imported → private draft
+→ submitted for review → changes_requested/approved/rejected → published
 ```
 
 Requirements:
@@ -3259,9 +2245,135 @@ Requirements:
 - Source updates mark potentially stale translations.
 - Publication requires permission and authorized approval.
 
-A curator’s approval is a quality/workflow decision, not a grant of copyright permission.
+A curator's approval is a quality/workflow decision, not a grant of copyright permission.
 
-Private reader translations need not enter a public review queue unless the user submits them.
+## 22.3 Cost model
+
+Content translation costs credits per word. Reader subscription tier includes a monthly translation quota. Costs quoted before job submission with cancellation option.
+
+Reader-initiated private translation (translating for personal reading only) uses a lighter workflow but still costs credits and respects permission. Private translations are never published without going through the review workflow.
+
+## 22.4 Permission handling
+
+Author of the original work controls whether translations may be published on Lorehaven. Options:
+
+- No translation.
+- Translation with author approval required.
+- Translation permitted, review by community only.
+- Translation permitted, machine-translated versions marked as such.
+
+Imported works follow the original source's stated permission where available. Ambiguous cases default to review-required.
+
+## 22.5 AI overrides human
+
+Human translations always take precedence over AI translations of the same work in the same language. When a human translation exists, AI translation is disabled for that work-language pair unless explicitly requested for comparison.
+
+## 22.6 Machine-translation labeling
+
+Machine-translated content is clearly labeled at the work level, chapter level, and in metadata. Original language is preserved and always accessible. Machine translations do not replace the original.
+
+## 22.7 Translation of comments and forum posts
+
+Optional per-user setting: "Translate comments in languages I don't read." Uses cached translations shared across readers to reduce cost. Does not create a public "translated comment" — the translation is a rendering, not stored as a work.
+
+## 22.8 Translation incentives
+
+Human translators receive credits for approved translations (Milestone 15). Translators appear in the people directory as translators. Translation quality contributes to their reliability trust signal.
+
+## 22.9 Translation search
+
+Readers can search across all languages, filtered to their preferred reading languages. Translated works appear alongside originals with clear labeling. Search-language settings independent from interface-language settings.
+
+## Acceptance
+
+- Interface fully translated in initial locales.
+- Content translation requires explicit request and permission check.
+- Cost quoted before submission.
+- Human translation cannot be silently replaced by AI.
+- Machine translation labeled in every surface.
+- Translation review does not grant copyright permission.
+- Private reader translations do not become public without explicit publication.
+- Translator credit awards are auditable.
+
+---
+
+# 23. Milestone 18: Public API, Bots, Feeds, Push, Federation, and AI Providers
+
+## 23.1 Public developer API
+
+The application API is a supported interface, not an internal detail.
+
+Deliver: OpenAPI specification, interactive documentation, scoped tokens, explicit acting pseud, cursor pagination, rate-limit documentation and response headers, idempotency conventions, versioning and deprecation policy, example clients, error-code reference, security reporting guidance.
+
+Publish only supported endpoints. Administrative and experimental APIs are marked separately.
+
+Third-party tools receive the same authorization, content, privacy, and rate-limit checks as the frontend.
+
+## 23.2 Chat bots as thin REST clients
+
+Bot-client framework and reference adapters for Discord, Telegram, Matrix.
+
+Each adapter gets separate fixture and live-verification status.
+
+Supported initial actions: search eligible public works, fetch public metadata, start an authorized private import, check job status, request a permitted export, save a bookmark, return a link to continue on Lorehaven, send appreciation to authors.
+
+Linking:
+
+```text
+bot issues short-lived linking challenge → user opens Lorehaven
+→ signs in on Lorehaven only → selects pseud and scopes → confirms
+→ bot receives revocable limited authorization
+```
+
+Bots never receive the user's Lorehaven password.
+
+Security: tokens stored securely by the bot deployment, no private library results in public channels, private actions require private delivery or Lorehaven link, destination/channel context checked before every response, revocation and unlinking, explicit disclosure that the chat provider receives submitted messages.
+
+## 23.3 Notifications
+
+```text
+domain event → notification eligibility → in-app record → optional email/push job
+```
+
+Apply privacy, rating, and positivity restrictions before generating text and again where necessary before delayed delivery.
+
+Support: mention alerts, replies (positive only by default), source-update notices, credential expiry, batch completion, digests, delivery failures, positive feedback received, cheer received, wishlist fulfillment.
+
+## 23.4 Push
+
+Request permission after relevant user action, store subscriptions per device, remove invalid subscriptions, generic lock-screen text by default, best-effort delivery, no sensitive excerpts by default.
+
+## 23.5 RSS, Atom, and OPDS
+
+Public feeds, scoped revocable private feeds, OPDS catalogs with eligible download links, documented token rotation and revocation.
+
+Never log private feed tokens. Private feed URLs are bearer secrets and require explicit disclosure.
+
+## 23.6 ActivityPub
+
+Initial scope: public opted-in pseud actors, follow/unfollow, work announcements, updates, deletion notices.
+
+Signature verification, retry, replay and abuse controls, SSRF defenses, remote actor cache, instance blocks, opt-out and deletion documentation.
+
+Do not federate private imports, reading history, hidden account linkage, private ratings, or held comments.
+
+Explain that remote copies may persist after deletion notice.
+
+## 23.7 AI provider interface
+
+Tasks: translation, summarization, grammar assistance, prompt assistance, embeddings, optional metadata suggestions, comment classification.
+
+Requirements: disabled without configuration, explicit private-text consent, quoted costs, cancellation, no automatic publication, generated output distinguished from author text, same permissions and exclusions as ordinary search, provider-specific retention and data-use disclosure.
+
+Multiple provider adapters supported. Administrator selects providers per task. Users may opt out of specific providers.
+
+## 23.8 Fic trailers, mood boards, and rich sharing
+
+Authors create visual/aesthetic pages for their works: images, playlists, quotes. Displayed as an optional tab on the work page.
+
+Open Graph, Twitter/X cards, and embed previews for every public work URL with title, author, summary, fandom, cover image.
+
+Cover images use content-addressed storage, permission checks, and size limits.
 
 ## Acceptance
 
@@ -3269,15 +2381,16 @@ Private reader translations need not enter a public review queue unless the user
 - Token revocation affects bots promptly.
 - Public channels never receive private results through fallback behavior.
 - Feed restrictions match reader restrictions.
-- Delayed notifications recheck access.
+- Delayed notifications recheck access and positivity.
 - AI-disabled operation remains complete.
-- Translation approval cannot silently publish an unauthorized derivative work.
+- Federation does not leak held comments.
+- Sharing cards render for public eligible works only.
 
 ---
 
-# 22. Milestone 17: Administration, Statistics, Abuse Defense, Privacy, and Operations
+# 24. Milestone 19: Administration, Statistics, Abuse Defense, Privacy, and Operations
 
-## 22.1 Administration routes
+## 24.1 Administration routes
 
 ```text
 /admin
@@ -3290,6 +2403,7 @@ Private reader translations need not enter a public review queue unless the user
 /admin/jobs
 /admin/storage
 /admin/metadata
+/admin/positivity
 /admin/translations
 /admin/billing
 /admin/extensions
@@ -3299,28 +2413,16 @@ Private reader translations need not enter a public review queue unless the user
 /admin/audit
 /admin/health
 /admin/backups
+/admin/quorum
 ```
 
-Show:
-
-- Memory and disk pressure.
-- Job backlog.
-- Failed imports.
-- Source incidents.
-- Converter availability.
-- Backup age.
-- Moderation backlog.
-- Database health.
-- Integration status.
-- Search index lag.
-- Credential-expiry counts without secret details.
-- Retention and deletion backlog.
+Show memory and disk pressure, job backlog, failed imports, source incidents, converter availability, backup age, moderation backlog, positivity queue depth, translation queue depth, database health, integration status, search index lag, credential-expiry counts without secret details, retention and deletion backlog.
 
 Ordinary dashboards do not expose individual reading histories.
 
-## 22.2 Public statistics
+## 24.2 Public statistics
 
-Provide `/stats` with eligible aggregate metrics such as:
+Provide `/stats` with eligible aggregate metrics:
 
 - Public works.
 - Public chapters and words.
@@ -3328,206 +2430,89 @@ Provide `/stats` with eligible aggregate metrics such as:
 - Public appreciation counts.
 - Explicitly public bookmark counts.
 - Aggregate eligible views.
-- Active public contributors, under a documented definition.
+- Active public contributors (documented definition).
 - Source support status and public incidents.
+- Positive feedback delivered (aggregate).
+- Translation coverage by language.
 
-Do not count private imports as public archive holdings.
+Do not count private imports as public archive holdings. Public "works read" metrics require separately permitted aggregate input, cohort suppression, clear definitions.
 
-Public “works read” metrics, if enabled, require separately permitted aggregate input, cohort suppression, and clear definitions. They are not derived silently from private history.
+Each metric documents definition, refresh interval, coverage, exclusions, approximation, retention. Suppress small or sensitive cohorts.
 
-Each metric documents:
+## 24.3 Privacy-preserving usage analytics
 
-- Definition.
-- Refresh interval.
-- Coverage.
-- Exclusions.
-- Approximation.
-- Retention.
+First-party aggregate analytics without third-party tracking by default.
 
-Suppress small or sensitive cohorts.
+Separate product metrics, security logs, personal reading statistics, recommendation learning.
 
-## 22.3 Privacy-preserving usage analytics
+Potential metrics: approximate DAU/WAU/MAU, active versus view-only sessions, aggregate action timelines, import success rate, search success rate, export completion, offline-download failures, positivity filter accuracy metrics, translation completion rates.
 
-Use first-party aggregate analytics without third-party tracking by default.
+Rules: do not call IP addresses or persistent identifiers "non-PII", avoid cross-site identifiers and browser fingerprinting, use short-lived or rotating identifiers where needed, establish applicable legal basis, apply consent where required, document estimation limits, never retain raw search queries or reading paths merely to produce broad counts.
 
-Separate:
-
-- Product metrics.
-- Security logs.
-- Personal reading statistics.
-- Recommendation learning.
-
-Potential metrics:
-
-- Approximate daily/weekly/monthly visitors.
-- Active versus view-only sessions.
-- Aggregate action timelines.
-- Import success rate.
-- Search success rate.
-- Export completion.
-- Offline-download failures.
-
-Rules:
-
-- Do not call IP addresses or persistent identifiers “non-PII.”
-- Avoid cross-site identifiers and browser fingerprinting.
-- Use short-lived or rotating identifiers where needed.
-- Establish the applicable legal basis.
-- Apply consent where required.
-- Document estimation limits.
-- Never retain raw search queries or reading paths merely to produce broad counts.
-
-Anonymous visitor estimates must not be presented as exact people counts.
-
-## 22.4 Abuse dashboard
+## 24.4 Abuse dashboard
 
 Restrict detailed security telemetry to authorized security staff.
 
-Show:
+Show request bursts, failed-authentication bursts, expensive-operation rates, export-to-request ratios, source-domain pressure, repeated limit violations, temporary mitigations and expiry, repeated held-comment authors, extension resource abusers.
 
-- Request bursts.
-- Failed-authentication bursts.
-- Expensive-operation rates.
-- Export-to-request ratios.
-- Source-domain pressure.
-- Repeated limit violations.
-- Temporary mitigations and expiry.
+IP addresses and related identifiers are personal/security data: short retention, access audit, masked ordinary display, justified reveal, no public leaderboard of addresses.
 
-IP addresses and related identifiers are personal/security data:
+## 24.5 Layered abuse defense
 
-- Short retention.
-- Access audit.
-- Masked ordinary display.
-- Justified reveal.
-- No public leaderboard of addresses.
+Required baseline: resource-specific rate limits, account/client/network layers, concurrency limits, upload and extraction limits, session and token controls, source throttling, anomaly alerts.
 
-## 22.5 Layered abuse defense
-
-Required baseline:
-
-- Resource-specific rate limits.
-- Account/client/network layers.
-- Concurrency limits.
-- Upload and extraction limits.
-- Session and token controls.
-- Source throttling.
-- Anomaly alerts.
-
-Optional escalating controls:
-
-- Accessible honeypots.
-- Form-timing signals.
-- Targeted proof-of-work with strict device budgets.
-- Targeted browser challenges.
-- Manual review or alternative verification.
+Optional escalating controls: accessible honeypots, form-timing signals, targeted proof-of-work with strict device budgets, targeted browser challenges, manual review or alternative verification.
 
 These signals must not alone establish abuse.
 
-Do not:
-
-- Block solely because JavaScript is disabled.
-- Treat assistive technology as automation.
-- Blanket-block headless browsers.
-- Require expensive proof-of-work for ordinary reading.
-- Penalize shared NAT users through a single narrow global IP bucket.
-- Use invasive fingerprinting by default.
+Do not: block solely because JavaScript is disabled, treat assistive technology as automation, blanket-block headless browsers, require expensive proof-of-work for ordinary reading, penalize shared NAT users through a single narrow global IP bucket, use invasive fingerprinting by default.
 
 Every challenge needs an accessible fallback and a way to recover from false positives.
 
-## 22.6 Data export
+## 24.6 Data export
 
-Export:
+Export account settings, pseuds, authored works, private library metadata, permitted private content copies, bookmarks and notes, ratings and reviews, history and personal statistics, saved views and recipes, relevant messages, credit history, consent and authorization records, extension installations, watches.
 
-- Account settings.
-- Pseuds.
-- Authored works.
-- Private library metadata.
-- Permitted private content copies.
-- Bookmarks and notes.
-- Ratings and reviews.
-- History and personal statistics.
-- Saved views and recipes.
-- Relevant messages.
-- Credit history.
-- Consent and authorization records.
-
-Exclude plaintext source credentials, active session secrets, API tokens, and private feed tokens.
+Exclude plaintext source credentials, active session secrets, API tokens, private feed tokens.
 
 Use a job and expiring authenticated download.
 
-## 22.7 Deletion
+## 24.7 Deletion
 
-Distinguish:
-
-- Account.
-- Pseud.
-- Work.
-- Eligible work orphaning.
-- Private library copy.
-- Source credential.
-- History.
-- Rating/review.
-- Integration authorization.
-- Local offline data.
+Distinguish account, pseud, work, eligible work orphaning, private library copy, source credential, history, rating/review, integration authorization, local offline data, extension purchase.
 
 Document retention exceptions and backup expiry.
 
-Deletion propagates to:
-
-- Search indexes.
-- Recommendation signals.
-- Caches.
-- Pending notifications.
-- Derived personal statistics.
-- Blob references.
-- Integration grants.
+Deletion propagates to search indexes, recommendation signals, caches, pending notifications, derived personal statistics, blob references, integration grants, held comments authored by the deleted account.
 
 Shared physical blobs remain only while valid references or documented cache retention justify them.
 
-## 22.8 Backups
+## 24.8 Backups
 
-SQLite:
+SQLite: backup API or consistent snapshot. Do not copy only the main live database while ignoring WAL state.
 
-- Use the backup API or a consistent snapshot.
-- Do not copy only the main live database while ignoring WAL state.
+PostgreSQL: supported backup tooling, file-storage consistency strategy.
 
-PostgreSQL:
-
-- Supported backup tooling.
-- File-storage consistency strategy.
-
-Include encrypted-secret recovery planning. Operators must understand whether restoring a database without its encryption keys makes source credentials unrecoverable.
+Include encrypted-secret recovery planning. Operators must understand whether restoring a database without encryption keys makes source credentials unrecoverable.
 
 Restore tests read restored works and validate private-library authorization.
 
-## 22.9 Upgrades
+## 24.9 Upgrades
 
 ```text
-check compatibility
-→ maintenance/coordination
-→ backup
-→ install verified executable
-→ migrate
-→ health check
-→ resume
+check compatibility → maintenance/coordination → backup
+→ install verified executable → migrate → health check → resume
 ```
 
 Do not assume replacing the binary reverses migrations.
 
-Include:
-
-- Database schema compatibility.
-- Search reindex requirements.
-- IndexedDB migration compatibility.
-- Extension host API compatibility.
-- Recipe/query AST migration.
-- Encryption-key version support.
+Include database schema compatibility, search reindex requirements, IndexedDB migration compatibility, extension host API compatibility, recipe/query AST migration, encryption-key version support, positivity classifier version compatibility.
 
 ---
 
-# 23. Milestone 18: Hardening and Release
+# 25. Milestone 20: Hardening and Release
 
-## 23.1 Functional browser journeys
+## 25.1 Functional browser journeys
 
 Automate:
 
@@ -3535,135 +2520,77 @@ Automate:
 2. Import → update → bookmark → export.
 3. Add source credential → import → expire → renew.
 4. Bibliography preview → partial batch → restart → resume.
-5. Preservation dry run → review → approved publication.
-6. Download → disconnect → read offline.
-7. Rate privately → publish review → verify visibility.
-8. Record history → pause → clear.
-9. Search bound character attribute → exclude ship.
-10. Search private body phrase → verify no cross-user leakage.
-11. Save query → pin view → migrate query version.
-12. Change engine → install recipe → opt out.
-13. Forum read state → mention → digest → reconnect.
-14. Report → quorum → appeal.
-15. Earn credits → reserve → capture/refund.
-16. Install extension → deny permission → fork → uninstall.
-17. Link bot → import privately → revoke.
-18. Export account → delete account.
-19. Backup → restore to a clean instance.
-20. Complete critical journeys in both initial locales.
+5. Add author watch → new work appears → import.
+6. Preservation dry run → review → approved publication.
+7. Cross-post a work → verify destination.
+8. Download → disconnect → read offline.
+9. Rate privately → publish review → verify visibility.
+10. Record history → pause → clear.
+11. Search bound character attribute → exclude ship → filter by mood.
+12. Search private body phrase → verify no cross-user leakage.
+13. Save query → pin view → migrate query version.
+14. Change engine → install recipe → opt out.
+15. Post positive comment → verify delivery.
+16. Post negative comment → verify held → moderator review → decision.
+17. Author opts in to critique → constructive comment → delivered.
+18. Forum read state → mention → digest → reconnect.
+19. Report → quorum → appeal.
+20. Earn credits → reserve → capture/refund.
+21. Request AI translation → cost quote → review → publish.
+22. Install extension → deny permission → fork → uninstall.
+23. Install paid extension → verify entitlement.
+24. Link bot → import privately → revoke.
+25. Subscribe → verify quota changes → cancel.
+26. Wishlist item → claim → fulfill.
+27. Export account → delete account.
+28. Backup → restore to a clean instance.
+29. Complete critical journeys in both initial locales.
 
-## 23.2 Security tests
+## 25.2 Security tests
 
-Cover:
+Cover stored XSS, CSRF, SSRF and DNS rebinding, credential forwarding across redirects, file traversal, malicious archives and decompression bombs, object-level authorization, pseud isolation, search snippet and count leakage, shared-cache existence leakage, session/token revocation, credit races, webhook replay, plugin exhaustion, CSS resource exfiltration, private cache leakage, bot channel-context errors, email relay abuse, feed-token logging, retention and deletion failures, positivity filter bypass attempts, translation permission bypass, extension purchase entitlement bypass.
 
-- Stored XSS.
-- CSRF.
-- SSRF and DNS rebinding.
-- Credential forwarding across redirects.
-- File traversal.
-- Malicious archives and decompression bombs.
-- Object-level authorization.
-- Pseud isolation.
-- Search snippet and count leakage.
-- Shared-cache existence leakage.
-- Session/token revocation.
-- Credit races.
-- Webhook replay.
-- Plugin exhaustion.
-- CSS resource exfiltration.
-- Private cache leakage.
-- Bot channel-context errors.
-- Email relay abuse.
-- Feed-token logging.
-- Retention and deletion failures.
+## 25.3 Accessibility
 
-## 23.3 Accessibility
+Automate what can be automated, then manually test keyboard-only navigation, screen-reader reading and forms, dialogs, editor, reader settings, command palette, dashboard reordering alternatives, query-builder errors, zoom and mobile layouts, reduced motion, contrast, challenge fallback, both appearance presets, comment interface with author feedback preferences.
 
-Automate what can be automated, then manually test:
+## 25.4 Performance
 
-- Keyboard-only navigation.
-- Screen-reader reading and forms.
-- Dialogs.
-- Editor.
-- Reader settings.
-- Command palette.
-- Dashboard reordering alternatives.
-- Query-builder errors.
-- Zoom and mobile layouts.
-- Reduced motion.
-- Contrast.
-- Challenge fallback.
-- Both appearance presets.
+Seed: 10,000 works, 1,000 accounts, realistic chapters and metadata, large works, dense tags, private imports, body-search documents, forum and bookmark activity, batch-import history, translation records, held comments, extension installations.
 
-## 23.4 Performance
+Benchmark idle memory, read latency, metadata and body search, progress writes, concurrent browsing, one heavy conversion, one AI translation, import backlog, bibliography enumeration, search indexing, extension execution, real-time catch-up, positivity classification throughput, disk growth and cache eviction.
 
-Seed:
+Define "100 concurrent users" through a reproducible request mix and think time.
 
-- 10,000 works.
-- 1,000 accounts.
-- Realistic chapters and metadata.
-- Large works.
-- Dense tags.
-- Private imports.
-- Body-search documents.
-- Forum and bookmark activity.
-- Batch-import history.
+Record actual results. If a 1 GB profile fails, reduce budgets or mark the workload unsupported.
 
-Benchmark:
+## 25.5 Platform and integration evidence
 
-- Idle memory.
-- Read latency.
-- Metadata and body search.
-- Progress writes.
-- Concurrent browsing.
-- One heavy conversion.
-- Import backlog.
-- Bibliography enumeration.
-- Search indexing.
-- Extension execution.
-- Real-time catch-up.
-- Disk growth and cache eviction.
-
-Define “100 concurrent users” through a reproducible request mix and think time.
-
-Record actual results. If a 1 GB profile fails, reduce budgets or mark the workload unsupported rather than claiming success.
-
-## 23.5 Platform and integration evidence
-
-Address:
-
-- x86-64.
-- ARM64.
-- SQLite.
-- PostgreSQL.
-- Supported browsers.
-- PWA limitations by browser.
-- Converter versions.
-- SMTP delivery.
-- Each website adapter.
-- Each bot adapter.
-- Federation peers used in tests.
+Address x86-64, ARM64, SQLite, PostgreSQL, supported browsers, PWA limitations by browser, converter versions, SMTP delivery, each website adapter, each bot adapter, each AI provider, federation peers used in tests.
 
 Fixture success is not live verification.
 
 ---
 
-# 24. Route and API Ownership
+# 26. Route and API Ownership
 
 | Surface | Frontend routes | API owner |
 |---|---|---|
-| Discovery | `/`, `/discover`, `/blind-date`, `/dashboard` | discovery |
+| Discovery | `/`, `/discover`, `/blind-date`, `/dashboard`, `/surprise` | discovery |
 | Recipes | `/recipes/*` | discovery/extensions |
 | Search | `/search`, `/search/advanced`, `/find-fic` | search |
 | People | `/people`, `/u/:handle` | identity/content |
 | Reader | `/works/*`, `/series/*` | content/library |
 | Writing | `/write/*` | content |
 | Imports/library | `/library/*` | imports/library |
+| Watches | `/library/watches` | imports/library |
 | Source status | `/sources`, `/sources/:id` | imports |
+| Cross-posting | `/write/:id/cross-post` | imports |
 | Community | `/forum/*`, `/groups/*`, `/messages/*` | community |
-| Events | `/challenges/*`, `/requests/*` | community |
+| Events | `/challenges/*`, `/requests/*`, `/wishlists/*` | community |
+| Translation | `/translations/*` | translation |
 | Governance | `/trust/*`, `/moderation/*`, `/curation/*` | governance |
-| Credits/billing | `/credits/*`, `/billing` | economy |
+| Credits/billing | `/credits/*`, `/billing`, `/subscribe` | economy |
 | Marketplace | `/marketplace/*` | extensions |
 | Help | `/help/*` | app/documentation |
 | Developer API | `/developers/*`, `/api/v1/*` | relevant module |
@@ -3672,28 +2599,13 @@ Fixture success is not live verification.
 | Administration | `/admin/*` | restricted administration |
 | Bot clients | external clients, linking under `/settings/integrations` | integrations |
 
-Generate an endpoint inventory from implemented routes and compare it with requirements in CI.
+Generate an endpoint inventory from implemented routes and compare with requirements in CI.
 
-For every endpoint document:
-
-- Authentication.
-- Acting pseud.
-- Authorization.
-- Request schema.
-- Response schema.
-- Error codes.
-- Rate limits.
-- Idempotency.
-- Privacy classification.
-- Cache policy.
-- Retention implications.
-- Public API stability status.
-
-Bot commands, feeds, and extension host calls must map to documented policies rather than duplicate their own authorization logic.
+For every endpoint document authentication, acting pseud, authorization, request schema, response schema, error codes, rate limits, idempotency, privacy classification, cache policy, retention implications, public API stability status, positivity filter application, credit cost.
 
 ---
 
-# 25. Tutorial Delivery Plan
+# 27. Tutorial Delivery Plan
 
 Each chapter contains:
 
@@ -3714,175 +2626,146 @@ Suggested checkpoints:
 
 ```text
 v0.01-running-app
-v0.02-design-system-i18n-help
+v0.02-design-system-i18n-help-slots
 v0.03-identity
-v0.04-publishing
-v0.05-reader-feedback-history
+v0.04-publishing-feedback-preferences
+v0.05-reader-reactions-history
 v0.06-jobs-storage-secrets
-v0.07-importing-batches-preservation
-v0.08-exports-offline
-v0.09-library-saved-views
-v0.10-search-taxonomy
-v0.11-discovery-recipes-dashboard
-v0.12-community
-v0.13-events
-v0.14-governance
-v0.15-economy
-v0.16-marketplace
-v0.17-integrations
-v0.18-operations
+v0.07-importing-watches-preservation
+v0.08-positivity-filter
+v0.09-exports-offline
+v0.10-library-saved-views
+v0.11-search-taxonomy-mood
+v0.12-discovery-recipes-dashboard
+v0.13-community
+v0.14-events-wishlists
+v0.15-governance
+v0.16-economy
+v0.17-marketplace
+v0.18-translation
+v0.19-integrations
+v0.20-operations
 v1.0-release
 ```
 
-No required functionality is left as “an exercise for the reader.”
-
-The tutorial, contextual help, API documentation, and operator documentation must describe the same implemented behavior.
+The tutorial, contextual help, API documentation, and operator documentation describe the same implemented behavior.
 
 ---
 
-# 26. Final Completion Checklist and Deliberate Exclusions
+# 28. Final Completion Checklist
 
-## 26.1 Core product
+## 28.1 Customization (Priority 1)
 
-- [ ] Authors can create, revise, publish, and complete works.
-- [ ] Readers can read suitable public fiction without unnecessary registration.
-- [ ] Private imports remain private.
-- [ ] Source credentials are encrypted, scoped, revocable, and expiring.
-- [ ] Supported adapters have documented evidence.
-- [ ] Runtime source health is separate from support status.
-- [ ] Bibliography batches resume safely.
-- [ ] Preservation batches retain permission records and attribution.
-- [ ] Cross-source identity does not merge permissions.
-- [ ] Exports are valid.
-- [ ] Device delivery is permission-aware and honestly reported.
-- [ ] Downloaded reading works offline.
-- [ ] Draft conflicts never silently destroy text.
+- [ ] Extension slot architecture from Milestone 1.
+- [ ] Themes and layout presets installable from marketplace.
+- [ ] Recommendation engines and recipes installable.
+- [ ] Widgets composable per pseud.
+- [ ] Extension permissions require user consent.
+- [ ] Paid extensions honor entitlements.
+- [ ] Reset and safe mode work with broken extensions.
 
-## 26.2 Reading and library
+## 28.2 Available fiction (Priority 2)
 
-- [ ] Ratings default to private.
-- [ ] Public reviews require explicit publication.
-- [ ] Private ratings do not enter public aggregates.
-- [ ] History, progress, and learning have separate controls.
-- [ ] Reading metrics are accurately labeled.
-- [ ] Views do not expose visitors.
-- [ ] Saved views can be named, pinned, and migrated.
-- [ ] Shared storage does not reveal private holdings.
-- [ ] Deletion and cache retention behave as documented.
+- [ ] Paste URL, drag file, and raw text import.
+- [ ] Author bibliography batch import.
+- [ ] Author watches.
+- [ ] Cross-posting to external sites.
+- [ ] Preservation batches with attribution.
+- [ ] Source credentials encrypted and scoped.
+- [ ] Runtime source health separate from support status.
+- [ ] Completion rate as quality signal.
+- [ ] Mood/tone search.
+- [ ] Length histogram filter.
+- [ ] Editorial curator picks.
 
-## 26.3 Search and discovery
+## 28.3 Positive feedback (Priority 3)
 
-- [ ] Main/supporting distinctions work.
-- [ ] Character attributes bind correctly.
-- [ ] Negative ship filtering does not remove characters.
-- [ ] Unknown metadata is explicit.
-- [ ] Query syntax and visual filters share one AST.
-- [ ] Body search is permission-safe.
-- [ ] Counts, facets, and snippets do not leak private content.
-- [ ] Exact search remains exact.
-- [ ] Administrator tastes remain private at the data/API level.
-- [ ] Influence updates automatically.
-- [ ] Opt-out works across recommendations, recipes, widgets, prompts, and notifications.
-- [ ] Community similarity is distinct from machine-generated similarity.
-- [ ] Search-demand insights protect sensitive queries.
+- [ ] Positivity filter classifies all author-facing comments.
+- [ ] Destructive comments never reach author without explicit opt-in.
+- [ ] Constructive critique opt-in per work.
+- [ ] Quick reactions bypass filter as pre-classified positive.
+- [ ] Anonymous appreciation notes.
+- [ ] Reading milestone celebrations.
+- [ ] Author feedback preferences per work.
+- [ ] Moderator quorum reviews held comments.
+- [ ] Repeated negativity from an account triggers rate limits.
+- [ ] No public downvote counts or negative review aggregates.
 
-## 26.4 Community and governance
+## 28.4 Admin-enjoyable without monothematic (Priority 4)
 
-- [ ] Pseuds remain compartmentalized.
-- [ ] Forum unread state works.
-- [ ] Mentions and digests honor blocks and visibility.
-- [ ] Real-time delivery has durable catch-up.
-- [ ] Scoped sanctions expire.
-- [ ] Reports, quorum, appeals, and emergency review work.
+- [ ] Admin taste profile drives writing prompts and recommendations.
+- [ ] Diversity budget reserved in recommendations.
+- [ ] Blind-spot suggestions.
+- [ ] Surprise-me mode.
+- [ ] Cross-fandom dynamic matching.
+- [ ] Admin wishlist items appear without ranking advantage.
+- [ ] Temporary taste boosts.
+- [ ] Meaningful opt-out affects all discovery surfaces.
+
+## 28.5 Trust-level self-governance (Priority 5)
+
+- [ ] TL0–TL6 trust levels.
+- [ ] Higher trust grants moderation eligibility.
+- [ ] Bootstrap mode labeled honestly.
+- [ ] Bootstrap-to-community transition workflow.
+- [ ] Administrator override logged with reason.
 - [ ] Trust cannot be purchased.
-- [ ] Process feedback does not become mob adjudication.
-- [ ] Public logs are redacted.
-- [ ] Child-related controls operate server-side.
 
-## 26.5 Economy and extensibility
+## 28.6 Quorum-based moderation (Priority 6)
 
-- [ ] Credits cannot double-spend.
-- [ ] Free queues cannot starve.
-- [ ] Billing can be disabled.
-- [ ] Plugins have bounded execution at every trust level.
-- [ ] Permissions are enforced by the host.
-- [ ] Installation is idempotent.
-- [ ] Forks preserve attribution and undergo review.
-- [ ] Revocation, rollback, uninstall, and safe mode work.
-- [ ] No paid product buys ranking or governance authority.
+- [ ] Two-reviewer minimum for routine curation.
+- [ ] Three-reviewer minimum for high-impact changes.
+- [ ] Appeals exclude original decision-makers.
+- [ ] Positivity classification overrides quorum-reviewed.
+- [ ] Extension approvals require independent quorum.
+- [ ] Process feedback advisory only.
 
-## 26.6 Interface and integrations
+## 28.7 Translation (Priority 7)
 
-- [ ] Modern and archive presets preserve functionality.
-- [ ] Command palette is accessible.
-- [ ] Contextual help links remain valid.
-- [ ] English and Spanish critical journeys are reviewed.
-- [ ] Public API documentation matches implemented endpoints.
-- [ ] Bots store revocable authorization rather than user passwords.
-- [ ] Public channels cannot receive private results accidentally.
-- [ ] Feeds and federation preserve privacy boundaries.
-- [ ] AI is optional and private-text use is explicit.
-- [ ] Translation review does not replace publication permission.
+- [ ] Interface fully translated in initial locales.
+- [ ] Content translation on demand with credit cost.
+- [ ] Human translations override AI translations.
+- [ ] Machine translations clearly labeled.
+- [ ] Author permission per work.
+- [ ] Translator credit awards.
+- [ ] Optional comment translation.
 
-## 26.7 Operations
+## 28.8 Revenue (Priority 8)
 
-- [ ] SQLite and PostgreSQL integration tests pass.
-- [ ] Backups restore usable content and correct permissions.
-- [ ] Upgrades have migration safeguards.
-- [ ] ARM64 and x86-64 builds are addressed.
-- [ ] Resource claims are measured.
-- [ ] Public statistics exclude private holdings.
-- [ ] Analytics definitions and retention are documented.
-- [ ] Abuse controls have accessible fallbacks.
-- [ ] Security telemetry is treated as sensitive data.
-- [ ] Accessibility includes manual verification.
-- [ ] Documentation matches the delivered repository.
+- [ ] Credit ledger with balanced entries.
+- [ ] Free tier retains core functionality.
+- [ ] Subscription tiers grant quota, not authority.
+- [ ] Marketplace revenue split with developers.
+- [ ] Standard queues cannot be starved by paid load.
+- [ ] Wishlist bounties escrow correctly.
+- [ ] Webhook idempotency.
 
-## 26.8 Deliberately not adopted
+## 28.9 Foundational protections
 
-The following FicNexus-style behaviors are excluded or materially constrained:
+- [ ] Private libraries and reading history stay private.
+- [ ] Pseud linkage remains hidden.
+- [ ] Source credentials encrypted and scoped.
+- [ ] Extensions have bounded execution at every level.
+- [ ] Age policy enforced server-side.
+- [ ] Child safety controls operate independently of paid features.
+- [ ] Data export excludes secrets.
+- [ ] Deletion propagates across systems.
+- [ ] Accessibility manually verified.
+- [ ] Documentation matches delivered repository.
 
-### XP and rank-gated core functionality
+## 28.10 Deliberately not adopted
 
-No 100-level progression system, ability tree, or reading/download XP gates.
-
-Widgets, themes, saved views, recipe creation, reading, and publishing are not unlocked through activity grinding.
-
-### Posting-volume reputation
-
-No global or forum-local score that rewards raw posting volume or becomes a proxy for trust.
-
-Use reviewed reliability, scoped expertise, appointed roles, and ordinary appreciation.
-
-### A promised source count
-
-No “107+ supported sources” claim in advance. Counts follow verified adapter support.
-
-### A permanent archive of every fetched body
-
-No automatic public corpus created from private imports.
-
-Shared infrastructure may deduplicate bytes, but public preservation requires its own permission, review, and retention workflow.
-
-### Credentials as an SSRF exception
-
-Authenticated fetching remains subject to the same network restrictions. Internal-network integrations require separate explicit administrative configuration.
-
-### Popularity-based moderation verdicts
-
-Community process feedback is advisory. It does not replace evidence, independent review, or appeals.
-
-### Invasive or exclusionary bot detection
-
-No default fingerprinting, blanket headless-browser bans, compulsory JavaScript for reading, or expensive universal proof-of-work.
-
-### Coercive reading analytics
-
-No mandatory streaks, loss warnings, public reading leaderboards, or rewards tied to surveillance of reading behavior.
-
-### Automatic publication of suggestions or translations
-
-Metadata suggestions, AI outputs, preservation imports, and translations remain reviewable drafts until the appropriate authorized action.
+- **XP and rank-gated core functionality.** No 100-level system, no reading/download XP gates.
+- **Posting-volume reputation.** No global score rewarding raw posting volume.
+- **A promised source count.** Counts follow verified adapter support.
+- **A permanent archive of every fetched body.** Shared infrastructure may deduplicate; public preservation requires explicit workflow.
+- **Credentials as an SSRF exception.** Internal-network integrations require separate configuration.
+- **Popularity-based moderation verdicts.** Process feedback is advisory.
+- **Invasive or exclusionary bot detection.** No default fingerprinting, blanket headless-browser bans, compulsory JavaScript for reading.
+- **Coercive reading analytics.** No mandatory streaks, loss warnings, public reading leaderboards.
+- **Automatic publication of AI outputs.** All translations, suggestions, and generated content require review.
+- **Purchased visibility or authority.** No paid ranking, trust, or moderation.
+- **Silent public visibility of hidden comments.** If a comment is hidden from the author, it is hidden from the public work page.
 
 ---
 
