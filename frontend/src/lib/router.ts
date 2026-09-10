@@ -24,6 +24,7 @@ export type RouteId =
   | 'work-editor'
   | 'work-read'
   | 'chapter-read'
+  | 'history'
   | 'planned'
   | 'not-found';
 
@@ -121,6 +122,10 @@ export function matchRoute(path: string): RouteMatch {
         chapterId: decodeURIComponent(chapterMatch[2]),
       },
     };
+  }
+
+  if (normalised === '/library/history') {
+    return { id: 'history', path: normalised };
   }
 
   const workMatch = normalised.match(/^\/works\/([^/]+)$/);

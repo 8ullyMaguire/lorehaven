@@ -1,30 +1,28 @@
 <script lang="ts">
   /**
-   * One chapter, as a reader sees it.
+   * A work's public page.
    *
-   * The body is rendered with `{@html}` from `sanitized_html`, which the
-   * *server* produced from the validated editor document. That is the only
-   * reason this is safe: the server escapes every text node and attribute and
-   * restricts link schemes, and it stores the HTML rather than rebuilding it
-   * here, so the client never renders anything the server did not check (ADR
-   * 0002, spec §8.3). A second renderer on the client would be a second set of
-   * escaping rules to get wrong.
+   * The same route answers a contributor with the author's view, so this page
+   * says which one it is rather than pretending: a contributor gets a note and
+   * a link to the editor, everyone else gets the reading page.
    */
-  import { fetchChapter, type ChapterContent } from '../lib/api';
+  import { fetchWork, isAuthorWork, type AuthorWork, type PublicWork } from '../lib/api';
+  import { describeCompletion, describeLifecycle, describeRating, describeVisibility } from '../lib/labels';
   import { handleLinkClick } from '../lib/router';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
   interface Props {
     workId: string;
-    chapterId: string;
   }
 
-  let { workId, chapterId }: Props = $props();
+  let { workId }: Props = $props();
 
-  let chapter = $state<ChapterContent | null>(null);
+  let work = $state<PublicWork | AuthorWork | null>(null);
   let error = $state<unknown>(null);
   let loading = $state(true);
+
+  const authorView = $derived(work !== null && isAuthorWork(work) ? (work as AuthorWork) : null);
 
   $effect(() => {
     void load();
@@ -33,11 +31,11 @@
   async function load() {
     loading = true;
     error = null;
-    chapter = null;
     try {
-      chapter = await fetchChapter(workId, chapterId);
+      work = await fetchWork(workId);
     } catch (failure) {
       error = failure;
+      work = null;
     } finally {
       loading = false;
     }
@@ -45,99 +43,101 @@
 </script>
 
 {#if loading}
-  <Skeleton lines={5} />
+  <Skeleton lines={4} />
 {:else if error}
   <h1>Not found</h1>
   <ErrorSummary error={error} />
   <p>
-    <a href={`/works/${workId}`} onclick={(event) => handleLinkClick(event, `/works/${workId}`)}>
-      Back to the work
-    </a>
+    <a href="/" onclick={(event) => handleLinkClick(event, '/')}>Back to the front page</a>
   </p>
-{:else if chapter}
-  <nav class="crumbs">
-    <a href={`/works/${workId}`} onclick={(event) => handleLinkClick(event, `/works/${workId}`)}>
-      {chapter.work.title.trim() === '' ? 'Untitled' : chapter.work.title}
-    </a>
-  </nav>
+{:else if work}
+  {#if authorView}
+    <p class="draft-note" role="status">
+      {#if authorView.lifecycle === 'published'}
+        You contribute to this work, so you see it here along with its editing controls.
+      {:else}
+        This work is {describeLifecycle(authorView.lifecycle).toLowerCase()}, so only its
+        contributors can see it. Others see it once it is published.
+      {/if}
+      <a href={`/write/${work.id}`} onclick={(event) => handleLinkClick(event, `/write/${work.id}`)}>
+        Edit it
+      </a>
+    </p>
+  {/if}
 
-  <h1>{chapter.chapter.title.trim() === '' ? 'Untitled chapter' : chapter.chapter.title}</h1>
+  <h1>{work.title.trim() === '' ? 'Untitled' : work.title}</h1>
 
-  <p class="meta">
-    {chapter.word_count} words
-    {#if chapter.revision_number !== null}· revision {chapter.revision_number}{/if}
-    {#if chapter.editable}
-      · <a href={`/write/${workId}`} onclick={(event) => handleLinkClick(event, `/write/${workId}`)}>Edit</a>
-    {/if}
+  <p class="byline">
+    {#each (work as PublicWork).authors ?? [] as author, index (author.handle)}
+      {#if index > 0}· {/if}<a href={`/pseud/${author.handle}`} onclick={(event) => handleLinkClick(event, `/pseud/${author.handle}`)}>@{author.handle}</a>
+    {/each}
   </p>
 
-  <!-- Server-sanitized HTML; see the module note. -->
-  <article class="prose">{@html chapter.sanitized_html}</article>
+  <p class="badges">
+    <span>{describeRating(work.rating)}</span>
+    <span>{describeVisibility(work.visibility)}</span>
+    <span>{describeCompletion(work.completion)}</span>
+    {#if work.published_at}<span>Published {work.published_at.slice(0, 10)}</span>{/if}
+  </p>
 
-  <nav class="pager" aria-label="Chapter navigation">
-    {#if chapter.previous_chapter_id}
-      <a
-        href={`/works/${workId}/chapters/${chapter.previous_chapter_id}`}
-        onclick={(event) => handleLinkClick(event, `/works/${workId}/chapters/${chapter.previous_chapter_id}`)}
-      >
-        ← Previous chapter
-      </a>
-    {/if}
-    {#if chapter.next_chapter_id}
-      <a
-        class="next"
-        href={`/works/${workId}/chapters/${chapter.next_chapter_id}`}
-        onclick={(event) => handleLinkClick(event, `/works/${workId}/chapters/${chapter.next_chapter_id}`)}
-      >
-        Next chapter →
-      </a>
-    {/if}
-  </nav>
+  {#if work.summary.trim() !== ''}
+    <p class="summary">{work.summary}</p>
+  {/if}
+
+  <h2>Chapters</h2>
+  {#if work.chapters.length === 0}
+    <p class="note">This work has no chapters.</p>
+  {:else}
+    <ol class="chapters">
+      {#each work.chapters as chapter (chapter.id)}
+        <li>
+          <a
+            href={`/works/${work.id}/chapters/${chapter.id}`}
+            onclick={(event) => handleLinkClick(event, `/works/${work.id}/chapters/${chapter.id}`)}
+          >
+            {chapter.title.trim() === '' ? 'Untitled chapter' : chapter.title}
+          </a>
+          <span class="note">{chapter.word_count} words</span>
+        </li>
+      {/each}
+    </ol>
+  {/if}
 {/if}
 
 <style>
-  .prose {
-    max-width: 66ch;
-    font-family: var(--font-reading);
+  .byline {
     font-size: var(--text-lg);
-    line-height: 1.75;
   }
 
-  .prose :global(blockquote) {
-    border-left: 3px solid var(--color-accent);
-    margin: var(--space-4) 0;
-    padding-left: var(--space-4);
-    color: var(--color-muted);
-  }
-
-  .prose :global(hr) {
-    border: none;
-    text-align: center;
-    margin: var(--space-5) 0;
-  }
-
-  .prose :global(hr)::after {
-    content: '* * *';
-    color: var(--color-muted);
-    letter-spacing: 0.4em;
-  }
-
-  .meta,
-  .crumbs {
+  .badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
     color: var(--color-muted);
     font-size: var(--text-sm);
   }
 
-  .pager {
-    display: flex;
-    justify-content: space-between;
-    gap: var(--space-4);
-    margin-top: var(--space-6);
-    padding-top: var(--space-4);
-    border-top: var(--border-width) solid var(--color-border);
+  .summary {
+    max-width: 62ch;
   }
 
-  .next {
-    margin-left: auto;
+  .draft-note {
+    background: var(--color-surface);
+    border: var(--border-width) solid var(--color-accent);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    font-size: var(--text-sm);
+  }
+
+  .chapters {
+    padding-left: var(--space-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .note {
+    color: var(--color-muted);
+    font-size: var(--text-sm);
   }
 </style>

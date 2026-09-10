@@ -61,7 +61,7 @@ export function readCachedPosition(workId: string): CachedPosition | null {
 }
 
 /** Write the cached position for a work to localStorage. */
-function writeCachedPosition(pos: CachedPosition): void {
+export function writeCachedPosition(pos: CachedPosition): void {
   try {
     const raw = localStorage.getItem(POSITION_STORAGE_KEY);
     const existing: CachedPosition[] = raw ? JSON.parse(raw) : [];

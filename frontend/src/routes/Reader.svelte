@@ -1,14 +1,12 @@
 <script lang="ts">
   /**
-   * One chapter, as a reader sees it.
+   * The reading surface: one chapter, with position awareness.
    *
-   * The body is rendered with `{@html}` from `sanitized_html`, which the
-   * *server* produced from the validated editor document. That is the only
-   * reason this is safe: the server escapes every text node and attribute and
-   * restricts link schemes, and it stores the HTML rather than rebuilding it
-   * here, so the client never renders anything the server did not check (ADR
-   * 0002, spec §8.3). A second renderer on the client would be a second set of
-   * escaping rules to get wrong.
+   * Spec §9. The reader renders a single chapter at a time (whole-work
+   * mode is paginated, not one long DOM). Position is saved on scroll
+   * end and on `visibilitychange`, debounced, and the local copy is
+   * written to `localStorage` first so a lost request still leaves a
+   * position.
    */
   import { fetchChapter, type ChapterContent } from '../lib/api';
   import { handleLinkClick } from '../lib/router';

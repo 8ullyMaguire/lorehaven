@@ -14,6 +14,10 @@ describe('routing', () => {
     expect(match.planned?.milestone).toMatch(/^Milestone \d+$/);
   });
 
+  it('resolves the reader history page', () => {
+    expect(matchRoute('/library/history').id).toBe('history');
+  });
+
   it('does not pretend an unknown path exists', () => {
     const match = matchRoute('/nowhere/6f2a9c');
     expect(match.id).toBe('not-found');
