@@ -330,6 +330,22 @@ async fn save_progress(
         },
     )
     .await?;
+
+    // Reading is what puts a work in the reader's history, and this route is
+    // the only signal the reader's browser sends on arrival. `touch_history`
+    // had no caller at all before this — the acceptance tests called the
+    // repository directly, so `/library/history` was empty for every real
+    // reader while the tests were green.
+    reading::touch_history(
+        state.db(),
+        user.account_id,
+        pseud_id,
+        &request.subject_type,
+        &request.subject_id,
+        revision,
+    )
+    .await?;
+
     Ok(StatusCode::NO_CONTENT)
 }
 
