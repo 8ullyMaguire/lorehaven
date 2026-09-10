@@ -20,6 +20,7 @@ pub mod content;
 pub mod identity;
 pub mod migrate;
 pub mod outbox;
+pub mod reading;
 pub mod sessions;
 
 use std::borrow::Cow;
