@@ -138,6 +138,16 @@ pre {
   background: var(--color-border);
 }
 
+/*
+ * Distraction-free reading (spec §9.2). The reader's typography is applied to
+ * the document element, so the chrome is hidden from here rather than from a
+ * component that would have to be told about a reading preference.
+ */
+html[data-distraction-free='true'] .site-header,
+html[data-distraction-free='true'] .site-footer {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
