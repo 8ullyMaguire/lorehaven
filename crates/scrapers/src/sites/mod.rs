@@ -23,6 +23,7 @@
 
 pub mod ao3;
 pub mod royalroad;
+pub mod syosetu;
 
 use crate::{Registry, SourceAdapter};
 
@@ -36,6 +37,7 @@ pub fn default_registry() -> Registry {
     let mut registry = Registry::new();
     registry.register(Box::new(ao3::ArchiveSoftware::new()));
     registry.register(Box::new(royalroad::RoyalRoad::new()));
+    registry.register(Box::new(syosetu::Syosetu::new()));
     // An adapter that cannot read anything must not appear in the catalogue: a
     // source listed as available and answering "not implemented" is worse than
     // one that is absent, because the first wastes a reader's time and the

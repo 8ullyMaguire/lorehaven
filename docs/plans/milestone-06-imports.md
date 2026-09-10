@@ -15,13 +15,14 @@ absent, which means the plan's own journey cannot be walked.
 
 | Piece | Where | Tests |
 |---|---|---|
-| The adapter crate, its trait and the registry | `crates/scrapers/src/{lib,registry,sites}.rs` | 101 in-crate |
+| The adapter crate, its trait and the registry | `crates/scrapers/src/{lib,registry,sites}.rs` | 177 in-crate |
 | The safe fetcher and URL guard | `crates/scrapers/src/safety.rs` | in-crate |
 | `robots.txt`: the source's own pace and path rules | `crates/scrapers/src/robots.rs` | 20 |
 | Chapter sanitation | `crates/scrapers/src/sanitize.rs` | in-crate |
 | The Archive-software adapter | `crates/scrapers/src/sites/ao3.rs` | 9 fixture tests |
 | The Royal Road adapter | `crates/scrapers/src/sites/royalroad.rs` | 13 unit + 21 fixture tests |
-| Recorded fixtures | `crates/scrapers/tests/fixtures/{ao3,royalroad}/` | provenance in `fixtures/README.md` |
+| The Syosetu adapter | `crates/scrapers/src/sites/syosetu.rs` | 16 unit + 31 fixture tests |
+| Recorded fixtures | `crates/scrapers/tests/fixtures/{ao3,royalroad,syosetu}/` | provenance in `fixtures/README.md` |
 | The planning rules | `crates/domain/src/imports.rs` | 24 |
 | Migration 0006, both dialects | `migrations/{sqlite,postgres}/0006_imports.sql` | applied by every acceptance test |
 | The repositories | `crates/db/src/imports.rs`, `crates/db/src/secrets.rs` | through the acceptance tests |
@@ -121,7 +122,86 @@ whose foreign keys have never been exercised, and this is where they were.
 
 ---
 
-## 5. The port from `ficnexus`, and what it was wrong about
+## 5. Syosetu, and the shape that made a preview expensive
+
+The third adapter, and the first whose source spreads one work across more than one
+page. Knowing which page holds what is most of the work, and one of the three is a
+trap:
+
+| Page | Holds |
+|---|---|
+| `/{ncode}/` | the episode list, **100 episodes at a time**, paginated by `?p=N` |
+| `/novelview/infotop/ncode/{ncode}/` | title, author, summary, dates, status, word count, tags, and the *total* episode count |
+| `/{ncode}/{episode}/` | one episode's prose |
+
+**The work page does not state how many episodes the work has.** A 795-episode work
+serves 100 rows and a pager; the number 795 appears only on the info page, as
+`全795エピソード`. A preview that reads the work page and stops reports 100 of 795
+chapters — and because the import trusts the preview, it stores a seventh of the
+work and reports success. That is the plan's third pitfall ("a selector that matches
+nothing returns zero chapters") in a different costume: not a selector that matched
+nothing, but a paginated list read once.
+
+So the adapter reads the info page first, walks every page of the episode list, and
+then checks the two against each other. If they disagree it returns a parse failure
+naming both numbers rather than a short list. Two checks, because a partial read can
+look consistent:
+
+* **The count.** The list yielded N episodes; the info page states M. `N != M` is a
+  refusal.
+* **The walk.** The pager advertises P pages; P pages must have been read. This one
+  is defensive and no recorded fixture can reach it — where both are wrong the
+  count check fires first and says more — which is recorded in the test file rather
+  than left as silence.
+
+The cost is real and is stated rather than hidden: previewing a 795-episode work is
+one info request plus eight list requests, and importing it is 795 more. At the one
+request per second Syosetu publishes that is about fourteen minutes, which is
+tolerable because the import is resumable.
+
+### What the port was wrong about here, again
+
+The same three defects as Royal Road, plus two that are worse because they are
+silent:
+
+| The ported adapter | What this adapter does instead |
+|---|---|
+| `updated: now()` | reads `最新掲載日` |
+| `published: … else now` | a parse failure is `None`, never the current time |
+| `author_local_id: story_id` | the work id goes in `source_work_key` |
+| `chapter_id: chapters.len() + 1` | the site's own episode number, which is in the URL |
+| `let Ok(toc) = fetch(..) else continue` | a failed list page is an error, not a skipped 100 episodes |
+| `fetch_chapter_text` → `String::new()` | a failed body is an error, never a blank chapter stored as success |
+| `can_handle` by substring | host **and** a work-shaped path |
+
+The fourth row down is the one worth dwelling on. `let Ok(..) = fetch(..) else
+continue` in the ported code drops up to a hundred episodes of a work when one list
+page fails, and the import completes and reports success — with a chapter list that
+is short in the middle. Row five is the same failure for a single chapter: a failed
+fetch becomes an empty string, and an empty chapter is stored. Neither raises
+anything. Both are why the count check exists at all: it is the only thing that can
+notice a hole the adapter made itself.
+
+### Two smaller decisions
+
+**Dates are Japanese local time.** The site writes `2012年 04月20日 21時58分` and
+`2012/04/20 21:58` with no offset. The adapter reads them as JST (+09:00) and carries
+the offset rather than converting it away. This is an inference — the page never says
+so — and it is written down because if it is wrong it is wrong for every work on the
+site. Read as UTC, every imported date would be nine hours out.
+
+**The author's notes are set apart with `blockquote`.** The recorded episodes carry a
+preface and an afterword around the story. Those are kept, and marked, because a
+reader should be able to tell the author from the narrative. The wrapper is
+`blockquote` rather than a `<div class="notes">` for a concrete reason: the crate's
+sanitiser allows a fixed list of tags and attributes in which `div` and `class` do not
+appear, so a classed wrapper would be stripped and the note would merge into the
+prose. That is a rendering convention, not a claim about the site's markup, and it is
+the kind of choice worth revisiting deliberately rather than inheriting.
+
+---
+
+## 6. The port from `ficnexus`, and what it was wrong about
 
 M6's adapters are ported from `~/code/rust/ficnexus`, which already holds a Rust
 translation of FanFicFare's per-site knowledge. The decision was made explicitly
@@ -168,7 +248,7 @@ where this crate's adapters receive a `&dyn Fetcher` and cannot construct a clie
 
 ---
 
-## 6. Rate limits come from the source
+## 7. Rate limits come from the source
 
 Decided during this milestone, and written into the spec rather than left in the
 code (spec §11.5, "Rate limits come from the source, and the floor is one request
@@ -227,7 +307,7 @@ from the letter of the standard, in the safe direction, and it has its own test.
 
 ---
 
-## 7. Source reachability, measured
+## 8. Source reachability, measured
 
 Recorded on 2026-09-10 with a plain HTTPS request and a browser `User-Agent`,
 against the URL taken from the ficnexus adapter for each source:
@@ -236,7 +316,7 @@ against the URL taken from the ficnexus adapter for each source:
 |---|---|---|
 | Archive of Our Own | `200` | Adapter built, fixtures recorded |
 | Royal Road | `200` | Adapter built, fixtures recorded |
-| Syosetu | `200` | **Reachable, adapter not built yet** |
+| Syosetu | `200` | Adapter built, fixtures recorded |
 | www.fanficauthors.net, www.lcfanfic.com, www.phoenixsong.net, www.mediaminer.org | `200` | **Reachable, adapter not built yet** (the eFiction family) |
 | **www.fanfiction.net** | **`403`** | Cloudflare |
 | **www.scribblehub.com** | **`403`** | Cloudflare |
@@ -246,9 +326,9 @@ against the URL taken from the ficnexus adapter for each source:
 FictionPress runs the same software as FanFiction.net and is therefore behind the
 same wall.
 
-Two rows say *reachable* and no more. Syosetu and the eFiction family answer plain
-requests, so an adapter for either can be verified and is ordinary work; it is not
-done yet, and the table says so rather than implying a delay is a difficulty.
+One row says *reachable* and no more. The eFiction members answer plain requests, so
+an adapter for them can be verified and is ordinary work; it is not done yet, and the
+table says so rather than implying a delay is a difficulty.
 
 ### What that means, and the decision it forces
 
@@ -293,7 +373,7 @@ operator rather than to the implementer.
 
 ---
 
-## 8. Before this milestone can be tagged
+## 9. Before this milestone can be tagged
 
 1. The two pages, and a browser journey over them.
 2. The remaining tier-1 adapters, each with recorded fixtures.
