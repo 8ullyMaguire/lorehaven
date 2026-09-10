@@ -8,7 +8,6 @@
    * consequence of ownership belonging to a pseud rather than an account.
    */
   import {
-    ApiError,
     createWork,
     fetchInvitations,
     fetchWorks,

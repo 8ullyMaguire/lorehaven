@@ -32,14 +32,21 @@
 </script>
 
 {#if resolution.kind === 'use_stored' && resolution.position}
+  <!--
+    `{@const}`, not `!`. A `let` binding is not narrowed inside an `onclick`
+    closure, and the two branches below already worked around that with non-null
+    assertions. A `const` binding keeps the narrowing from the `{#if}` above it,
+    which is the same guarantee without the assertion.
+  -->
+  {@const stored = resolution.position}
   <aside class="resume" aria-label="Resume reading">
     <p>
-      You were <strong>{describe(resolution.position)}</strong> last time you read this.
+      You were <strong>{describe(stored)}</strong> last time you read this.
     </p>
     <a
       class="resume-link"
-      href={href(null, resolution.position)}
-      onclick={(event) => handleLinkClick(event, href(null, resolution.position))}
+      href={href(null, stored)}
+      onclick={(event) => handleLinkClick(event, href(null, stored))}
     >
       Resume reading
     </a>
@@ -50,22 +57,18 @@
     <p>You stopped in two places. Which one would you like?</p>
     <ul>
       {#if resolution.mine}
+        {@const mine = resolution.mine}
         <li>
-          <a
-            href={href(null, resolution.mine)}
-            onclick={(event) => handleLinkClick(event, href(null, resolution.mine!))}
-          >
-            {describe(resolution.mine)}
+          <a href={href(null, mine)} onclick={(event) => handleLinkClick(event, href(null, mine))}>
+            {describe(mine)}
           </a>
         </li>
       {/if}
       {#if resolution.other}
+        {@const other = resolution.other}
         <li>
-          <a
-            href={href(null, resolution.other)}
-            onclick={(event) => handleLinkClick(event, href(null, resolution.other!))}
-          >
-            {describe(resolution.other)}
+          <a href={href(null, other)} onclick={(event) => handleLinkClick(event, href(null, other))}>
+            {describe(other)}
           </a>
         </li>
       {/if}

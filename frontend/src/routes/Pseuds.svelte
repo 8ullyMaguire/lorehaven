@@ -1,7 +1,6 @@
 <script lang="ts">
   import {
     ApiError,
-    activatePseud,
     createPseud,
     fetchPrivacy,
     fetchPseuds,
