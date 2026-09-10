@@ -706,6 +706,10 @@ impl SourceAdapter for Syosetu {
         self.key.clone()
     }
 
+    fn display_name(&self) -> &'static str {
+        "Syosetu"
+    }
+
     fn capabilities(&self) -> SourceCapabilities {
         SourceCapabilities {
             metadata: true,

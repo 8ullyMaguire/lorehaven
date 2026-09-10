@@ -31,6 +31,8 @@ const ITEM = {
   summary: 'Zorian is a mage student.',
   language: 'en',
   word_count: 806306,
+  chapter_count: 109,
+  source_display_name: 'Royal Road',
   status: 'complete',
   source_updated_at: '2026-09-01T00:00:00Z',
   last_synced_at: '2026-09-09T00:00:00Z',

@@ -400,6 +400,10 @@ impl SourceAdapter for RoyalRoad {
         self.key.clone()
     }
 
+    fn display_name(&self) -> &'static str {
+        "Royal Road"
+    }
+
     fn capabilities(&self) -> SourceCapabilities {
         SourceCapabilities {
             metadata: true,

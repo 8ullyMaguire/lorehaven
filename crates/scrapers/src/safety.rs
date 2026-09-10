@@ -426,7 +426,10 @@ impl SafeFetcher {
                 });
             }
             if !status.is_success() {
-                return Err(SourceError::Network(format!("{host} answered {status}")));
+                return Err(SourceError::Network(format!(
+                    "{host} answered {}",
+                    describe_status(status)
+                )));
             }
 
             // Read the validators before the body, because reading the body
@@ -689,6 +692,44 @@ impl Fetcher for SafeFetcher {
 /// unchanged page. Returning an error here rather than an empty body is the
 /// difference between a loud bug and a chapter stored as nothing — which is the
 /// exact failure the ported Syosetu code had.
+/// How to say a status code to an operator.
+///
+/// `StatusCode`'s own `Display` appends `<unknown status code>` to any code it
+/// has no reason phrase for, which is every code an intermediary invents. A
+/// reader who met a Cloudflare wobble was told:
+///
+/// ```text
+/// source unavailable: the source (archiveofourown.org answered 525 <unknown status code>)
+/// ```
+///
+/// The number alone is not much better. 525, 522 and 520 all mean the site's
+/// own server is in trouble rather than that we are blocked or misconfigured, and
+/// which of those it is decides whether an operator retries, waits, or goes and
+/// looks at the source. So the intermediary's family is named, standard codes
+/// keep their phrase, and a code nobody has heard of is reported as a bare
+/// number rather than as a number plus an apology for not recognising it.
+fn describe_status(status: reqwest::StatusCode) -> String {
+    let code = status.as_u16();
+    let detail = match code {
+        520 => Some("the site's own server returned an unknown error"),
+        521 => Some("the site's own server is down"),
+        522 => Some("the connection to the site's server timed out"),
+        523 => Some("the site's server is unreachable"),
+        524 => Some("the site's server timed out"),
+        525 => Some("an SSL handshake with the site's server failed"),
+        526 => Some("the site's SSL certificate is invalid"),
+        527 => Some("the site's proxy reported an error"),
+        530 => Some("the site's server could not be resolved"),
+        _ => None,
+    };
+
+    match (detail, status.canonical_reason()) {
+        (Some(detail), _) => format!("{code} ({detail})"),
+        (None, Some(reason)) => format!("{code} {reason}"),
+        (None, None) => code.to_string(),
+    }
+}
+
 fn expect_fetched(result: ConditionalFetch) -> SourceResult<Fetched> {
     match result {
         ConditionalFetch::Fetched(fetched) => Ok(fetched),
@@ -1006,6 +1047,42 @@ pub fn encode_form(fields: &mut [(&str, &str)]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::describe_status;
+
+    /// A code with a reason phrase keeps it.
+    #[test]
+    fn a_standard_status_keeps_its_phrase() {
+        assert_eq!(
+            describe_status(reqwest::StatusCode::SERVICE_UNAVAILABLE),
+            "503 Service Unavailable"
+        );
+    }
+
+    /// An intermediary's code is named, because "525" alone does not tell an
+    /// operator whether to retry or to wait.
+    #[test]
+    fn a_cloudflare_code_is_named() {
+        assert_eq!(
+            describe_status(reqwest::StatusCode::from_u16(525).expect("525 is a status")),
+            "525 (an SSL handshake with the site's server failed)"
+        );
+        assert_eq!(
+            describe_status(reqwest::StatusCode::from_u16(522).expect("522 is a status")),
+            "522 (the connection to the site's server timed out)"
+        );
+    }
+
+    /// A code nobody has heard of is a bare number, and carries none of
+    /// `StatusCode`'s own `<unknown status code>` apology.
+    #[test]
+    fn an_unheard_of_code_is_just_the_number() {
+        let described = describe_status(reqwest::StatusCode::from_u16(599).expect("599"));
+        assert_eq!(described, "599");
+        assert!(
+            !described.contains("unknown"),
+            "the reader is not told that we do not recognise a number: {described}"
+        );
+    }
     use super::*;
 
     fn policy() -> FetchPolicy {

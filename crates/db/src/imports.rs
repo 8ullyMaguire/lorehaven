@@ -131,6 +131,12 @@ pub struct LibraryItem {
     /// When *we* last looked. Kept apart from the line above, because "the
     /// author updated it" and "we checked it" are different facts.
     pub last_synced_at: Option<String>,
+    /// How many of this work's chapters are stored and readable.
+    ///
+    /// Counted, not copied from the source: the source's number is a claim about
+    /// the work and this is a fact about the copy. They differ whenever an
+    /// import is partial, which is the state a reader most needs to be told.
+    pub chapter_count: i64,
     /// Which import produced this and from where.
     pub provenance_json: String,
     /// When this copy was created.
@@ -717,11 +723,11 @@ pub async fn find_library_item(
     let sql = sql_owned(
         db,
         format!(
-            "SELECT {LIBRARY_COLUMNS} FROM library_items
+            "SELECT {LIBRARY_COLUMNS}, {LIBRARY_CHAPTER_COUNT} FROM library_items
              WHERE account_id = ? AND source_key = ? AND source_work_key = ?"
         ),
         format!(
-            "SELECT {LIBRARY_COLUMNS_PG} FROM library_items
+            "SELECT {LIBRARY_COLUMNS_PG}, {LIBRARY_CHAPTER_COUNT} FROM library_items
              WHERE account_id = ?::uuid AND source_key = ? AND source_work_key = ?"
         ),
     );
@@ -737,10 +743,13 @@ pub async fn get_library_item(
 ) -> Result<Option<LibraryItem>> {
     let sql = sql_owned(
         db,
-
-        format!("SELECT {LIBRARY_COLUMNS} FROM library_items WHERE id = ? AND account_id = ?"),
         format!(
-            "SELECT {LIBRARY_COLUMNS_PG} FROM library_items WHERE id = ?::uuid AND account_id = ?::uuid"
+            "SELECT {LIBRARY_COLUMNS}, {LIBRARY_CHAPTER_COUNT} FROM library_items \
+             WHERE id = ? AND account_id = ?"
+        ),
+        format!(
+            "SELECT {LIBRARY_COLUMNS_PG}, {LIBRARY_CHAPTER_COUNT} FROM library_items \
+             WHERE id = ?::uuid AND account_id = ?::uuid"
         ),
     );
     let row: Option<LibraryItemRow> = match db.backend() {
@@ -777,14 +786,14 @@ pub async fn list_library_items(
     let sql = sql_owned(
         db,
         format!(
-            "SELECT {LIBRARY_COLUMNS} FROM library_items
+            "SELECT {LIBRARY_COLUMNS}, {LIBRARY_CHAPTER_COUNT} FROM library_items
              WHERE account_id = ?
                AND (? IS NULL OR (updated_at, id) < (?, ?))
              ORDER BY updated_at DESC, id DESC
              LIMIT ?"
         ),
         format!(
-            "SELECT {LIBRARY_COLUMNS_PG} FROM library_items
+            "SELECT {LIBRARY_COLUMNS_PG}, {LIBRARY_CHAPTER_COUNT} FROM library_items
              WHERE account_id = ?::uuid
                AND (?::text IS NULL OR (updated_at, id::text) < (?::text, ?::text))
              ORDER BY updated_at DESC, id DESC
@@ -1552,6 +1561,19 @@ pub async fn delete_source_credential(
 // Row shapes
 // ---------------------------------------------------------------------------
 
+/// How many chapters of this copy are actually stored.
+///
+/// Counted from `import_chapters` rather than read off the source's own count,
+/// because the two answer different questions and the difference is the point:
+/// "the source lists 109 chapters" and "we hold 109 chapters" diverge the moment
+/// an import is partial, and a library that showed the source's number would
+/// report a complete copy of a work it holds a third of. `state = 'stored'` is
+/// the same rule the planner uses, so a chapter that is known and not yet
+/// fetched does not count as one the reader can read.
+const LIBRARY_CHAPTER_COUNT: &str = "(SELECT COUNT(*) FROM import_chapters \
+    WHERE import_chapters.library_item_id = library_items.id AND state = 'stored') \
+    AS chapter_count";
+
 const LIBRARY_COLUMNS: &str = "id, account_id, work_id, source_key, source_work_key, title, \
     author_text, author_url, summary, language, word_count, status, source_url, \
     source_updated_at, last_synced_at, provenance_json, created_at, updated_at, version";
@@ -1600,6 +1622,7 @@ struct LibraryItemRow {
     id: String,
     account_id: String,
     work_id: Option<String>,
+    chapter_count: i64,
     source_key: String,
     source_work_key: String,
     title: String,
@@ -1694,6 +1717,7 @@ fn decode_library_item(row: LibraryItemRow) -> Result<LibraryItem> {
         source_url: row.source_url,
         source_updated_at: row.source_updated_at,
         last_synced_at: row.last_synced_at,
+        chapter_count: row.chapter_count,
         provenance_json: row.provenance_json,
         created_at: row.created_at,
         updated_at: row.updated_at,

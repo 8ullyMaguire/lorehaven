@@ -357,6 +357,10 @@ impl SourceAdapter for ArchiveSoftware {
         self.key.clone()
     }
 
+    fn display_name(&self) -> &'static str {
+        "Archive of Our Own"
+    }
+
     fn capabilities(&self) -> SourceCapabilities {
         SourceCapabilities {
             metadata: true,
