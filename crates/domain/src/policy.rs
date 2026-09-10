@@ -215,6 +215,10 @@ pub enum DenyReason {
     RatingExceedsPolicy,
     /// The author blocked or muted the actor.
     BlockedByAuthor,
+    /// The acting pseud is not a contributor of the work at all.
+    NotAContributor,
+    /// The acting pseud is a contributor, but its role does not permit this.
+    InsufficientRole,
 }
 
 impl DenyReason {
@@ -228,6 +232,8 @@ impl DenyReason {
             Self::SignInRequired => "sign_in_required",
             Self::RatingExceedsPolicy => "rating_exceeds_policy",
             Self::BlockedByAuthor => "blocked_by_author",
+            Self::NotAContributor => "not_a_contributor",
+            Self::InsufficientRole => "insufficient_role",
         }
     }
 }
