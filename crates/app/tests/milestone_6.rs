@@ -73,7 +73,7 @@ struct FixtureArchive {
     /// The whole-work page: every chapter body.
     full_html: String,
     /// When set, `fetch_chapters` fails with this. Proves the retry path.
-    fail_chapters: Option<String>,
+    fail_chapters: Option<SourceError>,
     /// When set, the adapter claims to need a credential. Proves that a
     /// missing credential is caught before a fetch rather than after.
     requires_auth: bool,
@@ -125,9 +125,22 @@ impl FixtureArchive {
         Arc::clone(&self.calls)
     }
 
+    /// An adapter whose chapter read fails with a network fault, which is the
+    /// transient case: the queue's answer is to try again.
     fn failing(message: &str) -> Self {
         Self {
-            fail_chapters: Some(message.to_owned()),
+            fail_chapters: Some(SourceError::Network(message.to_owned())),
+            ..Self::new()
+        }
+    }
+
+    /// An adapter whose chapter read fails because the source will not serve the
+    /// work at all. The error is carried rather than described, because the
+    /// queue's decision is made from the *category* and a test that could only
+    /// inject one category could not tell the categories apart.
+    fn refusing(error: SourceError) -> Self {
+        Self {
+            fail_chapters: Some(error),
             ..Self::new()
         }
     }
@@ -193,8 +206,8 @@ impl SourceAdapter for FixtureArchive {
         _creds: Option<&Credentials>,
     ) -> SourceResult<Vec<SourceChapter>> {
         self.calls.bulk_fetches.fetch_add(1, Ordering::SeqCst);
-        if let Some(message) = &self.fail_chapters {
-            return Err(SourceError::Network(message.clone()));
+        if let Some(error) = &self.fail_chapters {
+            return Err(error.clone());
         }
         self.inner.chapters_from_html(&self.full_html, work)
     }
@@ -905,6 +918,60 @@ async fn a_transient_fetch_failure_stays_queued_for_retry() {
         .await
         .expect("chapters");
     assert!(chapters.is_empty());
+
+    harness.cleanup().await;
+}
+
+/// A source that holds the work fails the job rather than retrying it.
+///
+/// The mirror of the transient case above, and the reason `SourceError` has
+/// categories rather than one variant: a moderation hold, a work withdrawn by its
+/// author and a takedown in progress are all states the *source* is in. Retrying
+/// asks the same question and receives the same answer, so a retry budget spent
+/// on one is a reader waiting for an import that cannot arrive. What must hold is
+/// that the job ends `failed` on its first attempt, with the source's own words
+/// recorded, and that nothing was stored.
+#[tokio::test]
+async fn a_source_that_withholds_a_work_fails_the_job_instead_of_retrying() {
+    let harness = Harness::new("withheld").await;
+    let (_client, account, pseud) = signed_in(&harness, "withheld@example.org", "withheld").await;
+
+    let state = harness.state_with(FixtureArchive::refusing(SourceError::Withheld(
+        "this story has not been validated by its administrators".to_owned(),
+    )));
+    let import_id = queue_import(&harness, account, &pseud, false).await;
+    run_passes(&state, 1).await;
+
+    let job_id = imports::job_for_import(&harness.db, &import_id)
+        .await
+        .expect("job id")
+        .expect("the import names its queue row");
+    let job = jobs::find(&harness.db, job_id.parse().expect("a job id"))
+        .await
+        .expect("read job")
+        .expect("the job exists");
+
+    assert_eq!(
+        job.state,
+        "failed",
+        "a hold is terminal, not something to retry: {}",
+        job.last_error.unwrap_or_default()
+    );
+    assert_eq!(job.attempts, 1, "one attempt, and no second");
+    assert!(
+        job.last_error.as_deref().is_some_and(
+            |error| error.contains("will not serve it") && error.contains("not been validated")
+        ),
+        "the source's own words are recorded: {:?}",
+        job.last_error
+    );
+
+    let row = import_row(&harness, &import_id).await;
+    assert_ne!(row.state, "completed");
+    let chapters = imports::list_import_chapters(&harness.db, &import_id)
+        .await
+        .expect("chapters");
+    assert!(chapters.is_empty(), "nothing was stored");
 
     harness.cleanup().await;
 }

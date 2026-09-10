@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 async-trait.workspace = true
+encoding_rs.workspace = true
 regex-lite.workspace = true
 reqwest.workspace = true
 scraper.workspace = true
