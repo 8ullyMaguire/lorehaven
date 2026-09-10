@@ -3,17 +3,18 @@
   import Drawer from './lib/components/Drawer.svelte';
   import Select from './lib/components/Select.svelte';
   import Account from './routes/Account.svelte';
-  import ChapterRead from './routes/ChapterRead.svelte';
+  import History from './routes/History.svelte';
   import Home from './routes/Home.svelte';
   import NotFound from './routes/NotFound.svelte';
   import PasswordReset from './routes/PasswordReset.svelte';
   import Planned from './routes/Planned.svelte';
   import PseudProfile from './routes/PseudProfile.svelte';
   import Pseuds from './routes/Pseuds.svelte';
+  import Reader from './routes/Reader.svelte';
   import Register from './routes/Register.svelte';
   import SignIn from './routes/SignIn.svelte';
   import WorkEditor from './routes/WorkEditor.svelte';
-  import WorkRead from './routes/WorkRead.svelte';
+  import WorkPage from './routes/WorkPage.svelte';
   import Write from './routes/Write.svelte';
   import { handleLinkClick, matchRoute } from './lib/router';
   import { session } from './lib/session.svelte';
@@ -213,9 +214,11 @@
   {:else if route.id === 'work-editor'}
     <WorkEditor workId={route.params?.workId ?? ''} />
   {:else if route.id === 'work-read'}
-    <WorkRead workId={route.params?.workId ?? ''} />
+    <WorkPage workId={route.params?.workId ?? ''} />
   {:else if route.id === 'chapter-read'}
-    <ChapterRead workId={route.params?.workId ?? ''} chapterId={route.params?.chapterId ?? ''} />
+    <Reader workId={route.params?.workId ?? ''} chapterId={route.params?.chapterId ?? ''} />
+  {:else if route.id === 'history'}
+    <History />
   {:else if route.id === 'planned' && route.planned}
     <Planned route={route.planned} />
   {:else}
@@ -244,6 +247,9 @@
     {#if session.isSignedIn}
       <a href="/account" onclick={(event) => onLinkClick(event, '/account')}>Your account</a>
       <a href="/pseud" onclick={(event) => onLinkClick(event, '/pseud')}>Your pseuds</a>
+      <a href="/library/history" onclick={(event) => onLinkClick(event, '/library/history')}>
+        Reading history
+      </a>
       <Button variant="secondary" size="sm" onclick={signOut}>Sign out</Button>
     {:else}
       <a href="/sign-in" onclick={(event) => onLinkClick(event, '/sign-in')}>Sign in</a>

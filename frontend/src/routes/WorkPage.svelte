@@ -1,15 +1,34 @@
 <script lang="ts">
   /**
-   * A work's public page.
+   * A work's page (spec §9.1).
    *
-   * The same route answers a contributor with the author's view, so this page
+   * The same URL answers a contributor with the author's view, so this page
    * says which one it is rather than pretending: a contributor gets a note and
    * a link to the editor, everyone else gets the reading page.
+   *
+   * It is also where the reader's own things appear — a resume offer, a private
+   * rating, the public reviews — and the rule for all three is the same: the
+   * page must not offer what the server will refuse. A visitor is told that
+   * rating needs an account rather than shown stars that would fail on click.
    */
-  import { fetchWork, isAuthorWork, type AuthorWork, type PublicWork } from '../lib/api';
+  import {
+    fetchReviews,
+    fetchWork,
+    getProgress,
+    isAuthorWork,
+    upsertReview,
+    type AuthorWork,
+    type ProgressView,
+    type PublicWork,
+    type ReviewView,
+  } from '../lib/api';
   import { describeCompletion, describeLifecycle, describeRating, describeVisibility } from '../lib/labels';
   import { handleLinkClick } from '../lib/router';
+  import { session } from '../lib/session.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
+  import NotePanel from '../lib/components/NotePanel.svelte';
+  import Rating from '../lib/components/Rating.svelte';
+  import ResumePrompt from '../lib/components/ResumePrompt.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
   interface Props {
@@ -22,7 +41,14 @@
   let error = $state<unknown>(null);
   let loading = $state(true);
 
+  let progress = $state<ProgressView | null>(null);
+  let reviews = $state<ReviewView[]>([]);
+  let reviewDraft = $state('');
+  let reviewPublic = $state(false);
+  let reviewError = $state<unknown>(null);
+
   const authorView = $derived(work !== null && isAuthorWork(work) ? (work as AuthorWork) : null);
+  const firstChapterId = $derived(work && work.chapters.length > 0 ? work.chapters[0].id : null);
 
   $effect(() => {
     void load();
@@ -33,11 +59,38 @@
     error = null;
     try {
       work = await fetchWork(workId);
+      // Public reviews are readable by anyone; a failure here must not hide
+      // the work itself.
+      try {
+        reviews = (await fetchReviews(workId)).items;
+      } catch {
+        reviews = [];
+      }
+      if (session.isSignedIn) {
+        try {
+          progress = await getProgress('work', workId);
+        } catch {
+          progress = null;
+        }
+      }
     } catch (failure) {
       error = failure;
       work = null;
     } finally {
       loading = false;
+    }
+  }
+
+  async function publishReview() {
+    if (reviewDraft.trim() === '') return;
+    reviewError = null;
+    try {
+      await upsertReview(workId, { body: reviewDraft, is_public: reviewPublic });
+      reviewDraft = '';
+      reviewPublic = false;
+      reviews = (await fetchReviews(workId)).items;
+    } catch (failure) {
+      reviewError = failure;
     }
   }
 </script>
@@ -84,6 +137,10 @@
     <p class="summary">{work.summary}</p>
   {/if}
 
+  {#if progress && progress.resolution.kind !== 'no_position'}
+    <ResumePrompt workId={workId} resolution={progress.resolution} firstChapterId={firstChapterId} />
+  {/if}
+
   <h2>Chapters</h2>
   {#if work.chapters.length === 0}
     <p class="note">This work has no chapters.</p>
@@ -101,6 +158,56 @@
         </li>
       {/each}
     </ol>
+  {/if}
+
+  <div id="rate">
+    <Rating workId={workId} signedIn={session.isSignedIn} />
+  </div>
+
+  <section class="reviews">
+    <h2>Reviews</h2>
+    {#if reviews.length === 0}
+      <p class="note">No public reviews yet. A review stays private until its writer publishes it.</p>
+    {:else}
+      <ul>
+        {#each reviews as review (review.id)}
+          <li>
+            <p class="review-author">@{review.author_handle}</p>
+            {#if review.contains_spoilers}
+              <!-- Spoiler reveal is a deliberate click, never automatic (§9.2). -->
+              <details>
+                <summary>This review mentions spoilers</summary>
+                <p>{review.body}</p>
+              </details>
+            {:else}
+              <p>{review.body}</p>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    {#if session.isSignedIn}
+      <h3>Your review</h3>
+      <label for="review-body" class="label">What did you think?</label>
+      <textarea id="review-body" rows="3" bind:value={reviewDraft}></textarea>
+      <label class="share">
+        <input type="checkbox" bind:checked={reviewPublic} />
+        Publish this review under @{session.activePseud?.handle ?? 'your pseud'}
+      </label>
+      {#if reviewError}
+        <ErrorSummary error={reviewError} />
+      {/if}
+      <button type="button" onclick={publishReview} disabled={reviewDraft.trim() === ''}>
+        Save review
+      </button>
+    {:else}
+      <p class="note">Sign in to write a review.</p>
+    {/if}
+  </section>
+
+  {#if session.isSignedIn}
+    <NotePanel subjectType="work" subjectId={workId} signedIn={session.isSignedIn} />
   {/if}
 {/if}
 
@@ -134,6 +241,47 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
+  }
+
+  .reviews ul {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .reviews li {
+    border-left: 2px solid var(--color-border);
+    padding-left: var(--space-3);
+  }
+
+  .review-author {
+    color: var(--color-muted);
+    font-size: var(--text-sm);
+    margin: 0 0 var(--space-1);
+  }
+
+  .reviews textarea {
+    width: 100%;
+    max-width: 60ch;
+    font: inherit;
+    color: var(--color-text);
+    background: var(--color-bg);
+    border: var(--border-width) solid var(--color-border-strong);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2);
+  }
+
+  .label {
+    display: block;
+    margin: var(--space-3) 0 var(--space-1);
+  }
+
+  .share {
+    display: block;
+    font-size: var(--text-sm);
+    margin: var(--space-2) 0;
   }
 
   .note {
