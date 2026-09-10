@@ -22,9 +22,7 @@
 //! the crate documentation for why that is a security boundary.
 
 pub mod ao3;
-pub mod efiction;
 pub mod royalroad;
-pub mod syosetu;
 
 use crate::{Registry, SourceAdapter};
 
@@ -37,10 +35,12 @@ use crate::{Registry, SourceAdapter};
 pub fn default_registry() -> Registry {
     let mut registry = Registry::new();
     registry.register(Box::new(ao3::ArchiveSoftware::new()));
-    // `efiction`, `royalroad` and `syosetu` are declared above but not
-    // registered: an adapter that cannot read anything must not appear in the
-    // catalogue, because a source listed as available and answering "not
-    // implemented" is worse than one that is absent. Each registers itself here
+    registry.register(Box::new(royalroad::RoyalRoad::new()));
+    // An adapter that cannot read anything must not appear in the catalogue: a
+    // source listed as available and answering "not implemented" is worse than
+    // one that is absent, because the first wastes a reader's time and the
+    // second does not. Adapters register here as they land, and the milestone
+    // notes list the sources still to come.
     // in the same commit that makes it work.
     registry
 }

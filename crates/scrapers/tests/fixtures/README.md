@@ -40,3 +40,39 @@ The `work.html` recording is a *chapter* view, which is what the site redirects
 `select#selected_id` index rather than from the chapter elements: the work page
 holds one chapter's body and the whole list of ids, and the whole-work page holds
 every body.
+
+## royalroad
+
+| File | Source | Recorded |
+|---|---|---|
+| `work.html` | `https://www.royalroad.com/fiction/21220/mother-of-learning` | 2026-09-10 |
+| `chapter-1.html` | `https://www.royalroad.com/fiction/21220/mother-of-learning/chapter/301778/1-good-morning-brother` | 2026-09-10 |
+| `chapter-2.html` | `https://www.royalroad.com/fiction/21220/mother-of-learning/chapter/301781/2-lifes-little-problems` | 2026-09-10 |
+| `not-found.html` | `https://www.royalroad.com/fiction/999999999/definitely-not-a-real-fiction` (`404`) | 2026-09-10 |
+
+`Mother of Learning` (109 chapters, completed) is recorded because it exercises
+both ends of this site's shape at once: a long chapter table, a `COMPLETED`
+status label beside a title that also carries a fiction-type label, an author
+with a profile URL, and a work whose last two "chapters" are announcements rather
+than chapters — which the site lists as chapters and which this adapter therefore
+lists as chapters too.
+
+Two chapter pages are recorded rather than one because a chapter page *does not
+state its own position in the work*. The adapter recovers the ordinal by matching
+the page's title against the work's chapter list, and a single chapter would not
+show that the same rule gives chapter 1 for one page and chapter 2 for another.
+
+This is also the fixture set that disproves the earlier ported selectors: the
+ported adapter read `h2.chapter-title`, `div[property='description']` and
+`span[property='genre']`, and all three match nothing on the recorded pages.
+
+### A note on what a fixture cannot show
+
+Royal Road answers a chapter URL whose slug is wrong (`.../chapter/301781/whatever`
+→ `200`) but returns `404` when the slug is absent entirely, so a chapter URL
+cannot be built from the chapter id alone. That behaviour is not visible in a
+fixture — it took three live requests to establish, and it is why
+`fetch_chapter` re-reads the work page to resolve an id to a path instead of
+constructing one. Recorded here so the next person does not have to rediscover it
+by shipping the bug.
+
