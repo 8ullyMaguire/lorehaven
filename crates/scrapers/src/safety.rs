@@ -60,13 +60,18 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
+use reqwest::header::{
+    HeaderMap, HeaderValue, CONTENT_TYPE, IF_MODIFIED_SINCE, IF_NONE_MATCH, USER_AGENT,
+};
 use reqwest::redirect::Policy;
 use tokio::sync::{Mutex, Semaphore};
 use url::Url;
 
 use crate::robots::RobotsRules;
-use crate::{Fetched, Fetcher, SourceCapabilities, SourceError, SourceResult};
+use crate::{
+    ConditionalFetch, Fetched, Fetcher, RevisionValidators, SourceCapabilities, SourceError,
+    SourceResult,
+};
 
 /// The product token a site's `robots.txt` would name us by.
 ///
@@ -248,7 +253,8 @@ impl SafeFetcher {
         &self,
         url: &str,
         form: Option<&[(&str, &str)]>,
-    ) -> SourceResult<Fetched> {
+        conditional: Option<&RevisionValidators>,
+    ) -> SourceResult<ConditionalFetch> {
         let parsed = validate_url(url, &self.policy)?;
         let host = shared_host(&parsed);
         let robots = self.robots_for(&host).await;
@@ -258,7 +264,7 @@ impl SafeFetcher {
                 parsed.path()
             )));
         }
-        self.send_with_redirects(url, form).await
+        self.send_with_redirects(url, form, conditional).await
     }
 
     /// Fetch with no regard for `robots.txt`.
@@ -272,7 +278,8 @@ impl SafeFetcher {
         &self,
         url: &str,
         form: Option<&[(&str, &str)]>,
-    ) -> SourceResult<Fetched> {
+        conditional: Option<&RevisionValidators>,
+    ) -> SourceResult<ConditionalFetch> {
         let mut current = validate_url(url, &self.policy)?;
         let mut credential_sent_to: Option<String> = None;
 
@@ -288,6 +295,26 @@ impl SafeFetcher {
                     SourceError::Internal("user agent is not a valid header".into())
                 })?,
             );
+
+            // The conditional headers say which revision we already hold, so a
+            // source with nothing new can answer `304` and send no body at all.
+            // Sent on the first hop only: after a redirect the URL is a
+            // different resource, and a validator for the old one means
+            // nothing for the new (RFC 9110).
+            if hop == 0 {
+                if let Some(validators) = conditional {
+                    if let Some(etag) = &validators.etag {
+                        if let Ok(value) = HeaderValue::from_str(etag) {
+                            headers.insert(IF_NONE_MATCH, value);
+                        }
+                    }
+                    if let Some(modified) = &validators.last_modified {
+                        if let Ok(value) = HeaderValue::from_str(modified) {
+                            headers.insert(IF_MODIFIED_SINCE, value);
+                        }
+                    }
+                }
+            }
 
             // The credential travels only to the host it was configured for.
             let send_credential = self.credential_host.as_deref() == Some(host.as_str());
@@ -360,6 +387,19 @@ impl SafeFetcher {
                 continue;
             }
 
+            // `304` is the good outcome of a conditional request, not a
+            // failure: the source has confirmed the revision we hold is still
+            // current. It is only ever a valid answer when we asked
+            // conditionally, so a bare `GET` that produces one is a protocol
+            // error rather than an empty page to be stored.
+            if status == reqwest::StatusCode::NOT_MODIFIED {
+                if conditional.is_none() {
+                    return Err(SourceError::Network(format!(
+                        "{host} answered 304 to an unconditional request"
+                    )));
+                }
+                return Ok(ConditionalFetch::NotModified);
+            }
             if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::GONE {
                 return Err(SourceError::NotFound);
             }
@@ -389,17 +429,31 @@ impl SafeFetcher {
                 return Err(SourceError::Network(format!("{host} answered {status}")));
             }
 
+            // Read the validators before the body, because reading the body
+            // consumes the response.
             let content_type = response
                 .headers()
                 .get(CONTENT_TYPE)
                 .and_then(|v| v.to_str().ok())
                 .map(str::to_owned);
+            let etag = response
+                .headers()
+                .get(reqwest::header::ETAG)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned);
+            let last_modified = response
+                .headers()
+                .get(reqwest::header::LAST_MODIFIED)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned);
             let body = read_bounded(response, self.policy.max_bytes).await?;
-            return Ok(Fetched {
+            return Ok(ConditionalFetch::Fetched(Fetched {
                 final_url: current.to_string(),
                 body,
                 content_type,
-            });
+                etag,
+                last_modified,
+            }));
         }
 
         Err(SourceError::Refused(format!(
@@ -526,11 +580,28 @@ impl SafeFetcher {
         }
 
         let url = format!("https://{host}/robots.txt");
-        let rules = match self.send_with_redirects(&url, None).await {
+        // `robots.txt` is read unconditionally: it is the file that decides the
+        // pacing, so asking the source to cache it would be asking it to make
+        // the rules stale.
+        let outcome = self.send_with_redirects(&url, None, None).await;
+        let rules = match outcome {
             // A site with no `robots.txt` has no restrictions. `404` arrives as
             // `NotFound` because that is how every other fetch reports it.
             Err(SourceError::NotFound) => RobotsRules::unrestricted(),
-            Ok(page) => RobotsRules::parse(&page.body, &product_token(&self.policy.user_agent)),
+            Ok(ConditionalFetch::Fetched(page)) => {
+                RobotsRules::parse(&page.body, &product_token(&self.policy.user_agent))
+            }
+            // A `304` to an unconditional read is a protocol fault rather than
+            // an unchanged file. It falls into the same arm as any other
+            // failure: the rules are unknown, and unknown means the default
+            // pace rather than no rules.
+            Ok(ConditionalFetch::NotModified) => {
+                tracing::warn!(
+                    host,
+                    "robots.txt answered 304 to an unconditional request; using the default pace"
+                );
+                RobotsRules::unrestricted()
+            }
             // Anything else — a 5xx, a challenge wall, a network failure — leaves
             // the site's rules unknown. Recorded rather than treated as "no
             // rules", because a reader's import should not fail over a file that
@@ -582,11 +653,48 @@ impl SafeFetcher {
 #[async_trait::async_trait]
 impl Fetcher for SafeFetcher {
     async fn get(&self, url: &str) -> SourceResult<Fetched> {
-        self.get_with_redirects(url, None).await
+        expect_fetched(self.get_with_redirects(url, None, None).await?)
     }
 
     async fn post_form(&self, url: &str, fields: &[(&str, &str)]) -> SourceResult<Fetched> {
-        self.get_with_redirects(url, Some(fields)).await
+        expect_fetched(self.get_with_redirects(url, Some(fields), None).await?)
+    }
+
+    /// Fetch, asking the source to answer `304` when nothing has changed.
+    ///
+    /// The conditional headers are sent only for a request that carries no form
+    /// and no credential-bearing body, because `If-None-Match` on a POST is
+    /// meaningless: the whole point of the condition is that the request has no
+    /// side effect to skip.
+    async fn get_conditional(
+        &self,
+        url: &str,
+        known: Option<&RevisionValidators>,
+    ) -> SourceResult<ConditionalFetch> {
+        let Some(known) = known.filter(|validators| validators.is_usable()) else {
+            // Nothing to be conditional about. Asking anyway would be a request
+            // with a header the source cannot act on.
+            return Ok(ConditionalFetch::Fetched(expect_fetched(
+                self.get_with_redirects(url, None, None).await?,
+            )?));
+        };
+        self.get_with_redirects(url, None, Some(known)).await
+    }
+}
+
+/// Take the page out of a conditional result, refusing the impossible case.
+///
+/// A `304` can only answer a request that carried a condition, so an
+/// unconditional `get` that receives one has hit a fault rather than an
+/// unchanged page. Returning an error here rather than an empty body is the
+/// difference between a loud bug and a chapter stored as nothing — which is the
+/// exact failure the ported Syosetu code had.
+fn expect_fetched(result: ConditionalFetch) -> SourceResult<Fetched> {
+    match result {
+        ConditionalFetch::Fetched(fetched) => Ok(fetched),
+        ConditionalFetch::NotModified => Err(SourceError::Network(
+            "the source answered 304 to an unconditional request".to_owned(),
+        )),
     }
 }
 
@@ -664,6 +772,8 @@ impl Fetcher for FixtureFetcher {
                 final_url: url.to_owned(),
                 body: body.clone(),
                 content_type: Some("text/html; charset=utf-8".to_owned()),
+                etag: None,
+                last_modified: None,
             }),
             None => Err(SourceError::Network(format!(
                 "no fixture recorded for {url}"

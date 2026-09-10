@@ -33,7 +33,7 @@ use lorehaven_domain::imports::{
 use lorehaven_domain::JobId;
 use lorehaven_scrapers::registry::Registry;
 use lorehaven_scrapers::{
-    Credentials, FetchPolicy, SafeFetcher, SourceAdapter, SourceKey, SourceWork,
+    Credentials, FetchPolicy, Fetcher, SafeFetcher, SourceAdapter, SourceKey, SourceWork,
 };
 use serde_json::{json, Value};
 use time::OffsetDateTime;
@@ -192,8 +192,10 @@ pub async fn run(
 
     let policy = FetchPolicy::for_source(adapter.capabilities());
     let mut fetcher = SafeFetcher::new(adapter.hosts(), policy);
+    let mut credentialed = false;
     if let Some(credentials) = &credentials {
         if !credentials.secret.is_empty() {
+            credentialed = true;
             // The header goes to the source's own host and to nothing a
             // redirect leads to; the fetcher enforces both halves.
             let host = adapter.hosts().into_iter().next().unwrap_or_default();
@@ -202,6 +204,29 @@ pub async fn run(
                 .map_err(|error| fatal(format!("the saved credential cannot be sent: {error}")))?;
         }
     }
+
+    // Reads are filed under the source and under *who* they were made as. A
+    // page fetched with a reader's credential is a different resource from the
+    // same URL fetched anonymously, and serving one for the other would hand
+    // somebody gated content — so the scope is part of the cache key rather
+    // than a detail of the fetch (spec §10.4).
+    let scope = if credentialed && !row.pseud_id.is_empty() {
+        row.pseud_id.clone()
+    } else {
+        crate::revisions::PUBLIC_SCOPE.to_owned()
+    };
+    let adapter_version = source
+        .as_ref()
+        .map_or("0", |record| record.adapter_version.as_str())
+        .to_owned();
+    let fetcher = crate::revisions::CachingFetcher::new(
+        fetcher,
+        state.db(),
+        state.config().storage.root.clone(),
+        &row.source_key,
+        &adapter_version,
+        &scope,
+    );
 
     // Rule 3: preview first, so the plan is a fact before any body is stored.
     let url = row
@@ -538,7 +563,7 @@ struct StoredChapter {
 /// sources' halves.
 struct SourceFetch<'a> {
     registry: &'a Registry,
-    fetcher: &'a SafeFetcher,
+    fetcher: &'a dyn Fetcher,
     credentials: Option<&'a Credentials>,
     work: &'a SourceWork,
 }

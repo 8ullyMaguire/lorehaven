@@ -23,6 +23,7 @@ pub mod jobs;
 pub mod migrate;
 pub mod outbox;
 pub mod reading;
+pub mod revisions;
 pub mod secrets;
 pub mod sessions;
 pub mod storage;

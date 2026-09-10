@@ -49,7 +49,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD as BASE64;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
-use lorehaven_db::{imports, secrets};
+use lorehaven_db::{imports, revisions, secrets};
 use lorehaven_domain::imports::{plan_import, ChapterIdentity, ImportedWork};
 use lorehaven_domain::{AppError, PseudId};
 use lorehaven_scrapers::{FetchPolicy, SafeFetcher, SourceKey};
@@ -90,7 +90,60 @@ pub fn router() -> Router<AppState> {
 /// operator surface exists is itself a disclosure (spec §11.8, and the same rule
 /// `/admin/jobs` follows).
 pub fn admin_router() -> Router<AppState> {
-    Router::new().route("/admin/sources/health", post(sweep_source_health))
+    Router::new()
+        .route("/admin/sources/health", post(sweep_source_health))
+        .route(
+            "/admin/sources/revisions",
+            get(revision_cache_stats).delete(clear_revision_cache),
+        )
+        .route("/admin/sources/revisions/purge", post(purge_revision_cache))
+}
+
+/// What the revision cache is holding.
+///
+/// Reported rather than inferred. The number is the only way to tell a cache
+/// that is working from one that is silently empty, and an empty cache looks
+/// exactly like a healthy one from every other endpoint: imports still succeed,
+/// they just cost a request each.
+async fn revision_cache_stats(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_operator(&state, &user)?;
+    let total = revisions::count(state.db()).await?;
+    Ok(Json(serde_json::json!({
+        "entries": total,
+        "ttl_seconds": crate::revisions::REVISION_TTL_SECONDS,
+    })))
+}
+
+/// Drop the entries whose expiry has passed.
+///
+/// Only the entries. The bytes they pointed at are left for the collector to
+/// judge, because `content_blobs` is shared with the snapshots a reader is
+/// actually reading — a cache that deleted its own blobs would be a cache that
+/// could delete a chapter.
+async fn purge_revision_cache(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_operator(&state, &user)?;
+    let purged = revisions::purge_expired(state.db()).await?;
+    Ok(Json(serde_json::json!({ "purged": purged })))
+}
+
+/// Empty the cache.
+///
+/// Safe by construction and still worth an operator's decision: it costs
+/// requests, not correctness. Deliberately *not* wired into the maintenance
+/// worker, so nothing empties the cache on its own.
+async fn clear_revision_cache(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_operator(&state, &user)?;
+    let cleared = revisions::clear(state.db()).await?;
+    Ok(Json(serde_json::json!({ "cleared": cleared })))
 }
 
 /// Recompute every source's health from the import history.
@@ -242,6 +295,33 @@ async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<serde_jso
     Ok(Json(serde_json::json!({ "items": items })))
 }
 
+/// Wrap a fetcher so a preview reuses what the source says has not changed.
+///
+/// The scope mirrors the worker's: a read made with a stored credential is filed
+/// under the pseud it belongs to, and an anonymous read under `public`. Two
+/// readers' credentialed reads must not share entries, which is the whole reason
+/// the scope is part of the cache key (spec §10.4).
+async fn caching_fetcher<'a>(
+    state: &'a AppState,
+    fetcher: SafeFetcher,
+    source_key: &str,
+    scope: &str,
+) -> crate::revisions::CachingFetcher<'a, SafeFetcher> {
+    let adapter_version = imports::find_source(state.db(), source_key)
+        .await
+        .ok()
+        .flatten()
+        .map_or_else(|| "0".to_owned(), |record| record.adapter_version);
+    crate::revisions::CachingFetcher::new(
+        fetcher,
+        state.db(),
+        state.config().storage.root.clone(),
+        source_key,
+        &adapter_version,
+        scope,
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Preview
 // ---------------------------------------------------------------------------
@@ -332,6 +412,12 @@ async fn preview_import(
         lorehaven_scrapers::AuthKind::None => None,
         _ => load_credential_for(&state, &pseud, adapter.key().as_str()).await?,
     };
+    let scope = if credential.is_some() {
+        pseud.to_string()
+    } else {
+        crate::revisions::PUBLIC_SCOPE.to_owned()
+    };
+    let fetcher = caching_fetcher(&state, fetcher, adapter.key().as_str(), &scope).await;
 
     let work = adapter
         .preview(&fetcher, &url, credential.as_ref())
@@ -626,6 +712,12 @@ async fn start_import(
             lorehaven_scrapers::AuthKind::None => None,
             _ => load_credential_for(&state, &pseud, &source_key).await?,
         };
+        let scope = if credential.is_some() {
+            pseud.to_string()
+        } else {
+            crate::revisions::PUBLIC_SCOPE.to_owned()
+        };
+        let fetcher = caching_fetcher(&state, fetcher, &source_key, &scope).await;
         let work = adapter
             .preview(&fetcher, &url, credential.as_ref())
             .await

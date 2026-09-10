@@ -101,6 +101,39 @@ impl BlobStore {
         bytes: &[u8],
         content_type: &str,
     ) -> Result<(String, String)> {
+        self.put_with_retention(db, bytes, content_type, "snapshot")
+            .await
+    }
+
+    /// Store a blob the fetch cache owns (spec §10.4).
+    ///
+    /// The same bytes as [`BlobStore::put`] but classified `fetch_cache`, which
+    /// is a statement about why the bytes are here: a cached source page is an
+    /// optimisation, and an operator clearing the cache is opting out of it.
+    /// Getting the class wrong is not fatal — nothing deletes by class yet — but
+    /// it is the difference between a row that explains itself and one that does
+    /// not.
+    ///
+    /// # Errors
+    /// As [`BlobStore::put`].
+    pub async fn put_fetch_cache(
+        &self,
+        db: &Database,
+        bytes: &[u8],
+        content_type: &str,
+    ) -> Result<(String, String)> {
+        self.put_with_retention(db, bytes, content_type, "fetch_cache")
+            .await
+    }
+
+    /// The shared body of both `put` variants.
+    async fn put_with_retention(
+        &self,
+        db: &Database,
+        bytes: &[u8],
+        content_type: &str,
+        retention: &str,
+    ) -> Result<(String, String)> {
         let checksum = hex::encode(Sha256::digest(bytes));
         let storage_key = Self::storage_key(&checksum);
 
@@ -135,12 +168,12 @@ impl BlobStore {
             "INSERT INTO content_blobs
                  (checksum, storage_key, byte_size, content_type, retention_class,
                   created_at, last_referenced_at)
-             VALUES (?, ?, ?, ?, 'snapshot', ?, ?)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (checksum) DO NOTHING",
             "INSERT INTO content_blobs
                  (checksum, storage_key, byte_size, content_type, retention_class,
                   created_at, last_referenced_at)
-             VALUES (?, ?, ?, ?, 'snapshot', ?, ?)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (checksum) DO NOTHING",
         );
         match db.backend() {
@@ -150,6 +183,7 @@ impl BlobStore {
                     .bind(&storage_key)
                     .bind(byte_size)
                     .bind(content_type)
+                    .bind(retention)
                     .bind(&now)
                     .bind(&now)
                     .execute(db.sqlite_pool().expect("sqlite handle"))
@@ -161,6 +195,7 @@ impl BlobStore {
                     .bind(&storage_key)
                     .bind(byte_size)
                     .bind(content_type)
+                    .bind(retention)
                     .bind(&now)
                     .bind(&now)
                     .execute(db.postgres_pool().expect("postgres handle"))

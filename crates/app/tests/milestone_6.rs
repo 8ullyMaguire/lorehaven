@@ -33,7 +33,7 @@ use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
 use lorehaven_app::worker::{Worker, WorkerOptions};
 use lorehaven_db::storage::BlobStore;
-use lorehaven_db::{imports, jobs, Database, DatabaseConfig};
+use lorehaven_db::{imports, jobs, revisions, Database, DatabaseConfig};
 use lorehaven_domain::jobs::{JobKind, RetryPolicy};
 use lorehaven_domain::AccountId;
 use lorehaven_scrapers::async_trait;
@@ -436,6 +436,10 @@ impl Client {
 
     async fn post(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
         self.request("POST", uri, Some(body)).await
+    }
+
+    async fn delete(&mut self, uri: &str) -> (StatusCode, Value) {
+        self.request("DELETE", uri, None).await
     }
 }
 
@@ -1647,6 +1651,128 @@ async fn running_an_import_updates_the_sources_health() {
         source_health(&harness).await,
         "healthy",
         "a successful import is what makes a source healthy"
+    );
+
+    harness.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// The revision cache (spec §10.4)
+//
+// The cache's own behaviour is proven in `revision_cache.rs`, against a
+// scripted fetcher. What is proven here is the part that needs the real
+// server: that the surface exists, and that it is an operator's and nobody
+// else's.
+// ---------------------------------------------------------------------------
+
+/// A client for an operator, built over an existing account.
+///
+/// A separate state rather than a flag on the harness, because being an
+/// operator is a property of the *configuration* — which account
+/// `config.administration.operator_account_id` names — and not of the session.
+/// Building it here is what proves the gate reads the configuration rather than
+/// something the caller passed in.
+async fn operator_client(harness: &Harness, account: AccountId, email: &str) -> Client {
+    let mut config = config_for(&harness.dir);
+    config.administration.operator_account_id = Some(account);
+    let mut client = Client::new(server::build_router(AppState::new(
+        config,
+        harness.db.clone(),
+    )));
+    let (status, body) = client
+        .post(
+            "/api/v1/auth/login",
+            json!({ "email": email, "password": PASSWORD }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "operator login: {body}");
+    client
+}
+
+/// The cache's surface is an operator's, and its absence is a 404 to everybody
+/// else.
+///
+/// `404` rather than `403`: confirming that an operator surface exists is itself
+/// a disclosure, which is the rule `/admin/jobs` already follows.
+#[tokio::test]
+async fn the_revision_cache_surface_belongs_to_the_operator() {
+    let harness = Harness::new("revisions-route").await;
+    let (mut reader, account, _pseud) = signed_in(&harness, "curious@example.org", "curious").await;
+
+    // A reader is told the endpoint does not exist.
+    let (status, body) = reader.get("/api/v1/admin/sources/revisions").await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    let (status, body) = reader
+        .post("/api/v1/admin/sources/revisions/purge", json!({}))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    // The operator sees what the cache holds.
+    let mut operator = operator_client(&harness, account, "curious@example.org").await;
+    let (status, body) = operator.get("/api/v1/admin/sources/revisions").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["entries"], 0, "nothing has been cached yet: {body}");
+    assert!(
+        body["ttl_seconds"].as_i64().is_some_and(|ttl| ttl > 0),
+        "the operator can see how long entries last: {body}"
+    );
+
+    harness.cleanup().await;
+}
+
+/// An operator can empty the cache, and doing so leaves the stored bytes alone.
+///
+/// The bytes are the point of the test. `content_blobs` is shared with the
+/// snapshots a reader is reading, so a cache that deleted its own blobs would be
+/// a cache that could delete somebody's chapter.
+#[tokio::test]
+async fn clearing_the_revision_cache_does_not_delete_stored_bytes() {
+    let harness = Harness::new("revisions-clear").await;
+    let (_reader, account, _pseud) = signed_in(&harness, "keeper@example.org", "keeper").await;
+
+    // A chapter's bytes, stored the way an import stores them.
+    let store = harness.store();
+    let (checksum, _key) = store
+        .put(&harness.db, b"<html>a chapter</html>", "text/html")
+        .await
+        .expect("store the snapshot");
+
+    // And a cache entry pointing at the same bytes, as a real read would leave.
+    let entry = revisions::RevisionEntry {
+        checksum: checksum.clone(),
+        etag: Some("\"v1\"".to_owned()),
+        last_modified: None,
+        expires_at: lorehaven_db::identity::in_seconds(3600),
+    };
+    revisions::upsert(
+        &harness.db,
+        &revisions::RevisionKey {
+            source_key: SOURCE,
+            revision_key: WORK_URL,
+            adapter_version: "0.1.0",
+            security_scope: "public",
+        },
+        &entry,
+    )
+    .await
+    .expect("record the revision");
+    assert_eq!(revisions::count(&harness.db).await.expect("count"), 1);
+
+    let mut operator = operator_client(&harness, account, "keeper@example.org").await;
+    let (status, body) = operator.delete("/api/v1/admin/sources/revisions").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["cleared"], 1, "{body}");
+    assert_eq!(revisions::count(&harness.db).await.expect("count"), 0);
+
+    // The bytes are still there. A cache is an optimisation; losing it costs
+    // requests, and losing a snapshot costs a reader their chapter.
+    assert!(
+        store
+            .get(&harness.db, &checksum)
+            .await
+            .expect("read the blob")
+            .is_some(),
+        "clearing the revision cache must not delete content_blobs"
     );
 
     harness.cleanup().await;

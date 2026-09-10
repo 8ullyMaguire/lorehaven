@@ -12,6 +12,7 @@ name = "lorehaven"
 path = "src/main.rs"
 
 [dependencies]
+async-trait.workspace = true
 anyhow.workspace = true
 argon2.workspace = true
 axum.workspace = true
