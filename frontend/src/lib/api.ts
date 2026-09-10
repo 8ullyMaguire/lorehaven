@@ -825,3 +825,263 @@ export function respondToInvitation(id: string, accept: boolean): Promise<Invita
 export function revokeInvitation(id: string): Promise<void> {
   return apiFetch<void>(`/invitations/${encodeURIComponent(id)}/revoke`, { method: 'POST' });
 }
+
+// ---------------------------------------------------------------------------
+// Reading (spec §9)
+// ---------------------------------------------------------------------------
+
+/** A reading position as stored on the server. */
+export interface ServerPosition {
+  revision: string | null;
+  anchor: string | null;
+  position_permille: number;
+  device: string | null;
+}
+
+/** The resolution of multiple positions for the same subject. */
+export interface ProgressResolution {
+  kind: 'use_stored' | 'ask_the_reader' | 'no_position';
+  position?: ServerPosition;
+  mine?: ServerPosition | null;
+  other?: ServerPosition | null;
+}
+
+/** The full progress view returned by GET /reading/progress. */
+export interface ProgressView {
+  positions: ServerPosition[];
+  resolution: ProgressResolution;
+}
+
+/** A history entry. */
+export interface HistoryItem {
+  id: string;
+  subject_type: string;
+  subject_id: string;
+  last_read_at: string;
+  revision_seen: string | null;
+  created_at: string;
+}
+
+/** A history view returned by GET /library/history. */
+export interface HistoryView {
+  entries: HistoryItem[];
+  cursor: string | null;
+}
+
+/** A rating. */
+export interface Rating {
+  id: string;
+  work_id: string;
+  stars: number;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A rating view. */
+export interface RatingView {
+  id: string;
+  work_id: string;
+  stars: number;
+  version: number;
+}
+
+/** A review. */
+export interface ReviewView {
+  id: string;
+  body: string;
+  contains_spoilers: boolean;
+  is_public: boolean;
+  published_at: string | null;
+  version: number;
+}
+
+/** A private note. */
+export interface Note {
+  id: string;
+  body: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A note view. */
+export interface NoteView {
+  id: string;
+  body: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Typography settings as stored. */
+export interface Typography {
+  font_size: number;
+  line_width: number;
+  theme: string;
+  version: number;
+}
+
+/** Typography view returned by GET /settings/typography. */
+export interface TypographyView {
+  font_size: number;
+  line_width: number;
+  theme: string;
+  version: number;
+  defaults: TypographyDefaults;
+}
+
+export interface TypographyDefaults {
+  font_size: number;
+  line_width: number;
+  theme: string;
+}
+
+/** Progress request body for PUT /reading/progress. */
+export interface ProgressRequest {
+  subject_id: string;
+  subject_type: 'work' | 'library_item';
+  revision_id: string | null;
+  paragraph_anchor: string | null;
+  position_permille: number;
+}
+
+/** Rating request body. */
+export interface RatingRequest {
+  stars: number;
+  expected_version?: number;
+}
+
+/** Review request body. */
+export interface ReviewRequest {
+  body: string;
+  contains_spoilers: boolean;
+  is_public: boolean;
+  expected_version?: number;
+}
+
+/** Note request body. */
+export interface NoteRequest {
+  body: string;
+}
+
+/** Typography patch request body. */
+export interface TypographyRequest {
+  font_size?: number;
+  line_width?: number;
+  theme?: string;
+  expected_version: number;
+}
+
+// ---------------------------------------------------------------------------
+// Reading API functions
+// ---------------------------------------------------------------------------
+
+/** Save or update the reader's position for a work. */
+export function saveProgress(
+  _workId: string,
+  request: ProgressRequest,
+): Promise<ProgressView> {
+  return apiFetch<ProgressView>(`/reading/progress`, {
+    method: 'PUT',
+    body: JSON.stringify(request),
+  });
+}
+
+/** Get positions for a subject (one per device). */
+export function getProgress(
+  subjectId: string,
+  signal?: AbortSignal,
+): Promise<ProgressView> {
+  return apiFetch<ProgressView>(`/reading/progress?subject_id=${encodeURIComponent(subjectId)}`, {
+    signal,
+  });
+}
+
+/** Forget this device's position for a subject. */
+export function forgetProgress(subjectId: string): Promise<void> {
+  return apiFetch<void>(`/reading/progress?subject_id=${encodeURIComponent(subjectId)}`, {
+    method: 'DELETE',
+  });
+}
+
+/** Get the reader's history with optional pagination cursor. */
+export function fetchHistory(
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<HistoryView> {
+  const url = cursor
+    ? `/library/history?cursor=${encodeURIComponent(cursor)}`
+    : '/library/history';
+  return apiFetch<HistoryView>(url, { signal });
+}
+
+/** Delete a single history entry. */
+export function deleteHistoryEntry(id: string): Promise<void> {
+  return apiFetch<void>(`/library/history/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** Clear the entire history. */
+export function clearHistory(): Promise<void> {
+  return apiFetch<void>('/library/history/clear', { method: 'POST' });
+}
+
+/** Submit or update a rating for a work. */
+export function upsertRating(
+  workId: string,
+  request: RatingRequest,
+): Promise<RatingView> {
+  return apiFetch<RatingView>(`/works/${encodeURIComponent(workId)}/rating`, {
+    method: 'PUT',
+    body: JSON.stringify(request),
+  });
+}
+
+/** Delete a rating for a work. */
+export function deleteRating(workId: string): Promise<void> {
+  return apiFetch<void>(`/works/${encodeURIComponent(workId)}/rating`, { method: 'DELETE' });
+}
+
+/** Get public reviews for a work. */
+export function fetchReviews(workId: string, signal?: AbortSignal): Promise<ReviewView[]> {
+  return apiFetch<ReviewView[]>(`/works/${encodeURIComponent(workId)}/reviews`, { signal });
+}
+
+/** Create or update the caller's review for a work. */
+export function upsertReview(
+  workId: string,
+  request: ReviewRequest,
+): Promise<ReviewView> {
+  return apiFetch<ReviewView>(`/works/${encodeURIComponent(workId)}/reviews`, {
+    method: 'PUT',
+    body: JSON.stringify(request),
+  });
+}
+
+/** Get private notes for a subject. */
+export function fetchNotes(subjectId: string, signal?: AbortSignal): Promise<NoteView[]> {
+  return apiFetch<NoteView[]>(`/notes?subject_id=${encodeURIComponent(subjectId)}`, { signal });
+}
+
+/** Create or update a note. */
+export function saveNote(request: NoteRequest): Promise<NoteView> {
+  return apiFetch<NoteView>('/notes', { method: 'PUT', body: JSON.stringify(request) });
+}
+
+/** Delete a note. */
+export function deleteNote(id: string): Promise<void> {
+  return apiFetch<void>(`/notes/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** Get effective typography settings plus defaults. */
+export function fetchTypography(signal?: AbortSignal): Promise<TypographyView> {
+  return apiFetch<TypographyView>('/settings/typography', { signal });
+}
+
+/** Update typography settings. Returns 409 on stale version. */
+export function patchTypography(request: TypographyRequest): Promise<TypographyView> {
+  return apiFetch<TypographyView>('/settings/typography', {
+    method: 'PATCH',
+    body: JSON.stringify(request),
+  });
+}
