@@ -26,7 +26,7 @@ the result. Where a claim could only be checked by hand, it says so.
 | Field | Value |
 |---|---|
 | Date of last verification | 2026-09-10 |
-| Commit | tag `v0.03-identity` (Milestone 2, the name `docs/tutorial/README.md` reserves for it). The previous checkpoint was `v0.01-running-app` (`0d51c19`). |
+| Commit | tag `v0.04-publishing` (Milestone 3). Previous checkpoints: `v0.03-identity` (Milestone 2), `v0.01-running-app` (Milestone 0). |
 | Environment | Linux, Rust 1.98.0, Node 26.8.1, SQLite 3.53.4 |
 | PostgreSQL available | **No** |
 
@@ -177,6 +177,76 @@ Two defects were found by this journey and fixed before committing:
 
 ---
 
+## Milestone 3 — Drafts, chapters, publishing and revisions
+
+| # | Acceptance criterion | Status | Evidence |
+|---|---|---|---|
+| 1 | Concurrent edits return conflicts | Implemented and locally tested | `milestone_3.rs::a_stale_edit_is_refused_with_a_conflict_that_names_both_versions`. Both writers' versions are named in the envelope. |
+| 2 | Revision restoration creates a new revision | Implemented and locally tested | `milestone_3.rs::restoring_a_revision_creates_a_new_one_rather_than_rewriting_history` — three revisions afterwards, the oldest byte-identical to what it was. |
+| 3 | Public readers never receive unpublished revisions | Implemented and locally tested | `milestone_3.rs::an_anonymous_reader_never_receives_a_draft_revision`; a draft is `404` to a stranger. Withdrawing removes the work from the public surface entirely. |
+| 4 | Repeated publication with one idempotency key does not duplicate notifications | Implemented and locally tested | `milestone_3.rs::replaying_one_idempotency_key_does_not_publish_or_notify_twice` — the outbox rows are compared before and after the replay. |
+| 5 | Pseud switching does not change ownership | Implemented and locally tested | `milestone_3.rs::switching_pseuds_does_not_hand_over_a_work`; the work becomes a `404` to the other face, never an edit. |
+| 6 | Invitations identify the exposed pseud | Implemented and locally tested | `milestone_3.rs::an_invitation_names_pseuds_and_grants_edit_rights_only_after_acceptance` — the response names two handles and contains no account. |
+| 7 | Withdrawn or newly restricted content disappears from public indexes and caches | Partially implemented | A withdraw enqueues `withdraw.deindex` in the publication transaction and a visibility change enqueues `visibility.deindex`, both asserted in tests. **No indexer consumes them yet** — that is Milestone 9. |
+| 8 | The editor schema is closed and enforced on write | Implemented and locally tested | `crates/domain/src/document.rs` (16 tests) and `milestone_3.rs::a_document_outside_the_editor_schema_is_refused_and_changes_nothing`: unknown nodes, marks and attributes are refused, and a refused save writes nothing at all. |
+| 9 | Derived HTML escapes and link schemes are restricted | Implemented and locally tested | `markup_is_escaped_in_the_reading_view`; `javascript:`, `data:` and protocol-relative URLs never reach an `href`. |
+| 10 | Autosave keeps text through conflicts and offline | Implemented and locally tested | `frontend/src/lib/autosave.test.ts` (8 tests). |
+
+Commands actually run, with their result:
+
+```text
+cargo test --workspace            203 passed, 0 failed (10 test binaries)
+cargo clippy --all-targets --all-features -- -D warnings    clean
+cargo fmt --all -- --check        clean
+vitest (frontend)                 71 passed (12 files)
+vite build                        entry 132.72 kB JS (45.85 kB gzip) + 32.35 kB CSS,
+                                  editor split to a separate 331.34 kB chunk (106 kB gzip)
+lorehaven migrate                 applied 0003_works on a scratch database
+lorehaven serve --port 8123       the writing journey driven in a real browser
+```
+
+The browser journey, against the compiled binary serving its embedded bundle,
+with a scratch database at `/tmp/lh-m3-e2e`:
+
+```text
+/register              account created with the age band set; landed on /account
+/write                 "Writing as @inkwell"; the list loaded empty, honestly
+Start a draft          created a work and routed to /write/<id>
+Details                title typed and saved; the work page's h1 followed immediately
+Publication            the blockers were listed before publishing was possible:
+                       "title: …", then "chapters: A work needs at least one chapter…"
+Add chapter            "One"; the editor opened and the autosave reported its state
+Type in the editor     text entered; the revision was written and the status said so
+Publish                succeeded once the chapter had content; the work page showed
+                       Published 2026-09-10 and the chapter with its word count
+Read publicly          /works/<id> served the work with its author and chapter list
+```
+
+Three defects were found by this journey and by testing, not by reading:
+
+1. **`bind:value` on the field primitives silently did nothing.** `TextField`,
+   `Textarea` and `Select` spread their props onto the native element instead of
+   declaring a `$bindable` value, so `bind:value` compiled cleanly, the runtime
+   dropped it, and the parent never heard a keystroke. Every Milestone 3 form
+   submitted empty while looking correctly filled in — the title field was typed
+   into and the server stored `""`. Fixed with `$bindable()` and pinned by
+   `frontend/src/lib/components/FieldBinding.test.ts`, which drives a real
+   component binding rather than a DOM event.
+2. **Saving a chapter violated a foreign key.** The chapter's
+   `current_revision_id` was moved before the revision row was inserted, so
+   SQLite refused the write: the editor's first save returned `500`. The insert
+   now precedes the pointer move, and a version conflict rolls the whole
+   transaction back, so a stale save writes no revision at all.
+3. **An internal fault logged only its masked message.** `ApiError` was logged
+   with `Display`, which by design returns the client-facing text; the cause was
+   invisible in a test run. Faults now log with `Debug`, which prints the chain.
+
+One thing the journey showed that the tests could not: the reader's note on a
+published work said "Others see it only once it is published" *about an already
+published work*. The wording now distinguishes the two cases.
+
+---
+
 ## Known limitations and open risks
 
 1. **PostgreSQL has never been executed.** Every PostgreSQL statement is
@@ -208,19 +278,32 @@ Two defects were found by this journey and fixed before committing:
    honest — the flow cannot silently pretend a message was sent — but it is not
    a shipped flow. SMTP is spec §2.2 optional infrastructure and has not been
    chosen.
-8. **The account and pseud pages have no automated browser coverage.** They were
-   driven by hand (the journey above); Vitest covers the store, the router, the
-   API client and two of the pages. A Playwright suite is still missing
-   (spec §23).
-9. **Two tabs can still collide on the settings forms.** The server refuses a
-   stale version and the interface shows the conflict with a reload, but the
-   loser of that race has to re-apply their change by hand.
+8. **No page has automated browser coverage.** The Milestone 2 and 3 journeys
+   were driven by hand; Vitest covers the store, the router, the API client,
+   the autosave and three of the pages. Both frontend defects found in
+   Milestone 3 were invisible to the unit tests, which is the argument for the
+   Playwright suite spec §23 asks for.
+9. **Two tabs can still collide on the settings forms and on a work's details.**
+   The server refuses a stale version and the interface shows the conflict, but
+   the loser of the race has to re-apply their change by hand. A chapter's text
+   is the exception: the autosave keeps both copies and offers a choice.
+10. **Nothing consumes the outbox yet.** Milestone 3 writes `chapter.revised`,
+    `publish.notify`, `publish.index`, `withdraw.deindex`,
+    `visibility.deindex` and `rating.reindex` rows in the transactions that
+    cause them, and they are asserted in tests. The worker that delivers them
+    arrives in Milestone 5, so no notification has ever been delivered and no
+    index has ever been updated.
+11. **Chapter deletion and ordering are one-way.** Deleting a chapter
+    soft-deletes it and reordering rewrites position keys, but no page offers
+    either operation, and there is no undo. Both routes exist and are tested
+    only through the repository.
 
 ## What was *not* done, stated plainly
 
-Milestones 3 through 18 are **not implemented**. `docs/requirements.csv` records
-each as `unsupported`. Within Milestone 2, block and mute primitives are still
-tables with no behaviour (M2-06). No screen in the application displays mock
+Milestones 4 through 18 are **not implemented**. `docs/requirements.csv` records
+each as `unsupported`, and `docs/plans/` is the build plan for them. Within
+Milestone 2, block and mute primitives are still tables with no behaviour
+(M2-06). No screen in the application displays mock
 data: the pages that exist show real values from the server, and the routes that
 are linked but unbuilt render an explicit "not built yet" panel naming the
 milestone that will fill them.

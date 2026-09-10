@@ -1,0 +1,194 @@
+# Build plan — the rest of Lorehaven
+
+This directory is the working plan for the milestones that are **not yet
+built**. `docs/spec.md` says what the platform must do; these files say what to
+type, in what order, and how to check it. They are written for someone who
+knows Rust and Svelte but has never seen this repository.
+
+Milestones 0–3 are done. `docs/verification.md` records the evidence for each
+claim, and `docs/requirements.csv` records every requirement with a status.
+Both are updated **as part of** finishing a milestone, never afterwards.
+
+---
+
+## 1. The order of work, and why
+
+```text
+M4  Reader, ratings, history, work pages      ← do this first
+M5  Jobs, storage, cache, secrets
+M6  Imports, source credentials, batches
+M7  Exports, device delivery, offline
+M8  Library, saved views, bookmarks
+M9  Taxonomy, body search, query language
+M10 Discovery, private taste influence
+M11 Comments, forums, groups, messaging
+M12 Collections, challenges, requests, events
+M13 Trust, reports, quorum, appeals
+M14 Credits, fair queues, billing
+M15 Marketplace, extension isolation
+M16 Public API, feeds, push, federation, AI
+M17 Administration, statistics, abuse, privacy, ops
+M18 Hardening and release
+```
+
+The order is a dependency order, not a preference. Three examples, because a
+junior developer will otherwise be tempted to reorder:
+
+* **M5 before M6.** Importing is a background job: nothing in M6 can be
+  written honestly before there is a job model with leases and retries.
+  Writing an import "for now, inline in the request" is the specific mistake
+  this order prevents — a request that fetches a 300-chapter work times out,
+  and the retry does it all again from scratch.
+* **M5 before M7.** Every export is a job that writes a file to storage.
+* **M9 before M10.** Two of the recommendation engines read an inverted index
+  and a tag graph; neither exists until M9 has built them.
+
+Within a milestone the order is always the same, and it is the order the
+vertical-slice rule in `docs/spec.md` §1.3 demands:
+
+```text
+migration (both dialects)
+→ domain types and policy functions
+→ repository functions
+→ routes
+→ pages
+→ the journey, driven by hand in a browser
+→ tests that pin what the journey proved
+→ requirements.csv + verification.md
+```
+
+Do **not** write all the migrations for a milestone, then all the routes, then
+all the pages. Build one journey end to end, check it by hand, then broaden.
+
+---
+
+## 2. House rules a newcomer must follow
+
+These are not stylistic. Each one exists because its absence already caused a
+defect somewhere in this repository's history, and the commit messages say so.
+
+### 2.1 The database layer
+
+* Every statement is written **twice**: once for SQLite, once for PostgreSQL.
+  `db.sql("... ?", "... ?::uuid")` picks one and rewrites `?` to `$1…$n` for
+  PostgreSQL. See `crates/db/src/lib.rs` (`Database::sql`) and any function in
+  `crates/db/src/content.rs` for the shape to copy.
+* When a statement is assembled from shared column lists, use `sql_owned`
+  (`crates/db/src/lib.rs`) — `db.sql` borrows, and a temporary `format!` result
+  does not live long enough.
+* Bind only `String` and `i64` (and `Option<…>` of those). PostgreSQL `uuid`
+  columns are written as `?::uuid` and read with `id::text AS id`. This is what
+  lets one row type decode on both engines. See ADR 0004.
+* Never put a literal `?` inside SQL text: it is always a placeholder.
+* A function that needs several statements in one transaction writes the SQLite
+  branch and the PostgreSQL branch out separately. They are different
+  transaction types; do not try to abstract over them. A `macro_rules!` that
+  expands the shared body is acceptable and is used in
+  `crates/db/src/content.rs::append_revision`.
+* Every migration exists **twice**, with identical ids:
+  `migrations/sqlite/000N_name.sql` and `migrations/postgres/000N_name.sql`.
+  A test (`the_two_dialects_define_the_same_migration_ids`) fails if they drift.
+  The next free number is **0004**.
+* Every migration states, in a comment, its deletion and retention behaviour
+  (spec §4.1). Not a summary — the actual rule, including what cascades and
+  what deliberately does not.
+
+### 2.2 Errors and policies
+
+* Failures are `AppError` (`crates/domain/src/error.rs`). A new failure mode
+  gets a variant there with a stable code, an HTTP status and a public message.
+  Never return a raw `anyhow::Error` to a client: `AppError::Internal` masks it
+  and logs the chain (the logging uses `?error`, not `%error`, precisely so the
+  chain is visible).
+* Authorization lives in **pure functions** in `crates/domain/src/policy.rs`
+  and `crates/domain/src/content.rs`: `fn can_do_thing(actor, facts) ->
+  Decision`. No database, no clock, no I/O. The handler loads the facts and
+  asks. A `if account_id == ...` in a handler is the thing this rule forbids.
+* **Reading content goes through `can_access_content`** and nothing else. If
+  you find yourself writing a second check — "this one is for the reader, that
+  one is for the download" — you are about to leak restricted content. Add the
+  fact the check needs to `ContentFacts` instead.
+* A resource the caller may not reach is `404`, not `403`, whenever saying
+  "forbidden" would confirm that it exists (spec §3.3). `AppError::NotFound`
+  takes a coarse noun ("work"), never an identifier.
+
+### 2.3 Optimistic concurrency
+
+Every editable row has `version`. Every mutating statement carries
+`... AND version = ?` in its `WHERE` clause. Zero rows affected means the caller
+lost a race, and the handler re-reads the row and returns
+`AppError::RevisionConflict { expected, actual }` so the client can say what it
+was racing. **Never** `SELECT` then `UPDATE` without the version predicate.
+
+### 2.4 The HTTP layer
+
+* Routes are declared in `crates/app/src/routes/<area>.rs` and registered in
+  `crates/app/src/server.rs::build_router`. A route that is not registered is
+  not reachable — there is no discovery.
+* Every route tree is wrapped in `classified(...)`, which declares its
+  rate-limit class (`Auth`, `Write`, `Search`, `Default`) and installs the
+  limiter. The limiter **fails closed** when a request carries no class, so a
+  route tree merged without `classified` returns 500 for every request. This
+  has already happened once.
+* The class marker must be layered *outside* the limiter; `classified` does
+  this for you, which is why you use it rather than writing the layers yourself.
+* Cookie-authenticated state changes need the CSRF layer, which is applied to
+  the `account_routes` subtree in `build_router`. `Write`-class routes belong
+  under it.
+* Signing-in-required handlers take `RequireSession` (or `RequirePseud`);
+  handlers a visitor may reach take `MaybeSession`. Extracting a `RequireSession`
+  *is* the authentication check.
+* Collections answer with `{ "items": [], "next_cursor": null }` (spec §3.3).
+  Existing endpoints that return a bare array are a known inconsistency; new
+  cursor-paginated endpoints must use the envelope.
+
+### 2.5 The frontend
+
+* Svelte 5 runes (`$state`, `$derived`, `$effect`, `$props`). No stores, no
+  `export let`.
+* Field components take a **`$bindable` value**. `bind:value` without
+  `$bindable()` on the child compiles and silently does nothing; this shipped
+  once and every form submitted empty. `FieldBinding.test.ts` now pins it.
+* The API client (`frontend/src/lib/api.ts`) mirrors the routes exactly and
+  never navigates on a failure. Types come from the server's response shapes;
+  where the server omits a field, the type has no field.
+* Router paths live in `frontend/src/lib/router.ts`. A linked-but-unbuilt
+  destination resolves to `Planned` and says which milestone will fill it —
+  never to mock data.
+* HTML from the server is rendered with `{@html}` **only** for
+  `sanitized_html` produced by `crates/domain/src/document.rs`. Never render
+  author text any other way.
+* Run the frontend with `bash frontend/scripts/fe.sh build|test|check` if
+  `npm run` cannot find the binaries (this checkout lives on an sshfs mount
+  where `node_modules/.bin` is not executable).
+
+### 2.6 Testing and honesty
+
+* Rust: `cargo test --workspace`. Acceptance tests live in
+  `crates/app/tests/milestone_N.rs`, run against the **real router**, a real
+  SQLite file and a cookie jar that mimics a browser. Copy the harness from
+  `milestone_3.rs`.
+* Frontend: `vitest`, in `*.test.ts` beside what it tests.
+* A test asserts the property, not the implementation. "A stale save writes
+  nothing at all" is a property; "update_work returns Ok(false)" is not.
+* When you find a bug while doing anything else, fix it and write the test
+  that would have caught it. The session summaries list eight defects found
+  this way, all of which reading the code had not revealed.
+* **Do not claim something works until you have run it.** `verification.md`
+  has a status vocabulary for exactly this; use `implemented but not executed`
+  when that is the truth.
+* Every milestone ends with a tag named in `docs/tutorial/README.md`
+  (`v0.04-publishing` is next), and with `requirements.csv` rows whose
+  `evidence` column names a command or a test — not a file path alone.
+
+---
+
+## 3. The files in this directory
+
+| File | Covers |
+|---|---|
+| `milestone-04-reader.md` | Milestone 4 in full: the next thing to build |
+| `milestones-05-18.md` | The remaining milestones, each with tasks, files, tests and pitfalls |
+| `cross-cutting.md` | Work that every milestone touches: verification, migrations, performance budgets, accessibility |
+
+Read the milestone you are about to build, in full, before opening an editor.
