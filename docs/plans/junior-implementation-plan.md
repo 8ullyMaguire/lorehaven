@@ -626,7 +626,11 @@ format, confirms a privacy notice, and downloads it when the job finishes. Then
 they install the site on their phone, go offline, and still read a chapter they
 opened before.
 
-#### Migration 0007 — exports and offline
+#### Migration 0008 — exports and offline
+
+> Renumbered from `0007`: the source revision cache took `0007` during Milestone
+> 6, and this plan allots one migration number per milestone. Every migration
+> from here on is one higher than this document originally said.
 
 ```text
 export_jobs        id, job_id, account_id, subject_type, subject_id,
@@ -714,7 +718,7 @@ A reader's library is a place: shelves they made, private tags, reading statuses
 bookmarks with notes, a list of what updated since they last looked, and their
 storage usage with a way to free space.
 
-#### Migration 0008
+#### Migration 0009
 
 ```text
 shelves           id, account_id, name, description, is_public INTEGER,
@@ -813,7 +817,7 @@ body of a chapter. A curator proposes a new tag and it enters a review queue.
 Two of the recommendation engines read an inverted index and a tag graph.
 Neither exists until this milestone has built them.
 
-#### Migration 0009
+#### Migration 0010
 
 ```text
 tags              id, slug, display_name, kind TEXT, parent_id (nullable),
@@ -924,7 +928,7 @@ operator chooses whether an aggregate signal exists at all; an individual
 chooses whether their own reading contributes. Both switches exist, both default
 to off, and the interface says which is which.
 
-#### Migration 0010
+#### Migration 0011
 
 ```text
 recommendation_settings  account_id PRIMARY KEY, use_history INTEGER,
@@ -1013,7 +1017,7 @@ auto-delivery, it is held for a moderator and the reader is told so in those
 words. Elsewhere a group holds a discussion thread, and two readers exchange a
 private message that respects a block.
 
-#### Migration 0011
+#### Migration 0012
 
 ```text
 comments          id, subject_type, subject_id, author_pseud_id, body,
@@ -1120,7 +1124,7 @@ A moderator opens a gift exchange: a sign-up window, a matching run, a deadline,
 and a reveal. A reader requests a translation of a work and follows the request
 until it is fulfilled.
 
-#### Migration 0012
+#### Migration 0013
 
 ```text
 collections        id, slug, name, description, owner_pseud_id, visibility,
@@ -1232,7 +1236,7 @@ Rules to implement, with a test each:
   `two_pseuds_of_one_account_are_one_decision`.
 * A suspended account keeps its history and loses its powers.
 
-#### Migration 0013
+#### Migration 0014
 
 ```text
 trust_levels      account_id PRIMARY KEY, level INTEGER, standing TEXT,
@@ -1311,7 +1315,7 @@ translation and the credits move when it is fulfilled.
 the balance is its sum. A single `balance` column that gets `+=` is a bug waiting
 for the first crash between the debit and the credit.
 
-#### Migration 0014
+#### Migration 0015
 
 ```text
 credit_accounts   account_id PRIMARY KEY, held INTEGER, created_at, updated_at
@@ -1414,7 +1418,7 @@ pub enum Permission { ReadWork(Scope), WriteWork(Scope), Network(Vec<String>),
 pub fn may_call(grant: &Grant, call: &ExtensionCall) -> Decision;
 ```
 
-#### Migration 0015
+#### Migration 0016
 
 ```text
 extension_packages   id, package_id, version, manifest_json, checksum,
@@ -1482,7 +1486,7 @@ A reader subscribes to their favourite author's feed in an RSS reader. A bot
 posts a new chapter through an API token with one scope. A push notification
 arrives on a phone with generic lock-screen text.
 
-#### Migration 0016
+#### Migration 0017
 
 ```text
 api_tokens        id, account_id, pseud_id, name, token_hash, scopes_json,
@@ -1566,7 +1570,7 @@ An operator opens the admin dashboard, sees the queue lengths and the error
 rates, exports a reader's data for a subject access request, and runs a backup
 that restores on a second machine.
 
-#### Migration 0017
+#### Migration 0018
 
 ```text
 instance_settings    key PRIMARY KEY, value_json, updated_by, updated_at
