@@ -35,7 +35,8 @@ These are not priorities that yield to others. They constrain every priority abo
 - Bounded resource use at every trust and payment level.
 - Accessibility, child safety, and harassment protection are foundational.
 - No purchased trust, purchased ranking, or purchased moderation authority.
-- No XP, level progression, reputation scores, or public leaderboards.
+- Credits and gamification rewards must never purchase trust, moderation authority, or search ranking.
+- The administrator's taste profile must never be visible, inferable, or hinted at through any user-facing label, multiplier name, or credit breakdown.
 - Honest verification claims. Feature presence in this document is not evidence of implementation.
 
 ---
@@ -1036,25 +1037,245 @@ Personal analytics: works marked finished, chapters read, estimated words read, 
 
 Do not count opens as proof of reading. Label estimates as such.
 
-## 9.7 Reading goals and streaks
+## 9.7 Reading goals, streaks, and gamification
 
-Reading goals are private, opt-in, and grant nothing.
+### 9.7.1 Design principles
 
-Users may set:
+Gamification rewards the behaviors the platform wants more of: completing fiction, leaving genuine feedback, importing new sources, reading diversely, and fulfilling community demand.
 
-- Daily or weekly reading target (chapters, words, or works).
-- Progress display on personal dashboard.
+Rules:
 
-Reading streaks are private, opt-in, and cosmetic.
+- **Never punish inactivity.** Missing a day costs nothing. Streaks reset without guilt messaging.
+- **Never create anxiety.** No "your streak will break" notifications. No loss-framed language.
+- **Reward quality, not volume.** Completion rates and positive feedback multiply author earnings. Raw word count and post count do not.
+- **Credits and trust are separate.** Earning credits never advances trust level. Trust requires reviewed conduct.
+- **Admin taste is invisible.** The taste multiplier affects author credit amounts silently. No user-facing label, breakdown, or hint reveals the administrator's preferences.
 
-Explicitly prohibited:
+### 9.7.2 Daily login and action credits
 
-- Public leaderboards for reading activity.
-- Loss warnings or streak-break notifications designed to induce compulsive use.
-- Credit, trust, or ranking rewards for meeting goals or maintaining streaks.
-- Notifications that pressure the user to read to maintain a streak.
+**Login bonus:**
 
-The goal display simply shows current progress toward the user's chosen target. Missing a target is displayed as neutral information, not failure.
+| Action | Credits | Notes |
+|--------|---------|-------|
+| Daily login | 5 | Once per calendar day (user's timezone). Flat rate regardless of streak length. |
+
+**Daily action credits:**
+
+| Action | Credits | Daily cap | Notes |
+|--------|---------|-----------|-------|
+| Read a chapter | 1 | 10/day | Once per unique chapter per day. Minimum 30 seconds on page or scroll depth threshold. |
+| Leave a quick reaction | 1 | 5/day | Pre-classified positive. |
+| Leave a positive comment (delivered) | 2 | 3/day | Must pass positivity filter and reach the author. |
+| Leave a constructive review (delivered, author opted in) | 3 | 1/day | Higher reward for effort. |
+| Post in a forum | 1 | 5/day | Minimum 100 characters. |
+| Create a forum topic | 2 | 2/day | |
+| Bookmark a work | 1 | 5/day | Private or public. |
+| Import a work | 2 | 5/day | Unique source key per day. |
+| Import from a new source (first time ever) | 10 | 1/day | One-time per source domain. |
+| Fulfill a wishlist item | 15 | 1/day | Requester must confirm match. |
+| Complete a translation chapter (approved) | 5 | 5/day | Human-reviewed. |
+| Vote on a subforum proposal | 2 | 5/day | Governance participation. |
+
+**Daily action cap:** 50 credits total from daily actions (75 for Author subscription, 100 for Curator/Patron).
+
+### 9.7.3 Reader completion credits
+
+| Action | Credits | Notes |
+|--------|---------|-------|
+| Mark a work as finished | 5 | Once per work per pseud. Minimum time-on-page enforced. |
+| Finish a work under 10k words | 3 | Bonus for short complete fiction. |
+| Finish a work over 100k words | 10 | Bonus for long fiction commitment. |
+| Finish a work in a new fandom | 3 | Cross-fandom discovery. |
+
+**Monthly cap:** 200 credits from completion bonuses.
+
+**Quality gate:** A work counts as "finished" only if the reader spent a minimum time proportional to word count. Opening the last chapter and immediately marking finished does not count.
+
+### 9.7.4 Author credits
+
+Authors earn credits when readers engage with their work.
+
+**Base author rewards:**
+
+| Event | Credits to author | Notes |
+|-------|-------------------|-------|
+| Unique reader reads a chapter | 1 | Once per reader per chapter. Capped at 50 unique readers/day per work. |
+| Reader completes the work | 5 | Once per reader per work. |
+| Reader leaves a quick reaction | 1 | Per reaction per reader. |
+| Reader leaves a positive comment | 2 | Per delivered positive comment. |
+| Reader bookmarks the work | 1 | Per unique reader. |
+| Reader adds to a public collection | 2 | Per collection. |
+
+**Quality multiplier:**
+
+```text
+quality_multiplier = 1.0
+  + 0.3 × completion_rate_bonus    (if >60% of starters finish)
+  + 0.2 × positive_feedback_bonus  (if >80% of feedback is positive)
+  + 0.2 × reread_bonus             (if >10% of readers return)
+  + 0.1 × bookmark_rate_bonus      (if >15% of readers bookmark)
+```
+
+Range: 1.0x to 1.8x. Recalculated weekly from the previous 30 days. Minimum 10 readers before quality signals activate. New works start at 1.0x.
+
+**Demand multiplier (silent):**
+
+```text
+demand_multiplier = 1.0
+  + 0.25 × admin_taste_affinity
+  + 0.15 × wishlist_demand
+  + 0.10 × search_demand
+```
+
+Range: 1.0x to 1.5x. The admin taste component is **never disclosed**. Authors see only their total credits and the quality multiplier breakdown. The demand multiplier is folded silently into the total.
+
+**What the author sees:**
+
+```text
+"Your work earned 180 credits this week."
+"Quality bonus: +50% (high completion rate, positive reader feedback)."
+```
+
+No mention of "trending category," "demand bonus," "admin taste," or any label that hints at the administrator's preferences. The quality multiplier breakdown is shown because it is actionable and based on public reader behavior. The demand multiplier is not shown because it contains the private taste signal.
+
+**Author credit caps:**
+
+| Cap | Limit |
+|-----|-------|
+| Per work per day | 100 credits |
+| Per author per day | 300 credits |
+| Per author per month | 5,000 credits |
+
+**Pseud isolation:** Pseuds on the same account do not generate author credits for each other's works.
+
+### 9.7.5 Leaderboards
+
+**Time windows:** Daily (resets midnight UTC), Weekly (resets Monday 00:00 UTC), Monthly (resets first of month).
+
+**Categories:**
+
+| Category | Metric |
+|----------|--------|
+| Top Completed Reads | Works marked finished |
+| Top Positive Feedback | Positive reactions + comments received |
+| Top Completion Rate | % of readers who finish (min 10 readers) |
+| Top Wishlist Heroes | Wishlist items fulfilled |
+| Top Translators | Approved translation chapters |
+| Top Curators | Quorum votes cast, tag proposals approved |
+| Top Importers | Works imported from new sources |
+| Top Discoverers | Unique fandoms/moods read |
+
+**Deliberately absent:** most words written, most posts, most kudos given, longest streak, any global XP ranking.
+
+**Display:**
+
+- Top 20 per category per time window.
+- Users see their own rank even if outside top 20.
+- **Opt-out:** all users appear by default. Users may hide themselves from public leaderboards in settings. Hidden users still earn leaderboard credits.
+- Each entry shows pseud name and metric value only.
+- Accessible from `/leaderboards` and as a dashboard widget.
+
+**Leaderboard rewards:**
+
+| Placement | Credits |
+|-----------|---------|
+| 1st | 50 |
+| 2nd–3rd | 25 |
+| 4th–10th | 10 |
+| Participation (score > 0) | 2 |
+
+Paid at the end of each period.
+
+### 9.7.6 Badges
+
+**Milestone badges (one-time, permanent):**
+
+| Badge | Condition | Credit bonus |
+|-------|-----------|-------------|
+| First Words | Publish first work | 20 |
+| First Finish | Mark first work finished (reading) | 10 |
+| First Import | Import first work | 10 |
+| First Translation | Publish first approved translation | 30 |
+| First Fulfillment | Fulfill first wishlist item | 25 |
+| First Review | Leave first constructive review | 10 |
+| First Quorum | Cast first governance vote | 15 |
+| Centurion Reader | Finish 100 works | 50 |
+| Prolific Author | Publish 10 complete works | 50 |
+| Polyglot | Read works in 5 languages | 30 |
+| Explorer | Read works in 10 fandoms | 30 |
+| Tastemaker | 50 of your bookmarks also bookmarked by others | 30 |
+| Wishlist Hero | Fulfill 10 wishlist items | 50 |
+| Bridge Builder | Read in 5 previously unread fandoms | 20 |
+
+**Recurring badges (earned multiple times, display "Awarded ×N"):**
+
+| Badge | Condition | Credits per award |
+|-------|-----------|------------------|
+| Daily Reader | Read 5+ chapters in a day | 2 |
+| Week in Books | Read every day for 7 days | 5 |
+| Feedback Star | Receive 20 positive reactions in a week | 5 |
+| Completionist | Finish 5 works in a month | 10 |
+| Challenge Finisher | Complete a writing or reading challenge | 15 |
+| Leaderboard Top 10 | Place top 10 on any leaderboard | 10 |
+| New Source Pioneer | Import from a previously unimported source | 15 |
+| Demand Responder | Fulfill a wishlist item with 10+ votes | 20 |
+
+**Seasonal badges (limited-time, display year/season):**
+
+| Badge | Condition | Notes |
+|-------|-----------|-------|
+| Summer Reader [Year] | Finish 20 works during summer event | Unique per season |
+| Holiday Writer [Year] | Publish during winter challenge | Unique per season |
+
+Seasonal events run for 4–8 weeks with boosted multipliers (1.5x completion credits) and unique badges. They are announced in advance and entirely optional.
+
+**Badge display:**
+
+- Appear on public profile if user chooses to display them.
+- Each badge shows icon, name, and **"Awarded ×N"** count.
+- Global award count visible in the badge catalog ("Awarded 142 times across all users") to show rarity.
+- Users feature up to 6 badges on their profile.
+- Badge catalog at `/badges` with all available badges, conditions, and global counts.
+- No badge gates a feature. No badge grants trust.
+
+### 9.7.7 Streaks
+
+- Reading streak: consecutive calendar days reading at least one chapter.
+- Writing streak: consecutive days saving at least one draft edit.
+- **Private by default.** Public display opt-in.
+- No credit multiplier for streak length.
+- No "streak will break" notifications.
+- Reset message is neutral: "Your reading streak reset. Start a new one?"
+- **Streak freeze:** spend 5 credits to preserve a streak through one missed day. Once per streak. Included free with Author subscription and above.
+- Streak milestones trigger cosmetic badges (Week in Books, etc.).
+
+### 9.7.8 Anti-gaming measures
+
+| Risk | Mitigation |
+|------|-----------|
+| Speed-reading to farm completions | Minimum time-on-page proportional to word count. |
+| Alt account reaction farming | Accounts <7 days old or TL0 don't generate author credits. |
+| Self-reacting across pseuds | Same-account pseuds don't generate author credits for each other. |
+| Repeated imports of same fic | Import credits only for unique source keys. |
+| Low-effort forum spam | Forum post credits require 100-character minimum. |
+| Quality multiplier gaming | 30-day rolling window, minimum 10 readers. |
+| Wishlist fulfillment farming | Requester must confirm fulfillment matches. |
+| Leaderboard manipulation | Unique-account deduplication. |
+
+**Acceptance**
+
+- Daily login credits award once per calendar day.
+- Action credits respect daily caps.
+- Completion credits enforce minimum time-on-page.
+- Author credits aggregate silently with quality and demand multipliers.
+- No user-facing label, breakdown, or notification reveals the administrator's taste influence.
+- Leaderboards rotate on schedule and pay rewards.
+- Users can opt out of public leaderboard display.
+- Badges display "Awarded ×N" count and global rarity.
+- Streak resets produce neutral messaging with no guilt framing.
+- Streak freezes work correctly and deduct credits.
+- Anti-gaming measures prevent the listed exploits.
+- Credit earnings never affect trust level.
 
 ## 9.8 Views and completion rates
 
@@ -2358,17 +2579,48 @@ Quotes cover batch imports, device delivery, conversion, translation, AI feature
 
 ## 20.3 Initial credit economy
 
-| Action | Credits |
-|---|---:|
-| Daily regeneration | 10, capped |
-| First publication | 20, once, abuse-reviewed |
-| Accepted challenge completion | 10, monthly cap |
-| Reviewed mentorship or beta-reading | 10, monthly cap |
-| Recognized constructive feedback (opted-in author) | 2, strict caps |
-| Reviewed governance contribution | 5 per approved batch |
-| Fulfilled wishlist item | 15 |
-| Cross-posting a work | 3 |
-| Approved translation contribution | 5 per chapter |
+| Action | Credits | Cap |
+|--------|---------|-----|
+| Daily login | 5 | 1/day |
+| Read a chapter | 1 | 10/day |
+| Quick reaction | 1 | 5/day |
+| Positive comment (delivered) | 2 | 3/day |
+| Constructive review (delivered) | 3 | 1/day |
+| Forum post | 1 | 5/day |
+| Forum topic | 2 | 2/day |
+| Bookmark | 1 | 5/day |
+| Import work | 2 | 5/day |
+| Import from new source | 10 | 1/day, once per source |
+| Mark work finished | 5 | 200/month |
+| Finish short work (<10k) | 3 | 200/month |
+| Finish long work (>100k) | 10 | 200/month |
+| Finish in new fandom | 3 | 200/month |
+| Fulfill wishlist item | 15 | 1/day |
+| Translation chapter (approved) | 5 | 5/day |
+| Quorum vote | 2 | 5/day |
+| Author: unique reader per chapter | 1 | 50 readers/day/work |
+| Author: reader completion | 5 | Per reader |
+| Author: reaction received | 1 | Per reader |
+| Author: positive comment received | 2 | Per reader |
+| Author: bookmark received | 1 | Per reader |
+| Author quality multiplier | Up to 1.8x | Weekly recalc |
+| Author demand multiplier (silent) | Up to 1.5x | Weekly recalc |
+| Leaderboard 1st place | 50 | Per category per period |
+| Leaderboard 2nd–3rd | 25 | Per category per period |
+| Leaderboard 4th–10th | 10 | Per category per period |
+| Leaderboard participation | 2 | Per category per period |
+| Milestone badge | 10–50 | Once per badge |
+| Recurring badge | 2–20 | Per award |
+| First publication | 20 | Once, abuse-reviewed |
+| Accepted challenge completion | 10 | Monthly cap |
+| Reviewed mentorship/beta | 10 | Monthly cap |
+| Reviewed governance batch | 5 | Per batch |
+
+**Daily action cap:** 50 (free), 75 (Author), 100 (Curator/Patron).
+
+**Author caps:** 100/work/day, 300/author/day, 5,000/author/month.
+
+**Priority job costs remain unchanged from previous spec.**
 
 Do not reward raw reading surveillance, posting volume, sanctions issued, positive star ratings, or maintaining streaks.
 
@@ -2389,6 +2641,15 @@ Do not reward raw reading surveillance, posting volume, sanctions issued, positi
 | Extension execution beyond free ceiling | Variable per plugin |
 
 Standard jobs remain free within fair-use limits.
+
+**Subscription gamification benefits:**
+
+| Tier | Gamification benefit |
+|------|---------------------|
+| Reader | Daily action cap 50 (same as free). |
+| Author | Daily action cap 75. Free streak freeze (1/month). |
+| Curator | Daily action cap 100. Free streak freeze (2/month). |
+| Patron | Daily action cap 100. Free streak freeze (unlimited). |
 
 ## 20.4 Scheduling
 
@@ -2958,6 +3219,11 @@ Automate:
 32. Export account → delete account.
 33. Backup → restore to a clean instance.
 34. Complete critical journeys in both initial locales.
+35. Log in → earn daily credit → read chapters → earn action credits → finish work → earn completion credit → verify author earned credits.
+36. View leaderboard → verify own rank → opt out of public display → verify hidden.
+37. Earn badge → verify "Awarded ×N" display → verify global count in catalog.
+38. Maintain reading streak → miss day → verify neutral reset message → use streak freeze → verify streak preserved.
+39. Publish work in admin-taste category → verify author credits include silent demand multiplier → verify no taste-related label appears anywhere.
 
 ## 25.2 Security tests
 
@@ -3133,7 +3399,8 @@ The tutorial, contextual help, API documentation, and operator documentation des
 - [ ] Bootstrap-to-community transition workflow.
 - [ ] Administrator override logged with reason.
 - [ ] Trust cannot be purchased.
-- [ ] No XP, levels, reputation, or public leaderboards.
+- [ ] Credits and gamification rewards never advance trust level.
+- [ ] Leaderboards exist for engagement but do not determine governance authority.
 
 ## 28.6 Quorum-based moderation (Priority 6)
 
@@ -3180,14 +3447,18 @@ The tutorial, contextual help, API documentation, and operator documentation des
 - [ ] Accessibility manually verified.
 - [ ] Documentation matches delivered repository.
 - [ ] Presence and typing indicators opt-in per pseud.
-- [ ] Reading goals and streaks produce no coercive messaging.
+- [ ] Reading goals and streaks produce no coercive messaging, no guilt-framed loss notifications, and no credit multipliers tied to streak length.
+- [ ] Gamification rewards never reveal the administrator's taste profile through any label, multiplier name, or breakdown.
+- [ ] Badge counts display "Awarded ×N" per user and global rarity.
 
 ## 28.10 Deliberately not adopted
 
-- **XP and rank-gated core functionality.** No level system, no reading/download XP gates, no achievement-driven progression.
-- **Posting-volume reputation.** No global or forum-local score rewarding raw posting volume.
-- **Public leaderboards.** No weekly/monthly top-contributor rankings for reading, posting, or curation activity.
-- **Reputation scores.** No visible score derived from activity that determines trust or authority.
+- **XP and level progression.** No 100-level system, no XP bars, no rank-gated features. Gamification uses flat credit rewards, quality multipliers, and badges — not cumulative progression ladders.
+- **Volume-based leaderboards.** No "most words written," "most posts," or "most kudos given" categories. Leaderboards reward completion, quality, and contribution.
+- **Reputation scores.** No visible score derived from activity volume that determines trust or governance authority. Trust requires reviewed conduct.
+- **Coercive streak mechanics.** No guilt-framed loss notifications, no streak-length credit multipliers, no "your streak will break" push notifications. Streaks are cosmetic with optional freezes.
+- **Purchased trust or governance authority.** Credits buy compute priority, not moderation power or search ranking.
+- **Visible admin taste influence.** The demand multiplier affecting author credits is never labeled, broken down, or hinted at in any user-facing surface. Authors see quality bonuses based on reader behavior only.
 - **A promised source count.** Counts follow verified adapter support.
 - **A permanent archive of every fetched body.** Shared infrastructure may deduplicate; public preservation requires explicit workflow.
 - **Credentials as an SSRF exception.** Internal-network integrations require separate configuration.
@@ -3202,6 +3473,23 @@ The tutorial, contextual help, API documentation, and operator documentation des
 - **Community suggestions of other users' social links.** Only the author adds their own social links.
 - **NodeBB import.** Not applicable to a new platform.
 - **Author social proposals as a public queue.** Suggestions may be sent privately to the author, not published.
+
+## 28.11 Gamification
+
+- [ ] Daily login credits award correctly.
+- [ ] Action credits respect daily caps and anti-gaming thresholds.
+- [ ] Completion credits enforce minimum time-on-page.
+- [ ] Author credits include quality multiplier with visible breakdown.
+- [ ] Author credits include demand multiplier with no visible trace of admin taste.
+- [ ] Leaderboards rotate on schedule and pay rewards.
+- [ ] Leaderboard opt-out hides user from public display.
+- [ ] Badges display "Awarded ×N" and global rarity count.
+- [ ] Streak resets produce neutral messaging.
+- [ ] Streak freezes deduct credits and preserve streak.
+- [ ] Seasonal events run with boosted multipliers and unique badges.
+- [ ] Credit earnings never affect trust level.
+- [ ] Same-account pseuds cannot farm each other's author credits.
+- [ ] New/low-trust accounts cannot farm author credits through reactions.
 
 ---
 
