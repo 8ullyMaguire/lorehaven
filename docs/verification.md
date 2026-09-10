@@ -247,6 +247,77 @@ published work*. The wording now distinguishes the two cases.
 
 ---
 
+## Milestone 4 — Reader, ratings, reactions and history
+
+| # | Acceptance criterion | Status | Evidence |
+|---|---|---|---|
+| 1 | A visitor reads a published chapter; a draft is a `404` | Implemented and locally tested | `milestone_4.rs::a_visitor_can_read_a_published_chapter` asserts the sanitized HTML and `editable: false` for a signed-out reader; `a_draft_is_a_404_to_a_stranger` asserts `404` on both the work and the chapter. |
+| 2 | A position is stored per device and one device does not overwrite another | Implemented and locally tested | `milestone_4.rs::progress_saved_by_one_device_does_not_overwrite_another` — two device ids, two rows. |
+| 3 | Devices that disagree offer a choice | Implemented and locally tested | `milestone_4.rs::two_devices_that_disagree_produce_a_choice` asserts `resolution.kind == "ask_the_reader"` with two different permille values, against the running router. |
+| 4 | Position survives a chapter edit, by anchor rather than offset | Implemented and locally tested | `milestone_4.rs::resuming_after_an_edit_uses_the_anchor_not_the_offset` — the author rewrites the chapter, and the stored position still names `p-3` and the revision it was taken against, which `position_is_reliable` then reports as unreliable. |
+| 5 | A private rating changes no public number | Implemented and locally tested | `milestone_4.rs::a_private_rating_changes_no_public_number` (the aggregate stays absent) and `a_rating_is_invisible_to_the_accounts_other_pseud` (a second face of the same account sees nothing). |
+| 6 | The aggregate states its method and count, above a minimum | Implemented and locally tested | `milestone_4.rs::the_aggregate_reports_its_count_and_method` (five public ratings → count 5, mean 4000 permille) and `the_public_aggregate_is_absent_below_the_minimum_count`. |
+| 7 | History is per pseud, and a reader can erase it | Implemented and locally tested | `milestone_4.rs::switching_pseud_shows_a_different_history`; `clearing_history_removes_only_the_callers_rows` — A's clear leaves B's row. |
+| 8 | Typography is account-scoped and stale-write protected | Implemented and locally tested | `milestone_4.rs::typography_follows_the_account_not_the_pseud`; `a_stale_typography_patch_returns_conflict` asserts `409 REVISION_CONFLICT`. |
+| 9 | A review is private until its writer publishes it | Implemented and locally tested | `milestone_4.rs::a_review_stays_private_until_it_is_published` — an unpublished review is invisible to a visitor, and publishing it makes it visible under the active pseud's handle. `a_withdrawn_review_leaves_the_public_list` also asserts that a *stranger* withdrawing the same work's review withdraws nothing. |
+| 10 | A stale rating write is refused rather than overwriting | Implemented and locally tested | `PUT /works/:id/rating` honours `expected_version` the same way typography does; `get_rating` exists so the interface can show what the reader already gave (`null` when there is none, because "I gave nothing" is an answer, not a missing resource). |
+| 11 | Private notes are per pseud and are never rendered in the reading text | Partially implemented | The routes and the repository exist (`notes_for`, `save_note`, `delete_note`, `milestone_4` does not yet cover them) and `NotePanel.svelte` is a side panel, not part of the prose. **No acceptance test drives a note end to end** — that is the gap. |
+| 12 | Search within the current work | Unsupported | Not built. Spec §9.2 lists it; it needs the inverted index of Milestone 9 and is deferred there. |
+| 13 | Whole-work mode without rendering every paragraph at once | Unsupported | Not built. Spec §9.2 requires pagination in whole-work mode; the reader currently reads one chapter at a time with previous/next, which satisfies "must not require rendering every paragraph at once" but does not offer the mode itself. |
+| 14 | Spoiler reveal | Implemented, not exercised end to end | A public review marked `contains_spoilers` is rendered behind a `<details>` element in `WorkPage.svelte`, so it is a deliberate click and never automatic. No test covers the rendering. |
+
+Commands actually run, with their result:
+
+```text
+cargo test --workspace            232 passed, 0 failed (11 test binaries)
+cargo clippy --all-targets --all-features -- -D warnings    clean
+cargo fmt --all -- --check        clean
+vitest (frontend)                 82 passed (13 files)
+vite build                        entry 153.09 kB JS (52.17 kB gzip) + 37.94 kB CSS,
+                                  editor split to a separate 331.34 kB chunk (106 kB gzip)
+bash frontend/scripts/fe.sh build succeeded
+```
+
+**The Milestone 4 browser journey has not been driven by hand.** The API
+journeys above are pinned by acceptance tests that run against the real router, a
+real SQLite file and a cookie jar that mimics a browser; the pages compile and
+the frontend suite passes. That is `implemented and locally tested`, not
+`verified in a browser`, and the difference is written here rather than glossed.
+
+Six defects were found while doing this milestone, and none of them by reading:
+
+1. **The two review handlers were stubs that answered `200` with nothing.** A
+   `PUT` to create a review reported success and stored nothing; a `GET` returned
+   an empty array whatever the database held. This is the failure mode spec §1.2
+   names as forbidden, and it survived into a commit because nothing exercised
+   it.
+2. **The frontend and the server disagreed about the method.** `api.ts` sent
+   `PUT /works/:id/reviews`; the route was registered as `post(...)`. Every
+   review the interface would have sent was a `405`.
+3. **`/library/history` resolved to the history view but `App.svelte` had no
+   branch for it**, so the route fell through to `NotFound`. The router and the
+   shell had been edited independently.
+4. **Three pairs of duplicate pages existed** (`ChapterRead`/`Reader`,
+   `WorkRead`/`WorkPage`, `TypographySettings`/`ReaderSettings`). The shell
+   rendered the older, emptier one of each pair, so the position tracking, the
+   rating and the notes were in files nothing imported.
+5. **`rating_summary` was never constructed**, which the compiler reported as
+   dead code. The reader had no way to see the public aggregate at all, because
+   the view type existed and no route returned it.
+6. **The reading test file leaked a `localStorage` spy between tests.** The
+   first describe block mocked `getItem` to throw and never restored it, so the
+   typography test three tests later read `null`. The fix is an `afterEach`
+   `vi.restoreAllMocks`, which is the reason the suite is now green rather than
+   green-by-ordering.
+
+Two further things were changed because `-D warnings` is a gate, not because
+they were broken: `save_progress` took ten positional arguments (five of them
+`Option<&str>`) and now takes `ProgressInput`, and `save_typography` took eight
+and now takes `TypographyInput`. A call site that passed them in the wrong order
+would have compiled.
+
+---
+
 ## Known limitations and open risks
 
 1. **PostgreSQL has never been executed.** Every PostgreSQL statement is
