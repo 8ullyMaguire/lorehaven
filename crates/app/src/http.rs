@@ -54,6 +54,15 @@ impl From<AppError> for ApiError {
     }
 }
 
+impl From<lorehaven_db::content::ContentError> for ApiError {
+    fn from(error: lorehaven_db::content::ContentError) -> Self {
+        match error {
+            lorehaven_db::content::ContentError::Refused(app) => Self(app),
+            lorehaven_db::content::ContentError::Fault(cause) => Self(AppError::Internal(cause)),
+        }
+    }
+}
+
 impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
         Self(AppError::Internal(error))
@@ -94,8 +103,11 @@ impl IntoResponse for ApiError {
         let code = error.code();
 
         // Faults are logged with their full chain; refusals are not noise.
+        // `?error` rather than `%error`: the `Display` form of an internal
+        // error is masked by design, so the diagnostic detail only appears in
+        // the `Debug` rendering.
         if error.is_fault() {
-            tracing::error!(error = %format!("{error:#}"), code = code.as_str(), "request failed");
+            tracing::error!(error = ?error, code = code.as_str(), "request failed");
         } else {
             tracing::debug!(code = code.as_str(), "request rejected");
         }

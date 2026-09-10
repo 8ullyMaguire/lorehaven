@@ -230,6 +230,27 @@ impl axum::extract::FromRequestParts<AppState> for RequireSession {
     }
 }
 
+/// An extractor that yields the session when there is one and never rejects.
+///
+/// Used by endpoints a visitor may reach without signing in — reading a
+/// published work — where the same URL must answer a contributor with their
+/// draft and a stranger with a refusal. Written out rather than borrowing
+/// `Option<RequireSession>`, because the middleware has already attached the
+/// session to the request and a second, silently-swallowing fallback would be
+/// one more thing to reason about.
+pub struct MaybeSession(pub Option<SessionUser>);
+
+impl axum::extract::FromRequestParts<AppState> for MaybeSession {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        Ok(Self(parts.extensions.get::<SessionUser>().cloned()))
+    }
+}
+
 /// An extractor for endpoints that require a signed-in account *and* an
 /// explicitly selected active pseud.
 pub struct RequirePseud {

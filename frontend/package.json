@@ -22,5 +22,10 @@
     "typescript": "^5.7.2",
     "vite": "^6.0.7",
     "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "@tiptap/core": "^2.27.3",
+    "@tiptap/extension-link": "^2.27.3",
+    "@tiptap/starter-kit": "^2.27.3"
   }
 }

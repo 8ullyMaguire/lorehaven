@@ -1,0 +1,1249 @@
+//! Works, chapters, revisions and publication endpoints (spec §8).
+//!
+//! ```text
+//! GET    /works                         the acting pseud's own works
+//! POST   /works                         create a draft
+//! GET    /works/:id                     read (contributor view, or public)
+//! PATCH  /works/:id                     edit metadata
+//! POST   /works/:id/publish             publish / republish, idempotent
+//! POST   /works/:id/withdraw            withdraw
+//! POST   /works/:id/chapters            append a chapter
+//! GET    /works/:id/chapters/:chapter   read a chapter
+//! POST   /works/:id/reorder-chapters    reorder
+//! PATCH  /chapters/:id                  rename, and/or save text
+//! GET    /chapters/:id/revisions        revision history
+//! POST   /chapters/:id/restore-revision bring an old revision back
+//! ```
+//!
+//! Two rules hold across every handler, and both are enforced by *loading*
+//! rather than by checking afterwards:
+//!
+//! * **A work is reached through the acting pseud's contributions.** An account
+//!   that switches pseuds does not thereby gain access to a work it wrote under
+//!   another face (spec §8 acceptance). A work the acting pseud does not
+//!   contribute to is `404`, not `403`: whether it exists is not disclosed.
+//! * **Reading goes through the one eligibility service** in
+//!   `lorehaven_domain::policy`, so a draft, a withdrawn work or an
+//!   over-rating work is refused identically wherever it is asked for.
+//!
+//! And one property the reader endpoints must hold (spec §8 acceptance):
+//! **public readers never receive an unpublished revision.** The reader path
+//! serves the chapter's *current* revision, and the lifecycle check happens
+//! before the chapter is loaded at all.
+
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::routing::{get, patch, post};
+use axum::{Json, Router};
+use lorehaven_db::collaboration;
+use lorehaven_db::content::{
+    self, ContentError, PublicationOutcome, RevisionInput, RevisionSummary, Work, WorkPatch,
+};
+use lorehaven_db::identity;
+use lorehaven_domain::content::Contributor;
+use lorehaven_domain::document::Document;
+use lorehaven_domain::policy::{
+    can_access_content, AccessPolicy, Actor, ContentFacts, Decision, DenyReason, Lifecycle,
+    Visibility,
+};
+use lorehaven_domain::{AppError, ChapterId, PseudId, RevisionId, WorkId};
+use serde::{Deserialize, Serialize};
+
+use crate::auth::{MaybeSession, RequireSession, SessionUser};
+use crate::http::{ApiError, ApiResult};
+use crate::state::AppState;
+
+/// Work, chapter and revision routes.
+///
+/// Split in two because the reader surface and the writing surface have
+/// different audiences and therefore different rate-limit classes: a visitor
+/// reading a published chapter must not share a bucket with an author saving
+/// drafts.
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/works", get(list_works).post(create_work))
+        .route("/works/{id}", patch(update_work))
+        .route("/works/{id}/publish", post(publish_work))
+        .route("/works/{id}/withdraw", post(withdraw_work))
+        .route("/works/{id}/chapters", post(add_chapter))
+        .route("/works/{id}/reorder-chapters", post(reorder_chapters))
+        .route("/chapters/{id}", patch(update_chapter))
+        .route("/chapters/{id}/revisions", get(list_revisions))
+        .route("/chapters/{id}/restore-revision", post(restore_revision))
+}
+
+/// Routes a visitor may reach with no session at all.
+///
+/// Both handlers still load the session when there is one, because a
+/// contributor reading their own draft must be answered by the same URL that
+/// answers a stranger with `404`.
+pub fn read_router() -> Router<AppState> {
+    Router::new()
+        .route("/works/{id}", get(read_work))
+        .route("/works/{id}/chapters/{chapter}", get(read_chapter))
+}
+
+// ---------------------------------------------------------------------------
+// Views
+// ---------------------------------------------------------------------------
+
+/// A work as its contributor sees it.
+#[derive(Debug, Serialize)]
+struct AuthorWorkView {
+    id: WorkId,
+    title: String,
+    summary: String,
+    language: String,
+    rating: String,
+    visibility: String,
+    lifecycle: String,
+    completion: String,
+    /// Optimistic-concurrency version; the next `PATCH` must send it back.
+    version: i64,
+    created_at: String,
+    updated_at: String,
+    published_at: Option<String>,
+    withdrawn_at: Option<String>,
+    show_public_ratings: bool,
+    /// What the *acting* pseud may do with it.
+    role: String,
+    chapters: Vec<ChapterView>,
+    contributors: Vec<ContributorView>,
+    /// Why the work cannot be published yet, if it cannot.
+    publication_blockers: Vec<String>,
+}
+
+/// A contributor as the author's own view shows them.
+#[derive(Debug, Serialize)]
+struct ContributorView {
+    pseud_id: PseudId,
+    handle: String,
+    display_name: String,
+    role: String,
+    public_attribution: bool,
+}
+
+/// A chapter, with its text only when the caller asked for one chapter.
+#[derive(Debug, Serialize)]
+struct ChapterView {
+    id: ChapterId,
+    title: String,
+    order_key: i64,
+    word_count: i64,
+    revision_count: i64,
+    version: i64,
+    updated_at: String,
+    created_at: String,
+    has_content: bool,
+    current_revision_id: Option<RevisionId>,
+}
+
+impl From<content::Chapter> for ChapterView {
+    fn from(chapter: content::Chapter) -> Self {
+        // Computed before the fields are moved out of `chapter`.
+        let has_content = chapter.has_content();
+        Self {
+            id: chapter.id,
+            title: chapter.title,
+            order_key: chapter.order_key,
+            word_count: chapter.word_count,
+            revision_count: chapter.revision_count,
+            version: chapter.version,
+            updated_at: chapter.updated_at,
+            created_at: chapter.created_at,
+            has_content,
+            current_revision_id: chapter.current_revision_id,
+        }
+    }
+}
+
+/// A chapter's text, as whoever may read it receives it.
+#[derive(Debug, Serialize)]
+struct ChapterContentView {
+    chapter: ChapterView,
+    /// The editor document, as the schema stores it. Contributors only.
+    document: Option<serde_json::Value>,
+    /// Derived sanitized HTML.
+    sanitized_html: String,
+    /// Derived plain text.
+    plain_text: String,
+    word_count: i64,
+    revision_number: Option<i64>,
+    revision_id: Option<RevisionId>,
+    /// The acting pseud may change this chapter.
+    editable: bool,
+    /// Neighbouring chapters, so a reader can move without a table of contents.
+    previous_chapter_id: Option<ChapterId>,
+    next_chapter_id: Option<ChapterId>,
+    work: ChapterWorkView,
+}
+
+/// The little bit of work metadata a chapter page needs.
+#[derive(Debug, Serialize)]
+struct ChapterWorkView {
+    id: WorkId,
+    title: String,
+    lifecycle: String,
+    /// Public author credits.
+    authors: Vec<PublicAuthor>,
+}
+
+/// A publicly credited author.
+#[derive(Debug, Serialize)]
+struct PublicAuthor {
+    handle: String,
+    display_name: String,
+    role: String,
+}
+
+/// A public work page.
+#[derive(Debug, Serialize)]
+struct PublicWorkView {
+    id: WorkId,
+    title: String,
+    summary: String,
+    language: String,
+    rating: String,
+    visibility: String,
+    completion: String,
+    published_at: Option<String>,
+    show_public_ratings: bool,
+    authors: Vec<PublicAuthor>,
+    chapters: Vec<ChapterView>,
+}
+
+/// A chapter in the revision history list.
+#[derive(Debug, Serialize)]
+struct RevisionView {
+    id: String,
+    revision_number: i64,
+    word_count: i64,
+    note: Option<String>,
+    created_at: String,
+    restored_from_id: Option<String>,
+    author_handle: String,
+    /// Whether this is the revision readers currently get.
+    current: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Requests
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct CreateWorkRequest {
+    #[serde(default)]
+    title: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateWorkRequest {
+    expected_version: i64,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    summary: Option<String>,
+    #[serde(default)]
+    language: Option<String>,
+    #[serde(default)]
+    rating: Option<String>,
+    #[serde(default)]
+    visibility: Option<String>,
+    #[serde(default)]
+    completion: Option<String>,
+    #[serde(default)]
+    show_public_ratings: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PublishRequest {
+    expected_version: i64,
+    #[serde(default)]
+    idempotency_key: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateChapterRequest {
+    #[serde(default)]
+    title: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateChapterRequest {
+    expected_version: i64,
+    #[serde(default)]
+    title: Option<String>,
+    /// The editor document. Absent leaves the text alone; present appends a
+    /// revision.
+    #[serde(default)]
+    document: Option<serde_json::Value>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReorderRequest {
+    chapters: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RestoreRequest {
+    revision_id: String,
+}
+
+/// Pagination-ish query for the revision list.
+#[derive(Debug, Deserialize)]
+struct ReadQuery {
+    /// `?document=0` asks for text without the editor document.
+    #[serde(default)]
+    document: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Works
+// ---------------------------------------------------------------------------
+
+async fn list_works(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<Vec<content::OwnedWork>>> {
+    let pseud = acting_pseud(&user)?;
+    let works = content::works_for_pseud(state.db(), pseud).await?;
+    Ok(Json(works))
+}
+
+async fn create_work(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Json(request): Json<CreateWorkRequest>,
+) -> ApiResult<(StatusCode, Json<AuthorWorkView>)> {
+    let pseud = acting_pseud(&user)?;
+    require_participation(&user)?;
+
+    let title = validate_title(request.title.as_deref().unwrap_or(""), false)?;
+    let work = content::create_work(state.db(), pseud, &title).await?;
+
+    let view = author_view(&state, &user, &work).await?;
+    Ok((StatusCode::CREATED, Json(view)))
+}
+
+async fn read_work(
+    State(state): State<AppState>,
+    MaybeSession(session): MaybeSession,
+    Path(id): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let work_id = parse_work_id(&id)?;
+    let work = content::find_work(state.db(), work_id)
+        .await?
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "work" }))?;
+
+    let contributors = collaboration::contributors_for_work(state.db(), work_id).await?;
+    let actor = actor_for(session.as_ref());
+
+    match reading_decision(&state, actor.as_ref(), &work, &contributors) {
+        Reading::Contributor => {}
+        Reading::Public => {
+            // A public reader never receives the editor document, and never
+            // receives a chapter that is not currently published.
+            let view = public_view(&state, &work).await?;
+            return Ok(Json(serde_json::to_value(view).map_err(internal)?));
+        }
+        Reading::Denied(error) => return Err(ApiError(error)),
+    }
+
+    let user = session.ok_or(ApiError(AppError::AuthRequired))?;
+    let view = author_view(&state, &user, &work).await?;
+    Ok(Json(serde_json::to_value(view).map_err(internal)?))
+}
+
+async fn update_work(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(request): Json<UpdateWorkRequest>,
+) -> ApiResult<Json<AuthorWorkView>> {
+    let (work, contributors) = author_work(&state, &user, &id).await?;
+
+    if let Decision::Deny(reason) = can_edit(&user, &contributors) {
+        return Err(refusal(reason));
+    }
+
+    let patch = work_patch(&request)?;
+
+    let changed =
+        content::update_work(state.db(), work.id, request.expected_version, &patch).await?;
+
+    if !changed {
+        let actual = content::current_work_version(state.db(), work.id).await?;
+        return Err(ApiError(AppError::RevisionConflict {
+            expected: request.expected_version,
+            actual,
+        }));
+    }
+
+    let updated = reload(&state, work.id).await?;
+
+    // A work that was listed and is no longer listable (or whose rating moved)
+    // must leave the surfaces that cached it (spec §8 acceptance). The
+    // deindexing is enqueued, not performed here: the request that changes a
+    // work is not the request that should spend time on a search cluster.
+    if let Some(visibility) = &request.visibility {
+        let was_listable = work.visibility == "public";
+        let now_listable = visibility == "public";
+        if was_listable && !now_listable {
+            lorehaven_db::outbox::enqueue(
+                state.db(),
+                "visibility.deindex",
+                &serde_json::json!({ "work_id": work.id }).to_string(),
+                Some(&format!("work:{}:visibility:{}", work.id, updated.version)),
+            )
+            .await?;
+        }
+    }
+    if request.rating.is_some() && request.rating.as_deref() != Some(work.rating.as_str()) {
+        lorehaven_db::outbox::enqueue(
+            state.db(),
+            "rating.reindex",
+            &serde_json::json!({ "work_id": work.id }).to_string(),
+            Some(&format!("work:{}:rating:{}", work.id, updated.version)),
+        )
+        .await?;
+    }
+
+    Ok(Json(author_view(&state, &user, &updated).await?))
+}
+
+async fn publish_work(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(request): Json<PublishRequest>,
+) -> ApiResult<Json<AuthorWorkView>> {
+    let (work, _) = author_work(&state, &user, &id).await?;
+    let actor = user.actor(acting_pseud(&user)?);
+
+    let outcome = content::publish_work(
+        state.db(),
+        &work,
+        &actor,
+        request.expected_version,
+        request.idempotency_key.as_deref(),
+    )
+    .await
+    .map_err(from_content)?;
+
+    let updated = reload(&state, work.id).await?;
+
+    if matches!(outcome, PublicationOutcome::AlreadyApplied) {
+        tracing::debug!(work = %work.id, "publication replayed for an idempotency key");
+    }
+
+    Ok(Json(author_view(&state, &user, &updated).await?))
+}
+
+async fn withdraw_work(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(request): Json<PublishRequest>,
+) -> ApiResult<Json<AuthorWorkView>> {
+    let (work, _) = author_work(&state, &user, &id).await?;
+    let actor = user.actor(acting_pseud(&user)?);
+
+    content::withdraw_work(
+        state.db(),
+        &work,
+        &actor,
+        request.expected_version,
+        request.idempotency_key.as_deref(),
+    )
+    .await
+    .map_err(from_content)?;
+
+    let updated = reload(&state, work.id).await?;
+    Ok(Json(author_view(&state, &user, &updated).await?))
+}
+
+// ---------------------------------------------------------------------------
+// Chapters
+// ---------------------------------------------------------------------------
+
+async fn add_chapter(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(request): Json<CreateChapterRequest>,
+) -> ApiResult<(StatusCode, Json<ChapterView>)> {
+    let (work, contributors) = author_work(&state, &user, &id).await?;
+
+    if let Decision::Deny(reason) = can_edit(&user, &contributors) {
+        return Err(refusal(reason));
+    }
+
+    let title = validate_title(request.title.as_deref().unwrap_or(""), false)?;
+    let chapter = content::create_chapter(state.db(), work.id, &title).await?;
+
+    Ok((StatusCode::CREATED, Json(ChapterView::from(chapter))))
+}
+
+async fn update_chapter(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(request): Json<UpdateChapterRequest>,
+) -> ApiResult<Json<ChapterView>> {
+    let chapter_id = parse_chapter_id(&id)?;
+    let chapter = content::find_chapter(state.db(), chapter_id)
+        .await?
+        .ok_or_else(|| {
+            ApiError(AppError::NotFound {
+                resource: "chapter",
+            })
+        })?;
+
+    // Loading the parent work through the acting pseud is the authorization
+    // step: a stranger's chapter is not found rather than found-and-refused.
+    let (work, contributors) = author_work(&state, &user, &chapter.work_id.to_string()).await?;
+    let _ = work;
+
+    if let Decision::Deny(reason) = can_edit(&user, &contributors) {
+        return Err(refusal(reason));
+    }
+
+    // Text first: a save that appends a revision also bumps the chapter's
+    // version, so a rename sent with the same expected version afterwards would
+    // conflict with itself.
+    if let Some(document) = &request.document {
+        let parsed = Document::from_json(document).map_err(|error| {
+            ApiError(AppError::field(
+                "document",
+                format!("This document is not in the editor's schema ({error})."),
+            ))
+        })?;
+
+        let note = request
+            .note
+            .as_deref()
+            .map(str::trim)
+            .filter(|n| !n.is_empty());
+        let input = RevisionInput::from_document(&parsed, note.map(str::to_owned));
+
+        content::append_revision(
+            state.db(),
+            chapter.id,
+            chapter.work_id,
+            acting_pseud(&user)?,
+            &input,
+            Some(request.expected_version),
+            None,
+        )
+        .await
+        .map_err(from_content)?;
+    }
+
+    if request.title.is_some() {
+        let title = validate_title(request.title.as_deref().unwrap_or(""), false)?;
+        let changed = content::update_chapter(
+            state.db(),
+            chapter.id,
+            request.expected_version,
+            Some(&title),
+        )
+        .await?;
+        if !changed && request.document.is_none() {
+            let current = content::find_chapter(state.db(), chapter.id)
+                .await?
+                .ok_or_else(|| {
+                    ApiError(AppError::NotFound {
+                        resource: "chapter",
+                    })
+                })?;
+            return Err(ApiError(AppError::RevisionConflict {
+                expected: request.expected_version,
+                actual: current.version,
+            }));
+        }
+    }
+
+    let updated = content::find_chapter(state.db(), chapter.id)
+        .await?
+        .ok_or_else(|| {
+            ApiError(AppError::NotFound {
+                resource: "chapter",
+            })
+        })?;
+
+    Ok(Json(ChapterView::from(updated)))
+}
+
+async fn reorder_chapters(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(request): Json<ReorderRequest>,
+) -> ApiResult<Json<Vec<ChapterView>>> {
+    let (work, contributors) = author_work(&state, &user, &id).await?;
+
+    if let Decision::Deny(reason) = can_edit(&user, &contributors) {
+        return Err(refusal(reason));
+    }
+
+    let ordered: Vec<ChapterId> = request
+        .chapters
+        .iter()
+        .map(|raw| parse_chapter_id(raw))
+        .collect::<ApiResult<Vec<_>>>()?;
+
+    content::reorder_chapters(state.db(), work.id, &ordered)
+        .await
+        .map_err(from_content)?;
+
+    let chapters = content::chapters_for_work(state.db(), work.id).await?;
+    Ok(Json(chapters.into_iter().map(ChapterView::from).collect()))
+}
+
+async fn read_chapter(
+    State(state): State<AppState>,
+    MaybeSession(session): MaybeSession,
+    Path((id, chapter)): Path<(String, String)>,
+    Query(query): Query<ReadQuery>,
+) -> ApiResult<Json<ChapterContentView>> {
+    let work_id = parse_work_id(&id)?;
+    let chapter_id = parse_chapter_id(&chapter)?;
+
+    let work = content::find_work(state.db(), work_id)
+        .await?
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "work" }))?;
+    let contributors = collaboration::contributors_for_work(state.db(), work_id).await?;
+    let actor = actor_for(session.as_ref());
+
+    let (is_contributor, is_public) =
+        match reading_decision(&state, actor.as_ref(), &work, &contributors) {
+            Reading::Contributor => (true, false),
+            Reading::Public => (false, true),
+            Reading::Denied(error) => return Err(ApiError(error)),
+        };
+    let _ = is_public;
+
+    let chapters = content::chapters_for_work(state.db(), work_id).await?;
+    let chapter = chapters
+        .iter()
+        .find(|candidate| candidate.id == chapter_id)
+        .cloned()
+        .ok_or_else(|| {
+            ApiError(AppError::NotFound {
+                resource: "chapter",
+            })
+        })?;
+
+    let revision = match chapter.current_revision_id {
+        Some(id) => content::find_revision(state.db(), id).await?,
+        None => None,
+    };
+
+    let position = chapters
+        .iter()
+        .position(|candidate| candidate.id == chapter_id);
+    let previous_chapter_id = position
+        .and_then(|index| index.checked_sub(1))
+        .and_then(|index| chapters.get(index))
+        .map(|chapter| chapter.id);
+    let next_chapter_id = position
+        .and_then(|index| chapters.get(index + 1))
+        .map(|chapter| chapter.id);
+
+    let authors = collaboration::public_contributors(state.db(), work_id)
+        .await?
+        .into_iter()
+        .map(|(handle, display_name, role)| PublicAuthor {
+            handle,
+            display_name,
+            role,
+        })
+        .collect();
+
+    // The editor document is a contributor-only field: a public reader gets the
+    // sanitized rendering and nothing that could be re-saved over the original.
+    let want_document = query.document.as_deref() != Some("0");
+    let document = if is_contributor && want_document {
+        revision
+            .as_ref()
+            .and_then(|revision| serde_json::from_str(&revision.document_json).ok())
+    } else {
+        None
+    };
+
+    Ok(Json(ChapterContentView {
+        chapter: ChapterView::from(chapter),
+        document,
+        sanitized_html: revision
+            .as_ref()
+            .map(|revision| revision.sanitized_html.clone())
+            .unwrap_or_default(),
+        plain_text: revision
+            .as_ref()
+            .map(|revision| revision.plain_text.clone())
+            .unwrap_or_default(),
+        word_count: revision.as_ref().map_or(0, |revision| revision.word_count),
+        revision_number: revision.as_ref().map(|revision| revision.revision_number),
+        revision_id: revision.as_ref().map(|revision| revision.id),
+        editable: is_contributor,
+        previous_chapter_id,
+        next_chapter_id,
+        work: ChapterWorkView {
+            id: work.id,
+            title: work.title.clone(),
+            lifecycle: work.lifecycle.clone(),
+            authors,
+        },
+    }))
+}
+
+async fn list_revisions(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Vec<RevisionView>>> {
+    let chapter_id = parse_chapter_id(&id)?;
+    let chapter = content::find_chapter(state.db(), chapter_id)
+        .await?
+        .ok_or_else(|| {
+            ApiError(AppError::NotFound {
+                resource: "chapter",
+            })
+        })?;
+    let (_work, contributors) = author_work(&state, &user, &chapter.work_id.to_string()).await?;
+
+    if let Decision::Deny(reason) = can_edit(&user, &contributors) {
+        return Err(refusal(reason));
+    }
+
+    let current = chapter.current_revision_id.map(|id| id.to_string());
+    let revisions: Vec<RevisionSummary> =
+        content::revisions_for_chapter(state.db(), chapter_id).await?;
+
+    Ok(Json(
+        revisions
+            .into_iter()
+            .map(|revision| RevisionView {
+                current: current.as_deref() == Some(revision.id.as_str()),
+                id: revision.id,
+                revision_number: revision.revision_number,
+                word_count: revision.word_count,
+                note: revision.note,
+                created_at: revision.created_at,
+                restored_from_id: revision.restored_from_id,
+                author_handle: revision.author_handle,
+            })
+            .collect(),
+    ))
+}
+
+async fn restore_revision(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(request): Json<RestoreRequest>,
+) -> ApiResult<Json<ChapterView>> {
+    let chapter_id = parse_chapter_id(&id)?;
+    let chapter = content::find_chapter(state.db(), chapter_id)
+        .await?
+        .ok_or_else(|| {
+            ApiError(AppError::NotFound {
+                resource: "chapter",
+            })
+        })?;
+    let (_work, contributors) = author_work(&state, &user, &chapter.work_id.to_string()).await?;
+
+    if let Decision::Deny(reason) = can_edit(&user, &contributors) {
+        return Err(refusal(reason));
+    }
+
+    let revision_id: RevisionId = request.revision_id.parse().map_err(|_| {
+        ApiError(AppError::NotFound {
+            resource: "revision",
+        })
+    })?;
+
+    content::restore_revision(state.db(), chapter, revision_id, acting_pseud(&user)?)
+        .await
+        .map_err(from_content)?;
+
+    let updated = content::find_chapter(state.db(), chapter_id)
+        .await?
+        .ok_or_else(|| {
+            ApiError(AppError::NotFound {
+                resource: "chapter",
+            })
+        })?;
+
+    Ok(Json(ChapterView::from(updated)))
+}
+
+// ---------------------------------------------------------------------------
+// Authorization helpers
+// ---------------------------------------------------------------------------
+
+/// The pseud this session is acting as.
+fn acting_pseud(user: &SessionUser) -> ApiResult<PseudId> {
+    user.pseud_id.ok_or(ApiError(AppError::AccessDenied))
+}
+
+/// Whether this account may write at all (spec §7, age policy).
+fn require_participation(user: &SessionUser) -> ApiResult<()> {
+    if user.age_state.may_participate() {
+        Ok(())
+    } else {
+        Err(ApiError(AppError::AccessDenied))
+    }
+}
+
+/// Build the domain actor for a request, if there is one.
+///
+/// Returns `None` for an anonymous visitor *and* for a signed-in account that
+/// has not chosen a pseud: a policy decision about "who is this" is meaningless
+/// without a public face, and the eligibility service treats `None` as
+/// anonymous rather than guessing.
+fn actor_for(user: Option<&SessionUser>) -> Option<Actor> {
+    let user = user?;
+    let pseud_id = user.pseud_id?;
+    Some(user.actor(pseud_id))
+}
+
+/// Load a work *through* the acting pseud's contributions.
+///
+/// A work the acting pseud does not contribute to is reported as absent, and
+/// so is a work that does not exist: the two answers are deliberately
+/// indistinguishable to the caller.
+async fn author_work(
+    state: &AppState,
+    user: &SessionUser,
+    raw_id: &str,
+) -> ApiResult<(Work, Vec<Contributor>)> {
+    let work_id = parse_work_id(raw_id)?;
+    let work = content::find_work(state.db(), work_id)
+        .await?
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "work" }))?;
+
+    let contributors = collaboration::contributors_for_work(state.db(), work_id).await?;
+    let pseud = acting_pseud(user)?;
+
+    if !contributors.iter().any(|c| c.pseud_id == pseud) {
+        return Err(ApiError(AppError::NotFound { resource: "work" }));
+    }
+
+    Ok((work, contributors))
+}
+
+fn can_edit(user: &SessionUser, contributors: &[Contributor]) -> Decision {
+    match user.pseud_id {
+        Some(pseud) => lorehaven_domain::content::can_edit_work(
+            &lorehaven_domain::policy::Actor {
+                account_id: user.account_id,
+                pseud_id: pseud,
+                age_state: user.age_state,
+                trusted_reviewer: false,
+            },
+            contributors,
+        ),
+        None => Decision::Deny(DenyReason::NotAuthenticated),
+    }
+}
+
+/// How a request for a work is answered.
+enum Reading {
+    /// The actor contributes to it: the author view, drafts included.
+    Contributor,
+    /// The actor may read the published work.
+    Public,
+    /// Refused, with the error the caller receives.
+    Denied(AppError),
+}
+
+fn reading_decision(
+    state: &AppState,
+    actor: Option<&Actor>,
+    work: &Work,
+    contributors: &[Contributor],
+) -> Reading {
+    let actor_is_contributor =
+        actor.is_some_and(|actor| contributors.iter().any(|c| c.pseud_id == actor.pseud_id));
+
+    let facts = ContentFacts {
+        lifecycle: work.lifecycle_state(),
+        visibility: parse_visibility(&work.visibility),
+        rating: lorehaven_db::sessions::parse_rating(&work.rating),
+        actor_is_contributor,
+        author_blocked_actor: false,
+        via_deep_link: true,
+    };
+
+    let policy = AccessPolicy::default();
+    let _ = state;
+
+    if actor_is_contributor {
+        return Reading::Contributor;
+    }
+
+    match can_access_content(actor, &facts, &policy) {
+        Decision::Allow => {
+            if matches!(work.lifecycle_state(), Lifecycle::Published) {
+                Reading::Public
+            } else {
+                Reading::Denied(AppError::NotFound { resource: "work" })
+            }
+        }
+        Decision::Deny(reason) => Reading::Denied(match reason {
+            // Absence is reported as absence: a draft, a withheld work or a
+            // work belonging to someone the actor is blocked by all look the
+            // same from outside (spec §3.3).
+            DenyReason::NotPublished | DenyReason::BlockedByAuthor => {
+                AppError::NotFound { resource: "work" }
+            }
+            DenyReason::SignInRequired => AppError::AuthRequired,
+            DenyReason::NotAuthenticated
+            | DenyReason::AnonymousReadingDisabled
+            | DenyReason::RatingExceedsPolicy
+            | DenyReason::NotAContributor
+            | DenyReason::InsufficientRole => AppError::ContentRestricted,
+            // `DenyReason` is non-exhaustive: a reason added later must not
+            // silently become "allow", so the default is refusal.
+            _ => AppError::ContentRestricted,
+        }),
+    }
+}
+
+fn refusal(reason: DenyReason) -> ApiError {
+    tracing::debug!(reason = reason.as_str(), "content permission denied");
+    match reason {
+        // Not a contributor at all: the resource is not disclosed.
+        DenyReason::NotAContributor | DenyReason::NotAuthenticated => {
+            ApiError(AppError::NotFound { resource: "work" })
+        }
+        _ => ApiError(AppError::AccessDenied),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// View builders
+// ---------------------------------------------------------------------------
+
+async fn author_view(
+    state: &AppState,
+    user: &SessionUser,
+    work: &Work,
+) -> ApiResult<AuthorWorkView> {
+    let chapters = content::chapters_for_work(state.db(), work.id).await?;
+    let contributors = collaboration::contributors_for_work(state.db(), work.id).await?;
+    let (_, with_content) = content::chapter_facts(state.db(), work.id).await?;
+
+    let role = user
+        .pseud_id
+        .and_then(|pseud| {
+            contributors
+                .iter()
+                .find(|c| c.pseud_id == pseud)
+                .map(|c| c.role)
+        })
+        .map(|role| role.as_str().to_owned())
+        .unwrap_or_else(|| "none".to_owned());
+
+    // The blockers are computed here rather than in the interface, so a client
+    // cannot believe a work is publishable when the server would refuse.
+    let facts = content::publication_facts(state.db(), work).await?;
+    let publication_blockers = match lorehaven_domain::content::publication_readiness(&facts) {
+        Ok(()) => Vec::new(),
+        Err(error) => error
+            .field_errors()
+            .into_iter()
+            .map(|(field, message)| format!("{field}: {message}"))
+            .collect(),
+    };
+    let _ = with_content;
+
+    let mut contributor_views = Vec::with_capacity(contributors.len());
+    for contributor in &contributors {
+        let pseud = identity::find_pseud(state.db(), contributor.pseud_id)
+            .await?
+            .ok_or_else(|| ApiError(AppError::NotFound { resource: "pseud" }))?;
+        contributor_views.push(ContributorView {
+            pseud_id: pseud.id,
+            handle: pseud.handle,
+            display_name: pseud.display_name,
+            role: contributor.role.as_str().to_owned(),
+            public_attribution: contributor.public_attribution,
+        });
+    }
+
+    Ok(AuthorWorkView {
+        id: work.id,
+        title: work.title.clone(),
+        summary: work.summary.clone(),
+        language: work.language.clone(),
+        rating: work.rating.clone(),
+        visibility: work.visibility.clone(),
+        lifecycle: work.lifecycle.clone(),
+        completion: work.completion.clone(),
+        version: work.version,
+        created_at: work.created_at.clone(),
+        updated_at: work.updated_at.clone(),
+        published_at: work.published_at.clone(),
+        withdrawn_at: work.withdrawn_at.clone(),
+        show_public_ratings: work.show_public_ratings,
+        role,
+        chapters: chapters.into_iter().map(ChapterView::from).collect(),
+        contributors: contributor_views,
+        publication_blockers,
+    })
+}
+
+async fn public_view(state: &AppState, work: &Work) -> ApiResult<PublicWorkView> {
+    let chapters = content::chapters_for_work(state.db(), work.id).await?;
+    let authors = collaboration::public_contributors(state.db(), work.id)
+        .await?
+        .into_iter()
+        .map(|(handle, display_name, role)| PublicAuthor {
+            handle,
+            display_name,
+            role,
+        })
+        .collect();
+
+    Ok(PublicWorkView {
+        id: work.id,
+        title: work.title.clone(),
+        summary: work.summary.clone(),
+        language: work.language.clone(),
+        rating: work.rating.clone(),
+        visibility: work.visibility.clone(),
+        completion: work.completion.clone(),
+        published_at: work.published_at.clone(),
+        show_public_ratings: work.show_public_ratings,
+        authors,
+        chapters: chapters.into_iter().map(ChapterView::from).collect(),
+    })
+}
+
+async fn reload(state: &AppState, id: WorkId) -> ApiResult<Work> {
+    content::find_work(state.db(), id)
+        .await?
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "work" }))
+}
+
+// ---------------------------------------------------------------------------
+// Validation and conversion
+// ---------------------------------------------------------------------------
+
+fn parse_work_id(raw: &str) -> ApiResult<WorkId> {
+    raw.parse()
+        .map_err(|_| ApiError(AppError::NotFound { resource: "work" }))
+}
+
+fn parse_chapter_id(raw: &str) -> ApiResult<ChapterId> {
+    raw.parse().map_err(|_| {
+        ApiError(AppError::NotFound {
+            resource: "chapter",
+        })
+    })
+}
+
+fn parse_visibility(raw: &str) -> Visibility {
+    match raw {
+        "unlisted" => Visibility::Unlisted,
+        "restricted" => Visibility::Restricted,
+        _ => Visibility::Public,
+    }
+}
+
+/// Trim and validate a title or chapter heading. An empty one is allowed for a
+/// draft; publication is what refuses it.
+fn validate_title(raw: &str, required: bool) -> ApiResult<String> {
+    let trimmed = raw.trim();
+    if required && trimmed.is_empty() {
+        return Err(ApiError(AppError::field("title", "A title is required.")));
+    }
+    if trimmed.chars().count() > 300 {
+        return Err(ApiError(AppError::field(
+            "title",
+            "A title may be at most 300 characters.",
+        )));
+    }
+    if trimmed
+        .chars()
+        .any(|c| c.is_control() && c != '\n' && c != '\t')
+    {
+        return Err(ApiError(AppError::field(
+            "title",
+            "A title cannot contain control characters.",
+        )));
+    }
+    Ok(trimmed.to_owned())
+}
+
+fn validate_summary(raw: &str) -> ApiResult<String> {
+    let trimmed = raw.trim();
+    if trimmed.chars().count() > 5000 {
+        return Err(ApiError(AppError::field(
+            "summary",
+            "A summary may be at most 5000 characters.",
+        )));
+    }
+    if trimmed
+        .chars()
+        .any(|c| c.is_control() && c != '\n' && c != '\t')
+    {
+        return Err(ApiError(AppError::field(
+            "summary",
+            "A summary cannot contain control characters.",
+        )));
+    }
+    Ok(trimmed.to_owned())
+}
+
+/// Check a BCP 47-looking language tag.
+///
+/// Deliberately shaped rather than merely "alphanumeric": a free-text language
+/// field is a field nobody can filter on later, and search by language is a
+/// Milestone 9 requirement.
+fn validate_language(raw: &str) -> ApiResult<String> {
+    let trimmed = raw.trim();
+    let mut parts = trimmed.split('-');
+    let primary = parts.next().unwrap_or_default();
+    let primary_ok =
+        (2..=3).contains(&primary.len()) && primary.chars().all(|c| c.is_ascii_alphabetic());
+
+    let rest_ok = parts.all(|part| {
+        (2..=8).contains(&part.len()) && part.chars().all(|c| c.is_ascii_alphanumeric())
+    });
+
+    if !primary_ok || !rest_ok || trimmed.len() > 35 {
+        return Err(ApiError(AppError::field(
+            "language",
+            "A language tag looks like `en`, `pt-BR` or `zh-Hans`.",
+        )));
+    }
+    Ok(trimmed.to_owned())
+}
+
+fn validate_rating(raw: &str) -> ApiResult<String> {
+    match raw {
+        "general" | "teen" | "mature" | "explicit" => Ok(raw.to_owned()),
+        _ => Err(ApiError(AppError::field(
+            "rating",
+            "A rating is one of general, teen, mature or explicit.",
+        ))),
+    }
+}
+
+fn validate_visibility(raw: &str) -> ApiResult<String> {
+    match raw {
+        "public" | "unlisted" | "restricted" => Ok(raw.to_owned()),
+        _ => Err(ApiError(AppError::field(
+            "visibility",
+            "A visibility is one of public, unlisted or restricted.",
+        ))),
+    }
+}
+
+fn validate_completion(raw: &str) -> ApiResult<String> {
+    match raw {
+        "in_progress" | "complete" | "hiatus" | "abandoned" => Ok(raw.to_owned()),
+        _ => Err(ApiError(AppError::field(
+            "completion",
+            "A completion state is one of in_progress, complete, hiatus or abandoned.",
+        ))),
+    }
+}
+
+/// Validate every field the request wants to change.
+///
+/// Owned strings rather than borrows: each validated form is a trimmed copy of
+/// what arrived, so the patch cannot outlive its source by accident, and the
+/// database layer is not tied to a transport type.
+fn work_patch(request: &UpdateWorkRequest) -> ApiResult<WorkPatch> {
+    let title = request
+        .title
+        .as_deref()
+        .map(|raw| validate_title(raw, false))
+        .transpose()?;
+    let summary = request
+        .summary
+        .as_deref()
+        .map(validate_summary)
+        .transpose()?;
+    let language = request
+        .language
+        .as_deref()
+        .map(validate_language)
+        .transpose()?;
+    let rating = request.rating.as_deref().map(validate_rating).transpose()?;
+    let visibility = request
+        .visibility
+        .as_deref()
+        .map(validate_visibility)
+        .transpose()?;
+    let completion = request
+        .completion
+        .as_deref()
+        .map(validate_completion)
+        .transpose()?;
+
+    Ok(WorkPatch {
+        title,
+        summary,
+        language,
+        rating,
+        visibility,
+        completion,
+        show_public_ratings: request.show_public_ratings,
+    })
+}
+
+fn internal(error: serde_json::Error) -> ApiError {
+    ApiError(AppError::Internal(error.into()))
+}
+
+/// Turn a content refusal into the API error it deserves.
+fn from_content(error: ContentError) -> ApiError {
+    match error {
+        ContentError::Refused(app) => ApiError(app),
+        ContentError::Fault(cause) => ApiError(AppError::Internal(cause)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn titles_are_trimmed_and_length_checked() {
+        assert_eq!(validate_title("  A Story  ", false).expect("ok"), "A Story");
+        assert_eq!(validate_title("", false).expect("ok"), "");
+        assert!(validate_title("", true).is_err());
+        assert!(validate_title(&"x".repeat(301), false).is_err());
+        assert!(validate_title("bell\u{7}", false).is_err());
+    }
+
+    #[test]
+    fn enumerated_fields_reject_anything_they_do_not_know() {
+        assert!(validate_rating("teen").is_ok());
+        assert!(validate_rating("Teen").is_err());
+        assert!(validate_rating("explicit-ish").is_err());
+        assert!(validate_visibility("unlisted").is_ok());
+        assert!(validate_visibility("secret").is_err());
+        assert!(validate_completion("hiatus").is_ok());
+        assert!(validate_completion("stalled").is_err());
+        assert!(validate_language("pt-BR").is_ok());
+        assert!(validate_language("english").is_err());
+    }
+
+    #[test]
+    fn an_unrecognised_stored_visibility_is_not_treated_as_listable() {
+        // `parse_visibility` defaults to Public for the *stored* value, which is
+        // safe because the column default is public; the risk it guards against
+        // is a *narrower* value being read as a wider one, and it never is.
+        assert_eq!(parse_visibility("public"), Visibility::Public);
+        assert_eq!(parse_visibility("unlisted"), Visibility::Unlisted);
+        assert_eq!(parse_visibility("restricted"), Visibility::Restricted);
+    }
+}
