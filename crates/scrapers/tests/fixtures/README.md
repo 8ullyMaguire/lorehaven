@@ -132,3 +132,122 @@ have to be rediscovered by shipping the bug:
   out of scope. No page from behind that gate could be recorded, so no parser
   could be written against it honestly — which is why the adapter neither claims
   its URLs nor lists it in `hosts()`.
+
+## efiction
+
+One family, many members. eFiction is not a site but a script that hundreds of
+archives run, each with its own skin. These recordings are from five of them, and
+they disagree with each other in ways that matter — which is the whole reason the
+family needs a variant layer rather than one parser.
+
+| File | Source | Recorded |
+|---|---|---|
+| `tgstorytime-work.html` | `https://www.tgstorytime.com/viewstory.php?sid=6369&index=1` | 2026-09-10 |
+| `tgstorytime-chapter-1.html` | `https://www.tgstorytime.com/viewstory.php?sid=6369&chapter=1` | 2026-09-10 |
+| `tgstorytime-chapter-2.html` | `https://www.tgstorytime.com/viewstory.php?sid=6369&chapter=2` | 2026-09-10 |
+| `tgstorytime-story-1.html` | `https://www.tgstorytime.com/viewstory.php?sid=6369&textsize=0&chapter=1` | 2026-09-10 |
+| `tgstorytime-access-denied.html` | a story id that is not validated | 2026-09-10 |
+| `giantessworld-work.html` | `https://www.giantessworld.net/viewstory.php?sid=11369&index=1` | 2026-09-10 |
+| `giantessworld-chapter-1.html` | `https://www.giantessworld.net/viewstory.php?sid=11369&chapter=1` | 2026-09-10 |
+| `giantessworld-chapter-2.html` | `https://www.giantessworld.net/viewstory.php?sid=11369&chapter=2` | 2026-09-10 |
+| `giantessworld-story-1.html` | `https://www.giantessworld.net/viewstory.php?sid=11369&textsize=0&chapter=1` | 2026-09-10 |
+| `giantessworld-access-denied.html` | a story id that is not validated | 2026-09-10 |
+| `gluttony-content-warning.html` | `https://www.gluttonyfiction.com/viewstory.php?sid=313` | 2026-09-10 |
+| `narutofic-content-warning.html` | `https://www.narutofic.org/viewstory.php?sid=11545` | 2026-09-10 |
+| `ninelives-content-warning.html` | `https://www.ninelivesarchive.com/viewstory.php?sid=3205` | 2026-09-10 |
+| `cloudflare-challenge.html` | a member behind a JS challenge | 2026-09-10 |
+
+The URLs for the two worked examples are the ones those pages link to themselves
+— a work page's own "Table of Contents" link, and a text view's own "Next Page"
+link. The three content-warning recordings are named for the id each page's own
+acknowledgement link carries, which is how the requested story is recoverable
+from an interstitial that does not otherwise name it.
+
+### The two-page shape
+
+eFiction serves one work across more than one kind of page, and this is the fact
+the port got wrong:
+
+* **The work page** (`viewstory.php?sid=N&index=1`) carries the title, the
+  metadata labels, the summary and the chapter list. It carries no chapter prose.
+* **A chapter page** (`viewstory.php?sid=N&chapter=K`) carries one chapter. Its
+  metadata — including the summary — is in `div.infobox`, its heading is
+  `.chaptertitle`, and the author's notes are `.notes` / `.noteinfo`.
+* **A chapter's text view** (`...&textsize=0&chapter=K`) is the same chapter
+  under a different skin, and it is the one that renders the prose in `div#story`
+  with the story block in `div.storyinfo`. `div#story` does **not** exist on the
+  plain chapter page.
+
+An earlier note in this repository recorded that the ported adapter's `infobox`
+selector "matched zero markup". That was wrong twice over, and the mistake is
+instructive: it was checked against the *work* page, where `div.infobox` really
+does not appear. `div.infobox` is exactly where a *chapter* page keeps the
+summary and the labels. The selector was not dead; it was pointed at the wrong
+page, and the conclusion drawn from that was wrong with it.
+
+### The chapter key is on the work page, but not behind one selector
+
+`div#chapterlist` holds one line per chapter for tgstorytime: its ordinal, a link
+to `viewstory.php?sid=N&chapter=K`, the chapter's title, the author, and a
+**review link carrying `chapid=NNNN`**. That `chapid` is the site's own
+identifier for the chapter, and it is available at preview time without fetching
+a single chapter.
+
+**But `div#chapterlist` belongs to that member's skin, not to the family.**
+giantessworld's work page has no such container, and still carries thirteen
+`chapter=K` links and thirteen `chapid` values. A parser that looks for
+`#chapterlist` reads tgstorytime and imports nothing from giantessworld while
+reporting success — which is the failure this directory exists to prevent, in the
+form it actually takes on this family.
+
+The port keyed chapters by its loop index instead of by any of this. An index is
+a position, not an identity, and it changes the moment a chapter is inserted.
+
+### What the two worked members disagree about
+
+| | tgstorytime | giantessworld |
+|---|---|---|
+| Chapter list container | `div#chapterlist` | none; links are loose in the page |
+| Summary on the work page | `div.summarytext` | a `Summary:` label span |
+| Chapter titles | the author's own (`In the beginning - Chapter 1`) | generated (`Chapter 1`) |
+| Chapter count | 19 | 13 |
+
+Both carry `Completed:`, `Word count:`, `Read:`, `Published:` and `Updated:` as
+label spans, with the value in the markup that follows the span — and they
+disagree about the date format inside those values, which is what makes the date
+parser a variant rather than a function.
+
+### Three outcomes, not two
+
+A story id that is not validated answers with the site's own error block:
+`Access denied. This story has not been validated by the administrators.` The
+page still carries the site's title and chrome. It is not a `404`, and it is not
+the markup having changed — it is a third outcome, and an adapter that folds it
+into either of the other two will report a moderation state as a missing story
+or as a parse failure. Both recordings are here so the distinction can be
+asserted rather than assumed.
+
+### The content-warning interstitial
+
+Three of these members answer a request for a warned story with a gate page
+instead of the story: *"This content is for people aged 12 years and over"*,
+*"you must be of legal age in your region"*, *"Age Consent Required"*. Each
+carries the id in its own acknowledgement link, with the member's own parameter
+name — `warning=2`, `warning=6`, `ageconsent=ok&warning=5`. This is why those
+three recordings are interstitials and not work pages: the probe that recorded
+them asked each member for a story, and this is what three of them answered. An
+adapter may not treat such a page as a story, and a preview that did would report
+a title and no chapters.
+
+`narutofic-content-warning.html` also carries `Members:`, `Series:`, `Stories:`,
+`Chapters:`, `Word count:` and `Reviewers:` as label spans. Those are that site's
+*archive statistics*, not the requested story's metadata. A parser that reads
+label spans generically picks up a story whose word count is the whole archive's.
+
+### One member is behind a challenge
+
+`cloudflare-challenge.html` is a Cloudflare interstitial — `Just a moment...`,
+`Enable JavaScript and cookies to continue`. It is recorded because it is the
+reason a class of these archives cannot be read by a plain request, and because a
+fetched page that looks like this must be recognised as a block rather than
+parsed as a story with no title.

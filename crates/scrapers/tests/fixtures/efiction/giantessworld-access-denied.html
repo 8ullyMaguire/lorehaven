@@ -1,0 +1,221 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd"><html><head><link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;600;700&display=swap" rel="stylesheet"><script src="https://code.jquery.com/jquery-3.4.1.slim.min.js" integrity="sha384-J6qa4849blE2+poT4WnyKhv5vZF5SrPo0iEjwBvKU7imGFAV0wwj1yYfoRSJoZ+n" crossorigin="anonymous"></script>
+    <link href="https://cdn.jsdelivr.net/npm/summernote@0.8.18/dist/summernote-lite.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/summernote@0.8.18/dist/summernote-lite.min.js"></script><title>Giantess World :: The home of people big and small.</title>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><script language="javascript" type="text/javascript" src="includes/javascript.js"></script>
+<link rel="alternate" type="application/rss+xml" title="Giantess World RSS Feed" href="rss.php"><style type="text/css">
+#columncontainer { margin: 1em auto; width: auto;}
+#browseblock, #memberblock { width: 100%; padding: 0; margin: 0; float: left; border: 0px solid transparent; }
+.column { float: left; width: 24%; }
+html>body .column { width: 25%; }
+.cleaner { clear: both; height: 1px; font-size: 1px; margin: 0; padding: 0; background: transparent; }
+#settingsform { margin: 0; padding: 0; border: none; }
+#settingsform FORM { width: 100%; margin: 0 10%; }
+#settingsform input { margin: 0 auto 0.2em; }
+#settingsform label { display:block; }
+#settingsform .submit {margin: 10px 0 0 0; }
+#settingsform .penname { font-size:15px; } 
+#settingsform { float: left; margin: 1ex 10%; }
+#settingsform .tinytoggle { text-align: center; }
+#settingsform .tinytoggle LABEL { float: none; display: inline; width: auto; text-align: center; padding: 0; clear: none; }
+#settingsform .fieldset { display: none; } 
+a.pophelp{
+    position: relative; /* this is the key*/
+    vertical-align: super;
+}
+
+a.pophelp:hover{z-index:100; border: none; text-decoration: none;}
+
+a.pophelp span{display: none; position: absolute; top: -25em; left: 20em; }
+
+a.pophelp:hover span{ /*the span will display just on :hover state*/
+    display:block;
+    position: absolute;
+    top: -3em; left: 8em; width: 225px;
+    border:1px solid #000;
+    background-color:#CCC; color:#000;
+    text-decoration: none;
+    text-align: left;
+    padding: 5px;
+    font-weight: normal;
+    visibility: visible;
+}
+.required { color: red; }
+.shim {
+	position: absolute;
+	display: none;
+	height: 0;
+	width:0;
+	margin: 0;
+	padding: 0;
+	z-index: 100;
+}
+
+.ajaxOptList {
+	background: #CCC;
+	border: 1px solid #000;
+	margin: 0;
+	position: absolute;
+	padding: 0;
+	z-index: 1000;
+	text-align: left;
+}
+.ajaxListOptOver {
+	padding: 4px;
+	background: #CCC;
+	margin: 0;
+}
+.ajaxListOpt {
+	background: #EEE;
+	padding: 4px;
+	margin: 0;
+}
+.multiSelect {
+	width: 300px;
+}
+
+</style>
+<link rel='stylesheet' type='text/css' href='skins/Light/style.css' /> 
+
+<meta name='viewport' content='width=device-width, initial-scale=1.0' />
+</head>
+<script src="https://js.hcaptcha.com/1/api.js" async defer></script>
+<!-- START BLOCK : header --!>
+<body>
+
+<!-- start header -->
+<!-- start menus -->
+<div id="menu">
+<ul id="menulist">
+<li><a href="index.php" title="Home">Home</a></li>
+<li><a href="user.php?action=register" title="Register">Register</a></li> 
+<li><a href="user.php?action=login" title="Login">Login</a></li> 
+<li><a href="browse.php?type=featured" title="Featured Stories">Featured Stories</a></li> 
+<li><a href="browse.php?type=recent" title="Most Recent">Most Recent</a></li> 
+<li><a href="browse.php" title="Browse">Browse</a></li>
+<li><a href="viewpage.php?page=oldstories" title="Old Archive">Old Archive</a></li>
+<li><a href="viewpage.php?page=tools" title="Writing Tools">Writing Tools</a></li>
+<li><a href="http://giantessworld.net/viewpage.php?page=Images_link" title="Images">Images</a><li>
+<li><a href="search.php" title="Search">Search</a></li> 
+<li></li>
+<li><a href="viewpage.php?page=help" title="Help">Help</a></li> 
+<li></li>
+</ul>
+</div>
+<!-- end menus -->
+<!-- end header -->
+
+<!-- start big container -->
+<div id="container">
+
+<!-- start main layout -->
+<div id="mainpage">
+
+
+<!-- Big Ol Sitename -->
+
+<!-- left column must come before middle column -->
+<!-- column is here so it appears on all pages -->
+<div id="leftindex">
+
+<div class="logo" style="font-weight: 600;color:#B4654A;font-size: 58px;text-align:center;padding:10px 0;letter-spacing: .15em;">
+	Giantess <span style="color:#00A9A5;">World</span>
+</div>
+<div align="center">
+<p>
+<a href="http://www.twitter.com/GiantessWorld"><img src="skins/Light/images/icons/twitter_icon.png" border="0"></a> 
+<a href="https://discord.gg/S7fk6va"><img src="skins/Light/images/icons/discord_icon.png" border="0"></a>
+<a href="./rss.php"><img src="skins/Light/images/icons/rss_icon.png" border="0"></a>
+</p>
+<form method="POST" id="loginblock" enctype="multipart/form-data" action="user.php?action=login"><label for="penname=">Penname:</label><INPUT type="text" class="textbox" name="penname" id="penname" size="15"> <label for="password">Password:</label><INPUT type="password" class="textbox" name="password" id="password" size="15"> <span id='rememberme'><INPUT type="checkbox" class="checkbox" name="cookiecheck" id="cookiecheck" value="1"><label for="cookiecheck=">Remember Me</label></span><div style="overflow:hidden" class="h-captcha" data-sitekey="e708a206-345b-446f-b8fc-0675788bf2f9"></div> <INPUT type="submit" class="button" name="submit" value="Go"> <div id='loginlinks'><a href="user.php?action=register" title="Register">Register</a> | <a href="user.php?action=lostpassword" title="Lost Password">Lost Password</a></div></form>
+</div>
+<div id="submenu">
+<ul id="submenulist">
+<li><a href="index.php" title="Home">Home</a></li>
+<li><a href="user.php?action=register" title="Register">Register</a></li>
+<li><a href="viewpage.php?page=help" title="Help">Help</a></li>
+<li></li>
+</ul>
+<ul id="othermenulist">
+<li><a href="browse.php?type=featured" title="Featured Stories">Featured Stories</a></li> 
+<li><a href="browse.php?type=recent" title="Most Recent">Most Recent</a></li> 
+<li><a href="authors.php?list=authors" title="Authors">Authors</a></li>
+<li><a href="browse.php?type=categories" title="Categories">Categories</a></li>
+<li><a href="browse.php?type=titles" title="Titles">Titles</a></li> 
+<li><a href="browse.php?type=series" title="Series">Series</a></li> 
+<li><a href="browse.php?type=challenges" title="Challenges">Challenges</a></li>
+<li></li>
+<li><a href="toplists.php" title="Top Tens">Top Tens</a></li>  
+<li><a href="viewpage.php?page=oldstories" title="Old Archive">Old Archive</a></li>
+<li><a href="viewpage.php?page=tools" title="Writing Tools">Writing Tools</a></li>
+<li><a href="http://giantessworld.net/viewpage.php?page=Images_link" title="Images">Images</a><li>
+<li><a href="search.php" title="Search">Search</a></li> 
+</ul>
+<ul id="submenulist">
+<li><a href="contact.php" title="Contact Us">Contact Us</a></li> 
+<li><a href="viewpage.php?page=rules" title="Rules">Rules</a></li> 
+<li><a href="viewpage.php?page=tos" title="Terms of Service">Terms of Service</a></li> 
+</ul>
+</div>
+<p>
+</p>
+<!-- End Left Column -->
+</div>
+
+<!-- Start Right Column -->
+<div id="middleindex">
+
+<div id="skinny">
+
+<div id='pagetitle'></div><div style='text-align: center; margin: 1em;' class='errortext'>Access denied. This story has not been validated by the adminstrators of this site.</div>
+</div>
+
+</div>
+</div>
+		</div>
+		<!-- <div class="gb-20 sidebar">
+				<h3><span></span></h3><br /><br /> -->
+
+				<!-- Just delete the < !-- and -- > before and after the shoutbox/poll to make it visible. Remember to add the blocks at your admin panel. -->
+				
+				<!-- <h3></h3>  
+				<h3></h3>
+				<br />
+				<div align="center"> </div>
+		</div>
+
+		<div class="gb-full">
+				<div class="gb-33"><h3>Featured Stories</h3></div>
+				<div class="gb-33"><h3></h3></div>
+				<div class="gb-33"><h3></h3></div>
+		</div> -->
+		
+	<script>
+           if ($('textarea').length) {
+           $('textarea').summernote({
+             placeholder: '',
+             tabsize: 2,
+             height: 150,
+	     fontNames: ['Source Sans Pro'],
+             toolbar: [
+               ['style', ['style']],
+               ['font', ['bold','italic','underline', 'clear']],
+	       ['fontname', ['fontname']],
+               ['color', ['color']],
+               ['para', ['ul', 'ol', 'paragraph', 'height']],
+               ['insert', ['hr', 'picture']],
+               ['view', ['codeview', 'help']]
+             ]
+           });
+	   }
+	</script>
+    <div class="gb-full footer">
+			<!-- <hr /> -->
+			<p><span style="text-decoration: underline;">Disclaimer<a href="http://fotoredaktor.su/" target="_blank">:</a></span> All publicly recognizable characters, settings, etc. are the property of their respective owners.  The original characters and plot are the property of the author.  No money is being made from this work.  No copyright infringement is intended.</p>
+    </div>
+
+	</div> <!-- closing content grid -->   			
+
+	</body>
+</html>

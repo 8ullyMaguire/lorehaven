@@ -43,7 +43,6 @@ pub fn default_registry() -> Registry {
     // one that is absent, because the first wastes a reader's time and the
     // second does not. Adapters register here as they land, and the milestone
     // notes list the sources still to come.
-    // in the same commit that makes it work.
     registry
 }
 
