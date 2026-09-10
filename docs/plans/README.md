@@ -187,8 +187,13 @@ was racing. **Never** `SELECT` then `UPDATE` without the version predicate.
 
 | File | Covers |
 |---|---|
-| `milestone-04-reader.md` | Milestone 4 in full: the next thing to build |
-| `milestones-05-18.md` | The remaining milestones, each with tasks, files, tests and pitfalls |
+| `junior-implementation-plan.md` | **Start here.** The whole website, start to finish: prerequisites, the workflow loop, every milestone from 5 to 18 with its migration, domain types, routes, pages, tests and pitfalls, then the frontend rules and the cross-cutting work. Written so someone who has never seen this repository can implement a milestone without guessing. |
+| `milestone-04-reader.md` | Milestone 4 in full: built, with its verification in `docs/verification.md` |
+| `milestones-05-18.md` | The remaining milestones, in summary form |
 | `cross-cutting.md` | Work that every milestone touches: verification, migrations, performance budgets, accessibility |
+
+`junior-implementation-plan.md` and `milestones-05-18.md` cover the same ground at
+different depths. When they disagree, the junior plan wins and the summary is
+corrected in the same commit.
 
 Read the milestone you are about to build, in full, before opening an editor.
