@@ -79,6 +79,78 @@ impl From<SecretRowRecord> for SecretRow {
     }
 }
 
+/// Register a key in the key table, if it is not there already.
+///
+/// `secrets.key_id` is a foreign key to `encryption_keys`, so a key that has
+/// never been registered cannot encrypt anything — the write is refused by the
+/// database rather than by a convention somebody has to remember. That is the
+/// behaviour we want; what was missing is the registration, and this is it.
+///
+/// The name is written once. Re-registering an existing key changes nothing,
+/// including `created_at`, so calling this on every seal is free and cannot
+/// rewrite the key's history.
+pub async fn ensure_encryption_key(db: &Database, key_id: &str, algorithm: &str) -> Result<()> {
+    let now = crate::identity::now_rfc3339();
+    let sql = db.sql(
+        "INSERT INTO encryption_keys (key_id, algorithm, created_at, retired_at)
+         VALUES (?, ?, ?, NULL)
+         ON CONFLICT (key_id) DO NOTHING",
+        "INSERT INTO encryption_keys (key_id, algorithm, created_at, retired_at)
+         VALUES (?, ?, ?, NULL)
+         ON CONFLICT (key_id) DO NOTHING",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(key_id)
+                .bind(algorithm)
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await
+                .with_context(|| format!("registering the {key_id} encryption key"))?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(key_id)
+                .bind(algorithm)
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await
+                .with_context(|| format!("registering the {key_id} encryption key"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Mark a key as no longer used for new writes.
+///
+/// Existing rows encrypted with it are still readable — that is what a retired
+/// key is for — so nothing is deleted here.
+pub async fn retire_encryption_key(db: &Database, key_id: &str) -> Result<()> {
+    let now = crate::identity::now_rfc3339();
+    let sql = db.sql(
+        "UPDATE encryption_keys SET retired_at = ? WHERE key_id = ?",
+        "UPDATE encryption_keys SET retired_at = ? WHERE key_id = ?",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(&now)
+                .bind(key_id)
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(&now)
+                .bind(key_id)
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
 /// Write a secret, replacing any earlier secret with the same owner and name.
 ///
 /// The id is reused on replacement rather than reissued, so a row pointing at
@@ -166,10 +238,7 @@ pub async fn get_secret(
     let sql = sql_owned(
         db,
         format!("SELECT {COLUMNS} FROM secrets WHERE owner_type = ? AND owner_id = ? AND name = ?"),
-        format!(
-            "SELECT {COLUMNS} FROM secrets
-             WHERE owner_type = ? AND owner_id = ?::uuid AND name = ?"
-        ),
+        format!("SELECT {COLUMNS} FROM secrets WHERE owner_type = ? AND owner_id = ? AND name = ?"),
     );
     let row: Option<SecretRowRecord> = match db.backend() {
         Backend::Sqlite => {

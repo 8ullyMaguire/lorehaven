@@ -261,6 +261,15 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // Imports, the source catalogue, the library and source credentials.
+        // A write class rather than a read class even for the reads: every one
+        // of these is scoped to the caller and the preview may reach out to a
+        // source, so they are not cheap shared reads.
+        .merge(classified(
+            routes::imports::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // The operator surface. Gated on configuration inside the handlers,
         // because "who is an operator" is a decision about an account and not
         // about a route tree.

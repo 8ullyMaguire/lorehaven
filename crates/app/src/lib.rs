@@ -215,3 +215,14 @@ pub async fn main_entry() -> ExitCode {
         }
     }
 }
+
+/// An instant in RFC 3339 UTC, which is the only timestamp format stored.
+///
+/// One function because the format is a storage contract: two modules that
+/// format the same instant differently produce rows that compare wrongly and
+/// cursors that skip pages.
+#[must_use]
+pub fn format_rfc3339(at: time::OffsetDateTime) -> String {
+    at.format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| at.to_string())
+}
