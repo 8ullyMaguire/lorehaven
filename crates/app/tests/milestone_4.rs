@@ -15,7 +15,6 @@ use lorehaven_app::state::AppState;
 use lorehaven_db::{reading, Database, DatabaseConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
-use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -721,4 +720,467 @@ async fn a_stale_typography_patch_returns_conflict() {
     assert_eq!(body["error"]["code"], "REVISION_CONFLICT");
 
     harness.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// Two devices: the reader is asked which position to resume from
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn two_devices_that_disagree_produce_a_choice() {
+    let harness = Harness::new("devices-disagree").await;
+    let mut reader = harness.client();
+    register(&mut reader, "reader@example.com", "Bookworm").await;
+    let (work_id, chapter) = published_chapter(&harness, "Disagreeing Devices").await;
+
+    let (status, body) = reader
+        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let revision = body["revision_id"].as_str().expect("revision id");
+
+    // Two devices read the same revision and stopped in different places.
+    for (device, permille) in [("device-a", 100), ("device-b", 900)] {
+        let (status, body) = reader
+            .put(
+                "/api/v1/reading/progress",
+                json!({
+                    "subject_type": "work",
+                    "subject_id": work_id,
+                    "chapter_id": chapter,
+                    "content_revision": revision,
+                    "position_permille": permille,
+                    "device_id": device,
+                }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    }
+
+    let (status, body) = reader
+        .get(&format!(
+            "/api/v1/reading/progress?subject_type=work&subject_id={work_id}"
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["positions"].as_array().expect("positions").len(),
+        2,
+        "one position per device: {body}"
+    );
+
+    // Spec §9.3: differing devices present a choice rather than silently
+    // taking the furthest position.
+    assert_eq!(body["resolution"]["kind"], "ask_the_reader", "{body}");
+    let mine = &body["resolution"]["mine"];
+    let other = &body["resolution"]["other"];
+    assert!(mine.is_object(), "the reader's own position: {body}");
+    assert!(other.is_object(), "the other device's position: {body}");
+    assert_ne!(
+        mine["position_permille"], other["position_permille"],
+        "the two options must be different places: {body}"
+    );
+
+    harness.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// Resuming after an edit: the anchor is what is kept
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn resuming_after_an_edit_uses_the_anchor_not_the_offset() {
+    let harness = Harness::new("anchor-after-edit").await;
+    let mut reader = harness.client();
+    register(&mut reader, "reader@example.com", "Bookworm").await;
+
+    let mut author = harness.client();
+    register(&mut author, "author@example.com", "Quill").await;
+    let work = create_work(&mut author, "Revised Work").await;
+    let work_id = work["id"].as_str().expect("id").to_owned();
+    let (chapter, chapter_version) = add_chapter(&mut author, &work_id, "One").await;
+    let (status, body) = save_chapter(
+        &mut author,
+        &chapter,
+        chapter_version,
+        "The first draft of the scene.",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let version = body["version"].as_i64().expect("chapter version");
+    publish(&mut author, &work_id, 1).await;
+
+    // The reader stops a third of the way into the published revision, at a
+    // paragraph anchor.
+    let (status, body) = reader
+        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let read_revision = body["revision_id"]
+        .as_str()
+        .expect("revision id")
+        .to_owned();
+
+    let (status, body) = reader
+        .put(
+            "/api/v1/reading/progress",
+            json!({
+                "subject_type": "work",
+                "subject_id": work_id,
+                "chapter_id": chapter,
+                "content_revision": read_revision,
+                "paragraph_anchor": "p-3",
+                "position_permille": 330,
+                "device_id": "device-a",
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    // The author rewrites the chapter. The words at 33% are not the words the
+    // reader was looking at any more.
+    let (status, body) = save_chapter(
+        &mut author,
+        &chapter,
+        version,
+        "The second draft, rewritten from the top and with a different middle.",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) = reader
+        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let current_revision: lorehaven_domain::RevisionId = body["revision_id"]
+        .as_str()
+        .expect("revision id")
+        .parse()
+        .expect("revision id");
+    assert_ne!(
+        current_revision.to_string(),
+        read_revision,
+        "an edit must create a new revision for this test to mean anything"
+    );
+
+    // The stored position kept the anchor and the revision it was recorded
+    // against, so a client can put the reader back at the paragraph and must
+    // not treat the offset as a position in the new text.
+    let account_id: lorehaven_domain::AccountId = reader.get("/api/v1/auth/me").await.1["account"]
+        ["id"]
+        .as_str()
+        .expect("account id")
+        .parse()
+        .expect("account id");
+    let positions = reading::progress_for(&harness.db, account_id, "work", &work_id)
+        .await
+        .expect("progress");
+    assert_eq!(
+        positions.len(),
+        1,
+        "the edit must not duplicate the position"
+    );
+    let stored = &positions[0];
+    assert_eq!(stored.anchor.as_deref(), Some("p-3"), "the anchor survives");
+    assert_eq!(
+        stored
+            .revision
+            .map(|revision| revision.to_string())
+            .as_deref(),
+        Some(read_revision.as_str()),
+        "the position still names the revision it was taken against"
+    );
+    assert_eq!(stored.fraction, 330);
+    assert!(
+        !lorehaven_domain::reading::position_is_reliable(stored, current_revision),
+        "a position taken against removed text is not reliable"
+    );
+
+    harness.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// A rating belongs to the pseud that gave it
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_rating_is_invisible_to_the_accounts_other_pseud() {
+    let harness = Harness::new("rating-per-pseud").await;
+    let mut reader = harness.client();
+    register(&mut reader, "reader@example.com", "First").await;
+    let first: lorehaven_domain::PseudId = active_pseud(&mut reader).await.parse().expect("pseud");
+
+    let (status, body) = reader
+        .post("/api/v1/pseuds", json!({ "handle": "Second" }))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let second: lorehaven_domain::PseudId = body["id"].as_str().expect("pseud id").parse().unwrap();
+    let (status, _) = reader
+        .post(&format!("/api/v1/pseuds/{second}/activate"), json!({}))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (work_id, _chapter) = published_chapter(&harness, "Rated Work").await;
+    let work: lorehaven_domain::WorkId = work_id.parse().expect("work id");
+
+    // The second face rates it, privately.
+    let (status, body) = reader
+        .put(
+            &format!("/api/v1/works/{work_id}/rating"),
+            json!({ "stars": 5, "is_public": false }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    assert!(
+        reading::rating_for(&harness.db, first, work)
+            .await
+            .expect("rating")
+            .is_none(),
+        "the first pseud gave no rating and must see none"
+    );
+    let rated = reading::rating_for(&harness.db, second, work)
+        .await
+        .expect("rating")
+        .expect("the rating the second face gave");
+    assert_eq!(rated.stars, 5);
+
+    harness.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// Typography belongs to the account, not to a pseud
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn typography_follows_the_account_not_the_pseud() {
+    let harness = Harness::new("typography-account").await;
+    let mut reader = harness.client();
+    register(&mut reader, "reader@example.com", "First").await;
+
+    let (status, body) = reader
+        .patch(
+            "/api/v1/settings/typography",
+            json!({ "expected_version": 0, "font_scale": 1.3, "reader_theme": "dark" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    let (status, body) = reader.get("/api/v1/settings/typography").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let version = body["version"].as_i64().expect("version");
+    assert_eq!(version, 1);
+    assert_eq!(body["reader_theme"], "dark");
+
+    // Another face of the same account sees the same settings and the same
+    // version — typography is a property of the reader, not of a face.
+    let (status, body) = reader
+        .post("/api/v1/pseuds", json!({ "handle": "Second" }))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let second = body["id"].as_str().expect("pseud id").to_owned();
+    let (status, _) = reader
+        .post(&format!("/api/v1/pseuds/{second}/activate"), json!({}))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, body) = reader.get("/api/v1/settings/typography").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["reader_theme"], "dark");
+    assert_eq!(body["version"].as_i64().expect("version"), version);
+
+    harness.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// Reviews: private until published, public identity is the active pseud
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_review_stays_private_until_it_is_published() {
+    let harness = Harness::new("review-private").await;
+    let mut reader = harness.client();
+    register(&mut reader, "reader@example.com", "Bookworm").await;
+    let (work_id, _chapter) = published_chapter(&harness, "Reviewed Work").await;
+
+    let (status, body) = reader
+        .put(
+            &format!("/api/v1/works/{work_id}/reviews"),
+            json!({ "body": "A quiet, careful story." }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["is_public"], false, "a review is private by default");
+    assert!(body["published_at"].is_null(), "{body}");
+    let version = body["version"].as_i64().expect("version");
+
+    let mut visitor = harness.client();
+    let (status, body) = visitor
+        .get(&format!("/api/v1/works/{work_id}/reviews"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["items"].as_array().expect("items").len(),
+        0,
+        "an unpublished review is not readable by anyone else: {body}"
+    );
+
+    // Publishing it makes it visible, attributed to the active pseud.
+    let (status, body) = reader
+        .put(
+            &format!("/api/v1/works/{work_id}/reviews"),
+            json!({
+                "body": "A quiet, careful story.",
+                "is_public": true,
+                "contains_spoilers": true,
+                "expected_version": version,
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["is_public"], true);
+    assert!(body["published_at"].is_string(), "{body}");
+
+    let (status, body) = visitor
+        .get(&format!("/api/v1/works/{work_id}/reviews"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body["items"].as_array().expect("items");
+    assert_eq!(items.len(), 1, "{body}");
+    assert_eq!(items[0]["author_handle"], "Bookworm");
+    assert_eq!(items[0]["body"], "A quiet, careful story.");
+    assert_eq!(items[0]["contains_spoilers"], true);
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_withdrawn_review_leaves_the_public_list() {
+    let harness = Harness::new("review-withdrawn").await;
+    let mut reader = harness.client();
+    register(&mut reader, "reader@example.com", "Bookworm").await;
+    let (work_id, _chapter) = published_chapter(&harness, "Withdrawn Review").await;
+
+    let (status, body) = reader
+        .put(
+            &format!("/api/v1/works/{work_id}/reviews"),
+            json!({ "body": "Worth your evening.", "is_public": true }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // A stranger deleting the same work's review removes nothing: the
+    // statement is scoped to the caller's own pseud.
+    let mut stranger = harness.client();
+    register(&mut stranger, "stranger@example.com", "Passerby").await;
+    let (status, _) = stranger
+        .delete(&format!("/api/v1/works/{work_id}/reviews"))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let mut visitor = harness.client();
+    let (status, body) = visitor
+        .get(&format!("/api/v1/works/{work_id}/reviews"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["items"].as_array().expect("items").len(),
+        1,
+        "another account's withdrawal must not withdraw this review: {body}"
+    );
+
+    // The author withdrawing it does.
+    let (status, _) = reader
+        .delete(&format!("/api/v1/works/{work_id}/reviews"))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = visitor
+        .get(&format!("/api/v1/works/{work_id}/reviews"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["items"].as_array().expect("items").len(),
+        0,
+        "a withdrawn review leaves the public list: {body}"
+    );
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_stale_review_write_returns_conflict() {
+    let harness = Harness::new("review-conflict").await;
+    let mut reader = harness.client();
+    register(&mut reader, "reader@example.com", "Bookworm").await;
+    let (work_id, _chapter) = published_chapter(&harness, "Contested Review").await;
+
+    let (status, body) = reader
+        .put(
+            &format!("/api/v1/works/{work_id}/reviews"),
+            json!({ "body": "First thoughts." }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["version"].as_i64().expect("version"), 1);
+
+    // A second tab still holding version 0 loses the race.
+    let (status, body) = reader
+        .put(
+            &format!("/api/v1/works/{work_id}/reviews"),
+            json!({ "body": "Written from an older tab.", "expected_version": 0 }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"]["code"], "REVISION_CONFLICT");
+
+    // The version it read is accepted, and the write is not duplicated.
+    let (status, body) = reader
+        .put(
+            &format!("/api/v1/works/{work_id}/reviews"),
+            json!({ "body": "Second thoughts.", "expected_version": 1 }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["version"].as_i64().expect("version"), 2);
+    assert_eq!(body["body"], "Second thoughts.");
+
+    // A review with no words is refused rather than stored empty.
+    let (status, body) = reader
+        .put(
+            &format!("/api/v1/works/{work_id}/reviews"),
+            json!({ "body": "   " }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "VALIDATION_FAILED");
+
+    harness.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// A helper for the tests that need a published work to point a reader at
+// ---------------------------------------------------------------------------
+
+/// Publish a one-chapter work with a different account and return its ids.
+async fn published_chapter(harness: &Harness, title: &str) -> (String, String) {
+    let mut author = harness.client();
+    let email = format!(
+        "author-{}@example.com",
+        title.to_lowercase().replace(' ', "-")
+    );
+    register(&mut author, &email, "Quill").await;
+    let work = create_work(&mut author, title).await;
+    let work_id = work["id"].as_str().expect("id").to_owned();
+    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
+    let (status, body) = save_chapter(
+        &mut author,
+        &chapter,
+        version,
+        "A chapter with enough words to have a middle.",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "save chapter: {body}");
+    let (status, body) = publish(&mut author, &work_id, 1).await;
+    assert_eq!(status, StatusCode::OK, "publish: {body}");
+    (work_id, chapter)
 }

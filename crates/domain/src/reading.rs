@@ -157,7 +157,7 @@ mod tests {
     fn a_single_position_is_used_directly() {
         let only = position("00000000-0000-0000-0000-000000000011", 500);
         assert_eq!(
-            resolve_progress(&[only.clone()]),
+            resolve_progress(std::slice::from_ref(&only)),
             ProgressResolution::UseStored(only)
         );
     }

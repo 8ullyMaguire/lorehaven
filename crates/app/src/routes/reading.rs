@@ -11,6 +11,7 @@
 //! DELETE /works/:id/rating
 //! GET    /works/:id/reviews                        public reviews only
 //! PUT    /works/:id/reviews                        create or update the caller's review
+//! DELETE /works/:id/reviews                        withdraw the caller's review
 //! GET    /notes?subject_id=…                       private notes for the acting pseud
 //! PUT    /notes                                    create/update
 //! DELETE /notes/:id
@@ -32,7 +33,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
-use lorehaven_db::reading::{self, HistoryRow, Note, Rating, RatingSummary};
+use lorehaven_db::content;
+use lorehaven_db::reading::{self, HistoryRow, Note, Rating, Review};
 use lorehaven_domain::reading::{resolve_progress, ProgressResolution, ReadingPosition};
 use lorehaven_domain::{AppError, WorkId};
 use serde::{Deserialize, Serialize};
@@ -53,9 +55,12 @@ pub fn router() -> Router<AppState> {
         .route("/library/history/{id}", delete(delete_history))
         .route(
             "/works/{id}/rating",
-            put(upsert_rating).delete(delete_rating),
+            get(get_rating).put(upsert_rating).delete(delete_rating),
         )
-        .route("/works/{id}/reviews", get(list_reviews).post(upsert_review))
+        .route(
+            "/works/{id}/reviews",
+            get(list_reviews).put(upsert_review).delete(delete_review),
+        )
         .route("/notes", get(list_notes).put(upsert_note))
         .route("/notes/{id}", delete(delete_note))
 }
@@ -231,20 +236,9 @@ impl From<Rating> for RatingView {
 }
 
 #[derive(Debug, Serialize)]
-struct RatingSummaryView {
-    count: i64,
-    mean_stars: f64,
-    method: &'static str,
-}
-
-impl From<RatingSummary> for RatingSummaryView {
-    fn from(summary: RatingSummary) -> Self {
-        Self {
-            count: summary.count,
-            mean_stars: summary.mean_permille as f64 / 1000.0,
-            method: "mean of public ratings, shown only at or above the minimum count",
-        }
-    }
+struct ReviewListView {
+    items: Vec<ReviewView>,
+    next_cursor: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -253,7 +247,26 @@ struct ReviewView {
     author_handle: String,
     body: String,
     contains_spoilers: bool,
-    published_at: String,
+    is_public: bool,
+    /// `null` until the review is published — a private review has no
+    /// publication time, and saying otherwise would be a small lie the client
+    /// would have to work around.
+    published_at: Option<String>,
+    version: i64,
+}
+
+impl From<Review> for ReviewView {
+    fn from(review: Review) -> Self {
+        Self {
+            id: review.id,
+            author_handle: review.author_handle,
+            body: review.body,
+            contains_spoilers: review.contains_spoilers,
+            is_public: review.is_public,
+            published_at: review.published_at,
+            version: review.version,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -304,15 +317,17 @@ async fn save_progress(
         .and_then(|r| r.parse().ok());
     reading::save_progress(
         state.db(),
-        user.account_id,
-        Some(pseud_id),
-        &request.subject_type,
-        &request.subject_id,
-        request.chapter_id.as_deref(),
-        revision,
-        request.paragraph_anchor.as_deref(),
-        request.position_permille.unwrap_or(0),
-        request.device_id.as_deref(),
+        reading::ProgressInput {
+            account: user.account_id,
+            pseud: Some(pseud_id),
+            subject_type: &request.subject_type,
+            subject_id: &request.subject_id,
+            chapter_id: request.chapter_id.as_deref(),
+            revision,
+            anchor: request.paragraph_anchor.as_deref(),
+            fraction: request.position_permille.unwrap_or(0),
+            device: request.device_id.as_deref(),
+        },
     )
     .await?;
     Ok(StatusCode::NO_CONTENT)
@@ -409,6 +424,22 @@ async fn clear_history(
 // Ratings
 // ---------------------------------------------------------------------------
 
+/// The acting pseud's own rating, or `null` when it has not rated the work.
+///
+/// `null` rather than `404`: the caller asked "what did I give this?", and
+/// "nothing" is a complete answer to that question, not a missing resource.
+async fn get_rating(
+    State(state): State<AppState>,
+    RequirePseud { user: _, pseud_id }: RequirePseud,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Option<RatingView>>> {
+    let work_id: WorkId = id
+        .parse()
+        .map_err(|_| ApiError(AppError::NotFound { resource: "work" }))?;
+    let rating = reading::rating_for(state.db(), pseud_id, work_id).await?;
+    Ok(Json(rating.map(RatingView::from)))
+}
+
 async fn upsert_rating(
     State(state): State<AppState>,
     RequirePseud { user, pseud_id }: RequirePseud,
@@ -426,6 +457,20 @@ async fn upsert_rating(
         )));
     }
     let is_public = request.is_public.unwrap_or(false);
+
+    // Optimistic concurrency, when the caller sends the version it read. The
+    // rating UI always sends it, so two tabs cannot silently overwrite each
+    // other's stars (house rule 2.3). A first write sends nothing and is
+    // allowed to create the row.
+    if let Some(expected) = request.expected_version {
+        let actual = reading::rating_for(state.db(), pseud_id, work_id)
+            .await?
+            .map_or(0, |rating| rating.version);
+        if actual != expected {
+            return Err(ApiError(AppError::RevisionConflict { expected, actual }));
+        }
+    }
+
     let version = reading::upsert_rating(
         state.db(),
         user.account_id,
@@ -459,24 +504,100 @@ async fn delete_rating(
 // ---------------------------------------------------------------------------
 
 async fn list_reviews(
-    State(_state): State<AppState>,
-    Path(_id): Path<String>,
-) -> ApiResult<Json<Vec<ReviewView>>> {
-    // TODO: implement once the review repository functions exist
-    Ok(Json(Vec::new()))
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<ReviewListView>> {
+    // Public and anonymous by design (§9): the query refuses a review that was
+    // never published or has been withdrawn, so this handler adds no check of
+    // its own — a second check here is how a private review eventually leaks.
+    let work_id: WorkId = id
+        .parse()
+        .map_err(|_| ApiError(AppError::NotFound { resource: "work" }))?;
+    let reviews = reading::public_reviews(state.db(), work_id).await?;
+    Ok(Json(ReviewListView {
+        items: reviews.into_iter().map(ReviewView::from).collect(),
+        // A work's public reviews are read in one go; the envelope is here for
+        // the shape's sake, as spec §3.3 requires of every collection.
+        next_cursor: None,
+    }))
 }
 
 async fn upsert_review(
     State(state): State<AppState>,
-    RequirePseud {
-        user: _,
-        pseud_id: _,
-    }: RequirePseud,
-    Path(_id): Path<String>,
-    Json(_request): Json<ReviewRequest>,
+    RequirePseud { user, pseud_id }: RequirePseud,
+    Path(id): Path<String>,
+    Json(request): Json<ReviewRequest>,
+) -> ApiResult<Json<ReviewView>> {
+    let work_id: WorkId = id
+        .parse()
+        .map_err(|_| ApiError(AppError::NotFound { resource: "work" }))?;
+
+    if request.body.trim().is_empty() {
+        return Err(ApiError(AppError::field(
+            "body",
+            "A review needs some words.",
+        )));
+    }
+
+    // A review on a work that does not exist would fail the foreign key and
+    // surface as an internal error; say `404` instead, with the same coarse
+    // noun every other unreachable resource uses (spec §3.3).
+    if content::find_work(state.db(), work_id).await?.is_none() {
+        return Err(ApiError(AppError::NotFound { resource: "work" }));
+    }
+
+    // Reviews are private until explicitly published (§9.5), so the default is
+    // private and only an explicit `true` makes one visible.
+    let is_public = request.is_public.unwrap_or(false);
+    let contains_spoilers = request.contains_spoilers.unwrap_or(false);
+
+    // Optimistic concurrency, when the caller sends the version it read. A
+    // caller that omits it is saying "I do not care what was there", which is
+    // what a first write does.
+    if let Some(expected) = request.expected_version {
+        let actual = reading::review_for(state.db(), pseud_id, work_id)
+            .await?
+            .map_or(0, |review| review.version);
+        if actual != expected {
+            return Err(ApiError(AppError::RevisionConflict { expected, actual }));
+        }
+    }
+
+    let version = reading::upsert_review(
+        state.db(),
+        user.account_id,
+        pseud_id,
+        work_id,
+        &request.body,
+        contains_spoilers,
+        is_public,
+    )
+    .await?;
+
+    let review = reading::review_for(state.db(), pseud_id, work_id)
+        .await?
+        .ok_or_else(|| {
+            ApiError(AppError::internal(
+                "reading back a review that was just written",
+                anyhow::anyhow!("the review is missing immediately after its upsert"),
+            ))
+        })?;
+    debug_assert_eq!(review.version, version);
+
+    Ok(Json(ReviewView::from(review)))
+}
+
+async fn delete_review(
+    State(state): State<AppState>,
+    RequirePseud { user: _, pseud_id }: RequirePseud,
+    Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
-    let _ = state;
-    // TODO: implement once the review repository functions exist
+    let work_id: WorkId = id
+        .parse()
+        .map_err(|_| ApiError(AppError::NotFound { resource: "work" }))?;
+    // A review that is not there is not a failure: the caller asked for the
+    // end state, and it already holds.
+    reading::delete_review(state.db(), pseud_id, work_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -557,13 +678,15 @@ async fn save_typography(
 
     let saved = reading::save_typography(
         state.db(),
-        user.account_id,
-        request.expected_version,
-        font_scale,
-        line_height,
-        measure,
-        reader_theme,
-        distraction_free,
+        reading::TypographyInput {
+            account: user.account_id,
+            expected_version: request.expected_version,
+            font_scale,
+            line_height,
+            measure,
+            reader_theme,
+            distraction_free,
+        },
     )
     .await?;
 

@@ -40,6 +40,7 @@ use lorehaven_db::content::{
     self, ContentError, PublicationOutcome, RevisionInput, RevisionSummary, Work, WorkPatch,
 };
 use lorehaven_db::identity;
+use lorehaven_db::reading;
 use lorehaven_domain::content::Contributor;
 use lorehaven_domain::document::Document;
 use lorehaven_domain::policy::{
@@ -208,9 +209,28 @@ struct PublicWorkView {
     completion: String,
     published_at: Option<String>,
     show_public_ratings: bool,
+    /// The public aggregate rating, when the owner allows it and the minimum
+    /// count is met. `null` otherwise, including below the threshold.
+    rating_summary: Option<PublicRatingSummaryView>,
     authors: Vec<PublicAuthor>,
     chapters: Vec<ChapterView>,
 }
+
+/// The public aggregate rating, with the count and the method it used.
+///
+/// The method travels with the number because spec §9.5 requires the aggregate
+/// to state how it was computed, and a mean is not the only thing it might one
+/// day be.
+#[derive(Debug, Serialize)]
+struct PublicRatingSummaryView {
+    count: i64,
+    mean_stars: f64,
+    method: &'static str,
+}
+
+/// The words every aggregate carries, so the rule lives in one place.
+const MEAN_OF_PUBLIC_RATINGS: &str =
+    "mean of public ratings, shown only at or above the minimum count";
 
 /// A chapter in the revision history list.
 #[derive(Debug, Serialize)]
@@ -1009,6 +1029,16 @@ async fn public_view(state: &AppState, work: &Work) -> ApiResult<PublicWorkView>
         })
         .collect();
 
+    // Spec §9.5: the aggregate is shown only where the work's owner allows it,
+    // only above the minimum count, and always with its count and its method.
+    // A work whose owner has turned it off reports no aggregate at all rather
+    // than a zero, which would read as "nobody liked this".
+    let rating_summary = if work.show_public_ratings {
+        reading::public_rating_summary(state.db(), work.id).await?
+    } else {
+        None
+    };
+
     Ok(PublicWorkView {
         id: work.id,
         title: work.title.clone(),
@@ -1019,6 +1049,11 @@ async fn public_view(state: &AppState, work: &Work) -> ApiResult<PublicWorkView>
         completion: work.completion.clone(),
         published_at: work.published_at.clone(),
         show_public_ratings: work.show_public_ratings,
+        rating_summary: rating_summary.map(|summary| PublicRatingSummaryView {
+            count: summary.count,
+            mean_stars: summary.mean_permille as f64 / 1000.0,
+            method: MEAN_OF_PUBLIC_RATINGS,
+        }),
         authors,
         chapters: chapters.into_iter().map(ChapterView::from).collect(),
     })

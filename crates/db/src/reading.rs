@@ -49,23 +49,44 @@ impl ProgressRow {
     }
 }
 
+/// Everything [`save_progress`] needs, in one value.
+///
+/// A struct rather than eight positional arguments: five of them are
+/// `Option<&str>`-shaped and two are ids, and a call site that passed them in
+/// the wrong order would still compile.
+pub struct ProgressInput<'a> {
+    pub account: AccountId,
+    /// The face that read the work, when one was acting.
+    pub pseud: Option<PseudId>,
+    pub subject_type: &'a str,
+    pub subject_id: &'a str,
+    pub chapter_id: Option<&'a str>,
+    /// The revision the reader was looking at.
+    pub revision: Option<RevisionId>,
+    pub anchor: Option<&'a str>,
+    /// Position in permille (0..=1000).
+    pub fraction: u16,
+    pub device: Option<&'a str>,
+}
+
 /// Upsert this device's position for a subject.
 ///
 /// The upsert is keyed on `(account, pseud, subject, device)`; a NULL device
 /// id is treated as its own key, so two sessions with no device id share one
 /// row rather than colliding.
-pub async fn save_progress(
-    db: &Database,
-    account: AccountId,
-    pseud: Option<PseudId>,
-    subject_type: &str,
-    subject_id: &str,
-    chapter_id: Option<&str>,
-    revision: Option<RevisionId>,
-    anchor: Option<&str>,
-    fraction: u16,
-    device: Option<&str>,
-) -> Result<()> {
+pub async fn save_progress(db: &Database, input: ProgressInput<'_>) -> Result<()> {
+    let ProgressInput {
+        account,
+        pseud,
+        subject_type,
+        subject_id,
+        chapter_id,
+        revision,
+        anchor,
+        fraction,
+        device,
+    } = input;
+
     let id = uuid::Uuid::new_v4().to_string();
     let now = now_rfc3339();
     let revision_text = revision.as_ref().map(ToString::to_string);
@@ -649,6 +670,276 @@ pub async fn delete_rating(db: &Database, pseud: PseudId, work: WorkId) -> Resul
 }
 
 // ---------------------------------------------------------------------------
+// Reviews
+// ---------------------------------------------------------------------------
+
+/// A stored review, with the handle of the pseud that wrote it.
+///
+/// The two flags are decoded to `bool` here so that no caller has to remember
+/// that SQLite stores them as integers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Review {
+    pub id: String,
+    pub author_handle: String,
+    pub body: String,
+    pub contains_spoilers: bool,
+    pub is_public: bool,
+    pub published_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: i64,
+}
+
+/// The row shape both engines return.
+///
+/// PostgreSQL is asked for `::int` on the two flags and for `id::text`, so one
+/// tuple decodes on both engines (ADR 0004).
+#[derive(Debug, Clone, FromRow)]
+struct ReviewRow {
+    id: String,
+    author_handle: String,
+    body: String,
+    contains_spoilers: i64,
+    is_public: i64,
+    published_at: Option<String>,
+    created_at: String,
+    updated_at: String,
+    version: i64,
+}
+
+impl ReviewRow {
+    fn decode(self) -> Review {
+        Review {
+            id: self.id,
+            author_handle: self.author_handle,
+            body: self.body,
+            contains_spoilers: self.contains_spoilers != 0,
+            is_public: self.is_public != 0,
+            published_at: self.published_at,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+            version: self.version,
+        }
+    }
+}
+
+/// Create or update the caller's review of a work, keyed on `(pseud, work)`.
+///
+/// A review is private until the caller explicitly publishes it: with
+/// `is_public = false` the row keeps `published_at` NULL and
+/// [`public_reviews`] can never return it. Re-publishing keeps the timestamp
+/// of the *first* publication, because that is when readers could first have
+/// seen it.
+///
+/// Returns the new version.
+pub async fn upsert_review(
+    db: &Database,
+    account: AccountId,
+    pseud: PseudId,
+    work: WorkId,
+    body: &str,
+    contains_spoilers: bool,
+    is_public: bool,
+) -> Result<i64> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = now_rfc3339();
+    let spoilers_int: i64 = i64::from(contains_spoilers);
+    let public_int: i64 = i64::from(is_public);
+    let published_at: Option<String> = if is_public { Some(now.clone()) } else { None };
+
+    // The conflict target repeats the partial unique index's predicate
+    // (`WHERE deleted_at IS NULL`), because that is the index the upsert has to
+    // match; without the predicate SQLite refuses the statement outright.
+    let sql = db.sql(
+        "INSERT INTO review
+             (id, account_id, pseud_id, work_id, body, contains_spoilers, is_public,
+              published_at, created_at, updated_at, version, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL)
+         ON CONFLICT (pseud_id, work_id) WHERE deleted_at IS NULL
+         DO UPDATE SET body = excluded.body,
+                       contains_spoilers = excluded.contains_spoilers,
+                       is_public = excluded.is_public,
+                       published_at = COALESCE(review.published_at, excluded.published_at),
+                       updated_at = excluded.updated_at,
+                       deleted_at = NULL,
+                       version = review.version + 1
+         RETURNING version",
+        "INSERT INTO review
+             (id, account_id, pseud_id, work_id, body, contains_spoilers, is_public,
+              published_at, created_at, updated_at, version, deleted_at)
+         VALUES (?::uuid, ?::uuid, ?::uuid, ?::uuid, ?, ?, ?, ?, ?, ?, 1, NULL)
+         ON CONFLICT (pseud_id, work_id) WHERE deleted_at IS NULL
+         DO UPDATE SET body = excluded.body,
+                       contains_spoilers = excluded.contains_spoilers,
+                       is_public = excluded.is_public,
+                       published_at = COALESCE(review.published_at, excluded.published_at),
+                       updated_at = excluded.updated_at,
+                       deleted_at = NULL,
+                       version = review.version + 1
+         RETURNING version",
+    );
+
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite handle");
+            let mut tx = pool.begin().await?;
+            sqlx::query(&sql.replace(" RETURNING version", ""))
+                .bind(&id)
+                .bind(account.to_string())
+                .bind(pseud.to_string())
+                .bind(work.to_string())
+                .bind(body)
+                .bind(spoilers_int)
+                .bind(public_int)
+                .bind(&published_at)
+                .bind(&now)
+                .bind(&now)
+                .execute(&mut *tx)
+                .await?;
+            let version: i64 = sqlx::query_scalar(
+                "SELECT version FROM review
+                  WHERE pseud_id = ? AND work_id = ? AND deleted_at IS NULL",
+            )
+            .bind(pseud.to_string())
+            .bind(work.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            Ok(version)
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres handle");
+            let version: i64 = sqlx::query_scalar(&sql)
+                .bind(&id)
+                .bind(account.to_string())
+                .bind(pseud.to_string())
+                .bind(work.to_string())
+                .bind(body)
+                .bind(spoilers_int)
+                .bind(public_int)
+                .bind(&published_at)
+                .bind(&now)
+                .bind(&now)
+                .fetch_one(pool)
+                .await?;
+            Ok(version)
+        }
+    }
+}
+
+/// The acting pseud's own review of a work, published or not.
+pub async fn review_for(db: &Database, pseud: PseudId, work: WorkId) -> Result<Option<Review>> {
+    let sql = db.sql(
+        "SELECT r.id, p.handle AS author_handle, r.body, r.contains_spoilers,
+                r.is_public, r.published_at, r.created_at, r.updated_at, r.version
+           FROM review r
+           JOIN pseuds p ON p.id = r.pseud_id
+          WHERE r.pseud_id = ? AND r.work_id = ? AND r.deleted_at IS NULL",
+        "SELECT r.id::text AS id, p.handle AS author_handle, r.body,
+                r.contains_spoilers::int, r.is_public::int, r.published_at,
+                r.created_at, r.updated_at, r.version
+           FROM review r
+           JOIN pseuds p ON p.id = r.pseud_id
+          WHERE r.pseud_id = ?::uuid AND r.work_id = ?::uuid AND r.deleted_at IS NULL",
+    );
+    let row: Option<ReviewRow> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(pseud.to_string())
+                .bind(work.to_string())
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(pseud.to_string())
+                .bind(work.to_string())
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(row.map(ReviewRow::decode))
+}
+
+/// The public reviews of a work, newest publication first.
+///
+/// Three predicates stand between a private row and a reader — `is_public = 1`,
+/// a non-NULL `published_at` and `deleted_at IS NULL` — so a review that was
+/// never published, or was withdrawn by its author, cannot leak through this
+/// function even if some future caller forgets one of them.
+pub async fn public_reviews(db: &Database, work: WorkId) -> Result<Vec<Review>> {
+    let sql = db.sql(
+        "SELECT r.id, p.handle AS author_handle, r.body, r.contains_spoilers,
+                r.is_public, r.published_at, r.created_at, r.updated_at, r.version
+           FROM review r
+           JOIN pseuds p ON p.id = r.pseud_id
+          WHERE r.work_id = ?
+            AND r.is_public = 1
+            AND r.published_at IS NOT NULL
+            AND r.deleted_at IS NULL
+          ORDER BY r.published_at DESC, r.id ASC",
+        "SELECT r.id::text AS id, p.handle AS author_handle, r.body,
+                r.contains_spoilers::int, r.is_public::int, r.published_at,
+                r.created_at, r.updated_at, r.version
+           FROM review r
+           JOIN pseuds p ON p.id = r.pseud_id
+          WHERE r.work_id = ?::uuid
+            AND r.is_public = TRUE
+            AND r.published_at IS NOT NULL
+            AND r.deleted_at IS NULL
+          ORDER BY r.published_at DESC, r.id ASC",
+    );
+    let rows: Vec<ReviewRow> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(work.to_string())
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(work.to_string())
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(rows.into_iter().map(ReviewRow::decode).collect())
+}
+
+/// Soft-delete the acting pseud's review of a work.
+///
+/// Soft rather than hard, because a moderation review may still need to see
+/// what was written (migration 0004's retention comment).
+pub async fn delete_review(db: &Database, pseud: PseudId, work: WorkId) -> Result<bool> {
+    let sql = db.sql(
+        "UPDATE review SET deleted_at = ?, updated_at = ?
+          WHERE pseud_id = ? AND work_id = ? AND deleted_at IS NULL",
+        "UPDATE review SET deleted_at = ?, updated_at = ?
+          WHERE pseud_id = ?::uuid AND work_id = ?::uuid AND deleted_at IS NULL",
+    );
+    let now = now_rfc3339();
+    let affected = match db.backend() {
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(&now)
+            .bind(&now)
+            .bind(pseud.to_string())
+            .bind(work.to_string())
+            .execute(db.sqlite_pool().expect("sqlite handle"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(&now)
+            .bind(&now)
+            .bind(pseud.to_string())
+            .bind(work.to_string())
+            .execute(db.postgres_pool().expect("postgres handle"))
+            .await?
+            .rows_affected(),
+    };
+    Ok(affected > 0)
+}
+
+// ---------------------------------------------------------------------------
 // Reader notes
 // ---------------------------------------------------------------------------
 
@@ -862,21 +1153,34 @@ pub async fn typography_for(db: &Database, account: AccountId) -> Result<Typogra
     ))
 }
 
+/// The typography values to store, and the version they were read at.
+pub struct TypographyInput<'a> {
+    pub account: AccountId,
+    /// The version the caller read. `0` means "no row yet".
+    pub expected_version: i64,
+    pub font_scale: f64,
+    pub line_height: f64,
+    pub measure: i64,
+    pub reader_theme: &'a str,
+    pub distraction_free: bool,
+}
+
 /// Upsert the typography preferences if the caller's version is current.
 ///
 /// When no row exists yet, `expected_version` must be 0 (the "no row"
 /// sentinel). Any other value means the client believes a row exists that
 /// does not — a conflict.
-pub async fn save_typography(
-    db: &Database,
-    account: AccountId,
-    expected_version: i64,
-    font_scale: f64,
-    line_height: f64,
-    measure: i64,
-    reader_theme: &str,
-    distraction_free: bool,
-) -> Result<bool> {
+pub async fn save_typography(db: &Database, input: TypographyInput<'_>) -> Result<bool> {
+    let TypographyInput {
+        account,
+        expected_version,
+        font_scale,
+        line_height,
+        measure,
+        reader_theme,
+        distraction_free,
+    } = input;
+
     let now = now_rfc3339();
     let distraction_int: i64 = if distraction_free { 1 } else { 0 };
 
