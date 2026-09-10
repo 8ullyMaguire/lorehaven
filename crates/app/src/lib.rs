@@ -10,12 +10,15 @@
 //! elasticity of separate services.
 
 pub mod assets;
+pub mod auth;
 pub mod cli;
 pub mod config;
 pub mod crypto;
 pub mod doctor;
 pub mod http;
+pub mod limiter;
 pub mod logging;
+pub mod privacy;
 pub mod routes;
 pub mod safety;
 pub mod seed;

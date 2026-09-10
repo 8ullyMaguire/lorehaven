@@ -17,6 +17,7 @@
 
 pub mod identity;
 pub mod migrate;
+pub mod sessions;
 
 use std::borrow::Cow;
 use std::path::Path;

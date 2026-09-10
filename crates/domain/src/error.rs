@@ -91,6 +91,14 @@ pub enum AppError {
     #[error("authentication required")]
     AuthRequired,
 
+    /// Credentials were supplied and did not match.
+    ///
+    /// Deliberately distinct from [`AppError::AuthRequired`] so the message can
+    /// be useful without inventing a new public error code: it maps to
+    /// `AUTH_REQUIRED` with `401`, and it never says *which* half was wrong.
+    #[error("that email address and password do not match an account")]
+    InvalidCredentials,
+
     /// The caller is authenticated but not permitted.
     #[error("access denied")]
     AccessDenied,
@@ -190,6 +198,7 @@ impl AppError {
     pub const fn code(&self) -> ErrorCode {
         match self {
             Self::AuthRequired => ErrorCode::AuthRequired,
+            Self::InvalidCredentials => ErrorCode::AuthRequired,
             Self::AccessDenied => ErrorCode::AccessDenied,
             Self::NotFound { .. } => ErrorCode::NotFound,
             Self::Validation { .. } => ErrorCode::ValidationFailed,
@@ -213,7 +222,7 @@ impl AppError {
     #[must_use]
     pub const fn status_code(&self) -> u16 {
         match self {
-            Self::AuthRequired => 401,
+            Self::AuthRequired | Self::InvalidCredentials => 401,
             Self::AccessDenied
             | Self::ContentRestricted
             | Self::ExtensionPermissionDenied { .. } => 403,

@@ -107,8 +107,44 @@ pub struct Config {
     pub assets: AssetsConfig,
     /// Development-only affordances.
     pub dev: DevConfig,
+    /// Account and registration settings.
+    pub accounts: AccountsConfig,
+    /// Age-policy settings.
+    pub age: AgeConfig,
+    /// Rate limits.
+    pub rate_limits: crate::limiter::Limits,
     /// Where the configuration file was read from, if any.
     pub config_path: Option<PathBuf>,
+}
+
+/// Account creation settings.
+#[derive(Debug, Clone)]
+pub struct AccountsConfig {
+    /// Whether new accounts may register at all.
+    ///
+    /// Exposed because a small instance frequently closes registration after an
+    /// initial cohort; making that a configuration value rather than a code
+    /// change keeps it an operational decision.
+    pub registration_open: bool,
+}
+
+/// Age-policy settings.
+///
+/// Spec §7 requires the age machinery to be *configured*, not hard-coded to a
+/// jurisdiction, and warns explicitly against allowing unrestricted child
+/// registration merely because a checkbox exists.
+#[derive(Debug, Clone)]
+pub struct AgeConfig {
+    /// The age at which a person may consent to their own data processing.
+    /// Fourteen under Spanish law, which is the operator's stated basis.
+    pub threshold: u8,
+    /// Whether an under-threshold authorization workflow is actually in place.
+    ///
+    /// **False by default.** While it is false, an account that declares itself
+    /// under the threshold is created in the `restricted` state: it may read,
+    /// and it may not write, message or be discovered. Turning this on is a
+    /// legal and operational decision, not a feature toggle.
+    pub guardian_workflow_enabled: bool,
 }
 
 /// Public identity of the instance.
@@ -153,6 +189,12 @@ pub struct SecurityConfig {
     pub session_ttl: Duration,
     /// Whether state-changing cookie-authenticated requests need a CSRF token.
     pub csrf_required: bool,
+    /// Whether `X-Forwarded-For` may be believed for rate-limit keying.
+    ///
+    /// Off by default, and it must stay off unless a reverse proxy is genuinely
+    /// in front: the header is trivially forgeable, and trusting it lets a
+    /// client mint a fresh rate-limit bucket per request.
+    pub trust_proxy: bool,
 }
 
 /// Logging settings.
@@ -301,6 +343,7 @@ impl Config {
                 60 * 60 * 24 * u64::from(security_file.session_ttl_days.unwrap_or(30)),
             ),
             csrf_required: security_file.csrf_required.unwrap_or(true),
+            trust_proxy: security_file.trust_proxy.unwrap_or(false),
         };
 
         // --- logging --------------------------------------------------------
@@ -339,6 +382,53 @@ impl Config {
             seed_enabled: dev_file.seed_enabled.unwrap_or(!production),
         };
 
+        // --- accounts -------------------------------------------------------
+        let accounts_file = file.accounts.unwrap_or_default();
+        let accounts = AccountsConfig {
+            registration_open: accounts_file.registration_open.unwrap_or(true),
+        };
+
+        // --- age policy -----------------------------------------------------
+        let age_file = file.age.unwrap_or_default();
+        let age = AgeConfig {
+            threshold: age_file.threshold.unwrap_or(14),
+            guardian_workflow_enabled: age_file.guardian_workflow_enabled.unwrap_or(false),
+        };
+
+        // --- rate limits ----------------------------------------------------
+        let rate_limits = {
+            let defaults = crate::limiter::Limits::default();
+            let section = file.rate_limits.unwrap_or_default();
+            let build =
+                |burst: Option<u32>, per_minute: Option<u32>, fallback: crate::limiter::Quota| {
+                    crate::limiter::Quota {
+                        burst: burst.unwrap_or(fallback.burst),
+                        per_minute: per_minute.unwrap_or(fallback.per_minute),
+                    }
+                };
+            crate::limiter::Limits {
+                auth: build(section.auth_burst, section.auth_per_minute, defaults.auth),
+                write: build(
+                    section.write_burst,
+                    section.write_per_minute,
+                    defaults.write,
+                ),
+                search: build(
+                    section.search_burst,
+                    section.search_per_minute,
+                    defaults.search,
+                ),
+                default: build(
+                    section.default_burst,
+                    section.default_per_minute,
+                    defaults.default,
+                ),
+                address_multiplier: section
+                    .address_multiplier
+                    .unwrap_or(defaults.address_multiplier),
+            }
+        };
+
         let config = Self {
             environment,
             site,
@@ -349,6 +439,9 @@ impl Config {
             logging,
             assets,
             dev,
+            accounts,
+            age,
+            rate_limits,
             config_path,
         };
 
@@ -381,6 +474,7 @@ impl Config {
                 cookie_secure: false,
                 session_ttl: Duration::from_secs(60 * 60 * 24 * 30),
                 csrf_required: true,
+                trust_proxy: false,
             },
             logging: LoggingConfig {
                 filter: "info".to_owned(),
@@ -388,6 +482,14 @@ impl Config {
             },
             assets: AssetsConfig { dir: None },
             dev: DevConfig { seed_enabled: true },
+            accounts: AccountsConfig {
+                registration_open: true,
+            },
+            age: AgeConfig {
+                threshold: 14,
+                guardian_workflow_enabled: false,
+            },
+            rate_limits: crate::limiter::Limits::default(),
             config_path: None,
         }
     }
@@ -422,6 +524,15 @@ impl Config {
         }
         if self.site.name.trim().is_empty() {
             anyhow::bail!("site.name must not be empty");
+        }
+        if !(13..=18).contains(&self.age.threshold) {
+            anyhow::bail!(
+                "age.threshold must be between 13 and 18, got {}",
+                self.age.threshold
+            );
+        }
+        if self.rate_limits.write.burst == 0 || self.rate_limits.auth.burst == 0 {
+            anyhow::bail!("rate limits must allow at least one request in a burst");
         }
         Ok(())
     }
@@ -464,6 +575,9 @@ struct FileConfig {
     logging: Option<LoggingSection>,
     assets: Option<AssetsSection>,
     dev: Option<DevSection>,
+    accounts: Option<AccountsSection>,
+    age: Option<AgeSection>,
+    rate_limits: Option<RateLimitSection>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -504,6 +618,34 @@ struct SecuritySection {
     cookie_secure: Option<bool>,
     session_ttl_days: Option<u32>,
     csrf_required: Option<bool>,
+    trust_proxy: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AccountsSection {
+    registration_open: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AgeSection {
+    threshold: Option<u8>,
+    guardian_workflow_enabled: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RateLimitSection {
+    auth_burst: Option<u32>,
+    auth_per_minute: Option<u32>,
+    write_burst: Option<u32>,
+    write_per_minute: Option<u32>,
+    search_burst: Option<u32>,
+    search_per_minute: Option<u32>,
+    default_burst: Option<u32>,
+    default_per_minute: Option<u32>,
+    address_multiplier: Option<u32>,
 }
 
 #[derive(Debug, Default, Deserialize)]

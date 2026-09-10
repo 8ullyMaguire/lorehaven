@@ -36,9 +36,10 @@ use tracing::Instrument;
 use crate::cli::ServeArgs;
 use crate::config::{ensure_dir, Config, Environment};
 use crate::http::with_request_id;
+use crate::limiter::{self, Classified, RouteClass, TrustProxy};
 use crate::routes;
 use crate::state::AppState;
-use crate::{assets, safety, version};
+use crate::{assets, auth, safety, version};
 
 /// How the server treats migrations it finds pending.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +76,10 @@ pub async fn serve(config: Config, db: Database, args: &ServeArgs) -> Result<()>
     safety::validate_for_startup(&config)?;
     ensure_dir(&config.storage.root)?;
 
+    // Fixed for the process lifetime, so it is published once rather than
+    // looked up on every request.
+    set_trust_proxy(config.security.trust_proxy);
+
     apply_migration_policy(&config, &db, MigrationPolicy::for_config(&config, args)).await?;
 
     let state = AppState::new(config.clone(), db);
@@ -96,10 +101,16 @@ pub async fn serve(config: Config, db: Database, args: &ServeArgs) -> Result<()>
         "listening"
     );
 
-    axum::serve(listener, router)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .context("serving HTTP")?;
+    // `into_make_service_with_connect_info` is what makes the peer address
+    // available to the rate limiter. Without it every anonymous request has no
+    // address to be keyed by, and the limiter quietly does nothing.
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .context("serving HTTP")?;
 
     tracing::info!("shutdown complete");
     Ok(())
@@ -155,19 +166,74 @@ pub async fn apply_migration_policy(
 }
 
 /// Assemble the router with the full middleware stack.
+///
+/// Order is not incidental. Reading from the inside out:
+///
+/// ```text
+/// handlers
+///   ← rate limit      needs the session, so it sits inside session loading
+///   ← CSRF            needs the session
+///   ← session load    attaches SessionUser, or leaves the request anonymous
+///   ← body limit      rejects an oversized body before it is parsed
+///   ← timeout
+///   ← CORS
+///   ← security headers
+///   ← request context outermost, so nothing escapes the request id
+/// ```
+///
+/// One cost worth naming: because the limiter runs after session loading, a
+/// flood that carries session cookies performs one indexed lookup per request
+/// until its address bucket trips. The bucket bounds that, and the alternative —
+/// limiting before we know who is asking — would give every account behind a
+/// shared address the same allowance.
 pub fn build_router(state: AppState) -> Router {
     let config = state.config().clone();
     let cors = build_cors(&config);
 
-    let router = Router::new()
-        .merge(routes::health::router())
-        .nest("/api/v1", routes::meta::router())
+    // Routes that are authenticated and state-changing.
+    let account_routes: Router<AppState> = Router::new()
+        .merge(classified(routes::auth::router(), RouteClass::Auth, &state))
+        .merge(classified(
+            routes::pseuds::router(),
+            RouteClass::Write,
+            &state,
+        ))
+        .merge(classified(
+            routes::settings::router(),
+            RouteClass::Write,
+            &state,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::verify_csrf,
+        ));
+
+    let api: Router<AppState> = Router::new()
+        .merge(classified(
+            routes::meta::router(),
+            RouteClass::Default,
+            &state,
+        ))
+        .merge(account_routes)
+        // Session loading wraps everything under /api/v1 so that the CSRF layer
+        // and the limiter installed per subtree can both see who is asking.
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::load_session,
+        ));
+
+    let health = classified(routes::health::router(), RouteClass::Default, &state);
+
+    let router: Router<AppState> = Router::new()
+        .merge(health)
+        .nest("/api/v1", api)
         .fallback(assets::serve)
         .layer(RequestBodyLimitLayer::new(config.server.max_body_bytes))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
             config.server.request_timeout,
         ))
+        .layer(middleware::from_fn(add_trust_proxy_flag))
         .layer(middleware::from_fn(security_headers))
         // Added last, therefore outermost: nothing escapes correlation.
         .layer(middleware::from_fn(request_context));
@@ -180,6 +246,44 @@ pub fn build_router(state: AppState) -> Router {
     };
 
     router.with_state(state)
+}
+
+/// Declare a route tree's rate-limit class and install the limiter for it.
+///
+/// The class marker is layered *outside* the limiter on purpose. Middleware
+/// runs outermost-first, so a marker appended afterwards is visible by the time
+/// the limiter runs. Adding it the other way round — which is the obvious way
+/// to write it — means the limiter inspects a request that does not yet carry a
+/// class, and the fail-closed guard rejects every request on the route.
+fn classified<S>(router: Router<S>, class: RouteClass, state: &AppState) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    router
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            limiter::enforce,
+        ))
+        .layer(axum::Extension(Classified(class)))
+}
+
+/// Record whether a reverse proxy is trusted, for rate-limit keying.
+///
+/// This is a marker, not a decision: it copies configuration into the request
+/// so that [`limiter::client_address`] can consult it without holding state.
+async fn add_trust_proxy_flag(mut request: Request, next: Next) -> Response {
+    let trusted = TRUST_PROXY.load(std::sync::atomic::Ordering::Relaxed);
+    request.extensions_mut().insert(TrustProxy(trusted));
+    next.run(request).await
+}
+
+/// Whether `X-Forwarded-For` may be believed. Fixed for the process lifetime.
+static TRUST_PROXY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Publish the trust-proxy decision. Called once during startup, before the
+/// listener is bound.
+pub fn set_trust_proxy(trusted: bool) {
+    TRUST_PROXY.store(trusted, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Cross-origin policy. Empty means same-origin only.
