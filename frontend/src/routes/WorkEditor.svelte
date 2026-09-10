@@ -38,7 +38,6 @@
     describeVisibility,
   } from '../lib/labels';
   import { handleLinkClick } from '../lib/router';
-  import { session } from '../lib/session.svelte';
   import Button from '../lib/components/Button.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Select from '../lib/components/Select.svelte';
@@ -335,8 +334,9 @@
   </p>
 
   {#if work.lifecycle === 'published'}
+    {@const publishedHref = `/works/${work.id}`}
     <p>
-      <a href={`/works/${work.id}`} onclick={(event) => handleLinkClick(event, `/works/${work.id}`)}>
+      <a href={publishedHref} onclick={(event) => handleLinkClick(event, publishedHref)}>
         Read the published version
       </a>
     </p>

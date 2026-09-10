@@ -104,6 +104,20 @@
     <a href="/" onclick={(event) => handleLinkClick(event, '/')}>Back to the front page</a>
   </p>
 {:else if work}
+  <!--
+    Bound once, as a `const`.
+
+    `work.id` inside an `onclick` closure was an error — "'work' is possibly
+    'null'" — because `work` is a `let` binding and TypeScript will not carry a
+    narrowing from the surrounding `{#if}` into a callback that might run after
+    it changed. The `href` attribute on the same element read it happily, which
+    is what made the errors look arbitrary. A `{@const}` is a fresh binding whose
+    narrowed type is fixed at the point of declaration, so both readers see it
+    the same way.
+  -->
+  {@const workHref = `/works/${work.id}`}
+  {@const editorHref = `/write/${work.id}`}
+
   {#if authorView}
     <p class="draft-note" role="status">
       {#if authorView.lifecycle === 'published'}
@@ -112,9 +126,7 @@
         This work is {describeLifecycle(authorView.lifecycle).toLowerCase()}, so only its
         contributors can see it. Others see it once it is published.
       {/if}
-      <a href={`/write/${work.id}`} onclick={(event) => handleLinkClick(event, `/write/${work.id}`)}>
-        Edit it
-      </a>
+      <a href={editorHref} onclick={(event) => handleLinkClick(event, editorHref)}>Edit it</a>
     </p>
   {/if}
 
@@ -147,11 +159,9 @@
   {:else}
     <ol class="chapters">
       {#each work.chapters as chapter (chapter.id)}
+        {@const chapterHref = `${workHref}/chapters/${chapter.id}`}
         <li>
-          <a
-            href={`/works/${work.id}/chapters/${chapter.id}`}
-            onclick={(event) => handleLinkClick(event, `/works/${work.id}/chapters/${chapter.id}`)}
-          >
+          <a href={chapterHref} onclick={(event) => handleLinkClick(event, chapterHref)}>
             {chapter.title.trim() === '' ? 'Untitled chapter' : chapter.title}
           </a>
           <span class="note">{chapter.word_count} words</span>

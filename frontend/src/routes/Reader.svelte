@@ -232,19 +232,19 @@
 
   <nav class="pager" aria-label="Chapter navigation">
     {#if chapter.previous_chapter_id}
-      <a
-        href={`/works/${workId}/chapters/${chapter.previous_chapter_id}`}
-        onclick={(event) => handleLinkClick(event, `/works/${workId}/chapters/${chapter.previous_chapter_id}`)}
-      >
+      <!--
+        A `{@const}` per link, because a `let` binding is not narrowed inside an
+        `onclick` closure. `chapter` is a `let`, so TypeScript rejected the read
+        in the callback while allowing it in the `href` beside it.
+      -->
+      {@const previousHref = `/works/${workId}/chapters/${chapter.previous_chapter_id}`}
+      <a href={previousHref} onclick={(event) => handleLinkClick(event, previousHref)}>
         ← Previous chapter
       </a>
     {/if}
     {#if chapter.next_chapter_id}
-      <a
-        class="next"
-        href={`/works/${workId}/chapters/${chapter.next_chapter_id}`}
-        onclick={(event) => handleLinkClick(event, `/works/${workId}/chapters/${chapter.next_chapter_id}`)}
-      >
+      {@const nextHref = `/works/${workId}/chapters/${chapter.next_chapter_id}`}
+      <a class="next" href={nextHref} onclick={(event) => handleLinkClick(event, nextHref)}>
         Next chapter →
       </a>
     {:else}

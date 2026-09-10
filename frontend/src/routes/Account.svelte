@@ -12,7 +12,7 @@
     type PrivacySettings as PrivacySettingsResponse,
     type SessionSummary,
   } from '../lib/api';
-  import { describeAgeState, describeRating } from '../lib/labels';
+  import { describeAgeState } from '../lib/labels';
   import { handleLinkClick } from '../lib/router';
   import { session } from '../lib/session.svelte';
   import { formatTimestamp } from '../lib/time';

@@ -30,13 +30,20 @@ build-release:
 
 # Build the frontend bundle.
 frontend:
-    cd {{frontend_dir}} && npm run build
+    {{frontend_dir}}/scripts/fe.sh build
 
 # Build everything, in the order the deploy uses: bundle first, then the binary
 # that embeds it.
 all: frontend build
 
 # --- checks -----------------------------------------------------------------
+#
+# The frontend recipes reach their tools through `frontend/scripts/fe.sh` rather
+# than `npm run`. This checkout may sit on a filesystem that cannot execute the
+# `node_modules/.bin` shims, where `npm run build` fails with "vite: command not
+# found" while the same entry point invoked through `node` works — see the header
+# of that script. Routing every recipe the same way means `just check` here means
+# what it means in CI.
 
 fmt:
     cargo fmt --all
@@ -49,10 +56,19 @@ test:
 
 # Frontend unit tests.
 test-frontend:
-    cd {{frontend_dir}} && npm test
+    {{frontend_dir}}/scripts/fe.sh test
+
+# Frontend type and accessibility check.
+#
+# This belongs in `check`: it is the step CI runs and the one that catches the
+# most, and it used to be missing here. Its absence is why 65 pre-existing
+# `svelte-check` failures — 44 of them the same message against 44 files — sat
+# unnoticed in a tree whose owner ran `just check` and saw green.
+check-frontend:
+    {{frontend_dir}}/scripts/fe.sh check
 
 # Everything CI runs.
-check: fmt lint test test-frontend
+check: fmt lint test test-frontend check-frontend
     cargo fmt --all -- --check
 
 # --- run --------------------------------------------------------------------
@@ -79,7 +95,7 @@ doctor:
 
 # Start the Vite dev server (proxies /api and /health to the Rust server).
 dev-frontend:
-    cd {{frontend_dir}} && npm run dev
+    {{frontend_dir}}/scripts/fe.sh dev
 
 # --- housekeeping -----------------------------------------------------------
 

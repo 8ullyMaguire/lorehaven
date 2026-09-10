@@ -29,13 +29,24 @@
   let loading = $state(true);
   let error = $state<unknown>(null);
   let forbidden = $state(false);
-  let state = $state('');
+  /*
+   * Named `stateFilter`, not `state`.
+   *
+   * A local variable called `state` collides with the `$state` rune, and the
+   * collision is not merely stylistic: it leaves `svelte-check` unable to
+   * resolve the rune at all, and it reported every `$state` call in this file
+   * as "Block-scoped variable '$state' used before its declaration" — six of
+   * them, plus two implicit-`any` errors that followed from `Job[]` never being
+   * applied. The name is also just clearer: this holds a filter value, and
+   * `job.state` two lines down is a different thing entirely.
+   */
+  let stateFilter = $state('');
   let busy = $state<string | null>(null);
 
   const hasActive = $derived(jobs.some((job) => ACTIVE.has(job.state)));
 
   $effect(() => {
-    void state;
+    void stateFilter;
     void session.activePseud?.id;
     void load();
   });
@@ -50,7 +61,7 @@
     if (!options.quiet) loading = true;
     error = null;
     try {
-      const view = await fetchAllJobs(state ? { state } : {});
+      const view = await fetchAllJobs(stateFilter ? { state: stateFilter } : {});
       jobs = view.items;
       forbidden = false;
     } catch (failure) {
@@ -114,7 +125,7 @@
 
   <div class="filters">
     <label for="state-filter">State</label>
-    <select id="state-filter" bind:value={state}>
+    <select id="state-filter" bind:value={stateFilter}>
       <option value="">all</option>
       {#each STATES as candidate (candidate)}
         <option value={candidate}>{candidate}</option>
