@@ -14,6 +14,7 @@ pub mod document;
 pub mod error;
 pub mod ids;
 pub mod policy;
+pub mod reading;
 
 pub use error::{AppError, ErrorCode, Result};
 pub use ids::*;
