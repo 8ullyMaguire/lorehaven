@@ -130,11 +130,18 @@ async fn royal_road_still_reads() {
         work.author_url.is_some(),
         "the author URL is on the page; a blank one means the selector moved"
     );
-    assert!(work.chapter_count() > 100, "a long work lost its chapter list");
+    assert!(
+        work.chapter_count() > 100,
+        "a long work lost its chapter list"
+    );
     assert!(work.word_count.unwrap_or(0) > 0, "no word count");
     // The recorded fixture is a completed work. If this fails the site changed
     // and the fixture, not the parser, is what needs re-reading.
-    assert_eq!(work.status, WorkStatus::Complete, "status changed at the source");
+    assert_eq!(
+        work.status,
+        WorkStatus::Complete,
+        "status changed at the source"
+    );
     assert!(
         work.published_at.is_some() && work.updated_at.is_some(),
         "the JSON-LD dates are gone"
@@ -213,5 +220,4 @@ async fn a_chapter_body_still_comes_back_with_text() {
         missing.is_err(),
         "a chapter past the end of the work was reported as read"
     );
-
 }

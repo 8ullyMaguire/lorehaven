@@ -396,7 +396,29 @@ impl Worker {
                 let payload = serde_json::from_str(&job.payload).map_err(|error| {
                     HandlerError::Fatal(format!("the import job's payload is not JSON: {error}"))
                 })?;
-                crate::imports::run(state, state.registry(), id, &payload).await
+                let outcome = crate::imports::run(state, state.registry(), id, &payload).await;
+
+                // Recompute the source's health from the import history, after
+                // the attempt and whatever the attempt did (spec §11.8). The
+                // sweep reads the history rather than this call's result, so it
+                // cannot be skewed by one attempt — and a failure to sweep is
+                // *not* reported as a failure of the import: the queue must act
+                // on the import's own outcome, and a health row is not worth
+                // five retries of a work that was fetched fine.
+                if let Some(import_id) = payload
+                    .get("import_job_id")
+                    .and_then(serde_json::Value::as_str)
+                {
+                    if let Err(error) = crate::imports::settle_source_health(state, import_id).await
+                    {
+                        tracing::warn!(
+                            import = import_id,
+                            %error,
+                            "could not recompute the source's health after an import"
+                        );
+                    }
+                }
+                outcome
             }
             JobKind::Notify => {
                 let (_, _, failed) = self

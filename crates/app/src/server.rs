@@ -278,6 +278,11 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        .merge(classified(
+            routes::imports::admin_router(),
+            RouteClass::Write,
+            &state,
+        ))
         .merge(account_routes)
         // Session loading wraps everything under /api/v1 so that the CSRF layer
         // and the limiter installed per subtree can both see who is asking.
