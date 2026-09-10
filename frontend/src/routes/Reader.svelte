@@ -21,8 +21,16 @@
    * (§7), so nothing here is behind a session. Only the position is; a
    * signed-out reader keeps it in `localStorage` and it is never uploaded.
    */
-  import { fetchChapter, saveProgress, type ChapterContent } from '../lib/api';
-  import { PositionFlusher, readCachedPosition } from '../lib/reading';
+  import { fetchChapter, fetchTypography, saveProgress, type ChapterContent } from '../lib/api';
+  import {
+    DEFAULT_TYPOGRAPHY,
+    PositionFlusher,
+    applyTypography,
+    readCachedPosition,
+    readTypographyPrefs,
+    savePosition,
+    writeTypographyPrefs,
+  } from '../lib/reading';
   import { handleLinkClick } from '../lib/router';
   import { session } from '../lib/session.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
@@ -43,6 +51,27 @@
   let showSettings = $state(false);
 
   /**
+   * The reading surface's appearance, applied as the page opens.
+   *
+   * The stored copy (or the defaults) goes on first, so a reader never sees
+   * the text at the wrong size; the server's copy is then fetched for a
+   * signed-in reader, because the settings panel promises these follow the
+   * account to another device and this is what makes that true.
+   */
+  $effect(() => {
+    applyTypography(readTypographyPrefs() ?? DEFAULT_TYPOGRAPHY, document.documentElement);
+    if (!session.isSignedIn) return;
+    void fetchTypography()
+      .then((view) => {
+        writeTypographyPrefs(view);
+        applyTypography(view, document.documentElement);
+      })
+      .catch(() => {
+        // The local copy is already applied; the server's is a refinement.
+      });
+  });
+
+  /**
    * This browser's own identifier, so two devices keep two positions rather
    * than overwriting one another (spec §9.3).
    */
@@ -60,21 +89,24 @@
     }
   }
 
+  /**
+   * `savePosition` writes the local copy before it tries the server, which is
+   * what makes "a lost request still leaves a position" true. A signed-out
+   * reader keeps the position in `localStorage` and uploads nothing.
+   */
   const flusher = new PositionFlusher(async (pending) => {
-    if (!session.isSignedIn) return;
-    try {
+    await savePosition(pending, async (position) => {
+      if (!session.isSignedIn) return;
       await saveProgress({
         subject_type: 'work',
-        subject_id: pending.workId,
-        chapter_id: pending.chapterId,
-        content_revision: pending.revision,
-        paragraph_anchor: pending.anchor,
-        position_permille: pending.fraction,
-        device_id: pending.device,
+        subject_id: position.workId,
+        chapter_id: position.chapterId,
+        content_revision: position.revision,
+        paragraph_anchor: position.anchor,
+        position_permille: position.fraction,
+        device_id: position.device,
       });
-    } catch {
-      // Already cached locally; the next visit retries from the cache.
-    }
+    });
   });
 
   $effect(() => {
@@ -88,6 +120,11 @@
     showSettings = false;
     try {
       chapter = await fetchChapter(workId, chapterId);
+      // Arriving in a chapter is itself a reading: it is recorded even if the
+      // reader never scrolls, which is what puts an opened work in `/library`
+      // and in the history list. The write is debounced, so the restore below
+      // replaces it with the position actually landed on.
+      remember();
       // Restore a remembered place in this chapter, when there is one.
       const cached = readCachedPosition(workId);
       if (cached && cached.chapterId === chapterId) {
@@ -236,6 +273,21 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-5);
+    /*
+     * The reading surface carries the reader's own preset, not the site's
+     * theme: spec §9 and THEME.md both require "how the page I am reading
+     * looks" to be independent of "how the site looks". The fallbacks keep a
+     * page readable if no preset has been resolved yet.
+     */
+    margin-top: var(--space-3);
+    padding: var(--space-4) var(--space-4) var(--space-5);
+    border-radius: var(--radius-md);
+    background: var(--reader-bg, transparent);
+    color: var(--reader-text, inherit);
+  }
+
+  .reader-body :global(a) {
+    color: var(--reader-link, var(--color-accent));
   }
 
   @media (min-width: 62rem) {
@@ -253,10 +305,10 @@
   }
 
   .prose :global(blockquote) {
-    border-left: 3px solid var(--color-accent);
+    border-left: 3px solid var(--reader-rule, var(--color-accent));
     margin: var(--space-4) 0;
     padding-left: var(--space-4);
-    color: var(--color-muted);
+    color: var(--reader-muted, var(--color-muted));
   }
 
   .prose :global(hr) {

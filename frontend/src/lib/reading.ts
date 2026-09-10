@@ -27,6 +27,53 @@ export interface CachedPosition {
   savedAt: number;
 }
 
+/** The reader's own surface presets, matching `[data-reader='…']` in tokens.css. */
+export const READER_THEMES = ['paper', 'white', 'sepia', 'dark'] as const;
+
+/** One of the reader's surface presets. */
+export type ReaderTheme = (typeof READER_THEMES)[number];
+
+/** The preset a reader gets before choosing one (the server's default too). */
+export const DEFAULT_READER_THEME: ReaderTheme = 'sepia';
+
+/** Human labels for the presets. */
+export const READER_THEME_LABELS: Record<ReaderTheme, string> = {
+  paper: 'Paper',
+  white: 'White',
+  sepia: 'Sepia',
+  dark: 'Dark',
+};
+
+/**
+ * The typography a reader gets before anything is stored or configured.
+ *
+ * The server holds the same defaults; this copy is what makes the reading
+ * surface look right on the first paint, before any request has answered.
+ */
+export const DEFAULT_TYPOGRAPHY: TypographyPrefs = {
+  font_scale: 1,
+  line_height: 1.6,
+  measure: 66,
+  reader_theme: DEFAULT_READER_THEME,
+  distraction_free: false,
+  version: 0,
+};
+
+/**
+ * The stored reader theme, or the default.
+ *
+ * The server accepts any string for `reader_theme`, so the value can be
+ * something this build does not know — a site theme name from an older
+ * release, for instance. It is resolved here rather than written to the
+ * document, because `data-reader` selects from a closed set in the stylesheet
+ * and an unrecognised value would paint nothing at all.
+ */
+export function resolveReaderTheme(value: unknown): ReaderTheme {
+  return typeof value === 'string' && (READER_THEMES as readonly string[]).includes(value)
+    ? (value as ReaderTheme)
+    : DEFAULT_READER_THEME;
+}
+
 /**
  * Typography preferences stored locally.
  *
@@ -45,13 +92,21 @@ export interface TypographyPrefs {
   version: number;
 }
 
-/** The CSS custom properties the reader applies, and their units. */
+/**
+ * Apply a reader's typography to the document.
+ *
+ * The attribute is `data-reader`, spelled exactly as `tokens.css` selects it
+ * (`[data-reader='sepia']`). It is not `data-reader-theme`: that name was
+ * written here and read by nothing, so the reader's theme control changed no
+ * pixel. `frontend/static/prepaint.js` mirrors this function for the first
+ * paint, and a test asserts the two agree.
+ */
 export function applyTypography(prefs: TypographyPrefs, root: HTMLElement): void {
   const style = root.style;
   style.setProperty('--reader-font-scale', String(prefs.font_scale));
   style.setProperty('--reader-line-height', String(prefs.line_height));
   style.setProperty('--reader-measure', `${prefs.measure}ch`);
-  root.dataset.readerTheme = prefs.reader_theme;
+  root.dataset.reader = resolveReaderTheme(prefs.reader_theme);
   root.dataset.distractionFree = prefs.distraction_free ? 'true' : 'false';
 }
 

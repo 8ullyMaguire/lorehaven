@@ -16,8 +16,15 @@
    * are remembered in `localStorage`, they are just not sent anywhere.
    */
   import { fetchTypography, patchTypography, type TypographyView } from '../api';
-  import { applyTypography, readTypographyPrefs, writeTypographyPrefs, type TypographyPrefs } from '../reading';
-  import { THEMES, THEME_LABELS } from '../theme';
+  import {
+    DEFAULT_TYPOGRAPHY,
+    READER_THEMES,
+    READER_THEME_LABELS,
+    applyTypography,
+    readTypographyPrefs,
+    writeTypographyPrefs,
+    type TypographyPrefs,
+  } from '../reading';
   import ErrorSummary from './ErrorSummary.svelte';
 
   interface Props {
@@ -26,16 +33,7 @@
 
   let { signedIn }: Props = $props();
 
-  const defaults: TypographyPrefs = {
-    font_scale: 1,
-    line_height: 1.6,
-    measure: 66,
-    reader_theme: 'reading-room',
-    distraction_free: false,
-    version: 0,
-  };
-
-  let prefs = $state<TypographyPrefs>(readTypographyPrefs() ?? defaults);
+  let prefs = $state<TypographyPrefs>(readTypographyPrefs() ?? DEFAULT_TYPOGRAPHY);
   let saving = $state(false);
   let error = $state<unknown>(null);
   let conflict = $state(false);
@@ -113,8 +111,8 @@
   <label>
     Reader theme
     <select bind:value={prefs.reader_theme}>
-      {#each THEMES as option (option)}
-        <option value={option}>{THEME_LABELS[option] ?? option}</option>
+      {#each READER_THEMES as option (option)}
+        <option value={option}>{READER_THEME_LABELS[option]}</option>
       {/each}
     </select>
   </label>

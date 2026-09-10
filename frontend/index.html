@@ -10,52 +10,13 @@
     />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <title>Lorehaven</title>
-    <script>
-      // Applied before first paint so a dark-preferring reader never sees a
-      // white flash. Mirrors the resolution in src/lib/theme.ts.
-      (function () {
-        try {
-          var stored = localStorage.getItem('lorehaven.theme');
-          var prefersDark =
-            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-          var resolved = !stored || stored === 'system' ? (prefersDark ? 'after-hours' : 'reading-room') : stored;
-          document.documentElement.dataset.theme = resolved;
-        } catch (error) {
-          document.documentElement.dataset.theme = 'reading-room';
-        }
-      })();
-
-      // Reading typography, applied before first paint for the same reason:
-      // a reader must not see the text resize under them. Mirrors
-      // `applyTypography` in src/lib/reading.ts, which is what keeps it in
-      // step afterwards. The stored object is the one the server last
-      // reported, so the fields are the server's names.
-      (function () {
-        try {
-          var raw = localStorage.getItem('lorehaven.typography');
-          if (!raw) return;
-          var prefs = JSON.parse(raw);
-          var style = document.documentElement.style;
-          if (typeof prefs.font_scale === 'number') {
-            style.setProperty('--reader-font-scale', String(prefs.font_scale));
-          }
-          if (typeof prefs.line_height === 'number') {
-            style.setProperty('--reader-line-height', String(prefs.line_height));
-          }
-          if (typeof prefs.measure === 'number') {
-            style.setProperty('--reader-measure', prefs.measure + 'ch');
-          }
-          if (prefs.reader_theme) {
-            document.documentElement.dataset.readerTheme = prefs.reader_theme;
-          }
-          if (prefs.distraction_free) {
-            document.documentElement.dataset.distractionFree = 'true';
-          }
-        } catch (error) {
-          // A corrupt preference is not worth blocking the page for.
-        }
-      })();
-    </script>
+    <!--
+      Appearance before the first paint lives in a file, not in a block here:
+      the server's Content-Security-Policy is `script-src 'self'`, so an inline
+      script is refused by the browser without an error the page can see.
+      `src/lib/prepaint.test.ts` fails if an inline script returns.
+    -->
+    <script src="/prepaint.js"></script>
   </head>
   <body>
     <div id="app"></div>
