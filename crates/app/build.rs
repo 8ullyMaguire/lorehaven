@@ -32,6 +32,12 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed={}", frontend_dist.display());
 
+    // The build identity must change when the revision does, otherwise a
+    // deployed binary keeps reporting the commit it was first built from.
+    let git_dir = manifest_dir.join("../../.git");
+    println!("cargo:rerun-if-changed={}", git_dir.join("HEAD").display());
+    println!("cargo:rerun-if-changed={}", git_dir.join("refs").display());
+
     let git_revision = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .current_dir(&manifest_dir)
