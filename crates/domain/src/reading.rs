@@ -134,7 +134,7 @@ pub fn estimate_reading_time(word_count: u32) -> ReadingTime {
     if word_count == 0 {
         return ReadingTime { minutes: 0 };
     }
-    let minutes = (word_count + WORDS_PER_MINUTE - 1) / WORDS_PER_MINUTE;
+    let minutes = word_count.div_ceil(WORDS_PER_MINUTE);
     ReadingTime {
         minutes: minutes.max(1),
     }
