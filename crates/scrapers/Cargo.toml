@@ -1,0 +1,41 @@
+[package]
+name = "lorehaven-scrapers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Source adapters for Lorehaven's importer: fetch and parse other sites' works (spec §11)"
+publish = false
+
+[dependencies]
+async-trait.workspace = true
+regex-lite.workspace = true
+reqwest.workspace = true
+scraper.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio = { workspace = true, features = ["time", "sync"] }
+tracing.workspace = true
+url = "2"
+urlencoding = "2"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[features]
+default = []
+# The Cloudflare escalation path (TLS-fingerprint impersonation via `primp`).
+# Off by default: it pulls its own HTTP/TLS stack, and only sources behind a
+# challenge wall need it. Off, a challenged source reports `Blocked` and the
+# import pauses rather than pretending the work is empty.
+cloudflare-impersonation = ["dep:primp"]
+
+[dependencies.primp]
+version = "1.3"
+optional = true
+default-features = true
+
+[lints]
+workspace = true

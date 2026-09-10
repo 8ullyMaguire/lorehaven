@@ -4,6 +4,7 @@ members = [
     "crates/domain",
     "crates/db",
     "crates/app",
+    "crates/scrapers",
 ]
 
 [workspace.package]
@@ -17,6 +18,7 @@ description = "Lorehaven — a self-hosted fanfiction archive and community plat
 [workspace.dependencies]
 anyhow = "1"
 argon2 = { version = "0.5", features = ["std"] }
+async-trait = "0.1"
 axum = { version = "0.8", default-features = false, features = [
     "http1",
     "json",
@@ -30,7 +32,18 @@ clap = { version = "4", features = ["derive", "env", "wrap_help"] }
 hex = "0.4"
 mime_guess = "2"
 rand = "0.8"
+regex-lite = "0.1"
+# The importer's HTTP client. `cookies` is needed because several sources gate
+# an adult-confirmation or a login behind a session cookie; `rustls-tls` keeps
+# the TLS stack in-process so a deployment needs no system OpenSSL.
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "cookies",
+    "charset",
+    "http2",
+] }
 rust-embed = { version = "8", features = ["include-exclude", "interpolate-folder-path"] }
+scraper = "0.27"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
