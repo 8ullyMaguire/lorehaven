@@ -15,11 +15,12 @@ absent, which means the plan's own journey cannot be walked.
 
 | Piece | Where | Tests |
 |---|---|---|
-| The adapter crate, its trait and the registry | `crates/scrapers/src/{lib,registry,sites}.rs` | 67 in-crate |
+| The adapter crate, its trait and the registry | `crates/scrapers/src/{lib,registry,sites}.rs` | 101 in-crate |
 | The safe fetcher and URL guard | `crates/scrapers/src/safety.rs` | in-crate |
 | Chapter sanitation | `crates/scrapers/src/sanitize.rs` | in-crate |
 | The Archive-software adapter | `crates/scrapers/src/sites/ao3.rs` | 9 fixture tests |
-| Recorded fixtures | `crates/scrapers/tests/fixtures/ao3/` | provenance in `fixtures/README.md` |
+| The Royal Road adapter | `crates/scrapers/src/sites/royalroad.rs` | 13 unit + 21 fixture tests |
+| Recorded fixtures | `crates/scrapers/tests/fixtures/{ao3,royalroad}/` | provenance in `fixtures/README.md` |
 | The planning rules | `crates/domain/src/imports.rs` | 24 |
 | Migration 0006, both dialects | `migrations/{sqlite,postgres}/0006_imports.sql` | applied by every acceptance test |
 | The repositories | `crates/db/src/imports.rs`, `crates/db/src/secrets.rs` | through the acceptance tests |
@@ -119,6 +120,53 @@ whose foreign keys have never been exercised, and this is where they were.
 
 ---
 
+## 5. The port from `ficnexus`, and what it was wrong about
+
+M6's adapters are ported from `~/code/rust/ficnexus`, which already holds a Rust
+translation of FanFicFare's per-site knowledge. The decision was made explicitly
+and is worth restating with its limit: **the selector knowledge is what is worth
+lifting, and it is not trustworthy on its own.** For Royal Road every one of these
+was true of the ported adapter, and each is checked against the recorded pages
+rather than against the ported code:
+
+| The ported adapter | The recorded page | What this adapter does instead |
+|---|---|---|
+| `published: 0` | the page states `datePublished` | reads it from the page's structured block |
+| `updated: Utc::now()…` | the page states `dateModified` | reads it from the page's structured block |
+| `status: "ongoing"`, hardcoded | the page labels the work `COMPLETED` | parses the label, and reports `Unknown` for a label it does not recognise |
+| `author_url: String::new()` | the structured block carries the profile URL | carries it |
+| `author_local_id: fiction_id` | — | the fiction id goes in `source_work_key`, where it belongs |
+| `chapter_id: (i + 1) as i32` | each row carries the site's chapter id | the site's own id is the chapter key |
+| `h2.chapter-title`, and the `h1` selectors for the *author*, both fall back | `h2.chapter-title` matches **nothing** | the chapter title comes from `h1.font-white` |
+| the body is `inner_html()`, unsanitised | — | sanitised on the way out of the crate |
+
+The `h2.chapter-title` row is the one that matters, because the ported adapter
+does not fail on it: it falls back to `format!("Chapter {}", i + 1)`, so every
+chapter of every Royal Road work is titled `Chapter 1`, `Chapter 2`, … and the
+author's own titles are discarded with nothing raised. That is exactly the failure
+this milestone's fixtures exist to catch, and it is why the fixture test asserts
+the title of the first chapter *and* the second rather than only that a title
+exists.
+
+`published: 0` is worth its own note. It is not a missing value; it is the epoch,
+so a reader would see the work as published in 1970 — worse than the absent
+timestamp the type already models.
+
+### What porting did *not* mean
+
+The other 51 ficnexus adapters still carry these defects, so the remaining sources
+are **not** a copy job. Each needs the same four corrections before its fixture
+test can pass: real dates or none, the source's own chapter id rather than a loop
+index, a title selector that actually matches, and sanitisation. The ticket for
+the bulk pass is that list, not "port 51 files".
+
+Two defects in the ported code are structural rather than per-site and do not
+carry over at all: it has no SSRF guard (its `fetch` is a bare `client.get(url)`,
+where this crate's adapters receive a `&dyn Fetcher` and cannot construct a client
+— §2), and it has no fixtures, so none of the above was ever checkable there.
+
+---
+
 ## 6. Source reachability, measured
 
 Recorded on 2026-09-10 with a plain HTTPS request and a browser `User-Agent`,
@@ -128,8 +176,8 @@ against the URL taken from the ficnexus adapter for each source:
 |---|---|---|
 | Archive of Our Own | `200` | Adapter built, fixtures recorded |
 | Royal Road | `200` | Adapter built, fixtures recorded |
-| Syosetu | `200` | Adapter built, fixtures recorded |
-| www.fanficauthors.net, www.lcfanfic.com, www.phoenixsong.net, www.mediaminer.org | `200` | The eFiction family is reachable |
+| Syosetu | `200` | **Reachable, adapter not built yet** |
+| www.fanficauthors.net, www.lcfanfic.com, www.phoenixsong.net, www.mediaminer.org | `200` | **Reachable, adapter not built yet** (the eFiction family) |
 | **www.fanfiction.net** | **`403`** | Cloudflare |
 | **www.scribblehub.com** | **`403`** | Cloudflare |
 | **www.fimfiction.net** | **`403`** | Cloudflare |
@@ -137,6 +185,10 @@ against the URL taken from the ficnexus adapter for each source:
 
 FictionPress runs the same software as FanFiction.net and is therefore behind the
 same wall.
+
+Two rows say *reachable* and no more. Syosetu and the eFiction family answer plain
+requests, so an adapter for either can be verified and is ordinary work; it is not
+done yet, and the table says so rather than implying a delay is a difficulty.
 
 ### What that means, and the decision it forces
 
@@ -181,7 +233,7 @@ operator rather than to the implementer.
 
 ---
 
-## 5. Before this milestone can be tagged
+## 7. Before this milestone can be tagged
 
 1. The two pages, and a browser journey over them.
 2. The remaining tier-1 adapters, each with recorded fixtures.
