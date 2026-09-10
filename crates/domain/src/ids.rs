@@ -144,6 +144,23 @@ uuid_id! {
     OutboxEventId
 }
 uuid_id! {
+    /// A source an import can read from (`ao3`, `ffnet`, ...).
+    SourceId
+}
+uuid_id! {
+    /// One import: a reader's request to bring a work in from a source.
+    ImportJobId
+}
+uuid_id! {
+    /// One chapter's state within an import.
+    ImportChapterId
+}
+uuid_id! {
+    /// A stored connection to a source, which names a row in `secrets` rather
+    /// than holding any credential material itself.
+    SourceCredentialId
+}
+uuid_id! {
     /// An idempotency key presented by a client, so a retried publication does
     /// not notify twice.
     IdempotencyKey

@@ -386,7 +386,7 @@ pub fn normalize_title(raw: &str) -> String {
 pub fn normalize_author(raw: &str) -> String {
     let mut names: Vec<String> = raw
         .split(['&', ',', ';'])
-        .map(|part| normalize_title(part))
+        .map(normalize_title)
         .filter(|part| !part.is_empty())
         .collect();
     names.sort();

@@ -177,6 +177,10 @@ mod tests {
         fn capabilities(&self) -> SourceCapabilities {
             SourceCapabilities::public_read()
         }
+        fn hosts(&self) -> Vec<String> {
+            vec![self.host.to_owned()]
+        }
+
         fn can_handle(&self, url: &Url) -> bool {
             url.host_str() == Some(self.host)
         }
