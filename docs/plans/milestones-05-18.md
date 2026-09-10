@@ -10,7 +10,11 @@ House rules from `README.md` apply to every task here without being repeated.
 
 ## Milestone 5 — Jobs, storage, cache boundaries and secret management
 
-Spec §10. Tag `v0.06-jobs`. **This milestone unlocks M6 and M7; do not skip it.**
+**Built.** Tag `v0.06-jobs`. The record of what was built, what was corrected and
+what the tests are called is `milestone-05-jobs.md`; the evidence is in
+`docs/verification.md`. The summary below is what the plan said, kept for the
+milestones after this one that refer back to it. **This milestone unlocks M6 and
+M7.**
 
 Tables (migration 0005): `jobs`, `job_attempts`, `job_leases`,
 `content_blobs`, `content_references`, `source_revision_cache_entries`,

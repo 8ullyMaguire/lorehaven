@@ -12,7 +12,9 @@ all live in this repository.
 
 **Milestones 0 through 4 are complete**: the running application, the design
 system, accounts and pseuds, writing and publishing, and the reader with
-ratings, reviews, notes and history. Milestones 5–18 are not implemented.
+ratings, reviews, notes and history. Milestone 5 added the job queue, the
+content-addressed blob store, encrypted secret storage and the worker that
+drains the outbox. Milestones 6–18 are not implemented.
 
 That is the honest summary; `docs/requirements.csv` lists every requirement with
 a status, and `docs/verification.md` records the evidence behind each claim.
@@ -24,7 +26,8 @@ a status, and `docs/verification.md` records the evidence behind each claim.
 | 2 | Accounts, pseuds, privacy, age policy | Done: API and pages, tested, and driven in a browser |
 | 3 | Drafts, chapters, publishing, revisions | Done, tested, driven in a browser — tag `v0.04-publishing` |
 | 4 | Reader, ratings, reviews, notes, history | Done, tested, driven in a browser — tag `v0.05-reader` |
-| 5–18 | Jobs, imports, offline, library, search, discovery, community, events, governance, economy, extensions, integrations, operations | Not implemented |
+| 5 | Jobs, storage, secret encryption, outbox delivery | Done, tested, driven in a browser — tag `v0.06-jobs` |
+| 6–18 | Imports, offline, library, search, discovery, community, events, governance, economy, extensions, integrations, operations | Not implemented |
 
 No screen in this repository displays mock data. Pages that exist show real
 values from the server; routes that are linked but unbuilt say so plainly.

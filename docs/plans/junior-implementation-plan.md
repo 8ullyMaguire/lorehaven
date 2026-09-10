@@ -251,7 +251,9 @@ repeated.
 
 ### Milestone 5 — Jobs, storage, cache and secrets
 
-Spec §10. Tag `v0.06-jobs`. **This milestone unlocks M6 and M7; do not skip it.**
+Spec §10. Tag `v0.06-jobs`. **Built** — see `docs/plans/milestone-05-jobs.md` for
+the record and `docs/verification.md` for the evidence. **This milestone unlocks
+M6 and M7; do not skip it.**
 
 #### The journey
 
