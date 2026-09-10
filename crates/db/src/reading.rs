@@ -995,7 +995,15 @@ pub async fn notes_for(
     Ok(rows)
 }
 
-/// Upsert a note keyed on (pseud, subject, anchor); a NULL anchor is one note.
+/// Upsert a note keyed on `(pseud, subject, anchor)`; a NULL anchor is one note.
+///
+/// The schema deliberately carries no unique index for that key: an anchor may
+/// be NULL and both engines treat NULLs as distinct, so a constraint would not
+/// express it. That makes `ON CONFLICT DO UPDATE` useless here — with nothing to
+/// conflict on, it degrades to a plain insert, and every edit appended a second
+/// note (see `saving_the_same_note_twice_updates_it_in_place`). The row is
+/// therefore looked up and updated, or inserted when it is not there, and both
+/// statements run in one transaction so two writers cannot both insert.
 pub async fn save_note(
     db: &Database,
     account: AccountId,
@@ -1008,53 +1016,105 @@ pub async fn save_note(
     let id = uuid::Uuid::new_v4().to_string();
     let now = now_rfc3339();
 
-    let sql = db.sql(
+    let lookup = db.sql(
+        "SELECT id FROM reader_note
+          WHERE pseud_id = ? AND subject_type = ? AND subject_id = ?
+            AND COALESCE(anchor, '') = COALESCE(?, '') AND deleted_at IS NULL",
+        "SELECT id::text AS id FROM reader_note
+          WHERE pseud_id = ?::uuid AND subject_type = ? AND subject_id = ?::uuid
+            AND COALESCE(anchor, '') = COALESCE(?, '') AND deleted_at IS NULL",
+    );
+    let update = db.sql(
+        "UPDATE reader_note
+            SET body = ?, updated_at = ?, version = version + 1
+          WHERE id = ? AND deleted_at IS NULL",
+        "UPDATE reader_note
+            SET body = ?, updated_at = ?, version = version + 1
+          WHERE id = ?::uuid AND deleted_at IS NULL",
+    );
+    let insert = db.sql(
         "INSERT INTO reader_note
              (id, account_id, pseud_id, subject_type, subject_id, anchor, body,
               created_at, updated_at, version)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-         ON CONFLICT DO UPDATE SET
-              body = excluded.body,
-              updated_at = excluded.updated_at,
-              version = reader_note.version + 1",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
         "INSERT INTO reader_note
              (id, account_id, pseud_id, subject_type, subject_id, anchor, body,
               created_at, updated_at, version)
-         VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?::uuid, ?, ?, ?, ?, 1)
-         ON CONFLICT DO UPDATE SET
-              body = excluded.body,
-              updated_at = excluded.updated_at,
-              version = reader_note.version + 1",
+         VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?::uuid, ?, ?, ?, ?, 1)",
     );
 
     match db.backend() {
         Backend::Sqlite => {
-            sqlx::query(&sql)
-                .bind(&id)
-                .bind(account.to_string())
+            let pool = db.sqlite_pool().expect("sqlite handle");
+            let mut tx = pool.begin().await?;
+            let existing: Option<(String,)> = sqlx::query_as(&lookup)
                 .bind(pseud.to_string())
                 .bind(subject_type)
                 .bind(subject_id)
                 .bind(anchor)
-                .bind(body)
-                .bind(&now)
-                .bind(&now)
-                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .fetch_optional(&mut *tx)
                 .await?;
+            match existing {
+                Some((existing_id,)) => {
+                    sqlx::query(&update)
+                        .bind(body)
+                        .bind(&now)
+                        .bind(&existing_id)
+                        .execute(&mut *tx)
+                        .await?;
+                }
+                None => {
+                    sqlx::query(&insert)
+                        .bind(&id)
+                        .bind(account.to_string())
+                        .bind(pseud.to_string())
+                        .bind(subject_type)
+                        .bind(subject_id)
+                        .bind(anchor)
+                        .bind(body)
+                        .bind(&now)
+                        .bind(&now)
+                        .execute(&mut *tx)
+                        .await?;
+                }
+            }
+            tx.commit().await?;
         }
         Backend::Postgres => {
-            sqlx::query(&sql)
-                .bind(&id)
-                .bind(account.to_string())
+            let pool = db.postgres_pool().expect("postgres handle");
+            let mut tx = pool.begin().await?;
+            let existing: Option<(String,)> = sqlx::query_as(&lookup)
                 .bind(pseud.to_string())
                 .bind(subject_type)
                 .bind(subject_id)
                 .bind(anchor)
-                .bind(body)
-                .bind(&now)
-                .bind(&now)
-                .execute(db.postgres_pool().expect("postgres handle"))
+                .fetch_optional(&mut *tx)
                 .await?;
+            match existing {
+                Some((existing_id,)) => {
+                    sqlx::query(&update)
+                        .bind(body)
+                        .bind(&now)
+                        .bind(&existing_id)
+                        .execute(&mut *tx)
+                        .await?;
+                }
+                None => {
+                    sqlx::query(&insert)
+                        .bind(&id)
+                        .bind(account.to_string())
+                        .bind(pseud.to_string())
+                        .bind(subject_type)
+                        .bind(subject_id)
+                        .bind(anchor)
+                        .bind(body)
+                        .bind(&now)
+                        .bind(&now)
+                        .execute(&mut *tx)
+                        .await?;
+                }
+            }
+            tx.commit().await?;
         }
     }
     Ok(())

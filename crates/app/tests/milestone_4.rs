@@ -612,6 +612,72 @@ async fn switching_pseud_shows_a_different_history() {
     harness.cleanup().await;
 }
 
+/// Reading a chapter through the reader's own route records it in history.
+///
+/// `touch_history` had no caller in the application: the reading surface
+/// reported a position and nothing recorded that the work had been opened, so
+/// `/library/history` was empty for every real reader while these tests — which
+/// called the repository directly — stayed green.
+#[tokio::test]
+async fn reading_a_chapter_records_it_in_history() {
+    let harness = Harness::new("history-from-reading").await;
+    let mut reader = harness.client();
+    register(&mut reader, "reader@example.com", "Reader").await;
+
+    let mut author = harness.client();
+    register(&mut author, "author@example.com", "Quill").await;
+    let work = create_work(&mut author, "The Long Road").await;
+    let work_id = work["id"].as_str().expect("id").to_owned();
+    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
+    save_chapter(&mut author, &chapter, version, "Text to read.").await;
+    publish(&mut author, &work_id, 1).await;
+
+    // Nothing has been read yet, so nothing is in the history.
+    let (status, body) = reader.get("/api/v1/library/history").await;
+    assert_eq!(status, StatusCode::OK, "history: {body}");
+    assert_eq!(body["items"].as_array().expect("items").len(), 0);
+
+    // The two requests the reading surface makes: open the chapter, then say
+    // where the reader is.
+    let (status, chapter_body) = reader
+        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "read chapter: {chapter_body}");
+    let revision_id = chapter_body["revision_id"]
+        .as_str()
+        .expect("revision id")
+        .to_owned();
+    let (status, body) = reader
+        .put(
+            "/api/v1/reading/progress",
+            json!({
+                "subject_type": "work",
+                "subject_id": work_id,
+                "chapter_id": chapter,
+                "content_revision": revision_id,
+                "position_permille": 400,
+                "device_id": "device-1"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "save progress: {body}");
+
+    let (status, body) = reader.get("/api/v1/library/history").await;
+    assert_eq!(status, StatusCode::OK, "history: {body}");
+    let items = body["items"].as_array().expect("items");
+    assert_eq!(items.len(), 1, "the work the reader opened: {body}");
+    assert_eq!(items[0]["subject_id"], work_id);
+    assert_eq!(items[0]["title"], "The Long Road");
+    assert!(
+        items[0]["last_read_at"]
+            .as_str()
+            .is_some_and(|at| !at.is_empty()),
+        "a history row says when: {body}"
+    );
+
+    harness.cleanup().await;
+}
+
 #[tokio::test]
 async fn clearing_history_removes_only_the_callers_rows() {
     let harness = Harness::new("clear-history").await;
@@ -1183,4 +1249,226 @@ async fn published_chapter(harness: &Harness, title: &str) -> (String, String) {
     let (status, body) = publish(&mut author, &work_id, 1).await;
     assert_eq!(status, StatusCode::OK, "publish: {body}");
     (work_id, chapter)
+}
+
+// ---------------------------------------------------------------------------
+// Private notes are per pseud and never leave their writer
+// ---------------------------------------------------------------------------
+
+/// A note belongs to the writer's pseud and is invisible to a stranger.
+#[tokio::test]
+async fn a_note_is_private_to_its_writer_and_visible_only_to_them() {
+    let harness = Harness::new("note-private").await;
+    let mut author = harness.client();
+    register(&mut author, "author@example.com", "Quill").await;
+    let first = active_pseud(&mut author).await;
+
+    let work = create_work(&mut author, "The Open Road").await;
+    let work_id = work["id"].as_str().expect("id").to_owned();
+    let (chapter, version) = add_chapter(&mut author, &work_id, "One").await;
+    save_chapter(&mut author, &chapter, version, "One").await;
+    publish(&mut author, &work_id, 1).await;
+
+    // The author writes a note anchored to the chapter.
+    let (status, body) = author
+        .put(
+            "/api/v1/notes",
+            json!({
+                "subject_type": "work",
+                "subject_id": work_id,
+                "anchor": format!("p-{chapter}"),
+                "body": "a private observation"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "write note: {body}");
+
+    // The note is visible to the same pseud on this account.
+    let (status, body) = author
+        .get(&format!(
+            "/api/v1/notes?subject_type=work&subject_id={work_id}"
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "list notes: {body}");
+    let notes = body.as_array().expect("notes");
+    assert_eq!(notes.len(), 1, "the writer sees their own note");
+    assert_eq!(notes[0]["body"], "a private observation");
+
+    // The note id is captured while its writer can still see it.
+    let note_id = notes[0]["id"].as_str().expect("note id").to_owned();
+
+    // A second face on the same account keeps its own notes: adding a pseud and
+    // switching to it hides the first face's note.
+    let (status, body) = author
+        .post("/api/v1/pseuds", json!({ "handle": "Second" }))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "second pseud: {body}");
+    let second = body["id"].as_str().expect("pseud id").to_owned();
+    let (status, _) = author
+        .post(&format!("/api/v1/pseuds/{second}/activate"), json!({}))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "activate the second face");
+    let (status, body) = author
+        .get(&format!(
+            "/api/v1/notes?subject_type=work&subject_id={work_id}"
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "other pseud list notes: {body}");
+    let notes = body.as_array().expect("notes");
+    assert_eq!(
+        notes.len(),
+        0,
+        "a pseud cannot see another's notes on the same account"
+    );
+
+    // A stranger cannot see it either.
+    let mut stranger = harness.client();
+    register(&mut stranger, "stranger@example.com", "Read").await;
+    let (status, body) = stranger
+        .get(&format!(
+            "/api/v1/notes?subject_type=work&subject_id={work_id}"
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "stranger list notes: {body}");
+    let notes = body.as_array().expect("notes");
+    assert_eq!(
+        notes.len(),
+        0,
+        "a stranger cannot see another writer's notes"
+    );
+
+    // Another face cannot delete the writer's note, even holding its id: the
+    // delete is scoped by the acting pseud and quietly does nothing.
+    let (status, _) = author.delete(&format!("/api/v1/notes/{note_id}")).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // Back as the writer: the note survived the other face's delete.
+    let (status, _) = author
+        .post(&format!("/api/v1/pseuds/{first}/activate"), json!({}))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "activate the writer again");
+    let (status, body) = author
+        .get(&format!(
+            "/api/v1/notes?subject_type=work&subject_id={work_id}"
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "writer list notes: {body}");
+    assert_eq!(
+        body.as_array().expect("notes").len(),
+        1,
+        "another face's delete does not remove the writer's note"
+    );
+
+    // Deleting removes the writer's note and nothing else.
+    let (status, _) = author.delete(&format!("/api/v1/notes/{note_id}")).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, body) = author
+        .get(&format!(
+            "/api/v1/notes?subject_type=work&subject_id={work_id}"
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_array().expect("notes").len(), 0);
+
+    harness.cleanup().await;
+}
+
+/// The note repository honours the subject, so a note on a work does not
+/// surface against a library item with the same id.
+#[tokio::test]
+async fn notes_filter_to_the_exact_subject() {
+    let harness = Harness::new("note-subject").await;
+    let mut reader = harness.client();
+    register(&mut reader, "reader@example.com", "Reader").await;
+
+    let work = create_work(&mut reader, "A Work").await;
+    let work_id = work["id"].as_str().expect("id").to_owned();
+    let (chapter, version) = add_chapter(&mut reader, &work_id, "One").await;
+    save_chapter(&mut reader, &chapter, version, "One").await;
+    publish(&mut reader, &work_id, 1).await;
+
+    // One note on the work.
+    let (status, _) = reader
+        .put(
+            "/api/v1/notes",
+            json!({
+                "subject_type": "work",
+                "subject_id": work_id,
+                "body": "on the work"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // Listing the work returns it; listing by a different subject does not.
+    let (status, body) = reader
+        .get(&format!(
+            "/api/v1/notes?subject_type=work&subject_id={work_id}"
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_array().expect("notes").len(), 1);
+
+    let (status, body) = reader
+        .get("/api/v1/notes?subject_type=work&subject_id=other")
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_array().expect("notes").len(), 0);
+
+    harness.cleanup().await;
+}
+
+/// Saving the same anchor twice edits the one note instead of adding a second.
+///
+/// The schema carries no unique index on `(pseud, subject, anchor)` — an anchor
+/// may be NULL and both engines treat NULLs as distinct, so a constraint would
+/// not express the key. The repository therefore has to do the upsert itself,
+/// and this test is what notices when it stops.
+#[tokio::test]
+async fn saving_the_same_note_twice_updates_it_in_place() {
+    let harness = Harness::new("note-upsert").await;
+    let mut reader = harness.client();
+    register(&mut reader, "reader@example.com", "Reader").await;
+
+    let work = create_work(&mut reader, "A Work").await;
+    let work_id = work["id"].as_str().expect("id").to_owned();
+    let (chapter, version) = add_chapter(&mut reader, &work_id, "One").await;
+    save_chapter(&mut reader, &chapter, version, "One").await;
+    publish(&mut reader, &work_id, 1).await;
+
+    for body in ["first", "second"] {
+        let (status, response) = reader
+            .put(
+                "/api/v1/notes",
+                json!({
+                    "subject_type": "work",
+                    "subject_id": work_id,
+                    "anchor": "p-1",
+                    "body": body
+                }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "write note: {response}");
+    }
+
+    let (status, body) = reader
+        .get(&format!(
+            "/api/v1/notes?subject_type=work&subject_id={work_id}"
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let notes = body.as_array().expect("notes");
+    assert_eq!(
+        notes.len(),
+        1,
+        "one anchor holds one note, not one per save"
+    );
+    assert_eq!(
+        notes[0]["body"], "second",
+        "the second save replaces the body"
+    );
+    assert_eq!(notes[0]["version"], 2, "the edit bumps the version");
+
+    harness.cleanup().await;
 }
