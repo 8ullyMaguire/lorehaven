@@ -8,10 +8,18 @@ describe('routing', () => {
   });
 
   it('maps linked-but-unbuilt destinations to an honest placeholder', () => {
-    const match = matchRoute('/library');
+    const match = matchRoute('/discover');
     expect(match.id).toBe('planned');
-    expect(match.planned?.title).toBe('Library');
+    expect(match.planned?.title).toBe('Discover');
     expect(match.planned?.milestone).toMatch(/^Milestone \d+$/);
+  });
+
+  it('resolves the library and import pages Milestone 6 built', () => {
+    // These were a placeholder until the import machinery existed. They are
+    // real pages now, and a stale placeholder would hide a working surface.
+    expect(matchRoute('/library').id).toBe('library');
+    expect(matchRoute('/import').id).toBe('import');
+    expect(matchRoute('/import/').id).toBe('import');
   });
 
   it('resolves the reader history page', () => {

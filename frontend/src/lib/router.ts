@@ -25,6 +25,8 @@ export type RouteId =
   | 'work-read'
   | 'chapter-read'
   | 'history'
+  | 'import'
+  | 'library'
   | 'jobs'
   | 'admin-jobs'
   | 'planned'
@@ -50,11 +52,6 @@ export const PLANNED_ROUTES: Record<string, PlannedRoute> = {
     milestone: 'Milestone 9',
     summary:
       'Structured search over characters, relationships, prominence and attributes, with explicit handling of unknown metadata.',
-  },
-  '/library': {
-    title: 'Library',
-    milestone: 'Milestone 8',
-    summary: 'Imported works, shelves, private tags, update checking and storage usage.',
   },
   '/community': {
     title: 'Community',
@@ -82,6 +79,8 @@ const FIXED_ROUTES: Record<string, RouteId> = {
   '/account': 'account',
   '/pseud': 'pseuds',
   '/write': 'write',
+  '/import': 'import',
+  '/library': 'library',
   '/jobs': 'jobs',
   '/admin/jobs': 'admin-jobs',
 };
