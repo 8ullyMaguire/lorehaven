@@ -85,31 +85,41 @@ honest but is not the same guarantee.
 
 ---
 
-## 3. Deliberately not built, with the reason
+## 3. What is not built, with the reason
+
+Two things, and neither is a gap in the machinery: one is deferred by the plan,
+and one is reconnaissance that has been done and an adapter that has not been
+written.
 
 **Preservation batches.** Spec §14.5 and the plan's fifth pitfall both put them
-in Milestone 17, behind the operator role, a documented permission basis and a
-dry-run report. The destination field exists and accepts only `library`. Nothing
-in M6 could be mistaken for the authorisation.
+in Milestone 17, behind a documented permission basis and a dry-run report. The
+destination field exists and accepts only `library`. Nothing in M6 could be
+mistaken for the authorisation. `M6-10`.
 
-**The source revision cache.** `source_revision_cache_entries` has existed since
-migration 0005 and nothing has ever written to it; M6 did not either. An import
-re-reads the source's page rather than trusting a cached revision. Making the
-cache real needs an adapter that declares a conditional-request capability, and
-none does. Tracked as `M6-12`.
+**The remaining tier-1 adapters.** ffnet/fictionpress, the XenForo board family,
+scribblehub, wattpad, the eFiction family, ficbook. Three — AO3, Royal Road,
+Syosetu — are built. Of the rest, the eFiction family now has its reconnaissance
+committed and the others do not:
 
-**Automatic source health.** An operator pause is honoured — a paused source
-costs zero requests, which is asserted by counting them — and nothing moves a
-source's health on its own. The spec §11.8 failure classes are classified in the
-message a reader sees and are not written back to the catalogue. `M6-08`.
+* **eFiction** is the family worth doing next: one script, many archives, so one
+  adapter covers nineteen hosts. Its fixtures are recorded in
+  `crates/scrapers/tests/fixtures/efiction/` across five members, and
+  `tests/fixtures/README.md` writes down what they establish — including that the
+  ported `infobox` selector was never dead but pointed at the wrong page, that
+  `div#chapterlist` is one member's skin rather than the family's, that a
+  chapter's stable key is the `chapid` on its review link, and that these archives
+  answer with three distinct outcomes (the story, an unvalidated-story refusal,
+  and a content-warning gate) where the old design assumed two. What is left is
+  the adapter, its variant layer and its fixture test.
+* **ffnet/fictionpress, the XenForo boards and scribblehub** answer `403` to a
+  plain request, and `cloudflare-challenge.html` records what that looks like.
+  Reading them needs TLS impersonation or a browser, and the plan's §6 weighs
+  that against the SSRF guard `SafeFetcher` provides — a browser subprocess
+  cannot be DNS-pinned the way the guard pins a request. This is the point at
+  which a signed-in session is the honest tool, and the work is left for one.
+* **wattpad and ficbook** are reachable and simply not yet recorded.
 
-**Nine of the ten tier-1 sources.** ffnet/fictionpress, the XenForo board
-family, royalroad, scribblehub, wattpad, the eFiction family, syosetu and
-ficbook. The trait is shaped for them and the fixture discipline is written down
-in `crates/scrapers/src/sites/mod.rs`; none is ported. `M6-02`.
-
-**The pages.** `/import` and the imported-items list. Everything they need
-exists on the API. `M6-09`.
+`M6-02`.
 
 ---
 
@@ -317,7 +327,7 @@ against the URL taken from the ficnexus adapter for each source:
 | Archive of Our Own | `200` | Adapter built, fixtures recorded |
 | Royal Road | `200` | Adapter built, fixtures recorded |
 | Syosetu | `200` | Adapter built, fixtures recorded |
-| www.fanficauthors.net, www.lcfanfic.com, www.phoenixsong.net, www.mediaminer.org | `200` | **Reachable, adapter not built yet** (the eFiction family) |
+| the eFiction family: tgstorytime.com, giantessworld.net, gluttonyfiction.com, narutofic.org, ninelivesarchive.com, and thirteen more listed by the port | `200` | **Reachable; reconnaissance recorded, adapter not built yet** |
 | **www.fanfiction.net** | **`403`** | Cloudflare |
 | **www.scribblehub.com** | **`403`** | Cloudflare |
 | **www.fimfiction.net** | **`403`** | Cloudflare |
@@ -327,8 +337,17 @@ FictionPress runs the same software as FanFiction.net and is therefore behind th
 same wall.
 
 One row says *reachable* and no more. The eFiction members answer plain requests, so
-an adapter for them can be verified and is ordinary work; it is not done yet, and the
-table says so rather than implying a delay is a difficulty.
+an adapter for them can be verified and is ordinary work. It is still not done, and
+the table says so rather than implying a delay is a difficulty — but the
+reconnaissance behind it is not pending any more: fixtures from five members are
+committed under `crates/scrapers/tests/fixtures/efiction/`, and
+`tests/fixtures/README.md` records what they establish. Three of those five record
+something other than a work page, which is itself the finding: these archives gate a
+warned story behind a content-warning interstitial, and the recording shows the gate
+rather than the story. The port's member list is eighteen hosts, and the four names an
+earlier draft of this table carried — fanficauthors.net, lcfanfic.com, phoenixsong.net,
+mediaminer.org — appear in none of them; they were invented, and the real list is now
+in the fixtures README where it can be checked.
 
 ### What that means, and the decision it forces
 
