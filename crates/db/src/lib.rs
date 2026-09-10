@@ -18,10 +18,12 @@
 pub mod collaboration;
 pub mod content;
 pub mod identity;
+pub mod jobs;
 pub mod migrate;
 pub mod outbox;
 pub mod reading;
 pub mod sessions;
+pub mod storage;
 
 use std::borrow::Cow;
 use std::path::Path;

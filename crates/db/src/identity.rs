@@ -22,8 +22,17 @@ use crate::Database;
 /// Current UTC time as RFC 3339 text — the storage format for every timestamp.
 #[must_use]
 pub fn now_rfc3339() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
+    format_rfc3339(OffsetDateTime::now_utc())
+}
+
+/// A moment as RFC 3339 text, the format every timestamp column stores.
+///
+/// Public because the job queue computes a *future* moment (a lease expiry, the
+/// earliest time a retry may run) and has to store it in the same format. A
+/// second formatter would be a second thing that can disagree about the offset.
+#[must_use]
+pub fn format_rfc3339(at: OffsetDateTime) -> String {
+    at.format(&Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_owned())
 }
 
