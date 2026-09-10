@@ -231,6 +231,15 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // Reading progress, ratings, history, notes and typography. A visitor
+        // may reach none of these without a session, so they live under the
+        // writers' subtree with the Write class.
+        .merge(classified(
+            routes::reading::router(),
+            RouteClass::Write,
+            &state,
+        ))
+        .merge(routes::reading::authed_router())
         .merge(account_routes)
         // Session loading wraps everything under /api/v1 so that the CSRF layer
         // and the limiter installed per subtree can both see who is asking.
