@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   readCachedPosition,
   writeCachedPosition,
@@ -9,12 +9,20 @@ import {
   TYPOGRAPHY_STORAGE_KEY,
 } from './reading';
 
+// A `getItem` spy installed by one test would otherwise stay installed for
+// every test after it in this file, so each test starts from a clean slate.
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 function createPrefs(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    font_size: 100,
-    line_width: 70,
-    theme: 'paper',
-    expected_version: 1,
+    font_scale: 1.0,
+    line_height: 1.6,
+    measure: 66,
+    reader_theme: 'reading-room',
+    distraction_free: false,
+    version: 0,
     ...overrides,
   };
 }
@@ -83,7 +91,7 @@ describe('typography preferences', () => {
   });
 
   it('reads and writes typography preferences', () => {
-    const prefs = createPrefs({ font_size: 125, line_width: 80, theme: 'sepia' });
+    const prefs = createPrefs({ font_scale: 1.25, measure: 60, reader_theme: 'after-hours' });
     writeTypographyPrefs(prefs as never);
     expect(readTypographyPrefs()).toEqual(prefs);
   });

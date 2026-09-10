@@ -27,12 +27,32 @@ export interface CachedPosition {
   savedAt: number;
 }
 
-/** Typography preferences stored locally. */
+/**
+ * Typography preferences stored locally.
+ *
+ * The field names are the server's (`font_scale`, `measure`, `reader_theme`),
+ * not the reader's words for them, because the same object is written back to
+ * `PATCH /settings/typography` and has to name the columns the server expects.
+ */
 export interface TypographyPrefs {
-  font_size: number; // percentage
-  line_width: number; // percentage
-  theme: string;
-  expected_version: number;
+  font_scale: number;
+  line_height: number;
+  /** Line length in characters. */
+  measure: number;
+  reader_theme: string;
+  distraction_free: boolean;
+  /** The version the server last reported, for the next stale-write check. */
+  version: number;
+}
+
+/** The CSS custom properties the reader applies, and their units. */
+export function applyTypography(prefs: TypographyPrefs, root: HTMLElement): void {
+  const style = root.style;
+  style.setProperty('--reader-font-scale', String(prefs.font_scale));
+  style.setProperty('--reader-line-height', String(prefs.line_height));
+  style.setProperty('--reader-measure', `${prefs.measure}ch`);
+  root.dataset.readerTheme = prefs.reader_theme;
+  root.dataset.distractionFree = prefs.distraction_free ? 'true' : 'false';
 }
 
 /** A pending position flush. */

@@ -852,43 +852,33 @@ export interface ProgressView {
   resolution: ProgressResolution;
 }
 
-/** A history entry. */
+/** A history entry, joined with the work's own metadata. */
 export interface HistoryItem {
   id: string;
   subject_type: string;
   subject_id: string;
   last_read_at: string;
-  revision_seen: string | null;
-  created_at: string;
+  title: string;
+  authors: string[];
 }
 
-/** A history view returned by GET /library/history. */
+/** The history envelope returned by GET /library/history. */
 export interface HistoryView {
-  entries: HistoryItem[];
-  cursor: string | null;
+  items: HistoryItem[];
+  next_cursor: string | null;
 }
 
-/** A rating. */
-export interface Rating {
-  id: string;
-  work_id: string;
-  stars: number;
-  version: number;
-  created_at: string;
-  updated_at: string;
-}
-
-/** A rating view. */
+/** A rating view. A rating is private unless `is_public` says otherwise. */
 export interface RatingView {
-  id: string;
-  work_id: string;
   stars: number;
+  is_public: boolean;
   version: number;
 }
 
 /** A review. */
 export interface ReviewView {
   id: string;
+  author_handle: string;
   body: string;
   contains_spoilers: boolean;
   is_public: boolean;
@@ -896,93 +886,90 @@ export interface ReviewView {
   version: number;
 }
 
-/** A private note. */
-export interface Note {
-  id: string;
-  body: string;
-  version: number;
-  created_at: string;
-  updated_at: string;
+/** The envelope every collection answers with (spec §3.3). */
+export interface ReviewListView {
+  items: ReviewView[];
+  next_cursor: string | null;
 }
 
-/** A note view. */
+/** A private note view. */
 export interface NoteView {
   id: string;
+  anchor: string | null;
   body: string;
-  version: number;
   created_at: string;
   updated_at: string;
-}
-
-/** Typography settings as stored. */
-export interface Typography {
-  font_size: number;
-  line_width: number;
-  theme: string;
   version: number;
 }
 
-/** Typography view returned by GET /settings/typography. */
+/** Typography settings as the server holds them. */
 export interface TypographyView {
-  font_size: number;
-  line_width: number;
-  theme: string;
+  font_scale: number;
+  line_height: number;
+  measure: number;
+  reader_theme: string;
+  distraction_free: boolean;
   version: number;
-  defaults: TypographyDefaults;
-}
-
-export interface TypographyDefaults {
-  font_size: number;
-  line_width: number;
-  theme: string;
 }
 
 /** Progress request body for PUT /reading/progress. */
 export interface ProgressRequest {
-  subject_id: string;
   subject_type: 'work' | 'library_item';
-  revision_id: string | null;
-  paragraph_anchor: string | null;
-  position_permille: number;
+  subject_id: string;
+  chapter_id?: string | null;
+  /** The revision the reader was looking at, when one is known. */
+  content_revision?: string | null;
+  paragraph_anchor?: string | null;
+  /** Position in the content, in permille (0..=1000). */
+  position_permille?: number;
+  device_id?: string | null;
 }
 
-/** Rating request body. */
+/** Rating request body. A rating is private unless `is_public` is sent. */
 export interface RatingRequest {
   stars: number;
+  is_public?: boolean;
   expected_version?: number;
 }
 
 /** Review request body. */
 export interface ReviewRequest {
   body: string;
-  contains_spoilers: boolean;
-  is_public: boolean;
+  contains_spoilers?: boolean;
+  is_public?: boolean;
   expected_version?: number;
 }
 
 /** Note request body. */
 export interface NoteRequest {
+  subject_type: 'work' | 'library_item';
+  subject_id: string;
+  anchor?: string | null;
   body: string;
 }
 
-/** Typography patch request body. */
+/** Typography patch request body. Every field but the version is optional. */
 export interface TypographyRequest {
-  font_size?: number;
-  line_width?: number;
-  theme?: string;
   expected_version: number;
+  font_scale?: number;
+  line_height?: number;
+  measure?: number;
+  reader_theme?: string;
+  distraction_free?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // Reading API functions
 // ---------------------------------------------------------------------------
 
-/** Save or update the reader's position for a work. */
-export function saveProgress(
-  _workId: string,
-  request: ProgressRequest,
-): Promise<ProgressView> {
-  return apiFetch<ProgressView>(`/reading/progress`, {
+/**
+ * Save or update the reader's position for a subject.
+ *
+ * Answers `204`, so there is nothing to return: the position the server holds
+ * is read back with `getProgress` when the reader returns.
+ */
+export function saveProgress(request: ProgressRequest): Promise<void> {
+  return apiFetch<void>('/reading/progress', {
     method: 'PUT',
     body: JSON.stringify(request),
   });
@@ -990,19 +977,21 @@ export function saveProgress(
 
 /** Get positions for a subject (one per device). */
 export function getProgress(
+  subjectType: 'work' | 'library_item',
   subjectId: string,
   signal?: AbortSignal,
 ): Promise<ProgressView> {
-  return apiFetch<ProgressView>(`/reading/progress?subject_id=${encodeURIComponent(subjectId)}`, {
-    signal,
-  });
+  const query = `subject_type=${encodeURIComponent(subjectType)}&subject_id=${encodeURIComponent(subjectId)}`;
+  return apiFetch<ProgressView>(`/reading/progress?${query}`, { signal });
 }
 
 /** Forget this device's position for a subject. */
-export function forgetProgress(subjectId: string): Promise<void> {
-  return apiFetch<void>(`/reading/progress?subject_id=${encodeURIComponent(subjectId)}`, {
-    method: 'DELETE',
-  });
+export function forgetProgress(
+  subjectType: 'work' | 'library_item',
+  subjectId: string,
+): Promise<void> {
+  const query = `subject_type=${encodeURIComponent(subjectType)}&subject_id=${encodeURIComponent(subjectId)}`;
+  return apiFetch<void>(`/reading/progress?${query}`, { method: 'DELETE' });
 }
 
 /** Get the reader's history with optional pagination cursor. */
@@ -1026,6 +1015,11 @@ export function clearHistory(): Promise<void> {
   return apiFetch<void>('/library/history/clear', { method: 'POST' });
 }
 
+/** Get the caller's own rating for a work, or null when there is none. */
+export function fetchRating(workId: string, signal?: AbortSignal): Promise<RatingView | null> {
+  return apiFetch<RatingView | null>(`/works/${encodeURIComponent(workId)}/rating`, { signal });
+}
+
 /** Submit or update a rating for a work. */
 export function upsertRating(
   workId: string,
@@ -1043,8 +1037,8 @@ export function deleteRating(workId: string): Promise<void> {
 }
 
 /** Get public reviews for a work. */
-export function fetchReviews(workId: string, signal?: AbortSignal): Promise<ReviewView[]> {
-  return apiFetch<ReviewView[]>(`/works/${encodeURIComponent(workId)}/reviews`, { signal });
+export function fetchReviews(workId: string, signal?: AbortSignal): Promise<ReviewListView> {
+  return apiFetch<ReviewListView>(`/works/${encodeURIComponent(workId)}/reviews`, { signal });
 }
 
 /** Create or update the caller's review for a work. */
@@ -1058,9 +1052,19 @@ export function upsertReview(
   });
 }
 
-/** Get private notes for a subject. */
-export function fetchNotes(subjectId: string, signal?: AbortSignal): Promise<NoteView[]> {
-  return apiFetch<NoteView[]>(`/notes?subject_id=${encodeURIComponent(subjectId)}`, { signal });
+/** Withdraw the caller's review of a work. */
+export function deleteReview(workId: string): Promise<void> {
+  return apiFetch<void>(`/works/${encodeURIComponent(workId)}/reviews`, { method: 'DELETE' });
+}
+
+/** Get the acting pseud's private notes for a subject. */
+export function fetchNotes(
+  subjectType: 'work' | 'library_item',
+  subjectId: string,
+  signal?: AbortSignal,
+): Promise<NoteView[]> {
+  const query = `subject_type=${encodeURIComponent(subjectType)}&subject_id=${encodeURIComponent(subjectId)}`;
+  return apiFetch<NoteView[]>(`/notes?${query}`, { signal });
 }
 
 /** Create or update a note. */
