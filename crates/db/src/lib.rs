@@ -15,8 +15,11 @@
 //!    placeholder, never something quoted inside a string literal. Do not put
 //!    a literal `?` inside a DML statement.
 
+pub mod collaboration;
+pub mod content;
 pub mod identity;
 pub mod migrate;
+pub mod outbox;
 pub mod sessions;
 
 use std::borrow::Cow;
@@ -268,6 +271,20 @@ impl Database {
             Pool::Sqlite(pool) => pool.close().await,
             Pool::Postgres(pool) => pool.close().await,
         }
+    }
+}
+
+/// Select the dialect statement from two owned strings.
+///
+/// [`Database::sql`] borrows its arguments, so it cannot be handed a temporary
+/// `format!` result; statements assembled from shared column lists use this
+/// instead. The rewriting rule is the same one documented on
+/// [`Database::sql`].
+#[must_use]
+pub fn sql_owned(db: &Database, sqlite: String, postgres: String) -> String {
+    match db.backend() {
+        Backend::Sqlite => sqlite,
+        Backend::Postgres => rewrite_placeholders(&postgres),
     }
 }
 

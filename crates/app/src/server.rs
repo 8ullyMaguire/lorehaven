@@ -203,6 +203,16 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        .merge(classified(
+            routes::works::router(),
+            RouteClass::Write,
+            &state,
+        ))
+        .merge(classified(
+            routes::collaborators::router(),
+            RouteClass::Write,
+            &state,
+        ))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::verify_csrf,
@@ -211,6 +221,13 @@ pub fn build_router(state: AppState) -> Router {
     let api: Router<AppState> = Router::new()
         .merge(classified(
             routes::meta::router(),
+            RouteClass::Default,
+            &state,
+        ))
+        // Reader routes are reachable with no session at all, so they carry the
+        // default class rather than the writers' tighter allowance.
+        .merge(classified(
+            routes::works::read_router(),
             RouteClass::Default,
             &state,
         ))
