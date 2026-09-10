@@ -78,3 +78,75 @@ const AGE_STATE_LABELS: Record<string, string> = {
 export function describeAgeState(state: string): string {
   return AGE_STATE_LABELS[state] ?? state;
 }
+
+// ---------------------------------------------------------------------------
+// Milestone 3 — the vocabulary of works
+// ---------------------------------------------------------------------------
+
+/** A work's editorial state, in the writer's words. */
+const LIFECYCLE_LABELS: Record<string, string> = {
+  draft: 'Draft',
+  scheduled: 'Scheduled',
+  published: 'Published',
+  withdrawn: 'Withdrawn',
+  deleted: 'Deleted',
+};
+
+/** A human label for a work's lifecycle. */
+export function describeLifecycle(lifecycle: string): string {
+  return LIFECYCLE_LABELS[lifecycle] ?? lifecycle;
+}
+
+/**
+ * Who can reach a work.
+ *
+ * The unlisted wording states the consequence rather than the setting: spec §8
+ * requires that "anyone with the URL can read it" is said plainly, because
+ * "unlisted" reads like "private" to most people and it is not.
+ */
+const VISIBILITY_LABELS: Record<string, string> = {
+  public: 'Listed publicly',
+  unlisted: 'Unlisted — anyone with the link can read it',
+  restricted: 'Signed-in readers only',
+};
+
+/** A human label for a work's visibility. */
+export function describeVisibility(visibility: string): string {
+  return VISIBILITY_LABELS[visibility] ?? visibility;
+}
+
+/** How finished a work is; orthogonal to whether it is published. */
+const COMPLETION_LABELS: Record<string, string> = {
+  in_progress: 'In progress',
+  complete: 'Complete',
+  hiatus: 'On hiatus',
+  abandoned: 'Abandoned',
+};
+
+/** A human label for a work's completion state. */
+export function describeCompletion(completion: string): string {
+  return COMPLETION_LABELS[completion] ?? completion;
+}
+
+/** The roles a contributor can hold, and what each may do. */
+export const CONTRIBUTOR_ROLES = [
+  { value: 'coauthor', label: 'Co-author — may edit and publish' },
+  { value: 'editor', label: 'Editor — may edit, may not publish' },
+  { value: 'beta_reader', label: 'Beta reader — may read, may not change text' },
+] as const;
+
+/** A human label for a contributor role. */
+export function describeRole(role: string): string {
+  switch (role) {
+    case 'owner':
+      return 'Owner';
+    case 'coauthor':
+      return 'Co-author';
+    case 'editor':
+      return 'Editor';
+    case 'beta_reader':
+      return 'Beta reader';
+    default:
+      return role;
+  }
+}

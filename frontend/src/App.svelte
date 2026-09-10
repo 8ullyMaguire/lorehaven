@@ -3,6 +3,7 @@
   import Drawer from './lib/components/Drawer.svelte';
   import Select from './lib/components/Select.svelte';
   import Account from './routes/Account.svelte';
+  import ChapterRead from './routes/ChapterRead.svelte';
   import Home from './routes/Home.svelte';
   import NotFound from './routes/NotFound.svelte';
   import PasswordReset from './routes/PasswordReset.svelte';
@@ -11,6 +12,9 @@
   import Pseuds from './routes/Pseuds.svelte';
   import Register from './routes/Register.svelte';
   import SignIn from './routes/SignIn.svelte';
+  import WorkEditor from './routes/WorkEditor.svelte';
+  import WorkRead from './routes/WorkRead.svelte';
+  import Write from './routes/Write.svelte';
   import { handleLinkClick, matchRoute } from './lib/router';
   import { session } from './lib/session.svelte';
   import {
@@ -204,6 +208,14 @@
     <Pseuds />
   {:else if route.id === 'pseud-profile'}
     <PseudProfile handle={route.params?.handle ?? ''} />
+  {:else if route.id === 'write'}
+    <Write />
+  {:else if route.id === 'work-editor'}
+    <WorkEditor workId={route.params?.workId ?? ''} />
+  {:else if route.id === 'work-read'}
+    <WorkRead workId={route.params?.workId ?? ''} />
+  {:else if route.id === 'chapter-read'}
+    <ChapterRead workId={route.params?.workId ?? ''} chapterId={route.params?.chapterId ?? ''} />
   {:else if route.id === 'planned' && route.planned}
     <Planned route={route.planned} />
   {:else}
