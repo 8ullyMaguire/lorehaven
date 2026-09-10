@@ -20,7 +20,10 @@
 //! * a dry run reports the plan and stores no chapters;
 //! * a credential's plaintext is in no response and not in the database file.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Body;
@@ -74,6 +77,34 @@ struct FixtureArchive {
     /// When set, the adapter claims to need a credential. Proves that a
     /// missing credential is caught before a fetch rather than after.
     requires_auth: bool,
+    /// How many times each read entry point was entered.
+    calls: Arc<Calls>,
+}
+
+/// What the adapter was asked to do, counted.
+#[derive(Debug, Default)]
+struct Calls {
+    previews: AtomicUsize,
+    bulk_fetches: AtomicUsize,
+    /// Every ordinal passed to `fetch_chapter`, in order.
+    single_fetches: std::sync::Mutex<Vec<u32>>,
+}
+
+impl Calls {
+    fn previews(&self) -> usize {
+        self.previews.load(Ordering::SeqCst)
+    }
+
+    fn bulk_fetches(&self) -> usize {
+        self.bulk_fetches.load(Ordering::SeqCst)
+    }
+
+    fn single_fetches(&self) -> Vec<u32> {
+        self.single_fetches
+            .lock()
+            .expect("the call log is not poisoned")
+            .clone()
+    }
 }
 
 impl FixtureArchive {
@@ -84,7 +115,14 @@ impl FixtureArchive {
             full_html: fixture("work-full.html"),
             fail_chapters: None,
             requires_auth: false,
+            calls: Arc::new(Calls::default()),
         }
+    }
+
+    /// A handle on the call log, taken before the adapter is moved into the
+    /// registry.
+    fn calls(&self) -> Arc<Calls> {
+        Arc::clone(&self.calls)
     }
 
     fn failing(message: &str) -> Self {
@@ -140,6 +178,7 @@ impl SourceAdapter for FixtureArchive {
         url: &url::Url,
         _creds: Option<&Credentials>,
     ) -> SourceResult<SourceWork> {
+        self.calls.previews.fetch_add(1, Ordering::SeqCst);
         self.inner.preview_from_html(&self.work_html, url)
     }
 
@@ -149,10 +188,36 @@ impl SourceAdapter for FixtureArchive {
         work: &SourceWork,
         _creds: Option<&Credentials>,
     ) -> SourceResult<Vec<SourceChapter>> {
+        self.calls.bulk_fetches.fetch_add(1, Ordering::SeqCst);
         if let Some(message) = &self.fail_chapters {
             return Err(SourceError::Network(message.clone()));
         }
         self.inner.chapters_from_html(&self.full_html, work)
+    }
+
+    /// One chapter, read from the recorded whole-work page.
+    ///
+    /// This is what a retry uses, so it is also where a chapter that the source
+    /// serves badly is simulated: the ordinal is counted whatever happens, so a
+    /// test can assert that a retry asked for the failed chapter and no other.
+    async fn fetch_chapter(
+        &self,
+        _fetch: &dyn Fetcher,
+        work: &SourceWork,
+        ordinal: u32,
+        _creds: Option<&Credentials>,
+    ) -> SourceResult<SourceChapter> {
+        self.calls
+            .single_fetches
+            .lock()
+            .expect("the call log is not poisoned")
+            .push(ordinal);
+
+        let chapters = self.inner.chapters_from_html(&self.full_html, work)?;
+        chapters
+            .into_iter()
+            .find(|chapter| chapter.ordinal == ordinal)
+            .ok_or(SourceError::NotFound)
     }
 
     fn preview_from_html(&self, html: &str, url: &url::Url) -> SourceResult<SourceWork> {
@@ -961,7 +1026,7 @@ async fn the_catalogue_reports_capabilities() {
     let (mut client, _account, _pseud) =
         signed_in(&harness, "browser@example.org", "browser").await;
 
-    let (status, body) = client.get("/api/v1/sources").await;
+    let (status, body) = client.get("/api/v1/imports/sources").await;
     assert_eq!(status, StatusCode::OK, "sources: {body}");
     let items = body["items"].as_array().expect("items");
     let ao3 = items
@@ -1042,6 +1107,348 @@ async fn an_unknown_address_is_refused_before_it_is_queued() {
         .await
         .expect("items");
     assert!(items.is_empty());
+
+    harness.cleanup().await;
+}
+
+/// The adapter is not called at all when the source is switched off.
+///
+/// "Nothing was stored" is not the same claim: a source that is paused must cost
+/// no requests, and the only way to know is to count them.
+#[tokio::test]
+async fn the_adapter_is_not_called_when_the_source_is_disabled() {
+    let harness = Harness::new("disabled-calls").await;
+    let (_client, account, pseud) = signed_in(&harness, "quiet@example.org", "quiet").await;
+
+    harness
+        .seed_source(false, Some("paused by an operator"))
+        .await;
+    let adapter = FixtureArchive::new();
+    let calls = adapter.calls();
+    let state = harness.state_with(adapter);
+    let import_id = queue_import(&harness, account, &pseud, false).await;
+    run_passes(&state, 2).await;
+
+    assert_eq!(calls.previews(), 0, "the preview must not have run");
+    assert_eq!(calls.bulk_fetches(), 0, "no chapter fetch must have run");
+    assert!(
+        calls.single_fetches().is_empty(),
+        "no single-chapter fetch must have run"
+    );
+    assert_eq!(import_row(&harness, &import_id).await.state, "failed");
+
+    harness.cleanup().await;
+}
+
+/// A retry re-reads the chapters that failed and nothing else.
+///
+/// The record is seeded the way an abandoned attempt would leave it — one
+/// chapter failed, the rest already stored — because that is the state the rule
+/// is about. The assertion is on which ordinals the adapter was asked for: a
+/// retry that re-read the whole work would still end with every chapter stored,
+/// so counting rows would prove nothing.
+#[tokio::test]
+async fn a_failed_chapter_is_retried_without_refetching_the_rest() {
+    let harness = Harness::new("retry-failed-chapters").await;
+    let (_client, account, pseud) = signed_in(&harness, "resume2@example.org", "resume2").await;
+
+    // A completed import, to learn the source's own chapter keys and the
+    // checksums the good chapters ended up with.
+    let done = run_import(&harness, account, &pseud, FixtureArchive::new(), false).await;
+    let stored = imports::list_import_chapters(&harness.db, &done)
+        .await
+        .expect("chapters");
+    assert_eq!(stored.len(), 3);
+    let keys: Vec<String> = stored
+        .iter()
+        .map(|chapter| chapter.source_chapter_key.clone())
+        .collect();
+    let checksums: HashMap<String, Option<String>> = stored
+        .iter()
+        .map(|chapter| {
+            (
+                chapter.source_chapter_key.clone(),
+                chapter.content_blob_checksum.clone(),
+            )
+        })
+        .collect();
+
+    // A second import of the same work, left the way an attempt that lost one
+    // chapter would leave it: two stored, the middle one failed.
+    let retry_id = lorehaven_domain::ImportJobId::new().to_string();
+    let job_id = jobs::enqueue(
+        &harness.db,
+        JobKind::Import,
+        &json!({ "import_job_id": retry_id }).to_string(),
+        None,
+        Some(account),
+        0,
+        &RetryPolicy::default(),
+    )
+    .await
+    .expect("enqueue");
+    imports::create_import_job(
+        &harness.db,
+        &retry_id,
+        &job_id.to_string(),
+        &account.to_string(),
+        &pseud,
+        SOURCE,
+        WORK_URL,
+        "library",
+        false,
+    )
+    .await
+    .expect("create import");
+    let item = imports::find_library_item(&harness.db, &account.to_string(), SOURCE, WORK_KEY)
+        .await
+        .expect("find")
+        .expect("the item exists");
+    for (index, key) in keys.iter().enumerate() {
+        let (state, checksum) = if index == 1 {
+            ("failed".to_owned(), None)
+        } else {
+            ("stored".to_owned(), checksums.get(key).cloned().flatten())
+        };
+        imports::upsert_import_chapter(
+            &harness.db,
+            &retry_id,
+            Some(&item.id),
+            &imports::ImportChapterInput {
+                source_chapter_key: key.clone(),
+                ordinal: i64::try_from(index + 1).expect("ordinal"),
+                title: String::new(),
+                state,
+                content_blob_checksum: checksum,
+                note: None,
+            },
+        )
+        .await
+        .expect("seed chapter");
+    }
+
+    // The retry.
+    let adapter = FixtureArchive::new();
+    let calls = adapter.calls();
+    let state = harness.state_with(adapter);
+    run_passes(&state, 2).await;
+
+    assert_eq!(
+        calls.single_fetches(),
+        vec![2],
+        "the retry asked for the failed chapter and nothing else"
+    );
+    assert_eq!(
+        calls.bulk_fetches(),
+        0,
+        "the retry must not re-read the whole work"
+    );
+
+    let after = imports::list_import_chapters(&harness.db, &retry_id)
+        .await
+        .expect("chapters");
+    assert_eq!(after.len(), 3);
+    for chapter in &after {
+        assert_eq!(chapter.state, "stored", "chapter {}", chapter.ordinal);
+        assert_eq!(
+            chapter.content_blob_checksum,
+            checksums
+                .get(&chapter.source_chapter_key)
+                .cloned()
+                .flatten(),
+            "chapter {} was re-stored rather than left alone",
+            chapter.ordinal
+        );
+    }
+
+    harness.cleanup().await;
+}
+
+/// An import is queued and answered at once; the request does not do the work.
+#[tokio::test]
+async fn an_import_is_queued_and_does_not_block_the_request() {
+    let harness = Harness::new("queued").await;
+    let (mut client, account, _pseud) = signed_in(&harness, "queuer@example.org", "queuer").await;
+
+    let (status, body) = client
+        .post(
+            "/api/v1/imports",
+            json!({ "url": WORK_URL, "destination": "library" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "start import: {body}");
+    let import_id = body["import_id"].as_str().expect("an import id").to_owned();
+    let job_id = body["job_id"].as_str().expect("a job id");
+    assert_eq!(body["state"], "queued");
+
+    // The queue holds it, and the request did not claim to have done anything.
+    let job = jobs::find(&harness.db, job_id.parse().expect("a job id"))
+        .await
+        .expect("read job")
+        .expect("the job exists");
+    assert_eq!(job.kind, JobKind::Import.as_str());
+    // The payload names the import and nothing else: no credential, no URL.
+    assert_eq!(
+        job.payload,
+        json!({ "import_job_id": import_id }).to_string()
+    );
+    assert!(
+        !job.payload.contains("archiveofourown"),
+        "the URL is not in the payload"
+    );
+
+    // The import row is the queue row's partner.
+    let row = import_row(&harness, &import_id).await;
+    assert_eq!(row.state, "queued");
+    assert_eq!(row.destination_type, "library");
+    assert_eq!(
+        imports::job_for_import(&harness.db, &import_id)
+            .await
+            .expect("job id")
+            .as_deref(),
+        Some(job_id)
+    );
+
+    // And nothing has been fetched or stored yet.
+    let chapters = imports::list_import_chapters(&harness.db, &import_id)
+        .await
+        .expect("chapters");
+    assert!(chapters.is_empty(), "the request must not fetch chapters");
+    let items = imports::list_library_items(&harness.db, &account.to_string(), 50, None)
+        .await
+        .expect("items");
+    assert!(items.is_empty(), "the request must not create the item");
+
+    harness.cleanup().await;
+}
+
+/// An expired credential is reported before the import starts, and is not
+/// retried: the same expired credential would fail the same way.
+#[tokio::test]
+async fn an_expired_credential_is_reported_before_the_import_starts() {
+    let harness = Harness::new("credential-expired").await;
+    let (_client, account, pseud) = signed_in(&harness, "expired@example.org", "expired").await;
+
+    // A credential whose expiry has passed, seeded directly: this is the state
+    // the sweep would leave behind, not something a request can create.
+    //
+    // Its secret row has to be real, because `source_credentials.secret_id` is
+    // a foreign key — which is the property that stops a credential existing
+    // without a value to authenticate with.
+    let cipher = lorehaven_app::secrets::load_cipher(&harness.dir.join("storage"), None, false)
+        .expect("the development key");
+    let secret_id = lorehaven_app::secrets::seal_secret(
+        &harness.db,
+        &cipher,
+        "source_credential",
+        &format!("{pseud}:{SOURCE}:an old login"),
+        "secret",
+        &lorehaven_app::secrets::Secret::new("a-stale-password"),
+    )
+    .await
+    .expect("seed secret");
+
+    let (row, _previous) = imports::upsert_source_credential(
+        &harness.db,
+        &pseud,
+        SOURCE,
+        &secret_id,
+        "an old login",
+        Some("2001-01-01T00:00:00Z"),
+    )
+    .await
+    .expect("seed credential");
+    assert_eq!(row.status, "active", "it was stored as active");
+
+    let adapter = FixtureArchive::needing_a_credential();
+    let calls = adapter.calls();
+    let state = harness.state_with(adapter);
+    let import_id = queue_import(&harness, account, &pseud, false).await;
+    run_passes(&state, 1).await;
+
+    let row = import_row(&harness, &import_id).await;
+    assert_eq!(row.state, "failed", "report: {:?}", row.report_json);
+    let report = row.report_json.clone().unwrap_or_default();
+    assert!(
+        report.contains("credential_expired"),
+        "the report names the expiry: {report}"
+    );
+    assert!(
+        report.contains("2001-01-01"),
+        "the report says when it expired: {report}"
+    );
+    assert_eq!(
+        calls.previews(),
+        0,
+        "nothing may be fetched with a dead credential"
+    );
+
+    // And the credential itself is marked, so the reader can see why.
+    let listed = imports::list_source_credentials(&harness.db, &pseud, Some(SOURCE))
+        .await
+        .expect("credentials");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].status, "expired");
+
+    harness.cleanup().await;
+}
+
+/// The retry route queues an attempt at the chapters that failed, and refuses
+/// when there are none.
+#[tokio::test]
+async fn the_retry_route_queues_only_when_something_failed() {
+    let harness = Harness::new("retry-route").await;
+    let (mut client, account, pseud) =
+        signed_in(&harness, "retryroute@example.org", "retryroute").await;
+
+    let import_id = run_import(&harness, account, &pseud, FixtureArchive::new(), false).await;
+
+    // Nothing failed, so there is nothing to retry.
+    let (status, body) = client
+        .post(
+            &format!("/api/v1/imports/{import_id}/retry-failed-chapters"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "a retry with nothing failed: {body}"
+    );
+
+    // Now record a failure, as an abandoned attempt would.
+    let chapters = imports::list_import_chapters(&harness.db, &import_id)
+        .await
+        .expect("chapters");
+    let second = chapters
+        .iter()
+        .find(|chapter| chapter.ordinal == 2)
+        .expect("chapter two");
+    imports::upsert_import_chapter(
+        &harness.db,
+        &import_id,
+        None,
+        &imports::ImportChapterInput {
+            source_chapter_key: second.source_chapter_key.clone(),
+            ordinal: 2,
+            title: second.title.clone(),
+            state: "failed".to_owned(),
+            content_blob_checksum: None,
+            note: Some("the source dropped it".to_owned()),
+        },
+    )
+    .await
+    .expect("mark failed");
+
+    let (status, body) = client
+        .post(
+            &format!("/api/v1/imports/{import_id}/retry-failed-chapters"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "retry: {body}");
+    assert_eq!(body["failed_chapters"], 1);
+    assert_eq!(import_row(&harness, &import_id).await.state, "queued");
 
     harness.cleanup().await;
 }

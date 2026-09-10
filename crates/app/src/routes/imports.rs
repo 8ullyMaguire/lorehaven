@@ -1,13 +1,14 @@
 //! Imports, the source catalogue and source credentials (spec §11.3, §11.6).
 //!
 //! ```text
-//! GET    /sources                             the catalogue this build ships
+//! GET    /imports/sources                     the catalogue this build ships
 //! POST   /imports/preview                     detect, fetch metadata, plan; writes nothing
 //! POST   /imports                             enqueue an import
 //! GET    /imports?cursor=…&state=…            the caller's own imports, envelope
 //! GET    /imports/:id                         one import, with its chapters
 //! POST   /imports/:id/cancel                  ask the worker to stop
-//! GET    /library                             the caller's own imported items
+//! POST   /imports/:id/retry-failed-chapters   re-fetch only what failed
+//! GET    /library/items                       the caller's own imported items
 //! GET    /source-credentials                  metadata only, never a secret
 //! POST   /source-credentials                  store one, encrypted
 //! DELETE /source-credentials/:id              revoke it
@@ -55,12 +56,16 @@ use crate::state::AppState;
 /// The catalogue and the preview.
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/sources", get(list_sources))
+        .route("/imports/sources", get(list_sources))
         .route("/imports/preview", post(preview_import))
         .route("/imports", get(list_imports).post(start_import))
         .route("/imports/{id}", get(get_import))
         .route("/imports/{id}/cancel", post(cancel_import))
-        .route("/library", get(list_library))
+        .route(
+            "/imports/{id}/retry-failed-chapters",
+            post(retry_failed_chapters),
+        )
+        .route("/library/items", get(list_library))
         .route(
             "/source-credentials",
             get(list_credentials).post(store_credential),
@@ -808,6 +813,69 @@ async fn list_library(
             .collect::<Vec<_>>(),
         "next_cursor": next_cursor,
     })))
+}
+
+/// Queue another attempt at the chapters that failed, and only those.
+///
+/// This is the plan's "re-fetch only what failed" route, and it is a *new job
+/// on the same import* rather than a new import: the chapters already stored are
+/// already stored, so the second attempt reads the record, skips them, and asks
+/// the source only for the ordinals that failed. For a source that cannot
+/// address a single chapter the retry is a bulk fetch and the skip rule is what
+/// keeps it from re-storing anything (spec §11.7, and the capability is reported
+/// rather than assumed).
+async fn retry_failed_chapters(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    let row = imports::get_import_job(state.db(), &id)
+        .await?
+        .filter(|row| row.account_id == user.account_id.to_string())
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "import" }))?;
+
+    if !matches!(row.state.as_str(), "completed" | "failed" | "cancelled") {
+        return Err(ApiError(AppError::Validation {
+            message: "this import has not finished, so there is nothing to retry yet".to_owned(),
+            field_errors: Default::default(),
+        }));
+    }
+
+    let chapters = imports::list_import_chapters(state.db(), &row.id).await?;
+    let failed = chapters
+        .iter()
+        .filter(|chapter| chapter.state == "failed")
+        .count();
+    if failed == 0 {
+        // Nothing to do, and saying so is better than queueing a job that will
+        // find nothing and look like it did something.
+        return Err(ApiError(AppError::Validation {
+            message: "this import has no failed chapters to retry".to_owned(),
+            field_errors: Default::default(),
+        }));
+    }
+
+    let job_id = lorehaven_db::jobs::enqueue(
+        state.db(),
+        lorehaven_domain::jobs::JobKind::Import,
+        &serde_json::json!({ "import_job_id": row.id }).to_string(),
+        None,
+        Some(user.account_id),
+        0,
+        &lorehaven_domain::jobs::RetryPolicy::default(),
+    )
+    .await?;
+    imports::set_import_state(state.db(), &row.id, "queued", None, None).await?;
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({
+            "import_id": row.id,
+            "job_id": job_id.to_string(),
+            "state": "queued",
+            "failed_chapters": failed,
+        })),
+    ))
 }
 
 // ---------------------------------------------------------------------------
