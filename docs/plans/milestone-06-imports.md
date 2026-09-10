@@ -510,44 +510,113 @@ now in the fixtures README where it can be checked.
 
 ### What that means, and the decision it forces
 
-For the blocked sources, an adapter cannot be **verified**, and a parser that
-cannot be verified is the failure the plan's third pitfall names: a selector that
-matches nothing returns zero chapters, the import records an empty work, and the
-reader sees a success.
+An adapter for a blocked source cannot be **verified**, and a parser that cannot be
+verified is the failure the plan's third pitfall names: a selector that matches
+nothing returns zero chapters, the import records an empty work, and the reader
+sees a success. So the question is whether to go through the wall at all.
 
-ficnexus carries a Cloudflare path: TLS impersonation via `primp` with a
-`chromium --dump-dom` fallback. Porting it wholesale would undo part of the
-security work M6 just did, and it is worth being explicit about why rather than
-letting this look like an oversight:
+#### First: what the wall is, and what it is not
 
-* `SafeFetcher` resolves a hostname, checks the answers, and then **pins** them
-  for the request, so a name cannot resolve to a public address for the check and
-  a private one for the connection. A browser started as a subprocess cannot be
-  pinned that way — it does its own resolution, follows its own redirects, and
-  loads subresources.
-* A `chromium --dump-dom` render also fetches images, stylesheets, fonts and
-  anything a page's script asks for. Through the guard, every one of those is a
-  decision we make in advance; through a browser, none of them is.
+Cloudflare's "Just a moment" is bound to the **TLS and HTTP/2 fingerprint** of the
+connecting client. `reqwest`'s rustls fingerprint is one it rejects. That is why
+changing the `User-Agent` changes nothing, why the refusal is not an IP block, and
+why an ordinary browser walking through the same door is not challenged. It is a
+bot-mitigation wall, and it is applied by a managed rule rather than by a person
+reading a request.
 
-So the options are, in order of how much I would trust them:
+**The sources' own rules are a different question, and they have now been read.**
+Recorded 2026-09-11:
 
-1. **Do not support the blocked sources.** Honest, loses FanFiction.net, which is
-   probably the single largest source for a fanfiction platform.
-2. **A sanctioned browser path with its own guard.** Pre-validate the URL and
-   every redirect target against the same IP rules, run the browser with no
-   network access of its own (a proxy that enforces the allow-list, or a
-   network namespace), cap the response size, and document the boundary as
-   weaker than `SafeFetcher`'s. Real work, and testable — the guard's refusals
-   can be asserted even when the site's page cannot be recorded.
-3. **Port the ficnexus path as it stands.** Fastest, and the only one I would not
-   recommend: it puts an unpinned fetcher into the one code path whose entire
-   purpose is that a user-supplied URL cannot make the server read its own
-   network.
+| Source | Its own `robots.txt` says |
+|---|---|
+| `www.fanfiction.net`, `www.fictionpress.com` | `User-agent: *` → **`Allow: /`**, `crawl-delay: 5`, disallowing `/secure/`, `/rs/`, `/ru/`, `/eye/`, `/m/` and `/*.php`. Story pages (`/s/…`) are allowed. Also `Content-Signal: search=yes, ai-train=no, use=reference`, and explicit `Disallow: /` for GPTBot, ClaudeBot, CCBot, Bytespider and friends |
+| `www.fimfiction.net` | `User-agent: *` → `Allow: /` |
+| `forums.spacebattles.com` | `User-agent: *` → `Allow: /`, plus named AI-training crawlers disallowed |
+| `www.scribblehub.com` | the `robots.txt` request is itself challenged (`403`), so the rules are **unknown** — which by this crate's own policy means default pacing and a recorded condition, not a refusal |
 
-Option 2 is the one I would build, and it is larger than the rest of M6's adapter
-work. It needs a decision because it trades a documented security property for
-coverage, which is the kind of trade the spec (§11.5, §11.7) leaves to the
-operator rather than to the implementer.
+**This inverts the framing.** FanFiction.net — the source that matters most and the
+one this whole section has been about — does not merely fail to forbid an import:
+it states `Allow: /` for any crawler, names its required `crawl-delay` of five
+seconds, and reserves its `Disallow` for the AI-training crawlers. Its AI clause
+distinguishes training from reference use, and a library import that stores a work
+for people to read is on the crawling-and-reference side of that line rather than
+the training side. (The `Content-Signal` block governs AI consumption specifically
+— the preamble says so — so it is not itself a licence for an archive copy. The
+licence is `Allow: /` with `crawl-delay: 5`, which is exactly a statement about
+crawling.) So this is not a case of circumventing an archive's wishes, in the way
+`tgstorytime.com`'s `Disallow: /` was. The wall says *not from that client*; the
+site says *yes, at five seconds*.
+
+#### Second: the two ways through are not the same kind of thing
+
+ficnexus uses both, `primp` first and a browser as fallback, and an earlier draft
+of this section treated them as one option. They are not:
+
+**TLS impersonation (`primp`) does not cost the guard.** `primp` is a fork of
+`reqwest` — it re-exports it and wraps its `ClientBuilder` — and it exposes
+`resolve_to_addrs`, which is the exact API `SafeFetcher` already uses to pin a
+host's addresses. It also exposes `redirect(Policy::none())`, `no_gzip()` and
+friends, `local_address`, and `https_only`. So a `primp`-based path keeps every
+property the guard provides:
+
+* we still resolve the hostname ourselves, filter to public addresses, and pin
+  those exact addresses, so DNS rebinding remains closed;
+* we still follow redirects by hand with `Policy::none()` and re-pin every hop, so
+  a redirect to a private address is still refused;
+* we still bound the body while reading and still disable automatic
+  decompression, so a decompression bomb still cannot get in;
+* and it is one request for one response — no subresources, no JavaScript.
+
+The cost is not the boundary. It is **a forked HTTP stack**: `primp-reqwest`,
+`primp-hyper`, `primp-h2`, `primp-rustls`, `primp-hyper-rustls` and
+`primp-tokio-rustls` — about twenty-five entries in ficnexus's lock file — sitting
+beside the real `reqwest` this workspace already depends on. Security fixes to
+`rustls` or `hyper` do not reach a fork on their own, so the cost is one of
+maintenance and supply chain, paid every time those crates are patched.
+
+**A headless browser is the option that actually spends the guard.** `chromium
+--dump-dom` does its own DNS resolution, follows its own redirects, and loads
+subresources — images, stylesheets, fonts, and whatever a page's own script asks
+for. `SafeFetcher` cannot pin a process, so every one of those fetches becomes a
+request the guard did not approve. It is also the *fallback* in ficnexus rather
+than the primary path, which is worth remembering: `primp` alone was verified
+against FanFiction.net live.
+
+#### Third: the pacing, which is not a detail
+
+ficnexus records that `primp` passing the wall is not sufficient on its own —
+back-to-back chapter fetches are refused even with the fingerprint, and the working
+interval is enforced at eight seconds in its code, against FanFiction.net's own
+stated `crawl-delay: 5`. Whatever is built has to be slower than the crate's
+one-second default, and the source's own number is the floor.
+
+#### So the options, restated
+
+1. **Do not support the blocked sources.** This was described above as "honest,
+   loses FanFiction.net". With FFN's own rules read, the honest option is harder to
+   claim: its stated policy permits the crawl. And FFN is the largest source in
+   fandom, so this is the option that costs the most and is justified the least.
+2. **A `primp`-backed path behind the existing guard** — pinned addresses,
+   hand-rolled redirects, bounded reads, no auto-decompression, the source's own
+   `crawl-delay` as the floor. This keeps every security property M6 built, does
+   not need a browser for the sources that reach the wall, and its cost is a fork
+   to maintain rather than a boundary to weaken. **The guard's refusals are
+   testable even when the site's page cannot be recorded**, which is what makes
+   this the option that can still be verified.
+3. **A browser fallback**, for a source that defeats `primp`. Only this one spends
+   the guard. If it is ever added it should be opt-in per source, off by default,
+   and documented as weaker — and it is not needed to ship (2).
+4. **Port the ficnexus path as it stands.** Not recommended: it is unpinned, and it
+   puts an unpinned fetcher into the one code path whose entire purpose is that a
+   user-supplied URL cannot make the server read its own network.
+
+**Option 2 is what I would build, and it is smaller than this section first
+claimed** — the guard survives, so the work is a second fetcher implementation
+behind the same trait plus the adapter fixtures, not new security machinery. The
+decision is still the user's because it is a maintenance and policy judgement
+rather than a technical one: whether a forked HTTP stack is worth FanFiction.net.
+What no longer holds is the earlier claim that option 2 "trades a documented
+security property for coverage". It does not.
 
 ---
 
