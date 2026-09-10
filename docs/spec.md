@@ -842,6 +842,28 @@ POST   /api/v1/registration-applications
 GET    /api/v1/registration-applications/:id (own only)
 ```
 
+## 7.8 First-run experience
+
+A new account's first session ends in something to read, not in an empty shelf.
+
+The flow is short, skippable and resumable:
+
+- **Choose fandoms.** A searchable selection with no minimum and no maximum.
+- **Choose a few moods or tones** from the taxonomy (§15.8).
+- **Choose a format preference:** written, media, or both (§30).
+- **State the content notes the reader wants surfaced**, drawn from the content-note vocabulary (§15.16), so the first work shown already respects them.
+- **Offer the taste quiz.** A short set of "which of these two would you rather read" comparisons — the arena mechanism of §29.2 applied to works rather than to roadmap cards — which seeds a taste profile before the reader has any history. Skippable.
+- The reader is then shown a small set of works drawn from what they just said, each with the reason it was chosen stated in plain language.
+
+Rules:
+
+- **The first session ends with a work being opened.** If the stated preferences produce too few results, the flow says so and widens the recommendation honestly rather than presenting generic trending content as though it matched.
+- Everything chosen here is editable afterwards in the ordinary settings, and the flow is re-runnable from help.
+- **The flow explains the comment norms before the reader can post:** appreciation is the default, critique is opt-in per work (§8.4), and the filter (§12.1) is described as what it is. A reader who has not been told meets the norms as a surprise rather than as a culture.
+- The flow never asks for a real name, never requires contact details beyond what registration required, and adds nothing to the reader's public profile.
+- Skipping the flow leaves a working account, and recommendations then fall back to the baseline engines (§16.1) with the coverage caveat stated.
+- Recommendation coverage is stated honestly throughout: a reader is told which signals are in use, and a first-session recommendation is labeled as based on stated preferences rather than on behavior.
+
 ## Acceptance
 
 - No cross-account pseud editing.
@@ -943,6 +965,24 @@ GET    /api/v1/drafts/posts
 POST   /api/v1/drafts/posts
 DELETE /api/v1/drafts/posts/:id
 ```
+
+## 8.8 Activity status and WIP honesty
+
+Readers invest in works that stop. The archive states what it knows rather than leaving a reader to infer it from a date.
+
+Activity status is derived and displayed alongside completion:
+
+```text
+Activity: active | slow | dormant | concluded
+```
+
+- `active` — updated within three months. `slow` — three to twelve months. `dormant` — over twelve months. `concluded` — the work is marked complete.
+- Derived status is **information and never a penalty.** It changes no ranking, award, credit, badge or trust outcome, and a dormant work keeps everything it earned.
+- **An author-set state always wins.** `hiatus` and `abandoned` (§8.2) override the derived reading, and a work marked complete is `concluded` regardless of when it was last touched.
+- Readers may filter dormant and abandoned works out of search, saved views (§14.2) and recommendations, and **the filter is off by default.**
+- A "likely complete" note may be offered for a work that has not been updated but reads as finished — no open threads, a completion-shaped structure, and the author's own completion field unset. It is a suggestion to the author and never a claim shown to readers as fact.
+- After a long inactivity period the author receives **one** notice they can opt out of: whether the work is still going, and an offer to mark it hiatus or abandoned. It is sent once, never repeated on a schedule, and carries no guilt framing (§28.10). Declining is silent and permanent.
+- The notice never appears on a work whose author has disabled notifications, and never during a configured quiet period.
 
 ## Acceptance
 
@@ -1572,6 +1612,8 @@ Never assign imported authors to local accounts solely by matching names or emai
 
 Preservation batches may initially remain private or review-only. Public release is a separate approval step.
 
+A preservation batch captures text and metadata. Media bytes are captured only where the instance hosts media (§30.2); elsewhere the reference is preserved as a reference, so a preservation record survives the loss of its origin without this instance having mirrored anything.
+
 ## 11.12 Cross-posting to external sites
 
 Support publishing local Lorehaven works to external sites through adapters that provide cross-posting capability.
@@ -1704,6 +1746,19 @@ Authors have a dedicated view separate from public work-page comments:
 - Cheer count for WIPs.
 
 Notifications for author feedback default to positive-only.
+
+## 12.10 Author boundary tools
+
+The filter (§12.1) handles the worst of reader behavior after it happens. Authors also need to set expectations before it does, and every tool here is framed as author comfort rather than reader punishment.
+
+- **Per-work author note:** a short, prominent note the author writes — posting schedule, whether update questions are welcome, whether the work is complete. Displayed where a reader decides to comment, not buried in a settings page.
+- **Per-work comment policy:** the author states that update requests, unsolicited concrit, or reader-suggested directions are not wanted. The interface says so before the reader types, and a reply that ignores a stated policy is still delivered but marked for the author, who decides — nothing is filtered silently on the author's behalf.
+- **"No requests" flag on the profile:** an author-level statement that they do not take prompts, bounties or writing requests. Request surfaces (§16.9, §18.5) then exclude that author from matching and from being named as a candidate.
+- **Comment throttle per work:** a per-reader-per-day limit the author sets, implemented by the same machinery as rate limiting (§3.8). Reaching it is answered with a clear explanation and a time, never a silent drop.
+- **Cooling-off mode:** for a work receiving intense attention, the author may batch and slow comment delivery and notifications. The comments still arrive, in a digest, so nothing is lost and nothing is censored.
+- **Pause comments entirely** on a work, reversibly, with existing comments retained and the state shown to readers.
+
+None of these tools hides a reader's words from the author, and none is a sanction: they are the author's own boundary, applied by the author, recorded as such, and reversible at any time.
 
 ## Acceptance
 
@@ -2032,6 +2087,30 @@ External AI clustering requires separate explicit consent. Label clusters as obs
 
 Show a histogram of matching works by length. Filter by "under 5k", "5k–20k", "20k–100k", "100k+". Helps readers find fiction that fits available time.
 
+## 15.16 Content notes
+
+Four rating values are too coarse to decide with. Content notes are the fine-grained statement of what is *in* a text, as distinct from what it is *about*: tags describe subject matter, content notes describe what a reader will encounter.
+
+The vocabulary is a controlled list, seeded with the conventional set and extensible per instance:
+
+```text
+graphic violence | on-screen character death | major character death | self-harm |
+eating disorder | suicide | parental abuse | domestic abuse | sexual assault |
+child endangerment | addiction | medical trauma | pregnancy loss | torture |
+unreliable narrator | ambiguous ending | unhappy ending | claustrophobia |
+vomit | insects | needles | drowning
+```
+
+Rules:
+
+- **Content notes are a separate axis from tags.** A note is not a tag, is never merged into tag search, and does not appear in a tag cloud. A work is tagged `enemies to lovers`; it is noted `graphic violence`.
+- **Notes are behind a reveal by default.** A reader opens them deliberately, so a note cannot spoil a story they were about to enjoy, and a reader who needs them finds them in the same place on every work.
+- **Reader-configurable:** a reader marks notes they always want surfaced (shown open, without a click) and notes they never need warned about (collapsed entirely). The setting is per account and applies everywhere.
+- **Author-provided by default**, with a distinguished "the author states there are no notes" state, which is not the same as "no notes were provided". The difference is real and the interface shows which one it is.
+- **Community-suggested and quorum-reviewed** where the author provided none or few. A suggestion is evidence plus a note from the vocabulary; it is added by quorum (§19.4), attributed as community-provided, **shown to the author before it is shown to readers**, and removable by the author with a recorded reason.
+- Content notes feed the filters (§15.7), saved views (§14.2) and the first-run flow (§7.8), and are the context the positivity filter uses when judging whether a comment is reacting to unmarked content (§12.2).
+- A note is never a judgement of the work, and no surface frames one as advice against reading it.
+
 ## Acceptance fixture
 
 Include contrasting works: A protagonist/B vampire, A vampire protagonist, A supporting vampire, A/B central, A/B background, A with unknown relationship metadata, A with confirmed no romantic/sexual relationship, a private imported body containing a unique phrase, a withdrawn work containing the same phrase, works with each mood tag.
@@ -2186,6 +2265,28 @@ Curator picks:
 
 Controls: taste source, signal inclusion, learning pause, influence pause, recency, weights, profile history, reset and rollback, aggregate evaluation, recommendation cache invalidation, diversity budget tuning, temporary boosts, editorial pick slots.
 
+## 16.13 New voices and the cold start
+
+A first work has no readers, and a reader choosing between two unknown works picks the one with history. Without a deliberate counterweight, an archive's newest authors are its least visible, which is the opposite of what keeps them writing.
+
+- **New voices slot:** a discovery surface reserved for recent works by authors below a configured threshold of published works or followers, sized and placed so it is a real slot rather than a token one, and presented as one stream among the discovery surfaces rather than as a banner.
+- **First-work marker:** a reader-facing indication that an author is new, framed as an invitation to encourage rather than as a caveat about quality. The author may hide it.
+- **Early reader recognition:** a reader who reads, rates or reacts to a work within a configured window of its publication, while it has few readers, receives a badge or credits for it. The threshold and window are configuration, the reward is never a ranking and carries no governance weight, and it cannot be farmed by publishing and reading one's own work — the anti-farming rules of §28.11 apply unchanged.
+- **Short blind-date residency:** a newly published work that has not yet been shown to anyone enters the blind-date pool (§16.10) for a bounded period, so a first work is guaranteed some exposure without being guaranteed attention.
+- **The slot's effect is measured and reported** to the administrator like any other discovery surface, including whether works it surfaced are continued by their authors.
+
+Nothing here overrides a reader's stated preferences, and no reader's discovery is flooded by new works: the slot is bounded, labeled and excludable.
+
+## 16.14 Freshness
+
+Recency is already an input to ranking; freshness is the reader-facing statement of it.
+
+- **"Updated this week" and "Newly completed" filters** in search and saved views, derived from the publication event log (§4.3) rather than from a timestamp on the work row.
+- **Active author indicator** on a work card, derived from the same activity status as §8.8 and never from a private signal.
+- **Newly completed is a discovery slot of its own:** a reader looking for something to finish in one sitting is not served a filtered view of trending.
+- **Decay in trending:** a work's contribution to a trending calculation decays with age since its last publication event, so no work holds a trending position indefinitely on the strength of one event. The curve is configuration, is stated on the administrator's discovery page, and **is never applied to a reader's own library, bookmarks or follows.**
+- Freshness never buries the archive: a reader who narrows by fandom and mood still sees the best matches regardless of age, and a decayed trend score never removes a work from a filtered result.
+
 ## Acceptance
 
 - Opt-out changes candidates and scores across all surfaces.
@@ -2281,6 +2382,20 @@ Forum reputation points and posting-volume leaderboards are not implemented.
 
 Groups can form reading clubs: pick a work, read on a schedule, discuss chapter by chapter in a linked forum thread. Reading club discussions bypass the individual author feedback filter but remain subject to forum policy.
 
+## 17.12 Fandom-specific spaces
+
+A large fandom has its own norms, in-jokes and moderation needs, and one general forum serves none of them well.
+
+A fandom space is a group (§17.6) bound to a fandom, with:
+
+- Its own sub-forums, topic tags and read state, built on the existing community machinery rather than a second forum implementation.
+- **Its own moderators, appointed through the same quorum process as any other moderation appointment** (§19.4), with the same accountability, appeal path (§19.10) and modlog (§19.12). A fandom appointment is scoped to that space and confers nothing instance-wide, and it is gated on trust level rather than on any role.
+- Its own content-note conventions, which may **add** notes to the instance vocabulary for works carrying that fandom (§15.16) and may never remove the instance's own.
+- Its own events, challenges and reading clubs (§18.2, §17.11), linked from the fandom landing page (§15.13) alongside the works.
+- Its own welcome text, written by its moderators, subject to the instance's positivity rules.
+
+A fandom space is public by default and its moderators may set it to approval-required or private. A fandom with no space has no space: none is created automatically, and the landing page states whether one exists.
+
 ## Acceptance
 
 - Removed members lose access.
@@ -2356,6 +2471,30 @@ Trusted curators (and the administrator) may feature works with short rationales
 ## 18.7 "Best of" community-voted lists
 
 Periodic community votes for completed works by category (fandom, mood, length, etc.). Separate from algorithmic trending. Voting requires trust level and completes with quorum review.
+
+## 18.8 Collaborative drafting tools
+
+Contributors are already modelled (§4.3, §8.7). These are the tools that make working on one work together possible without leaving the platform.
+
+- **Shared outline:** a per-work planning document, editable by contributors with write access and private to them.
+- **Beta-reader inline comments:** anchored to a passage in a chapter revision, visible only to contributors and invited beta readers, and entirely separate from public comments and from the positivity filter (§12.1). This is a private author-to-beta channel where blunt criticism is the point, and it is never delivered to the author as reader feedback. Resolvable, and never published with the work.
+- **Revision comparison:** a side-by-side or unified diff between any two revisions visible to the contributor, so a co-author can see what changed and who changed it. The revision history is already append-only (§8.5); this adds the reader for it.
+- **Round-robin assignment:** for a multi-author work, an optional ordering of who drafts which chapter, shown on the contributor view and not published.
+- **Contribution notes:** each revision may carry a note naming its contributor's contribution, used to compile public attribution on request rather than asserted automatically.
+
+Beta-reader inline comments are the one place in this specification where text is deliberately not positivity-classified, and it is stated here so the exemption is a decision on the record rather than an oversight: the classification exists to protect authors from readers, and a beta reader is not a reader.
+
+## 18.9 Reading paths
+
+A reading path is an ordered, curated walk through several works, and it is a first-class content type: ownable, editable, bookmarkable, shareable, commentable and rateable.
+
+- Each stop names a work, an optional curator's note on why it is there, and whether it is required or optional.
+- A path states whether order matters; a path where it does not is displayed as a list rather than a sequence.
+- Progress through a path is tracked per reader and private by default, using the same completion machinery as a work (§9.8).
+- Paths may be public, unlisted or restricted, are searched with the standard filters, and appear in collections, series listings and the fandom landing page (§15.13).
+- Community paths may be created by any reader; featuring one is a curator decision (§18.6) and never a popularity vote, and a path's rating rates the curation rather than the works inside it.
+- A path lists every stop's availability, so a reader who may not read one work still sees the shape of the whole and decides for themselves whether to skip it.
+- A path never reorders or re-ranks the works it contains, and a work's position in a path changes nothing about the work.
 
 ## Acceptance
 
@@ -2529,6 +2668,8 @@ Requirements:
 - Decisions logged in the modlog with redacted claimant identity.
 - Repeat infringers subject to escalating sanctions per policy.
 - Fraudulent notices trigger review of the claimant.
+
+Where the instance holds a reference to a work rather than its bytes, a notice is answered by identifying the host and applying this workflow to the listing itself (§30.10), so a reference-only instance is not treated as the infringing party for media it never stored.
 
 DMCA workflow respects legal requirements while preventing abuse of takedown mechanisms for harassment.
 
@@ -2932,6 +3073,21 @@ Human translators receive credits for approved translations (Milestone 15). Tran
 
 Readers can search across all languages, filtered to their preferred reading languages. Translated works appear alongside originals with clear labeling. Search-language settings independent from interface-language settings.
 
+## 22.11 AI cost controls
+
+Cost estimation (§22.3) tells a requester what a job will cost. These are the ceilings that stop one requester, or one batch, from consuming an instance's month.
+
+Budgets are separate per task class — translation, classification, summarization, search assist, transcription (§30.8) — because an instance may be willing to spend on one and not another, and a single pooled budget lets the cheapest-running task starve the one the operator actually cares about.
+
+- **Per-account daily and monthly spend caps**, independent of the credit balance. A subscriber with a large balance still meets the cap, and the cap is on AI spend rather than on credits, so buying credits cannot raise it.
+- **An instance-wide monthly budget** set by the administrator, with alerts at configurable thresholds (default 50%, 80%, 100%) delivered through §24.12.
+- **Behavior at each threshold is stated and configurable**, with the honest default: at the soft threshold new jobs queue with the reason shown, and at the ceiling they are refused with an explanation and an estimate of when the budget resets. **A job already running is never killed mid-flight by a threshold it was admitted under.**
+- **Cost is estimated before admission, and admission is what reserves it.** Two jobs admitted against the same remaining budget must not both be accepted; the reservation is the concurrency control (§3.4).
+- **A job over a configurable cost threshold requires a second, explicit confirmation** naming the estimate, per job rather than as a standing consent.
+- **The rules-only fallback is explicit:** when the classification budget is exhausted the positivity filter (§12.1) continues on its deterministic rules rather than failing open or refusing to accept comments, and the degraded state is visible to moderators.
+- **Every AI feature has a configured provider and a configured absence.** With no provider, or with the budget exhausted, each task class degrades to a named non-AI behavior — search falls back to structured search (§23.8), summarization is absent, transcription is absent — and nothing silently returns an empty result as though it had run.
+- Spend is reported per account, per task class and per provider, and the report distinguishes a quote from an actual charge.
+
 ## Acceptance
 
 - Interface fully translated in initial locales.
@@ -3037,9 +3193,21 @@ The AI never bypasses permission checks, since the AST always runs through stand
 
 Authors create visual/aesthetic pages for their works: images, playlists, quotes. Displayed as an optional tab on the work page.
 
-Open Graph, Twitter/X cards, and embed previews for every public work URL with title, author, summary, fandom, cover image.
+Open Graph, Twitter/X cards, and embed previews for every public **eligible** work URL with title, author, summary, fandom, cover image (§31.1).
 
 Cover images use content-addressed storage, permission checks, and size limits.
+
+## 23.10 Federation beyond announcements
+
+§23.6 federates follows and announcements. These are the cross-instance capabilities that need the data model to be right before they can be built, recorded now so that a later milestone does not have to reshape what exists.
+
+- **Cross-instance search:** a reader searches a peer's public corpus from this instance through a federated query protocol rather than by scraping the peer's search pages. Results carry the peer's identity, are labeled as remote, and obey the peer's own eligibility decisions, which this instance cannot override.
+- **Cross-instance wishlists:** a wish (§18.5) may be published to peers, and a fulfillment from elsewhere records which instance it came from and links back. A wish is never silently claimed on an instance the wisher does not use.
+- **Shared tag canonicalization:** canonical forms of fandom, character and relationship names (§15.11) may be exchanged between peers as proposals, applied by an instance's own quorum, and never imposed. A peer's canonicalization is a suggestion with provenance attached.
+- **Instance trust relationships:** an instance may declare another trusted, blocked or limited, with the same block semantics a user has (§7.5) at instance scope. Blocking an instance stops federation with it and is recorded publicly enough that a reader can see why a remote instance's content is absent.
+- **Transfer manifests between instances:** a preservation batch (§11.11) may name a peer as its source together with the peer's own record of permission, so attribution survives the transfer.
+
+Everything here is deferred. What this section fixes is the shape: identity, provenance and permission travel with federated records, and no instance's policy, moderation decision or canonicalization is overridden by a peer's.
 
 ## Acceptance
 
@@ -3085,6 +3253,10 @@ Cover images use content-addressed storage, permission checks, and size limits.
 /admin/registration
 /admin/flags
 /admin/dmca
+/admin/media
+/admin/sharing
+/admin/alerts
+/admin/succession
 ```
 
 Show memory and disk pressure, job backlog, failed imports, source incidents, converter availability, backup age, moderation backlog, positivity queue depth, translation queue depth, database health, integration status, search index lag, credential-expiry counts without secret details, retention and deletion backlog, registration application backlog, active shadowbans.
@@ -3193,6 +3365,43 @@ Do not assume replacing the binary reverses migrations.
 
 Include database schema compatibility, search reindex requirements, IndexedDB migration compatibility, extension host API compatibility, recipe/query AST migration, encryption-key version support, positivity classifier version compatibility.
 
+## 24.11 Succession, caretaker mode, and break-glass
+
+A self-hosted instance with one administrator is one absence away from being unadministrable. The mechanism is documented, sealed, and deliberately awkward to use.
+
+- **A designated successor** is named by the administrator from accounts at or above a configured trust level. Naming an account grants nothing while the administrator is present.
+- **Break-glass activation** requires the administrator to be unreachable for a configured period, attested by a second person at or above the configured trust level, and a sealed recovery credential held outside the database — in the deployment's secret store, never in a row this instance holds.
+- **Caretaker mode** is what a successor gets: the site keeps running and moderation and quorum continue, but no feature flag can be enabled, no AI budget raised, no billing change made, no extension installed, and the configuration surface is read-only apart from restoring service. Every action taken in caretaker mode is logged and published in the modlog (§19.12).
+- **A returning administrator reclaims control** by presenting their own credential, which ends caretaker mode. The record of what happened while they were away is the first thing shown to them.
+- **Critical operational documentation** — how to restore from backup, how to rotate the storage key, how to reach the registrar and the payment processor, what the instance's legal obligations are — is sealed the same way and is part of the backup set (§24.9).
+- **The administrator's taste profile has a defined end.** If the administrator is absent beyond the configured period, influence from the taste profile stops rather than continuing to steer discovery on an absent person's preferences; discovery falls back to the baseline engines (§16.1) and says so.
+- **No break-glass path bypasses the audit trail.** The mechanism exists to keep the instance administrable, and its whole value is that its use is visible.
+
+## 24.12 Proactive alerting
+
+The dashboard (§24.1) shows current state to somebody who is looking at it. Alerts are for the hours when nobody is.
+
+- Channels: email, webhook and a chat-bot endpoint, each configured separately with its own destination and severity floor.
+- Severity: `informational | warning | critical`, with the floor applied per channel, so a channel subscribed to critical only does not receive the informational stream.
+- Conditions alerted at minimum: storage pressure above a configured fraction; job queue depth, failure rate and stalled leases; AI provider error rate and budget thresholds (§22.11); payment webhook failures; source credential mass expiry and per-source incident onset (§11.8); backup age beyond the configured interval; positivity queue depth and moderation backlog; migration or schema mismatch; certificate expiry; and a source's robots policy changing to disallow what an adapter needs.
+- **Deduplication and hysteresis:** one alert per condition per window, and an alert clears only after the condition has been below threshold for a sustained period, so a metric oscillating at a boundary does not produce a stream of messages and closures.
+- **Every alert names what to do**, not only what happened, and links to the relevant administrator page.
+- **A status surface** may be enabled, public or internal, showing a coarse health state with no internal detail: whether the instance is operating normally, degraded or down, and never a count, an address or error text.
+- **A channel's own failure is itself an alerted condition**, because a silently broken alert path is worse than no alert path.
+
+## 24.13 Account dormancy and data lifecycle
+
+Accounts outlive attention. The policy is stated, notified, and reversible for as long as it can be.
+
+- **Dormancy is a notification first.** An account with no sign-in for a configured period receives notice that it is becoming dormant, what that changes, and how to prevent it. Nothing is actioned before the notice and its grace period have both passed.
+- **A dormant account keeps everything.** No work, chapter, comment, rating, review, series, collection or message is deleted or hidden by dormancy. The account stays readable and its works stay published.
+- **What changes is quota:** storage for new imports, active watches, queued jobs and AI spend caps fall to the dormant floor, while everything already held is retained. Existing imports are not evicted to make room for the rule.
+- **Source credentials expire normally and are not renewed.** An expired credential is cleared as the credential policy already requires (§11.6), so a dormant account's stored secret is removed rather than left indefinitely.
+- **Drafts are preserved and are not counted against active quotas.** A returning author finds their drafts as they left them.
+- **Deletion is never automatic.** An account reaching an extreme dormancy threshold is not deleted; it is reported to the administrator as eligible for review, and any deletion then follows §24.8 including its notices.
+- **A return restores the previous quota tier** without a support request, and the notices stop.
+- The policy states its relationship to the instance's retention and privacy obligations (§24.7, §24.8) explicitly, including whether dormant data is included in exports and backups, rather than leaving the question to be inferred.
+
 ---
 
 # 25. Milestone 20: Hardening and Release
@@ -3243,10 +3452,17 @@ Automate:
 40. Suggest a feature → verify the raw text is stored → verify it joins an existing card or opens one → enter the arena → name best and worst → verify every implied rating moved.
 41. Curator moves a card from Ideas to Up Next → verify the arena stops drawing it → verify the move is in the log with the actor and reason → verify the rating is unchanged.
 42. Publish a changelog entry for a shipped card → verify the card links to the entry → verify the entry links to the card.
+43. Import a fan film from a supported video platform → verify attribution, description, duration and tags → curate the tags → publish → verify it appears in search and on the fandom page.
+44. Set an instance to reference-only → attempt a media upload → verify the refusal names the policy → import the same media by reference → verify no bytes were stored.
+45. Open a media work with no transcript → verify the page says so → attach a machine transcript → verify it is labeled → replace it with the author's own → verify the machine revision is retained.
+46. Share a public work → verify the card renders → request the card URL unauthenticated → verify it is indistinguishable between an unlisted work and a non-existent one.
+47. Post a link to this instance's own work in the forum → verify the preview appears with no outbound request → post a link to an unknown host → verify it renders as a plain link.
+48. Make a work private → verify a previously cached preview stops being served.
+49. Register a new account → pick fandoms, moods, formats and content notes → verify the first session ends with a work opened and the reason stated.
 
 ## 25.2 Security tests
 
-Cover stored XSS, CSRF, SSRF and DNS rebinding, credential forwarding across redirects, file traversal, malicious archives and decompression bombs, object-level authorization, pseud isolation, search snippet and count leakage, shared-cache existence leakage, session/token revocation, credit races, webhook replay, plugin exhaustion, CSS resource exfiltration, private cache leakage, bot channel-context errors, email relay abuse, feed-token logging, retention and deletion failures, positivity filter bypass attempts, translation permission bypass, extension purchase entitlement bypass, shadowban visibility leaks, DMCA workflow abuse.
+Cover stored XSS, CSRF, SSRF and DNS rebinding, credential forwarding across redirects, file traversal, malicious archives and decompression bombs, object-level authorization, pseud isolation, search snippet and count leakage, shared-cache existence leakage, session/token revocation, credit races, webhook replay, plugin exhaustion, CSS resource exfiltration, private cache leakage, bot channel-context errors, email relay abuse, feed-token logging, retention and deletion failures, positivity filter bypass attempts, translation permission bypass, extension purchase entitlement bypass, shadowban visibility leaks, DMCA workflow abuse. Cover link-unfurl SSRF and outbound-request absence, media embed provider allow-list bypass, media reference leaking a private work, share-card and preview existence leakage for ineligible works, transcript leakage of a restricted work.
 
 ## 25.3 Accessibility
 
@@ -3268,6 +3484,19 @@ Address x86-64, ARM64, SQLite, PostgreSQL, supported browsers, PWA limitations b
 
 Fixture success is not live verification.
 
+## 25.6 Cognitive accessibility
+
+Keyboard, screen-reader and contrast requirements are verified already (§25.3). Cognitive accessibility is a separate obligation and is tested separately, because a page can pass every automated check and still be unusable to a reader who has lost their place.
+
+- **Predictable navigation.** Primary navigation, the position of a work page's actions, and the shape of a list are consistent across routes. A layout that moves between pages is a defect.
+- **Controls do what their label says**, and a destructive control is never adjacent to a benign one without a confirmation or an undo.
+- **Progressive disclosure on complex surfaces.** Advanced search filters, dashboard composition, the recipe builder and the taxonomy editor show their essential controls first and reveal the rest deliberately, and nothing a reader needs to finish the task is hidden.
+- **Plain language in errors and help.** An error states what happened, what it means and what to do; it never leads with a code, and a code is something a reader can quote in a report rather than the message itself. Technical detail moves behind a disclosure instead of being removed.
+- **Sensory controls beyond reduced motion:** a reduced-animation setting that removes transitions rather than shortening them, a lower-contrast-but-still-compliant preset, and a simplified page preset that drops decorative imagery and secondary panels.
+- **Time and attention:** no countdown that expires a reader's work, no session timeout that discards an unsaved draft (§8.3 already preserves local text, and this states the expectation at the interface level), and no infinite scroll on a surface where a reader must be able to reach a footer.
+- **Reading-position orientation** on long pages: which work, which chapter or unit, and how much remains, stated in text.
+- Cognitive accessibility is part of the milestone's manual pass (§25.3's list) rather than a separate deferred item.
+
 ---
 
 # 26. Route and API Ownership
@@ -3275,17 +3504,20 @@ Fixture success is not live verification.
 | Surface | Frontend routes | API owner |
 |---|---|---|
 | Discovery | `/`, `/discover`, `/blind-date`, `/dashboard`, `/surprise` | discovery |
+| Onboarding | `/welcome` | identity/discovery |
 | Fandom pages | `/fandoms/:id` | discovery |
 | Recipes | `/recipes/*` | discovery/extensions |
 | Search | `/search`, `/search/advanced`, `/find-fic` | search |
 | People | `/people`, `/u/:handle` | identity/content |
 | Reader | `/works/*`, `/series/*` | content/library |
+| Media works | `/watch/*`, `/listen/*`, `/media/*` | content/imports |
 | Writing | `/write/*` | content |
 | Imports/library | `/library/*` | imports/library |
 | Watches | `/library/watches` | imports/library |
 | Source status | `/sources`, `/sources/:id` | imports |
 | Cross-posting | `/write/:id/cross-post` | imports |
 | Community | `/forum/*`, `/groups/*`, `/messages/*` | community |
+| Sharing | `/works/:id/card`, `/api/v1/unfurl` | content |
 | Events | `/challenges/*`, `/requests/*`, `/wishlists/*` | community |
 | Translation | `/translations/*` | translation |
 | Governance | `/trust/*`, `/moderation/*`, `/curation/*`, `/appeals/*` | governance |
@@ -3384,6 +3616,12 @@ The tutorial, contextual help, API documentation, and operator documentation des
 - [ ] Editorial curator picks.
 - [ ] Fandom landing pages.
 - [ ] Bookmark CSV import/export.
+- [ ] Non-written works — video, audio, comic, zine — are importable, searchable and readable under the instance's media policy.
+- [ ] Fan-film aggregation records attribution, description, tags, characters and duration, and a reference-only instance stores no media bytes.
+- [ ] Every public work URL renders a share card, and a link posted in the community previews internally without an outbound request.
+- [ ] New voices and first works are surfaced by a bounded, labeled discovery slot.
+- [ ] Activity status distinguishes active, slow, dormant and concluded without penalizing any of them.
+- [ ] Content notes are a separate axis from tags, reader-configurable and quorum-suggestible.
 
 ## 28.3 Positive feedback (Priority 3)
 
@@ -3470,6 +3708,11 @@ The tutorial, contextual help, API documentation, and operator documentation des
 - [ ] Reading goals and streaks produce no coercive messaging, no guilt-framed loss notifications, and no credit multipliers tied to streak length.
 - [ ] Gamification rewards never reveal the administrator's taste profile through any label, multiplier name, or breakdown.
 - [ ] Badge counts display "Awarded ×N" per user and global rarity.
+- [ ] An instance's media hosting policy is enforced with no per-work, per-user or per-peer override.
+- [ ] No embed markup authored by a user, extension or peer is rendered; only the configured provider allow-list is.
+- [ ] Unfurling makes no outbound request for an unknown host.
+- [ ] A share card or preview never reveals a work the viewer may not read, and never differs between "not found" and "no access".
+- [ ] AI spend has a ceiling that no request, subscriber or job batch can raise.
 
 ## 28.10 Deliberately not adopted
 
@@ -3498,6 +3741,16 @@ The tutorial, contextual help, API documentation, and operator documentation des
 - **Published individual ballots.** Ratings are public; who voted for what is not. A vote that can be seen is a vote that can be pressured.
 - **A ranked list of contributors.** The board ranks ideas and never people.
 - **Automatic promotion across a threshold.** Crossing a rating promotes nothing; a person decides, in the open.
+- **Re-hosting third-party media.** An instance that references media stores metadata and a reference; it never mirrors a video or audio file it was not given permission to host.
+- **Storing media an instance has not agreed to host.** The hosting policy is the operator's, stated once, and no upload, import, batch, cache or peer raises it.
+- **Author-authored embed markup.** A player is a configured provider on a record, never a frame, script or object inside a document.
+- **Unfurling arbitrary URLs.** Only this instance's own content and sources with an adapter are resolved; a preview is never an outbound request aimed by whoever wrote the link.
+- **Autoplay, and tracking before consent, in media embeds.**
+- **Inferring completion from a third-party player's playback position.**
+- **AI spend without a ceiling.** Every task class has a budget, and exhausting it degrades to a named non-AI behavior rather than to silence.
+- **Automatic deletion of dormant accounts.** Dormancy changes quota and ends credentials; it never removes what a person wrote.
+- **A card or preview that reveals a work to someone who may not read it.**
+- **Media hosting as a per-work decision.** "This instance does not host media" and "this media is a work on this instance" must both be expressible, and only an instance-level policy expresses both.
 
 ## 28.11 Gamification
 
@@ -3539,6 +3792,25 @@ The tutorial, contextual help, API documentation, and operator documentation des
 - [ ] The changelog entry for a shipped card links to the card, and the card links back.
 - [ ] Only published changelog entries are listed.
 - [ ] Who voted on what is not a surface anywhere in the product.
+
+## 28.13 Non-written works and media
+
+- [ ] A work carries a format, and a non-written work is a full citizen of search, collections, series, challenges, comments and federation.
+- [ ] An instance states its media hosting policy once, and every surface honors it.
+- [ ] A fan film imports with attribution, description, tags, characters and duration, and never as a bare URL.
+- [ ] A media series imports as one work with one unit per episode, reconciled against the source's stated count.
+- [ ] No player frame is stored or rendered from user, extension or peer markup.
+- [ ] A work with no transcript says so; a machine transcript is labeled and replaceable.
+- [ ] Unreachable media is marked, not deleted.
+
+## 28.14 Sharing and link previews
+
+- [ ] Every public eligible work URL renders a card and the metadata that points at it.
+- [ ] No card or preview exists for a work the viewer may not read, and the markup is identical to the non-existent case.
+- [ ] A link to this instance's own work previews with no outbound request.
+- [ ] A link to an unknown host is a plain link and triggers no fetch.
+- [ ] An author can disable unfurling, and the setting is honored everywhere.
+- [ ] Sharing changes no ranking signal and awards no credits.
 
 ---
 
@@ -3650,6 +3922,240 @@ Counts and ratings are ordinary columns, not derived views: a rating that had to
 - A published changelog entry and the card it shipped link to each other.
 - No request in this section returns a ballot cast by another reader.
 
+---
+
+# 30. Non-written Works, Media, and Aggregation
+
+Written fiction is one format among several. Fan films, podfics, fan comics and zine scans are part of the same fandom, and an instance that catalogues only prose is not an archive of fandom — it is an archive of one corner of it. This milestone makes format a first-class property of a work, **without requiring any instance to store media it does not want to store**.
+
+## 30.1 What counts as a work
+
+Every work carries a format:
+
+```text
+Format: prose | poetry | fan_film | podfic | audiobook | fan_comic | zine_scan | interactive | other
+```
+
+A work's format determines how its units are rendered and which capabilities apply. It never determines eligibility for search, ratings, collections, series, challenges, comments or federation. A podfic is a work. A fan film is a work.
+
+A non-written work is the same kind of record as a written one: owning pseud, contributors, tags, fandoms, characters, relationships, content notes, rating, visibility, lifecycle, completion, series and collection membership, comments, reactions, bookmarks and credit events. The differences are the unit type and the hosting policy below.
+
+## 30.2 Hosting policy is an instance decision, stated once
+
+Each instance declares what it will store. The setting applies to the instance, never to a request, a work or an uploader:
+
+```text
+Media hosting: host | reference | catalogue
+```
+
+- **`host`** — media bytes are uploaded, stored content-addressed, and served from this instance, under the same retention, backup and deletion rules as any other object.
+- **`reference`** — metadata is stored and the media is played or opened at its origin. No bytes are ever fetched into this instance's storage: not by an import, not by a preservation batch, not by a cache, not by a federated announcement.
+- **`catalogue`** — metadata only, with no playback shell embedded at all. The work page presents the work and links out.
+
+The setting is the operator's, and an instance that chooses `reference` or `catalogue` is a complete instance: every other feature in this specification behaves identically. No work, contributor, importer, extension or federated peer may raise the setting on its own behalf. An instance set to `reference` refuses an upload rather than silently storing a file, and the refusal names the instance's policy.
+
+This is why the preference is an instance setting and not a per-work flag. "My instance does not host media, and the fan film it aggregates is still a work" is the combination to be expressible, and a per-work flag cannot express it without turning every work into a decision somebody has to make.
+
+## 30.3 Media references, and where the metadata comes from
+
+When hosting is `reference`, a media work is an external reference: a canonical URL, the source it belongs to, and the metadata this instance holds about it.
+
+For a site with an adapter (§11.1) the adapter extracts the metadata and the reference is an ordinary imported record. For a fan film on a video platform, the adapter reads the public page and records:
+
+- Title, as the author gave it.
+- Channel or uploader, recorded as the work's attribution — never merged into a local account by matching names or handles (§11.11).
+- Canonical URL and the platform's own identifier for the item.
+- Duration, where the platform states one.
+- Publication date, or **no date**. A guessed date is worse than an absent one.
+- Description, sanitized and stored as the work's summary, with the boilerplate platforms append to descriptions removed rather than displayed.
+- Thumbnail reference, subject to §30.6.
+- Tags, fandoms, characters, relationships and content notes (§15.16), drawn from the description or the platform's own fields and **verified or corrected before the work is public** — by the original author if they are on this instance, otherwise by a curator. A fan film's tags are frequently empty, wrong, or a keyword wall, and an uncurated import that displays them is presenting noise as taxonomy.
+- A transcript or caption track reference where one exists.
+
+A record with only a URL is not a work. A media work becomes public only when it carries attribution, a description or a transcript, at least one fandom, and a format.
+
+## 30.4 Units
+
+A work's chapters generalize to units. A unit is text or media, and one work may contain both — a podfic with a text version, a fan film series with written episode notes, a comic with the author's commentary.
+
+Each unit records its position, its title, its runtime where it has one, its own external reference or storage key, and an optional transcript.
+
+An imported media series — a fan film in episodes, a podfic in parts — imports as one work with one unit per episode or part, discovered from the source's own listing the way chapter lists are walked (§11.7). The count is reconciled against the source's stated total, and a disagreement refuses the import naming both numbers.
+
+## 30.5 Playback and embedding
+
+Playback is served by this instance's own player shell. Third-party embed markup is never accepted from an author, an importer, an extension or a federated payload, and the work document schema (§8.3) stays free of frames, scripts and embedded objects: a media unit is a field on a record, never markup inside a chapter.
+
+The shell renders a provider drawn from an allow-list that is configuration rather than code. The initial providers are those the initial adapters support; adding one is an operator decision recorded in the ADR set (§1.4).
+
+Rules that hold for every provider:
+
+- No autoplay, and no audio before a reader-initiated action.
+- No third-party cookies or trackers before consent; a privacy-preserving embed host is used where the provider offers one.
+- No tracking parameter is forwarded, and no referrer beyond the origin is sent.
+- The player is replaced by a plain link when the provider is unreachable, when the reader has disabled embeds, or when the instance's hosting policy is `catalogue`. A work never becomes unreadable because an embed failed.
+- A reader-level setting disables embedded players everywhere, and it is honored with no per-work exception.
+
+## 30.6 Thumbnails, covers and caching
+
+Thumbnail and cover references are stored, not mirrored, unless hosting is `host`. Displaying a platform thumbnail uses the provider's own image URL with a size hint, and sends nothing about the reader beyond what a plain image request carries.
+
+Metadata extracted from a platform is cached with a short retention and refreshed through the job queue on a schedule derived from the instance's crawl policy. The media itself is never cached, never proxied, and never used to serve a byte this instance has no permission to serve. A cache miss re-fetches the page, not the media.
+
+Search indexes hold metadata only. A private or restricted work's media reference never lands in a shared cache (§10.4).
+
+## 30.7 Discovery, search and eligibility
+
+Format is a filter and a facet everywhere works are filtered: search, saved views, the library, collections, series, challenges, recommendations and statistics.
+
+Discovery is not prose-only by default. A reader who has expressed no format preference meets media works in proportion to their presence in the eligible corpus — neither buried beneath it nor promoted above it.
+
+A media work takes part in mood search, tag search, the people directory, fandom landing pages and the recommendation engines on the same terms as a written one. The engine inputs that assume text are not applied to a work that has no words: runtime substitutes for length, and the length histogram (§15.15) uses runtime for these works rather than omitting them. Completion for a media work means the reader reached the end of the last unit, recorded by the same explicit action a written work uses (§9.8), and **never inferred from a third-party player's playback position**.
+
+## 30.8 Accessibility
+
+A media work states whether a transcript, a caption track, or neither is available, and the work page says which. "No transcript available" is displayed rather than omitted, because a reader who needs one is deciding whether to start.
+
+Where a transcript exists it is readable as text on the work page and is included in full-text search for that work, under the same privacy rules as any other body text.
+
+Auto-transcription is an AI task: it costs credits, quotes before it runs, respects the budget guardrails (§22.11), is labeled as machine-produced (§22.6), and is never presented as the author's own words. An author may replace a machine transcript with their own; the machine version is then retained as a revision rather than overwritten.
+
+A work with neither a transcript nor a caption track is listable and searchable, and is marked in the accessibility facets so a reader filtering for transcripts can exclude it deliberately rather than by accident.
+
+## 30.9 Aggregating media from other instances
+
+A federated media work is announced by reference. The receiving instance applies its own hosting policy: an instance set to `host` may fetch and store media it is permitted to fetch, one set to `reference` stores the announcement and the metadata and plays at the origin, and one set to `catalogue` lists it and links out.
+
+No instance's policy changes another's. A peer that hosts media does not cause a reference-only instance to store bytes, and a reference-only instance does not cause a peer to stop announcing.
+
+## 30.10 Legal and takedown
+
+Where this instance does not host the media, a takedown concerning the media itself is answered by stating that this instance holds metadata and a reference, identifying the host, and complying with any requirement that the listing itself be removed. §19.11 applies unchanged, including the counter-notice path and the modlog.
+
+Where this instance hosts the media, the ordinary copyright workflow applies to it exactly as to uploaded text.
+
+A media reference whose origin becomes unreachable is marked as such rather than deleted, and the work remains in the archive as a record that it existed — the same treatment §11.13 gives a vanished source.
+
+## 30.11 API
+
+```text
+GET    /api/v1/works/:id/units
+POST   /api/v1/works/:id/units
+PATCH  /api/v1/units/:id
+DELETE /api/v1/units/:id
+
+POST   /api/v1/media/references
+GET    /api/v1/media/references/:id
+POST   /api/v1/media/transcripts/:unitId
+GET    /api/v1/works/:id/transcript
+
+GET    /api/v1/admin/media/policy
+PATCH  /api/v1/admin/media/policy
+```
+
+## 30.12 Data model
+
+| Table | Important fields |
+|---|---|
+| `work_units` | work_id, position, unit_kind, title, runtime_seconds, media_reference_id, chapter_id |
+| `media_references` | canonical_url, source_key, provider, provider_id, duration_seconds, published_at, transcript_blob_id, availability, last_checked_at |
+| `unit_transcripts` | unit_id, origin (author / machine / provided), language, blob_id, revision |
+| `instance_media_policy` | hosting_mode, provider_allowlist, updated_by, updated_at |
+
+`works` gains `format`. `chapters` remains the text unit and is referenced by `work_units` rather than replaced, so existing content and every path that reads a chapter keep working.
+
+Where the instance hosts media, a unit's bytes live in `content_blobs` (§4.4) under a media retention class, exactly as an imported chapter's text does. `media_assets` (§4.3) is unaffected and remains what it is: assets an author uploads *about* a work, such as a cover or a mood-board image. That is a different question from media that *is* the work, and the two are deliberately not merged.
+
+## 30.13 Acceptance
+
+- A fan film on a supported video platform imports with title, attribution, description, duration and a canonical link, and is public only once it carries a fandom, a description and a format.
+- An instance set to `reference` refuses an upload and names its policy, and no import, batch, cache or federated announcement stores media bytes on it.
+- An instance set to `catalogue` renders no player and links out, and the work page remains complete.
+- A media work appears in search, mood search, fandom landing pages and collections, and filters by format.
+- A media work is excluded from word-count and reading-time filters, and the length histogram uses its runtime.
+- Completion for a media work is recorded by an explicit reader action and never inferred from a third-party player.
+- A media series imports as one work with one unit per episode, and a count disagreement refuses the import naming both numbers.
+- No embed markup authored by a user, an extension or a peer is ever rendered; only the configured provider allow-list is.
+- No stored page or payload contains a player frame, and the editor document schema is unchanged.
+- A work with no transcript says so, and a work with one is full-text searchable through it.
+- A machine transcript is labeled as machine-produced and can be replaced by the author without destroying the machine revision.
+- Disabling embeds instance-wide leaves every media work readable as a link.
+- Unreachable media is marked, not deleted, and the work remains in the archive.
+- A takedown of non-hosted media identifies the host, removes the listing if required, and follows the §19.11 workflow including the counter-notice.
+
+---
+
+# 31. Sharing: Fic Cards, Unfurling, and Link Previews
+
+Fiction is shared by link, and a link that shows a title, an author and a fandom travels where a bare URL does not. This milestone makes every shareable work render a card, and makes a link posted inside the community resolve to the work it names.
+
+## 31.1 The fic card
+
+Every public eligible work URL renders a card image, server-side and deterministically, for social platforms and for direct download.
+
+The card carries: title; the authors as displayed; fandom; format; rating; completion state; length as word count or runtime; up to the configured number of content notes; the instance name and base URL; and a short link that resolves to the work.
+
+The card is generated from the work record at request time and cached by content hash and template version, so it is stable while the work is unchanged and regenerated exactly when the work changes.
+
+Rules:
+
+- **Public eligible works only.** A draft, a withdrawn work, a restricted work, an unlisted work, and a work the requester may not read render no card, and the response for a non-eligible identifier is identical to the response for a non-existent one, so the endpoint is not an existence oracle (§25.2).
+- **The summary appears only if the author allows it**, truncated rather than reformatted. The author controls the cover image, the summary, the content notes, and whether co-authors are named.
+- **A card never un-masks an author.** A work published under a pseud the author has hidden does not name it.
+- **No reader data on the card.** No reading counts, no reader identities, and no per-viewer variation that could reveal who looked.
+- The image is produced by this instance, and no third-party card service receives the work's text.
+- A text-only fallback describes the work for platforms that do not render images, under the same eligibility rules.
+
+## 31.2 Sharing from the interface
+
+A work page and the end-of-work page (§9.10) offer: copy link, open the card image, download the card, and a share action that opens the platform's own share URL for the reader's choice. **The instance never posts to a platform on a reader's behalf.** A reader's own note may accompany a shared link, bounded in length and added by the platform's composer rather than by this instance.
+
+## 31.3 Unfurling inside the community
+
+When a post, comment, message or profile field contains a URL, the server may resolve it into a preview card at render time. Previews are rendered server-side, so they appear without JavaScript and to every client, including the API and the federated representation.
+
+**What is resolved, and what is not:**
+
+- **A URL on this instance is rendered from internal data, with no outbound request.** The preview links internally and shows the work, series, collection or thread it names, respecting the reader's access: a work the reader may not read produces a preview that says a work exists and offers the link, never its metadata. This is the common case and the one that matters most — a link to a work here never leaves the instance to render, so there is nothing to scrape and nothing to leak.
+- **A URL on a known source** (a site with an adapter, §11.1) may be rendered from a cached metadata record, with attribution and a link to the origin. The fetch that fills that record happens through the job queue under the source's robots and pacing rules (§11.5) and the revision cache (§10.4) — never inline, on request, in the rendering path.
+- **Every other URL is a plain link.** No outbound request is made for it, ever.
+
+That last rule is the security-relevant one and it is not a limitation awaiting a later milestone. Fetching an arbitrary URL to build a preview is an outbound request that any signed-in account can aim wherever it likes; it is the same hazard the import path closes with a pinned resolver and an explicit policy (§11.5), and a rendering path cannot apply that policy and remain a rendering path. The set of unfurlable origins is the set this instance already trusts: its own content, and sources it has an adapter for.
+
+Further rules:
+
+- Previews are cached per URL with the same retention as the metadata they show, and a preview of a work that has become private is invalidated rather than served.
+- A preview never renders the body text of a work, a held comment, a private note, a private-library entry, a reading position or any personal statistic.
+- A preview of a remote Lorehaven instance's work uses that instance's own published card and metadata. One instance never scrapes another's pages to build one (§23.6).
+- A preview never appears for content whose eligibility the viewer fails, and the rendered markup is identical between "does not exist" and "you may not see it".
+- **An author may disable unfurling of their works**, after which the link renders as a plain link everywhere on the instance. The setting is recorded, so a later reader can see why a preview is absent.
+- A shared preview is not an endorsement and is never counted as one: it feeds no ranking signal and no credit event.
+
+## 31.4 API
+
+```text
+GET  /api/v1/works/:id/card.png
+GET  /api/v1/works/:id/card.svg
+GET  /works/:id/card
+POST /api/v1/unfurl
+GET  /api/v1/admin/sharing
+PATCH /api/v1/admin/sharing
+```
+
+## 31.5 Acceptance
+
+- A public eligible work's URL renders a card image and the Open Graph and Twitter/X metadata that point at it (§23.9).
+- A draft, unlisted, restricted or withdrawn work renders no card, and its response is indistinguishable from a non-existent work's.
+- A card omits the summary when the author has not allowed it, and omits a hidden pseud.
+- No card or preview carries a reading count, a reader identity or any per-viewer variation.
+- A link to a work on this instance renders a preview with no outbound request, verified by network assertion.
+- A URL pointing at an unknown host makes no outbound request when a post containing it is rendered.
+- A URL on a known source renders from cache, and the fetch that fills that cache runs through the queue under the source's pacing rules.
+- A viewer without access sees a preview that reveals no metadata, and the markup matches the non-existent case.
+- A preview of a work that has become private is invalidated and no longer served from cache.
+- An author who disables unfurling sees plain links in the forum, in the preview and in the federated representation.
+- A shared preview changes no ranking signal and awards no credits.
+- A remote instance's work is previewed from its own published card, with no scrape of its pages.
 
 ---
 
