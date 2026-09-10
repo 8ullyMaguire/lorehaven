@@ -1,0 +1,78 @@
+# Lorehaven configuration.
+#
+# Precedence, highest first:
+#   command-line argument  →  environment variable  →  this file  →  default
+#
+# Copy to `lorehaven.toml` and edit. Every key below is optional; the values
+# shown are the defaults outside production. Unknown keys are a startup error
+# rather than a silently ignored line, so a typo is caught immediately.
+#
+# Environment variables use the LOREHAVEN_ prefix, e.g.
+#   LOREHAVEN_PORT=9000
+#   LOREHAVEN_DATABASE_URL=postgres://user:pass@host/lorehaven
+
+# development | test | production
+environment = "development"
+
+[site]
+# Shown in the interface, feeds and notification emails.
+name = "Lorehaven"
+# Public address, used for links, feeds and cookie scoping. Must be https in
+# production.
+base_url = "http://localhost:8080"
+# Shown on legal pages and in feed metadata.
+# contact_email = "operator@example.com"
+
+[server]
+# Bind address. Keep this on loopback and terminate TLS in a reverse proxy.
+bind = "127.0.0.1"
+port = 8080
+# Largest accepted request body. Uploads and imports need this raised when they
+# arrive; 2 MiB is generous for JSON.
+max_body_bytes = 2097152
+# Per-request ceiling, so one slow handler cannot hold a connection slot.
+request_timeout_secs = 30
+# Cross-origin origins. Empty means same-origin only, which is the default and
+# the recommended setting. "*" is refused in production.
+# cors_origins = ["https://lorehaven.example"]
+
+[database]
+# SQLite (default): a single file, no server to run.
+url = "sqlite://./data/lorehaven.sqlite?mode=rwc"
+# PostgreSQL: uncomment instead of the SQLite URL.
+# url = "postgres://lorehaven:secret@localhost/lorehaven"
+max_connections = 5
+acquire_timeout_secs = 10
+
+[storage]
+# Root for uploads, exports and cached media. Must be an absolute path in
+# production.
+root = "./data"
+
+[security]
+# Secure cookies require HTTPS. Defaults to true in production and false
+# otherwise; setting it false in production is a startup error.
+# cookie_secure = true
+# How long a session survives without re-authentication.
+session_ttl_days = 30
+# Required for state-changing cookie-authenticated requests. Turning this off
+# in production is a startup error.
+csrf_required = true
+
+[logging]
+# Tracing filter directives.
+filter = "info,lorehaven_app=debug,lorehaven_db=debug"
+# pretty | json
+format = "pretty"
+
+[assets]
+# Development only: serve the frontend from disk so a `vite build --watch` loop
+# does not need a Rust rebuild. Production refuses this and serves the bundle
+# compiled into the binary.
+# dir = "./frontend/dist"
+
+[dev]
+# Whether `lorehaven seed` may write development fixtures. Defaults to true
+# outside production and false in it; enabling it in production is a startup
+# error.
+seed_enabled = true

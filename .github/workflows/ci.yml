@@ -1,0 +1,156 @@
+name: CI
+
+# Spec §5 requires continuous integration, and spec §4 requires integration
+# tests against both databases "from the beginning" — so the PostgreSQL job is
+# part of CI from the first commit rather than a promise for later.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lints
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build
+        run: cargo build --all-targets
+
+      - name: Test
+        run: cargo test --workspace
+
+  frontend:
+    name: Frontend (check, test, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type and accessibility check
+        run: npm run check
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+  embedded-assets:
+    name: Embedded assets build from a clean checkout
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # Spec §5: "a clean checkout builds". The frontend bundle is a build
+      # artefact and is not committed, so this proves the placeholder path and
+      # the build script ordering hold without any Node step.
+      - name: Build without building the frontend first
+        run: cargo build -p lorehaven-app
+
+  postgres:
+    name: PostgreSQL migrations apply
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: lorehaven
+          POSTGRES_PASSWORD: lorehaven
+          POSTGRES_DB: lorehaven
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build -p lorehaven-app
+
+      # The developer machine has no PostgreSQL, so this job is the only place
+      # the PostgreSQL dialect is exercised. It fails loudly rather than
+      # silently skipping, because an unrun dialect is an unverified dialect.
+      - name: Apply migrations to PostgreSQL
+        env:
+          LOREHAVEN_DATABASE_URL: postgres://lorehaven:lorehaven@localhost:5432/lorehaven
+          LOREHAVEN_STORAGE_ROOT: ${{ runner.temp }}/lorehaven
+        run: |
+          set -euo pipefail
+          ./target/debug/lorehaven migrate
+          ./target/debug/lorehaven migrate --status
+
+      - name: Migrations are idempotent
+        env:
+          LOREHAVEN_DATABASE_URL: postgres://lorehaven:lorehaven@localhost:5432/lorehaven
+          LOREHAVEN_STORAGE_ROOT: ${{ runner.temp }}/lorehaven
+        run: |
+          set -euo pipefail
+          output="$(./target/debug/lorehaven migrate)"
+          echo "$output"
+          grep -q "already up to date" <<<"$output"
+
+      - name: Readiness reports ready against PostgreSQL
+        env:
+          LOREHAVEN_DATABASE_URL: postgres://lorehaven:lorehaven@localhost:5432/lorehaven
+          LOREHAVEN_STORAGE_ROOT: ${{ runner.temp }}/lorehaven
+          LOREHAVEN_PORT: "8099"
+        run: |
+          set -euo pipefail
+          ./target/debug/lorehaven serve &
+          server=$!
+          trap 'kill $server' EXIT
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8099/health/ready > /tmp/ready.json; then break; fi
+            sleep 1
+          done
+          cat /tmp/ready.json
+          grep -q '"status":"ready"' /tmp/ready.json
+          grep -q '"backend"' /tmp/ready.json || grep -q 'postgres' /tmp/ready.json

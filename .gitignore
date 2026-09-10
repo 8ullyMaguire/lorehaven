@@ -1,0 +1,34 @@
+# Build output
+/target
+**/*.rs.bk
+
+# Rust
+Cargo.lock.bak
+
+# Local runtime data
+/data
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+
+# Configuration and secrets
+.env
+.env.local
+lorehaven.toml
+!lorehaven.toml.example
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/test-results/
+frontend/playwright-report/
+
+# Editor / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/

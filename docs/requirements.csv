@@ -1,0 +1,48 @@
+id,area,requirement,milestone,status,evidence,notes
+M0-01,platform,Rust workspace builds from a clean checkout,M0,implemented-locally-tested,cargo build,crates/domain lorehaven-db and lorehaven-app
+M0-02,platform,Application starts with SQLite,M0,implemented-locally-tested,crates/app/tests/milestone_0.rs,
+M0-03,platform,Application starts with PostgreSQL,M0,implemented-not-executed,--,No PostgreSQL server on the development machine; dialect SQL and migrations are written but unverified against a live server (see ADR 0004)
+M0-04,platform,Configuration precedence argument>environment>file>default,M0,implemented-locally-tested,crates/app/src/config.rs tests,
+M0-05,platform,Structured logging with request IDs,M0,implemented-locally-tested,crates/app/src/server.rs + http.rs tests,
+M0-06,platform,Embedded frontend assets served from the binary,M0,implemented-locally-tested,crates/app/tests/milestone_0.rs + browser check,
+M0-07,platform,Explicit migrate command with an embedded migration catalogue,M0,implemented-locally-tested,crates/db/src/migrate.rs tests,
+M0-08,platform,Development seed command that is idempotent and refuses production,M0,implemented-locally-tested,crates/app/src/seed.rs tests,
+M0-09,platform,Health endpoints distinguish liveness from readiness,M0,implemented-locally-tested,crates/app/tests/milestone_0.rs,
+M0-10,platform,Production startup rejects unsafe development configuration,M0,implemented-locally-tested,crates/app/src/safety.rs tests,
+M0-11,platform,Continuous integration,M0,implemented-not-executed,.github/workflows/ci.yml,Workflow is written; no runner has executed it
+M1-01,design,Design tokens implement the Reading Room theme,M1,implemented-locally-tested,frontend/src/styles/tokens.css + docs/design/THEME.md,
+M1-02,design,Three polished presets plus system preference,M1,implemented-locally-tested,frontend/src/lib/theme.test.ts,
+M1-03,design,Reusable component primitives exist,M1,partially-implemented,frontend/src/lib/components/,15 of the listed components exist; combobox and work-card variants remain
+M1-04,design,Controls work with a keyboard and show visible focus,M1,implemented-locally-tested,frontend/src/lib/components/Dialog.test.ts and component CSS,:focus-visible rule in app.css
+M1-05,design,Dialog traps focus and restores it on close,M1,implemented-locally-tested,frontend/src/lib/components/Dialog.test.ts,
+M1-06,design,Layout works at 320 CSS pixels,M1,implemented-not-executed,--,Responsive rules exist (48rem breakpoint) but no device-width measurement has been taken
+M1-07,design,Reduced-motion preference is respected,M1,implemented-locally-tested,frontend/src/app.css,+ component-level overrides
+M1-08,design,Navigation: desktop and mobile shells,M1,implemented-locally-tested,browser check,/discover /search /library /write /community /notifications /pseud
+M2-01,identity,Registration and login,M2,unsupported,--,
+M2-02,identity,Opaque server-managed sessions in secure cookies,M2,unsupported,--,Schema and hashing primitives exist; no endpoint yet
+M2-03,identity,CSRF protection for cookie-authenticated writes,M2,partially-implemented,frontend/src/lib/api.ts,Middleware and client header exist; no cookie-setting endpoint to exercise them
+M2-04,identity,Pseud creation switching and isolation,M2,partially-implemented,crates/db/src/identity.rs,Schema and repositories exist; no endpoints; account_id is never selected into a public shape
+M2-05,identity,Privacy settings stored from onboarding,M2,partially-implemented,crates/app/tests/milestone_0.rs,Seed records defaults; no settings API
+M2-06,identity,Block and mute primitives,M2,unsupported,--,Tables exist only
+M2-07,identity,Age-policy state machine,M2,implemented-locally-tested,crates/domain/src/policy.rs,
+M2-08,identity,One shared content-eligibility service,M2,implemented-locally-tested,crates/domain/src/policy.rs,No caller uses it yet because no content endpoints exist
+M3-01,writing,Drafts chapters publishing and revisions,M3,unsupported,--,
+M3-02,writing,Optimistic concurrency with REVISION_CONFLICT,M3,partially-implemented,crates/domain/src/error.rs,Error and status contract implemented and tested; no resource enforces it yet
+M3-03,writing,Autosave with local recovery,M3,unsupported,--,
+M4-01,reading,Reader and work pages,M4,unsupported,--,
+M5-01,jobs,Job system with leases retries and cancellation,M5,unsupported,--,
+M5-02,storage,Content-addressed storage and quota handling,M5,unsupported,--,
+M6-01,imports,Import framework and source adapters,M6,unsupported,--,
+M7-01,exports,Exports (text HTML EPUB PDF MOBI),M7,unsupported,--,ebook-convert and pandoc are detected by `doctor` but nothing calls them
+M7-02,offline,PWA offline reading,M7,unsupported,--,
+M8-01,library,Library shelves bookmarks and updates,M8,unsupported,--,
+M9-01,search,Structured taxonomy and advanced search,M9,unsupported,--,
+M10-01,discovery,Recommendations and private taste influence,M10,unsupported,--,
+M11-01,community,Comments forums groups and messaging,M11,unsupported,--,
+M12-01,events,Collections challenges and writing events,M12,unsupported,--,
+M13-01,governance,Trust reports quorum and appeals,M13,unsupported,--,
+M14-01,economy,Credits fair queues and billing,M14,unsupported,--,
+M15-01,extensions,Marketplace and extension isolation,M15,unsupported,--,
+M16-01,integrations,Feeds push federation and optional AI,M16,unsupported,--,
+M17-01,operations,Administration privacy tools backups and upgrades,M17,partially-implemented,crates/app/src/doctor.rs,doctor covers configuration database storage and converter checks; no admin UI
+M18-01,quality,Functional browser journeys and load profile,M18,unsupported,--,

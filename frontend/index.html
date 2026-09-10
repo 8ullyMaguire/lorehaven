@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="Lorehaven — a welcoming home for fanfiction: read, write, import your library, and keep it offline."
+    />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <title>Lorehaven</title>
+    <script>
+      // Applied before first paint so a dark-preferring reader never sees a
+      // white flash. Mirrors the resolution in src/lib/theme.ts.
+      (function () {
+        try {
+          var stored = localStorage.getItem('lorehaven.theme');
+          var prefersDark =
+            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var resolved = !stored || stored === 'system' ? (prefersDark ? 'after-hours' : 'reading-room') : stored;
+          document.documentElement.dataset.theme = resolved;
+        } catch (error) {
+          document.documentElement.dataset.theme = 'reading-room';
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

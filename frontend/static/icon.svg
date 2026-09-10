@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Lorehaven">
+  <!--
+    The mark: an open book whose central negative space is an archway —
+    "a haven for stories". One colour, no fine detail, legible at favicon size.
+    The spine line and the outer arch carry the identity; the inner opening is
+    cut from the page shapes so it reads at 16px.
+  -->
+  <g fill="none" stroke="#245C46" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Open book: two leaves meeting at the spine. -->
+    <path d="M32 20v28" />
+    <path d="M32 20c-5-3.4-11.5-5-22-5v28c10.5 0 17 1.6 22 5" />
+    <path d="M32 20c5-3.4 11.5-5 22-5v28c-10.5 0-17 1.6-22 5" />
+  </g>
+  <!-- The archway: negative space suggested by an inner arch over the spine. -->
+  <path
+    d="M24 41v-8a8 8 0 0 1 16 0v8"
+    fill="none"
+    stroke="#955333"
+    stroke-width="3"
+    stroke-linecap="round"
+  />
+</svg>

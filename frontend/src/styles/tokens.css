@@ -1,0 +1,176 @@
+/*
+ * Lorehaven design tokens — "The Reading Room".
+ *
+ * docs/design/THEME.md is the specification; this file is its implementation.
+ * Component CSS must reference these variables rather than literal values, so
+ * that marketplace themes and user presets can retarget the same component
+ * system (spec §20, "Themes") without forking components.
+ *
+ * Three polish presets ship: Reading Room (default), After Hours, Clear Day.
+ * Reader appearance is a *separate* scale (`--reader-*`), because a reader may
+ * want a dark interface with a warm-paper reading page.
+ */
+
+:root {
+  /* ---- typography ------------------------------------------------------ */
+  --font-interface: 'Source Sans 3', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-heading: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --font-reader: 'Literata', Georgia, 'Iowan Old Style', serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Mono', Menlo, monospace;
+
+  --text-xs: 0.78rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2.25rem;
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.8;
+
+  /* ---- spacing (generous, per the theme) ------------------------------- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-pill: 999px;
+
+  --border-width: 1px;
+  --content-width: 68rem;
+  --measure: 34rem;
+
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+}
+
+/* ---- Reading Room: warm paper and evergreen (default) ------------------ */
+:root,
+[data-theme='reading-room'] {
+  --color-bg: #f6f3ec;
+  --color-surface: #fffdfa;
+  --color-surface-raised: #ffffff;
+  --color-text: #202b25;
+  --color-muted: #59645c;
+  --color-primary: #245c46;
+  --color-primary-hover: #1d4c3a;
+  --color-primary-contrast: #fbfaf6;
+  --color-accent: #955333;
+  --color-accent-soft: #f0e3d9;
+  --color-border: #d9dfd5;
+  --color-border-strong: #b9c4b7;
+  --color-danger: #8c2f27;
+  --color-success: #2c6046;
+  --color-warning: #8a5a15;
+  --color-focus: #245c46;
+  --color-overlay: rgb(20 28 24 / 55%);
+
+  --shadow-sm: 0 1px 2px rgb(32 43 37 / 8%);
+  --shadow-md: 0 4px 16px rgb(32 43 37 / 10%);
+  --shadow-lg: 0 12px 40px rgb(32 43 37 / 16%);
+}
+
+/* ---- After Hours: forest charcoal and pale ivory ----------------------- */
+[data-theme='after-hours'] {
+  --color-bg: #151c19;
+  --color-surface: #1e2923;
+  --color-surface-raised: #24312a;
+  --color-text: #eeefe7;
+  --color-muted: #adb9ae;
+  --color-primary: #9bcbaa;
+  --color-primary-hover: #b3dabf;
+  --color-primary-contrast: #12201a;
+  --color-accent: #d8a17b;
+  --color-accent-soft: #33291f;
+  --color-border: #39483e;
+  --color-border-strong: #4d6053;
+  --color-danger: #e39b93;
+  --color-success: #9bcbaa;
+  --color-warning: #e0b877;
+  --color-focus: #9bcbaa;
+  --color-overlay: rgb(6 10 8 / 65%);
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 30%);
+  --shadow-md: 0 4px 16px rgb(0 0 0 / 35%);
+  --shadow-lg: 0 12px 40px rgb(0 0 0 / 45%);
+
+  color-scheme: dark;
+}
+
+/* ---- Clear Day: neutral white and charcoal ----------------------------- */
+[data-theme='clear-day'] {
+  --color-bg: #ffffff;
+  --color-surface: #fafafa;
+  --color-surface-raised: #ffffff;
+  --color-text: #171717;
+  --color-muted: #595959;
+  --color-primary: #333b38;
+  --color-primary-hover: #222826;
+  --color-primary-contrast: #ffffff;
+  --color-accent: #7a5c46;
+  --color-accent-soft: #f0ebe6;
+  --color-border: #e2e2e2;
+  --color-border-strong: #c6c6c6;
+  --color-danger: #a52a1f;
+  --color-success: #2f6b4f;
+  --color-warning: #8a5a15;
+  --color-focus: #333b38;
+  --color-overlay: rgb(0 0 0 / 45%);
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 6%);
+  --shadow-md: 0 4px 16px rgb(0 0 0 / 8%);
+  --shadow-lg: 0 12px 40px rgb(0 0 0 / 12%);
+}
+
+/*
+ * Reader presets. Deliberately independent of the site theme: spec §9 and the
+ * theme doc both require separating "how the site looks" from "how the page
+ * I am reading looks".
+ */
+[data-reader='paper'] {
+  --reader-bg: #f8f4ea;
+  --reader-text: #2a2a24;
+  --reader-muted: #5f5a4e;
+  --reader-link: #245c46;
+  --reader-rule: #ddd4c2;
+}
+
+[data-reader='white'] {
+  --reader-bg: #ffffff;
+  --reader-text: #1a1a1a;
+  --reader-muted: #5c5c5c;
+  --reader-link: #1f4ed8;
+  --reader-rule: #e4e4e4;
+}
+
+[data-reader='sepia'] {
+  --reader-bg: #f2e6d0;
+  --reader-text: #3a2f22;
+  --reader-muted: #6b5d49;
+  --reader-link: #7a4a1d;
+  --reader-rule: #d8c6a5;
+}
+
+[data-reader='dark'] {
+  --reader-bg: #16181a;
+  --reader-text: #e6e6e3;
+  --reader-muted: #a5a5a0;
+  --reader-link: #9bcbaa;
+  --reader-rule: #2c3033;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+  }
+}
