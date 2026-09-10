@@ -5,9 +5,13 @@ built**. `docs/spec.md` says what the platform must do; these files say what to
 type, in what order, and how to check it. They are written for someone who
 knows Rust and Svelte but has never seen this repository.
 
-Milestones 0–5 are done. `docs/verification.md` records the evidence for each
-claim, and `docs/requirements.csv` records every requirement with a status.
-Both are updated **as part of** finishing a milestone, never afterwards.
+Milestones 0–5 are done and Milestone 6 is **partly built** — its machinery is
+finished and its pages are not, so the work below is what remains of it.
+`docs/verification.md` records the evidence for each claim, and
+`docs/requirements.csv` records every requirement with a status. Both are updated
+**as part of** finishing a milestone, never afterwards.
+`docs/plans/milestone-06-imports.md` records what M6 actually became, where that
+differs from the plan below, and what is left before it can be tagged.
 
 ---
 

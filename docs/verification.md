@@ -26,7 +26,7 @@ the result. Where a claim could only be checked by hand, it says so.
 | Field | Value |
 |---|---|
 | Date of last verification | 2026-09-10 |
-| Commit | tag `v0.06-jobs` (Milestone 5). Previous checkpoints: `v0.05-reader` (Milestone 4), `v0.04-publishing` (Milestone 3), `v0.03-identity` (Milestone 2), `v0.01-running-app` (Milestone 0). |
+| Commit | Milestone 6 in progress on `master`; last tag `v0.06-jobs` (Milestone 5). Previous checkpoints: `v0.05-reader` (Milestone 4), `v0.04-publishing` (Milestone 3), `v0.03-identity` (Milestone 2), `v0.01-running-app` (Milestone 0). Milestone 6 is **not** tagged: its import and credential machinery is built and tested, and its pages are not. |
 | Environment | Linux, Rust 1.98.0, Node 26.8.1, SQLite 3.53.4 |
 | PostgreSQL available | **No** |
 
@@ -489,6 +489,76 @@ Two defects, both fixed rather than written around:
 
 ---
 
+## Milestone 6 — Imports, source credentials, batches and preservation
+
+Milestone 6 is **partly built**: the import framework, the safe fetcher, the
+first adapter, the sanitizer and the credential surface are implemented and
+tested; the pages that would let a reader use them are not, so no journey is
+recorded below. The rows in `docs/requirements.csv` say the same thing, one by
+one.
+
+| # | Acceptance criterion | Status | Evidence |
+|---|---|---|---|
+| 1 | A preview reports what an import would do and writes nothing | Implemented and locally tested | `milestone_6.rs::a_preview_stores_nothing` — the preview returns the parsed title, `chapter_count: 3`, `plan: create` and `is_new: true`, and neither account involved has a library item afterwards. The route builds its registry from application state, so the same parser the import uses answers it. |
+| 2 | An import is queued, answers at once, and the request does not do the work | Implemented and locally tested | `milestone_6.rs::an_import_is_queued_and_does_not_block_the_request` — `202` with `state: queued`, a `queued` job whose kind is `import`, no chapters and no library item afterwards. |
+| 3 | No credential and no URL is in the job payload | Implemented and locally tested | The same test asserts the payload is exactly `{"import_job_id": …}` and does not contain the source's domain. Spec §11.6: a URL can carry a private token, so it lives in the import row and not in the queue. |
+| 4 | An import stores a work's chapters, with their bytes readable | Implemented and locally tested | `milestone_6.rs::an_import_stores_a_works_chapters` — three chapters, each `stored`, each blob readable from `BlobStore`, none containing a `<script` tag, and the report reading `plan: create`, `stored: 3`, `failed: 0`. |
+| 5 | Imported metadata is the source's, not the moment of import | Implemented and locally tested | The same test asserts `source_updated_at` is present; `crates/scrapers/tests/ao3_fixtures.rs` asserts the published and last-changed dates come from the stats block rather than from the clock, against a recorded page. |
+| 6 | A source that is switched off costs no request at all | Implemented and locally tested | `milestone_6.rs::the_adapter_is_not_called_when_the_source_is_disabled` counts calls: zero previews, zero bulk fetches, zero single-chapter fetches, and the import is `failed` with `source_disabled` and the operator's own reason in the report. `a_disabled_source_is_refused_with_its_reason` covers the message. |
+| 7 | A missing or expired credential is refused before anything is fetched, and not retried | Implemented and locally tested | `a_missing_credential_is_refused_before_any_fetch` (fatal, `attempts: 1`, zero previews) and `an_expired_credential_is_reported_before_the_import_starts` (the expiry date is in the reader's message, the credential row is marked `expired`, and nothing was fetched). Spec §11.6: do not repeatedly retry authentication failures. |
+| 8 | A retry re-reads the chapters that failed and nothing else | Implemented and locally tested | `a_failed_chapter_is_retried_without_refetching_the_rest` — the record is seeded the way an abandoned attempt leaves it (two stored, one failed), and the assertion is on *which ordinals the adapter was asked for* (`[2]`) with zero bulk fetches, plus every chapter's checksum unchanged. |
+| 9 | Re-importing the same work updates it rather than duplicating it | Implemented and locally tested | `a_chapter_already_held_is_not_stored_again` — a second import of the same URL leaves one library item, and each chapter row still names the blob it already had. |
+| 10 | A dry run reports the plan and stores no chapters | Implemented and locally tested | `a_dry_run_reports_without_storing_chapters` — `completed`, report `dry_run: true`, zero chapter rows. |
+| 11 | A transient source failure leaves the queue holding the retry | Implemented and locally tested | `a_transient_fetch_failure_stays_queued_for_retry` — the job returns to `queued` with `attempts: 1` and the reason recorded, the import is not marked completed, and nothing was stored. |
+| 12 | A credential is encrypted, pseud-scoped and never returned | Implemented and locally tested | `a_credential_round_trips_through_the_encrypted_store` — the value opens with the instance key, is absent from the database's files *including the write-ahead log*, and the row's id is present in them (so the test is looking where the data is). `a_credential_for_a_source_that_needs_none_is_refused` — the refusal does not echo the secret, and the list endpoint returns none. |
+| 13 | Deleting a credential revokes the value and keeps what was imported | Implemented and locally tested | The round-trip test deletes the credential, finds the secret gone, and a second delete finds nothing — the deletion is scoped to the credential. Spec §11.6: already-imported copies are untouched. |
+| 14 | One reader's imports are not another's | Implemented and locally tested | `one_readers_imports_are_not_anothers` — a second account's list is empty and asking for the first account's import by id is a `404`. |
+| 15 | An address this build cannot read is refused rather than queued | Implemented and locally tested | `an_unknown_address_is_refused_before_it_is_queued` — a malformed URL, an `ftp:` URL and an unknown domain are each `422`, no import job is queued, and no item is created. Only `http` and `https` are accepted, checked in the route as well as in the fetcher. |
+| 16 | The catalogue reports what each adapter can do | Implemented and locally tested | `the_catalogue_reports_capabilities` — `GET /imports/sources` reports `known`, `chapters`, `per_chapter_fetch` and `authentication: none` for AO3. Spec §11.1: capability absence must be visible. |
+| 17 | The adapter parses the real site's markup, not a memory of it | Implemented and locally tested | `crates/scrapers/tests/ao3_fixtures.rs` (9 tests) over four pages recorded from the live site on 2026-09-10: metadata with tags and warnings, the chapter list, whole-work chapters, an ongoing work, and the site's own not-found page. The recorded pages are committed verbatim and their provenance is in `tests/fixtures/README.md`. |
+| 18 | Chapter bodies are sanitised on the way in | Implemented and locally tested | `crates/scrapers/src/sanitize.rs` unit tests: `script`/`style`/`iframe`/`img` dropped, an allow-list of tags kept, attributes dropped except an absolute `http(s)` link, entities resolved and re-escaped, and a `<script>` inside a stored chapter in `milestone_6.rs::an_import_stores_a_works_chapters`. |
+| 19 | A user-supplied URL cannot make the server read its own network | Implemented and locally tested | `crates/scrapers/src/safety.rs` unit tests — loopback, link-local, CGNAT, unique-local and metadata addresses refused; a hostname whose resolution is private refused; every redirect hop re-validated; the host allow-list taken from the adapter; the credential header sent only to the source's own host. |
+| 20 | Pages for importing and for the library | **Not built** | No `/import` page and no imported-items list. The API behind both exists. Recorded as `M6-09` in `docs/requirements.csv`. |
+| 21 | Preservation imports behind an approved batch | **Not built, deliberately** | Milestone 17 owns it (spec §14.5, and the plan's own fifth pitfall: do not build it by waving a flag in M6). The destination field exists and accepts only the reader's own library. Recorded as `M6-10`. |
+| 22 | A source's health is tracked and a bad source is paused automatically | **Partly built** | The column, the last-check date and the operator-set pause are honoured (a paused source costs no request). Nothing moves a source's health on its own after repeated failures, and the spec §11.8 distinctions are classified in the import's error mapping without being written back. Recorded as `M6-08`. |
+
+Commands actually run, with their result:
+
+```text
+cargo test --workspace            375 passed, 0 failed across 16 test binaries
+                                  (milestone_6.rs contributes 17; the scrapers
+                                  crate contributes 67 in-crate unit tests plus
+                                  9 fixture tests)
+cargo clippy --workspace --all-targets --offline -- -D warnings   clean
+cargo fmt --all -- --check        clean
+```
+
+Three defects the acceptance tests found, each recorded here because each was a
+real bug rather than a broken assertion:
+
+1. **`secrets.key_id` is a foreign key to `encryption_keys`, and nothing had ever
+   written to that table.** Milestone 5 created both tables and shipped a store
+   with no caller, so the first code to store a secret had its write refused by
+   the database. `ensure_encryption_key` now registers a key the first time it
+   encrypts anything, which is also what makes a rotation traceable.
+2. **A credential could not be stored in two writes with the row first.**
+   `source_credentials.secret_id` is `NOT NULL REFERENCES secrets(id)`, so a row
+   naming a secret that does not exist is refused — correctly. The secret is now
+   written first and bound to the credential's natural key (pseud, source,
+   label) rather than to a row id that does not exist yet.
+3. **Deleting a credential left its ciphertext in the database.** The schema
+   cascades `secrets` to `source_credentials`; the repository now deletes the
+   secret and lets the cascade take the row, so revoking a credential cannot
+   leave a reader's source password behind because a caller forgot a second
+   step.
+
+One parser defect was found the same way and fixed: a completed AO3 work states
+`Completed:` where an unfinished one states `Updated:`, and both are the
+source's last-change date. Reading only `Updated:` left every finished work with
+no revision date at all — which is worse than a null, because it looks like the
+source never said, and an update check would decide there was nothing to compare
+against.
+
 ## Known limitations and open risks
 
 1. **PostgreSQL has never been executed.** Every PostgreSQL statement is
@@ -542,19 +612,44 @@ Two defects, both fixed rather than written around:
     16 and the search index with Milestone 9. An instance's pending count will
     therefore stay above zero, and that is the honest state rather than a
     delivery that did not happen.
-11. **Chapter deletion and ordering are one-way.** Deleting a chapter
+11. **The import path has no page, and one adapter.** A reader cannot import
+    anything through the interface: the routes exist, are tested and are not
+    called by any component, so the plan's journey — paste a URL, see the
+    preview, confirm, watch it fetch — cannot be walked. Of the source family
+    list, the Archive-software family is built and the other nine tier-1 sources
+    are not. The importer is therefore reachable and real from the API and
+    invisible from the browser.
+12. **A source's health is reported, not maintained.** An operator can pause a
+    source and the importer will honour it without making a single request; what
+    nothing does is notice that a source has started failing and pause it, or
+    record repeated failures against the source row. The failure classes spec
+    §11.8 asks to distinguish are distinguished in the message a reader sees and
+    are not written back to the catalogue.
+13. **Nothing has been run against PostgreSQL, and nothing is deployed.**
+    Unchanged from Milestone 5 and still the largest untested surface: every
+    migration is written twice and only the SQLite half has ever been executed,
+    and the import's keyset cursors use row-value comparison that SQLite and
+    PostgreSQL share but which no test has executed on the second engine.
+14. **Chapter deletion and ordering are one-way.** Deleting a chapter
     soft-deletes it and reordering rewrites position keys, but no page offers
     either operation, and there is no undo. Both routes exist and are tested
     only through the repository.
 
 ## What was *not* done, stated plainly
 
-Milestones 6 through 18 are **not implemented**. Milestone 5 is complete for the
-criteria it states, with four pieces of it deliberately deferred and recorded in
-`docs/plans/milestone-05-jobs.md`: `job_leases` is not a separate table (the
+Milestones 7 through 18 are **not implemented**. Milestone 6 is **partly built**:
+the import framework, the safe fetcher, one source adapter, the chapter
+sanitiser, the credential surface and the routes behind them are implemented and
+tested; its two pages are not built, so the plan's import journey cannot be
+walked by a reader yet, and of the sources it was to cover one family is done.
+Eleven rows in `docs/requirements.csv` state the position one obligation at a
+time. Milestone 5 is complete for the criteria it states, with four pieces of it
+deliberately deferred and recorded in `docs/plans/milestone-05-jobs.md`: `job_leases` is not a separate table (the
 lease is two columns on `jobs`, renewed by the heartbeat); the source revision
-cache is not in migration 0005 because nothing populates it until Milestone 6
-exists; storage quota *enforcement* is not here, because a quota needs a limit
+cache is a table in migration 0005 that nothing populates, and Milestone 6 did
+not populate it either — an import re-reads the source's page rather than
+trusting a cached revision, so the cache is still unbuilt and is tracked as `M6-12`,
+still open, with nothing claiming it; storage quota *enforcement* is not here, because a quota needs a limit
 and an account to hang it on, which arrive with Milestone 7's export limits and
 Milestone 17's storage view; and the encrypted-secret store ships with no caller,
 because Milestone 6 is what puts source credentials in it (tracked as `M5-03`).
