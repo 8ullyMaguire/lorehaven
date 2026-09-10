@@ -38,7 +38,10 @@ struct ProgressRow {
 impl ProgressRow {
     fn decode(self) -> ReadingPosition {
         ReadingPosition {
-            revision: self.content_revision.as_deref().and_then(|r| r.parse().ok()),
+            revision: self
+                .content_revision
+                .as_deref()
+                .and_then(|r| r.parse().ok()),
             anchor: self.anchor,
             fraction: u16::try_from(self.position_permille).unwrap_or(0),
             device: self.device_id,
@@ -319,8 +322,7 @@ pub async fn history_for(
 ) -> Result<Vec<HistoryRow>> {
     let sql = sql_owned(
         db,
-        format!(
-            "SELECT h.id AS id, h.subject_type AS subject_type,
+        "SELECT h.id AS id, h.subject_type AS subject_type,
                     h.subject_id AS subject_id, h.last_read_at AS last_read_at,
                     h.revision_seen AS revision_seen,
                     COALESCE(w.title, '') AS title,
@@ -335,9 +337,8 @@ pub async fn history_for(
               WHERE h.account_id = ? AND h.pseud_id = ?
               ORDER BY h.last_read_at DESC
               LIMIT ?"
-        ),
-        format!(
-            "SELECT h.id::text AS id, h.subject_type,
+            .to_string(),
+        "SELECT h.id::text AS id, h.subject_type,
                     h.subject_id::text AS subject_id, h.last_read_at,
                     h.revision_seen::text AS revision_seen,
                     COALESCE(w.title, '') AS title,
@@ -352,7 +353,7 @@ pub async fn history_for(
               WHERE h.account_id = ?::uuid AND h.pseud_id = ?::uuid
               ORDER BY h.last_read_at DESC
               LIMIT ?"
-        ),
+            .to_string(),
     );
 
     let rows: Vec<HistoryRow> = match db.backend() {
