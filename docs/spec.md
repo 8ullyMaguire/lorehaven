@@ -1262,9 +1262,25 @@ Seasonal events run for 4–8 weeks with boosted multipliers (1.5x completion cr
 | Wishlist fulfillment farming | Requester must confirm fulfillment matches. |
 | Leaderboard manipulation | Unique-account deduplication. |
 
+### 9.7.9 Reading goals
+
+Reading goals remain private, opt-in, and grant nothing. They are a personal
+progress display, not a source of credits.
+
+Users may set:
+
+- Daily or weekly reading target (chapters, words, or works).
+- Progress display on personal dashboard.
+
+The goal display shows current progress toward the user's chosen target.
+Missing a target is displayed as neutral information, not failure, and meeting
+one earns no credit bonus: the daily reading credit in 9.7.2 is unaffected by
+whether a goal exists, so a goal can never become a way to farm credits.
+
 **Acceptance**
 
 - Daily login credits award once per calendar day.
+- Reading goals are private, opt-in, and grant nothing.
 - Action credits respect daily caps.
 - Completion credits enforce minimum time-on-page.
 - Author credits aggregate silently with quality and demand multipliers.
@@ -2302,7 +2318,7 @@ Represent variants through a shared configurable workflow.
 
 **Finished-work reading challenges:** "Read 5 completed fics under 10k words this month." Encourages completed-work reading.
 
-Reading challenge completion is private and cosmetic. No XP, credits, or trust rewards.
+Reading challenge completion is private by default and grants a recurring badge plus its credit bonus (9.7.6). It produces no public ranking, no XP, and no trust reward.
 
 ## 18.3 Mentorship and beta-reading
 
@@ -2622,7 +2638,7 @@ Quotes cover batch imports, device delivery, conversion, translation, AI feature
 
 **Priority job costs remain unchanged from previous spec.**
 
-Do not reward raw reading surveillance, posting volume, sanctions issued, positive star ratings, or maintaining streaks.
+Reading and import activity earn credits under 9.7, but the metric is never raw volume: completion credits require time-on-page proportional to word count, action credits carry per-action daily caps, and streak length earns no multiplier. Do not reward posting volume, sanctions issued, positive star ratings, or streak length.
 
 | Priority job | Credits |
 |---|---:|
@@ -3464,7 +3480,7 @@ The tutorial, contextual help, API documentation, and operator documentation des
 - **Credentials as an SSRF exception.** Internal-network integrations require separate configuration.
 - **Popularity-based moderation verdicts.** Process feedback is advisory.
 - **Invasive or exclusionary bot detection.** No default fingerprinting, blanket headless-browser bans, compulsory JavaScript for reading.
-- **Coercive reading analytics.** No mandatory streaks, loss warnings, public reading leaderboards, or rewards tied to reading behavior.
+- **Coercive reading analytics.** No mandatory streaks, no guilt-framed loss warnings, no leaderboard category ranking reading volume or streak length, and no credit multiplier tied to streak length.
 - **Automatic publication of AI outputs.** All translations, suggestions, and generated content require review.
 - **Purchased visibility or authority.** No paid ranking, trust, or moderation.
 - **Silent public visibility of hidden comments.** If a comment is hidden from the author, it is hidden from the public work page.
