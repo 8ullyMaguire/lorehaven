@@ -75,6 +75,36 @@ fn fatal(message: impl Into<String>) -> HandlerError {
     HandlerError::Fatal(message.into())
 }
 
+/// Recompute the source catalogue's health from the import history (spec §11.8).
+///
+/// Called by the worker after every import attempt and by an operator route on
+/// demand. It sweeps *every* source rather than the one just touched, for two
+/// reasons: the answer for a source nobody has tried is "no change", so the
+/// extra work is one aggregate query, and a sweep that only looked at the source
+/// that happened to run would never notice a source that has stopped being used
+/// at all — which is precisely the source an operator wants to hear about.
+///
+/// The job id is taken rather than the source key because it is what the queue
+/// has, and because a job whose import row has vanished has nothing to
+/// attribute: that case returns empty rather than sweeping on a phantom.
+///
+/// # Errors
+/// A database failure. The caller decides what that means: the worker logs it
+/// and keeps the import's own outcome, because a health row is not worth
+/// retrying a work that was fetched correctly.
+pub async fn settle_source_health(
+    state: &AppState,
+    import_job_id: &str,
+) -> Result<Vec<imports::SourceHealthChange>> {
+    if imports::get_import_job(state.db(), import_job_id)
+        .await?
+        .is_none()
+    {
+        return Ok(Vec::new());
+    }
+    imports::recompute_source_health(state.db(), imports::HEALTH_WINDOW_DAYS).await
+}
+
 /// Carry out one queued import.
 ///
 /// # Errors

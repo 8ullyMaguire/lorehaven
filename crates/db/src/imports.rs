@@ -395,6 +395,160 @@ pub async fn set_source_health(db: &Database, key: &str, health: &str) -> Result
     Ok(())
 }
 
+/// What one source's recent imports say about it, and what that changed.
+///
+/// Returned so an operator (and a test) can see *why* a source moved rather
+/// than only that it moved. A sweep that silently rewrites health is a sweep
+/// nobody can debug.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceHealthChange {
+    /// The source's key.
+    pub key: String,
+    /// What the row said before.
+    pub previous: String,
+    /// What it says now. Equal to `previous` when nothing changed.
+    pub current: String,
+    /// Finished imports that succeeded inside the window.
+    pub completed: i64,
+    /// Finished imports that failed inside the window.
+    pub failed: i64,
+}
+
+/// How far back the sweep looks.
+///
+/// Seven days, because spec §11.8's question is "is this source working *now*".
+/// A failure a month ago is history, and a source that has been broken for a
+/// month has been failing recently too.
+pub const HEALTH_WINDOW_DAYS: i64 = 7;
+
+/// How many failures, with no success at all, make a source unavailable.
+///
+/// Three rather than one, because one failure is a page that moved and a reader
+/// who pasted a bad URL — the source's health is a claim about the *source*, and
+/// a single attempt is evidence about one attempt.
+pub const FAILURES_TO_UNAVAILABLE: i64 = 3;
+
+/// Recompute every source's health from the outcome of its recent imports
+/// (spec §11.8).
+///
+/// # The rules, and why each is what it is
+///
+/// * **`paused` is never derived and never overwritten.** A pause is an
+///   operator's decision, and a sweep that could clear one would be a sweep
+///   that silently un-pauses a source somebody deliberately switched off.
+/// * **A source with no finished imports in the window keeps what it had.**
+///   Silence is not evidence, and `unknown` is the honest state for a source
+///   nobody has tried.
+/// * **One success with no failures is `healthy`.** One failure alongside
+///   successes is `degraded`: the source works and sometimes does not, which is
+///   exactly what a reader should be told.
+/// * **Three failures with no success is `unavailable`**, and an import into an
+///   unavailable source is refused before it is queued rather than queued and
+///   failed.
+/// * **A cancelled import counts as neither.** The reader changed their mind,
+///   which says nothing about the source.
+pub async fn recompute_source_health(
+    db: &Database,
+    window_days: i64,
+) -> Result<Vec<SourceHealthChange>> {
+    let sources = list_sources(db).await?;
+    let since = window_start(window_days);
+    let mut changes = Vec::new();
+
+    for source in sources {
+        // A pause is a decision, not an observation.
+        if source.health == "paused" {
+            continue;
+        }
+        let (completed, failed) = finished_import_counts(db, &source.key, &since).await?;
+        if completed == 0 && failed == 0 {
+            // Nothing finished: no evidence, so no change. `last_checked_at` is
+            // deliberately not touched either — it records when the source was
+            // actually read, and this sweep read nothing.
+            continue;
+        }
+        let current = if failed == 0 {
+            "healthy".to_owned()
+        } else if completed == 0 && failed >= FAILURES_TO_UNAVAILABLE {
+            "unavailable".to_owned()
+        } else {
+            "degraded".to_owned()
+        };
+        if current != source.health {
+            set_source_health(db, &source.key, &current).await?;
+        }
+        changes.push(SourceHealthChange {
+            key: source.key,
+            previous: source.health,
+            current,
+            completed,
+            failed,
+        });
+    }
+
+    Ok(changes)
+}
+
+/// The RFC 3339 instant `window_days` ago, in the same shape the columns hold.
+fn window_start(window_days: i64) -> String {
+    use time::{Duration, OffsetDateTime};
+    let now = OffsetDateTime::now_utc();
+    let then = now - Duration::days(window_days);
+    then.format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| now_rfc3339())
+}
+
+/// How many of a source's imports finished, by outcome, since an instant.
+///
+/// `cancelled` is excluded rather than counted as a failure: a reader who
+/// stopped an import has said something about the import, not about the source.
+async fn finished_import_counts(
+    db: &Database,
+    source_key: &str,
+    since: &str,
+) -> Result<(i64, i64)> {
+    let sql = db.sql(
+        "SELECT
+             SUM(CASE WHEN state = 'completed' THEN 1 ELSE 0 END) AS completed,
+             SUM(CASE WHEN state = 'failed'    THEN 1 ELSE 0 END) AS failed
+         FROM import_jobs
+         WHERE source_key = ? AND updated_at >= ?
+           AND state IN ('completed', 'failed')",
+        "SELECT
+             COALESCE(SUM(CASE WHEN state = 'completed' THEN 1 ELSE 0 END), 0)::BIGINT AS completed,
+             COALESCE(SUM(CASE WHEN state = 'failed'    THEN 1 ELSE 0 END), 0)::BIGINT AS failed
+         FROM import_jobs
+         WHERE source_key = $1 AND updated_at >= $2
+           AND state IN ('completed', 'failed')",
+    );
+
+    #[derive(FromRow)]
+    struct Counts {
+        completed: Option<i64>,
+        failed: Option<i64>,
+    }
+
+    // A parameter is bound once per dialect, so the binds are written per arm
+    // rather than through `run!`.
+    let row: Counts = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(source_key)
+                .bind(since)
+                .fetch_one(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(source_key)
+                .bind(since)
+                .fetch_one(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok((row.completed.unwrap_or(0), row.failed.unwrap_or(0)))
+}
+
 /// One source by key, or `None` when this instance has never heard of it.
 ///
 /// A key that is not a row is not an error: the catalogue is written by the

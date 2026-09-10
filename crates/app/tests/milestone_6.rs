@@ -1452,3 +1452,202 @@ async fn the_retry_route_queues_only_when_something_failed() {
 
     harness.cleanup().await;
 }
+
+// ---------------------------------------------------------------------------
+// Runtime source health (spec §11.8)
+//
+// The catalogue's health column is a promise to the reader: a source that has
+// stopped working should not be offered, and an import into one should not be
+// queued to fail. These tests drive the sweep the worker runs after every
+// import, and the refusal the routes apply.
+// ---------------------------------------------------------------------------
+
+/// Record a finished import for the source, in the state given.
+///
+/// It goes through the same two rows the route creates, because the sweep reads
+/// the import history and a test that fabricated history the routes cannot
+/// produce would prove nothing about the sweep.
+async fn finished_import(
+    harness: &Harness,
+    account: AccountId,
+    pseud: &str,
+    state: &str,
+) -> String {
+    let id = queue_import(harness, account, pseud, false).await;
+    imports::set_import_state(&harness.db, &id, state, None, None)
+        .await
+        .expect("finish the import");
+    id
+}
+
+async fn source_health(harness: &Harness) -> String {
+    imports::find_source(&harness.db, SOURCE)
+        .await
+        .expect("find the source")
+        .expect("the source has a row")
+        .health
+}
+
+/// Three failures with no success is `unavailable`, and an import into it is
+/// refused at the API rather than queued and failed.
+#[tokio::test]
+async fn repeated_failures_make_a_source_unavailable_and_imports_are_refused() {
+    let harness = Harness::new("health-unavailable").await;
+    let (_client, account, pseud) = signed_in(&harness, "unlucky@example.org", "unlucky").await;
+
+    for _ in 0..imports::FAILURES_TO_UNAVAILABLE {
+        finished_import(&harness, account, &pseud, "failed").await;
+    }
+
+    let changes = imports::recompute_source_health(&harness.db, imports::HEALTH_WINDOW_DAYS)
+        .await
+        .expect("sweep");
+    let change = changes
+        .iter()
+        .find(|change| change.key == SOURCE)
+        .expect("the source was considered");
+    assert_eq!(change.previous, "unknown");
+    assert_eq!(change.current, "unavailable");
+    assert_eq!(change.failed, imports::FAILURES_TO_UNAVAILABLE);
+    assert_eq!(
+        change.completed, 0,
+        "no import of this source has succeeded"
+    );
+    assert_eq!(source_health(&harness).await, "unavailable");
+
+    // The refusal is a refusal, not a queued job: `preview` is where a reader
+    // would have found out anyway, and the answer arrives without a request to
+    // a source the catalogue says is not working.
+    let mut http = Client::new(server::build_router(
+        harness.state_with(FixtureArchive::new()),
+    ));
+    register(&mut http, "unlucky2@example.org", "unlucky2").await;
+    let (status, body) = http
+        .post("/api/v1/imports/preview", json!({ "url": WORK_URL }))
+        .await;
+    assert_ne!(
+        status,
+        StatusCode::OK,
+        "an unavailable source was previewed: {body}"
+    );
+    assert!(
+        body.to_string().contains("unavailable") || body.to_string().contains("failed"),
+        "the refusal says why: {body}"
+    );
+
+    harness.cleanup().await;
+}
+
+/// A source that works and sometimes does not is `degraded`, not unavailable.
+///
+/// The distinction is the reader's: unavailable means "do not bother today",
+/// and a source with recent successes does not deserve that.
+#[tokio::test]
+async fn one_success_among_failures_is_degraded_not_unavailable() {
+    let harness = Harness::new("health-degraded").await;
+    let (_client, account, pseud) = signed_in(&harness, "mixed@example.org", "mixed").await;
+
+    finished_import(&harness, account, &pseud, "completed").await;
+    for _ in 0..4 {
+        finished_import(&harness, account, &pseud, "failed").await;
+    }
+
+    imports::recompute_source_health(&harness.db, imports::HEALTH_WINDOW_DAYS)
+        .await
+        .expect("sweep");
+    assert_eq!(
+        source_health(&harness).await,
+        "degraded",
+        "four failures and a success is a source that mostly works"
+    );
+
+    harness.cleanup().await;
+}
+
+/// A cancellation says something about the reader, not about the source.
+#[tokio::test]
+async fn a_cancelled_import_is_neither_a_success_nor_a_failure() {
+    let harness = Harness::new("health-cancelled").await;
+    let (_client, account, pseud) = signed_in(&harness, "fickle@example.org", "fickle").await;
+
+    for _ in 0..5 {
+        finished_import(&harness, account, &pseud, "cancelled").await;
+    }
+
+    let changes = imports::recompute_source_health(&harness.db, imports::HEALTH_WINDOW_DAYS)
+        .await
+        .expect("sweep");
+    assert!(
+        changes.iter().all(|change| change.key != SOURCE),
+        "five cancellations are not evidence about the source: {changes:?}"
+    );
+    assert_eq!(source_health(&harness).await, "unknown");
+
+    harness.cleanup().await;
+}
+
+/// A source nobody has tried keeps whatever it had. Silence is not evidence.
+#[tokio::test]
+async fn a_source_with_no_finished_imports_is_left_alone() {
+    let harness = Harness::new("health-untried").await;
+
+    let changes = imports::recompute_source_health(&harness.db, imports::HEALTH_WINDOW_DAYS)
+        .await
+        .expect("sweep");
+    assert!(changes.is_empty(), "nothing to report: {changes:?}");
+    assert_eq!(source_health(&harness).await, "unknown");
+
+    harness.cleanup().await;
+}
+
+/// A pause is an operator's decision, and the sweep is not allowed to undo it.
+///
+/// This is the test that matters most in this group: a sweep that could clear a
+/// pause would silently re-enable a source somebody switched off on purpose,
+/// and the operator's own reason would still be sitting on the row looking
+/// current.
+#[tokio::test]
+async fn a_sweep_never_clears_an_operators_pause() {
+    let harness = Harness::new("health-paused").await;
+    let (_client, account, pseud) = signed_in(&harness, "paused@example.org", "paused").await;
+
+    imports::set_source_health(&harness.db, SOURCE, "paused")
+        .await
+        .expect("pause the source");
+    for _ in 0..5 {
+        finished_import(&harness, account, &pseud, "completed").await;
+    }
+
+    let changes = imports::recompute_source_health(&harness.db, imports::HEALTH_WINDOW_DAYS)
+        .await
+        .expect("sweep");
+    assert!(
+        changes.iter().all(|change| change.key != SOURCE),
+        "a paused source is not the sweep's to change: {changes:?}"
+    );
+    assert_eq!(
+        source_health(&harness).await,
+        "paused",
+        "five successes must not un-pause a source an operator switched off"
+    );
+
+    harness.cleanup().await;
+}
+
+/// The worker sweeps after it runs an import, so health keeps itself current
+/// without anybody asking.
+#[tokio::test]
+async fn running_an_import_updates_the_sources_health() {
+    let harness = Harness::new("health-after-run").await;
+    let (_client, account, pseud) = signed_in(&harness, "runner@example.org", "runner").await;
+
+    let import_id = run_import(&harness, account, &pseud, FixtureArchive::new(), false).await;
+    assert_eq!(import_row(&harness, &import_id).await.state, "completed");
+    assert_eq!(
+        source_health(&harness).await,
+        "healthy",
+        "a successful import is what makes a source healthy"
+    );
+
+    harness.cleanup().await;
+}

@@ -13,9 +13,10 @@
 //! POST   /source-credentials                  store one, encrypted
 //! DELETE /source-credentials/:id              revoke it
 //! POST   /source-credentials/:id/test         check it against the source
+//! POST   /admin/sources/health                operators only; sweep source health
 //! ```
 //!
-//! Four rules this module exists to hold:
+//! Five rules this module exists to hold:
 //!
 //! * **A credential's plaintext never leaves the server.** Every response here
 //!   is built from metadata: a label, a status, a date. There is no code path
@@ -29,6 +30,10 @@
 //!   a source login demonstrates access, not permission to republish.
 //! * **A caller sees their own imports and nobody else's**, so the id on the
 //!   path is never sufficient on its own.
+//! * **A source the catalogue says is not working is refused before it is
+//!   queued.** Spec §11.8's health states are a promise to the reader; a source
+//!   that has failed three times with no success is unavailable, and an import
+//!   into it is a queued job that is certain to fail.
 //!
 //! The preview is the one place a reader's URL reaches the network during a
 //! request. That is deliberate — the alternative is a spinner around an
@@ -75,6 +80,99 @@ pub fn router() -> Router<AppState> {
             axum::routing::delete(delete_credential),
         )
         .route("/source-credentials/{id}/test", post(test_credential))
+}
+
+/// The operator surface for the source catalogue.
+///
+/// Separate from [`router`] because it is gated on configuration rather than on
+/// a session: `config.administration.operator_account_id` names one account, and
+/// a non-operator is answered `404` rather than `403` — confirming that an
+/// operator surface exists is itself a disclosure (spec §11.8, and the same rule
+/// `/admin/jobs` follows).
+pub fn admin_router() -> Router<AppState> {
+    Router::new().route("/admin/sources/health", post(sweep_source_health))
+}
+
+/// Recompute every source's health from the import history.
+///
+/// The sweep runs automatically after each import; this route is how an
+/// operator asks for it without waiting for traffic — after fixing a source,
+/// say, or after a run of failures from a source nobody has retried.
+async fn sweep_source_health(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_operator(&state, &user)?;
+    let changes = imports::recompute_source_health(state.db(), imports::HEALTH_WINDOW_DAYS).await?;
+    Ok(Json(serde_json::json!({
+        "sources_considered": changes.len(),
+        "changes": changes
+            .into_iter()
+            .map(|change| serde_json::json!({
+                "key": change.key,
+                "previous": change.previous,
+                "current": change.current,
+                "completed": change.completed,
+                "failed": change.failed,
+                "changed": change.previous != change.current,
+            }))
+            .collect::<Vec<_>>(),
+    })))
+}
+
+/// Whether this account may use the operator surface.
+///
+/// Duplicated from `jobs.rs` rather than shared: it is nine lines, and a shared
+/// helper would be one more thing to keep in step with the trust level that
+/// replaces it in Milestone 13.
+fn require_operator(state: &AppState, user: &crate::auth::SessionUser) -> ApiResult<()> {
+    let configured = state.config().administration.operator_account_id;
+    if configured == Some(user.account_id) {
+        return Ok(());
+    }
+    tracing::debug!(
+        operator_configured = configured.is_some(),
+        "an operator route was reached by an account that is not the operator"
+    );
+    Err(ApiError(AppError::NotFound { resource: "page" }))
+}
+
+/// Refuse a source the catalogue says cannot be used (spec §11.8).
+///
+/// Two states are refused and they are refused differently, because the reader's
+/// next move is different. A source an operator switched off is a policy the
+/// reader cannot change, so the message carries the operator's own reason. A
+/// source that has failed repeatedly is a fact about the source, so the message
+/// says so and says that trying again later is reasonable.
+async fn refuse_unusable_source(state: &AppState, source_key: &str) -> ApiResult<()> {
+    let Some(source) = imports::find_source(state.db(), source_key).await? else {
+        // No row is not a refusal: a source this build knows but the instance
+        // has not synced yet is usable, and inventing a refusal for it would
+        // make a fresh install unable to import at all.
+        return Ok(());
+    };
+
+    if !source.enabled {
+        let reason = source
+            .disabled_reason
+            .unwrap_or_else(|| "switched off by an operator, with no reason recorded".to_owned());
+        return Err(ApiError(AppError::SourceUnavailable {
+            domain: format!("the {source_key} source is switched off: {reason}"),
+        }));
+    }
+
+    if source.health == "unavailable" {
+        return Err(ApiError(AppError::SourceUnavailable {
+            domain: format!(
+                "the {source_key} source has failed {} times in the last {} days with no success, so it is \
+                 being left alone for now; try again later, or check the source's own page",
+                imports::FAILURES_TO_UNAVAILABLE,
+                imports::HEALTH_WINDOW_DAYS
+            ),
+        }));
+    }
+
+    Ok(())
 }
 
 /// How many rows a page holds.
@@ -216,6 +314,10 @@ async fn preview_import(
             field_errors: Default::default(),
         })
     })?;
+    // A preview is cheap for us and not for the source. Asking one the
+    // catalogue says is unavailable spends a request to learn what the
+    // catalogue already knew.
+    refuse_unusable_source(&state, adapter.key().as_str()).await?;
 
     // The same guard the worker uses. A preview is not a lesser fetch: if this
     // is safe to run later then it is safe to run now, and if it is not, the
@@ -502,6 +604,7 @@ async fn start_import(
         })
     })?;
     let source_key = adapter.key().as_str().to_owned();
+    refuse_unusable_source(&state, &source_key).await?;
 
     // A source that cannot do this is refused here rather than queued and failed
     // later, because a queued job is a promise that the work will be attempted.
