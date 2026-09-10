@@ -118,11 +118,19 @@ impl AgeState {
     }
 
     /// Whether this state is a minor state.
+    ///
+    /// `Restricted` belongs here. It means "we were told this person is below
+    /// the threshold and no authorization workflow exists", which is a minor
+    /// state by construction — omitting it would silently give a restricted
+    /// account the adult defaults for messaging and taste learning.
     #[must_use]
     pub const fn is_minor(self) -> bool {
         matches!(
             self,
-            Self::DeclaredMinor | Self::AuthorizationRequired | Self::AuthorizedUnderPolicy
+            Self::DeclaredMinor
+                | Self::AuthorizationRequired
+                | Self::AuthorizedUnderPolicy
+                | Self::Restricted
         )
     }
 }
@@ -414,5 +422,14 @@ mod tests {
         assert_ne!(AgeState::DeclaredAdult, AgeState::AuthorizedUnderPolicy);
         assert!(AgeState::AuthorizationRequired.is_minor());
         assert!(!AgeState::DeclaredAdult.is_minor());
+    }
+
+    #[test]
+    fn a_restricted_account_is_a_minor_state() {
+        // Restricted means "below the threshold, with no workflow to authorize
+        // it". Treating it as anything other than a minor state would hand a
+        // child the adult defaults for messaging and discovery.
+        assert!(AgeState::Restricted.is_minor());
+        assert!(!AgeState::Restricted.may_participate());
     }
 }

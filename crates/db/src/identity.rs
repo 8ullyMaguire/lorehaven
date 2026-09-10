@@ -93,10 +93,47 @@ pub struct Pseud {
     pub display_name: String,
     /// Free-text biography.
     pub bio: Option<String>,
+    /// Whether the pseud appears in listings and search.
+    pub discoverability: Discoverability,
     /// Creation time, RFC 3339.
     pub created_at: String,
     /// Optimistic-concurrency version.
     pub version: i64,
+}
+
+/// Whether a pseud is discoverable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Discoverability {
+    /// Appears in listings and search.
+    Listed,
+    /// Reachable only by direct link, and not described as existing.
+    Hidden,
+}
+
+impl Discoverability {
+    /// Storage form.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Listed => "listed",
+            Self::Hidden => "hidden",
+        }
+    }
+
+    /// Parse the storage form, defaulting to the non-disclosing value.
+    #[must_use]
+    pub fn parse(raw: &str) -> Self {
+        match raw {
+            "listed" => Self::Listed,
+            _ => Self::Hidden,
+        }
+    }
+
+    /// Whether this pseud may be shown publicly.
+    #[must_use]
+    pub const fn is_listed(self) -> bool {
+        matches!(self, Self::Listed)
+    }
 }
 
 /// The shape every identity query decodes into.
@@ -106,8 +143,18 @@ pub struct Pseud {
 /// in one engine and UUID in the other (see the crate docs and ADR 0004).
 type AccountRow = (String, String, String, String, Option<String>, String, i64);
 
-/// A pseud row: `(id, account_id, handle, display_name, bio, created_at, version)`.
-type PseudRow = (String, String, String, String, Option<String>, String, i64);
+/// A pseud row: `(id, account_id, handle, display_name, bio, discoverability,
+/// created_at, version)`.
+type PseudRow = (
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    String,
+    i64,
+);
 
 /// The owner of a privacy setting.
 #[derive(Debug, Clone, Copy)]
@@ -350,9 +397,9 @@ pub async fn create_pseud(
 /// Find a pseud by handle, case-insensitively.
 pub async fn find_pseud_by_handle(db: &Database, handle: &str) -> Result<Option<Pseud>> {
     let sql = db.sql(
-        "SELECT id, account_id, handle, display_name, bio, created_at, version
+        "SELECT id, account_id, handle, display_name, bio, discoverability, created_at, version
            FROM pseuds WHERE lower(handle) = lower(?) AND deleted_at IS NULL",
-        "SELECT id::text, account_id::text, handle, display_name, bio, created_at, version
+        "SELECT id::text, account_id::text, handle, display_name, bio, discoverability, created_at, version
            FROM pseuds WHERE lower(handle) = lower(?) AND deleted_at IS NULL",
     );
 
@@ -377,9 +424,9 @@ pub async fn find_pseud_by_handle(db: &Database, handle: &str) -> Result<Option<
 /// List an account's pseuds, oldest first.
 pub async fn pseuds_for_account(db: &Database, account_id: AccountId) -> Result<Vec<Pseud>> {
     let sql = db.sql(
-        "SELECT id, account_id, handle, display_name, bio, created_at, version
+        "SELECT id, account_id, handle, display_name, bio, discoverability, created_at, version
            FROM pseuds WHERE account_id = ? AND deleted_at IS NULL ORDER BY created_at ASC",
-        "SELECT id::text, account_id::text, handle, display_name, bio, created_at, version
+        "SELECT id::text, account_id::text, handle, display_name, bio, discoverability, created_at, version
            FROM pseuds WHERE account_id = ?::uuid AND deleted_at IS NULL ORDER BY created_at ASC",
     );
 
@@ -551,6 +598,163 @@ pub async fn create_session(
     Ok(id)
 }
 
+/// Find a pseud by identifier.
+///
+/// Note that this returns the owning account. Callers use it for authorization
+/// and must not serialise it (ADR 0003).
+pub async fn find_pseud(db: &Database, id: PseudId) -> Result<Option<Pseud>> {
+    let sql = db.sql(
+        "SELECT id, account_id, handle, display_name, bio, discoverability, created_at, version
+           FROM pseuds WHERE id = ? AND deleted_at IS NULL",
+        "SELECT id::text, account_id::text, handle, display_name, bio, discoverability, created_at, version
+           FROM pseuds WHERE id = ?::uuid AND deleted_at IS NULL",
+    );
+
+    let row: Option<PseudRow> = match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(id.to_string())
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        crate::Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(id.to_string())
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+
+    Ok(row.map(decode_pseud))
+}
+
+/// Update a pseud's display name and biography, scoped to its owner.
+///
+/// Two properties this function has to hold, and does so in SQL rather than in
+/// a caller's memory:
+///
+/// * the `account_id` predicate means an update aimed at someone else's pseud
+///   affects zero rows;
+/// * the `version` predicate means an update written against a stale read
+///   affects zero rows, which is how spec §3.4's `REVISION_CONFLICT` is
+///   produced rather than a silently lost edit.
+///
+/// Returns whether a row was changed.
+pub async fn update_pseud(
+    db: &Database,
+    account_id: AccountId,
+    pseud_id: PseudId,
+    expected_version: i64,
+    display_name: Option<&str>,
+    bio: Option<&str>,
+) -> Result<bool> {
+    let now = now_rfc3339();
+
+    // `COALESCE` keeps this one statement for any combination of changed
+    // fields: a `None` leaves the column as it was.
+    let sql = db.sql(
+        "UPDATE pseuds
+            SET display_name = COALESCE(?, display_name),
+                bio = COALESCE(?, bio),
+                updated_at = ?, version = version + 1
+          WHERE id = ? AND account_id = ? AND version = ? AND deleted_at IS NULL",
+        "UPDATE pseuds
+            SET display_name = COALESCE(?, display_name),
+                bio = COALESCE(?, bio),
+                updated_at = ?, version = version + 1
+          WHERE id = ?::uuid AND account_id = ?::uuid AND version = ? AND deleted_at IS NULL",
+    );
+
+    let affected = match db.backend() {
+        crate::Backend::Sqlite => sqlx::query(&sql)
+            .bind(display_name)
+            .bind(bio)
+            .bind(&now)
+            .bind(pseud_id.to_string())
+            .bind(account_id.to_string())
+            .bind(expected_version)
+            .execute(db.sqlite_pool().expect("sqlite handle"))
+            .await?
+            .rows_affected(),
+        crate::Backend::Postgres => sqlx::query(&sql)
+            .bind(display_name)
+            .bind(bio)
+            .bind(&now)
+            .bind(pseud_id.to_string())
+            .bind(account_id.to_string())
+            .bind(expected_version)
+            .execute(db.postgres_pool().expect("postgres handle"))
+            .await?
+            .rows_affected(),
+    };
+
+    Ok(affected > 0)
+}
+
+/// Set only a pseud's biography, bypassing the version check.
+///
+/// Used at creation time, where there is no prior version to conflict with.
+pub async fn set_pseud_bio(db: &Database, pseud_id: PseudId, bio: Option<&str>) -> Result<()> {
+    let now = now_rfc3339();
+    let sql = db.sql(
+        "UPDATE pseuds SET bio = ?, updated_at = ? WHERE id = ?",
+        "UPDATE pseuds SET bio = ?, updated_at = ? WHERE id = ?::uuid",
+    );
+
+    match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(bio)
+                .bind(&now)
+                .bind(pseud_id.to_string())
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+        }
+        crate::Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(bio)
+                .bind(&now)
+                .bind(pseud_id.to_string())
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Set a pseud's discoverability.
+pub async fn set_pseud_discoverability(
+    db: &Database,
+    pseud_id: PseudId,
+    discoverability: &str,
+) -> Result<()> {
+    let now = now_rfc3339();
+    let sql = db.sql(
+        "UPDATE pseuds SET discoverability = ?, updated_at = ? WHERE id = ?",
+        "UPDATE pseuds SET discoverability = ?, updated_at = ? WHERE id = ?::uuid",
+    );
+
+    match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(discoverability)
+                .bind(&now)
+                .bind(pseud_id.to_string())
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+        }
+        crate::Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(discoverability)
+                .bind(&now)
+                .bind(pseud_id.to_string())
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
 /// Count rows in a table. Used by `doctor` and the seed summary.
 pub async fn count(db: &Database, table: &str) -> Result<i64> {
     // `table` is never user-supplied; the allowlist keeps it that way.
@@ -646,13 +850,14 @@ fn decode_account(row: AccountRow) -> Account {
 }
 
 fn decode_pseud(row: PseudRow) -> Pseud {
-    let (id, account_id, handle, display_name, bio, created_at, version) = row;
+    let (id, account_id, handle, display_name, bio, discoverability, created_at, version) = row;
     Pseud {
         id: id.parse().unwrap_or_default(),
         account_id: account_id.parse().unwrap_or_default(),
         handle,
         display_name,
         bio,
+        discoverability: Discoverability::parse(&discoverability),
         created_at,
         version,
     }
