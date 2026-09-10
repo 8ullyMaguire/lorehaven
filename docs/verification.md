@@ -26,7 +26,7 @@ the result. Where a claim could only be checked by hand, it says so.
 | Field | Value |
 |---|---|
 | Date of last verification | 2026-09-10 |
-| Commit | tag `v0.04-publishing` (Milestone 3). Previous checkpoints: `v0.03-identity` (Milestone 2), `v0.01-running-app` (Milestone 0). |
+| Commit | tag `v0.06-jobs` (Milestone 5). Previous checkpoints: `v0.05-reader` (Milestone 4), `v0.04-publishing` (Milestone 3), `v0.03-identity` (Milestone 2), `v0.01-running-app` (Milestone 0). |
 | Environment | Linux, Rust 1.98.0, Node 26.8.1, SQLite 3.53.4 |
 | PostgreSQL available | **No** |
 
@@ -396,6 +396,97 @@ they were broken: `save_progress` took ten positional arguments (five of them
 and now takes `TypographyInput`. A call site that passed them in the wrong order
 would have compiled.
 
+## Milestone 5 — Jobs, storage, cache boundaries and secret management
+
+| # | Acceptance criterion | Status | Evidence |
+|---|---|---|---|
+| 1 | A request that hands work to a queue answers `202` with a job id | Implemented and locally tested | `milestone_5.rs::a_request_that_starts_a_job_gets_a_202_and_an_id` — the response carries `state: queued`, `progress_permille: 0`, `cancellable: true`, and the row is `queued` with `attempts: 0` afterwards, so the request did not do the work. Drilled in the browser journey below. |
+| 2 | Two workers racing cannot claim the same job | Implemented and locally tested | `milestone_5.rs::a_claimed_job_is_not_claimed_twice` — eight claims by two interleaved workers, eight distinct jobs. The claim is one statement: `UPDATE … WHERE id = (SELECT id FROM jobs WHERE state = 'queued' AND available_at <= ? ORDER BY priority DESC, available_at ASC LIMIT 1)` inside a transaction on SQLite, and the same sub-select with `FOR UPDATE SKIP LOCKED` on PostgreSQL. |
+| 3 | A worker that dies mid-job does not take the job out of circulation | Implemented and locally tested | `milestone_5.rs::a_lease_that_expires_is_requeued` — a live lease is not stolen, an expired one returns the job to `queued` with its owner cleared, another worker claims it, and the worker that lost the lease is refused when it tries to complete. |
+| 4 | Cancellation takes effect between units of work, not only at the start | Implemented and locally tested | `milestone_5.rs::a_cancelled_job_stops_at_the_next_checkpoint` — a twelve-step job is cancelled 120 ms in; it ends `cancelled` with `progress_permille < 1000`, a checkpoint recording where it stopped, and one attempt whose outcome is `cancelled`. Driven in the browser: the journey's second job was cancelled at *20% — step 2*. |
+| 5 | A failed attempt is retried with the policy's backoff, and the budget is bounded | Implemented and locally tested | `milestone_5.rs::a_retry_uses_the_backoff` — the first failure returns the job to `queued` with `available_at` more than 50 s away against a 60 s base delay, a job waiting for its retry is not claimable, the attempt counter carries over, and the second failure under `max_attempts: 2` is terminal. |
+| 6 | Replaying one idempotency key enqueues one job | Implemented and locally tested | `milestone_5.rs::replaying_one_idempotency_key_enqueues_one_job` — the same key twice is one job, a different key is another, and a keyless job is never deduplicated against anything. |
+| 7 | The same bytes stored twice are one blob, and one file | Implemented and locally tested | `milestone_5.rs::the_same_bytes_stored_twice_share_one_blob` — same checksum and storage key, `last_referenced_at` unchanged by the second put, one row, one file at `objects/c7/c7d…`, and `usage()` reporting 1 blob / 21 bytes. |
+| 8 | Deleting one of two references keeps the blob; the last one removes it | Implemented and locally tested | `deleting_one_reference_keeps_the_blob` (the blob is still readable after the second reference goes) and `deleting_the_last_reference_removes_the_blob` (row, file and `stat` all gone; deleting again is not an error). |
+| 9 | The outbox Milestone 3 has been writing is finally read | Implemented and locally tested | `an_outbox_event_is_deleted_only_after_its_handler_succeeds` — the handled event is gone and a topic with no handler is *not* marked delivered, it is still pending; `a_failing_outbox_handler_retries_with_a_reason` records `attempts` and `last_error` and does not offer the event again immediately. |
+| 10 | A credential is encrypted with the row bound in, and never logged | Implemented and locally tested | `crates/app/src/secrets.rs`: `a_secret_round_trips`, `a_nonce_is_never_reused_for_one_plaintext`, `a_ciphertext_moved_to_another_row_does_not_open` (a renamed owner and a moved row both fail), `a_ciphertext_under_an_unknown_key_is_refused`, `a_retired_key_still_opens_what_it_encrypted`, and `a_secret_is_not_in_the_logs` (`format!("{secret:?}")` is `<secret>`). |
+| 11 | No job kind is silently "succeeded" without doing its work | Implemented and locally tested | `a_job_with_no_handler_fails_loudly` (`reindex` → `failed`, reason naming the kind) and `an_unknown_maintenance_task_is_a_fatal_failure` (a fatal failure does not burn the retry budget). |
+| 12 | The caller sees their own jobs and only their own; the operator surface is gated | Implemented and locally tested | `the_job_list_shows_only_the_callers_own_jobs` — two accounts, one row each, and a stranger's cancel on another account's job is a `404` that changes nothing. `the_admin_surface_is_gated_on_the_operator_account` — with no operator configured *nobody* gets in, configuring one admits that account, an unknown state filter is refused rather than ignored, a real one filters, and a non-operator is still a `404`. |
+| 13 | An operator can retry a job that has finished failing | Implemented and locally tested | `an_operator_can_retry_a_failed_job` — a failed job returns to `queued` with the whole attempt budget back, and a job that has not finished is refused with `422` rather than silently queued twice. Driven in the browser below. |
+| 14 | Progress, checkpoint and the failure reason reach the owner's page | Implemented and locally tested | `job_progress_and_errors_reach_the_owner`; the page itself is covered by `frontend/src/routes/Jobs.test.ts` (4 tests), including that it stops polling once nothing can change. |
+| 15 | A queue that is already waiting is drained, and a pass that finds nothing says so | Implemented and locally tested | `the_worker_can_be_pointed_at_a_queue_that_is_already_waiting` (five jobs, five passes, `counts_by_state` all `succeeded`) and `one_pass_runs_one_job_and_says_so` (`worker --once` runs one job, records one attempt, and an empty pass does not hang). |
+| 16 | Terminal job rows are diagnostics and are swept, not kept for ever | Implemented and locally tested | `the_sweep_deletes_only_old_terminal_jobs` — a sweep with no cut-off deletes nothing; with one, the terminal rows and their attempts cascade away. |
+| 17 | A page of a collection carries a cursor that resumes it | Implemented and locally tested | `a_page_of_jobs_carries_a_cursor_that_resumes_it` — 51 jobs, a 50-row first page with a cursor, a one-row second page with `next_cursor: null`, and no row served twice or left out. A malformed cursor is refused (`VALIDATION_FAILED`) rather than silently restarting at page one. |
+| 18 | Configuration, database, storage *and the secret key* are checked before anything is stored | Implemented and locally tested | `lorehaven doctor` gained a `secret-key` check that loads the key and round-trips a value through it, so an instance that cannot encrypt says so at diagnosis time rather than when a reader first stores a credential. |
+
+Commands actually run, with their result:
+
+```text
+cargo test --workspace            276 passed, 0 failed (12 test binaries; three are
+                                  doc-tests with no tests)
+cargo clippy --all-targets --all-features -- -D warnings    clean
+cargo fmt --all -- --check        clean
+vitest (frontend)                 100 passed (16 files)
+vite build                        entry 162.94 kB JS (55.34 kB gzip) + 40.81 kB CSS,
+                                  editor split to a separate 331.34 kB chunk (106 kB gzip)
+bash frontend/scripts/fe.sh build succeeded
+```
+
+### The Milestone 5 browser journey
+
+Driven by hand on 2026-09-10 against the compiled binary serving its embedded
+bundle, on a seeded development instance (`lorehaven migrate && lorehaven seed
+--development`, `serve --with-worker` on `127.0.0.1:8120`, SQLite at
+`/tmp/lh-m5-journey/lorehaven.sqlite`), signed in as `@devwriter`:
+
+1. **A request hands work to the queue.** `/jobs` → *Start a diagnostic job* →
+   the page showed `maintenance | queued | 2026-09-10 18:58:52 | Cancel`, then
+   `running | 20% — step 2`, `running | 70% — step 7`, `succeeded | 100%`, with
+   the Cancel action disappearing when the job stopped being cancellable.
+2. **A second job was cancelled mid-flight** and stopped where it was:
+   `cancelled | 20% — step 2`. The row kept its checkpoint; the page stopped
+   asking for it.
+3. **The database agreed with the page**: the two jobs ended `succeeded`
+   (`progress_permille 1000`, checkpoint `NULL`) and `cancelled`
+   (`progress_permille 200`, checkpoint `step 2`), each with one `job_attempts`
+   row whose outcome is `succeeded` and `cancelled`.
+4. **Polling stops.** The last `GET /api/v1/jobs` was at `19:00:56`; nothing was
+   requested for the following 24 seconds, with only finished jobs on the page.
+5. **The operator surface is honest about who it is for.** With no operator
+   configured, `/admin/jobs` said so plainly — *"This page belongs to the
+   instance's operator. No account is configured as one, so nobody can open it:
+   set `LOREHAVEN_OPERATOR_ACCOUNT_ID`…"* — and the server logged the refusal as
+   a `404`, not a `403`. Restarting with `LOREHAVEN_OPERATOR_ACCOUNT_ID` set to
+   the dev account's id opened the table.
+6. **The operator's table** listed every job with kind, state, progress and
+   checkpoint, `attempts / max_attempts`, owner, creation time and an action, and
+   showed the failure reason inline: *"no handler for a thumbnail job in this
+   build"*.
+7. **Retry worked end to end.** The failed job went back to `queued` with its
+   budget restored (`0 / 5`), the in-process worker picked it up, and it failed
+   again terminally with `1 / 5` and a second `job_attempts` row — the history of
+   both attempts, in order.
+8. **The filter filters.** `state=succeeded` showed `1 job`.
+9. **Graceful shutdown.** `SIGTERM` logged `received terminate`, then `worker
+   stopped passes=95`, then `shutdown complete` — the worker released its lease
+   and exited rather than being killed mid-pass.
+
+### What the journey found
+
+Two defects, both fixed rather than written around:
+
+1. **`attempts` read `0` for a job that had plainly run.** Only `fail` incremented
+   the counter, so a job that succeeded on its first attempt reported *0 of 5*,
+   while `job_attempts` held a row proving it had run. `attempt_started` now
+   records the attempt on the job row, and the retry decision reads that number
+   back instead of adding one to it — which also means an attempt is never
+   counted twice when the budget is spent.
+2. **A 64-character hex key was rejected as "48 bytes".** A hex key is *also*
+   syntactically valid base64, and the decoder that ran first won: the operator
+   was told their key was the wrong length. `SecretKey::parse` now takes
+   whichever reading is a 32-byte key, and names the lengths it saw when neither
+   is.
+
 ---
 
 ## Known limitations and open risks
@@ -440,12 +531,17 @@ would have compiled.
    The server refuses a stale version and the interface shows the conflict, but
    the loser of the race has to re-apply their change by hand. A chapter's text
    is the exception: the autosave keeps both copies and offers a choice.
-10. **Nothing consumes the outbox yet.** Milestone 3 writes `chapter.revised`,
-    `publish.notify`, `publish.index`, `withdraw.deindex`,
-    `visibility.deindex` and `rating.reindex` rows in the transactions that
-    cause them, and they are asserted in tests. The worker that delivers them
-    arrives in Milestone 5, so no notification has ever been delivered and no
-    index has ever been updated.
+10. **The outbox is drained, but almost every topic has no handler.** Milestone 5
+    closed the *reading* half of this: the worker now claims `outbox_events` and
+    deletes an event only after a handler returns success, and an event whose
+    topic nothing handles is left pending rather than marked delivered — which is
+    why an unhandled event never silently disappears. What has not changed is
+    that the topics Milestone 3 writes (`chapter.revised`, `publish.notify`,
+    `publish.index`, `withdraw.deindex`, `visibility.deindex`,
+    `rating.reindex`) have no handler yet: notifications arrive with Milestone
+    16 and the search index with Milestone 9. An instance's pending count will
+    therefore stay above zero, and that is the honest state rather than a
+    delivery that did not happen.
 11. **Chapter deletion and ordering are one-way.** Deleting a chapter
     soft-deletes it and reordering rewrites position keys, but no page offers
     either operation, and there is no undo. Both routes exist and are tested
@@ -453,14 +549,21 @@ would have compiled.
 
 ## What was *not* done, stated plainly
 
-Milestones 5 through 18 are **not implemented**. Milestone 4 is complete for the
-criteria it still owns: two of its original rows were re-scoped with the
-operator's agreement on 2026-09-10 — search within a work to Milestone 9, which
-builds the index it needs (`M9-02`), and whole-work mode to Milestone 8, the
-reader's library (`M8-02`). `docs/requirements.csv` records
-each as `unsupported`, and `docs/plans/` is the build plan for them. Within
-Milestone 2, block and mute primitives are still tables with no behaviour
-(M2-06). No screen in the application displays mock
+Milestones 6 through 18 are **not implemented**. Milestone 5 is complete for the
+criteria it states, with four pieces of it deliberately deferred and recorded in
+`docs/plans/milestone-05-jobs.md`: `job_leases` is not a separate table (the
+lease is two columns on `jobs`, renewed by the heartbeat); the source revision
+cache is not in migration 0005 because nothing populates it until Milestone 6
+exists; storage quota *enforcement* is not here, because a quota needs a limit
+and an account to hang it on, which arrive with Milestone 7's export limits and
+Milestone 17's storage view; and the encrypted-secret store ships with no caller,
+because Milestone 6 is what puts source credentials in it (tracked as `M5-03`).
+Milestone 4 is complete for the criteria it still owns: two of its original rows
+were re-scoped with the operator's agreement on 2026-09-10 — search within a work
+to Milestone 9, which builds the index it needs (`M9-02`), and whole-work mode to
+Milestone 8, the reader's library (`M8-02`). `docs/requirements.csv` records each
+as `unsupported`, and `docs/plans/` is the build plan for them. Within Milestone
+2, block and mute primitives are still tables with no behaviour (M2-06). No screen in the application displays mock
 data: the pages that exist show real values from the server, and the routes that
 are linked but unbuilt render an explicit "not built yet" panel naming the
 milestone that will fill them.

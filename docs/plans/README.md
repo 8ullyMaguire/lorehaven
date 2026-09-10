@@ -5,7 +5,7 @@ built**. `docs/spec.md` says what the platform must do; these files say what to
 type, in what order, and how to check it. They are written for someone who
 knows Rust and Svelte but has never seen this repository.
 
-Milestones 0–3 are done. `docs/verification.md` records the evidence for each
+Milestones 0–5 are done. `docs/verification.md` records the evidence for each
 claim, and `docs/requirements.csv` records every requirement with a status.
 Both are updated **as part of** finishing a milestone, never afterwards.
 
@@ -14,8 +14,8 @@ Both are updated **as part of** finishing a milestone, never afterwards.
 ## 1. The order of work, and why
 
 ```text
-M4  Reader, ratings, history, work pages      ← do this first
-M5  Jobs, storage, cache, secrets
+M4  Reader, ratings, history, work pages      ← done, tag v0.05-reader
+M5  Jobs, storage, cache, secrets             ← done, tag v0.06-jobs
 M6  Imports, source credentials, batches
 M7  Exports, device delivery, offline
 M8  Library, saved views, bookmarks
@@ -178,7 +178,7 @@ was racing. **Never** `SELECT` then `UPDATE` without the version predicate.
   has a status vocabulary for exactly this; use `implemented but not executed`
   when that is the truth.
 * Every milestone ends with a tag named in `docs/tutorial/README.md`
-  (`v0.04-publishing` is next), and with `requirements.csv` rows whose
+  (`v0.06-jobs` is the latest), and with `requirements.csv` rows whose
   `evidence` column names a command or a test — not a file path alone.
 
 ---
@@ -189,6 +189,7 @@ was racing. **Never** `SELECT` then `UPDATE` without the version predicate.
 |---|---|
 | `junior-implementation-plan.md` | **Start here.** The whole website, start to finish: prerequisites, the workflow loop, every milestone from 5 to 18 with its migration, domain types, routes, pages, tests and pitfalls, then the frontend rules and the cross-cutting work. Written so someone who has never seen this repository can implement a milestone without guessing. |
 | `milestone-04-reader.md` | Milestone 4 in full: built, with its verification in `docs/verification.md` |
+| `milestone-05-jobs.md` | Milestone 5 in full: built, with its verification in `docs/verification.md` |
 | `milestones-05-18.md` | The remaining milestones, in summary form |
 | `cross-cutting.md` | Work that every milestone touches: verification, migrations, performance budgets, accessibility |
 
