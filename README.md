@@ -10,11 +10,14 @@ all live in this repository.
 
 ## Status
 
-**Milestones 0 through 4 are complete**: the running application, the design
-system, accounts and pseuds, writing and publishing, and the reader with
-ratings, reviews, notes and history. Milestone 5 added the job queue, the
-content-addressed blob store, encrypted secret storage and the worker that
-drains the outbox. Milestones 6–18 are not implemented.
+**Milestones 0 through 5 are complete**: the running application, the design
+system, accounts and pseuds, writing and publishing, the reader with ratings,
+reviews, notes and history, and the job queue with its content-addressed blob
+store, encrypted secret storage and worker. Milestone 6 is **partly built**: the
+import framework, the safe fetcher that stands between a pasted URL and the
+network, the first source adapter, the chapter sanitiser and the source-credential
+surface are implemented and tested, and the pages that would let a reader use
+them are not. Milestones 7–18 are not implemented.
 
 That is the honest summary; `docs/requirements.csv` lists every requirement with
 a status, and `docs/verification.md` records the evidence behind each claim.
@@ -27,7 +30,8 @@ a status, and `docs/verification.md` records the evidence behind each claim.
 | 3 | Drafts, chapters, publishing, revisions | Done, tested, driven in a browser — tag `v0.04-publishing` |
 | 4 | Reader, ratings, reviews, notes, history | Done, tested, driven in a browser — tag `v0.05-reader` |
 | 5 | Jobs, storage, secret encryption, outbox delivery | Done, tested, driven in a browser — tag `v0.06-jobs` |
-| 6–18 | Imports, offline, library, search, discovery, community, events, governance, economy, extensions, integrations, operations | Not implemented |
+| 6 | Imports, source credentials, batches, preservation | **Partly built**: API, importer and one source adapter tested; pages not built and nine of the ten planned sources not ported |
+| 7–18 | Offline, library, search, discovery, community, events, governance, economy, extensions, integrations, operations | Not implemented |
 
 No screen in this repository displays mock data. Pages that exist show real
 values from the server; routes that are linked but unbuilt say so plainly.
