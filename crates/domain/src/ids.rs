@@ -165,6 +165,37 @@ uuid_id! {
     /// not notify twice.
     IdempotencyKey
 }
+uuid_id! {
+    /// A reader's named shelf in their library.
+    ShelfId
+}
+uuid_id! {
+    /// One placement of a library item on a shelf.
+    ShelfItemId
+}
+uuid_id! {
+    /// A reader's bookmark, which may point into a work or a chapter.
+    BookmarkId
+}
+uuid_id! {
+    /// A reader's private tag on a work or a library item.
+    ///
+    /// Deliberately a different type from M9's public work tags: these are
+    /// never joined into anything another account can read.
+    PrivateTagId
+}
+uuid_id! {
+    /// A reader's own reading status for a work or library item.
+    ReadingStatusId
+}
+uuid_id! {
+    /// A stored library query the reader can return to.
+    SavedViewId
+}
+uuid_id! {
+    /// One recorded check of a library item against its source.
+    UpdateCheckId
+}
 
 /// A per-request correlation identifier.
 ///
