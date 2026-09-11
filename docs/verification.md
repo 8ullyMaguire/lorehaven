@@ -565,8 +565,9 @@ against.
 
 ### The unblock path, verified against real services
 
-FanFiction.net, FictionPress, FimFiction, ScribbleHub and the XenForo boards
-refuse a plain request. `crates/scrapers/src/` answers with a declared chain —
+FanFiction.net, FictionPress, FimFiction and ScribbleHub refuse a plain request.
+The XenForo boards were recorded here as refusing one too, and that entry was
+wrong — see *The wall that was in the probe* below. `crates/scrapers/src/` answers with a declared chain —
 a browser fingerprint (`engine.rs`), then a solver service (`solver.rs`), then an
 Internet Archive snapshot (`archive.rs`) — and on 2026-09-11 two of those tiers
 were run against a real service rather than a stub. Byparr 3.0.4 was installed
@@ -632,6 +633,68 @@ verified landing on `20260826131158`. And `id_` is the difference between a page
 and a wrapper around it, measured rather than asserted: **636 kB** wrapped against
 **93 kB** raw. Whether a real snapshot of a real FFN chapter parses is still
 unverified, because no page of the recorded work has one.
+
+### The fifth adapter, and the wall that was in the probe
+
+`xenforo.rs` is the last of the five adapters `M6-02` carried forward, and it
+closes the row. The reconnaissance behind it was wrong twice, in ways worth
+keeping, because both errors would have shipped quietly.
+
+**The wall was caused by the probe.** SpaceBattles was measured as needing a
+solver: `403`, *Just a moment*, to a plain request **and** to a browser
+fingerprint. Re-measured with each client's own honest `User-Agent`:
+
+| Client | Result |
+|---|---|
+| `Lorehaven/{version} (+import)` — this fetcher's own agent | **200**, the real 128 KB page |
+| `curl/8.0` | **200**, the real page |
+| a Chrome `User-Agent` over plain TLS | **403**, *Just a moment* |
+
+A request that says what it is gets served; one that claims to be a browser
+without behaving like one gets challenged. The reconnaissance sent a browser
+agent from a non-browser client, so it produced the wall it then reported — and
+two of the three hosts were only ever probed *through the solver*, so their
+behaviour under a plain request was never established at all. It was inherited
+from SpaceBattles, which is the exact mistake the `Wall` documentation warns
+about.
+
+Declaring `Wall::Solver` would have been wrong in the expensive direction: an
+instance with no solver refuses to import from SpaceBattles **before queueing**,
+for a host that answers a plain request. All three forums declare `Wall::None`,
+a challenge is still escalated when the instance has a solver configured, and the
+live test asserts the plain path for each of them.
+
+**The chapter count is checkable, and now is checked.** The first pass said the
+list stated no total. It does: the header carries `Threadmarks: 42` beside
+`Created`, `Status` and `Watchers`. The recorded work arrives as 25 + 17 = 42, and
+the adapter refuses a list that does not add up — which is what makes a partial
+import impossible rather than merely unlikely.
+
+Measured through the real fetcher, plainly, on 2026-09-11:
+
+```
+spacebattles: "By The Horns (Story only Thread)" by "master arminas", 42 chapters, Ongoing
+spacebattles: chapter 1 is 10162 bytes
+sufficientvelocity: "Marci of the Dreadfort" by "Carmin", 77 chapters, Ongoing
+sufficientvelocity: chapter 1 is 16869 bytes
+questionablequesting: "Margin of Error" by "USSExplorer", 17 chapters, Ongoing
+questionablequesting: chapter 1 is 17256 bytes
+```
+
+Three shapes the fixtures pin that a selector could silently get wrong: a thread
+page carries a widget list of recent threadmarks that parses as a valid five-item
+chapter list (`Threadmarks: 42` sitting beside it is what catches it);
+`per_page=1000` is silently clamped to the default 25, so a large page request
+that is trusted imports 25 chapters of 42 and reports success; and threadmark
+links are written two ways, a `#post-{id}` fragment on two hosts and an absolute
+`/post-{id}` path on the third, the second of which returns **zero** chapters if
+only the first is read.
+
+Both published `robots.txt` files are byte-identical and disallow about ninety AI
+and SEO crawlers by name, which makes this the one source in the project where
+the fetcher's own product token is load-bearing. The fixture suite asserts it both
+ways: our token is allowed these paths, and `GPTBot` parsed from the same recorded
+file is not.
 
 ## Milestone 7 — Exports, device delivery and offline reading
 
@@ -777,13 +840,16 @@ reason, because it is not free to change.
 
 ## What was *not* done, stated plainly
 
-Milestones 7 through 18 are **not implemented**. Milestone 6 is **partly built**:
-the import framework, the safe fetcher, one source adapter, the chapter
-sanitiser, the credential surface and the routes behind them are implemented and
-tested; its two pages are not built, so the plan's import journey cannot be
-walked by a reader yet, and of the sources it was to cover one family is done.
-Eleven rows in `docs/requirements.csv` state the position one obligation at a
-time. Milestone 5 is complete for the criteria it states, with four pieces of it
+Milestones 8 through 18 are **not implemented**. Milestones 0 through 7 are
+complete for the criteria they state, with the exceptions recorded one row at a
+time in `docs/requirements.csv` and repeated below. Milestone 6 is **complete
+apart from preservation batches**: the import framework, the safe fetcher, the
+chapter sanitiser, the credential surface, the revision cache, the runtime source
+health states, both pages and eleven adapters over nine source families are
+implemented and tested, and every source `M6-02` carried forward has landed.
+Milestone 7 is complete apart from device delivery, which spec §13.4 makes
+optional. Five rows in `docs/requirements.csv` outside those two milestones are
+still open, and each is named in *Open rows* below. Milestone 5 is complete for the criteria it states, with four pieces of it
 deliberately deferred and recorded in `docs/plans/milestone-05-jobs.md`: `job_leases` is not a separate table (the
 lease is two columns on `jobs`, renewed by the heartbeat); the source revision
 cache is a table in migration 0005 that nothing populates, and Milestone 6 did
