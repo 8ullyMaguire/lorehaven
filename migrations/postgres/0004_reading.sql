@@ -102,8 +102,11 @@ CREATE INDEX reader_note_subject ON reader_note (pseud_id, subject_type, subject
 
 CREATE TABLE typography_preference (
     account_id        UUID PRIMARY KEY REFERENCES accounts (id) ON DELETE CASCADE,
-    font_scale        REAL NOT NULL DEFAULT 1.0,
-    line_height       REAL NOT NULL DEFAULT 1.6,
+    -- DOUBLE PRECISION, not REAL: the repository decodes these as f64, and
+    -- SQLite's REAL is already 8 bytes, so REAL (4 bytes) here is the one
+    -- declaration that would not round-trip what the API accepted.
+    font_scale        DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    line_height       DOUBLE PRECISION NOT NULL DEFAULT 1.6,
     measure           BIGINT NOT NULL DEFAULT 66,
     reader_theme      TEXT NOT NULL DEFAULT 'sepia',
     distraction_free  BOOLEAN NOT NULL DEFAULT FALSE,

@@ -1217,7 +1217,8 @@ pub async fn typography_for(db: &Database, account: AccountId) -> Result<Typogra
     let sql = db.sql(
         "SELECT font_scale, line_height, measure, reader_theme, distraction_free, version
            FROM typography_preference WHERE account_id = ?",
-        "SELECT font_scale, line_height, measure, reader_theme, distraction_free::int::bigint, version
+        "SELECT font_scale::double precision, line_height::double precision, measure,
+                reader_theme, distraction_free::int::bigint, version
            FROM typography_preference WHERE account_id = ?::uuid",
     );
     let row: Option<(f64, f64, i64, String, i64, i64)> = match db.backend() {
@@ -1321,7 +1322,7 @@ pub async fn save_typography(db: &Database, input: TypographyInput<'_>) -> Resul
         "INSERT INTO typography_preference
              (account_id, font_scale, line_height, measure, reader_theme,
               distraction_free, created_at, updated_at, version)
-         VALUES (?::uuid, ?, ?, ?, ?, ?, ?, ?, 1)
+         VALUES (?::uuid, ?, ?, ?, ?, ?::int::boolean, ?, ?, 1)
          ON CONFLICT (account_id) DO UPDATE SET
               font_scale = excluded.font_scale,
               line_height = excluded.line_height,
