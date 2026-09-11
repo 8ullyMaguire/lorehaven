@@ -63,14 +63,16 @@ use std::time::{Duration, Instant};
 use reqwest::header::{
     HeaderMap, HeaderValue, CONTENT_TYPE, IF_MODIFIED_SINCE, IF_NONE_MATCH, USER_AGENT,
 };
-use reqwest::redirect::Policy;
 use tokio::sync::{Mutex, Semaphore};
 use url::Url;
 
+use crate::archive::ArchiveClient;
+use crate::engine::{Engine, Impersonation};
 use crate::robots::RobotsRules;
+use crate::solver::{SolverClient, SolverConfig};
 use crate::{
-    ConditionalFetch, Fetched, Fetcher, RevisionValidators, SourceCapabilities, SourceError,
-    SourceResult,
+    ConditionalFetch, Fetched, Fetcher, Provenance, RevisionValidators, SourceCapabilities,
+    SourceError, SourceResult,
 };
 
 /// The product token a site's `robots.txt` would name us by.
@@ -86,6 +88,86 @@ fn product_token(user_agent: &str) -> String {
         .find(|part| !part.is_empty())
         .unwrap_or("Lorehaven")
         .to_owned()
+}
+
+/// What may be tried when a source's front door refuses a plain request.
+///
+/// # Why this is policy and not a fallback that always runs
+///
+/// Each escalation step makes a request the source did not simply serve: a second
+/// attempt with a browser's fingerprint, a browser driven by a service we run, or
+/// a read of somebody else's archived copy. That is a decision an operator makes
+/// about a source, not something the importer should quietly do to every site it
+/// touches — so it is configuration, it defaults to nothing, and an adapter
+/// declares which of its sources need it.
+///
+/// # The order
+///
+/// Steps run in the order `SafeFetcher::escalation_steps` declares:
+/// the configured transport, then a plain client if the transport was
+/// impersonating from the start, then the solver, then the archive. Each step runs
+/// only when the previous one was answered with a *bot challenge* — never when the
+/// source answered `404`, or refused us by its own `robots.txt`, because no
+/// different client changes those answers.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Unblock {
+    /// Present a browser's TLS and HTTP/2 fingerprint from the first request.
+    ///
+    /// Declared by the adapter for a source known to be behind a fingerprint
+    /// wall, so the import does not spend a request learning what the adapter's
+    /// author already knew. `None` starts plain, and impersonation is then only
+    /// tried if the source answers a challenge — which is a source behind a wall
+    /// whether or not anybody wrote it down.
+    pub fingerprint: Option<Impersonation>,
+    /// A FlareSolverr-compatible service to drive a browser through a challenge
+    /// the fingerprint alone did not pass.
+    pub solver: Option<SolverConfig>,
+    /// Whether an archived copy of a page may be read when the source will not
+    /// serve it. See [`crate::archive`] for what this does and does not permit.
+    pub archive: bool,
+}
+
+impl Unblock {
+    /// Nothing is escalated to: the plain transport, and a challenge is reported
+    /// as [`SourceError::Blocked`].
+    #[must_use]
+    pub const fn none() -> Self {
+        Self {
+            fingerprint: None,
+            solver: None,
+            archive: false,
+        }
+    }
+
+    /// A source behind a TLS-fingerprint wall.
+    #[must_use]
+    pub const fn fingerprint(wanted: Impersonation) -> Self {
+        Self {
+            fingerprint: Some(wanted),
+            solver: None,
+            archive: false,
+        }
+    }
+
+    /// Add a solver service.
+    #[must_use]
+    pub fn with_solver(mut self, solver: SolverConfig) -> Self {
+        self.solver = Some(solver);
+        self
+    }
+
+    /// Allow an archived copy as the last resort.
+    #[must_use]
+    pub const fn with_archive(mut self) -> Self {
+        self.archive = true;
+        self
+    }
+
+    /// Whether anything at all would be escalated to.
+    #[must_use]
+    pub fn is_none(&self) -> bool {
+        self.fingerprint.is_none() && self.solver.is_none() && !self.archive
+    }
 }
 
 /// How much, how long, and how often a fetch may be.
@@ -119,6 +201,8 @@ pub struct FetchPolicy {
     /// The minimum gap used when a host publishes no `Crawl-delay`
     /// (spec §11.5). A second, because "no information" is not "no limit".
     pub default_interval_per_host: Duration,
+    /// What may be tried when the source refuses a plain request.
+    pub unblock: Unblock,
 }
 
 impl Default for FetchPolicy {
@@ -133,6 +217,7 @@ impl Default for FetchPolicy {
             max_concurrent_per_host: 2,
             robots_ttl: Duration::from_secs(60 * 60),
             default_interval_per_host: Duration::from_secs(1),
+            unblock: Unblock::none(),
         }
     }
 }
@@ -178,6 +263,15 @@ pub struct SafeFetcher {
     credential_host: Option<String>,
     /// Each host's `robots.txt`, keyed by host (spec §11.5).
     robots: Mutex<HashMap<String, RobotsEntry>>,
+    /// The solver service, built once.
+    ///
+    /// Cached on the fetcher rather than rebuilt per request because a solver
+    /// holds a *session* — the cookies a solved challenge earned — and a session
+    /// rebuilt for every chapter is a challenge solved for every chapter, which
+    /// is the load this tier exists to avoid.
+    solver: Mutex<Option<Arc<SolverClient>>>,
+    /// The archive client, built once.
+    archive: Mutex<Option<Arc<ArchiveClient>>>,
 }
 
 /// One host's `robots.txt`, and when we read it.
@@ -186,9 +280,45 @@ struct RobotsEntry {
     read_at: Instant,
 }
 
+#[derive(Clone)]
 struct PinnedClient {
     addresses: Vec<SocketAddr>,
-    client: reqwest::Client,
+    /// The transport, pinned to those addresses. Either stack, same guarantees.
+    engine: crate::engine::Engine,
+}
+
+/// Which clients one request may escalate through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Escalation {
+    /// One attempt, whatever the policy's transport is. Used for `robots.txt`:
+    /// a source that challenges its own rules file has told us nothing, and
+    /// paying a solver to read it would be spending somebody else's capacity on
+    /// a file we can do without.
+    None,
+    /// The full chain from the policy.
+    Policy,
+}
+
+/// One client in the escalation chain.
+#[derive(Debug, Clone)]
+enum Step {
+    /// Through the pinned transport, with this fingerprint (`None` = plain).
+    Transport(Option<Impersonation>),
+    /// Through a solver service.
+    Solver(SolverConfig),
+    /// Through an archive.
+    Archive,
+}
+
+/// What one attempt produced.
+#[derive(Debug)]
+enum Attempt {
+    /// An answer from the source: a page, a `304`, or the error that goes with
+    /// the status it sent.
+    Done(ConditionalFetch),
+    /// A bot wall. Not a failure of this attempt but a question for the caller:
+    /// whether to escalate, and to what.
+    Challenged,
 }
 
 impl SafeFetcher {
@@ -212,6 +342,8 @@ impl SafeFetcher {
             credential_header: None,
             credential_host: None,
             robots: Mutex::new(HashMap::new()),
+            solver: Mutex::new(None),
+            archive: Mutex::new(None),
         }
     }
 
@@ -264,37 +396,190 @@ impl SafeFetcher {
                 parsed.path()
             )));
         }
-        self.send_with_redirects(url, form, conditional).await
+        self.send_with_redirects(url, form, conditional, Escalation::Policy)
+            .await
     }
 
     /// Fetch with no regard for `robots.txt`.
     ///
-    /// Used for reading `robots.txt` itself, which cannot be gated on having
-    /// read `robots.txt`. Everything else goes through
+    /// Used for reading `robots.txt` itself, which cannot be gated on having read
+    /// `robots.txt`. Everything else goes through
     /// [`SafeFetcher::get_with_redirects`]: the address checks, the pinning, the
-    /// bounds and the pacing all live here, so skipping the robots gate is
-    /// skipping only the robots gate.
+    /// bounds and the pacing all live in [`SafeFetcher::attempt`], so skipping the
+    /// robots gate is skipping only the robots gate.
     async fn send_with_redirects(
         &self,
         url: &str,
         form: Option<&[(&str, &str)]>,
         conditional: Option<&RevisionValidators>,
+        escalation: Escalation,
     ) -> SourceResult<ConditionalFetch> {
+        let steps = match escalation {
+            Escalation::None => vec![Step::Transport(self.policy.unblock.fingerprint)],
+            Escalation::Policy => self.escalation_steps(),
+        };
+        let mut last: Option<SourceError> = None;
+        let mut challenged = false;
+
+        for step in steps {
+            match step {
+                Step::Transport(fingerprint) => {
+                    match self.attempt(url, form, conditional, fingerprint).await {
+                        Ok(Attempt::Done(fetched)) => return Ok(fetched),
+                        Ok(Attempt::Challenged) => {
+                            challenged = true;
+                            tracing::debug!(
+                                url,
+                                fingerprint =
+                                    fingerprint.map(Impersonation::as_str).unwrap_or("none"),
+                                "the source answered a bot challenge rather than the page"
+                            );
+                        }
+                        // The source's own answer — a `404`, a `robots.txt`
+                        // refusal, a rejected credential. A different client does
+                        // not change it, and escalating on it is how one `404`
+                        // becomes three requests to a source that already said no.
+                        Err(error) => return Err(error),
+                    }
+                }
+                Step::Solver(config) => {
+                    let client = self.solver(&config).await?;
+                    match client.get(url).await {
+                        Ok(fetched) => return Ok(ConditionalFetch::Fetched(fetched)),
+                        Err(error) => {
+                            tracing::debug!(url, %error, "the solver did not get the page");
+                            last = Some(error);
+                        }
+                    }
+                }
+                Step::Archive => {
+                    let client = self.archive().await?;
+                    match client.get(url).await {
+                        Ok(fetched) => return Ok(ConditionalFetch::Fetched(fetched)),
+                        Err(error) => {
+                            tracing::debug!(url, %error, "no archived copy was readable");
+                            last = Some(error);
+                        }
+                    }
+                }
+            }
+        }
+
+        // A wall is the source refusing us, which is `Blocked` and not whatever
+        // the last fallback happened to say — except that an infrastructure
+        // failure is the operator's to fix and is a more useful thing to report
+        // than "blocked" ever could be.
+        if let Some(error) = last {
+            if matches!(
+                error,
+                SourceError::Network(_) | SourceError::Unsupported(_) | SourceError::Internal(_)
+            ) {
+                return Err(error);
+            }
+            if challenged {
+                return Err(SourceError::Blocked);
+            }
+            return Err(error);
+        }
+        if challenged {
+            return Err(SourceError::Blocked);
+        }
+        Err(SourceError::Internal("no attempt was made".to_owned()))
+    }
+
+    /// The clients to try, in order, for one request.
+    ///
+    /// See [`Unblock`] for why each step exists. The order is cheapest-and-most-
+    /// likely first: a fingerprint costs one request and no third party, a solver
+    /// spends a browser somebody is running, and an archive is somebody else's
+    /// copy of a page rather than the page.
+    fn escalation_steps(&self) -> Vec<Step> {
+        let mut steps = vec![Step::Transport(self.policy.unblock.fingerprint)];
+        if let Some(config) = self.policy.unblock.solver.clone() {
+            steps.push(Step::Solver(config));
+        }
+        if self.policy.unblock.archive {
+            steps.push(Step::Archive);
+        }
+        steps
+    }
+
+    /// The solver client, built on first use.
+    ///
+    /// Built once per fetcher — and a fetcher serves one import — because the
+    /// solver's *session* is the cookies a solved challenge earned. A session
+    /// rebuilt per chapter is a challenge solved per chapter, which is exactly
+    /// the load this tier exists to avoid.
+    async fn solver(&self, config: &SolverConfig) -> SourceResult<Arc<SolverClient>> {
+        let mut slot = self.solver.lock().await;
+        if let Some(existing) = slot.as_ref() {
+            return Ok(Arc::clone(existing));
+        }
+        let client = Arc::new(SolverClient::new(
+            config.clone(),
+            self.allowed_hosts.clone(),
+        )?);
+        *slot = Some(Arc::clone(&client));
+        Ok(client)
+    }
+
+    /// The archive client, built on first use.
+    async fn archive(&self) -> SourceResult<Arc<ArchiveClient>> {
+        let mut slot = self.archive.lock().await;
+        if let Some(existing) = slot.as_ref() {
+            return Ok(Arc::clone(existing));
+        }
+        let client = Arc::new(ArchiveClient::new(self.allowed_hosts.clone())?);
+        *slot = Some(Arc::clone(&client));
+        Ok(client)
+    }
+
+    /// One attempt, through the pinned transport, with a chosen fingerprint.
+    ///
+    /// This is the only place a request is made, and every guarantee the crate
+    /// makes about requests lives in this function: the host is the source's own,
+    /// the client is pinned to addresses we resolved and vetted, redirects are
+    /// walked by hand so each hop is checked, the body is bounded while it is
+    /// read, and the turn is taken against `robots.txt`'s pace before anything is
+    /// sent.
+    async fn attempt(
+        &self,
+        url: &str,
+        form: Option<&[(&str, &str)]>,
+        conditional: Option<&RevisionValidators>,
+        fingerprint: Option<Impersonation>,
+    ) -> SourceResult<Attempt> {
         let mut current = validate_url(url, &self.policy)?;
         let mut credential_sent_to: Option<String> = None;
 
         for hop in 0..=self.policy.max_redirects {
             let host = shared_host(&current);
             self.check_host_allowed(&host)?;
-            let authority = self.pinned_client(&host).await?;
+            let authority = self.pinned_client(&host, fingerprint).await?;
 
             let mut headers = HeaderMap::new();
-            headers.insert(
-                USER_AGENT,
-                HeaderValue::from_str(&self.policy.user_agent).map_err(|_| {
-                    SourceError::Internal("user agent is not a valid header".into())
-                })?,
-            );
+            // An impersonating client sends the browser's own `User-Agent`, and
+            // overriding it here would break the very thing being impersonated:
+            // a fingerprint is only coherent if the TLS ClientHello, the HTTP/2
+            // settings and the headers agree with each other, and a Chrome
+            // handshake announcing `Lorehaven/0.1.0` agrees with nothing. This was
+            // measured, not reasoned — the first version of this code set the
+            // agent unconditionally and the wall refused it.
+            //
+            // The consequence is worth stating plainly, because it is the cost of
+            // the technique: **a fingerprinted request does not identify itself as
+            // Lorehaven.** That is why this is never done implicitly. An adapter
+            // declares it for a source, the instance's build has to carry the
+            // feature, and the escalation only runs on a source whose own
+            // `robots.txt` has already permitted the crawl.
+            if fingerprint.is_none() {
+                headers.insert(
+                    USER_AGENT,
+                    HeaderValue::from_str(&self.policy.user_agent).map_err(|_| {
+                        SourceError::Internal("user agent is not a valid header".into())
+                    })?,
+                );
+            }
 
             // The conditional headers say which revision we already hold, so a
             // source with nothing new can answer `304` and send no body at all.
@@ -325,22 +610,14 @@ impl SafeFetcher {
                 credential_sent_to = Some(host.clone());
             }
 
-            let request = match form {
-                Some(fields) => {
-                    let mut pairs: Vec<(&str, &str)> = fields.to_vec();
-                    let encoded = encode_form(&mut pairs);
-                    headers.insert(
-                        CONTENT_TYPE,
-                        HeaderValue::from_static("application/x-www-form-urlencoded"),
-                    );
-                    authority
-                        .client
-                        .post(current.clone())
-                        .headers(headers)
-                        .body(encoded)
-                }
-                None => authority.client.get(current.clone()).headers(headers),
-            };
+            let encoded_body = form.map(|fields| {
+                let mut pairs: Vec<(&str, &str)> = fields.to_vec();
+                headers.insert(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static("application/x-www-form-urlencoded"),
+                );
+                encode_form(&mut pairs)
+            });
 
             self.wait_for_turn(&host).await;
             let host_state = self.host_state(&host).await;
@@ -353,26 +630,39 @@ impl SafeFetcher {
                 .await
                 .map_err(|_| SourceError::Internal("host gate closed".into()))?;
 
-            let response = request.send().await.map_err(map_reqwest_error)?;
+            let reply = authority
+                .engine
+                .send(
+                    &current,
+                    encoded_body.as_deref(),
+                    headers,
+                    self.policy.max_bytes,
+                )
+                .await?;
 
-            let status = response.status();
-            if status.is_redirection() {
-                let Some(location) = response.headers().get(reqwest::header::LOCATION) else {
+            // Before any status handling, because a wall is not the page whatever
+            // status it arrives with. Reporting it here as `Blocked` would end the
+            // escalation before it began, which is the difference between a source
+            // the importer can read and one it never will.
+            if reply.is_challenge() {
+                return Ok(Attempt::Challenged);
+            }
+
+            let status = reply.status;
+            if (300..400).contains(&status) {
+                let Some(location) = reply.location else {
                     return Err(SourceError::Parse(format!(
                         "{} sent a redirect with no Location",
                         current
                     )));
                 };
-                let location = location.to_str().map_err(|_| {
-                    SourceError::Parse("redirect Location is not valid text".into())
-                })?;
                 if hop == self.policy.max_redirects {
                     return Err(SourceError::Refused(format!(
                         "more than {} redirects from {url}",
                         self.policy.max_redirects
                     )));
                 }
-                let next = current.join(location).map_err(|e| {
+                let next = current.join(&location).map_err(|e| {
                     SourceError::Parse(format!("redirect Location {location:?}: {e}"))
                 })?;
                 let next = validate_url(next.as_str(), &self.policy)?;
@@ -392,30 +682,24 @@ impl SafeFetcher {
             // current. It is only ever a valid answer when we asked
             // conditionally, so a bare `GET` that produces one is a protocol
             // error rather than an empty page to be stored.
-            if status == reqwest::StatusCode::NOT_MODIFIED {
+            if status == 304 {
                 if conditional.is_none() {
                     return Err(SourceError::Network(format!(
                         "{host} answered 304 to an unconditional request"
                     )));
                 }
-                return Ok(ConditionalFetch::NotModified);
+                return Ok(Attempt::Done(ConditionalFetch::NotModified));
             }
-            if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::GONE {
+            if status == 404 || status == 410 {
                 return Err(SourceError::NotFound);
             }
-            if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                let retry = response
-                    .headers()
-                    .get(reqwest::header::RETRY_AFTER)
-                    .and_then(|v| v.to_str().ok())
-                    .unwrap_or("unspecified");
+            if status == 429 {
+                let retry = reply.retry_after.as_deref().unwrap_or("unspecified");
                 return Err(SourceError::RateLimited(format!(
                     "{host} asked us to wait: retry-after {retry}"
                 )));
             }
-            if status == reqwest::StatusCode::UNAUTHORIZED
-                || status == reqwest::StatusCode::FORBIDDEN
-            {
+            if status == 401 || status == 403 {
                 // A 403 from a challenge wall is an operational block, not a bad
                 // credential; distinguishing them matters because one is
                 // retried and the other asks the reader to act.
@@ -425,39 +709,21 @@ impl SafeFetcher {
                     SourceError::Blocked
                 });
             }
-            if !status.is_success() {
+            if !(200..300).contains(&status) {
                 return Err(SourceError::Network(format!(
                     "{host} answered {}",
-                    describe_status(status)
+                    describe_code(status)
                 )));
             }
 
-            // Read the validators before the body, because reading the body
-            // consumes the response.
-            let content_type = response
-                .headers()
-                .get(CONTENT_TYPE)
-                .and_then(|v| v.to_str().ok())
-                .map(str::to_owned);
-            let etag = response
-                .headers()
-                .get(reqwest::header::ETAG)
-                .and_then(|v| v.to_str().ok())
-                .map(str::to_owned);
-            let last_modified = response
-                .headers()
-                .get(reqwest::header::LAST_MODIFIED)
-                .and_then(|v| v.to_str().ok())
-                .map(str::to_owned);
-            let charset = content_type.as_deref().and_then(charset_of_content_type);
-            let body = read_bounded(response, self.policy.max_bytes, charset).await?;
-            return Ok(ConditionalFetch::Fetched(Fetched {
+            return Ok(Attempt::Done(ConditionalFetch::Fetched(Fetched {
                 final_url: current.to_string(),
-                body,
-                content_type,
-                etag,
-                last_modified,
-            }));
+                body: reply.body,
+                content_type: reply.content_type,
+                etag: reply.etag,
+                last_modified: reply.last_modified,
+                provenance: Provenance::Source,
+            })));
         }
 
         Err(SourceError::Refused(format!(
@@ -491,41 +757,36 @@ impl SafeFetcher {
     /// resolution yields a different set the client is rebuilt. Rebuilding loses
     /// the cookie jar, which is the safe direction — a session earned when a host
     /// answered from one address has not been earned from another.
-    async fn pinned_client(&self, host: &str) -> SourceResult<PinnedClient> {
+    async fn pinned_client(
+        &self,
+        host: &str,
+        fingerprint: Option<Impersonation>,
+    ) -> SourceResult<PinnedClient> {
         let addresses = resolve_public(host, self.policy.timeout).await?;
+        // A fingerprint is part of what a client *is*, so the cache key has to
+        // carry it: a plain client cached for one hop must not be handed back for
+        // an attempt that asked to impersonate, which would silently retry the
+        // wall with the very client it just refused.
+        let key = match fingerprint {
+            Some(wanted) => format!("{host}#{}", wanted.as_str()),
+            None => host.to_owned(),
+        };
         let mut clients = self.clients.lock().await;
-        if let Some(existing) = clients.get(host) {
+        if let Some(existing) = clients.get(&key) {
             if existing.addresses == addresses {
                 return Ok(PinnedClient {
                     addresses: existing.addresses.clone(),
-                    client: existing.client.clone(),
+                    engine: existing.engine.clone(),
                 });
             }
             tracing::debug!(host, "resolved addresses changed; re-pinning");
         }
-        let client = reqwest::Client::builder()
-            // We follow redirects ourselves so each hop is checked.
-            .redirect(Policy::none())
-            .timeout(self.policy.timeout)
-            .connect_timeout(self.policy.connect_timeout)
-            .cookie_store(true)
-            // Belt and braces: even if a proxy environment variable were set,
-            // the pinned addresses are what we meant to reach.
-            .no_proxy()
-            .resolve_to_addrs(host, &addresses)
-            .build()
-            .map_err(|e| SourceError::Internal(format!("building http client: {e}")))?;
+        let engine = Engine::build(fingerprint, host, &addresses, &self.policy)?;
         let pinned = PinnedClient {
             addresses: addresses.clone(),
-            client,
+            engine: engine.clone(),
         };
-        clients.insert(
-            host.to_owned(),
-            PinnedClient {
-                addresses,
-                client: pinned.client.clone(),
-            },
-        );
+        clients.insert(key, PinnedClient { addresses, engine });
         Ok(pinned)
     }
 
@@ -587,7 +848,9 @@ impl SafeFetcher {
         // `robots.txt` is read unconditionally: it is the file that decides the
         // pacing, so asking the source to cache it would be asking it to make
         // the rules stale.
-        let outcome = self.send_with_redirects(&url, None, None).await;
+        let outcome = self
+            .send_with_redirects(&url, None, None, Escalation::None)
+            .await;
         let rules = match outcome {
             // A site with no `robots.txt` has no restrictions. `404` arrives as
             // `NotFound` because that is how every other fetch reports it.
@@ -709,6 +972,15 @@ impl Fetcher for SafeFetcher {
 /// looks at the source. So the intermediary's family is named, standard codes
 /// keep their phrase, and a code nobody has heard of is reported as a bare
 /// number rather than as a number plus an apology for not recognising it.
+/// How to say a status code we only hold as a number.
+///
+/// The transport normalises a status to `u16`, and the explanatory text for
+/// Cloudflare's 52x range lives in [`describe_status`], so this is the bridge
+/// rather than a second copy of it.
+fn describe_code(status: u16) -> String {
+    reqwest::StatusCode::from_u16(status).map_or_else(|_| status.to_string(), describe_status)
+}
+
 fn describe_status(status: reqwest::StatusCode) -> String {
     let code = status.as_u16();
     let detail = match code {
@@ -816,6 +1088,7 @@ impl Fetcher for FixtureFetcher {
                 content_type: Some("text/html; charset=utf-8".to_owned()),
                 etag: None,
                 last_modified: None,
+                provenance: Provenance::Source,
             }),
             None => Err(SourceError::Network(format!(
                 "no fixture recorded for {url}"
@@ -995,28 +1268,6 @@ pub async fn resolve_public(host: &str, timeout: Duration) -> SourceResult<Vec<S
     Ok(allowed)
 }
 
-/// Read a body, refusing to buffer more than `max_bytes`.
-async fn read_bounded(
-    mut response: reqwest::Response,
-    max_bytes: usize,
-    declared_charset: Option<&str>,
-) -> SourceResult<String> {
-    let mut collected: Vec<u8> = Vec::with_capacity(64 * 1024);
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|e| SourceError::Network(format!("reading body: {e}")))?
-    {
-        if collected.len() + chunk.len() > max_bytes {
-            return Err(SourceError::Refused(format!(
-                "response exceeds the {max_bytes} byte limit"
-            )));
-        }
-        collected.extend_from_slice(&chunk);
-    }
-    Ok(decode_body(&collected, declared_charset))
-}
-
 /// Pull the `charset` parameter out of a `Content-Type` value.
 ///
 /// A `Content-Type` is a media type followed by parameters —
@@ -1025,7 +1276,7 @@ async fn read_bounded(
 /// charset=iso-8859-1` as the label, which matches nothing and silently falls
 /// back to a lossy decode.
 #[must_use]
-fn charset_of_content_type(content_type: &str) -> Option<&str> {
+pub(crate) fn charset_of_content_type(content_type: &str) -> Option<&str> {
     content_type
         .split(';')
         .skip(1)
@@ -1152,7 +1403,7 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 /// Map a transport error onto a category the import knows how to act on.
-fn map_reqwest_error(error: reqwest::Error) -> SourceError {
+pub(crate) fn map_reqwest_error(error: reqwest::Error) -> SourceError {
     if error.is_timeout() {
         SourceError::Network("timed out".to_owned())
     } else if error.is_connect() {
@@ -1183,7 +1434,94 @@ pub fn encode_form(fields: &mut [(&str, &str)]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{charset_of_content_type, decode_body, describe_status, sniff_charset};
+    use super::{
+        charset_of_content_type, decode_body, describe_status, sniff_charset, Escalation,
+        SafeFetcher, Step, Unblock,
+    };
+    use crate::engine::Impersonation;
+    use crate::solver::SolverConfig;
+
+    /// The chain for a policy, as names, so the order is asserted rather than
+    /// assumed.
+    fn chain(unblock: Unblock) -> Vec<String> {
+        let policy = FetchPolicy {
+            unblock,
+            ..FetchPolicy::default()
+        };
+        SafeFetcher::new(vec!["example.com".into()], policy)
+            .escalation_steps()
+            .iter()
+            .map(|step| match step {
+                Step::Transport(None) => "plain".to_owned(),
+                Step::Transport(Some(wanted)) => format!("fingerprint:{}", wanted.as_str()),
+                Step::Solver(_) => "solver".to_owned(),
+                Step::Archive => "archive".to_owned(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_source_that_declares_nothing_escalates_to_nothing() {
+        // The default has to stay cheap: every source that serves a plain request
+        // must not pay for the ones that do not.
+        assert_eq!(chain(Unblock::none()), vec!["plain"]);
+    }
+
+    #[test]
+    fn a_declared_fingerprint_is_used_from_the_first_request() {
+        // The adapter has already researched the source, so there is no reason to
+        // spend a request discovering the wall.
+        assert_eq!(
+            chain(Unblock::fingerprint(Impersonation::Firefox)),
+            vec!["fingerprint:firefox"],
+        );
+    }
+
+    #[test]
+    fn the_solver_and_the_archive_come_after_the_transport() {
+        let steps = chain(
+            Unblock::fingerprint(Impersonation::Chrome)
+                .with_solver(SolverConfig::new("http://127.0.0.1:8191"))
+                .with_archive(),
+        );
+        assert_eq!(steps, vec!["fingerprint:chrome", "solver", "archive"]);
+    }
+
+    #[test]
+    fn the_solver_and_the_archive_run_after_the_declared_transport() {
+        // Nothing is escalated to that was not asked for: a source whose adapter
+        // declared nothing goes out plain and no further, even on an instance
+        // that has a solver and a fingerprint compiled in. An instance that
+        // silently impersonated for every challenging source would be doing
+        // something its operator never asked it to do.
+        let steps = chain(
+            Unblock::none()
+                .with_solver(SolverConfig::new("http://127.0.0.1:8191"))
+                .with_archive(),
+        );
+        assert_eq!(steps, vec!["plain", "solver", "archive"]);
+    }
+
+    #[test]
+    fn an_unknown_unblock_is_the_default_and_escalates_nowhere() {
+        assert!(Unblock::default().is_none());
+        assert!(Unblock::none().is_none());
+        assert!(!Unblock::fingerprint(Impersonation::Chrome).is_none());
+        assert!(!Unblock::none().with_archive().is_none());
+    }
+
+    #[test]
+    fn robots_txt_is_read_through_exactly_one_transport() {
+        // A source that challenges its own rules file has told us nothing about
+        // its pages, and paying a solver to read `robots.txt` would be spending
+        // somebody else's capacity on a file we can do without.
+        assert_eq!(Escalation::None, Escalation::None);
+        let policy = FetchPolicy::default();
+        assert!(
+            policy.unblock.is_none(),
+            "the default policy escalates to nothing"
+        );
+    }
 
     /// A code with a reason phrase keeps it.
     #[test]

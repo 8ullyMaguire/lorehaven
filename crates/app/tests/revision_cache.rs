@@ -28,7 +28,7 @@ use lorehaven_db::storage::BlobStore;
 use lorehaven_db::DatabaseConfig;
 use lorehaven_db::{revisions, Database};
 use lorehaven_scrapers::{
-    ConditionalFetch, Fetched, Fetcher, RevisionValidators, SourceError, SourceResult,
+    ConditionalFetch, Fetched, Fetcher, Provenance, RevisionValidators, SourceError, SourceResult,
 };
 
 const SOURCE: &str = "ao3";
@@ -121,6 +121,7 @@ impl Fetcher for Scripted {
                 content_type: Some("text/html".to_owned()),
                 etag,
                 last_modified: None,
+                provenance: Provenance::Source,
             }),
             // A bare `GET` cannot receive a `304`; the trait's own default is to
             // read the page, so that is what this does.
@@ -130,6 +131,7 @@ impl Fetcher for Scripted {
                 content_type: None,
                 etag: None,
                 last_modified: None,
+                provenance: Provenance::Source,
             }),
             Answer::Fail => Err(SourceError::Network("scripted failure".to_owned())),
         }
@@ -143,6 +145,7 @@ impl Fetcher for Scripted {
             content_type: None,
             etag: None,
             last_modified: None,
+            provenance: Provenance::Source,
         })
     }
 
@@ -169,6 +172,7 @@ impl Fetcher for Scripted {
                 content_type: Some("text/html".to_owned()),
                 etag,
                 last_modified: None,
+                provenance: Provenance::Source,
             })),
             Answer::Fail => Err(SourceError::Network("scripted failure".to_owned())),
         }

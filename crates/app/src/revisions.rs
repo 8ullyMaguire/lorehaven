@@ -33,7 +33,7 @@ use async_trait::async_trait;
 use lorehaven_db::storage::BlobStore;
 use lorehaven_db::{revisions, Database};
 use lorehaven_scrapers::{
-    ConditionalFetch, Fetched, Fetcher, RevisionValidators, SourceError, SourceResult,
+    ConditionalFetch, Fetched, Fetcher, Provenance, RevisionValidators, SourceError, SourceResult,
 };
 
 /// How long a stored revision stays usable as a validator.
@@ -186,6 +186,10 @@ impl<F: Fetcher> Fetcher for CachingFetcher<'_, F> {
                         content_type: None,
                         etag: entry.etag,
                         last_modified: entry.last_modified,
+                        // A cached page was read from the source when it was
+                        // cached; serving it from the store does not make it an
+                        // archive's copy.
+                        provenance: Provenance::Source,
                     }),
                     None => {
                         tracing::warn!(

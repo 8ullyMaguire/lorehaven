@@ -35,6 +35,23 @@ use lorehaven_scrapers::registry::Registry;
 use lorehaven_scrapers::{
     Credentials, FetchPolicy, Fetcher, SafeFetcher, SourceAdapter, SourceKey, SourceWork,
 };
+
+use crate::config::Config;
+
+/// The fetch policy for one source, as this instance builds it.
+///
+/// The adapter's capabilities set the politeness floor; the instance's import
+/// settings add what it is willing to run when the source refuses a plain
+/// request. Built here rather than at each call site so that a fetch path added
+/// later cannot arrive without the escalation settings attached — a preview that
+/// quietly did not escalate would fail on exactly the sources the import could
+/// read, which is the kind of difference nobody notices until a reader reports
+/// it.
+pub fn policy_for(adapter: &dyn SourceAdapter, config: &Config) -> FetchPolicy {
+    let mut policy = FetchPolicy::for_source(adapter.capabilities());
+    policy.unblock = config.imports.unblock_for(adapter);
+    policy
+}
 use serde_json::{json, Value};
 use time::OffsetDateTime;
 
@@ -190,7 +207,7 @@ pub async fn run(
         }
     };
 
-    let policy = FetchPolicy::for_source(adapter.capabilities());
+    let policy = policy_for(adapter, state.config());
     let mut fetcher = SafeFetcher::new(adapter.hosts(), policy);
     let mut credentialed = false;
     if let Some(credentials) = &credentials {

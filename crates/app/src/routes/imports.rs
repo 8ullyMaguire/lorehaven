@@ -52,7 +52,7 @@ use serde::{Deserialize, Serialize};
 use lorehaven_db::{imports, revisions, secrets};
 use lorehaven_domain::imports::{plan_import, ChapterIdentity, ImportedWork};
 use lorehaven_domain::{AppError, PseudId};
-use lorehaven_scrapers::{FetchPolicy, SafeFetcher, SourceAdapter, SourceKey};
+use lorehaven_scrapers::{SafeFetcher, SourceAdapter, SourceKey};
 
 use crate::auth::{RequirePseud, RequireSession};
 use crate::http::{ApiError, ApiResult};
@@ -451,7 +451,7 @@ async fn preview_import(
     // The same guard the worker uses. A preview is not a lesser fetch: if this
     // is safe to run later then it is safe to run now, and if it is not, the
     // reader finds out before anything is queued.
-    let mut policy = FetchPolicy::for_source(adapter.capabilities());
+    let mut policy = crate::imports::policy_for(adapter, state.config());
     policy.timeout = PREVIEW_TIMEOUT;
     let fetcher = SafeFetcher::new(adapter.hosts(), policy);
 
@@ -763,7 +763,7 @@ async fn start_import(
     // consent check: the metadata fetch that produced the preview is repeated,
     // but nothing is stored until both agree.
     if let Some(expected) = &request.confirmed_plan {
-        let mut policy = FetchPolicy::for_source(adapter.capabilities());
+        let mut policy = crate::imports::policy_for(adapter, state.config());
         policy.timeout = PREVIEW_TIMEOUT;
         let fetcher = SafeFetcher::new(adapter.hosts(), policy);
         let credential = match adapter.capabilities().authentication {
@@ -1399,7 +1399,7 @@ async fn test_credential(
         .parse::<url::Url>()
         .map_err(|error| ApiError(AppError::Internal(anyhow::anyhow!(error))))?;
 
-    let mut policy = FetchPolicy::for_source(adapter.capabilities());
+    let mut policy = crate::imports::policy_for(adapter, state.config());
     policy.timeout = PREVIEW_TIMEOUT;
     let fetcher = SafeFetcher::new(adapter.hosts(), policy)
         .with_credential_header(probe.clone(), crate::imports::CREDENTIAL_HEADER, &landed)

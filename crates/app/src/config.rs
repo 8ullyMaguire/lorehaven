@@ -126,6 +126,8 @@ pub struct Config {
     pub administration: AdministrationConfig,
     /// Rate limits.
     pub rate_limits: crate::limiter::Limits,
+    /// What the importer may do about a source that refuses a plain request.
+    pub imports: ImportsConfig,
     /// Where the configuration file was read from, if any.
     pub config_path: Option<PathBuf>,
 }
@@ -153,6 +155,66 @@ pub struct AccountsConfig {
     /// initial cohort; making that a configuration value rather than a code
     /// change keeps it an operational decision.
     pub registration_open: bool,
+}
+
+/// What the importer may do about a source that refuses a plain request.
+///
+/// # Why this is a configuration section and not a default
+///
+/// Each of these makes a request the source did not simply serve. A browser
+/// fingerprint is a request that does not identify itself as Lorehaven. A solver
+/// is a browser somebody runs on this instance's behalf. An archived copy is
+/// somebody else's copy of the page rather than the page. An instance that did
+/// all three for every challenging source would be doing things its operator
+/// never agreed to, so the section is empty by default and every escalation has
+/// to be switched on here.
+///
+/// The *other* half — which sources are behind a wall at all — belongs to the
+/// adapter, which is the code that knows its site. This section supplies what the
+/// instance is willing to run; the adapter supplies the need. Neither can grant
+/// the other's half, which is why the two are merged in
+/// [`ImportsConfig::unblock_for`] rather than either being the whole answer.
+#[derive(Debug, Clone, Default)]
+pub struct ImportsConfig {
+    /// A FlareSolverr-compatible service this instance may drive.
+    ///
+    /// The protocol rather than a program: FlareSolverr, Byparr and
+    /// obscura-solverr all speak it, so pointing this at any of them works and
+    /// changing tools is a configuration edit. Normally a container on loopback,
+    /// which is why a private address is not merely allowed here but the
+    /// expected case.
+    pub solver_url: Option<String>,
+    /// Whether a page the source will not serve may be read from the Internet
+    /// Archive instead.
+    ///
+    /// Off by default. It is the one escalation that reads a *different*
+    /// resource, and — for a work the source has deleted — it is also the one
+    /// that can put a work back in front of readers that its author withdrew.
+    /// That is a preservation decision an operator should make deliberately.
+    pub archive_fallback: bool,
+}
+
+impl ImportsConfig {
+    /// The escalation chain for one source.
+    ///
+    /// The adapter's declaration plus what this instance is willing to run. An
+    /// adapter asking for a fingerprint gets one only if the build carries the
+    /// feature; an instance with a solver configured offers it only to a source
+    /// that declared a wall.
+    #[must_use]
+    pub fn unblock_for(
+        &self,
+        adapter: &dyn lorehaven_scrapers::SourceAdapter,
+    ) -> lorehaven_scrapers::Unblock {
+        let mut unblock = adapter.unblock();
+        if let Some(url) = &self.solver_url {
+            unblock = unblock.with_solver(lorehaven_scrapers::SolverConfig::new(url.clone()));
+        }
+        if self.archive_fallback {
+            unblock = unblock.with_archive();
+        }
+        unblock
+    }
 }
 
 /// Age-policy settings.
@@ -474,6 +536,18 @@ impl Config {
             }
         };
 
+        let imports_file = file.imports.unwrap_or_default();
+        let imports = ImportsConfig {
+            // An empty string in a config file means "unset", not "the solver is
+            // the empty URL": the latter would fail at the first challenged
+            // chapter instead of at startup.
+            solver_url: imports_file
+                .solver_url
+                .map(|url| url.trim().to_owned())
+                .filter(|url| !url.is_empty()),
+            archive_fallback: imports_file.archive_fallback.unwrap_or(false),
+        };
+
         let config = Self {
             environment,
             site,
@@ -490,6 +564,7 @@ impl Config {
             accounts,
             age,
             rate_limits,
+            imports,
             config_path,
         };
 
@@ -542,6 +617,10 @@ impl Config {
                 guardian_workflow_enabled: false,
             },
             rate_limits: crate::limiter::Limits::default(),
+            // Nothing is escalated to in tests. An instance that impersonated or
+            // drove a solver by default would make every test that fetches a page
+            // depend on which escalations happened to be configured.
+            imports: ImportsConfig::default(),
             config_path: None,
         }
     }
@@ -585,6 +664,20 @@ impl Config {
         }
         if self.rate_limits.write.burst == 0 || self.rate_limits.auth.burst == 0 {
             anyhow::bail!("rate limits must allow at least one request in a burst");
+        }
+        // Checked here rather than at the first challenged chapter: a solver URL
+        // that does not parse is an operator's typo, and a typo should stop the
+        // instance rather than surface hours later as an import that cannot read
+        // one source.
+        if let Some(url) = &self.imports.solver_url {
+            let parsed = url::Url::parse(url)
+                .map_err(|error| anyhow::anyhow!("imports.solver_url is not a URL: {error}"))?;
+            if !matches!(parsed.scheme(), "http" | "https") {
+                anyhow::bail!(
+                    "imports.solver_url must be http or https, got {:?}",
+                    parsed.scheme()
+                );
+            }
         }
         Ok(())
     }
@@ -631,6 +724,16 @@ struct FileConfig {
     accounts: Option<AccountsSection>,
     age: Option<AgeSection>,
     rate_limits: Option<RateLimitSection>,
+    imports: Option<ImportsSection>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImportsSection {
+    /// A FlareSolverr-compatible service, e.g. `http://127.0.0.1:8191`.
+    solver_url: Option<String>,
+    /// Whether an archived copy may be read as a last resort.
+    archive_fallback: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -848,6 +951,70 @@ port = 7000
         assert_eq!(config.server.port, 7001);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Write a config file and load it, as the other config tests do.
+    fn load_from(name: &str, body: &str) -> Result<Config> {
+        let dir =
+            std::env::temp_dir().join(format!("lorehaven-imports-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("lorehaven.toml");
+        std::fs::write(&path, body).expect("write config");
+        Config::load(&GlobalArgs {
+            config: Some(path),
+            ..GlobalArgs::default()
+        })
+    }
+
+    #[test]
+    fn nothing_is_escalated_to_unless_it_is_configured() {
+        // The default has to be that an instance does nothing on a source's
+        // behalf that its operator did not ask for: no solver, no archived copy,
+        // and no fingerprint unless an adapter declares one.
+        let config = Config::development_defaults();
+        assert!(config.imports.solver_url.is_none());
+        assert!(!config.imports.archive_fallback);
+    }
+
+    #[test]
+    fn a_solver_url_is_read_from_the_config_file() {
+        let parsed = load_from(
+            "solver",
+            "environment = \"development\"\n\
+             [imports]\n\
+             solver_url = \"http://127.0.0.1:8191\"\n\
+             archive_fallback = true\n",
+        )
+        .expect("a solver on loopback is a valid configuration");
+        assert_eq!(
+            parsed.imports.solver_url.as_deref(),
+            Some("http://127.0.0.1:8191")
+        );
+        assert!(parsed.imports.archive_fallback);
+    }
+
+    #[test]
+    fn a_malformed_solver_url_stops_the_instance() {
+        // A typo in an operator's config should stop the instance rather than
+        // surface hours later as an import that cannot read one source.
+        for (name, url) in [("typo", "not a url"), ("scheme", "ftp://solver")] {
+            let body =
+                format!("environment = \"development\"\n[imports]\nsolver_url = \"{url}\"\n");
+            assert!(
+                load_from(name, &body).is_err(),
+                "a solver URL of {url:?} was accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_solver_url_means_unset_rather_than_the_empty_url() {
+        let parsed = load_from(
+            "empty",
+            "environment = \"development\"\n[imports]\nsolver_url = \"  \"\n",
+        )
+        .expect("an empty value is not an error");
+        assert!(parsed.imports.solver_url.is_none());
     }
 
     #[test]

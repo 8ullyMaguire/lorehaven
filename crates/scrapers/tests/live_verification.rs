@@ -14,8 +14,18 @@
 //! deliberately:
 //!
 //! ```text
-//! cargo test -p lorehaven-scrapers --test live_verification -- --ignored --nocapture
+//! cargo test -p lorehaven-scrapers --all-features --test live_verification \
+//!     -- --ignored --nocapture --test-threads=1
 //! ```
+//!
+//! **`--test-threads=1` is not optional.** These are crawls of real sites, and the
+//! crate they test exists partly to be polite to those sites. Run in parallel they
+//! defeat that: eight concurrent crawls from one address is precisely the behaviour
+//! the pacing rules are for, and the cost is not only impoliteness — Cloudflare's
+//! edge rate-limits per address, so one test's traffic gets another test
+//! challenged. That was measured rather than assumed: the fingerprint test below
+//! passes consistently alone and under `--test-threads=1`, and failed once in a
+//! parallel run, with a real challenge rather than a broken assertion.
 //!
 //! # What they assert
 //!
@@ -31,8 +41,10 @@
 
 use std::time::Duration;
 
-use lorehaven_scrapers::safety::{FetchPolicy, SafeFetcher};
-use lorehaven_scrapers::{sites, SourceAdapter, SourceError, SourceKey, WorkStatus};
+use lorehaven_scrapers::safety::{FetchPolicy, SafeFetcher, Unblock};
+use lorehaven_scrapers::{
+    sites, Fetcher, Impersonation, Provenance, SourceAdapter, SourceError, SourceKey, WorkStatus,
+};
 use url::Url;
 
 /// A fetcher for one source, built the way the importer builds it.
@@ -362,5 +374,116 @@ async fn an_efiction_chapter_body_still_comes_back_with_text() {
             .await
             .is_err(),
         "a chapter past the end of the work was reported as read"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The escalation path, which is not an adapter and is tested through none.
+// ---------------------------------------------------------------------------
+
+/// A policy as the importer would build it, with an escalation chain attached.
+fn live_policy(unblock: Unblock) -> FetchPolicy {
+    FetchPolicy {
+        timeout: Duration::from_secs(60),
+        unblock,
+        ..FetchPolicy::default()
+    }
+}
+
+/// Is a challenged source readable by the guarded fetcher at all?
+///
+/// This is the question the milestone plan's §9 could not answer from the
+/// outside, and the reason it could not is worth recording: reading a site
+/// through `curl` says nothing about whether *our* client can read it, because
+/// the wall is a judgement about the client. The only way to know is to run the
+/// real fetcher.
+///
+/// Two facts are asserted, and the first is what makes the second meaningful.
+/// A plain client must be **refused** — if it is served, the source is no longer
+/// behind a wall and the fingerprint half is testing nothing. Only then does the
+/// browser client's page prove the escalation did something. Asserting just the
+/// success would pass on a day the wall was switched off, and would go on
+/// passing after the impersonation code had stopped working.
+///
+/// The URL is a real `fanfiction.net` chapter. Its content is not asserted beyond
+/// the presence of the story container: chapter text changes when the author
+/// edits, and a test that fails over a typo gets deleted.
+///
+/// ```text
+/// cargo test -p lorehaven-scrapers --features cloudflare-impersonation \
+///     --test live_verification -- --ignored --nocapture
+/// ```
+#[tokio::test]
+#[ignore = "live: reaches fanfiction.net"]
+async fn a_challenged_source_is_readable_through_a_browser_fingerprint() {
+    const CHAPTER: &str = "https://www.fanfiction.net/s/12345678/1/";
+    const HOSTS: [&str; 1] = ["fanfiction.net"];
+
+    // 1. The wall is real. A plain request through the same fetcher, the same
+    //    guard and the same pacing is refused — which also proves the challenge
+    //    *detector* fires on the real thing rather than only on the fixtures.
+    let plain = SafeFetcher::new(
+        HOSTS.iter().map(|h| (*h).to_owned()).collect(),
+        live_policy(Unblock::none()),
+    );
+    match plain.get(CHAPTER).await {
+        Err(SourceError::Blocked) => {
+            println!("plain client: refused, as expected");
+        }
+        Ok(page) => panic!(
+            "a plain client was served {} bytes; the wall is not there today, so this \
+             test cannot show that the fingerprint is what made the difference",
+            page.body.len()
+        ),
+        Err(other) => panic!("expected Blocked from a challenged source, got {other:?}"),
+    }
+
+    // 2. The guard still refuses a host the source never declared, whatever
+    //    transport is in use. A link-local address is the canonical target of
+    //    the attack the guard exists for.
+    let refused = plain
+        .get("http://169.254.169.254/latest/meta-data/")
+        .await
+        .expect_err("a host outside the source must be refused");
+    assert!(
+        matches!(refused, SourceError::Refused(_)),
+        "the guard did not refuse an undeclared host: {refused:?}"
+    );
+
+    if !cfg!(feature = "cloudflare-impersonation") {
+        println!(
+            "skipped the fingerprint half: this build has no `cloudflare-impersonation` feature"
+        );
+        return;
+    }
+
+    // 3. The same fetcher, with a browser fingerprint declared, reads the page.
+    let browser = SafeFetcher::new(
+        HOSTS.iter().map(|h| (*h).to_owned()).collect(),
+        live_policy(Unblock::fingerprint(Impersonation::Chrome)),
+    );
+    let page = browser
+        .get(CHAPTER)
+        .await
+        .expect("a browser fingerprint should have been served the page");
+    assert!(
+        page.body.contains("storytext"),
+        "the page came back but is not a story page: {} bytes, head {:?}",
+        page.body.len(),
+        page.body.chars().take(200).collect::<String>()
+    );
+    assert_eq!(
+        page.provenance,
+        Provenance::Source,
+        "a page read from the source must not be recorded as an archived copy"
+    );
+    assert_eq!(
+        page.final_url, CHAPTER,
+        "the page came from somewhere other than the URL asked for"
+    );
+    println!(
+        "browser fingerprint: {} bytes of the real chapter page, from {}",
+        page.body.len(),
+        page.final_url
     );
 }

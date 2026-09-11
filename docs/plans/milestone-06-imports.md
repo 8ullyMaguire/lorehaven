@@ -461,13 +461,19 @@ against the URL taken from the ficnexus adapter for each source:
 | Royal Road | `200` | Adapter built, fixtures recorded |
 | Syosetu | `200` | Adapter built, fixtures recorded |
 | the eFiction family: nine of the eighteen hosts the port lists | `200` | Adapter built; the other nine refuse or no longer resolve (below) |
-| **www.fanfiction.net** | **`403`** | Cloudflare |
-| **www.scribblehub.com** | **`403`** | Cloudflare |
-| **www.fimfiction.net** | **`403`** | Cloudflare |
-| **forums.spacebattles.com** | **`403`** | Cloudflare (and the XenForo board family generally) |
+| **www.fanfiction.net** | **`403`**, served to a browser fingerprint | §9 below: readable through the declared escalation |
+| **www.scribblehub.com** | **`403`** | Cloudflare, and its `robots.txt` is challenged too — rules unknown |
+| **www.fimfiction.net** | **`403`**, served to a browser fingerprint | a solver is needed; the fingerprint alone does not pass it |
+| **forums.spacebattles.com** | **`403`**, served to a browser fingerprint | a solver is needed (and the XenForo family generally) |
 
-FictionPress runs the same software as FanFiction.net and is therefore behind the
-same wall.
+FictionPress runs the same software as FanFiction.net and is behind the same wall —
+but as of 2026-09-11 it is a *stricter* configuration: the fingerprint that opens
+FanFiction.net does not open FictionPress. That was measured, not assumed
+(`is_bot_challenge`'s fixtures and the live test below).
+
+**This table was recorded with a plain request, and a plain request is the one
+thing these four refuse.** What each actually does about a browser fingerprint, and
+what the escalation built for it can and cannot read, is measured in §9.
 
 One row says *reachable* and no more, and *reachable* turned out not to be the
 same question as *importable*. Answered for the whole family on 2026-09-11, by
@@ -478,7 +484,7 @@ reading each member's `robots.txt` and then requesting its work page:
 | giantessworld.net, gluttonyfiction.com, narutofic.org, ncisfiction.com, spikeluver.com, starslibrary.net, thedelphicexpanse.com, thehookupzone.net, valentchamber.com | reachable; rules and pages both open | importable; giantessworld is read live by `live_verification.rs` |
 | ninelivesarchive.com | `Crawl-Delay: 10`; work page open, **`viewstory.php?sid=*&chapter=*` disallowed** | a work page may be listed and no chapter may be read: the archive permits browsing and forbids reading |
 | tgstorytime.com, sinfuldreams.com | `User-agent: *` / `Disallow: /` | **unimportable**, by the archive's own instruction |
-| dark-solace.org, sunnydaleafterdark.com | `403` (Cloudflare) | blocked, as the four largest sources are |
+| dark-solace.org, sunnydaleafterdark.com | `403` (Cloudflare) | readable through the declared escalation, as the four largest sources are |
 | libraryofmoria.com, mttjustonce.net, mugglenetfanfiction.com, naiceanilme.net | the domain does not resolve | dead hosts sitting in a compile-time allow-list |
 
 **Nine of eighteen are importable**, which is a smaller claim than eighteen and the
@@ -550,37 +556,42 @@ site says *yes, at five seconds*.
 #### Second: the two ways through are not the same kind of thing
 
 ficnexus uses both, `primp` first and a browser as fallback, and an earlier draft
-of this section treated them as one option. They are not:
+of this section treated them as one option. They are not.
 
 **TLS impersonation (`primp`) does not cost the guard.** `primp` is a fork of
 `reqwest` — it re-exports it and wraps its `ClientBuilder` — and it exposes
 `resolve_to_addrs`, which is the exact API `SafeFetcher` already uses to pin a
-host's addresses. It also exposes `redirect(Policy::none())`, `no_gzip()` and
-friends, `local_address`, and `https_only`. So a `primp`-based path keeps every
-property the guard provides:
+host's addresses. It also exposes `redirect(Policy::none())`, `local_address`,
+`https_only`, `cookie_store` and `no_proxy`. So the impersonating engine is built
+from the *same* address list as the plain one, and keeps every property the guard
+provides:
 
 * we still resolve the hostname ourselves, filter to public addresses, and pin
   those exact addresses, so DNS rebinding remains closed;
 * we still follow redirects by hand with `Policy::none()` and re-pin every hop, so
   a redirect to a private address is still refused;
-* we still bound the body while reading and still disable automatic
-  decompression, so a decompression bomb still cannot get in;
+* we still bound the body while it is read, so an oversized response is refused
+  rather than buffered;
 * and it is one request for one response — no subresources, no JavaScript.
 
-The cost is not the boundary. It is **a forked HTTP stack**: `primp-reqwest`,
+The cost is not the boundary. It is **a forked HTTP/TLS stack**: `primp-reqwest`,
 `primp-hyper`, `primp-h2`, `primp-rustls`, `primp-hyper-rustls` and
-`primp-tokio-rustls` — about twenty-five entries in ficnexus's lock file — sitting
-beside the real `reqwest` this workspace already depends on. Security fixes to
-`rustls` or `hyper` do not reach a fork on their own, so the cost is one of
-maintenance and supply chain, paid every time those crates are patched.
+`primp-tokio-rustls`, plus `aws-lc-rs` underneath them. Security fixes to `rustls`
+or `hyper` do not reach a fork on their own, so the cost is one of maintenance and
+supply chain, paid every time those crates are patched — which is why the feature
+is off by default in the crate and switched on once, for the binary.
 
-**A headless browser is the option that actually spends the guard.** `chromium
---dump-dom` does its own DNS resolution, follows its own redirects, and loads
-subresources — images, stylesheets, fonts, and whatever a page's own script asks
-for. `SafeFetcher` cannot pin a process, so every one of those fetches becomes a
-request the guard did not approve. It is also the *fallback* in ficnexus rather
-than the primary path, which is worth remembering: `primp` alone was verified
-against FanFiction.net live.
+**A headless browser is the option that actually spends the guard** — with one
+qualification this section originally missed. Driving `chromium --dump-dom` *as a
+subprocess* does its own DNS resolution, follows its own redirects, and loads
+subresources, and `SafeFetcher` cannot pin a process. But a browser behind an
+**HTTP service** — which is what FlareSolverr, Byparr and obscura-solverr all are
+— is a process boundary instead: the importer sends one request to an
+operator-configured address and the browser runs on the far side of it. The
+importer's guard is intact; what changes is that the *solver's* request to the
+source is not one the guard made. That is stated plainly in
+`crates/scrapers/src/solver.rs`, and it is why the solver is only ever handed a
+URL whose host the source itself declared.
 
 #### Third: the pacing, which is not a detail
 
@@ -588,35 +599,91 @@ ficnexus records that `primp` passing the wall is not sufficient on its own —
 back-to-back chapter fetches are refused even with the fingerprint, and the working
 interval is enforced at eight seconds in its code, against FanFiction.net's own
 stated `crawl-delay: 5`. Whatever is built has to be slower than the crate's
-one-second default, and the source's own number is the floor.
+one-second default, and the source's own number is the floor. The escalation path
+adds no pacing of its own: every step runs *through* the same `robots.txt` gate, so
+`crawl-delay: 5` is still what paces an import from FanFiction.net.
 
-#### So the options, restated
+#### What was built
 
-1. **Do not support the blocked sources.** This was described above as "honest,
-   loses FanFiction.net". With FFN's own rules read, the honest option is harder to
-   claim: its stated policy permits the crawl. And FFN is the largest source in
-   fandom, so this is the option that costs the most and is justified the least.
-2. **A `primp`-backed path behind the existing guard** — pinned addresses,
-   hand-rolled redirects, bounded reads, no auto-decompression, the source's own
-   `crawl-delay` as the floor. This keeps every security property M6 built, does
-   not need a browser for the sources that reach the wall, and its cost is a fork
-   to maintain rather than a boundary to weaken. **The guard's refusals are
-   testable even when the site's page cannot be recorded**, which is what makes
-   this the option that can still be verified.
-3. **A browser fallback**, for a source that defeats `primp`. Only this one spends
-   the guard. If it is ever added it should be opt-in per source, off by default,
-   and documented as weaker — and it is not needed to ship (2).
-4. **Port the ficnexus path as it stands.** Not recommended: it is unpinned, and it
-   puts an unpinned fetcher into the one code path whose entire purpose is that a
-   user-supplied URL cannot make the server read its own network.
+Four tiers, in `crates/scrapers/src/`:
 
-**Option 2 is what I would build, and it is smaller than this section first
-claimed** — the guard survives, so the work is a second fetcher implementation
-behind the same trait plus the adapter fixtures, not new security machinery. The
-decision is still the user's because it is a maintenance and policy judgement
-rather than a technical one: whether a forked HTTP stack is worth FanFiction.net.
-What no longer holds is the earlier claim that option 2 "trades a documented
-security property for coverage". It does not.
+| Tier | Where | What it does |
+|---|---|---|
+| The plain transport | `safety.rs` | `reqwest`, pinned, unchanged |
+| A browser fingerprint | `engine.rs` | the same request through `primp` with a coherent Chrome/Edge/Firefox/Safari fingerprint, still pinned |
+| A solver service | `solver.rs` | the FlareSolverr v1 HTTP contract, which Byparr and obscura-solverr also speak — so the tool is a configuration value rather than an implementation |
+| An archived copy | `archive.rs` | the Internet Archive's snapshot of a page the source will not serve, marked as an archived read via `Fetched::provenance` |
+
+The transport is a seam inside `SafeFetcher` rather than a second fetcher: an
+`Engine` is either `Plain` or `Impersonating`, and `attempt()` is the only place a
+request is made, so pinning, hand-rolled redirects, bounded reads, `robots.txt`
+gating and pacing live in one place regardless of which stack opens the socket. A
+second fetcher written beside the first would have drifted from it within a
+milestone.
+
+Escalation is a chain, not a fallback that always runs: the configured transport
+first, then the solver, then the archive, and each step runs **only** when the
+previous one was answered with a detected bot challenge — never on a `404`, a
+`robots.txt` refusal, or a rejected credential, because no different client changes
+those answers. `is_bot_challenge` is written to be specific rather than eager, and
+the test next to it exists because of a real mistake: `challenge-platform` is the
+URL of Cloudflare's script and appears in the `<script>` tag of ordinary served
+pages, including every `fanfiction.net` chapter and every `royalroad.com` page.
+Matching on it would have marked successful reads as failures.
+
+Nothing is escalated to that was not declared. `SourceAdapter::unblock()` defaults
+to nothing, so every adapter that serves a plain request stays on the plain path;
+an instance's `[imports]` section supplies the solver URL and the archive switch.
+Neither half can grant the other's: an adapter asking for a fingerprint gets one
+only if the binary carries the feature, and an instance with a solver offers it
+only to a source that declared a wall.
+
+#### What it actually does, measured
+
+Verified live on 2026-09-11 against `https://www.fanfiction.net/s/12345678/1/`
+through the real fetcher, with `crates/scrapers/tests/live_verification.rs`
+asserting all three:
+
+```
+plain client: refused, as expected
+browser fingerprint: 46808 bytes of the real chapter page, from https://www.fanfiction.net/s/12345678/1/
+```
+
+The refusal is asserted first and on purpose. A test that only asserted the success
+would pass on a day the wall was switched off, and would go on passing after the
+impersonation code had stopped working.
+
+One trap worth recording, because reasoning alone got it wrong: **a fingerprint is
+only coherent if the headers agree with it.** The first implementation set our own
+`User-Agent` (`Lorehaven/0.1.0 (+import)`) on every request, and the wall refused
+it — a Chrome ClientHello announcing a fanfiction importer agrees with nothing. The
+agent is now left to the fingerprint, which has the consequence that *a
+fingerprinted request does not identify itself as Lorehaven*. That is the real cost
+of the technique, and it is the reason impersonation is declared per source rather
+than applied to anything that challenges us.
+
+The same reasoning applies to compression: `no_gzip()` is **not** set on the
+impersonating engine, because a browser sends `Accept-Encoding: gzip, br, zstd` and
+a fingerprint that omits them is not a browser's. The bound is unaffected — the
+ceiling is applied to the bytes as they arrive *after* decompression, which is the
+figure that matters for a decompression bomb.
+
+#### And the part that cannot be verified here
+
+The solver tier is implemented against the protocol and tested against a stub
+service over a real socket, which covers the commands sent, the session it reuses,
+the session it replaces when the service forgets it, and the refusal of a URL
+outside the source's hosts. It has **not** been run against a live Byparr or
+obscura-solverr, because none is running on this machine — so the remaining
+verification is an operator pointing `imports.solver_url` at one and re-running the
+live tests.
+
+The archive tier is the same shape: verified against a stub, not against the
+Internet Archive, because archive.org was answering *"Internet Archive services are
+temporarily offline"* for the whole of 2026-09-11. Its URL construction, its
+provenance marking, its refusal of a snapshot that points off the archive, and its
+handling of a 500 that is HTML rather than JSON are all covered; whether a real
+snapshot of a real FFN chapter parses is not.
 
 ---
 
