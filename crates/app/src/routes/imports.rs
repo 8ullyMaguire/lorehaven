@@ -228,6 +228,20 @@ async fn refuse_unusable_source(state: &AppState, source_key: &str) -> ApiResult
     Ok(())
 }
 
+/// Refuse a source this instance has no way of reaching.
+///
+/// Separate from [`refuse_unusable_source`] because the two are different
+/// failures: that one is about the *source's* condition (switched off, or failing
+/// for everybody), and this one is about this instance's own capability. Both are
+/// decided before anything is queued, so neither turns into a job that fails a
+/// page at a time while a reader waits.
+fn refuse_unreachable_source(state: &AppState, adapter: &dyn SourceAdapter) -> ApiResult<()> {
+    match state.config().imports.unreachable_reason(adapter) {
+        Some(reason) => Err(ApiError(AppError::SourceUnavailable { domain: reason })),
+        None => Ok(()),
+    }
+}
+
 /// How many rows a page holds.
 const PAGE: i64 = 50;
 
@@ -341,6 +355,15 @@ fn capabilities_of(adapter: &dyn SourceAdapter) -> serde_json::Value {
         "bibliography": capabilities.bibliography,
         "incremental": capabilities.incremental,
         "authentication": capabilities.authentication.as_str(),
+        // What the source requires of a client, so an operator can see that a
+        // source needs a solver *before* a reader pastes a URL into it
+        // (spec §11.1). A source whose wall this instance cannot satisfy is
+        // refused at preview and at start with the reason.
+        "wall": match adapter.wall() {
+            lorehaven_scrapers::Wall::None => "none",
+            lorehaven_scrapers::Wall::Fingerprint => "fingerprint",
+            lorehaven_scrapers::Wall::Solver => "solver",
+        },
     })
 }
 
@@ -447,6 +470,7 @@ async fn preview_import(
     // catalogue says is unavailable spends a request to learn what the
     // catalogue already knew.
     refuse_unusable_source(&state, adapter.key().as_str()).await?;
+    refuse_unreachable_source(&state, adapter)?;
 
     // The same guard the worker uses. A preview is not a lesser fetch: if this
     // is safe to run later then it is safe to run now, and if it is not, the
@@ -749,6 +773,7 @@ async fn start_import(
     })?;
     let source_key = adapter.key().as_str().to_owned();
     refuse_unusable_source(&state, &source_key).await?;
+    refuse_unreachable_source(&state, adapter)?;
 
     // A source that cannot do this is refused here rather than queued and failed
     // later, because a queued job is a promise that the work will be attempted.

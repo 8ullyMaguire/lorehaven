@@ -58,8 +58,17 @@ use time::OffsetDateTime;
 
 pub use archive::ArchiveClient;
 pub use engine::{is_bot_challenge, Impersonation};
+
+/// Whether this build can present a browser's TLS and HTTP/2 fingerprint.
+///
+/// Compile-time, because the impersonating transport is an optional dependency.
+/// It matters to a reader: an adapter declaring [`Wall::Fingerprint`] on a build
+/// compiled without the feature has a chain with no step that can pass, so the
+/// importer refuses the source before queueing instead of fetching a challenge
+/// it was never able to answer.
+pub const FINGERPRINT_SUPPORTED: bool = cfg!(feature = "cloudflare-impersonation");
 pub use registry::Registry;
-pub use safety::{FetchPolicy, FixtureFetcher, SafeFetcher, Unblock};
+pub use safety::{FetchPolicy, FixtureFetcher, SafeFetcher, Unblock, Wall};
 pub use solver::{SolverClient, SolverConfig};
 
 /// A stable, lowercase identifier for a source (`ao3`, `ffnet`, `xenforo`).
@@ -651,21 +660,41 @@ pub trait SourceAdapter: Send + Sync {
     /// What this adapter can do.
     fn capabilities(&self) -> SourceCapabilities;
 
+    /// The least this source needs before it will serve a page, as measured.
+    ///
+    /// Defaulted to [`Wall::None`], because most sources serve a plain request
+    /// and a default that declared a wall would refuse imports on instances with
+    /// nothing to do with this source. An adapter overrides it for a source whose
+    /// front door is known to be a wall — the adapter's author has researched the
+    /// site, and this is the place to write the result of that research down.
+    ///
+    /// It is a claim about **one host**, tested against that host: sibling sites
+    /// running the same software disagree about which client they refuse, so an
+    /// answer inherited from a sibling is wrong in whichever direction the
+    /// siblings differ. [`Wall`] records how that was established.
+    ///
+    /// The importer compares this against what the instance can run *before*
+    /// anything is queued, so a wall that cannot be passed is a refusal naming
+    /// the fix rather than a preview that fails while a reader watches.
+    fn wall(&self) -> Wall {
+        Wall::None
+    }
+
     /// What to try when this source refuses a plain request.
     ///
-    /// Defaulted to nothing, because most sources serve a plain request and a
-    /// default that escalated would make every import pay for the ones that do
-    /// not. An adapter overrides it for a source whose front door is known to be
-    /// a wall — the adapter's author has researched the site, and spending a
-    /// request to rediscover what they already knew is a request the source did
-    /// not need to serve.
+    /// Derived from [`SourceAdapter::wall`] by default, so an adapter states the
+    /// source's requirement once and gets a chain that answers it: a fingerprint
+    /// wall starts impersonating rather than spending a request on the challenge
+    /// the adapter's author already knew about. An adapter overrides this only
+    /// when its source needs something these three steps cannot express.
     ///
     /// This is a *declaration of need*, not a licence: the instance decides what
-    /// it is willing to run by building the [`FetchPolicy`], and an adapter asking
-    /// for a solver on an instance that has none configured gets a challenge
-    /// reported as [`SourceError::Blocked`] rather than a silent bypass.
+    /// it is willing to run by building the [`FetchPolicy`]. A wall the instance
+    /// cannot satisfy is refused before an import is queued, and a challenge
+    /// reached anyway is reported as [`SourceError::Blocked`] rather than
+    /// silently bypassed.
     fn unblock(&self) -> Unblock {
-        Unblock::none()
+        Unblock::for_wall(self.wall())
     }
 
     /// Whether this adapter handles a URL.

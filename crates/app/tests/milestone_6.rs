@@ -41,7 +41,7 @@ use lorehaven_scrapers::registry::Registry;
 use lorehaven_scrapers::sites::ao3::ArchiveSoftware;
 use lorehaven_scrapers::{
     AuthKind, Credentials, Fetcher, SourceAdapter, SourceCapabilities, SourceChapter, SourceError,
-    SourceKey, SourceResult, SourceWork,
+    SourceKey, SourceResult, SourceWork, Wall,
 };
 use serde_json::{json, Value};
 use tower::ServiceExt;
@@ -77,6 +77,9 @@ struct FixtureArchive {
     /// When set, the adapter claims to need a credential. Proves that a
     /// missing credential is caught before a fetch rather than after.
     requires_auth: bool,
+    /// What the adapter says its source needs of a client. Proves that a wall
+    /// this instance cannot pass is refused before anything is queued.
+    wall: Wall,
     /// How many times each read entry point was entered.
     calls: Arc<Calls>,
 }
@@ -115,7 +118,23 @@ impl FixtureArchive {
             full_html: fixture("work-full.html"),
             fail_chapters: None,
             requires_auth: false,
+            wall: Wall::None,
             calls: Arc::new(Calls::default()),
+        }
+    }
+
+    /// An adapter whose source answers an interactive challenge, so a solver
+    /// service is the only client that can read it.
+    ///
+    /// The wall is FimFiction's rather than a made-up one: measured on
+    /// 2026-09-11, that host refused a plain client and a browser fingerprint
+    /// alike and was read only through a solver, which is the pair of facts that
+    /// makes the refusal right. A test adapter with an invented wall would pass
+    /// whatever the code did with it.
+    fn behind_a_solver_wall() -> Self {
+        Self {
+            wall: Wall::Solver,
+            ..Self::new()
         }
     }
 
@@ -179,6 +198,10 @@ impl SourceAdapter for FixtureArchive {
             capabilities.authentication = AuthKind::Password;
         }
         capabilities
+    }
+
+    fn wall(&self) -> Wall {
+        self.wall
     }
 
     fn can_handle(&self, url: &url::Url) -> bool {
@@ -359,9 +382,15 @@ impl Harness {
     /// State whose registry is the fixture adapter, so an import never reaches
     /// the network and the parser is still the real one.
     fn state_with(&self, adapter: FixtureArchive) -> AppState {
+        self.state_with_config(adapter, config_for(&self.dir))
+    }
+
+    /// The same, on a config the test has adjusted — which is how an instance
+    /// with a solver configured is told apart from one without.
+    fn state_with_config(&self, adapter: FixtureArchive, config: Config) -> AppState {
         let mut registry = Registry::new();
         registry.register(Box::new(adapter));
-        self.state().with_registry(registry)
+        AppState::new(config, self.db.clone()).with_registry(registry)
     }
 
     fn store(&self) -> BlobStore {
@@ -769,6 +798,124 @@ async fn a_disabled_source_is_refused_with_its_reason() {
     harness.cleanup().await;
 }
 
+/// A source this instance has no way of reaching is refused before anything is
+/// queued, and the refusal names the fix.
+///
+/// The alternative — and what this replaced — was discovering it one page at a
+/// time: every fetch comes back a challenge, and the reader waits for an import
+/// that was never able to work. On a self-hosted instance the reader is also the
+/// operator, so the fix is theirs to apply and the message has to carry it.
+#[tokio::test]
+async fn a_source_this_instance_cannot_reach_is_refused_before_it_is_queued() {
+    let harness = Harness::new("wall-no-solver").await;
+    let adapter = FixtureArchive::behind_a_solver_wall();
+    let calls = adapter.calls();
+    let mut http = Client::new(server::build_router(harness.state_with(adapter)));
+    let account = register(&mut http, "walled@example.org", "walled").await;
+    let jobs_before = jobs::counts_by_state(&harness.db)
+        .await
+        .expect("job counts");
+
+    let (status, body) = http
+        .post("/api/v1/imports/preview", json!({ "url": WORK_URL }))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_GATEWAY,
+        "a source with no way to reach it is not previewable: {body}"
+    );
+    let message = body.to_string();
+    assert!(
+        message.contains("imports.solver_url"),
+        "the refusal names the setting that fixes it: {message}"
+    );
+    assert!(
+        message.contains("Byparr") || message.contains("FlareSolverr"),
+        "and a service that speaks the protocol: {message}"
+    );
+    assert_eq!(
+        calls.previews(),
+        0,
+        "no request may be made to a source this instance cannot read"
+    );
+
+    // The start route refuses too, and does so *before* a job exists: a queued
+    // job is a promise that the work will be attempted.
+    let (status, body) = http
+        .post("/api/v1/imports", json!({ "url": WORK_URL }))
+        .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "start: {body}");
+
+    let jobs_after = jobs::counts_by_state(&harness.db)
+        .await
+        .expect("job counts");
+    assert_eq!(
+        jobs_before, jobs_after,
+        "a refused import must not leave a job behind"
+    );
+    let refused = imports::list_import_jobs(&harness.db, &account.to_string(), None, 50, None)
+        .await
+        .expect("imports");
+    assert!(
+        refused.is_empty(),
+        "no import row should exist: {refused:?}"
+    );
+
+    harness.cleanup().await;
+}
+
+/// The same source is readable as soon as a solver is configured.
+///
+/// The pair matters: a test that only asserted the refusal would pass just as
+/// well if the adapter could never be used at all.
+#[tokio::test]
+async fn the_same_source_is_readable_once_a_solver_is_configured() {
+    let harness = Harness::new("wall-with-solver").await;
+    let mut config = config_for(&harness.dir);
+    config.imports.solver_url = Some("http://127.0.0.1:8191".to_owned());
+
+    let adapter = FixtureArchive::behind_a_solver_wall();
+    let calls = adapter.calls();
+    let mut http = Client::new(server::build_router(
+        harness.state_with_config(adapter, config),
+    ));
+    register(&mut http, "hassolver@example.org", "hassolver").await;
+
+    let (status, body) = http
+        .post("/api/v1/imports/preview", json!({ "url": WORK_URL }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "preview with a solver: {body}");
+    assert_eq!(body["chapter_count"], 3);
+    assert_eq!(
+        calls.previews(),
+        1,
+        "the adapter is what answers the preview"
+    );
+
+    harness.cleanup().await;
+}
+
+/// The catalogue says which sources need a solver, so the requirement is
+/// visible before a reader pastes a URL rather than after (spec §11.1).
+#[tokio::test]
+async fn the_catalogue_says_which_sources_need_a_solver() {
+    let harness = Harness::new("wall-catalogue").await;
+    let mut http = Client::new(server::build_router(
+        harness.state_with(FixtureArchive::behind_a_solver_wall()),
+    ));
+    register(&mut http, "listing@example.org", "listing").await;
+
+    let (status, body) = http.get("/api/v1/imports/sources").await;
+    assert_eq!(status, StatusCode::OK, "sources: {body}");
+    let entry = body["items"]
+        .as_array()
+        .and_then(|items| items.iter().find(|item| item["key"] == SOURCE))
+        .expect("the source is in the catalogue");
+    assert_eq!(entry["capabilities"]["wall"], "solver");
+
+    harness.cleanup().await;
+}
+
 /// A source that needs a credential is refused *before* anything is fetched,
 /// and the refusal is fatal rather than retried five times.
 #[tokio::test]
@@ -1142,6 +1289,10 @@ async fn the_catalogue_reports_capabilities() {
     assert_eq!(ao3["capabilities"]["chapters"], true);
     assert_eq!(ao3["capabilities"]["per_chapter_fetch"], true);
     assert_eq!(ao3["capabilities"]["authentication"], "none");
+    // A source that serves a plain request says so, rather than leaving the
+    // field absent: "needs nothing" and "the build forgot to say" must not look
+    // the same to an operator reading the catalogue.
+    assert_eq!(ao3["capabilities"]["wall"], "none");
     assert_eq!(ao3["enabled"], true);
 
     harness.cleanup().await;

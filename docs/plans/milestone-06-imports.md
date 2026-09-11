@@ -729,6 +729,44 @@ FictionPress, which the fingerprint could not touch at all:
 | ScribbleHub | refused | refused | 33,742 bytes |
 | SpaceBattles | refused | refused | 1,526,890 bytes |
 
+#### A wall this instance cannot pass is refused before it is queued
+
+The chain above is what an import will *try*. What a source will *accept* is a
+different question, and the two were conflated until a decision on 2026-09-11 made
+the difference matter: an adapter whose source needs a solver, on an instance
+running none, had a chain with no step that could pass, and the only way to find
+out was to spend a request discovering it — one challenge per page, per import.
+
+So an adapter now states its **wall** (`SourceAdapter::wall`, default
+`Wall::None`), and the importer compares it against what the instance can run
+before anything is queued:
+
+| Wall | Needs | Refused when |
+|---|---|---|
+| `None` | nothing | never |
+| `Fingerprint` | a build carrying `cloudflare-impersonation` | the feature is absent |
+| `Solver` | a reachable solver service | `imports.solver_url` is unset |
+
+The refusal is a `502 SOURCE_UNAVAILABLE` naming the fix — the setting to change
+and a service that speaks the protocol — which is the same shape as the
+source-health refusal beside it, and for the same reason: on a self-hosted
+instance the reader and the operator are the same person, and this is the one
+refusal they can act on themselves. It is checked at preview *and* at start, so a
+reader finds out while looking at the page rather than after a job has been
+promised work it cannot do. `the_catalogue_reports_capabilities` now also asserts
+the wall is reported, so the requirement is visible before a URL is pasted
+(spec §11.1).
+
+`unblock()` is derived from the wall (`Unblock::for_wall`) rather than declared
+separately, because two declarations that can disagree are two declarations that
+will. A fingerprint wall consequently *starts* impersonating instead of spending a
+request on a challenge the adapter's author already knew about, and a **solver
+wall declares no step of its own** — the fingerprint was measured insufficient on
+those hosts, so trying it first would be a refused request on every page. What a
+solver wall cannot do is declare the solver itself: whether one is running is the
+instance's fact, not the adapter's, which is exactly why the mismatch is detectable
+up front.
+
 #### Three bugs only a live service finds
 
 **The endpoint was posted to as configured.** `imports.solver_url` is naturally

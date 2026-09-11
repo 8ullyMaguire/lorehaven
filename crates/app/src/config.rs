@@ -217,6 +217,51 @@ impl ImportsConfig {
     }
 }
 
+impl ImportsConfig {
+    /// Why this source cannot be imported on this instance, when it cannot.
+    ///
+    /// # Why this is a refusal and not a fallback
+    ///
+    /// A source behind a wall needs something this instance either has or has
+    /// not: a build carrying the fingerprint transport, or a solver service it can
+    /// reach. Where it has not, there is no request worth making — every page
+    /// would come back a challenge, and the import would fail one page at a time
+    /// with a message about the wrong thing. So the answer is produced before
+    /// anything is queued, and it names the fix.
+    ///
+    /// The same shape as the source-health refusal beside it in the routes: work
+    /// that cannot succeed is refused while a reader is still looking at the page,
+    /// rather than promised to a queue that will fail it later.
+    ///
+    /// Returned rather than logged because on a self-hosted instance the reader
+    /// and the operator are the same person, and this is the one refusal they can
+    /// act on themselves.
+    #[must_use]
+    pub fn unreachable_reason(
+        &self,
+        adapter: &dyn lorehaven_scrapers::SourceAdapter,
+    ) -> Option<String> {
+        let name = adapter.display_name();
+        match adapter.wall() {
+            lorehaven_scrapers::Wall::None => None,
+            lorehaven_scrapers::Wall::Fingerprint => (!lorehaven_scrapers::FINGERPRINT_SUPPORTED)
+                .then(|| {
+                    format!(
+                        "the {name} source refuses a plain request and needs a browser's TLS fingerprint, which this build \
+                         was compiled without; rebuild with the `cloudflare-impersonation` feature to read it"
+                    )
+                }),
+            lorehaven_scrapers::Wall::Solver => self.solver_url.is_none().then(|| {
+                format!(
+                    "the {name} source answers a bot challenge that only a driven browser can clear, and this instance has \
+                     no solver service configured; run FlareSolverr, Byparr or obscura-solverr and point \
+                     `imports.solver_url` at it"
+                )
+            }),
+        }
+    }
+}
+
 /// Age-policy settings.
 ///
 /// Spec §7 requires the age machinery to be *configured*, not hard-coded to a
