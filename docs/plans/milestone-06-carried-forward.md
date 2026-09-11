@@ -11,6 +11,41 @@ this is the record of what it *owes*.
 
 ---
 
+## 0. Progress since this file was written
+
+| Adapter | State |
+|---|---|
+| `ffnet` — FanFiction.net and FictionPress | **written, tested, committed** |
+| `wattpad` | **written, tested, committed** |
+| `ficbook` | **written, tested, committed** |
+| `scribblehub` | **written, tested, committed** |
+| `xenforo` | **reconnoitred and its fixtures recorded; the adapter is not written** |
+
+Four of the five are done, each against pages recorded from the live site, each
+with an offline fixture suite and a live test. The fifth is written out in full in
+`docs/plans/milestone-06-xenforo-recon.md` — every markup shape, every selector,
+the per-host walls and `robots.txt` facts, and the open questions — so it can be
+built without going back to the live sites to re-derive any of it.
+
+Two decisions the four adapters settled, which the fifth should follow rather
+than rediscover:
+
+* **A robots override exists.** `imports.honour_robots` is an operator setting
+  (spec §11.5): `Disallow` is honoured by default, and an instance may override
+  it, in which case every bypass is counted and the override is visible in the
+  catalogue. Crawl-delay is never affected. This is why `wattpad` can read
+  metadata under the default policy while its prose is refused — and why the
+  refusal names the rule and the setting that would lift it.
+* **A fetch layer that does not undo the source's compression corrupts bodies
+  silently.** `safety::decode_response_body` handles it; `wattpad` is the source
+  that exposed it, and any source behind an edge that gzips unconditionally would
+  have been storing mojibake. Checked for a new source rather than assumed.
+
+`M6-02` stays `partially-implemented`, and `v0.07-imports` **still cannot be
+cut** — the milestone is not complete until XenForo lands.
+
+---
+
 ## 1. Why it stopped here
 
 The access half of importing from the bot-walled sources was the piece that looked
