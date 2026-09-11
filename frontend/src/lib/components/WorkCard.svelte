@@ -1,4 +1,23 @@
 <script lang="ts">
+  /**
+   * A work, in one of three densities.
+   *
+   * The variants exist because the same work is shown in places that want
+   * different amounts of it:
+   *
+   *  * `full` — a work's own page or a single result: everything known.
+   *  * `row` — a long list the reader scans: title, byline, facts, actions.
+   *  * `compact` — a grid of many: title, byline, and the state markers, with
+   *    the summary clamped away.
+   *
+   * All three are the same component rather than three components because the
+   * *content* is identical and only the arrangement differs; three copies would
+   * be three places for a chip to go missing. The library's cards also carry
+   * what only a library has — a reading status, the reader's own tags, the
+   * shelves a work sits on — and those are drawn in every variant, because a
+   * marker that disappears at a smaller size is a marker the reader will think
+   * they lost.
+   */
   import MetadataChip from './MetadataChip.svelte';
 
   export interface WorkSummary {
@@ -16,12 +35,42 @@
     bookmarked?: boolean;
   }
 
+  /** How much of a work to draw. */
+  export type WorkCardVariant = 'full' | 'row' | 'compact';
+
   interface Props {
     work: WorkSummary;
     onopen?: (id: string) => void;
+    /** How much of the work to draw. Defaults to `full`. */
+    variant?: WorkCardVariant;
+    /** The reader's reading status, already worded for display. */
+    readingStatus?: string;
+    /** The reader's own tags on this work. */
+    tags?: string[];
+    /** The shelves the work sits on. */
+    shelves?: string[];
+    /** Whether this card can be picked in a batch. */
+    selectable?: boolean;
+    /** Whether it is currently picked. */
+    selected?: boolean;
+    /** Called when it is picked or unpicked. */
+    onselect?: (id: string, selected: boolean) => void;
+    /** Actions, drawn in the footer. */
+    actions?: import('svelte').Snippet;
   }
 
-  let { work, onopen }: Props = $props();
+  let {
+    work,
+    onopen,
+    variant = 'full',
+    readingStatus,
+    tags = [],
+    shelves = [],
+    selectable = false,
+    selected = false,
+    onselect,
+    actions,
+  }: Props = $props();
 
   const COMPLETION_LABEL: Record<WorkSummary['completion'], string> = {
     in_progress: 'In progress',
@@ -42,12 +91,31 @@
     if (count < 1000) return `${count} words`;
     return `${(count / 1000).toFixed(count < 10000 ? 1 : 0)}k words`;
   }
+
+  /** Whether anything only a library knows is worth drawing. */
+  let hasLibraryFacts = $derived(
+    Boolean(readingStatus) || tags.length > 0 || shelves.length > 0,
+  );
+
+  function toggle() {
+    onselect?.(work.id, !selected);
+  }
 </script>
 
-<article class="card">
+<article class="card {variant}" class:selected>
   {#if work.bookmarked}
     <!-- The bookmark-ribbon motif from the theme, not a colour-coded badge. -->
     <span class="ribbon" aria-label="Saved to your library"></span>
+  {/if}
+
+  {#if selectable}
+    <!-- A real checkbox rather than a card-wide click: the card also holds links
+         and buttons, and making the whole thing a control would swallow them.
+         The label is the work's title, so the control has a name of its own. -->
+    <label class="pick">
+      <input type="checkbox" checked={selected} onchange={toggle} />
+      <span class="pick-label">Select {work.title}</span>
+    </label>
   {/if}
 
   <header>
@@ -61,13 +129,15 @@
     <p class="byline">by {work.authorDisplayName}</p>
   </header>
 
-  {#if work.summary}
+  {#if variant === 'full' && work.summary}
     <p class="summary">{work.summary}</p>
   {/if}
 
   <div class="chips">
     <MetadataChip label={COMPLETION_LABEL[work.completion]} tone={work.completion === 'complete' ? 'primary' : 'neutral'} />
-    <MetadataChip label={RATING_LABEL[work.rating]} />
+    {#if variant !== 'compact'}
+      <MetadataChip label={RATING_LABEL[work.rating]} />
+    {/if}
     {#if work.chapters !== undefined}
       <MetadataChip label="Chapters" value={work.chapters} />
     {/if}
@@ -76,7 +146,23 @@
     {/if}
   </div>
 
-  {#if work.mainCharacters?.length || work.centralRelationships?.length}
+  {#if hasLibraryFacts}
+    <!-- The library's own facts, drawn in every variant: a status or a tag that
+         vanished at grid density would look like it had been lost. -->
+    <ul class="library-facts">
+      {#if readingStatus}
+        <li class="status">{readingStatus}</li>
+      {/if}
+      {#each shelves as shelf (shelf)}
+        <li class="shelf">{shelf}</li>
+      {/each}
+      {#each tags as tag (tag)}
+        <li class="tag">{tag}</li>
+      {/each}
+    </ul>
+  {/if}
+
+  {#if variant === 'full' && (work.mainCharacters?.length || work.centralRelationships?.length)}
     <dl class="catalog">
       {#if work.mainCharacters?.length}
         <dt>Main characters</dt>
@@ -87,6 +173,12 @@
         <dd>{work.centralRelationships.join(', ')}</dd>
       {/if}
     </dl>
+  {/if}
+
+  {#if actions}
+    <div class="actions">
+      {@render actions()}
+    </div>
   {/if}
 </article>
 
@@ -101,6 +193,23 @@
     overflow: hidden;
   }
 
+  /* The grid density: less air, and the heading steps down a size. */
+  .compact {
+    padding: var(--space-3);
+  }
+
+  .compact h3 {
+    font-size: var(--text-lg);
+  }
+
+  .row {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .selected {
+    border-color: var(--color-primary);
+  }
+
   .ribbon {
     position: absolute;
     top: 0;
@@ -109,6 +218,23 @@
     height: 1.5rem;
     background: var(--color-accent);
     clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%);
+  }
+
+  .pick {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+  }
+
+  /* The label names the control for a screen reader; the checkbox is the mark. */
+  .pick-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   h3 {
@@ -147,6 +273,34 @@
     flex-wrap: wrap;
     gap: var(--space-2);
     margin-top: var(--space-3);
+  }
+
+  .library-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    list-style: none;
+    padding: 0;
+    margin: var(--space-3) 0 0;
+    font-size: var(--text-sm);
+  }
+
+  .library-facts li {
+    padding: 0 var(--space-2);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-sm);
+  }
+
+  .status {
+    color: var(--color-accent);
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin-top: var(--space-3);
+    align-items: center;
   }
 
   .catalog {

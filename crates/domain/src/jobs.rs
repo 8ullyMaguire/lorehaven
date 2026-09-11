@@ -99,6 +99,13 @@ pub enum JobKind {
     Thumbnail,
     /// Retention and collection: purge old jobs, collect unreferenced blobs.
     Maintenance,
+    /// Check the reader's library items against their sources (M8).
+    ///
+    /// A job rather than a request because it reads the network once per item
+    /// and a reader with a hundred imports should not hold a connection open
+    /// while it does: spec §14.1 asks for a check, and `POST
+    /// /library/updates/check` answers `202` with the job.
+    UpdateCheck,
 }
 
 impl JobKind {
@@ -112,6 +119,7 @@ impl JobKind {
             Self::Notify => "notify",
             Self::Thumbnail => "thumbnail",
             Self::Maintenance => "maintenance",
+            Self::UpdateCheck => "update_check",
         }
     }
 
@@ -125,6 +133,7 @@ impl JobKind {
             "notify" => Self::Notify,
             "thumbnail" => Self::Thumbnail,
             "maintenance" => Self::Maintenance,
+            "update_check" => Self::UpdateCheck,
             _ => return None,
         })
     }

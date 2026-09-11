@@ -70,7 +70,6 @@ pub fn router() -> Router<AppState> {
             "/imports/{id}/retry-failed-chapters",
             post(retry_failed_chapters),
         )
-        .route("/library/items", get(list_library))
         .route(
             "/source-credentials",
             get(list_credentials).post(store_credential),
@@ -1094,6 +1093,11 @@ async fn cancel_import(
     ))
 }
 
+// Retired in M8: `GET /library/items` now lives in `routes::library`, which
+// serves the same projection with filtering, sorting and paging. Kept here,
+// unused, only long enough to be sure nothing referenced it — and removed
+// outright rather than left as dead code.
+#[allow(dead_code)]
 async fn list_library(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,

@@ -438,6 +438,12 @@ impl Worker {
                 })?;
                 crate::exports::run(state, &payload).await
             }
+            JobKind::UpdateCheck => {
+                let payload = serde_json::from_str(&job.payload).map_err(|error| {
+                    HandlerError::Fatal(format!("the update check's payload is not JSON: {error}"))
+                })?;
+                crate::library_updates::run(state, &payload).await
+            }
             JobKind::Reindex | JobKind::Thumbnail => {
                 // A kind with no handler is a *fatal* failure: retrying it five
                 // times cannot make a handler appear, and a job that quietly
