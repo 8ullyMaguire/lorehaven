@@ -1691,6 +1691,8 @@ Work body retention: cache | aggregate
 
 Both modes produce a real work record. Eligibility (§7.6), metadata search, tags, fandoms, characters, series, collections, challenges, ratings, comments, bookmarks, notifications and the people directory all behave identically; what differs is whether this instance holds the words.
 
+Two values, not three, and not the words §30.2 uses. The media setting needed a third because media has a player shell to omit; text has no shell, so a third value here would be a state with no behaviour behind it. §30.2 states the reasoning in full.
+
 The setting is the operator's, and it is stated once. It applies to the instance, never to a request, a work, an importer, an extension or a federated peer: nothing an uploader, an adapter or a peer does may raise it. An instance set to `aggregate` refuses to store a body wherever a body could arrive — a URL import, a file upload, a clipboard paste, an authorized preservation batch (§11.11), a federated announcement, or a cache fill — and every refusal names the instance's policy rather than failing as a generic error.
 
 An operator may set retention per source family, and an override may only narrow. Caching most sources while aggregating one is expressible; the reverse on an `aggregate` instance is not, because that would restore storage the instance decided against, and the operator who wants it can change the instance setting itself, where the change is recorded. Overrides are recorded in the modlog with who set them and when.
@@ -4075,6 +4077,8 @@ The setting is the operator's, and an instance that chooses `reference` or `cata
 This is why the preference is an instance setting and not a per-work flag. "My instance does not host media, and the fan film it aggregates is still a work" is the combination to be expressible, and a per-work flag cannot express it without turning every work into a decision somebody has to make.
 
 Media bytes are one axis; the text of an imported work is another. This section governs the bytes and §11.15 governs the text, and the two are independent: an instance may host media while aggregating text, or hold nothing but text. They follow one principle, stated in both places because it is the same principle — the operator decides it once, and no work, uploader, importer, extension or federated peer raises it.
+
+**The two settings deliberately do not share a vocabulary, or a number of states.** Media needed a third value: `catalogue` renders no player shell at all, which is a different thing from playing at the origin, because media has a shell to omit. Text has no shell to omit — a work whose body this instance does not hold is read at its origin in the reader's own browser, and there is nothing here to render or to refrain from rendering. A third text value would be a state with no behaviour behind it, and one shared vocabulary would mean either giving text a mode it cannot act on or taking `catalogue` away from an operator who needs it. The names differ because the choices differ.
 
 ## 30.3 Media references, and where the metadata comes from
 
