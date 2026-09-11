@@ -23,6 +23,7 @@
 
 pub mod ao3;
 pub mod efiction;
+pub mod ffnet;
 pub mod royalroad;
 pub mod syosetu;
 
@@ -38,6 +39,8 @@ pub fn default_registry() -> Registry {
     let mut registry = Registry::new();
     registry.register(Box::new(ao3::ArchiveSoftware::new()));
     registry.register(Box::new(efiction::Efiction::new()));
+    registry.register(Box::new(ffnet::FanFiction::fanfiction_net()));
+    registry.register(Box::new(ffnet::FanFiction::fiction_press()));
     registry.register(Box::new(royalroad::RoyalRoad::new()));
     registry.register(Box::new(syosetu::Syosetu::new()));
     // An adapter that cannot read anything must not appear in the catalogue: a
