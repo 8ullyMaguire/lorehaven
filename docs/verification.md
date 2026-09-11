@@ -151,6 +151,27 @@ test runs on SQLite.
    SQLite index has it; this was a divergence between the two migration trees
    that nothing was comparing.
 8. `library_items` bound four values for five placeholders.
+9. **`typography_preference.distraction_free` was never cast on the write path.**
+   The column is `BOOLEAN`; the Postgres `VALUES` list bound it bare, so
+   `PATCH /settings/typography` answered `500` with *"column `distraction_free`
+   is of type boolean but expression is of type bigint"* — saving reading
+   preferences was broken on PostgreSQL and worked on SQLite. The first fix pass
+   covered `contains_spoilers` and `is_public` and missed this one, because the
+   sweep was done by reading the diffs rather than by enumerating the schema's
+   boolean columns and checking every bind of each. Now `?::int::boolean`.
+10. **`font_scale` and `line_height` were `REAL`.** The repository decodes them as
+    `f64`, and PostgreSQL's `REAL` is 4-byte `FLOAT4` against Rust's `FLOAT8`, so
+    the read after the write failed with *"column 0: mismatched types; Rust type
+    `f64` (as SQL type `FLOAT8`) is not compatible with SQL type `FLOAT4`"*.
+    SQLite's `REAL` is 8-byte, so the two dialects meant different widths for the
+    same declaration. Both columns are now `DOUBLE PRECISION` *and* read through
+    an explicit `::double precision`, which states the contract rather than
+    relying on the column type staying right.
+
+Defects 9 and 10 are each the same lesson as 3 and 5 — a dialect's declaration is
+not the repository's type — and they were found only because the sweep was run per
+column *class* over the whole schema instead of over the statements just edited. A
+fix applied by reading one's own diff verifies the diff, not the class.
 
 Defect 7 is the one to remember: the two migration catalogues are checked for
 *identical ids* and for nothing else, so a column can differ between the engines
