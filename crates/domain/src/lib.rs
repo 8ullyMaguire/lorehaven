@@ -16,6 +16,7 @@ pub mod exports;
 pub mod ids;
 pub mod imports;
 pub mod jobs;
+pub mod library;
 pub mod policy;
 pub mod reading;
 

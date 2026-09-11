@@ -315,6 +315,215 @@ mod tests {
         );
     }
 
+    /// The tables a migration declares, with their columns and indexes.
+    ///
+    /// Compared by *name* only: the two dialects legitimately differ in the
+    /// type of a column (`BIGINT` against `INTEGER`, `BOOLEAN` against
+    /// `INTEGER`), and asserting the types match would forbid the thing ADR 0004
+    /// requires. A column that exists in one dialect and not the other is the
+    /// defect this looks for.
+    type Schema = std::collections::BTreeMap<String, Vec<String>>;
+
+    fn declared_schema(sql: &str) -> Schema {
+        let stripped = strip_comments(sql);
+        let sql: &str = &stripped;
+        let mut schema = Schema::new();
+
+        // CREATE TABLE <name> ( ... ) — the body may contain parentheses
+        // (CHECK, UNIQUE, REFERENCES), so the closing paren is found by depth.
+        let mut rest = sql;
+        while let Some(at) = rest.find("CREATE TABLE") {
+            let after = &rest[at + "CREATE TABLE".len()..];
+            let after = after.trim_start();
+            let after = after
+                .strip_prefix("IF NOT EXISTS")
+                .map_or(after, str::trim_start);
+            let name: String = after
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            let Some(open) = after.find('(') else { break };
+            let body = match balanced(&after[open..]) {
+                Some(b) => b,
+                None => break,
+            };
+
+            let mut columns = Vec::new();
+            for item in split_top_level(body) {
+                let item = item.trim();
+                if item.is_empty() {
+                    continue;
+                }
+                let keyword = item.split_whitespace().next().unwrap_or("").to_uppercase();
+                // Table-level constraints are not columns.
+                if matches!(
+                    keyword.as_str(),
+                    "UNIQUE" | "PRIMARY" | "CHECK" | "FOREIGN" | "CONSTRAINT"
+                ) {
+                    continue;
+                }
+                if let Some(col) = item.split_whitespace().next() {
+                    columns.push(col.to_string());
+                }
+            }
+            schema.insert(name, columns);
+            rest = &after[open..];
+        }
+
+        // CREATE [UNIQUE] INDEX <name> ON <table> (cols)
+        for line in sql.lines() {
+            let line = line.trim();
+            let Some(at) = line.find("CREATE ") else {
+                continue;
+            };
+            let head = &line[at..];
+            if !head.starts_with("CREATE UNIQUE INDEX") && !head.starts_with("CREATE INDEX") {
+                continue;
+            }
+            let Some(on) = head.find(" ON ") else {
+                continue;
+            };
+            let Some(open) = head[on..].find('(') else {
+                continue;
+            };
+            let name = head[..on].split_whitespace().last().unwrap_or_default();
+            let Some(cols) = balanced(&head[on + open..]) else {
+                continue;
+            };
+            let cols = split_top_level(cols)
+                .into_iter()
+                .map(|c| c.trim().to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            schema.insert(format!("index:{name}"), vec![cols]);
+        }
+
+        schema
+    }
+
+    /// Remove `--` line comments, leaving anything inside a quoted string.
+    ///
+    /// Without this the parser reads a comment as a column: the migrations
+    /// document their columns inline, and `-- download …` became a column
+    /// named `--` and another named `download`.
+    fn strip_comments(sql: &str) -> String {
+        let mut out = String::with_capacity(sql.len());
+        for line in sql.lines() {
+            let mut in_quote = false;
+            let mut cut = line.len();
+            let bytes: Vec<char> = line.chars().collect();
+            let mut i = 0;
+            while i < bytes.len() {
+                match bytes[i] {
+                    '\'' => in_quote = !in_quote,
+                    '-' if !in_quote && i + 1 < bytes.len() && bytes[i + 1] == '-' => {
+                        cut = line.char_indices().nth(i).map_or(line.len(), |(b, _)| b);
+                        break;
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            out.push_str(&line[..cut]);
+            out.push('\n');
+        }
+        out
+    }
+
+    /// The body inside the first balanced pair of parentheses.
+    fn balanced(text: &str) -> Option<&str> {
+        let mut depth = 0usize;
+        let mut start = None;
+        for (i, c) in text.char_indices() {
+            match c {
+                '(' => {
+                    depth += 1;
+                    if depth == 1 {
+                        start = Some(i + 1);
+                    }
+                }
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return start.map(|s| &text[s..i]);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Split on commas that are not inside parentheses.
+    fn split_top_level(text: &str) -> Vec<&str> {
+        let mut parts = Vec::new();
+        let mut depth = 0usize;
+        let mut start = 0usize;
+        for (i, c) in text.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => depth = depth.saturating_sub(1),
+                ',' if depth == 0 => {
+                    parts.push(&text[start..i]);
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+        parts.push(&text[start..]);
+        parts
+    }
+
+    #[test]
+    fn the_two_dialects_declare_the_same_columns_and_indexes() {
+        // The id check above compares file names, and the *schema* is what the
+        // code depends on. A column present in one dialect and absent in the
+        // other passes that check and fails at runtime on the engine no test
+        // exercises — which is how `reading_progress` came to be missing a
+        // `device_id` in its unique index on PostgreSQL only.
+        for (lite, pg) in catalogue(Backend::Sqlite)
+            .iter()
+            .zip(catalogue(Backend::Postgres))
+        {
+            let a = declared_schema(lite.sql);
+            let b = declared_schema(pg.sql);
+
+            let only_sqlite: Vec<&String> = a.keys().filter(|k| !b.contains_key(*k)).collect();
+            let only_postgres: Vec<&String> = b.keys().filter(|k| !a.contains_key(*k)).collect();
+            assert!(
+                only_sqlite.is_empty() && only_postgres.is_empty(),
+                "{}: tables or indexes differ — sqlite only {only_sqlite:?}, \
+                 postgres only {only_postgres:?}",
+                lite.id()
+            );
+
+            for (name, columns) in &a {
+                assert_eq!(
+                    columns,
+                    &b[name],
+                    "{}: {name} declares different columns or index columns \
+                     per dialect",
+                    lite.id()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_schema_parser_sees_tables_columns_and_indexes() {
+        // The check above is only as good as this parser, so it is pinned.
+        let sql = "CREATE TABLE t (\n  -- a comment mentioning download\n  \
+                   a BIGINT PRIMARY KEY,\n  b TEXT NOT NULL,\n  UNIQUE (a, b)\n);\n\
+                   CREATE UNIQUE INDEX t_b ON t (b);";
+        let schema = declared_schema(sql);
+        assert_eq!(
+            schema["t"],
+            vec!["a", "b"],
+            "table-level constraints are not columns"
+        );
+        assert_eq!(schema["index:t_b"], vec!["b"]);
+    }
+
     #[test]
     fn migrations_are_ordered_and_uniquely_versioned() {
         let mut versions: Vec<&str> = catalogue(Backend::Sqlite)
