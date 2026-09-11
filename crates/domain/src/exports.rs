@@ -236,6 +236,68 @@ pub struct ExportProvenance {
     pub permission: Option<String>,
 }
 
+/// What a chapter's content is, which is one of exactly two things.
+///
+/// An authored chapter is a [`Document`] — the editor's own format, with its
+/// structure intact. An **imported** chapter is sanitized HTML, because that is
+/// what the importer stores: the source's page, reduced to the allow-listed
+/// subset, and never parsed back into the editor's model. Pretending the two are
+/// one shape would mean either losing the editor's structure or inventing an
+/// HTML-to-document parser whose mistakes would look like the author's.
+///
+/// The formats handle both, and the HTML side is a converter over exactly the
+/// tag set the sanitizer permits — a closed set, so the conversion is not a guess.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChapterBody {
+    /// An authored chapter, in the editor's format.
+    Document(Document),
+    /// An imported chapter: sanitized HTML from a source page.
+    Html(String),
+}
+
+impl ChapterBody {
+    /// The sanitized HTML rendering, which is what HTML and EPUB carry.
+    #[must_use]
+    pub fn to_sanitized_html(&self) -> String {
+        match self {
+            Self::Document(document) => document.to_sanitized_html(),
+            // Already sanitized on the way in by the importer, which is the only
+            // code that knew which parts of a foreign page were prose.
+            Self::Html(html) => html.clone(),
+        }
+    }
+
+    /// The plain-text rendering.
+    #[must_use]
+    pub fn to_plain_text(&self) -> String {
+        match self {
+            Self::Document(document) => document.to_plain_text(),
+            Self::Html(html) => html_to_text(html),
+        }
+    }
+
+    /// The Markdown rendering.
+    #[must_use]
+    pub fn to_markdown(&self) -> String {
+        match self {
+            Self::Document(document) => {
+                let mut out = String::new();
+                for block in &document.blocks {
+                    write_markdown_block(&mut out, block, 0);
+                }
+                out.trim_end().to_owned()
+            }
+            Self::Html(html) => html_to_markdown(html),
+        }
+    }
+
+    /// Whether there is nothing to render.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.to_plain_text().trim().is_empty()
+    }
+}
+
 /// One chapter, ready to render.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportChapter {
@@ -244,7 +306,29 @@ pub struct ExportChapter {
     /// The chapter's title as the author gave it. May be empty.
     pub title: String,
     /// The chapter's content.
-    pub document: Document,
+    pub body: ChapterBody,
+}
+
+impl ExportChapter {
+    /// An authored chapter.
+    #[must_use]
+    pub fn authored(ordinal: u32, title: impl Into<String>, document: Document) -> Self {
+        Self {
+            ordinal,
+            title: title.into(),
+            body: ChapterBody::Document(document),
+        }
+    }
+
+    /// An imported chapter, whose body is sanitized HTML.
+    #[must_use]
+    pub fn imported(ordinal: u32, title: impl Into<String>, html: impl Into<String>) -> Self {
+        Self {
+            ordinal,
+            title: title.into(),
+            body: ChapterBody::Html(html.into()),
+        }
+    }
 }
 
 impl ExportChapter {
@@ -334,7 +418,7 @@ pub fn render(
             let bodies: Vec<String> = work
                 .chapters
                 .iter()
-                .map(|chapter| chapter.document.to_sanitized_html())
+                .map(|chapter| chapter.body.to_sanitized_html())
                 .collect();
             let chapters: Vec<EpubChapter<'_>> = work
                 .chapters
@@ -370,6 +454,391 @@ pub fn render(
 }
 
 // ---------------------------------------------------------------------------
+// Imported chapters: sanitized HTML in, text and Markdown out
+// ---------------------------------------------------------------------------
+//
+// These two functions exist because an imported chapter is stored as HTML rather
+// than as the editor's document (see [`ChapterBody`]). They are written against
+// **exactly the tag set `lorehaven_scrapers::sanitize` permits**, which is a
+// closed set rather than "whatever the web contains":
+//
+//   p, br, hr, em, strong, blockquote, ul, ol, li, h1..h4, a[href], ruby/rt
+//
+// Anything outside it was already dropped on the way in, so the converters do not
+// need to handle it — and a test asserts the two lists still agree, so a tag
+// added to the sanitizer without a rule here is a failing test rather than a
+// paragraph that silently loses its text.
+
+/// The text of a sanitized HTML fragment, with block structure as newlines.
+#[must_use]
+pub fn html_to_text(html: &str) -> String {
+    let mut out = String::new();
+    let mut chars = html.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '<' => {
+                let mut tag = String::new();
+                for next in chars.by_ref() {
+                    if next == '>' {
+                        break;
+                    }
+                    tag.push(next);
+                }
+                let trimmed = tag.trim();
+                let closing = trimmed.starts_with('/');
+                let name = trimmed
+                    .trim_start_matches('/')
+                    .split(|c: char| c.is_whitespace() || c == '/')
+                    .next()
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                match name.as_str() {
+                    // A break, a scene divider and the end of a block all read as
+                    // a line ending in plain text; a list item as its own line.
+                    "br" | "hr" | "li" => out.push('\n'),
+                    "p" | "blockquote" | "ul" | "ol" | "h1" | "h2" | "h3" | "h4" => {
+                        if closing && !out.ends_with("\n\n") && !out.is_empty() {
+                            out.push('\n');
+                        }
+                    }
+                    // A ruby annotation's own text is pronunciation rather than
+                    // prose, and running it into the base text reads as a stutter:
+                    // 漢字かんじ instead of 漢字. The annotation runs to its own
+                    // closing tag, which the sanitizer never nests.
+                    "rt" | "rp" if !closing => {
+                        loop {
+                            match chars.next() {
+                                None => break,
+                                Some('<') => {
+                                    let inner = read_tag_body(&mut chars);
+                                    if inner.trim_start().starts_with('/') {
+                                        break;
+                                    }
+                                }
+                                Some(_) => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            '&' => out.push_str(&decode_entity(&read_entity(&mut chars))),
+            _ => out.push(ch),
+        }
+    }
+    tidy_lines(&out)
+}
+
+/// The text of a tag whose opening `<` has already been consumed, up to its `>`.
+fn read_tag_body(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> String {
+    let mut body = String::new();
+    for next in chars.by_ref() {
+        if next == '>' {
+            break;
+        }
+        body.push(next);
+    }
+    body
+}
+
+/// The name of an entity whose `&` has already been consumed.
+fn read_entity(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> String {
+    let mut entity = String::new();
+    for next in chars.by_ref() {
+        if next == ';' || entity.len() > 8 {
+            break;
+        }
+        entity.push(next);
+    }
+    entity
+}
+
+/// The Markdown of a sanitized HTML fragment.
+#[must_use]
+pub fn html_to_markdown(html: &str) -> String {
+    let mut out = MarkdownWriter::default();
+    // What is currently open, so a closing tag knows what it is closing. A stack
+    // rather than a set of flags, because `<strong><a href=..>x</a></strong>` and
+    // `<a href=..><strong>x</strong></a>` nest in opposite orders and both occur.
+    let mut open: Vec<Open> = Vec::new();
+    let mut list: Option<bool> = None;
+    let mut list_index = 0_usize;
+    let mut chars = html.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch != '<' {
+            if ch == '&' {
+                out.text(&decode_entity(&read_entity(&mut chars)));
+            } else {
+                out.text(&escape_markdown_char(ch));
+            }
+            continue;
+        }
+
+        let tag = read_tag_body(&mut chars);
+        let trimmed = tag.trim();
+        let closing = trimmed.starts_with('/');
+        let name = trimmed
+            .trim_start_matches('/')
+            .split(|c: char| c.is_whitespace() || c == '/')
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+
+        match name.as_str() {
+            "p" => out.blank_line(),
+            "br" => out.hard_break(),
+            "hr" => {
+                out.blank_line();
+                out.text("* * *");
+                out.blank_line();
+            }
+            "h1" | "h2" | "h3" | "h4" => {
+                out.blank_line();
+                if !closing {
+                    out.text(&"#".repeat(name[1..].parse::<usize>().unwrap_or(1)));
+                    out.text(" ");
+                }
+            }
+            "blockquote" => {
+                out.blank_line();
+                // The marker belongs on the lines *inside* the quote, so it is
+                // applied as they are written rather than appended after them.
+                out.quoted = !closing;
+            }
+            "ul" | "ol" => {
+                out.blank_line();
+                if closing {
+                    list = None;
+                } else {
+                    list = Some(name == "ol");
+                    list_index = 0;
+                }
+            }
+            "li" => {
+                out.item_break();
+                if !closing {
+                    list_index += 1;
+                    let marker = if list == Some(true) {
+                        format!("{list_index}. ")
+                    } else {
+                        "- ".to_owned()
+                    };
+                    out.text(&marker);
+                    // An item's first paragraph starts *at* the marker, not after
+                    // it: a blank line here would turn every list item into a
+                    // paragraph of its own with the marker stranded above it.
+                    out.at_item_start = true;
+                }
+            }
+            "strong" | "em" => {
+                let mark = if name == "strong" { "**" } else { "*" };
+                if closing {
+                    if open.last() == Some(&Open::Emphasis(mark)) {
+                        open.pop();
+                        out.text(mark);
+                    }
+                } else {
+                    open.push(Open::Emphasis(mark));
+                    out.text(mark);
+                }
+            }
+            "a" => {
+                if closing {
+                    if let Some(Open::Link(href)) = open.last().cloned() {
+                        open.pop();
+                        // A link with no href is not a link, and `[text]()` is not
+                        // Markdown — the empty case never opens a bracket.
+                        if !href.is_empty() {
+                            out.text(&format!("]({href})"));
+                        }
+                    }
+                } else {
+                    let href = attribute(trimmed, "href").unwrap_or_default();
+                    if !href.is_empty() {
+                        out.text("[");
+                    }
+                    open.push(Open::Link(href));
+                }
+            }
+            "ruby" | "rt" | "rp" => {}
+            _ => {}
+        }
+    }
+    out.finish()
+}
+
+/// A Markdown buffer that knows where its lines begin.
+///
+/// The line-start state is the whole reason this is a type rather than a
+/// `String`: a block quote's marker has to be written after every newline *while*
+/// inside the quote, and a writer that appends the marker when the quote closes
+/// puts it in the wrong place — which is what the first version of this did, and
+/// it produced `Quoted.` followed by two bare `>` lines.
+#[derive(Default)]
+struct MarkdownWriter {
+    out: String,
+    /// Whether a block quote is open, so its marker is written per line.
+    quoted: bool,
+    /// Whether the next character written starts a line.
+    at_line_start: bool,
+    /// Whether a list item's marker has been written and nothing else yet.
+    at_item_start: bool,
+}
+
+impl MarkdownWriter {
+    fn text(&mut self, text: &str) {
+        self.at_item_start = false;
+        for ch in text.chars() {
+            if self.at_line_start {
+                if self.quoted {
+                    self.out.push_str("> ");
+                }
+                self.at_line_start = false;
+            }
+            self.out.push(ch);
+            if ch == '\n' {
+                self.at_line_start = true;
+            }
+        }
+    }
+
+    /// A list item's break: a new line, but not a blank one.
+    fn item_break(&mut self) {
+        self.trim_trailing_spaces();
+        while self.out.ends_with("\n\n") {
+            self.out.pop();
+        }
+        if !self.out.is_empty() && !self.out.ends_with('\n') {
+            self.out.push('\n');
+        }
+        self.at_line_start = true;
+        self.at_item_start = false;
+    }
+
+    /// A paragraph break: exactly one blank line, however many were implied.
+    fn blank_line(&mut self) {
+        // A paragraph opening inside a list item is the item's own text.
+        if self.at_item_start {
+            return;
+        }
+        self.trim_trailing_spaces();
+        while self.out.ends_with("\n\n") || self.out.is_empty() {
+            if self.out.is_empty() {
+                return;
+            }
+            self.out.pop();
+        }
+        if !self.out.is_empty() {
+            self.out.push_str("\n\n");
+            self.at_line_start = true;
+        }
+    }
+
+    /// A line break inside a paragraph, which Markdown spells as two trailing
+    /// spaces — and which therefore must survive the trailing-space tidy-up.
+    fn hard_break(&mut self) {
+        if !self.out.ends_with(' ') && !self.out.is_empty() {
+            self.out.push_str("  ");
+        }
+        self.out.push('\n');
+        self.at_line_start = true;
+    }
+
+    fn trim_trailing_spaces(&mut self) {
+        while self.out.ends_with(' ') {
+            self.out.pop();
+            self.at_line_start = false;
+        }
+    }
+
+    fn finish(mut self) -> String {
+        self.trim_trailing_spaces();
+        while self.out.ends_with('\n') {
+            self.out.pop();
+        }
+        self.out
+    }
+}
+
+/// An inline construct waiting for its closing tag.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Open {
+    /// `**` or `*`, written on open and again on close.
+    Emphasis(&'static str),
+    /// A link's target, written as `](href)` on close.
+    Link(String),
+}
+
+/// The value of an attribute in a tag's own text, quoted either way.
+fn attribute(tag: &str, name: &str) -> Option<String> {
+    let needle = format!("{name}=");
+    let at = tag.find(&needle)?;
+    let after = tag[at + needle.len()..].trim_start();
+    let (quote, rest) = after.split_at(1);
+    if quote == "\"" || quote == "'" {
+        let end = rest.find(quote)?;
+        Some(rest[..end].to_owned())
+    } else {
+        let end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
+        Some(rest[..end].to_owned())
+    }
+}
+
+fn escape_markdown_char(ch: char) -> String {
+    match ch {
+        '*' | '_' | '`' | '[' | ']' => format!("\\{ch}"),
+        _ => ch.to_string(),
+    }
+}
+
+/// Decode the entities the sanitizer emits.
+fn decode_entity(entity: &str) -> String {
+    match entity {
+        "amp" => "&".to_owned(),
+        "lt" => "<".to_owned(),
+        "gt" => ">".to_owned(),
+        "quot" => "\"".to_owned(),
+        "apos" | "#39" => "'".to_owned(),
+        "nbsp" => " ".to_owned(),
+        _ => {
+            if let Some(code) = entity.strip_prefix('#') {
+                if let Ok(value) = code.parse::<u32>() {
+                    if let Some(ch) = char::from_u32(value) {
+                        return ch.to_string();
+                    }
+                }
+            }
+            format!("&{entity};")
+        }
+    }
+}
+
+/// Collapse runs of blank lines, and trim each line.
+///
+/// Both conversions produce ragged whitespace — an inline tag boundary can leave
+/// a space before a line ending, and a closed block can add a newline that is
+/// already there — and leaving it makes an exported file look careless in a way
+/// the author's text was not.
+fn tidy_lines(text: &str) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            if lines.last().is_none_or(|last| !last.is_empty()) {
+                lines.push(String::new());
+            }
+        } else {
+            lines.push(trimmed.trim_start_matches(' ').to_owned());
+        }
+    }
+    while lines.last().is_some_and(String::is_empty) {
+        lines.pop();
+    }
+    lines.join("\n")
+}
+
+// ---------------------------------------------------------------------------
 // Plain text
 // ---------------------------------------------------------------------------
 
@@ -386,7 +855,7 @@ fn render_plain_text(work: &ExportWork, options: &ExportOptions) -> String {
             out.push_str(&chapter.label());
             out.push_str("\n\n");
         }
-        out.push_str(&chapter.document.to_plain_text());
+        out.push_str(&chapter.body.to_plain_text());
         out.push_str("\n\n");
     }
     if let Some(provenance) = &work.provenance {
@@ -450,7 +919,7 @@ fn render_html(work: &ExportWork, options: &ExportOptions) -> String {
         if options.chapter_headings {
             out.push_str(&format!("<h2>{}</h2>\n", escape_text(&chapter.label())));
         }
-        out.push_str(&chapter.document.to_sanitized_html());
+        out.push_str(&chapter.body.to_sanitized_html());
         out.push_str("\n</section>\n");
     }
 
@@ -531,9 +1000,7 @@ fn render_markdown(work: &ExportWork, options: &ExportOptions) -> String {
         if options.chapter_headings {
             out.push_str(&format!("## {}\n\n", markdown_escape(&chapter.label())));
         }
-        for block in &work_chapter_blocks(chapter) {
-            write_markdown_block(&mut out, block, 0);
-        }
+        out.push_str(&chapter.body.to_markdown());
         out.push('\n');
     }
 
@@ -549,10 +1016,6 @@ fn render_markdown(work: &ExportWork, options: &ExportOptions) -> String {
         }
     }
     out
-}
-
-fn work_chapter_blocks(chapter: &ExportChapter) -> Vec<Block> {
-    chapter.document.blocks.clone()
 }
 
 fn write_markdown_block(out: &mut String, block: &Block, depth: usize) {
@@ -686,4 +1149,278 @@ fn markdown_anchor(label: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn work(chapters: Vec<ExportChapter>) -> ExportWork {
+        ExportWork {
+            title: "A Work".to_owned(),
+            author: "An Author".to_owned(),
+            language: "en".to_owned(),
+            chapters,
+            provenance: Some(ExportProvenance {
+                source_name: "Archive of Our Own".to_owned(),
+                source_url: "https://archiveofourown.org/works/1".to_owned(),
+                retrieved_at: "2026-09-11T09:00:00Z".to_owned(),
+                source_key: Some("1".to_owned()),
+                permission: None,
+            }),
+            identifier: "urn:uuid:1".to_owned(),
+            modified: "2026-09-11T00:00:00Z".to_owned(),
+        }
+    }
+
+    fn imported() -> ExportWork {
+        work(vec![
+            ExportChapter::imported(1, "One", "<p>First <strong>bold</strong> word.</p>"),
+            ExportChapter::imported(
+                2,
+                "",
+                "<p>Second.</p><hr /><blockquote><p>Quoted.</p></blockquote>\
+                 <ul><li><p>An item.</p></li></ul>",
+            ),
+        ])
+    }
+
+    #[test]
+    fn format_strings_are_stable_and_round_trip() {
+        // These strings are in a database column and in URLs.
+        for format in ExportFormat::ALL {
+            assert_eq!(ExportFormat::parse(format.as_str()), Some(format));
+        }
+        assert_eq!(ExportFormat::parse("docx"), None);
+        assert_eq!(ExportFormat::PlainText.as_str(), "plain_text");
+        assert_eq!(ExportFormat::Epub.as_str(), "epub");
+    }
+
+    #[test]
+    fn the_builtin_formats_are_exactly_the_ones_with_no_converter() {
+        // The two facts have to agree: an interface asks `is_builtin` to decide
+        // what to offer, and the renderer refuses what has a converter.
+        for format in ExportFormat::ALL {
+            assert_eq!(
+                format.is_builtin(),
+                format.converters().is_empty(),
+                "{format:?}"
+            );
+        }
+        assert!(!ExportFormat::Pdf.is_builtin());
+        assert_eq!(
+            ExportFormat::Pdf.converters(),
+            &[Converter::EbookConvert, Converter::Pandoc]
+        );
+        assert_eq!(ExportFormat::Mobi.converters(), &[Converter::EbookConvert]);
+    }
+
+    #[test]
+    fn the_plain_text_export_matches_the_rendered_text() {
+        // The plan's own criterion. An imported body is HTML, so the text is the
+        // converter's, and it has to equal what a reader would read.
+        let export = imported();
+        let bytes = render(&export, ExportFormat::PlainText, &ExportOptions::defaults())
+            .expect("plain text");
+        let text = String::from_utf8(bytes).expect("utf-8");
+        assert!(text.contains("First bold word."), "{text}");
+        assert!(text.contains("Quoted."), "{text}");
+        assert!(text.contains("An item."), "{text}");
+        assert!(!text.contains('<'), "no markup survives: {text}");
+        assert!(
+            text.contains("One"),
+            "the chapter's title is a heading: {text}"
+        );
+        // A chapter with no title gets a number and says so.
+        assert!(text.contains("Chapter 2"), "{text}");
+    }
+
+    #[test]
+    fn a_work_with_no_chapters_is_refused_in_every_format() {
+        let empty = work(Vec::new());
+        for format in ExportFormat::ALL {
+            let error =
+                render(&empty, format, &ExportOptions::defaults()).expect_err("must refuse");
+            // A converter format is refused for needing a converter, which is
+            // also true; the point is that none of them produces an empty file.
+            assert!(
+                matches!(
+                    error,
+                    ExportError::Empty | ExportError::NeedsConverter { .. }
+                ),
+                "{format:?}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_converter_formats_are_refused_by_the_renderer() {
+        let error = render(&imported(), ExportFormat::Pdf, &ExportOptions::defaults())
+            .expect_err("must refuse");
+        assert_eq!(
+            error,
+            ExportError::NeedsConverter {
+                format: ExportFormat::Pdf
+            }
+        );
+    }
+
+    #[test]
+    fn the_standalone_html_has_attribution_a_contents_list_and_no_theme() {
+        let export = imported();
+        let html = String::from_utf8(
+            render(&export, ExportFormat::Html, &ExportOptions::defaults()).expect("html"),
+        )
+        .expect("utf-8");
+        assert!(html.starts_with("<!DOCTYPE html>"), "{html}");
+        assert!(html.contains("<a href=\"#chapter-1\">One</a>"), "{html}");
+        assert!(html.contains("A Work — An Author"), "attribution: {html}");
+        assert!(
+            html.contains("archiveofourown.org/works/1"),
+            "provenance: {html}"
+        );
+        // The reader's own theme is not the exporter's business, so a default
+        // export carries no font choice at all.
+        assert!(!html.contains("font-family"), "{html}");
+
+        // …unless one was chosen for this export.
+        let options = ExportOptions {
+            font_family: Some("Literata, serif".to_owned()),
+            font_size_pt: Some(12),
+            ..ExportOptions::defaults()
+        };
+        let html = String::from_utf8(render(&export, ExportFormat::Html, &options).expect("html"))
+            .expect("utf-8");
+        assert!(html.contains("font-family: Literata, serif"), "{html}");
+        assert!(html.contains("font-size: 12pt"), "{html}");
+    }
+
+    #[test]
+    fn markdown_states_its_own_simplifications() {
+        let export = imported();
+        let markdown = String::from_utf8(
+            render(&export, ExportFormat::Markdown, &ExportOptions::defaults()).expect("markdown"),
+        )
+        .expect("utf-8");
+        assert!(markdown.starts_with("<!--"), "{markdown}");
+        assert!(markdown.contains("typography is not carried"), "{markdown}");
+        assert!(markdown.contains("# A Work"), "{markdown}");
+        assert!(markdown.contains("## Contents"), "{markdown}");
+    }
+
+    #[test]
+    fn markdown_keeps_emphasis_links_and_structure_from_an_imported_chapter() {
+        let export = work(vec![ExportChapter::imported(
+            1,
+            "One",
+            "<p>Some <strong>bold</strong> and <em>italic</em> and \
+             <a href=\"https://example.org/x\">a link</a>.</p>\
+             <blockquote><p>Quoted.</p></blockquote>\
+             <ul><li><p>First item.</p></li><li><p>Second item.</p></li></ul><hr />",
+        )]);
+        let markdown = String::from_utf8(
+            render(&export, ExportFormat::Markdown, &ExportOptions::defaults()).expect("markdown"),
+        )
+        .expect("utf-8");
+        assert!(
+            markdown.contains("Some **bold** and *italic* and"),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("[a link](https://example.org/x)"),
+            "a link survives with its target: {markdown}"
+        );
+        assert!(markdown.contains("> Quoted."), "{markdown}");
+        assert!(markdown.contains("- First item."), "{markdown}");
+        assert!(markdown.contains("- Second item."), "{markdown}");
+        assert!(markdown.contains("* * *"), "the scene break: {markdown}");
+    }
+
+    #[test]
+    fn markdown_from_an_authored_chapter_keeps_its_headings_and_order() {
+        // The editor's own format takes the other path, and it must produce the
+        // same shape of Markdown: this is the pair that would drift apart if only
+        // one were tested.
+        let document = Document::from_plain("First paragraph.\n\nSecond paragraph.");
+        let export = work(vec![ExportChapter::authored(1, "One", document)]);
+        let markdown = String::from_utf8(
+            render(&export, ExportFormat::Markdown, &ExportOptions::defaults()).expect("markdown"),
+        )
+        .expect("utf-8");
+        assert!(markdown.contains("## One"), "{markdown}");
+        assert!(markdown.contains("First paragraph."), "{markdown}");
+        assert!(markdown.contains("Second paragraph."), "{markdown}");
+    }
+
+    #[test]
+    fn the_sanitizers_tag_set_is_the_one_the_converters_cover() {
+        // If the importer's allow-list grows, this fails rather than a paragraph
+        // silently losing its text on the way out. The list is duplicated here on
+        // purpose: the assertion is that the two *sources* agree.
+        // The tags whose text a reader must see.
+        const SANITIZER_ALLOWS: [&str; 15] = [
+            "p",
+            "br",
+            "hr",
+            "em",
+            "strong",
+            "blockquote",
+            "ul",
+            "ol",
+            "li",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "a",
+            "ruby",
+        ];
+        for tag in SANITIZER_ALLOWS {
+            let html = format!("<{tag}>x</{tag}>");
+            assert!(
+                html_to_text(&html).contains('x'),
+                "the converter drops <{tag}>"
+            );
+        }
+
+        // …and the two that are *intentionally* dropped, because a ruby
+        // annotation is pronunciation rather than prose. Asserted rather than
+        // omitted, so a change to the sanitizer's list is noticed here.
+        for tag in ["rt", "rp"] {
+            let html = format!("<p><ruby>base<{tag}>note</{tag}></ruby></p>");
+            let text = html_to_text(&html);
+            assert!(text.contains("base"), "{tag}: {text}");
+            assert!(
+                !text.contains("note"),
+                "{tag} is dropped on purpose: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_ruby_annotation_does_not_stutter_the_base_text() {
+        // CJK sources carry pronunciation in <rt>, and running it into the base
+        // text reads as a repeat of the word.
+        let text = html_to_text("<p><ruby>漢字<rt>かんじ</rt></ruby> means kanji.</p>");
+        assert!(text.contains("漢字 means kanji."), "{text}");
+        assert!(!text.contains("かんじ"), "{text}");
+    }
+
+    #[test]
+    fn entities_are_decoded_so_text_is_not_double_escaped() {
+        let text = html_to_text("<p>A &amp; B &lt;tag&gt; &quot;quoted&quot; &#8212; end.</p>");
+        assert!(text.contains("A & B <tag> \"quoted\""), "{text}");
+        assert!(
+            text.contains('\u{2014}'),
+            "a numeric entity decodes: {text}"
+        );
+    }
+
+    #[test]
+    fn an_imported_chapter_to_epub_carries_its_prose_and_no_wrapper() {
+        let export = imported();
+        let bytes = render(&export, ExportFormat::Epub, &ExportOptions::defaults()).expect("epub");
+        let facts = epub::validate(&bytes).expect("valid");
+        assert_eq!(facts.chapter_titles, ["One", "Chapter 2"]);
+    }
 }
