@@ -1571,15 +1571,16 @@ pub async fn delete_source_credential(
 /// report a complete copy of a work it holds a third of. `state = 'stored'` is
 /// the same rule the planner uses, so a chapter that is known and not yet
 /// fetched does not count as one the reader can read.
-const LIBRARY_CHAPTER_COUNT: &str = "(SELECT COUNT(*) FROM import_chapters \
+pub(crate) const LIBRARY_CHAPTER_COUNT: &str = "(SELECT COUNT(*) FROM import_chapters \
     WHERE import_chapters.library_item_id = library_items.id AND state = 'stored') \
     AS chapter_count";
 
-const LIBRARY_COLUMNS: &str = "id, account_id, work_id, source_key, source_work_key, title, \
+pub(crate) const LIBRARY_COLUMNS: &str =
+    "id, account_id, work_id, source_key, source_work_key, title, \
     author_text, author_url, summary, language, word_count, status, source_url, \
     source_updated_at, last_synced_at, provenance_json, created_at, updated_at, version";
 
-const LIBRARY_COLUMNS_PG: &str = "id::text AS id, account_id::text AS account_id, \
+pub(crate) const LIBRARY_COLUMNS_PG: &str = "id::text AS id, account_id::text AS account_id, \
     work_id::text AS work_id, source_key, source_work_key, title, author_text, author_url, \
     summary, language, word_count, status, source_url, source_updated_at, last_synced_at, \
     provenance_json, created_at, updated_at, version";
@@ -1619,27 +1620,27 @@ struct SourceRow {
 }
 
 #[derive(FromRow)]
-struct LibraryItemRow {
-    id: String,
-    account_id: String,
-    work_id: Option<String>,
-    chapter_count: i64,
-    source_key: String,
-    source_work_key: String,
-    title: String,
-    author_text: String,
-    author_url: Option<String>,
-    summary: String,
-    language: Option<String>,
-    word_count: Option<i64>,
-    status: String,
-    source_url: String,
-    source_updated_at: Option<String>,
-    last_synced_at: Option<String>,
-    provenance_json: String,
-    created_at: String,
-    updated_at: String,
-    version: i64,
+pub(crate) struct LibraryItemRow {
+    pub(crate) id: String,
+    pub(crate) account_id: String,
+    pub(crate) work_id: Option<String>,
+    pub(crate) chapter_count: i64,
+    pub(crate) source_key: String,
+    pub(crate) source_work_key: String,
+    pub(crate) title: String,
+    pub(crate) author_text: String,
+    pub(crate) author_url: Option<String>,
+    pub(crate) summary: String,
+    pub(crate) language: Option<String>,
+    pub(crate) word_count: Option<i64>,
+    pub(crate) status: String,
+    pub(crate) source_url: String,
+    pub(crate) source_updated_at: Option<String>,
+    pub(crate) last_synced_at: Option<String>,
+    pub(crate) provenance_json: String,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+    pub(crate) version: i64,
 }
 
 #[derive(FromRow)]
@@ -1701,7 +1702,7 @@ fn decode_source(row: SourceRow) -> Result<Source> {
     })
 }
 
-fn decode_library_item(row: LibraryItemRow) -> Result<LibraryItem> {
+pub(crate) fn decode_library_item(row: LibraryItemRow) -> Result<LibraryItem> {
     Ok(LibraryItem {
         id: row.id,
         account_id: row.account_id,

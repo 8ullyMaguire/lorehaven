@@ -441,13 +441,21 @@ impl BatchOutcome {
     ///
     /// "3 removed" over a request of five hides two failures; "2 failed" hides
     /// that the other three worked.
+    ///
+    /// Takes the verb twice — as the past participle for what happened
+    /// (`removed`) and as the infinitive for what did not (`remove`) — because
+    /// one form cannot produce a sentence in both positions. The first version
+    /// took only the participle and rendered "2 removed, 1 could not be", which
+    /// stops mid-clause; the total is named as well, so a reader is not left
+    /// counting the list to find out how many were asked for.
     #[must_use]
-    pub fn summary(&self, verb: &str) -> String {
+    pub fn summary(&self, verb: &str, infinitive: &str) -> String {
+        let attempted = self.attempted();
         match (self.succeeded.len(), self.failed.len()) {
             (0, 0) => "nothing to do".to_string(),
             (s, 0) => format!("{s} {verb}"),
-            (0, f) => format!("none {verb}; {f} could not be"),
-            (s, f) => format!("{s} {verb}, {f} could not be"),
+            (0, f) => format!("none {verb}; {f} could not be {infinitive}"),
+            (s, f) => format!("{s} of {attempted} {verb}; {f} could not be {infinitive}"),
         }
     }
 }
@@ -465,6 +473,37 @@ pub const SUBJECT_LIBRARY_ITEM: &str = "library_item";
 #[must_use]
 pub fn is_known_subject(subject_type: &str) -> bool {
     matches!(subject_type, SUBJECT_WORK | SUBJECT_LIBRARY_ITEM)
+}
+
+/// The longest a private tag may be, in characters.
+///
+/// Long enough for a phrase a reader would actually use ("read on the train"),
+/// short enough that a tag is a label rather than a note. A note has its own
+/// field on a bookmark.
+pub const MAX_TAG_CHARS: usize = 64;
+
+/// Clean up a tag, or refuse it.
+///
+/// Returns `None` when the tag cannot be one, which the caller reports as a
+/// validation failure. The rules are deliberately small and total: trim the
+/// ends, collapse internal runs of whitespace to one space, refuse anything
+/// empty, over [`MAX_TAG_CHARS`], or carrying a control character.
+///
+/// Collapsing whitespace rather than refusing it means `"  read  later "` and
+/// `"read later"` are the same tag, which is what a reader means — and it is
+/// what stops the same tag appearing twice in their own tag list. Case is *not*
+/// folded: a reader who writes `WIP` and `wip` has two tags, and quietly merging
+/// them would be this program deciding what they meant.
+#[must_use]
+pub fn normalise_tag(raw: &str) -> Option<String> {
+    let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() || collapsed.chars().count() > MAX_TAG_CHARS {
+        return None;
+    }
+    if collapsed.chars().any(char::is_control) {
+        return None;
+    }
+    Some(collapsed)
 }
 
 /// How long an update-check record is kept, in days (spec §16's retention).
@@ -631,26 +670,32 @@ mod tests {
         );
         assert_eq!(outcome.attempted(), 5);
         assert!(!outcome.is_complete_success());
-        assert_eq!(outcome.summary("removed"), "3 removed, 2 could not be");
+        assert_eq!(
+            outcome.summary("removed", "removed"),
+            "3 of 5 removed; 2 could not be removed"
+        );
     }
 
     #[test]
     fn a_batch_that_wholly_succeeded_says_so_without_a_failure_clause() {
         let outcome = BatchOutcome::from_parts(vec!["a".into(), "b".into()], vec![]);
         assert!(outcome.is_complete_success());
-        assert_eq!(outcome.summary("removed"), "2 removed");
+        assert_eq!(outcome.summary("removed", "removed"), "2 removed");
     }
 
     #[test]
     fn a_batch_that_wholly_failed_does_not_claim_a_success() {
         let outcome = BatchOutcome::from_parts(vec![], vec![BatchFailure::gone("a")]);
-        assert_eq!(outcome.summary("removed"), "none removed; 1 could not be");
+        assert_eq!(
+            outcome.summary("removed", "removed"),
+            "none removed; 1 could not be removed"
+        );
     }
 
     #[test]
     fn an_empty_batch_is_not_a_success_or_a_failure() {
         let outcome = BatchOutcome::default();
-        assert_eq!(outcome.summary("removed"), "nothing to do");
+        assert_eq!(outcome.summary("removed", "removed"), "nothing to do");
     }
 
     #[test]

@@ -21,6 +21,7 @@ pub mod exports;
 pub mod identity;
 pub mod imports;
 pub mod jobs;
+pub mod library;
 pub mod migrate;
 pub mod outbox;
 pub mod reading;

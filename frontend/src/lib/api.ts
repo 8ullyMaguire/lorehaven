@@ -1525,10 +1525,310 @@ export function exportDownloadUrl(id: string): string {
   return `/api/v1/exports/${encodeURIComponent(id)}/download`;
 }
 
+/**
+ * The filters a library listing accepts.
+ *
+ * Filter values travel comma-separated rather than as repeated keys, because a
+ * repeated key is not something a query string parser can promise to preserve.
+ * Tags are safe to join with a comma: the server collapses whitespace inside a
+ * tag and a comma is not a character it keeps.
+ */
+export interface LibraryQueryParams {
+  shelves?: string[];
+  tags?: string[];
+  statuses?: ReadingStatus[];
+  source?: string;
+  /** An RFC 3339 instant: only items the source changed at or after it. */
+  updatedSince?: string;
+  sort?: LibrarySort;
+  limit?: number;
+}
+
+function libraryQueryString(query: LibraryQueryParams, cursor?: string): string {
+  const params = new URLSearchParams();
+  if (query.shelves?.length) params.set('shelves', query.shelves.join(','));
+  if (query.tags?.length) params.set('tags', query.tags.join(','));
+  if (query.statuses?.length) params.set('statuses', query.statuses.join(','));
+  if (query.source) params.set('source', query.source);
+  if (query.updatedSince) params.set('updated_since', query.updatedSince);
+  if (query.sort) params.set('sort', query.sort);
+  if (query.limit !== undefined) params.set('limit', String(query.limit));
+  if (cursor) params.set('cursor', cursor);
+  const suffix = params.toString();
+  return suffix ? `?${suffix}` : '';
+}
+
+/** One page of the reader's library, filtered and sorted. */
 export function fetchLibraryItems(
+  query: LibraryQueryParams = {},
   cursor?: string,
   signal?: AbortSignal,
-): Promise<ImportList<LibraryItem>> {
-  const suffix = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
-  return apiFetch<ImportList<LibraryItem>>(`/library/items${suffix}`, { signal });
+): Promise<LibraryPage> {
+  return apiFetch<LibraryPage>(`/library/items${libraryQueryString(query, cursor)}`, { signal });
+}
+
+/** A page of the library, with the total the filter matched. */
+export interface LibraryPage {
+  items: LibraryItem[];
+  total: number;
+  next_cursor: string | null;
+}
+
+/** How a listing is ordered. */
+export type LibrarySort = 'recent' | 'title' | 'updated' | 'words' | 'position';
+
+/** What a reader has done with a work. */
+export type ReadingStatus = 'want-to-read' | 'reading' | 'on-hold' | 'dropped' | 'finished';
+
+/** A shelf, as the reader made it. */
+export interface Shelf {
+  id: string;
+  name: string;
+  description: string;
+  is_public: boolean;
+  position: number;
+  item_count: number | null;
+  created_at: string;
+  updated_at: string;
+  version: number;
+}
+
+/** The reader's shelves, in sidebar order. */
+export function fetchShelves(signal?: AbortSignal): Promise<ImportList<Shelf>> {
+  return apiFetch<ImportList<Shelf>>('/shelves', { signal });
+}
+
+/** Make a shelf. */
+export function createShelf(input: {
+  name: string;
+  description?: string;
+  is_public?: boolean;
+}): Promise<Shelf> {
+  return apiFetch<Shelf>('/shelves', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** Rename, describe, share or reorder a shelf. */
+export function updateShelf(
+  id: string,
+  patch: {
+    name?: string;
+    description?: string;
+    is_public?: boolean;
+    position?: number;
+    expected_version: number;
+  },
+): Promise<void> {
+  return apiFetch<void>(`/shelves/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+/** Delete a shelf. The works on it stay in the library. */
+export function deleteShelf(id: string): Promise<void> {
+  return apiFetch<void>(`/shelves/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** Put a library item on a shelf. */
+export function addToShelf(shelfId: string, libraryItemId: string): Promise<void> {
+  return apiFetch<void>(
+    `/shelves/${encodeURIComponent(shelfId)}/items/${encodeURIComponent(libraryItemId)}`,
+    { method: 'POST', body: JSON.stringify({}) },
+  );
+}
+
+/** Take a library item off a shelf. */
+export function removeFromShelf(shelfId: string, libraryItemId: string): Promise<void> {
+  return apiFetch<void>(
+    `/shelves/${encodeURIComponent(shelfId)}/items/${encodeURIComponent(libraryItemId)}`,
+    { method: 'DELETE' },
+  );
+}
+
+/** One shelf, with the items on it. */
+export function fetchShelf(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ shelf: Shelf; library_item_ids: string[] }> {
+  return apiFetch<{ shelf: Shelf; library_item_ids: string[] }>(
+    `/shelves/${encodeURIComponent(id)}`,
+    { signal },
+  );
+}
+
+/** A bookmark: a note about a place in a work. */
+export interface Bookmark {
+  id: string;
+  subject_type: string;
+  subject_id: string;
+  chapter_id: string | null;
+  position_permille: number | null;
+  note: string;
+  is_public: boolean;
+  created_at: string;
+  updated_at: string;
+  version: number;
+}
+
+export function fetchBookmarks(
+  subject?: { type: string; id: string },
+  signal?: AbortSignal,
+): Promise<ImportList<Bookmark>> {
+  const params = new URLSearchParams();
+  if (subject) {
+    params.set('subject_type', subject.type);
+    params.set('subject_id', subject.id);
+  }
+  const suffix = params.toString();
+  return apiFetch<ImportList<Bookmark>>(`/bookmarks${suffix ? `?${suffix}` : ''}`, { signal });
+}
+
+export function createBookmark(input: {
+  subjectType: string;
+  subjectId: string;
+  chapterId?: string;
+  positionPermille?: number;
+  note?: string;
+  isPublic?: boolean;
+}): Promise<Bookmark> {
+  return apiFetch<Bookmark>('/bookmarks', {
+    method: 'POST',
+    body: JSON.stringify({
+      subject_type: input.subjectType,
+      subject_id: input.subjectId,
+      chapter_id: input.chapterId ?? null,
+      position_permille: input.positionPermille ?? null,
+      note: input.note ?? '',
+      // Private unless asked otherwise, and the server says the same.
+      is_public: input.isPublic ?? false,
+    }),
+  });
+}
+
+export function updateBookmark(
+  id: string,
+  patch: { note?: string; positionPermille?: number; isPublic?: boolean; expectedVersion: number },
+): Promise<void> {
+  return apiFetch<void>(`/bookmarks/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      note: patch.note,
+      position_permille: patch.positionPermille,
+      is_public: patch.isPublic,
+      expected_version: patch.expectedVersion,
+    }),
+  });
+}
+
+export function deleteBookmark(id: string): Promise<void> {
+  return apiFetch<void>(`/bookmarks/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** The reader's own tags on one item. */
+export function fetchItemTags(id: string, signal?: AbortSignal): Promise<ImportList<string>> {
+  return apiFetch<ImportList<string>>(
+    `/library/items/${encodeURIComponent(id)}/tags`,
+    { signal },
+  );
+}
+
+export function addItemTag(id: string, tag: string): Promise<void> {
+  return apiFetch<void>(
+    `/library/items/${encodeURIComponent(id)}/tags/${encodeURIComponent(tag)}`,
+    { method: 'PUT', body: JSON.stringify({}) },
+  );
+}
+
+export function removeItemTag(id: string, tag: string): Promise<void> {
+  return apiFetch<void>(
+    `/library/items/${encodeURIComponent(id)}/tags/${encodeURIComponent(tag)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export function setReadingStatus(id: string, status: ReadingStatus): Promise<unknown> {
+  return apiFetch<unknown>(`/library/items/${encodeURIComponent(id)}/status`, {
+    method: 'PUT',
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function clearReadingStatus(id: string): Promise<void> {
+  return apiFetch<void>(`/library/items/${encodeURIComponent(id)}/status`, { method: 'DELETE' });
+}
+
+/** A stored query. */
+export interface SavedView {
+  id: string;
+  name: string;
+  query: Record<string, unknown> | null;
+  needs_repair: boolean;
+  query_version: number;
+  sort: LibrarySort;
+  scope: string;
+  pinned: boolean;
+  is_public: boolean;
+  created_at: string;
+  updated_at: string;
+  version: number;
+}
+
+export function fetchSavedViews(signal?: AbortSignal): Promise<ImportList<SavedView>> {
+  return apiFetch<ImportList<SavedView>>('/saved-views', { signal });
+}
+
+export function deleteSavedView(id: string): Promise<void> {
+  return apiFetch<void>(`/saved-views/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** What the reader's library occupies. */
+export interface StorageUsage {
+  imported_bytes: number;
+  export_bytes: number;
+  total_bytes: number;
+  item_count: number;
+  blob_count: number;
+  counts: string;
+}
+
+export function fetchStorageUsage(signal?: AbortSignal): Promise<StorageUsage> {
+  return apiFetch<StorageUsage>('/library/storage', { signal });
+}
+
+/** One item's outcome in a batch. */
+export interface BatchFailure {
+  id: string;
+  code: string;
+  message?: string;
+}
+
+/** What a batch did, per item, with the sentence the interface shows. */
+export interface BatchResult {
+  succeeded: string[];
+  failed: BatchFailure[];
+  summary: string;
+  freed_bytes: number;
+  delete_copy: boolean;
+  removed: number;
+}
+
+/**
+ * Remove several items at once.
+ *
+ * `deleteCopy` is the difference between taking an item off the shelf and
+ * throwing the copy away, and the answer covers both cases.
+ */
+export function batchRemoveItems(ids: string[], deleteCopy: boolean): Promise<BatchResult> {
+  return apiFetch<BatchResult>('/library/items/batch', {
+    method: 'POST',
+    body: JSON.stringify({ ids, delete_copy: deleteCopy }),
+  });
+}
+
+/** Ask the server to check the library against its sources. Answers a job. */
+export function startUpdateCheck(): Promise<{ job_id: string; items: number }> {
+  return apiFetch<{ job_id: string; items: number }>('/library/updates/check', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
 }

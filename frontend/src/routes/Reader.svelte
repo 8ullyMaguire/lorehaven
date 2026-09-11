@@ -21,7 +21,8 @@
    * (§7), so nothing here is behind a session. Only the position is; a
    * signed-out reader keeps it in `localStorage` and it is never uploaded.
    */
-  import { fetchChapter, fetchTypography, saveProgress, type ChapterContent } from '../lib/api';
+  import {
+    createBookmark, fetchChapter, fetchTypography, saveProgress, type ChapterContent } from '../lib/api';
   import {
     DEFAULT_TYPOGRAPHY,
     PositionFlusher,
@@ -118,6 +119,12 @@
     error = null;
     chapter = null;
     showSettings = false;
+    // A new chapter restarts what whole-work mode has appended: the address
+    // names where the reader is, and carrying the previous chapter's tail into
+    // a different starting point would draw a work out of order.
+    extra = [];
+    appendError = null;
+    bookmarked = false;
     try {
       chapter = await fetchChapter(workId, chapterId);
       // Arriving in a chapter is itself a reading: it is recorded even if the
@@ -148,11 +155,14 @@
   }
 
   function remember() {
-    if (!chapter) return;
+    // The *focused* chapter, not the one the address names: in whole-work mode
+    // the reader is past that, and recording the first chapter of the work
+    // would put them back at its start next time.
+    if (!focused) return;
     flusher.schedule({
       workId,
-      chapterId,
-      revision: chapter.revision_id,
+      chapterId: focused.chapter.id,
+      revision: focused.revision_id,
       anchor: null,
       fraction: currentFraction(),
       device: deviceId(),
@@ -183,6 +193,134 @@
       void flusher.flushNow();
     };
   });
+
+  // -------------------------------------------------------------------------
+  // Whole-work mode (M8-02, re-scoped from M4)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Whether to keep reading past the end of this chapter.
+   *
+   * Spec §9.2 asks for a way to read a work through and, in the same breath,
+   * that long works must not require rendering every paragraph at once. Those
+   * two are only compatible if the mode *pages*: this renders the chapter the
+   * reader asked for, and then appends the next one — and only the next one —
+   * as they approach the end of what is loaded. A work of two hundred chapters
+   * is two hundred fetches the reader never notices and never pays for at once.
+   *
+   * The choice is remembered in this browser, because a reader who prefers to
+   * read through has told us so once.
+   */
+  const WHOLE_WORK_KEY = 'lorehaven.reader.whole-work';
+
+  let wholeWork = $state(readWholeWork());
+  /** Chapters appended after the one the address names. */
+  let extra = $state<ChapterContent[]>([]);
+  let appending = $state(false);
+  let appendError = $state<unknown>(null);
+  /** The sentinel the append watches; `null` until it is in the document. */
+  let sentinel = $state<HTMLElement | null>(null);
+
+  function readWholeWork(): boolean {
+    try {
+      return localStorage.getItem(WHOLE_WORK_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  function toggleWholeWork() {
+    wholeWork = !wholeWork;
+    if (!wholeWork) {
+      // Turning it off drops what it appended, so the page is the chapter the
+      // address names rather than a partial work whose address disagrees.
+      extra = [];
+      appendError = null;
+    }
+    try {
+      localStorage.setItem(WHOLE_WORK_KEY, String(wholeWork));
+    } catch {
+      // A browser refusing storage is not a reason to refuse the mode.
+    }
+  }
+
+  /** The chapter furthest down the page, which is the one being read. */
+  let focused = $derived(extra.length > 0 ? extra[extra.length - 1] : chapter);
+
+  /** The chapter after everything loaded, if there is one. */
+  let pending = $derived(
+    focused ? focused.next_chapter_id : null,
+  );
+
+  /**
+   * Append the next chapter.
+   *
+   * Guarded so a reader who scrolls to the sentinel during a fetch does not
+   * start a second one, and so a failure is reported once rather than retried
+   * by the observer every time the sentinel comes into view.
+   */
+  async function appendNext() {
+    if (!wholeWork || appending || appendError || !pending) return;
+    appending = true;
+    try {
+      const next = await fetchChapter(workId, pending);
+      extra = [...extra, next];
+      // An appended chapter is one the reader is now looking at, so it counts
+      // as a reading the same way arriving at one does.
+      remember();
+    } catch (failure) {
+      appendError = failure;
+    } finally {
+      appending = false;
+    }
+  }
+
+  $effect(() => {
+    if (!wholeWork || !sentinel || appendError) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void appendNext();
+      },
+      // A margin, so the next chapter is usually there before the reader
+      // reaches the end — the mode should not feel like it is loading.
+      { rootMargin: '600px' },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  });
+
+  // -------------------------------------------------------------------------
+  // Bookmarking the place
+  // -------------------------------------------------------------------------
+
+  let bookmarked = $state(false);
+  let bookmarkError = $state<unknown>(null);
+
+  /**
+   * Save this place, privately.
+   *
+   * Private unless the reader says otherwise, and the body does not say
+   * otherwise (spec §14.1). The position is the fraction of the chapter the
+   * reader is at, so the bookmark points where they were rather than at the
+   * chapter's start.
+   */
+  async function bookmarkHere() {
+    if (!chapter) return;
+    bookmarkError = null;
+    try {
+      await createBookmark({
+        subjectType: 'work',
+        subjectId: workId,
+        chapterId: focused?.chapter.id ?? chapterId,
+        positionPermille: currentFraction(),
+        note: '',
+        isPublic: false,
+      });
+      bookmarked = true;
+    } catch (failure) {
+      bookmarkError = failure;
+    }
+  }
 </script>
 
 {#if loading}
@@ -215,6 +353,14 @@
     · <button type="button" class="link-button" onclick={() => (showSettings = !showSettings)}>
       Reading settings
     </button>
+    · <button
+      type="button"
+      class="link-button"
+      aria-pressed={wholeWork}
+      onclick={toggleWholeWork}
+    >
+      {wholeWork ? 'One chapter at a time' : 'Read on without stopping'}
+    </button>
   </p>
 
   {#if showSettings}
@@ -230,7 +376,57 @@
     {/if}
   </div>
 
+  {#if wholeWork}
+    <!-- Everything past the chapter the address names. Appended one at a time
+         as the sentinel below comes into view, so the browser never lays out a
+         work the reader has not read. -->
+    {#each extra as appended (appended.chapter.id)}
+      <hr class="chapter-break" />
+      <h2 class="appended-title">
+        <a
+          href={`/works/${workId}/chapters/${appended.chapter.id}`}
+          onclick={(event) =>
+            handleLinkClick(event, `/works/${workId}/chapters/${appended.chapter.id}`)}
+        >
+          {appended.chapter.title.trim() === '' ? 'Untitled chapter' : appended.chapter.title}
+        </a>
+      </h2>
+      <div class="reader-body">
+        <article class="prose">{@html appended.sanitized_html}</article>
+      </div>
+    {/each}
+
+    {#if appending}
+      <p class="appending" role="status">Loading the next chapter…</p>
+    {/if}
+    {#if appendError}
+      <!-- A fetch that failed is a dead end unless it says so and offers the
+           way on, and the way on is the same append, tried again. -->
+      <ErrorSummary error={appendError} />
+      <p>
+        <button type="button" class="link-button" onclick={() => { appendError = null; void appendNext(); }}>
+          Try the next chapter again
+        </button>
+        ·
+        <a
+          href={`/works/${workId}/chapters/${pending}`}
+          onclick={(event) => handleLinkClick(event, `/works/${workId}/chapters/${pending}`)}
+        >
+          Open it on its own page
+        </a>
+      </p>
+    {/if}
+    {#if pending && !appendError}
+      <!-- Watched, and empty: it exists to be intersected with. -->
+      <div bind:this={sentinel} class="sentinel" aria-hidden="true"></div>
+    {/if}
+  {/if}
+
   <nav class="pager" aria-label="Chapter navigation">
+    <!-- In whole-work mode "next" is what the reader has already been given
+         automatically, so the link steps them into the chapter's own page
+         rather than pretending there is more below. The previous link still
+         goes back a chapter, which is the only way to go up. -->
     {#if chapter.previous_chapter_id}
       <!--
         A `{@const}` per link, because a `let` binding is not narrowed inside an
@@ -242,8 +438,8 @@
         ← Previous chapter
       </a>
     {/if}
-    {#if chapter.next_chapter_id}
-      {@const nextHref = `/works/${workId}/chapters/${chapter.next_chapter_id}`}
+    {#if focused?.next_chapter_id}
+      {@const nextHref = `/works/${workId}/chapters/${focused.next_chapter_id}`}
       <a class="next" href={nextHref} onclick={(event) => handleLinkClick(event, nextHref)}>
         Next chapter →
       </a>
@@ -254,7 +450,7 @@
     {/if}
   </nav>
 
-  {#if !chapter.next_chapter_id}
+  {#if !focused?.next_chapter_id}
     <ul class="end-actions">
       <li>
         <a href={`/works/${workId}`} onclick={(event) => handleLinkClick(event, `/works/${workId}`)}>
@@ -262,13 +458,56 @@
         </a>
       </li>
       <li><a href={`/works/${workId}#rate`}>Rate this work</a></li>
-      <li class="planned">Bookmarks arrive in Milestone 8</li>
-      <li class="planned">Downloads arrive in Milestone 7</li>
+      <li>
+        <!-- Private unless the reader says otherwise, and this says nothing, so
+             it is private. The place is where they are, not the chapter start. -->
+        {#if bookmarked}
+          <span role="status">Bookmarked this place.</span>
+        {:else}
+          <button type="button" class="link-button" onclick={() => void bookmarkHere()}>
+            Bookmark this place
+          </button>
+        {/if}
+      </li>
+      <li>
+        <a
+          href={`/exports?${new URLSearchParams({
+            subject_type: 'work',
+            subject_id: workId,
+            title: chapter.work.title,
+          }).toString()}`}
+        >
+          Download this work
+        </a>
+      </li>
     </ul>
+    {#if bookmarkError}
+      <ErrorSummary error={bookmarkError} />
+    {/if}
   {/if}
 {/if}
 
 <style>
+  .chapter-break {
+    border: 0;
+    border-top: var(--border-width) solid var(--color-border);
+    margin: var(--space-5) 0;
+  }
+
+  .appended-title {
+    font-size: var(--text-xl);
+    margin: var(--space-5) 0 var(--space-2);
+  }
+
+  .sentinel {
+    height: 1px;
+  }
+
+  .appending {
+    color: var(--color-muted);
+    font-size: var(--text-sm);
+  }
+
   .reader-body {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -366,7 +605,4 @@
     font-size: var(--text-sm);
   }
 
-  .end-actions .planned {
-    color: var(--color-muted);
-  }
 </style>

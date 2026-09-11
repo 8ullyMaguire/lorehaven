@@ -255,6 +255,15 @@ pub fn build_router(state: AppState) -> Router {
             &state,
         ))
         .merge(routes::reading::authed_router())
+        // The reader's library: shelves, bookmarks, private tags, reading
+        // statuses, saved views, storage and the update check. Every route
+        // needs a session and most of them write, so the whole tree sits under
+        // the writers' class rather than being split for the two reads.
+        .merge(classified(
+            routes::library::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // The job queue: a caller's own jobs, and the cancel action.
         .merge(classified(
             routes::jobs::router(),
