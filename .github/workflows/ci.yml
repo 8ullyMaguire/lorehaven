@@ -153,4 +153,7 @@ jobs:
           done
           cat /tmp/ready.json
           grep -q '"status":"ready"' /tmp/ready.json
-          grep -q '"backend"' /tmp/ready.json || grep -q 'postgres' /tmp/ready.json
+          # The readiness body names the backend it reached inside
+          # `checks.database.detail`, so this is the line that proves the server
+          # opened PostgreSQL rather than a SQLite file.
+          grep -q 'postgres reachable at' /tmp/ready.json

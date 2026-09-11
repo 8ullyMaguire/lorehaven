@@ -340,10 +340,22 @@
     z-index: 20;
   }
 
+  /*
+   * The bar wraps rather than overflowing.
+   *
+   * It carries nine destinations and four controls, which is more than one line
+   * holds at any ordinary desktop width: measured, the row needs 1375 CSS pixels
+   * signed out and 1553 signed in. Removing destinations to make it fit would be
+   * a navigation decision, and the alternative — letting the row run past the
+   * viewport — is what it did, pushing every page 95 to 273 pixels sideways.
+   * Wrapping keeps every destination and every control, on one line when there
+   * is room and two when there is not.
+   */
   .bar {
     display: flex;
     align-items: center;
-    gap: var(--space-5);
+    flex-wrap: wrap;
+    gap: var(--space-3) var(--space-5);
     min-height: 4rem;
   }
 
@@ -482,10 +494,23 @@
     color: var(--color-muted);
   }
 
-  /* The mobile header keeps only the appearance control; identity links live
-     in the drawer, next to the rest of the secondary navigation. */
+  /*
+   * The narrow header keeps the brand alone.
+   *
+   * This started as "the mobile header keeps only the appearance control", with
+   * the identity links hidden. Measured at 320 CSS pixels, that was already
+   * untrue and it was the header that overflowed: the identity links were
+   * hidden, but the sign-out button was not, and the appearance select with it
+   * needed 143 of the 288 pixels left after the wordmark. Hiding the controls
+   * one by one is what let the two of them disagree.
+   *
+   * The drawer already carries both — `theme-select-mobile` and its own sign-out
+   * action — so nothing becomes unreachable, and the header stops pretending to
+   * hold controls it has no room for. Measured, not assumed:
+   * `frontend/scripts/measure-viewport.mjs`.
+   */
   @media (max-width: 51.99rem) {
-    .controls > a {
+    .controls {
       display: none;
     }
   }

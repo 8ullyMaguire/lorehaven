@@ -26,9 +26,9 @@ the result. Where a claim could only be checked by hand, it says so.
 | Field | Value |
 |---|---|
 | Date of last verification | 2026-09-11 |
-| Commit | Milestone 6 in progress on `master`; last tag `v0.06-jobs` (Milestone 5). Previous checkpoints: `v0.05-reader` (Milestone 4), `v0.04-publishing` (Milestone 3), `v0.03-identity` (Milestone 2), `v0.01-running-app` (Milestone 0). Milestone 6 is **not** tagged: its import and credential machinery is built and tested, and its pages are not. |
+| Commit | `a54e3bc` on `master`. Milestones 0 to 7 are complete and tagged: `v0.01-running-app`, `v0.03-identity`, `v0.04-publishing`, `v0.05-reader`, `v0.06-jobs`, `v0.07-imports`, `v0.08-exports`. Every row in `docs/requirements.csv` for those milestones is `implemented-locally-tested` or a deliberate `unsupported`. |
 | Environment | Linux, Rust 1.98.0, Node 26.8.1, SQLite 3.53.4 |
-| PostgreSQL available | **No** |
+| PostgreSQL available | Yes — 17.11 in Docker on loopback (the development machine still has none installed) |
 
 ---
 
@@ -38,7 +38,7 @@ the result. Where a claim could only be checked by hand, it says so.
 |---|---|---|---|
 | 1 | A clean checkout builds | Implemented and locally tested | `cargo build` → clean, no errors |
 | 2 | The application starts with SQLite | Implemented and locally tested | `crates/app/tests/milestone_0.rs`; also run by hand: `lorehaven serve` on port 8099 answered `/health/live` with `{"status":"ok"}` |
-| 3 | The application starts with PostgreSQL | **Implemented but not executed** | Dialect SQL, migrations and a `postgres://` connection path exist. No PostgreSQL server is installed on the development machine, so **this has never been run**. This is the largest open risk in the project. See ADR 0004. |
+| 3 | The application starts with PostgreSQL | **Executed and locally tested** | Run against PostgreSQL 17.11 on 2026-09-11 (see *PostgreSQL, executed* below). Migrations, seed, readiness and a scripted journey all pass. Eight dialect defects were found and fixed; the two-dialect risk is no longer untested, though it remains the risk that needs a continuous check rather than a one-off. See ADR 0004. |
 | 4 | A frontend page loads from the Rust executable | Implemented and locally tested | Automated: `the_frontend_shell_is_served_from_the_binary`. By hand: loaded `http://127.0.0.1:8099/` in a real browser; the Svelte bundle executed, rendered the navigation and hero, and made its own calls to `/api/v1/meta` and `/health/ready`, whose results appear on the page. No CSP violation blocked the bundle. |
 | 5 | `/health/live` checks process liveness | Implemented and locally tested | `crates/app/tests/milestone_0.rs`; by hand `curl -i /health/live` → `200`, body carries version, build, environment, uptime |
 | 6 | `/health/ready` checks essential dependencies | Implemented and locally tested | Automated, including the negative case: an unmigrated database returns `503` and names the failing check. By hand it returned `{"status":"ready", …}` with database, migrations and storage all `ok`. |
@@ -70,6 +70,138 @@ GET /assets/nope.js  → 404
 Graceful shutdown was observed by sending SIGTERM: the log records
 `received terminate` followed by `shutdown complete`.
 
+### PostgreSQL, executed
+
+On 2026-09-11 the PostgreSQL half of the tree was run for the first time, against
+PostgreSQL 17.11 in a Docker container on loopback. The build was already up to
+date; what follows is the whole of what was run.
+
+```text
+lorehaven --database-url postgres://…@127.0.0.1:55432/lorehaven migrate
+  → 8 migration(s) applied (0001 … 0008)
+lorehaven … migrate --status
+  → every migration "applied"
+lorehaven … seed --development
+  → 1 account, 2 pseuds, 4 privacy settings, 1 password credential
+lorehaven … serve --port 8130
+  → GET /health/live  200 {"status":"ok"}
+  → GET /health/ready 200 {"status":"ready", checks.database.detail:
+                          "postgres reachable at postgres://…"}
+  → GET /api/v1/meta  200
+  → GET /               200 (the SPA shell)
+```
+
+Then a scripted journey, signed in as the development account, every step
+asserted:
+
+```text
+create a work            201     GET /works/{id}            200
+add a chapter            201     GET /library/items         200
+write the chapter        200     GET /library/history       200
+publish                  200     GET /jobs                  200
+progress device=250      204     GET /imports/sources       200
+progress device=500      204     GET /auth/me               200
+progress (no device)     204     GET /reading/progress      200
+rate 5 stars             200
+rate 4 stars             200
+note (first)             204
+note (second)            204
+review with spoilers     200
+```
+
+The last check reads back what the journey wrote: the work is public with one
+chapter, and **both** device positions survive as separate rows, which is what
+the `reading_progress_unique` index fix is for.
+
+#### The eight defects this found
+
+Every one is a violation of the rule in ADR 0004 — that every parameter and every
+selected column is `String` or `i64` so rows decode identically on both engines —
+and none of them could have been found by any test in the tree, because every
+test runs on SQLite.
+
+1. **A password update that silently wrote nothing.** `set_password_hash` bound
+   one parameter list for two statements whose placeholders are in different
+   orders: the insert leads with `account_id`, the update cannot, because `SET`
+   comes before `WHERE`. SQLite accepted the surplus parameter and shifted every
+   value by one, so `WHERE account_id = <timestamp>` matched no row; the call
+   returned `Ok(())` having written nothing. **This was a live bug in the SQLite
+   path**, not just a PostgreSQL failure: re-setting a password — the seed's
+   second run, a password reset, any change — did nothing and reported success.
+   Proven by seeding twice on SQLite and diffing the stored hash and `updated_at`
+   (byte-identical before the fix). PostgreSQL refused it outright with
+   `invalid input syntax for type uuid: "2026-09-11T…"`, which is how it was
+   found. Regression test:
+   `lorehaven-db::identity::tests::setting_a_password_twice_replaces_the_stored_credential`.
+2. `ON CONFLICT DO UPDATE` with no conflict target, in `privacy_settings`,
+   `outbox_events` and `reading_history_entry`. Legal in SQLite, refused by
+   PostgreSQL. The privacy and progress statements carry partial unique indexes,
+   so the target names the index **and its predicate**.
+3. `version INTEGER` against `i64` in Rust. SQLite's `INTEGER` is 64-bit;
+   PostgreSQL's is 32-bit, and `sqlx` will not widen `INT4` into `i64`. 18
+   columns.
+4. The same, for 20 more integer columns — counts, orderings, percentages and the
+   0/1 flags. ADR 0004 was amended: those columns are `BIGINT`.
+5. The 0/1 flags the repository reads as `bool` stay `BOOLEAN`, and where the
+   shared struct wants `i64` they are read as `bool::int::bigint`. PostgreSQL has
+   no boolean-to-bigint cast, which is why the double cast is not redundant.
+6. A `?` missing its `::uuid` cast in the rating upsert.
+7. `reading_progress_unique` was declared without `device_id` on PostgreSQL, so
+   two devices reading the same work would have collided onto one row. The
+   SQLite index has it; this was a divergence between the two migration trees
+   that nothing was comparing.
+8. `library_items` bound four values for five placeholders.
+
+Defect 7 is the one to remember: the two migration catalogues are checked for
+*identical ids* and for nothing else, so a column can differ between the engines
+indefinitely. If a second live run ever happens, compare the two catalogues'
+columns, not just their filenames.
+
+### Continuous integration, run by hand
+
+`.github/workflows/ci.yml` defines four jobs. No hosted runner has executed them:
+the repository has no git remote, and `act` cannot bind-mount this tree because
+the Docker daemon's root user cannot read it (`stat .: permission denied`). So
+each job's steps were executed here, with their own assertions, on 2026-09-11:
+
+```text
+job rust              Formatting                 clean
+                      Lints (clippy -D warnings) 0 findings   (5, then fixed)
+                      Build --all-targets         0 errors
+                      Test --workspace            791 passed, 0 failed
+job frontend          check (svelte-check)        0 errors, 0 warnings
+                      test (vitest)               136 passed
+                      build (vite)                ok
+job embedded-assets   cargo build -p lorehaven-app with no frontend/ present   ok
+job postgres          migrate --status            8 applied, 0 pending
+                      migrate is idempotent       "already up to date"
+                      readiness                   {"status":"ready"} naming postgres
+```
+
+Two findings came out of doing this rather than assuming it.
+
+**The clippy step caught something the full gate run had not.** Three
+`clone_on_copy` findings in the test added above, because that run happened
+before the test existed. That is the argument for running the gate after the
+last edit rather than during.
+
+**The readiness assertion was vacuous.** The job asserted
+`grep -q '"backend"' ready.json || grep -q 'postgres' ready.json`. The body has no
+`backend` field, so the first grep always failed and the second always succeeded —
+which passed whether or not the server had reached PostgreSQL. It now asserts
+`postgres reachable at`, which is the string the readiness body actually carries
+and only carries when the database it opened is PostgreSQL.
+
+The frontend job's `npm ci` is the only step not reproduced: it would install the
+toolchain, and this checkout has a `node_modules` whose `.bin` is empty, so the
+three commands run through `frontend/scripts/fe.sh` instead. The commands
+themselves — `svelte-check`, `vitest run`, `vite build` — are the job's.
+
+What remains unexercised is the runner's own plumbing: `actions/checkout`,
+`dtolnay/rust-toolchain`, the `postgres` service container and the cache action.
+Those are the parts a hosted runner supplies, and they are exactly the parts this
+machine cannot stand in for.
+
 ## Milestone 1 — Design system and navigation
 
 | # | Acceptance criterion | Status | Evidence |
@@ -77,7 +209,7 @@ Graceful shutdown was observed by sending SIGTERM: the log records
 | 1 | All controls work with a keyboard | Implemented and locally tested | `frontend/src/lib/components/Dialog.test.ts` (Escape, close control, unrelated keys). Tabs implement the WAI-ARIA roving-tabindex pattern. |
 | 2 | Focus is visible | Implemented and locally tested | `:focus-visible` outline on every interactive element via `app.css`; components that draw their own focus treatment (inputs, buttons) override the border, not the outline |
 | 3 | Dialog focus is trapped and restored | Implemented and locally tested | `Dialog.test.ts` covers focus entry; restoration runs in the effect cleanup. **Not yet verified by hand** with a screen reader. |
-| 4 | Layout works at 320 CSS pixels | **Implemented but not executed** | Responsive rules exist and the mobile navigation switches at 48rem, but no measurement at 320 px has been taken. |
+| 4 | Layout works at 320 CSS pixels | **Executed and locally tested** | `frontend/scripts/measure-viewport.mjs` measures every route in a real browser at 320, 360, 768 and 1280; all 19 routes hold with no horizontal scroll (see *Measured at 320 CSS pixels* below). Two real overflows were found and fixed, and the earlier hand measurement is recorded there as having passed vacuously. |
 | 5 | Pages remain usable at 200% zoom | **Implemented but not executed** | Relative units are used throughout; not measured. |
 | 6 | Reduced-motion preference is respected | Implemented and locally tested | Global override in `app.css` plus per-component overrides for the spinner, shimmer and progress bar |
 | 7 | Errors are announced accessibly | Implemented and locally tested | `ErrorSummary` and `TextField`/`Select` errors use `role="alert"`; `ToastRegion` is a polite live region |
@@ -108,6 +240,44 @@ invoked through `node`, as shown above. CI on a normal filesystem uses the
 ordinary `npm` scripts.
 
 ---
+
+### Measured at 320 CSS pixels
+
+`frontend/scripts/measure-viewport.mjs` drives a real browser (the Chromium in
+the Playwright cache, over CDP, with no Node dependencies) to every route the
+application can render, at four widths, and reports any route whose document is
+wider than its layout viewport. It was run against the built application serving
+a seeded SQLite journey, signed in:
+
+```text
+320 CSS px    19 routes   all ok
+360 CSS px    19 routes   all ok
+768 CSS px    19 routes   all ok
+1280 CSS px   19 routes   all ok
+```
+
+Two real overflows were found and fixed:
+
+* **The header at narrow widths.** At 320 the header kept the appearance control
+  and the sign-out action beside the wordmark, which pushed the row 6 px past the
+  viewport and the sign-out button 62 px past it. Both are already in the drawer,
+  so the narrow header now keeps the brand alone.
+* **The header at 1280.** The desktop row carries nine destinations and the
+  account cluster, and needed about 1553 px to hold them on one line. It now
+  wraps rather than overflowing.
+* **A server-written connection string.** The home panel's health detail is
+  written by the server and names a URL, so it set the panel's minimum width and
+  took the page 4 px sideways. Long unbreakable identifiers now break: `code`,
+  `kbd` and `samp` globally, and that detail specifically.
+
+One correction belongs here. The Milestone 4 journey recorded that "at 320 CSS
+pixels the document does not scroll horizontally (`scrollWidth == innerWidth`)".
+It compared the wrong two numbers: under mobile emulation the browser inflates
+`innerWidth` by the device viewport, so a 320 px layout reports `innerWidth` of
+355 and the comparison passes no matter how far the content overflows. The
+measurement above compares `scrollWidth` against the *layout viewport*
+(`documentElement.clientWidth`), which is the number that actually answers the
+question. The earlier claim was not a measurement.
 
 ## Milestone 2 — Accounts, pseuds, privacy and age policy
 
@@ -264,7 +434,7 @@ published work*. The wording now distinguishes the two cases.
 | 11 | Private notes are per pseud and are never rendered in the reading text | Implemented and locally tested | `milestone_4.rs::a_note_is_private_to_its_writer_and_visible_only_to_them` drives a note end to end: written, listed by its writer, invisible to the account's other pseud and to a stranger, undeletable by another face, then deleted. `saving_the_same_note_twice_updates_it_in_place` and `notes_filter_to_the_exact_subject` pin the repository's key. `NotePanel.svelte` is a side panel, never part of the prose. |
 | 12 | Search within the current work | Moved to Milestone 9 | Re-scoped on 2026-09-10, with the operator's agreement: spec §9.2 lists it, but a search of a work's text is the same index Milestone 9 builds (`docs/spec.md` §17, "search within one work"), and building a second, client-side scanner here would be the second implementation of one rule that this project forbids. The requirement is tracked as `M9-02`. |
 | 13 | Whole-work mode without rendering every paragraph at once | Moved to Milestone 8 | Re-scoped on 2026-09-10: the mode is a reader *mode*, and the reader's library — shelves, saved views and the mode that walks a whole work — is Milestone 8's subject. Tracked as `M8-02`. Reading one chapter at a time with previous/next already satisfies "long works must not require rendering every paragraph at once". |
-| 14 | Spoiler reveal | Implemented; rendered, not automatically tested | A public review marked `contains_spoilers` renders behind a `<details>` element in `WorkPage.svelte`, so it is a deliberate click and never automatic. Driven in the browser journey below; still no automated test covers the rendering. |
+| 14 | Spoiler reveal | Implemented and locally tested | A public review marked `contains_spoilers` renders behind a `<details>` element in `WorkPage.svelte`, so it is a deliberate click and never automatic. `frontend/src/routes/WorkPage.test.ts` now pins it: a flagged review's body is inside a `details` that starts closed and names the flag in its summary, and an unflagged review is plain text. jsdom can prove the structure; the reveal itself is the browser's, and was seen in the journey below. |
 
 Commands actually run, with their result:
 
@@ -748,9 +918,15 @@ reason, because it is not free to change.
 
 ## Known limitations and open risks
 
-1. **PostgreSQL has never been executed.** Every PostgreSQL statement is
-   written but unverified. A CI job with a `postgres` service must run the same
-   integration suite before PostgreSQL can be called supported.
+1. **PostgreSQL is executed once, by hand, and not continuously.**
+   It has been run end to end against a live server (see *PostgreSQL, executed*),
+   which found eight defects and proved the dialect paths the journey touches.
+   What is still missing is the thing that would keep it true: a job that runs
+   the same suite on every change, as ADR 0004 and the workflow's own
+   `postgres` job describe. Until that runs, this half of the tree can regress
+   the way it did — silently, because nothing reads it. The untested corners are
+   also still untested: retries, crashes, concurrent workers, export jobs and
+   import batches were never exercised on the second engine.
 2. **No browser-automation suite.** Milestone 1's accessibility criteria were
    checked with unit tests and one manual browser session, not with Playwright.
    Spec §23 asks for automated browser journeys; they do not exist yet.
@@ -828,11 +1004,12 @@ reason, because it is not free to change.
     default — but it means the tier's cost is borne by whoever configures it: a
     forked HTTP stack on the fingerprint path, and a browser service to maintain
     for the solver path. Verified on 2026-09-11 against Byparr 3.0.4.
-13. **Nothing has been run against PostgreSQL, and nothing is deployed.**
-    Unchanged from Milestone 5 and still the largest untested surface: every
-    migration is written twice and only the SQLite half has ever been executed,
-    and the import's keyset cursors use row-value comparison that SQLite and
-    PostgreSQL share but which no test has executed on the second engine.
+13. **PostgreSQL has been executed once; nothing is deployed.**
+    The second dialect now has one real run behind it, which is more than it had
+    yesterday and much less than continuous. The import's keyset cursors use
+    row-value comparison that SQLite and PostgreSQL share; the `library_items`
+    cursor was one of the eight defects, so assume the other cursors are unproven
+    until a run says otherwise. No instance is deployed anywhere.
 14. **Chapter deletion and ordering are one-way.** Deleting a chapter
     soft-deletes it and reordering rewrites position keys, but no page offers
     either operation, and there is no undo. Both routes exist and are tested
