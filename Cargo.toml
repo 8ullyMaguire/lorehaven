@@ -71,7 +71,7 @@ sqlx = { version = "0.8", default-features = false, features = [
 ] }
 thiserror = "2"
 time = { version = "0.3", features = ["formatting", "parsing", "serde", "macros"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "fs", "net", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "fs", "net", "time", "process"] }
 toml = "0.8"
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = [

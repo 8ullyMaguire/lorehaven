@@ -17,6 +17,7 @@
 
 pub mod collaboration;
 pub mod content;
+pub mod exports;
 pub mod identity;
 pub mod imports;
 pub mod jobs;

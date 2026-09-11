@@ -432,7 +432,13 @@ impl Worker {
                 }
                 Ok(())
             }
-            JobKind::Export | JobKind::Reindex | JobKind::Thumbnail => {
+            JobKind::Export => {
+                let payload = serde_json::from_str(&job.payload).map_err(|error| {
+                    HandlerError::Fatal(format!("the export job's payload is not JSON: {error}"))
+                })?;
+                crate::exports::run(state, &payload).await
+            }
+            JobKind::Reindex | JobKind::Thumbnail => {
                 // A kind with no handler is a *fatal* failure: retrying it five
                 // times cannot make a handler appear, and a job that quietly
                 // succeeds without doing its work is the one outcome nobody can
@@ -519,6 +525,18 @@ impl Worker {
                 Ok(())
             }
             "collect_blobs" => self.collect_blobs(state, job, &payload).await,
+            // Spec §13.2: an export's output is kept seven days and then
+            // removed. The sweep unreferences the blob rather than deleting it,
+            // so an output that is also something else's reading copy — content
+            // is shared by checksum — survives.
+            "purge_exports" => {
+                let removed = crate::exports::sweep(state).await?;
+                jobs::progress(state.db(), job, 1000, Some("purged"))
+                    .await
+                    .map_err(transient)?;
+                tracing::info!(removed, "maintenance removed expired exports");
+                Ok(())
+            }
             other => Err(HandlerError::Fatal(format!(
                 "unknown maintenance task {other:?}"
             ))),
