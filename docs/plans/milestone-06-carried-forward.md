@@ -19,16 +19,18 @@ this is the record of what it *owes*.
 | `wattpad` | **written, tested, committed** |
 | `ficbook` | **written, tested, committed** |
 | `scribblehub` | **written, tested, committed** |
-| `xenforo` | **reconnoitred and its fixtures recorded; the adapter is not written** |
+| `xenforo` | **written, tested, committed** |
 
-Four of the five are done, each against pages recorded from the live site, each
-with an offline fixture suite and a live test. The fifth is written out in full in
-`docs/plans/milestone-06-xenforo-recon.md` — every markup shape, every selector,
-the per-host walls and `robots.txt` facts, and the open questions — so it can be
-built without going back to the live sites to re-derive any of it.
+All five are done, each against pages recorded from the live site, each with an
+offline fixture suite and a live test. `docs/plans/milestone-06-xenforo-recon.md`
+keeps the reconnaissance as the design record, because two of its first readings
+were wrong and the corrections are the useful part: the wall it recorded had been
+caused by the probe itself (a browser `User-Agent` sent over non-browser TLS, which
+is precisely what Cloudflare challenges), and the chapter total it said was missing
+is stated in the list header and is now the adapter's completeness check.
 
-Two decisions the four adapters settled, which the fifth should follow rather
-than rediscover:
+Two decisions the adapters settled, which the fifth follows rather than
+rediscovering:
 
 * **A robots override exists.** `imports.honour_robots` is an operator setting
   (spec §11.5): `Disallow` is honoured by default, and an instance may override
