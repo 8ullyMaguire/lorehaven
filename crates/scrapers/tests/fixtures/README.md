@@ -593,3 +593,86 @@ story and never came back."*). Both are recorded, because the adapter must
 distinguish the site's own not-found from a shape that changed: the first is
 `NotFound`, the second is a parse failure, and folding either into the other
 reports a deleted work as a bug or a bug as a deleted work.
+
+## ficbook
+
+| File | Source | Recorded |
+|---|---|---|
+| `work.html` | `https://ficbook.net/readfic/01899919-f575-76ed-8476-cec2348b02bf` | 2026-09-11 |
+| `work-finished.html` | `https://ficbook.net/readfic/01a05297-2f11-74e0-a894-8ed36d62a32a` | 2026-09-11 |
+| `chapter-1.html` | `https://ficbook.net/readfic/01899919-f575-76ed-8476-cec2348b02bf/35183469` | 2026-09-11 |
+| `chapter-2.html` | `https://ficbook.net/readfic/01899919-f575-76ed-8476-cec2348b02bf/35203286` | 2026-09-11 |
+| `not-found.html` | `https://ficbook.net/readfic/does-not-exist` | 2026-09-11 |
+| `robots.txt` | `https://ficbook.net/robots.txt` | 2026-09-11 |
+
+Both works are Harry Potter fandom. They were chosen for what differs between
+them, not for their contents: one is unfinished and one is finished, which is
+the only way the status mapping and the second shape of the size line could be
+pinned down without guessing, and they are in Cyrillic, which is what the
+footnote escapes and the tagged field have to survive.
+
+### What the pages establish
+
+* **A work page has no prose.** `#content` is on a part page only, which is what
+  lets the chapter parser refuse a work page instead of returning an empty
+  chapter for every part.
+* **Two size-line shapes.** `планируется Макси, написано 158 страниц, 77 507
+  слов, 24 части` and `24 страницы, 8 122 слова, 4 части`. The plan prefix is
+  present on one and absent on the other, and the word forms differ, so the
+  fields are found by their unit. The thousands separator is a **non-breaking
+  space** — `77\xa0507` — which is why the digits are collected rather than the
+  string parsed.
+* **Status and rating are class names.** `ds-label-status-finished`,
+  `ds-label-status-in-progress`, `ds-label-rating-NC-17`, `ds-label-rating-R`.
+  The visible text is Russian; the classes are not language-dependent, and they
+  are what the adapter reads.
+* **The language field is the site's, not the work's.** `itemprop="inLanguage"`
+  is `ru-Latn` on both recorded works — identical across two works in the same
+  fandom but different languages of description — so it is the site's own
+  interface locale written into a machine-readable field. Reported as the
+  work's language it would claim every ficbook work is Russian-in-Latin-script.
+  `work-finished.html` is recorded mainly to hold that comparison.
+* **The part list and the "next chapter" links are the same shape.** Both are
+  `a.part-link`, so the list is scoped to `ul.list-of-fanfic-parts`: collecting
+  every match puts a duplicate of one part in the list, and on a one-part work
+  puts the work's only chapter in twice.
+* **A part page states its own address.** `<link rel="canonical">` carries the
+  part id, which is how the page identifies itself; `chapter-1.html` and
+  `chapter-2.html` are recorded as a pair so that a page answering with the
+  wrong part can be detected rather than stored under the wrong ordinal.
+* **The footnotes are not in the prose.** The references are empty placeholders
+  — `<span class="footnote" id="fn_35183469_0"></span>` — and the text is in a
+  `textFootnotes` object in a script at the bottom of the page, with a `\u`
+  escape for every Cyrillic character. Read as text the escapes would be stored
+  literally. `chapter-1.html` has nine notes and `chapter-2.html` has two, which
+  is what the reference-count assertion is anchored to.
+* **A missing work is a real `404`.** Unlike FanFiction.net, which answers a
+  missing story with `200` and a notice, this source answers `404`, so the
+  adapter needs no structural check for it. The recorded page is kept as the
+  evidence that it does not.
+
+### What the site's robots.txt says
+
+```text
+Disallow: /*?*     # every query string
+Disallow: *printfic*
+Disallow: *download*
+Allow: /fanfiction/*?p=*
+```
+
+`/*?*` is the rule that shapes the adapter. The site writes decorative queries
+on its own links — `/readfic/{uuid}?source=premium&premiumVisit=1` on listing
+pages, `?from_promo=1` on the work page — and answers the same work identically
+without them, so the adapter **strips the query and the fragment** rather than
+asking for an address its own front door would be refused. The fragment matters
+too and is easier to miss: the site's own chapter links end `#part_content`, and
+a fragment is never sent to the server.
+
+`*printfic*` and `*download*` are deliberately **not** worked around. They are
+the site's own views of the same content, and reading them would be reading a
+path the site has asked crawlers to leave alone rather than the page a reader
+sees. `/readfic/{work}/printfic` is therefore not an address this adapter
+claims.
+
+No `Crawl-delay` is published, so the fetcher's one-second floor is the pace: a
+site that asked for nothing gets nothing slower than the default.
