@@ -50,6 +50,10 @@ use crate::config::Config;
 pub fn policy_for(adapter: &dyn SourceAdapter, config: &Config) -> FetchPolicy {
     let mut policy = FetchPolicy::for_source(adapter.capabilities());
     policy.unblock = config.imports.unblock_for(adapter);
+    // The instance's answer to the source's own `robots.txt`, applied here so
+    // every import path — preview, chapter fetch, update check — gets the same
+    // one. Defaults to compliance; see `ImportsConfig::honour_robots`.
+    policy.honour_robots = config.imports.honour_robots;
     policy
 }
 use serde_json::{json, Value};

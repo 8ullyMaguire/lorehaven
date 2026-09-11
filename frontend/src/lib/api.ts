@@ -1202,6 +1202,20 @@ export interface ImportSource {
   health: string;
   last_checked_at: string | null;
   capabilities: SourceCapabilities;
+  /** The terms this instance reads sources on. Instance-wide, so identical
+   *  across entries — repeated rather than hoisted because the source list is
+   *  where an operator looks when one archive refuses. */
+  robots?: RobotsTerms;
+}
+
+/** How this instance treats a source's own `robots.txt`. */
+export interface RobotsTerms {
+  /** Whether a path a source forbids is refused. Off is an operator's choice. */
+  honour_disallow: boolean;
+  /** Whether the pace the same file publishes is still enforced. Always true. */
+  honour_crawl_delay: boolean;
+  /** What happens to a forbidden path, in the instance's own words. */
+  note: string;
 }
 
 /** What a preview decided the import would do. */

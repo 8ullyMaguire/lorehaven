@@ -269,6 +269,43 @@ struct SourceView {
     /// What the adapter can do. Absence is visible here rather than discovered
     /// when an import fails (spec §11.1, "Capability absence must be visible").
     capabilities: serde_json::Value,
+    /// The terms this instance reads sources on (spec §11.5).
+    robots: RobotsView,
+}
+
+/// How this instance treats the `Disallow` rules in a source's `robots.txt`.
+///
+/// Carried in the catalogue because an override that lives only in a config file
+/// and a log line is one a reader cannot see and an operator can forget. It is
+/// instance-wide, so every entry repeats it — which is the point: the answer does
+/// not depend on which source is being looked at, and an operator should not have
+/// to work out whether it does.
+#[derive(Debug, Serialize)]
+struct RobotsView {
+    /// Whether a path a source's `robots.txt` forbids is refused.
+    honour_disallow: bool,
+    /// Whether the pace the same file publishes is still enforced. Always true.
+    ///
+    /// A constant rather than a configuration value, and it is stated here so
+    /// that switching `honour_disallow` off cannot read as switching off the
+    /// politeness rules beside it.
+    honour_crawl_delay: bool,
+    /// What happens to a forbidden path while `honour_disallow` is false.
+    note: &'static str,
+}
+
+impl RobotsView {
+    fn of(config: &crate::config::Config) -> Self {
+        Self {
+            honour_disallow: config.imports.honour_robots,
+            honour_crawl_delay: true,
+            note: if config.imports.honour_robots {
+                "paths a source's robots.txt forbids are refused, and the failure names the rule"
+            } else {
+                "this instance reads paths a source's robots.txt forbids, under                  `imports.honour_robots = false`; the source's own crawl delay is still enforced"
+            },
+        }
+    }
 }
 
 /// The catalogue a reader is shown: every source this build can read, with this
@@ -318,6 +355,13 @@ async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<serde_jso
                 health: row.map_or_else(|| "unknown".to_owned(), |row| row.health.clone()),
                 last_checked_at: row.and_then(|row| row.last_checked_at.clone()),
                 capabilities: capabilities_of(adapter.as_ref()),
+                // The instance's own answer to every source's `robots.txt`,
+                // carried on each entry because this is the page an operator
+                // reads before wondering why one archive refuses. Instance-wide
+                // and therefore identical everywhere, which is the point: a
+                // per-source answer would be one an operator could set once and
+                // later be wrong about (spec §11.5).
+                robots: RobotsView::of(state.config()),
             }
         })
         .collect();
@@ -337,6 +381,7 @@ async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<serde_jso
                 health: row.health.clone(),
                 last_checked_at: row.last_checked_at.clone(),
                 capabilities: serde_json::json!({ "known": false }),
+                robots: RobotsView::of(state.config()),
             }),
     );
 

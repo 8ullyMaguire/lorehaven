@@ -46,6 +46,18 @@ let calls: Recorded[] = [];
 let imports: unknown[] = [];
 let sources: unknown[] = [];
 
+/**
+ * Text with runs of whitespace collapsed.
+ *
+ * A sentence in a Svelte template wraps across lines, so `textContent` carries
+ * the source file's indentation. Comparing against that would make the test fail
+ * the day somebody reflowed a paragraph — a test asserting the layout rather
+ * than the words.
+ */
+function squashed(text: string): string {
+  return text.replace(/\s+/g, ' ');
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -66,6 +78,11 @@ beforeEach(() => {
       health: 'ok',
       last_checked_at: null,
       capabilities: { known: true, metadata: true, chapters: true, per_chapter_fetch: true },
+      robots: {
+        honour_disallow: true,
+        honour_crawl_delay: true,
+        note: "paths a source's robots.txt forbids are refused, and the failure names the rule",
+      },
     },
     {
       key: 'ffnet',
@@ -76,6 +93,11 @@ beforeEach(() => {
       health: 'unavailable',
       last_checked_at: null,
       capabilities: { known: false },
+      robots: {
+        honour_disallow: true,
+        honour_crawl_delay: true,
+        note: "paths a source's robots.txt forbids are refused, and the failure names the rule",
+      },
     },
   ];
 
@@ -245,5 +267,39 @@ describe('the import page', () => {
         (button.getAttribute('aria-label') ?? '').includes('Cancel'),
       ),
     ).toBe(true);
+  });
+
+  it('states the terms the instance reads sources on', async () => {
+    render(Import);
+    // Waits for a *source*, not for the heading: the terms arrive with the
+    // catalogue, so a page that has rendered "Sources" has not yet rendered
+    // what it means to read one.
+    await waitFor(() => expect(document.body.textContent).toContain('Royal Road'));
+
+    expect(squashed(document.body.textContent ?? '')).toContain('forbids are refused');
+  });
+
+  it('marks the instance that has stopped honouring a source\'s rules', async () => {
+    // The state a reader on such an instance has no other way to see. It is
+    // marked rather than merely mentioned, because the difference between an
+    // instance that asks and one that does not is not a detail of the layout.
+    const terms = {
+      honour_disallow: false,
+      honour_crawl_delay: true,
+      note: 'this instance reads paths a source\'s robots.txt forbids',
+    };
+    sources = (sources as { key: string }[]).map((source) => ({ ...source, robots: terms }));
+
+    render(Import);
+    await waitFor(() => expect(document.body.textContent).toContain('Royal Road'));
+
+    const note = [...document.querySelectorAll('p')].find((p) =>
+      (p.textContent ?? '').includes('robots.txt forbids'),
+    );
+    expect(note?.className).toContain('override');
+    // And it says plainly that the pace was not switched off with it.
+    expect(squashed(note?.textContent ?? '')).toContain(
+      'crawl delay is enforced either way',
+    );
   });
 });
