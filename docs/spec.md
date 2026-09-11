@@ -1409,6 +1409,8 @@ Separate:
 2. **Temporary fetch cache:** reusable bytes under documented scope and expiry.
 3. **Approved public preservation corpus:** content explicitly authorized for public archival use.
 
+Which of these a fetched body may occupy is the instance's decision rather than the importer's: §11.15 states it once, and an instance set to `aggregate` produces none of the three — metadata is stored and the body is never fetched.
+
 Cache keys include source identity, source revision or validated fingerprint, adapter extraction version, and security scope.
 
 Rules:
@@ -1633,6 +1635,8 @@ Preservation batches may initially remain private or review-only. Public release
 
 A preservation batch captures text and metadata. Media bytes are captured only where the instance hosts media (§30.2); elsewhere the reference is preserved as a reference, so a preservation record survives the loss of its origin without this instance having mirrored anything.
 
+Where the instance retains work bodies as references rather than copies (§11.15), a preservation batch is refused rather than run in a reduced form. Capturing text is what such an instance has decided not to do, and a batch that ran anyway as metadata-only would be the same request answered two ways depending on who asked.
+
 ## 11.12 Cross-posting to external sites
 
 Support publishing local Lorehaven works to external sites through adapters that provide cross-posting capability.
@@ -1674,6 +1678,48 @@ Norms:
 - Quality never overrides eligibility (§7.6). A readable, eligible work is imported whether or not it looks impressive, and an ineligible one is refused however immaculate it looks.
 - An adapter may contribute source-specific evidence — a marker the site itself uses for an unposted or withdrawn work — and the shared classification remains the floor beneath it. Evidence may harden a rejection; it may not turn a rejection into an acceptance.
 
+## 11.15 Work body retention
+
+An instance that caches what it imports and an instance that is a catalogue of links are both complete instances, and which one this is must be the operator's decision rather than a consequence of how a work happened to arrive.
+
+```text
+Work body retention: cache | aggregate
+```
+
+- **`cache`** — the fetched body is stored on this instance and served from here. A library item is a durable snapshot (§10.4.1) referenced by that reader's copy, so the work reads here, downloads here, and reads offline. This is the default.
+- **`aggregate`** — metadata, attribution, provenance and canonical links are stored; the body is never fetched into this instance's storage. A library item is a reference to the work at its origin. The work page presents the work — title, author, summary, tags, fandoms, statistics, comments, ratings — and links out for the text.
+
+Both modes produce a real work record. Eligibility (§7.6), metadata search, tags, fandoms, characters, series, collections, challenges, ratings, comments, bookmarks, notifications and the people directory all behave identically; what differs is whether this instance holds the words.
+
+The setting is the operator's, and it is stated once. It applies to the instance, never to a request, a work, an importer, an extension or a federated peer: nothing an uploader, an adapter or a peer does may raise it. An instance set to `aggregate` refuses to store a body wherever a body could arrive — a URL import, a file upload, a clipboard paste, an authorized preservation batch (§11.11), a federated announcement, or a cache fill — and every refusal names the instance's policy rather than failing as a generic error.
+
+An operator may set retention per source family, and an override may only narrow. Caching most sources while aggregating one is expressible; the reverse on an `aggregate` instance is not, because that would restore storage the instance decided against, and the operator who wants it can change the instance setting itself, where the change is recorded. Overrides are recorded in the modlog with who set them and when.
+
+**Neither mode degrades silently, in either direction.** On a caching instance, a body that fails to fetch is a failed import that retries and eventually reports — never a work quietly reclassified as a link, because that turns a temporary source failure into a permanent loss of something the reader asked this instance to keep. On an aggregating instance, nothing fetches a body "because it was available": a bulk import of four hundred works does not become forty gigabytes because the adapter could have managed it.
+
+Consequences that follow from holding no body, stated so that they are decisions rather than surprises:
+
+- **Body search covers what this instance holds.** §15.9 indexes permitted body text; an aggregated work has none to index, so it is found by title, author, tags, fandom and summary, and a body-only search cannot match it. Metadata-only and combined modes are unaffected.
+- **Offline reading and exports cover what this instance holds.** An aggregated work cannot be downloaded for offline reading (§13.5) and cannot be exported (§13.1–13.3), because there are no chapter bytes to package. The action is absent or honestly disabled with the reason shown, never a download that produces a file containing a link.
+- **A preservation batch is refused.** §11.11 exists to capture text, and an instance set to `aggregate` has said it does not want captured text. The refusal names the policy.
+- **Quotas and storage accounting reflect it.** An aggregated library item consumes metadata, not bytes, and an operator's storage figures say so.
+
+**What `aggregate` does not mean.** It is not a fallback, not a degraded mode, and not permission to lose the record: provenance, source URL, timestamps, attribution and availability checking (§11.13) all remain, and a source that vanishes leaves the record marked unreachable rather than deleted. It is also not a way around §11.5, §11.6 or §15.16 — the same safe fetching, credential handling and tag curation apply to whatever is fetched to build the metadata.
+
+An instance may change the setting. Widening to `cache` does not retroactively fetch bodies for works already aggregated; that is a per-work action somebody takes, recorded, and bounded by the same source rate limits as any other import. Narrowing to `aggregate` does not delete bodies already held: an existing reader's snapshot is content this instance stored for them, and removing it is the deletion workflow (§10.4), not a policy change.
+
+```text
+GET    /api/v1/admin/retention/policy
+PATCH  /api/v1/admin/retention/policy
+GET    /api/v1/admin/retention/sources
+PUT    /api/v1/admin/retention/sources/:sourceKey
+```
+
+| Table | Important fields |
+|---|---|
+| `instance_retention_policy` | body_mode, updated_by, updated_at |
+| `instance_retention_source_overrides` | source_key, body_mode, updated_by, updated_at |
+
 ## Acceptance
 
 - Repeat imports avoid accidental duplicates.
@@ -1689,6 +1735,12 @@ Norms:
 - Author watches respect rate limits and can be paused.
 - Cross-posting requires explicit destination authentication.
 - An unreadable page is a rejected candidate carrying its reason, not a degraded source and not a lost import.
+- An instance set to `aggregate` imports a work into a complete record with metadata, attribution and a canonical link, and stores no body.
+- An instance set to `aggregate` refuses a body from every path that could deliver one — URL import, file upload, paste, preservation batch, federated announcement and cache fill — and each refusal names the policy.
+- A body that fails to fetch on a caching instance leaves a failed, retryable import and never becomes a silent link.
+- An aggregated work is found by metadata search, tags, collections and series, and is not matched by a body-only search.
+- An aggregated work offers no offline download and no export, and says why instead of producing a file containing a link.
+- An operator may narrow retention for one source and may not widen it on an aggregating instance.
 
 ---
 
@@ -1880,6 +1932,7 @@ Explain that browser storage may be evicted, downloaded copies cannot always be 
 - Foreground synchronization works without Background Sync.
 - Device delivery cannot be used as an open relay.
 - Unavailable converters honestly disabled.
+- A work whose body this instance does not hold offers no offline download and no export, and says why rather than producing a file that contains a link.
 
 ---
 
@@ -2063,6 +2116,8 @@ Index permitted body text for published eligible local works, the requesting pse
 Phrase search, prose and dialogue search, chapter-level matches, highlighted snippets, jump-to-match anchors, search within one work, explicit metadata-only/body-only/combined modes.
 
 Body search does not require a globally shared body cache. Permission checks apply before counts, facets, snippets, and result serialization. Inaccessible content must not leak through counts or autocomplete.
+
+A work this instance retains as a reference (§11.15) has no body here to index. It stays findable by metadata, and a body-only search does not match it — which is the honest answer, not a gap to paper over by indexing a summary as though it were the text.
 
 Sanitize highlighting output. Strip executable markup before indexing. Index revision state so stale snippets can be invalidated.
 
@@ -3295,6 +3350,7 @@ An instance may decline to run any compatibility surface. The default is that no
 /admin/preservation
 /admin/jobs
 /admin/storage
+/admin/retention
 /admin/metadata
 /admin/positivity
 /admin/translations
@@ -3810,6 +3866,9 @@ The tutorial, contextual help, API documentation, and operator documentation des
 - **Media hosting as a per-work decision.** "This instance does not host media" and "this media is a work on this instance" must both be expressible, and only an instance-level policy expresses both.
 - **A compatibility surface for another service's API by default.** None ships. If an instance ever needs one, §23.11 fixes its shape: a separate prefix, provenance-marked, pinned by tests, with its incompatibilities documented and no privileged path.
 - **Treating an unreadable page as an outage.** §11.14 separates a source's health from the quality of what it returned; one challenge page is a rejected candidate with a reason, not a degraded source.
+- **Body retention as a per-work decision.** "This instance holds the words" and "this instance knows this work exists and points at it" must both be expressible, and only an instance-level setting expresses both without making every import a decision (§11.15).
+- **An aggregating instance that caches "while it is there".** An instance set to `aggregate` stores no body from any path, including a cache fill that would have been convenient.
+- **A caching instance that downgrades a failed fetch into a link.** A body that could not be fetched is a failed, retryable import, not a reclassification of the work.
 
 ## 28.11 Gamification
 
@@ -4014,6 +4073,8 @@ Media hosting: host | reference | catalogue
 The setting is the operator's, and an instance that chooses `reference` or `catalogue` is a complete instance: every other feature in this specification behaves identically. No work, contributor, importer, extension or federated peer may raise the setting on its own behalf. An instance set to `reference` refuses an upload rather than silently storing a file, and the refusal names the instance's policy.
 
 This is why the preference is an instance setting and not a per-work flag. "My instance does not host media, and the fan film it aggregates is still a work" is the combination to be expressible, and a per-work flag cannot express it without turning every work into a decision somebody has to make.
+
+Media bytes are one axis; the text of an imported work is another. This section governs the bytes and §11.15 governs the text, and the two are independent: an instance may host media while aggregating text, or hold nothing but text. They follow one principle, stated in both places because it is the same principle — the operator decides it once, and no work, uploader, importer, extension or federated peer raises it.
 
 ## 30.3 Media references, and where the metadata comes from
 

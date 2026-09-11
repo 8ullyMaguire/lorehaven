@@ -144,6 +144,16 @@ mistaken for the authorisation: the destination field exists and accepts only th
 reader's own library. `M6-10` is `unsupported` in `docs/requirements.csv` and
 should stay there until M17 does that work.
 
+**`M6-15` — instance work body retention.** The `cache` half is what M6 built and what
+ships; the setting and the `aggregate` half do not, and are `M6-15` in
+`docs/requirements.csv` (spec §11.15, added 2026-09-11). An operator who wants their
+instance to be a catalogue of links — metadata, attribution and a canonical URL, no
+stored text — currently has no way to say so, and nothing refuses a body on their
+behalf. This is a real gap rather than a rounding error, but it is a bounded one: the
+default is unchanged, so nothing shipped contradicts it, and the work is a setting, a
+refusal at each path that could deliver a body, and the honest "not held here" states
+on the reader and export paths. It stays `unsupported` until somebody builds it.
+
 **`M6-13` — import result quality.** Added to the spec as §11.14 on 2026-09-11,
 after M6 closed, by folding in the one idea worth taking from FicNexus's scraper
 layer. §11.8 grades the *source* and this grades the *result*; M6 built the first
