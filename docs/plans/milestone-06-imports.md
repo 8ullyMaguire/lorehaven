@@ -5,9 +5,14 @@ file records what it *is*, where that differs, and why — the same shape as
 `docs/plans/milestone-05-jobs.md`, and written at the same time as the work
 rather than afterwards.
 
-The milestone is **partly built**. Its status is not "done with a caveat": the
-import machinery is finished and tested, and the pages a reader would use are
-absent, which means the plan's own journey cannot be walked.
+The milestone is **partly built**. Its status is not "done with a caveat", but the
+caveat has moved: the import machinery is finished and tested, the pages a reader
+would use are built and the plan's own journey has been walked on a real instance
+(§5 of `docs/sessions/2026-09-11.md`). What remains is the **adapter set** — five
+of the nine tier-1 sources — which is `M6-02`, and the reason it is unfinished is
+not the one this file first recorded. The earlier claim that reading the walled
+sources needed "a signed-in session" was wrong: the access path is built and
+live-verified, and those sources are blocked on **parsing**.
 
 ---
 
@@ -15,17 +20,21 @@ absent, which means the plan's own journey cannot be walked.
 
 | Piece | Where | Tests |
 |---|---|---|
-| The adapter crate, its trait and the registry | `crates/scrapers/src/{lib,registry,sites}.rs` | 146 in-crate |
-| The safe fetcher and URL guard | `crates/scrapers/src/safety.rs` | in-crate |
+| The adapter crate, its trait and the registry | `crates/scrapers/src/{lib,registry,sites}.rs` | 185 in-crate |
+| The safe fetcher and URL guard | `crates/scrapers/src/safety.rs` | 41 |
+| A browser TLS/HTTP2 fingerprint | `crates/scrapers/src/engine.rs` | 8 |
+| A FlareSolverr-v1 solver service | `crates/scrapers/src/solver.rs` | 13 |
+| An Internet Archive snapshot | `crates/scrapers/src/archive.rs` | 12 |
 | Charset decoding for fetched pages | `crates/scrapers/src/safety.rs` (`decode_body`) | 9 in-crate |
 | `robots.txt`: the source's own pace and path rules | `crates/scrapers/src/robots.rs` | 21 |
-| Chapter sanitation | `crates/scrapers/src/sanitize.rs` | in-crate |
+| The fixture tests, by family | `crates/scrapers/tests/{ao3,royalroad,syosetu,efiction}_fixtures.rs` | 9 + 21 + 31 + 37 |
+| Chapter sanitation | `crates/scrapers/src/sanitize.rs` | 17 |
 | The Archive-software adapter | `crates/scrapers/src/sites/ao3.rs` | 7 unit + 9 fixture tests |
 | The Royal Road adapter | `crates/scrapers/src/sites/royalroad.rs` | 13 unit + 21 fixture tests |
 | The Syosetu adapter | `crates/scrapers/src/sites/syosetu.rs` | 16 unit + 31 fixture tests |
 | The eFiction family adapter | `crates/scrapers/src/sites/efiction.rs` | 18 unit + 37 fixture tests |
 | Recorded fixtures | `crates/scrapers/tests/fixtures/{ao3,royalroad,syosetu,efiction}/` | provenance in `fixtures/README.md` |
-| Live verification, by hand | `crates/scrapers/tests/live_verification.rs` | 6 `#[ignore]`d, network |
+| Live verification, by hand | `crates/scrapers/tests/live_verification.rs` | 9 `#[ignore]`d, network |
 | The planning rules | `crates/domain/src/imports.rs` | 24 |
 | Migration 0006, both dialects | `migrations/{sqlite,postgres}/0006_imports.sql` | applied by every acceptance test |
 | Migration 0007, both dialects | `migrations/{sqlite,postgres}/0007_revision_cache.sql` | applied by every acceptance test |
@@ -112,11 +121,17 @@ Syosetu, eFiction — are built. Of the rest, none has fixtures:
   members, and `tests/fixtures/README.md` writes down what they establish.
 * **ffnet/fictionpress, the XenForo boards and scribblehub** answer `403` to a
   plain request, and `cloudflare-challenge.html` records what that looks like.
-  Reading them needs TLS impersonation or a browser, and the plan's §6 weighs
-  that against the SSRF guard `SafeFetcher` provides — a browser subprocess
-  cannot be DNS-pinned the way the guard pins a request. This is the point at
-  which a signed-in session is the honest tool, and the work is left for one.
-* **wattpad and ficbook** are reachable and simply not yet recorded.
+  ~~Reading them needs TLS impersonation or a browser, and the work is left for a
+  signed-in session.~~ **Corrected on 2026-09-11: the access half is built and
+  live-verified, and it was never a decision between impersonation and the guard.**
+  The three tiers exist (§9), the escalation runs only on a detected challenge and
+  only for what an adapter and an instance each declared, and all five walled
+  sources were read through a real Byparr on 2026-09-11 — including FictionPress,
+  which the browser fingerprint cannot touch at all. These adapters are not
+  waiting on a signed-in session; they are waiting on a **parser**, the same work
+  wattpad and ficbook need.
+* **wattpad and ficbook** are reachable with no wall at all and simply not yet
+  recorded.
 
 `M6-02`.
 
