@@ -79,6 +79,26 @@ pre {
   font-size: 0.9em;
 }
 
+/*
+ * A long unbreakable identifier must not set the page's minimum width.
+ *
+ * Build stamps, work keys and source addresses are all single tokens with no
+ * space to break at, and by default they make any container they sit in as wide
+ * as the token. That is invisible on a desktop and pushes the document
+ * sideways on a 320-pixel viewport — which is exactly what it did, in the home
+ * page's fact list, until it was measured (`frontend/scripts/measure-viewport.mjs`).
+ *
+ * `anywhere` rather than `break-word` because it also counts towards the
+ * min-content size, which is the size a grid or flex track will refuse to go
+ * below. Only tokens that genuinely cannot fit are broken.
+ */
+code,
+kbd,
+samp,
+.breakable {
+  overflow-wrap: anywhere;
+}
+
 :not(pre) > code {
   background: var(--color-surface);
   border: var(--border-width) solid var(--color-border);

@@ -303,6 +303,10 @@
 
   .check-detail {
     color: var(--color-muted);
+    /* The server writes this line, and it names a connection: a URL with no
+       space in it. Without this the detail sets the panel's minimum width and
+       pushes the whole page sideways at 320 CSS pixels. */
+    overflow-wrap: anywhere;
   }
 
   .remedy {
