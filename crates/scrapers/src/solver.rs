@@ -87,14 +87,48 @@ impl SolverConfig {
     }
 }
 
+/// Whether this service has a session API, and what that means here.
+///
+/// # Why this is discovered rather than assumed
+///
+/// The session API is FlareSolverr's, and **not every service that speaks the
+/// protocol implements it**. Byparr 3.x accepts exactly one body shape — a request
+/// with a `url` — and has no `sessions.create` command at all; its browser is a
+/// shared singleton, so a session would be redundant rather than merely absent.
+/// Sending the command to it is not harmless: the service parses it as a request
+/// with an empty URL, navigates to `https://`, fails, and logs an error. That was
+/// found by running against a real Byparr, and it is invisible to a stubbed socket,
+/// which answers whatever it is handed.
+///
+/// So support is *proven* by the first import long enough to need it, and remembered
+/// either way.
+#[derive(Debug)]
+enum Sessions {
+    /// No session has been needed yet. The count is how many requests have been
+    /// served without one.
+    ///
+    /// The first request deliberately goes without a session: a session exists to
+    /// make *later* requests cheaper, so a single-page fetch should never pay to
+    /// set one up — and on a service without the API, that setup is a wasted
+    /// navigation and an error line in somebody else's log.
+    Unproven { served: u32 },
+    /// Sessions work here, and this is the one to use.
+    Active(String),
+    /// This service has no session API. Not a failure: every request is served
+    /// independently, which is slower for a long import and entirely correct.
+    Unsupported,
+}
+
 /// A client for a FlareSolverr-compatible service.
 pub struct SolverClient {
     config: SolverConfig,
+    /// The address commands are posted to — the configured endpoint with the
+    /// service's command path resolved.
+    request_url: String,
     http: reqwest::Client,
-    /// The session id, once one has been created. `None` until the first request,
-    /// because creating a session for an import that never needs one would leave
-    /// a browser context open on the service for nothing.
-    session: Mutex<Option<String>>,
+    /// The session state. See [`Sessions`] for why it is discovered rather than
+    /// assumed, and why the first request goes without one.
+    sessions: Mutex<Sessions>,
     /// Hosts this solver may be aimed at.
     allowed_hosts: Vec<String>,
 }
@@ -115,6 +149,23 @@ impl SolverClient {
                 parsed.scheme()
             )));
         }
+        // The contract posts commands to `/v1`. An operator configuring this
+        // naturally writes the service's *address* (`http://127.0.0.1:8191`), and
+        // posting to that address answers `405 Method Not Allowed` — it serves the
+        // interactive docs page, which is a `GET`. Both spellings are therefore
+        // accepted: a path the operator gave is kept as theirs, and a bare address
+        // gets the command path appended.
+        //
+        // This was found by running against a real service, not by the unit tests.
+        // Those stub a socket, and a stub answers whatever path it is sent, so a
+        // wrong path is invisible to them — the stub's indifference is exactly what
+        // a mock cannot be asked about.
+        let mut root = parsed.clone();
+        if root.path().is_empty() || root.path() == "/" {
+            root.set_path("/v1");
+        }
+        let request_url = root.to_string();
+
         // The solver is given a generous connect timeout but no overall client
         // timeout: the service does its own waiting, and the request to it must
         // outlast `maxTimeout` or it would time out while the solve is succeeding.
@@ -125,8 +176,9 @@ impl SolverClient {
             .map_err(|e| SourceError::Internal(format!("building solver client: {e}")))?;
         Ok(Self {
             config,
+            request_url,
             http,
-            session: Mutex::new(None),
+            sessions: Mutex::new(Sessions::Unproven { served: 0 }),
             allowed_hosts: allowed_hosts
                 .into_iter()
                 .map(|host| host.trim_start_matches("www.").to_ascii_lowercase())
@@ -134,10 +186,20 @@ impl SolverClient {
         })
     }
 
-    /// Where the service is, for a log line or a health check.
+    /// Where the service is, as configured.
     #[must_use]
     pub fn endpoint(&self) -> &str {
         &self.config.endpoint
+    }
+
+    /// The address commands are actually posted to.
+    ///
+    /// Distinct from [`SolverClient::endpoint`] because a bare address gains the
+    /// service's command path, and an operator seeing a `405` deserves to be told
+    /// what was called rather than what they configured.
+    #[must_use]
+    pub fn request_url(&self) -> &str {
+        &self.request_url
     }
 
     /// Ask the service for `url`.
@@ -152,27 +214,7 @@ impl SolverClient {
             .map_err(|e| SourceError::Internal(format!("solver given a non-URL: {e}")))?;
         self.check_host(&parsed)?;
 
-        // A session is opened before the first request rather than after a
-        // failure, because the whole reason to use a session is to pay for the
-        // challenge once. `sessions.create` is the only command that can precede
-        // `request.get`, and a service that will not open one is still usable
-        // statelessly — so a failure here is logged and stepped over rather than
-        // failing an import that could otherwise have read the page.
-        let session = match self.session_id().await {
-            Some(existing) => Some(existing),
-            None => match self.create_session().await {
-                Ok(created) => Some(created),
-                Err(error) => {
-                    tracing::debug!(
-                        solver = %self.config.endpoint,
-                        %error,
-                        "the solver would not open a session; reading statelessly"
-                    );
-                    None
-                }
-            },
-        };
-
+        let session = self.session_for_request().await;
         let outcome = match self.request(url, session.as_deref()).await {
             Attempted::Ok(reply) => reply,
             Attempted::Failed(error) => return Err(error),
@@ -183,12 +225,12 @@ impl SolverClient {
             // `SourceError` no longer carries that sentence.
             Attempted::SessionGone => {
                 tracing::debug!(
-                    solver = %self.config.endpoint,
+                    solver = %self.request_url,
                     "the solver forgot our session; opening a new one"
                 );
-                *self.session.lock().await = None;
-                let fresh = self.create_session().await?;
-                match self.request(url, Some(&fresh)).await {
+                *self.sessions.lock().await = Sessions::Unproven { served: 1 };
+                let fresh = self.session_for_request().await;
+                match self.request(url, fresh.as_deref()).await {
                     Attempted::Ok(reply) => reply,
                     Attempted::Failed(error) => return Err(error),
                     Attempted::SessionGone => {
@@ -253,11 +295,57 @@ impl SolverClient {
         }
     }
 
-    async fn session_id(&self) -> Option<String> {
-        self.session.lock().await.clone()
+    /// The session to use for the next request, proving support if needed.
+    ///
+    /// Three cases, in the order they arise over an import's life:
+    ///
+    /// 1. **The first request goes without one.** A session makes later requests
+    ///    cheaper; a single-page fetch gains nothing from it and would pay for the
+    ///    attempt.
+    /// 2. **The second request tries one.** From then on the saving is real, so
+    ///    support is worth proving — and the outcome is remembered, so this
+    ///    happens at most once per import.
+    /// 3. **After a proof, it is reused** until the service says it is gone.
+    async fn session_for_request(&self) -> Option<String> {
+        let mut state = self.sessions.lock().await;
+        match &*state {
+            Sessions::Active(id) => Some(id.clone()),
+            Sessions::Unsupported => None,
+            Sessions::Unproven { served } if *served == 0 => {
+                *state = Sessions::Unproven { served: 1 };
+                None
+            }
+            Sessions::Unproven { .. } => {
+                // Released before the request: `create_session` is a round trip,
+                // and holding the lock across it would serialise every fetch and
+                // deadlock against the store below.
+                drop(state);
+                match self.create_session().await {
+                    Ok(id) => {
+                        *self.sessions.lock().await = Sessions::Active(id.clone());
+                        Some(id)
+                    }
+                    Err(error) => {
+                        // A service without the session API is not a broken
+                        // service, and a long import against one is slower rather
+                        // than wrong. Said once, with the reason, so an operator
+                        // seeing a rejected command in their solver's log knows
+                        // what it was.
+                        tracing::info!(
+                            solver = %self.request_url,
+                            %error,
+                            "this solver does not accept sessions; each request will be \
+                             served independently"
+                        );
+                        *self.sessions.lock().await = Sessions::Unsupported;
+                        None
+                    }
+                }
+            }
+        }
     }
 
-    /// Create a session, storing it for reuse.
+    /// Create a session. The caller stores the id, so this holds no lock.
     async fn create_session(&self) -> SourceResult<String> {
         let reply: SolverReply = self
             .post(&serde_json::json!({
@@ -271,11 +359,9 @@ impl SolverClient {
             );
             return Err(SourceError::Blocked);
         }
-        let session = reply.session.ok_or_else(|| {
+        reply.session.ok_or_else(|| {
             SourceError::Parse("the solver opened a session without naming it".to_owned())
-        })?;
-        *self.session.lock().await = Some(session.clone());
-        Ok(session)
+        })
     }
 
     /// One `request.get`, naming a session when there is one.
@@ -308,7 +394,7 @@ impl SolverClient {
             // means "a challenge wall, a ban, an IP block". The service's own
             // sentence is logged rather than discarded, because it is the only
             // thing that distinguishes a wall from a misconfigured service.
-            tracing::warn!(solver = %self.config.endpoint, %message, "the solver did not pass the wall");
+            tracing::warn!(solver = %self.request_url, %message, "the solver did not pass the wall");
             return Attempted::Failed(SourceError::Blocked);
         }
         Attempted::Ok(reply)
@@ -322,7 +408,7 @@ impl SolverClient {
         let body = payload.to_string();
         let response = self
             .http
-            .post(&self.config.endpoint)
+            .post(&self.request_url)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(body)
             .send()
@@ -330,7 +416,7 @@ impl SolverClient {
             .map_err(|e| {
                 SourceError::Network(format!(
                     "the solver at {} could not be reached: {e}",
-                    self.config.endpoint
+                    self.request_url
                 ))
             })?;
         let status = response.status();
@@ -451,10 +537,12 @@ mod tests {
 
     #[tokio::test]
     async fn a_solved_page_comes_back_with_its_url() {
-        let (endpoint, _seen) = stub(vec![
-            serde_json::json!({"status": "ok", "session": "abc123"}).to_string(),
-            ok_solution("<html><body><div class=\"story\">prose</div></body></html>"),
-        ])
+        // One request, one reply — and no session command at all. The stub is
+        // given a single reply on purpose: if the client tried to open a session
+        // first, it would consume the page's reply and this would fail.
+        let (endpoint, seen) = stub(vec![ok_solution(
+            "<html><body><div class=\"story\">prose</div></body></html>",
+        )])
         .await;
         let client = SolverClient::new(SolverConfig::new(&endpoint), vec!["fimfiction.net".into()])
             .expect("client");
@@ -468,14 +556,108 @@ mod tests {
             "https://www.fimfiction.net/story/373233/"
         );
         assert!(fetched.etag.is_none(), "a solved page carries no validator");
+        let seen = seen.await.expect("stub finished");
+        assert_eq!(
+            seen.len(),
+            1,
+            "a single-page fetch must not set a session up"
+        );
+        assert!(
+            !seen[0].contains("sessions.create"),
+            "the session API was touched for a one-page fetch: {}",
+            seen[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_service_without_the_session_api_is_used_statelessly() {
+        // Byparr 3.x, measured: a single `POST /v1` that always navigates, with no
+        // session model at all. It answers a session command with a 502, because it
+        // parses the command as a request for the empty URL. The client has to read
+        // that as "no sessions here", keep working, and stop asking — otherwise an
+        // import of more than one page pays for a wasted navigation on every page
+        // and the operator's solver log fills with errors about a service that is
+        // working perfectly.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let handle = tokio::spawn(async move {
+            // Four requests, not three: page one is served statelessly, page two
+            // costs the failed session attempt *and* its own request, and page
+            // three is stateless again.
+            let mut bodies = Vec::new();
+            for _ in 0..4 {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return bodies;
+                };
+                let mut buffer = vec![0_u8; 8192];
+                let read = socket.read(&mut buffer).await.expect("read");
+                let request = String::from_utf8_lossy(&buffer[..read]).into_owned();
+                let (status, body) = if request.contains("sessions.create") {
+                    // The service's own reply for a command it does not implement:
+                    // a rejected navigation, which is exactly how Byparr answers.
+                    (
+                        "502 Bad Gateway",
+                        r#"{"detail":"Could not reach the target: Page.goto: Protocol error (Page.navigate): Invalid url: \"https://\""}"#.to_owned(),
+                    )
+                } else {
+                    ("200 OK", ok_solution("<p>served statelessly</p>"))
+                };
+                bodies.push(request);
+                let response = format!(
+                    "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+                let _ = socket.flush().await;
+            }
+            bodies
+        });
+        let client = SolverClient::new(
+            SolverConfig::new(format!("http://{addr}")),
+            vec!["fimfiction.net".into()],
+        )
+        .expect("client");
+
+        // Three pages, the way a three-chapter import would ask.
+        for chapter in 1..=3 {
+            let page = client
+                .get(&format!("https://www.fimfiction.net/story/1/{chapter}/"))
+                .await
+                .unwrap_or_else(|e| panic!("chapter {chapter} should still be served: {e:?}"));
+            assert!(page.body.contains("served statelessly"));
+        }
+        let bodies = handle.await.expect("stub finished");
+        let pages = bodies
+            .iter()
+            .filter(|body| body.contains("request.get"))
+            .count();
+        assert_eq!(pages, 3, "every page should have been served");
+        let attempts = bodies
+            .iter()
+            .filter(|body| body.contains("sessions.create"))
+            .count();
+        assert_eq!(
+            attempts, 1,
+            "support must be proven once and remembered, not retried per request"
+        );
+        assert!(
+            !bodies[0].contains("sessions.create"),
+            "the first request tried a session: {}",
+            bodies[0]
+        );
     }
 
     #[tokio::test]
     async fn the_second_request_reuses_the_session() {
+        // The order is the point: the first request is served *without* a session,
+        // and support is proven only once a second request makes one worth having.
         let (endpoint, seen) = stub(vec![
-            serde_json::json!({"status": "ok", "session": "abc123"}).to_string(),
             ok_solution("<p>one</p>"),
+            serde_json::json!({"status": "ok", "session": "abc123"}).to_string(),
             ok_solution("<p>two</p>"),
+            ok_solution("<p>three</p>"),
         ])
         .await;
         let client = SolverClient::new(SolverConfig::new(&endpoint), vec!["fimfiction.net".into()])
@@ -488,26 +670,44 @@ mod tests {
             .get("https://www.fimfiction.net/story/2/")
             .await
             .expect("second");
+        client
+            .get("https://www.fimfiction.net/story/3/")
+            .await
+            .expect("third");
         let seen = seen.await.expect("stub finished");
-        assert_eq!(seen.len(), 3, "one create, two requests");
-        assert!(seen[0].contains("sessions.create"));
-        // Without this the whole point of sessions — one solve for a whole work —
-        // is lost, and every chapter pays for a browser again.
+        assert_eq!(seen.len(), 4, "one create, three requests");
         assert!(
-            seen[1].contains("\"session\":\"abc123\""),
-            "first request: {}",
+            !seen[0].contains("sessions.create") && !seen[0].contains("\"session\""),
+            "the first request should have gone without a session: {}",
+            seen[0]
+        );
+        assert!(
+            seen[1].contains("sessions.create"),
+            "second call: {}",
             seen[1]
         );
+        // Without this the whole point of sessions — one solve for a whole work —
+        // is lost, and every chapter pays for a browser again.
         assert!(
             seen[2].contains("\"session\":\"abc123\""),
             "second request: {}",
             seen[2]
         );
+        assert!(
+            seen[3].contains("\"session\":\"abc123\""),
+            "third request: {}",
+            seen[3]
+        );
     }
 
     #[tokio::test]
     async fn an_expired_session_is_replaced_rather_than_failing_the_chapter() {
+        // Two pages: the first proves the session API exists, the second finds it
+        // has expired and opens another rather than failing the chapter.
         let (endpoint, seen) = stub(vec![
+            // Page one, stateless.
+            ok_solution("<p>one</p>"),
+            // Page two: a session is proven, then found gone, then replaced.
             serde_json::json!({"status": "ok", "session": "old"}).to_string(),
             serde_json::json!({"status": "error", "message": "This session does not exist."})
                 .to_string(),
@@ -517,13 +717,22 @@ mod tests {
         .await;
         let client = SolverClient::new(SolverConfig::new(&endpoint), vec!["fimfiction.net".into()])
             .expect("client");
-        let fetched = client
+        client
             .get("https://www.fimfiction.net/story/1/")
             .await
-            .expect("a page");
+            .expect("first");
+        let fetched = client
+            .get("https://www.fimfiction.net/story/2/")
+            .await
+            .expect("the chapter should be recovered, not failed");
         assert!(fetched.body.contains("recovered"));
         let seen = seen.await.expect("stub finished");
-        assert_eq!(seen.len(), 4, "create, request, re-create, request");
+        assert_eq!(seen.len(), 5, "one create, page, gone, re-create, page");
+        assert!(
+            seen[4].contains("\"session\":\"new\""),
+            "the retry should use the session it just made: {}",
+            seen[4]
+        );
     }
 
     #[tokio::test]
@@ -590,8 +799,9 @@ mod tests {
 
     #[tokio::test]
     async fn a_source_that_refuses_the_solver_too_is_reported_as_withheld() {
+        // One request, so the session API is never reached: the service answered
+        // the page with the source's own refusal, which is the source's answer.
         let (endpoint, _seen) = stub(vec![
-            serde_json::json!({"status": "ok", "session": "s"}).to_string(),
             serde_json::json!({
                 "status": "ok",
                 "solution": { "url": "https://www.fimfiction.net/x/", "status": 403, "response": "<html>no</html>" }
@@ -622,6 +832,36 @@ mod tests {
             .await
             .expect_err("must fail");
         assert!(matches!(error, SourceError::Parse(_)), "got {error:?}");
+    }
+
+    #[test]
+    fn a_bare_address_is_posted_to_the_command_path() {
+        // Found by running against a real service: posting to a bare address
+        // answers `405`, because that address serves the docs page. The unit tests
+        // could not catch it — a stub answers whatever path it is sent.
+        let client = SolverClient::new(
+            SolverConfig::new("http://127.0.0.1:8191"),
+            vec!["fimfiction.net".into()],
+        )
+        .expect("client");
+        assert_eq!(client.request_url(), "http://127.0.0.1:8191/v1");
+        assert_eq!(client.endpoint(), "http://127.0.0.1:8191");
+
+        // A path the operator gave is theirs, including one behind a reverse proxy
+        // that mounts the service somewhere else.
+        for (configured, expected) in [
+            ("http://127.0.0.1:8191/v1", "http://127.0.0.1:8191/v1"),
+            (
+                "http://solver.internal/byparr",
+                "http://solver.internal/byparr",
+            ),
+            ("http://127.0.0.1:8191/", "http://127.0.0.1:8191/v1"),
+        ] {
+            let client =
+                SolverClient::new(SolverConfig::new(configured), vec!["fimfiction.net".into()])
+                    .expect("client");
+            assert_eq!(client.request_url(), expected, "configured {configured}");
+        }
     }
 
     #[test]
