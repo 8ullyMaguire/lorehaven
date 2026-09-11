@@ -36,11 +36,14 @@
 //! author-id column, and adapters that set a work's published and updated
 //! timestamps to the moment of the fetch. See the milestone record for the rest.
 
+pub mod archive;
+pub mod engine;
 pub mod registry;
 pub mod robots;
 pub mod safety;
 pub mod sanitize;
 pub mod sites;
+pub mod solver;
 
 use std::fmt;
 
@@ -53,8 +56,11 @@ pub use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
+pub use archive::ArchiveClient;
+pub use engine::{is_bot_challenge, Impersonation};
 pub use registry::Registry;
-pub use safety::{FetchPolicy, FixtureFetcher, SafeFetcher};
+pub use safety::{FetchPolicy, FixtureFetcher, SafeFetcher, Unblock};
+pub use solver::{SolverClient, SolverConfig};
 
 /// A stable, lowercase identifier for a source (`ao3`, `ffnet`, `xenforo`).
 ///
@@ -502,6 +508,40 @@ pub trait Fetcher: Send + Sync {
     }
 }
 
+/// Where a body actually came from.
+///
+/// Carried because "we have the page" and "we have the page *from somewhere
+/// else*" are different facts, and only the second needs saying out loud. An
+/// archived read is the case that matters: it is a real copy of the work, and a
+/// reader being shown it is owed the difference between the source's own page and
+/// somebody's snapshot of it.
+///
+/// It is also a correctness boundary. An adapter that stored
+/// [`Fetched::final_url`] as a work's canonical address would otherwise publish a
+/// `web.archive.org` URL as the work's home — so an archived read keeps the
+/// requested URL as `final_url` and records the snapshot here instead.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Provenance {
+    /// Read from the source itself.
+    #[default]
+    Source,
+    /// Read from an archive's copy of the source's page.
+    Archive {
+        /// The snapshot that was read.
+        snapshot_url: String,
+        /// When it was taken, `YYYYMMDDhhmmss`, when the archive said.
+        timestamp: Option<String>,
+    },
+}
+
+impl Provenance {
+    /// Whether this body came from anywhere other than the source.
+    #[must_use]
+    pub const fn is_archived(&self) -> bool {
+        matches!(self, Self::Archive { .. })
+    }
+}
+
 /// One page back from a fetch.
 #[derive(Debug, Clone)]
 pub struct Fetched {
@@ -523,6 +563,29 @@ pub struct Fetched {
     /// two validators, and useful precisely because a source that sends no ETag
     /// often sends this.
     pub last_modified: Option<String>,
+    /// Where the body came from, and whether that was anywhere other than the
+    /// source.
+    pub provenance: Provenance,
+}
+
+impl Fetched {
+    /// A page read from the source itself: the ordinary case, and the only one
+    /// that carries the source's own validators.
+    #[must_use]
+    pub fn from_source(
+        final_url: impl Into<String>,
+        body: impl Into<String>,
+        content_type: Option<String>,
+    ) -> Self {
+        Self {
+            final_url: final_url.into(),
+            body: body.into(),
+            content_type,
+            etag: None,
+            last_modified: None,
+            provenance: Provenance::Source,
+        }
+    }
 }
 
 /// The validators a page was last seen with.
@@ -587,6 +650,23 @@ pub trait SourceAdapter: Send + Sync {
 
     /// What this adapter can do.
     fn capabilities(&self) -> SourceCapabilities;
+
+    /// What to try when this source refuses a plain request.
+    ///
+    /// Defaulted to nothing, because most sources serve a plain request and a
+    /// default that escalated would make every import pay for the ones that do
+    /// not. An adapter overrides it for a source whose front door is known to be
+    /// a wall — the adapter's author has researched the site, and spending a
+    /// request to rediscover what they already knew is a request the source did
+    /// not need to serve.
+    ///
+    /// This is a *declaration of need*, not a licence: the instance decides what
+    /// it is willing to run by building the [`FetchPolicy`], and an adapter asking
+    /// for a solver on an instance that has none configured gets a challenge
+    /// reported as [`SourceError::Blocked`] rather than a silent bypass.
+    fn unblock(&self) -> Unblock {
+        Unblock::none()
+    }
 
     /// Whether this adapter handles a URL.
     ///
