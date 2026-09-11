@@ -71,6 +71,16 @@ check-frontend:
 check: fmt lint test test-frontend check-frontend
     cargo fmt --all -- --check
 
+# Drive every library endpoint against a live PostgreSQL server.
+#
+# Deliberately not part of `check`: it needs a running server and a scratch
+# database, and it drops that database's `public` schema. It is here because the
+# tests run on SQLite, and SQLite accepts SQL that PostgreSQL refuses — four
+# defects in milestone 8's own code were found only by this. See the script's
+# header for the server it expects and for what `DATABASE_URL` and `PSQL` override.
+journey-postgres:
+    ./scripts/postgres-journey.sh
+
 # --- run --------------------------------------------------------------------
 
 serve:

@@ -1004,22 +1004,71 @@ which is the sentence the `device_id` defect would have produced.
    chapter the address named, so a reader who read on and left would have resumed
    at the work's first chapter. It now follows the chapter on screen.
 
+### The same journey on live PostgreSQL 17
+
+`M8-01` claims both dialects. That claim was written from tests that run on SQLite,
+so it was then checked properly: a scratch instance on PostgreSQL 17.11 with the
+migrations applied, the same journey driven over HTTP, and **47 steps, 0 failures,
+0 driver complaints, 0 five-hundreds**. The journey is `scripts/postgres-journey.sh`,
+so it can be run again rather than only believed.
+
+```text
+create a shelf 201 · list shelves 200 · read one 200 · put an item on it 204
+put a second on it 204 · rename it 204 · refuse a stale rename 409 · take one off 204
+tag an item 204 · read its tags 200 · tag a second 204 · untag 204 · refuse an empty tag 422
+set a status 200 · read it back 200 · move it on 200 · refuse an unknown status 422
+bookmark a work 201 · list them 200 · read one 200 · edit the note 204 · refuse a stale edit 409
+save a view 201 · list views 200 · read one 200 · refuse a public view with a shelf 422
+refuse a public view with a tag 422
+list unfiltered 200 · by shelf 200 · by tag 200 · by status 200 · by source 200
+by updated-since 200 · sort by words 200 · by updated 200 · by position 200
+every filter at once 200 · page with a cursor 200
+storage usage 200 · queue an update check 202 · refuse an unknown id in the batch 200
+```
+
+**Four defects came out of it, all in this milestone's new code, all invisible on
+SQLite.** Each is a class, not an incident:
+
+1. **A raw PostgreSQL statement used `?`.** `db.sql()` rewrites `?` into `$1…$n`,
+   but only for the strings that go through it. `create_shelf`'s `MAX(position)`
+   lookup was an inline `sqlx::query_scalar` on the PostgreSQL branch, so
+   PostgreSQL was handed a literal `?` and answered `syntax error at or near "::"`.
+   A raw branch gets `$1`. A sweep of every raw `sqlx::query*` call with a literal
+   string found this one site and four legitimate SQLite ones.
+2. **`?::bigint::boolean`**, three sites. The bound value is an `i64`, which sqlx
+   sends as `BIGINT`, and PostgreSQL has no `bigint → boolean` cast; the legal
+   chain is `?::int::boolean`.
+3. **`uuid = text`** in the per-page facts query. The `account_id` comparison had
+   no `::uuid` cast and the `library_item_id`/`subject_id` projections had no
+   `::text`. PostgreSQL has neither an implicit `uuid = text` nor a way to decode a
+   `uuid` into a Rust `String`, and this query runs for every listing, so every
+   listing answered 500.
+4. **`SUM()` of a `bigint` is `numeric`**, which will not decode into an `i64` —
+   two sites in the storage figures. Two further sites of the same class were found
+   outside this milestone: the work list's `word_count`, and
+   `public_rating_summary`'s `stars`, which was hidden behind the query's own
+   `HAVING COUNT(*) >= ?` — with too few ratings it returns no rows, so the decode
+   never ran and the defect never showed. All four carry `::bigint` now.
+
 ### What was not verified
 
-The library tables have **not** been exercised against a live PostgreSQL server.
-The dialect rules were followed (`BIGINT` for `i64`, `?::int::boolean` on
-boolean writes, `::int::bigint` on reads, `?::uuid` on every identifier bind,
-`ON CONFLICT` with a named target) and the parity test covers the declared shape,
-but "the SQL is right" and "PostgreSQL accepted the SQL" are different claims and
-only the first one has been tested here. The update check's own network path has
-not been run against a live source either: the route and the job are covered, the
-per-item fetch is not.
+The update check's own network path has **not** been run against a live source. Its
+route, job, comparison and recording are covered by tests and it queues and
+completes on PostgreSQL; what has not been exercised is `adapter.preview` against a
+real site from inside the job, because a seeded item's URL is not a real one.
+
+**A malformed identifier in a path is answered as `500`.** `/library/items/nope/tags`
+reaches the driver, which refuses the cast, and the refusal is logged as an INTERNAL
+fault. Every route module in the tree takes `Path<String>` and behaves this way, so
+it is a class rather than this milestone's mistake; it is recorded rather than fixed
+in the new module and left in the eight older ones.
 
 ## Known limitations and open risks
 
 1. **PostgreSQL is executed once, by hand, and not continuously.**
    It has been run end to end against a live server (see *PostgreSQL, executed*),
-   which found eight defects and proved the dialect paths the journey touches.
+   which has found defects on every run so far — four of them in milestone 8's own
+   new code — and proved the dialect paths the journeys touch.
    What is still missing is the thing that would keep it true: a job that runs
    the same suite on every change, as ADR 0004 and the workflow's own
    `postgres` job describe. Until that runs, this half of the tree can regress

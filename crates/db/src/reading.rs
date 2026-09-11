@@ -646,7 +646,7 @@ pub async fn public_rating_summary(db: &Database, work: WorkId) -> Result<Option
            FROM rating
           WHERE work_id = ? AND is_public = 1 AND deleted_at IS NULL
           HAVING COUNT(*) >= ?",
-        "SELECT COUNT(*) AS count, COALESCE(SUM(stars), 0) AS sum
+        "SELECT COUNT(*) AS count, COALESCE(SUM(stars), 0)::bigint AS sum
            FROM rating
           WHERE work_id = ?::uuid AND is_public = TRUE AND deleted_at IS NULL
           HAVING COUNT(*) >= ?",

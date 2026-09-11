@@ -82,7 +82,7 @@ pub fn router() -> Router<AppState> {
         )
         .route(
             "/library/items/{id}/status",
-            put(set_status).delete(clear_status),
+            get(read_status).put(set_status).delete(clear_status),
         )
         .route("/saved-views", get(list_views).post(create_view))
         .route(
@@ -773,6 +773,31 @@ fn status_json(row: &library::ReadingStatusRecord) -> serde_json::Value {
         "updated_at": row.updated_at,
         "version": row.version,
     })
+}
+
+/// The reader's status for one item.
+///
+/// The listing carries the status for every item on the page, so this is not how
+/// a list draws its markers: it is for a screen that shows one item and has not
+/// loaded a page to find out.
+async fn read_status(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let row = library::reading_status_for(
+        state.db(),
+        &user.account_id.to_string(),
+        SUBJECT_LIBRARY_ITEM,
+        &id,
+    )
+    .await?;
+    match row {
+        Some(row) => Ok(Json(status_json(&row))),
+        None => Err(ApiError(AppError::NotFound {
+            resource: "reading status",
+        })),
+    }
 }
 
 /// Set the reader's status for an item.

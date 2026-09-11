@@ -225,3 +225,27 @@ git tag v0.01-running-app
 
 Next: `docs/tutorial/01-design-system.md` — tokens, components, focus
 management, and the navigation shell.
+
+## Checking a change against PostgreSQL
+
+The test suite runs on SQLite, and SQLite is more forgiving than PostgreSQL in
+ways that matter: it accepts `?` for a placeholder, casts a bigint straight to a
+boolean, compares a uuid to text without complaint, and sums integers to an
+integer. A query that is wrong for PostgreSQL therefore passes every test in this
+tree.
+
+`just journey-postgres` drives the library's endpoints against a real server and
+reports every step that does not answer what it should. It needs a scratch
+database — it drops and recreates the `public` schema — and expects the binary at
+`target/debug/lorehaven` or `~/.cargo-target/debug/lorehaven`. Point it somewhere
+with `DATABASE_URL`, and tell it how to reach `psql` with `PSQL`:
+
+```sh
+DATABASE_URL='postgres://user:pw@127.0.0.1:5432/scratch' \
+PSQL='psql -U user -d scratch' \
+  ./scripts/postgres-journey.sh
+```
+
+It is not part of `just check` because it needs that server. It is worth running
+before calling a change that touches SQL done: every time it has been run for the
+first time on a body of new queries, it has found something.
