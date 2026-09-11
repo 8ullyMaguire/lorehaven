@@ -25,7 +25,9 @@ use serde::{Deserialize, Serialize};
 /// These are the five the plan names. They are the *reader's* status, not the
 /// work's publication state: a work can be "ongoing" (the author is still
 /// posting) while the reader has it "on hold", and the two must not be
-/// conflated — see [`crate::content::WorkStatus`] for the other one.
+/// conflated. [`crate::policy::Completion`] is the work's own state, and what an
+/// import's source reports about a work is a third thing again, living with the
+/// scrapers because only they can know it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ReadingStatus {
