@@ -154,8 +154,10 @@ pub async fn create_shelf(
                 .fetch_one(db.sqlite_pool().expect("sqlite handle"))
                 .await?
             }
+            // `$1`, not `?`: this call never goes through `db.sql`, so nothing
+            // rewrites the placeholder, and PostgreSQL does not accept `?`.
             Backend::Postgres => sqlx::query_scalar(
-                "SELECT COALESCE(MAX(position), -10) + 10 FROM shelves WHERE account_id = ?::uuid",
+                "SELECT COALESCE(MAX(position), -10) + 10 FROM shelves WHERE account_id = $1::uuid",
             )
             .bind(account_id)
             .fetch_one(db.postgres_pool().expect("postgres handle"))
@@ -289,7 +291,7 @@ pub async fn update_shelf(
          updated_at = ?, version = version + 1 \
          WHERE id = ? AND account_id = ? AND version = ?",
         "UPDATE shelves SET name = COALESCE(?, name), description = COALESCE(?, description), \
-         is_public = COALESCE(?::bigint::boolean, is_public), position = COALESCE(?, position), \
+         is_public = COALESCE(?::int::boolean, is_public), position = COALESCE(?, position), \
          updated_at = ?, version = version + 1 \
          WHERE id = ?::uuid AND account_id = ?::uuid AND version = ?",
     );
@@ -714,7 +716,7 @@ pub async fn update_bookmark(
          WHERE id = ? AND account_id = ? AND version = ?",
         "UPDATE bookmarks SET note = COALESCE(?, note), \
          position_permille = COALESCE(?, position_permille), \
-         is_public = COALESCE(?::bigint::boolean, is_public), updated_at = ?, \
+         is_public = COALESCE(?::int::boolean, is_public), updated_at = ?, \
          version = version + 1 \
          WHERE id = ?::uuid AND account_id = ?::uuid AND version = ?",
     );
@@ -1415,7 +1417,7 @@ pub async fn update_saved_view(
          updated_at = ?, version = version + 1 \
          WHERE id = ? AND account_id = ? AND version = ?",
         "UPDATE saved_views SET name = COALESCE(?, name), \
-         pinned = COALESCE(?::bigint::boolean, pinned), updated_at = ?, version = version + 1 \
+         pinned = COALESCE(?::int::boolean, pinned), updated_at = ?, version = version + 1 \
          WHERE id = ?::uuid AND account_id = ?::uuid AND version = ?",
     );
     let affected = run!(db, sql, |q| q
@@ -1800,14 +1802,20 @@ pub async fn facts_for_items(
         return Ok(facts);
     }
 
-    let cast = |n: usize| placeholders(n, db.backend() == Backend::Postgres);
+    // PostgreSQL has no implicit `uuid = text`, and sqlx cannot decode a `uuid`
+    // column into a `String`, so both the comparison and the projection have to be
+    // told what they are. SQLite has neither problem and needs neither cast.
+    let postgres = db.backend() == Backend::Postgres;
+    let account_cast = if postgres { "::uuid" } else { "" };
+    let id_cast = if postgres { "::text" } else { "" };
+    let cast = |n: usize| placeholders(n, postgres);
 
     // Shelves, with each item's position so the sidebar's order is the one the
     // reader arranged rather than an alphabetical accident.
     let shelves_query = format!(
-        "SELECT si.library_item_id, s.name FROM shelf_items si \
+        "SELECT si.library_item_id{id_cast}, s.name FROM shelf_items si \
          JOIN shelves s ON s.id = si.shelf_id \
-         WHERE s.account_id = ? AND si.library_item_id IN ({}) \
+         WHERE s.account_id = ?{account_cast} AND si.library_item_id IN ({}) \
          ORDER BY s.position ASC, s.name ASC",
         cast(ids.len())
     );
@@ -1839,8 +1847,9 @@ pub async fn facts_for_items(
     // The reader's own tags. Scoped by account in its own right, not by the
     // shelf join above or by a caller's hopeful join.
     let tags_query = format!(
-        "SELECT subject_id, tag FROM private_tags \
-         WHERE account_id = ? AND subject_type = 'library_item' AND subject_id IN ({}) \
+        "SELECT subject_id{id_cast}, tag FROM private_tags \
+         WHERE account_id = ?{account_cast} AND subject_type = 'library_item' \
+           AND subject_id IN ({}) \
          ORDER BY tag ASC",
         cast(ids.len())
     );
@@ -1871,8 +1880,9 @@ pub async fn facts_for_items(
 
     // Reading statuses.
     let status_query = format!(
-        "SELECT subject_id, status FROM reading_status \
-         WHERE account_id = ? AND subject_type = 'library_item' AND subject_id IN ({})",
+        "SELECT subject_id{id_cast}, status FROM reading_status \
+         WHERE account_id = ?{account_cast} AND subject_type = 'library_item' \
+           AND subject_id IN ({})",
         cast(ids.len())
     );
     let rows: Vec<(String, String)> = match db.backend() {
@@ -1939,7 +1949,9 @@ pub async fn storage_usage(db: &Database, account_id: &str) -> Result<StorageUsa
          WHERE b.checksum IN (SELECT cr.checksum FROM content_references cr \
              JOIN library_items li ON li.id = cr.owner_id \
              WHERE cr.owner_type = 'library_item' AND li.account_id = ?)",
-        "SELECT COALESCE(SUM(b.byte_size), 0), COUNT(*) FROM content_blobs b \
+        // `::bigint` because PostgreSQL's SUM over a bigint is NUMERIC, which
+        // sqlx will not decode into an i64. SQLite sums integers to an integer.
+        "SELECT COALESCE(SUM(b.byte_size), 0)::bigint, COUNT(*) FROM content_blobs b \
          WHERE b.checksum IN (SELECT cr.checksum FROM content_references cr \
              JOIN library_items li ON li.id::text = cr.owner_id \
              WHERE cr.owner_type = 'library_item' AND li.account_id = ?::uuid)",
@@ -1947,7 +1959,7 @@ pub async fn storage_usage(db: &Database, account_id: &str) -> Result<StorageUsa
     let export_sql = db.sql(
         "SELECT COALESCE(SUM(output_bytes), 0) FROM export_jobs \
          WHERE account_id = ? AND output_bytes IS NOT NULL",
-        "SELECT COALESCE(SUM(output_bytes), 0) FROM export_jobs \
+        "SELECT COALESCE(SUM(output_bytes), 0)::bigint FROM export_jobs \
          WHERE account_id = ?::uuid AND output_bytes IS NOT NULL",
     );
     let items_sql = db.sql(

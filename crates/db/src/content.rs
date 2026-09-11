@@ -555,7 +555,7 @@ pub async fn works_for_pseud(db: &Database, pseud: PseudId) -> Result<Vec<OwnedW
                 w.published_at, w.version,
                 (SELECT COUNT(*) FROM chapters c
                   WHERE c.work_id = w.id AND c.deleted_at IS NULL) AS chapter_count,
-                (SELECT COALESCE(SUM(r.word_count), 0)
+                (SELECT COALESCE(SUM(r.word_count), 0)::bigint
                    FROM chapters c
                    JOIN chapter_revisions r ON r.id = c.current_revision_id
                   WHERE c.work_id = w.id AND c.deleted_at IS NULL) AS word_count,

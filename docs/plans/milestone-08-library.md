@@ -92,8 +92,14 @@ PRECISION` are *supposed* to differ (ADR 0004).
 
 ## Left open, and stated
 
-* **No live PostgreSQL run for these tables.** The dialect rules were followed and
-  the parity test covers declared shape; PostgreSQL has not been asked.
+* ~~**No live PostgreSQL run for these tables.**~~ **Closed after this document was
+  written.** The journey was then run against PostgreSQL 17.11 — 47 steps, 0
+  failures — and it found four defects in this milestone's own new code that SQLite
+  could not see (a raw branch passing `?` instead of `$1`, `?::bigint::boolean`,
+  a missing `::uuid`/`::text` pair in the per-page facts query, and `SUM()` of a
+  `bigint` decoding as `numeric`). See `verification.md`, *Milestone 8*, for each
+  one. The lesson is in the plan rather than only in the fix: the dialect rules
+  being followed is not the same claim as PostgreSQL having accepted the SQL.
 * **No live network run for the update check.** The route and the job are covered;
   the per-item fetch is not.
 * **A saved view holds a list per facet; the filter bar holds one.** Clicking a
