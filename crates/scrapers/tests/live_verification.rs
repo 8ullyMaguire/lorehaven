@@ -53,7 +53,8 @@ use std::time::Duration;
 
 use lorehaven_scrapers::safety::{FetchPolicy, SafeFetcher, Unblock};
 use lorehaven_scrapers::{
-    sites, Fetcher, Impersonation, Provenance, SourceAdapter, SourceError, SourceKey, WorkStatus,
+    sites, Fetcher, Impersonation, Provenance, SolverConfig, SourceAdapter, SourceError, SourceKey,
+    WorkStatus,
 };
 use url::Url;
 
@@ -496,4 +497,131 @@ async fn a_challenged_source_is_readable_through_a_browser_fingerprint() {
         page.body.len(),
         page.final_url
     );
+}
+
+// ---------------------------------------------------------------------------
+// The solver tier, against a real service.
+// ---------------------------------------------------------------------------
+
+/// A FlareSolverr-compatible service, if one is running.
+///
+/// Read from the environment rather than hard-coded: the service is a separate
+/// program an operator runs, so a machine without one is a machine that has not
+/// configured this, not a broken test. The test prints what to set and returns
+/// rather than failing, which is the same treatment the rest of this file gives a
+/// missing prerequisite.
+///
+/// ```text
+/// LOREHAVEN_SOLVER_URL=http://127.0.0.1:8191 \
+/// cargo test -p lorehaven-scrapers --all-features --test live_verification \
+///     -- --ignored --nocapture --test-threads=1 a_solver
+/// ```
+fn solver_url() -> Option<String> {
+    match std::env::var("LOREHAVEN_SOLVER_URL") {
+        Ok(url) if !url.trim().is_empty() => Some(url),
+        _ => {
+            println!(
+                "skipped: no solver service configured. Set LOREHAVEN_SOLVER_URL to a \
+                 FlareSolverr-compatible endpoint (e.g. http://127.0.0.1:8191) and re-run."
+            );
+            None
+        }
+    }
+}
+
+/// Does a real solver read a source that a browser fingerprint cannot?
+///
+/// The three assertions are ordered so that each one is necessary for the next to
+/// mean anything:
+///
+/// 1. The wall is real — a plain client is refused. Without this, a page coming
+///    back through the solver later proves nothing about the solver.
+/// 2. The fingerprint does **not** pass this host. This is the observation that
+///    justifies the tier existing at all; it is printed rather than asserted,
+///    because a day Cloudflare relaxes the rule the test should report the change
+///    instead of failing over it.
+/// 3. The solver serves the real page, marked as coming from the source.
+///
+/// FimFiction is the host chosen because it is the one where (2) is true: the
+/// fingerprint that opens `fanfiction.net` gets a `403` here, so a page through
+/// this path can only have come from the solver.
+#[tokio::test]
+#[ignore = "live: needs a running solver service and reaches fimfiction.net"]
+async fn a_solver_passes_a_wall_a_fingerprint_does_not() {
+    let Some(endpoint) = solver_url() else { return };
+    const STORY: &str = "https://www.fimfiction.net/story/594215/cool-rainbow-dash-costume-lady";
+    const HOSTS: [&str; 1] = ["fimfiction.net"];
+
+    let hosts = || HOSTS.iter().map(|h| (*h).to_owned()).collect::<Vec<_>>();
+
+    // 1. The wall.
+    let plain = SafeFetcher::new(hosts(), live_policy(Unblock::none()));
+    match plain.get(STORY).await {
+        Err(SourceError::Blocked) => println!("plain client: refused, as expected"),
+        Ok(page) => panic!("a plain client was served {} bytes", page.body.len()),
+        Err(other) => panic!("expected Blocked, got {other:?}"),
+    }
+
+    // 2. The fingerprint is not enough here — the reason this tier exists.
+    let fingerprinted = SafeFetcher::new(
+        hosts(),
+        live_policy(Unblock::fingerprint(Impersonation::Chrome)),
+    );
+    match fingerprinted.get(STORY).await {
+        Err(SourceError::Blocked) => {
+            println!("browser fingerprint: also refused, which is why the solver tier exists");
+        }
+        Ok(page) => println!(
+            "note: the fingerprint now passes this host ({} bytes); the solver is no \
+             longer the only path and this test should be re-read",
+            page.body.len()
+        ),
+        Err(other) => println!("note: the fingerprint failed with {other:?}"),
+    }
+
+    // 3. The solver, through the same guarded fetcher.
+    let solved = SafeFetcher::new(
+        hosts(),
+        live_policy(Unblock::none().with_solver(SolverConfig::new(&endpoint))),
+    );
+    let page = solved
+        .get(STORY)
+        .await
+        .expect("the solver should have served the page");
+    assert_eq!(
+        page.provenance,
+        Provenance::Source,
+        "a page a solver read *from the source* is not an archived copy"
+    );
+    assert_eq!(
+        page.final_url, STORY,
+        "the page came from somewhere other than asked"
+    );
+    // The site's own 404 page is served with status 200 and is only a few
+    // kilobytes, so a byte count alone would not tell the two apart. Assert on
+    // markup the real page has.
+    assert!(
+        page.body.contains("data-story-id"),
+        "the page is not a FimFiction story page: {} bytes, head {:?}",
+        page.body.len(),
+        page.body.chars().take(200).collect::<String>()
+    );
+    println!(
+        "solver: {} bytes of the real story page via {endpoint}",
+        page.body.len()
+    );
+
+    // 4. The guard still holds on this path. The solver is a service whose
+    //    requests the guard did not make, so the one mitigation it rests on —
+    //    only ever being handed a host the source declared — is worth asserting
+    //    rather than assuming.
+    let refused = solved
+        .get("http://169.254.169.254/latest/meta-data/")
+        .await
+        .expect_err("a host the source never declared must be refused");
+    assert!(
+        matches!(refused, SourceError::Refused(_)),
+        "the guard did not refuse an undeclared host: {refused:?}"
+    );
+    println!("guard: an undeclared host is refused before any solve is attempted");
 }
