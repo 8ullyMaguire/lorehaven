@@ -150,3 +150,23 @@ export function describeRole(role: string): string {
       return role;
   }
 }
+
+/**
+ * A byte count a reader can read.
+ *
+ * Binary units, because this measures files the browser is holding — and the
+ * numbers are rounded to one decimal at most, since a file that is 3.7 MB is not
+ * usefully "3.7276611328125 MB".
+ */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return 'unknown size';
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`;
+}

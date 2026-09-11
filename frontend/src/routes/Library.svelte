@@ -104,6 +104,24 @@ import EmptyState from '../lib/components/EmptyState.svelte';
     return value ? value.slice(0, 10) : 'never';
   }
 
+  /**
+   * Where an export starts.
+   *
+   * The subject travels in the query string rather than in the route, and the
+   * *same* string is used for the link and for the click handler: passing
+   * `/exports` to the handler and the full path to the browser would send a
+   * modified click to the export page with a subject and a plain left click to
+   * the same page without one.
+   */
+  function exportHref(item: LibraryItem): string {
+    const query = new URLSearchParams({
+      subject_type: 'library_item',
+      subject_id: item.id,
+      title: item.title,
+    });
+    return `/exports?${query.toString()}`;
+  }
+
   function words(count: number | null): string {
     return count === null ? 'unknown length' : `${count.toLocaleString()} words`;
   }
@@ -186,6 +204,16 @@ import EmptyState from '../lib/components/EmptyState.svelte';
             >
               {busy === item.id ? 'Checking…' : 'Check for updates'}
             </Button>
+            <!-- Where an export starts: with the work in front of the reader.
+                 The format and the privacy notice are chosen on the exports
+                 page, which is the only place the notice is shown. -->
+            <a
+              class="export-link"
+              href={exportHref(item)}
+              onclick={(event) => handleLinkClick(event, exportHref(item))}
+            >
+              Export
+            </a>
           </div>
 
           {#if answers[item.id]}

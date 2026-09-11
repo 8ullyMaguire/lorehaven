@@ -1396,6 +1396,121 @@ export function retryFailedChapters(
 }
 
 /** Imported works held by the caller, with the source each came from. */
+// ---------------------------------------------------------------------------
+// Exports (spec §13)
+// ---------------------------------------------------------------------------
+
+/** One format this instance can produce, and what it would need to produce it. */
+export interface ExportFormatView {
+  format: string;
+  label: string;
+  media_type: string;
+  extension: string;
+  /** True for the formats this instance renders itself. */
+  builtin: boolean;
+  available: boolean;
+  /** What an operator would install, when it is not available. */
+  requires: string | null;
+  converter: string | null;
+  converter_version: string | null;
+}
+
+/** The format catalogue, and the notice a reader has to acknowledge. */
+export interface ExportFormatCatalogue {
+  formats: ExportFormatView[];
+  /**
+   * The privacy notice. Returned by the server rather than written in the
+   * interface, so the text a reader reads and the text the server enforces
+   * cannot drift apart.
+   */
+  privacy_notice: string;
+  retention_days: number;
+}
+
+export type ExportState = 'queued' | 'running' | 'ready' | 'failed' | 'cancelled';
+
+/** One export: a request and its outcome. */
+export interface ExportJob {
+  id: string;
+  job_id: string;
+  subject_type: 'work' | 'library_item';
+  subject_id: string;
+  format: string;
+  label: string;
+  state: ExportState;
+  output_bytes: number | null;
+  /** True when there is a file to fetch right now. */
+  downloadable: boolean;
+  error: { code: string; message: string } | null;
+  privacy_acknowledged: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExportList {
+  exports: ExportJob[];
+}
+
+export interface RequestExportInput {
+  subjectType: 'work' | 'library_item';
+  subjectId: string;
+  format: string;
+  /** Required. The server refuses an export that has not been told. */
+  acknowledgePrivacy: boolean;
+  options?: {
+    title_page?: boolean;
+    chapter_headings?: boolean;
+    font_family?: string | null;
+    font_size_pt?: number | null;
+  };
+}
+
+/** What this instance can produce, and what to install for what it cannot. */
+export function fetchExportFormats(signal?: AbortSignal): Promise<ExportFormatCatalogue> {
+  return apiFetch<ExportFormatCatalogue>('/exports/formats', { signal });
+}
+
+/** The caller's own exports, newest first. */
+export function fetchExports(signal?: AbortSignal): Promise<ExportList> {
+  return apiFetch<ExportList>('/exports', { signal });
+}
+
+/** One export, for polling its state. */
+export function fetchExport(id: string, signal?: AbortSignal): Promise<ExportJob> {
+  return apiFetch<ExportJob>(`/exports/${encodeURIComponent(id)}`, { signal });
+}
+
+/**
+ * Ask for an export.
+ *
+ * Answers `202` with a job: the file does not exist yet, and the caller watches
+ * the state rather than waiting on this promise for a rendered EPUB.
+ */
+export function requestExport(input: RequestExportInput): Promise<ExportJob> {
+  return apiFetch<ExportJob>('/exports', {
+    method: 'POST',
+    body: JSON.stringify({
+      subject_type: input.subjectType,
+      subject_id: input.subjectId,
+      format: input.format,
+      acknowledge_privacy: input.acknowledgePrivacy,
+      options: input.options,
+    }),
+  });
+}
+
+/** Forget an export and delete its file. */
+export function deleteExport(id: string): Promise<{ removed: boolean }> {
+  return apiFetch<{ removed: boolean }>(`/exports/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+/** The address of an export's file, for a signed-in download. */
+export function exportDownloadUrl(id: string): string {
+  return `/api/v1/exports/${encodeURIComponent(id)}/download`;
+}
+
 export function fetchLibraryItems(
   cursor?: string,
   signal?: AbortSignal,
