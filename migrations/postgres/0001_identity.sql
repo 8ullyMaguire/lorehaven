@@ -17,7 +17,7 @@ CREATE TABLE accounts (
     age_state         TEXT    NOT NULL DEFAULT 'unknown',
     created_at        TEXT    NOT NULL,
     updated_at        TEXT    NOT NULL,
-    version           INTEGER NOT NULL DEFAULT 1,
+    version           BIGINT NOT NULL DEFAULT 1,
     deleted_at        TEXT
 );
 
@@ -77,7 +77,7 @@ CREATE TABLE pseuds (
     discoverability TEXT    NOT NULL DEFAULT 'listed',
     created_at      TEXT    NOT NULL,
     updated_at      TEXT    NOT NULL,
-    version         INTEGER NOT NULL DEFAULT 1,
+    version         BIGINT NOT NULL DEFAULT 1,
     deleted_at      TEXT
 );
 

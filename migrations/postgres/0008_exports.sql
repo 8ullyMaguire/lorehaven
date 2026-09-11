@@ -73,14 +73,14 @@ CREATE TABLE export_jobs (
     -- The rendered artifact. The bytes live in `content_blobs` (migration 0005);
     -- this is the pointer, and it is null until the job has produced something.
     output_blob_checksum  TEXT,
-    output_bytes          INTEGER,
+    output_bytes          BIGINT,
     -- Which converter produced it, for the evidence spec §13.1 asks for.
     converter_version     TEXT,
     -- Why it failed, in the reader's words rather than an operator's.
     error_message         TEXT,
     created_at            TEXT    NOT NULL,
     updated_at            TEXT    NOT NULL,
-    version               INTEGER NOT NULL DEFAULT 1
+    version               BIGINT NOT NULL DEFAULT 1
 );
 
 -- A reader's own exports, newest first — the only way this table is listed.
@@ -100,7 +100,7 @@ CREATE TABLE download_grants (
     expires_at    TEXT    NOT NULL,
     -- Set the first time it is redeemed, which is what makes it single-use.
     used_at       TEXT,
-    single_use    INTEGER NOT NULL DEFAULT 1,
+    single_use    BIGINT NOT NULL DEFAULT 1,
     created_at    TEXT    NOT NULL
 );
 

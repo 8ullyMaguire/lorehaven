@@ -313,19 +313,54 @@ pub async fn set_password_hash(db: &Database, account_id: AccountId, phc: &str) 
         }
     };
 
-    let sql = if existing > 0 {
-        db.sql(
+    /*
+     * Each statement binds its own parameters, in its own order.
+     *
+     * The two statements name their columns differently — the insert leads with
+     * `account_id`, the update can only reach it in the `WHERE` — and this used
+     * to bind one four-value list for both. The consequences were not equal. On
+     * SQLite the surplus parameter shifted every value by one, so the update
+     * matched no row and still reported success: setting a password on an
+     * account that already had one did nothing, silently. On PostgreSQL the same
+     * statement is refused ("invalid input syntax for type uuid"), which is how
+     * it was found — by running the application against a real server.
+     */
+    if existing > 0 {
+        let sql = db.sql(
             "UPDATE password_credentials SET password_hash = ?, updated_at = ? WHERE account_id = ?",
             "UPDATE password_credentials SET password_hash = ?, updated_at = ? WHERE account_id = ?::uuid",
-        )
-    } else {
-        db.sql(
-            "INSERT INTO password_credentials (account_id, password_hash, algorithm, created_at, updated_at)
+        );
+
+        match db.backend() {
+            crate::Backend::Sqlite => {
+                sqlx::query(&sql)
+                    .bind(phc)
+                    .bind(&now)
+                    .bind(account_id.to_string())
+                    .execute(db.sqlite_pool().expect("sqlite handle"))
+                    .await
+                    .context("writing password credential")?;
+            }
+            crate::Backend::Postgres => {
+                sqlx::query(&sql)
+                    .bind(phc)
+                    .bind(&now)
+                    .bind(account_id.to_string())
+                    .execute(db.postgres_pool().expect("postgres handle"))
+                    .await
+                    .context("writing password credential")?;
+            }
+        }
+
+        return Ok(());
+    }
+
+    let sql = db.sql(
+        "INSERT INTO password_credentials (account_id, password_hash, algorithm, created_at, updated_at)
              VALUES (?, ?, 'argon2id', ?, ?)",
-            "INSERT INTO password_credentials (account_id, password_hash, algorithm, created_at, updated_at)
+        "INSERT INTO password_credentials (account_id, password_hash, algorithm, created_at, updated_at)
              VALUES (?::uuid, ?, 'argon2id', ?, ?)",
-        )
-    };
+    );
 
     match db.backend() {
         crate::Backend::Sqlite => {
@@ -491,13 +526,38 @@ pub async fn set_privacy(
         PrivacyScope::Pseud(id) => (None, Some(id.to_string())),
     };
 
+    /*
+     * The scope decides the conflict target, on PostgreSQL only.
+     *
+     * This table carries two *partial* unique indexes — one keyed on
+     * `(account_id, key)` where the account is set, one on `(pseud_id, key)`
+     * where the pseud is — because a row belongs to exactly one of the two
+     * (the table's CHECK says so). SQLite's bare `ON CONFLICT` matches either,
+     * and the statement has always relied on that. PostgreSQL infers a partial
+     * index only when the conflict target repeats that index's own predicate,
+     * so it has to be told which one applies — which is what `scope` already
+     * knows.
+     */
+    let postgres_sql = match scope {
+        PrivacyScope::Account(_) => {
+            "INSERT INTO privacy_settings (id, account_id, pseud_id, key, value, created_at, updated_at)
+             VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?, ?, ?)
+             ON CONFLICT (account_id, key) WHERE account_id IS NOT NULL
+             DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+        }
+        PrivacyScope::Pseud(_) => {
+            "INSERT INTO privacy_settings (id, account_id, pseud_id, key, value, created_at, updated_at)
+             VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?, ?, ?)
+             ON CONFLICT (pseud_id, key) WHERE pseud_id IS NOT NULL
+             DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+        }
+    };
+
     let sql = db.sql(
         "INSERT INTO privacy_settings (id, account_id, pseud_id, key, value, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-        "INSERT INTO privacy_settings (id, account_id, pseud_id, key, value, created_at, updated_at)
-         VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?, ?, ?)
-         ON CONFLICT DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        postgres_sql,
     );
 
     match db.backend() {
@@ -924,5 +984,60 @@ mod tests {
             assert!(["accounts", "pseuds", "sessions"].contains(&table));
         }
         assert_ne!(admitted.len(), 0);
+    }
+
+    /// Re-setting a password must actually replace the stored credential.
+    ///
+    /// The two statements in `set_password_hash` name their columns in
+    /// different orders — the insert leads with `account_id`, the update cannot,
+    /// because `SET` comes before `WHERE`. Binding one parameter list for both,
+    /// in insert order, shifted every value by one against the update's
+    /// placeholders: `WHERE account_id = <timestamp>` matched no row, and the
+    /// call returned `Ok(())` having written nothing. SQLite accepted it
+    /// silently; PostgreSQL refused it outright ("invalid input syntax for type
+    /// uuid"), which is how it was found. This test fails on the old binding.
+    #[tokio::test]
+    async fn setting_a_password_twice_replaces_the_stored_credential() {
+        let dir = std::env::temp_dir().join(format!(
+            "lorehaven-db-password-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create scratch dir");
+        let config = crate::DatabaseConfig::new(format!(
+            "sqlite://{}/lorehaven.sqlite?mode=rwc",
+            dir.display()
+        ));
+        let db = Database::connect(&config).await.expect("connect");
+        db.migrate().await.expect("migrate");
+
+        let account = create_account(
+            &db,
+            "writer@example.test",
+            AgeState::DeclaredAdult,
+            AccountStatus::Active,
+        )
+        .await
+        .expect("create account");
+
+        set_password_hash(&db, account, "$argon2id$first")
+            .await
+            .expect("first write");
+        assert_eq!(
+            password_hash(&db, account).await.expect("read"),
+            Some("$argon2id$first".to_owned())
+        );
+
+        set_password_hash(&db, account, "$argon2id$second")
+            .await
+            .expect("second write");
+        assert_eq!(
+            password_hash(&db, account).await.expect("read"),
+            Some("$argon2id$second".to_owned()),
+            "the second write must replace the first"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
