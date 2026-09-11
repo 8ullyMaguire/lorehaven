@@ -90,6 +90,49 @@ fn product_token(user_agent: &str) -> String {
         .to_owned()
 }
 
+/// What a source needs before it will serve a page at all.
+///
+/// # Why this is separate from [`Unblock`]
+///
+/// [`Unblock`] is the chain an import will *try*; this is the least the source
+/// will *accept*. They are different questions, and conflating them is how a
+/// mismatch stays invisible until a reader is watching a preview fail: an adapter
+/// whose source needs a solver, on an instance that runs none, gets a chain with
+/// no step that can pass — and the only way to find out used to be to spend a
+/// request discovering it.
+///
+/// So an adapter states the wall it measured, and the importer compares that
+/// against what the instance can actually run *before anything is queued*
+/// (spec §11.1: capability absence must be visible). What a reader gets is then
+/// the reason and the fix, rather than a fetch that fails for a cause the
+/// preview could have named.
+///
+/// # Measured, not inherited
+///
+/// A wall is a property of one host, not of the software a host runs. Of five
+/// walled sources probed on 2026-09-11, one accepted a browser fingerprint and
+/// four refused it — three different browsers tried — and one of the four was a
+/// sibling host of the site that accepted it. An adapter that inherited a
+/// sibling's answer would be wrong about its own source in whichever direction
+/// the siblings happened to differ.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Wall {
+    /// A plain request is served. The common case, and the default.
+    #[default]
+    None,
+    /// A plain request is refused and a browser's TLS and HTTP/2 fingerprint is
+    /// enough. Requires a build carrying the `cloudflare-impersonation` feature,
+    /// which the importer checks before queueing rather than at fetch time.
+    Fingerprint,
+    /// A fingerprint was measured *insufficient*: the source answers an
+    /// interactive challenge that only a driven browser clears, so a solver
+    /// service has to be running for this source to be readable at all. A
+    /// fingerprint step is deliberately *not* tried first here — it was measured
+    /// to fail, and a step known to fail is a request the source did not need to
+    /// serve on every page of every import.
+    Solver,
+}
+
 /// What may be tried when a source's front door refuses a plain request.
 ///
 /// # Why this is policy and not a fallback that always runs
@@ -167,6 +210,30 @@ impl Unblock {
     #[must_use]
     pub fn is_none(&self) -> bool {
         self.fingerprint.is_none() && self.solver.is_none() && !self.archive
+    }
+}
+
+impl Unblock {
+    /// The chain a wall implies, before an instance adds what it will run.
+    ///
+    /// One place, because this mapping is the part that has to stay honest: a
+    /// wall the chain cannot express would be a wall an adapter could declare and
+    /// never be held to. Kept separate from [`crate::SourceAdapter::unblock`] so
+    /// it can be tested without an adapter, which is also why it is public — an
+    /// adapter
+    /// with an unusual source builds on it rather than restating it.
+    #[must_use]
+    pub fn for_wall(wall: Wall) -> Self {
+        match wall {
+            // A solver is the *instance's* to offer: an adapter cannot know
+            // whether one is running, so a solver wall declares no step here and
+            // the chain is config's to fill in. Impersonating first is
+            // deliberately not tried for such a source — it was measured to fail
+            // there, and a step known to fail is a request the source did not
+            // need to serve on every page of every import.
+            Wall::None | Wall::Solver => Self::none(),
+            Wall::Fingerprint => Self::fingerprint(Impersonation::default()),
+        }
     }
 }
 
@@ -1434,6 +1501,48 @@ pub fn encode_form(fields: &mut [(&str, &str)]) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_wall_decides_the_chain_an_import_starts_from() {
+        // A source that serves a plain request escalates to nothing: the common
+        // case must not pay for the rare one.
+        assert!(Unblock::for_wall(Wall::None).is_none());
+
+        // A fingerprint wall starts impersonating rather than spending a request
+        // on the challenge the adapter's author already knew about.
+        let chain = Unblock::for_wall(Wall::Fingerprint);
+        assert!(
+            chain.fingerprint.is_some(),
+            "a fingerprint wall starts fingered"
+        );
+        assert!(
+            chain.solver.is_none(),
+            "a solver is the instance's to offer"
+        );
+        assert!(
+            !chain.archive,
+            "an archived read is a decision, not a default"
+        );
+
+        // A solver wall declares no step of its own, and on purpose: the
+        // fingerprint was measured insufficient for such a host, so a step known
+        // to fail would be one refused request per page.
+        let chain = Unblock::for_wall(Wall::Solver);
+        assert!(
+            chain.is_none(),
+            "the chain is config's to fill in: {chain:?}"
+        );
+    }
+
+    #[test]
+    fn the_fingerprint_flag_tells_the_truth_about_this_build() {
+        // The importer refuses a fingerprint-walled source when this is false, so
+        // it has to agree with the feature the transport is compiled behind.
+        assert_eq!(
+            crate::FINGERPRINT_SUPPORTED,
+            cfg!(feature = "cloudflare-impersonation")
+        );
+    }
     use super::{
         charset_of_content_type, decode_body, describe_status, sniff_charset, Escalation,
         SafeFetcher, Step, Unblock,
