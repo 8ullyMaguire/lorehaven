@@ -130,6 +130,18 @@ Syosetu, eFiction — are built. Of the rest, none has fixtures:
   which the browser fingerprint cannot touch at all. These adapters are not
   waiting on a signed-in session; they are waiting on a **parser**, the same work
   wattpad and ficbook need.
+* **ffnet/fictionpress** — **fixtures recorded** on 2026-09-11, seven pages for the
+  two hosts, and the adapter is the next piece. Recording them needed the unblock
+  path twice: FanFiction.net through the browser fingerprint and FictionPress
+  through the solver, because the fingerprint is refused there. What the
+  recordings establish is written up in `tests/fixtures/README.md` §ffnet — the
+  chapter list is `#chap_select` and complete (122 options for a 122-chapter
+  work), the epoch in `data-xutime` is the date to read rather than the visible
+  text the two hosts format differently, the metadata's three unlabeled fields
+  cannot be read by position because FictionPress omits characters, a missing work
+  is a `200` with no `profile_top`, and the not-found page carries the phrase
+  *"Story is unavailable for reading"* as boilerplate that must not be mistaken
+  for a moderation hold.
 * **wattpad and ficbook** are reachable with no wall at all and simply not yet
   recorded.
 
