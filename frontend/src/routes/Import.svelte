@@ -214,6 +214,10 @@
 
   let enabledSources = $derived(sources.filter((source) => source.enabled));
   let unavailableSources = $derived(sources.filter((source) => !source.enabled));
+  // The terms are instance-wide, so any entry answers for all of them; the
+  // catalogue repeats them per source so that the source that refuses and the
+  // rule that refused it are on the same line of the page.
+  let robots = $derived(sources.find((source) => source.robots)?.robots ?? null);
 </script>
 
 <h1>Import</h1>
@@ -463,6 +467,13 @@
           </li>
         {/each}
       </ul>
+
+      {#if robots}
+        <p class="note" class:override={!robots.honour_disallow}>
+          {robots.note}{#if robots.honour_crawl_delay}{' '}Each source's published crawl delay is
+            enforced either way.{/if}
+        </p>
+      {/if}
     {/if}
   </section>
 {/if}
@@ -472,6 +483,14 @@
   .meta {
     color: var(--color-muted);
     font-size: var(--text-sm);
+  }
+
+  /* An instance that has stopped asking is a state a reader should notice
+     rather than read past, so the sentence is marked rather than merely present. */
+  .note.override {
+    color: var(--color-warning, var(--color-muted));
+    border-left: 2px solid currentColor;
+    padding-left: var(--space-2);
   }
 
   .break {

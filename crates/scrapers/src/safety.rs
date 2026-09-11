@@ -55,8 +55,9 @@
 //! Milestone 17's work, and a flag on this struct would be reachable from
 //! request handling. A guard with an escape hatch is not a guard.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -270,6 +271,32 @@ pub struct FetchPolicy {
     pub default_interval_per_host: Duration,
     /// What may be tried when the source refuses a plain request.
     pub unblock: Unblock,
+    /// Whether a path a host's `robots.txt` forbids is refused
+    /// (spec §11.5, "Honour `Disallow`").
+    ///
+    /// # What this does and does not switch
+    ///
+    /// It switches the **`Disallow` gate only**. Pacing is not policy: the
+    /// `Crawl-delay` from the same file, and the one-second floor beneath it,
+    /// are still read and still enforced while this is `false`. A permission
+    /// question and a load question arrive in one file, and an operator who
+    /// answers the first differently has said nothing about the second —
+    /// overriding `Disallow` and then hammering the host is the behaviour that
+    /// turns a lost permission into a lost address.
+    ///
+    /// It is likewise nothing to do with [`Unblock`]: that answers a source
+    /// which refuses us *technically*, and this answers one which has *asked*
+    /// us not to read it. Nor is it access control — `robots.txt` is a crawling
+    /// convention, not authentication, and no credential is bypassed here.
+    ///
+    /// # Why it is a field rather than a constant
+    ///
+    /// Because an instance's operator is the one who answers for its crawls,
+    /// and there are sources whose rules make an import impossible that no
+    /// other part of this system can overrule. Defaulting to `true` and letting
+    /// it be switched off in configuration keeps that a decision somebody made
+    /// and can point at, rather than a behaviour that ships on.
+    pub honour_robots: bool,
 }
 
 impl Default for FetchPolicy {
@@ -285,6 +312,10 @@ impl Default for FetchPolicy {
             robots_ttl: Duration::from_secs(60 * 60),
             default_interval_per_host: Duration::from_secs(1),
             unblock: Unblock::none(),
+            // A crawler that reads a host's rules and then ignores them is the
+            // thing robots.txt exists to be told about, so compliance is the
+            // default and overriding it is an explicit edit.
+            honour_robots: true,
         }
     }
 }
@@ -339,6 +370,22 @@ pub struct SafeFetcher {
     solver: Mutex<Option<Arc<SolverClient>>>,
     /// The archive client, built once.
     archive: Mutex<Option<Arc<ArchiveClient>>>,
+    /// How many paths this fetcher has read that their host's `robots.txt`
+    /// forbids.
+    ///
+    /// Counted rather than only logged, because an operator who switched
+    /// [`FetchPolicy::honour_robots`] off is the one who has to answer for what
+    /// it cost, and a count is the smallest thing that answers "how much".
+    /// Zero unless the policy overrides, so it is also the honest report for an
+    /// instance that complies.
+    robots_overrides: AtomicU64,
+    /// The hosts already reported, so the override is stated once per host
+    /// rather than once per chapter.
+    ///
+    /// A 122-chapter import against a host that forbids chapter paths is 122
+    /// identical warnings, and a log line repeated until it is scrolled past is
+    /// not a record of anything.
+    robots_override_hosts: Mutex<HashSet<String>>,
 }
 
 /// One host's `robots.txt`, and when we read it.
@@ -409,6 +456,8 @@ impl SafeFetcher {
             credential_header: None,
             credential_host: None,
             robots: Mutex::new(HashMap::new()),
+            robots_overrides: AtomicU64::new(0),
+            robots_override_hosts: Mutex::new(HashSet::new()),
             solver: Mutex::new(None),
             archive: Mutex::new(None),
         }
@@ -443,6 +492,36 @@ impl SafeFetcher {
         &self.policy
     }
 
+    /// How many paths this fetcher has read against their host's `robots.txt`.
+    ///
+    /// Always zero on a compliant instance, which is what makes it worth
+    /// reporting: the number exists only where somebody chose to make it exist.
+    #[must_use]
+    pub fn robots_overrides(&self) -> u64 {
+        self.robots_overrides.load(Ordering::Relaxed)
+    }
+
+    /// Note that a forbidden path is being read anyway.
+    ///
+    /// Warns once per host — the message names the host and the path that
+    /// happened to be first, and the count carries the rest.
+    async fn record_robots_override(&self, host: &str, path: &str) {
+        self.robots_overrides.fetch_add(1, Ordering::Relaxed);
+        let first_time = {
+            let mut seen = self.robots_override_hosts.lock().await;
+            seen.insert(host.to_owned())
+        };
+        if first_time {
+            tracing::warn!(
+                host,
+                path,
+                "this host's robots.txt disallows a path the import needs, and this instance \
+                 is configured not to honour `Disallow`; the read is going ahead under \
+                 `imports.honour_robots = false`. The host's own crawl delay is still enforced."
+            );
+        }
+    }
+
     /// Fetch, following redirects by hand with validation at every hop.
     ///
     /// This is the path every adapter read goes through, so this is where the
@@ -456,12 +535,18 @@ impl SafeFetcher {
     ) -> SourceResult<ConditionalFetch> {
         let parsed = validate_url(url, &self.policy)?;
         let host = shared_host(&parsed);
+        // Read either way: the same file carries the pace, and a policy that
+        // overrides `Disallow` has said nothing about how hard to knock.
         let robots = self.robots_for(&host).await;
-        if !robots.allows(parsed.path()) {
-            return Err(SourceError::Refused(format!(
-                "{host} disallows {} in its robots.txt",
-                parsed.path()
-            )));
+        match robots_gate(&robots, parsed.path(), self.policy.honour_robots) {
+            RobotsGate::Allowed => {}
+            RobotsGate::Refused => {
+                return Err(SourceError::Refused(format!(
+                    "{host} disallows {} in its robots.txt",
+                    parsed.path()
+                )))
+            }
+            RobotsGate::Overridden => self.record_robots_override(&host, parsed.path()).await,
         }
         self.send_with_redirects(url, form, conditional, Escalation::Policy)
             .await
@@ -1208,6 +1293,37 @@ pub fn validate_url(raw: &str, policy: &FetchPolicy) -> SourceResult<Url> {
     Ok(url)
 }
 
+/// What a host's own rules say about reading one path, given what the instance
+/// is willing to do about them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RobotsGate {
+    /// The rules do not mention this path, or they allow it.
+    Allowed,
+    /// The rules forbid it and the instance honours them.
+    Refused,
+    /// The rules forbid it and the instance has chosen to read it anyway.
+    Overridden,
+}
+
+/// Decide a fetch against one host's rules (spec §11.5, "Honour `Disallow`").
+///
+/// A pure function of the rules, the path and the policy, and deliberately so:
+/// the gate itself is only reachable through a real `robots.txt` fetch, and a
+/// branch reachable only through a live host is a branch no test exercises. This
+/// is the whole of the decision — the tracking that follows an override lives at
+/// the call site — so the three answers can be asserted against real rules
+/// parsed from real files.
+fn robots_gate(rules: &RobotsRules, path: &str, honour_robots: bool) -> RobotsGate {
+    if rules.allows(path) {
+        return RobotsGate::Allowed;
+    }
+    if honour_robots {
+        RobotsGate::Refused
+    } else {
+        RobotsGate::Overridden
+    }
+}
+
 /// The host of a URL, lowercased and with `www.` removed.
 #[must_use]
 pub fn shared_host(url: &Url) -> String {
@@ -1535,6 +1651,89 @@ mod tests {
     }
 
     #[test]
+    fn a_disallowed_path_is_refused_when_the_instance_honours_the_rules() {
+        // Recorded from `tgstorytime.com` on 2026-09-10: the whole archive is
+        // disallowed, which is why that member cannot be imported on a
+        // compliant instance.
+        let rules = crate::robots::RobotsRules::parse("User-agent: *\nDisallow: /\n", "Lorehaven");
+
+        assert_eq!(
+            robots_gate(&rules, "/viewstory.php?sid=6369", true),
+            RobotsGate::Refused
+        );
+        // And the same rules under an instance that has overridden them.
+        assert_eq!(
+            robots_gate(&rules, "/viewstory.php?sid=6369", false),
+            RobotsGate::Overridden
+        );
+    }
+
+    #[test]
+    fn an_allowed_path_is_allowed_under_either_policy() {
+        // The override is not a licence to reclassify everything: a path the
+        // rules permit takes the same branch whether or not the instance
+        // honours them, so nothing is counted as an override that was not one.
+        let rules = crate::robots::RobotsRules::parse(
+            "User-agent: *\nDisallow: /private/\nAllow: /\n",
+            "Lorehaven",
+        );
+
+        for honour in [true, false] {
+            assert_eq!(
+                robots_gate(&rules, "/viewstory.php?sid=1", honour),
+                RobotsGate::Allowed,
+                "honour_robots = {honour}"
+            );
+        }
+        // And the disallowed subtree still separates the two policies.
+        assert_eq!(robots_gate(&rules, "/private/x", true), RobotsGate::Refused);
+        assert_eq!(
+            robots_gate(&rules, "/private/x", false),
+            RobotsGate::Overridden
+        );
+    }
+
+    #[test]
+    fn a_host_with_no_rules_has_nothing_to_refuse_or_to_override() {
+        // A `404` for `robots.txt` is a site with no restrictions (spec §11.5),
+        // so it must produce neither a refusal nor a recorded override.
+        let rules = crate::robots::RobotsRules::unrestricted();
+        assert_eq!(robots_gate(&rules, "/anything", true), RobotsGate::Allowed);
+        assert_eq!(robots_gate(&rules, "/anything", false), RobotsGate::Allowed);
+    }
+
+    #[test]
+    fn the_three_answers_are_the_whole_decision() {
+        // The gate answers only these three things, so a caller that handles
+        // all three has handled every case — which is the property that makes
+        // extracting it worth more than inlining it.
+        let forbidding =
+            crate::robots::RobotsRules::parse("User-agent: *\nDisallow: /\n", "Lorehaven");
+        let allowing = crate::robots::RobotsRules::unrestricted();
+
+        let answers = [
+            robots_gate(&forbidding, "/x", true),
+            robots_gate(&forbidding, "/x", false),
+            robots_gate(&allowing, "/x", true),
+        ];
+        assert_eq!(
+            answers,
+            [
+                RobotsGate::Refused,
+                RobotsGate::Overridden,
+                RobotsGate::Allowed
+            ]
+        );
+    }
+
+    #[test]
+    fn compliance_is_the_default_policy() {
+        // An instance does not have to be told to read a host's rules. This is
+        // the assertion that fails if somebody ever flips the default.
+        assert!(crate::FetchPolicy::default().honour_robots);
+    }
+
+    #[test]
     fn the_fingerprint_flag_tells_the_truth_about_this_build() {
         // The importer refuses a fingerprint-walled source when this is false, so
         // it has to agree with the feature the transport is compiled behind.
@@ -1544,8 +1743,8 @@ mod tests {
         );
     }
     use super::{
-        charset_of_content_type, decode_body, describe_status, sniff_charset, Escalation,
-        SafeFetcher, Step, Unblock,
+        charset_of_content_type, decode_body, describe_status, robots_gate, sniff_charset,
+        Escalation, RobotsGate, SafeFetcher, Step, Unblock,
     };
     use crate::engine::Impersonation;
     use crate::solver::SolverConfig;

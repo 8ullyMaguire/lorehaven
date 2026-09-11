@@ -916,6 +916,106 @@ async fn the_catalogue_says_which_sources_need_a_solver() {
     harness.cleanup().await;
 }
 
+/// The catalogue states the terms this instance reads sources on, so the answer
+/// to "why did that archive refuse me?" is on the page rather than in a log
+/// (spec §11.5).
+#[tokio::test]
+async fn the_catalogue_states_the_robots_terms_this_instance_reads_on() {
+    let harness = Harness::new("robots-catalogue").await;
+    let mut http = Client::new(server::build_router(
+        harness.state_with(FixtureArchive::behind_a_solver_wall()),
+    ));
+    register(&mut http, "terms@example.org", "terms").await;
+
+    let (status, body) = http.get("/api/v1/imports/sources").await;
+    assert_eq!(status, StatusCode::OK, "sources: {body}");
+    let entry = body["items"]
+        .as_array()
+        .and_then(|items| items.iter().find(|item| item["key"] == SOURCE))
+        .expect("the source is in the catalogue");
+
+    // Compliance is the default, and an instance that has not been told
+    // otherwise says so.
+    assert_eq!(entry["robots"]["honour_disallow"], true);
+    // And the pace it *is* bound by is stated beside it, so switching one off
+    // cannot read as switching off the other.
+    assert_eq!(entry["robots"]["honour_crawl_delay"], true);
+    assert!(
+        entry["robots"]["note"]
+            .as_str()
+            .is_some_and(|note| note.contains("refused")),
+        "the note says what happens to a forbidden path: {}",
+        entry["robots"]
+    );
+
+    harness.cleanup().await;
+}
+
+/// An instance that has overridden `Disallow` says so, in the same place.
+///
+/// The failure this guards against is an override that only exists in a config
+/// file and a warning line: a reader could not see it, and an operator could set
+/// it and forget which instance they set it on.
+#[tokio::test]
+async fn an_instance_that_overrides_disallow_says_so_in_the_catalogue() {
+    let harness = Harness::new("robots-override").await;
+
+    let mut config = config_for(&harness.dir);
+    config.imports.honour_robots = false;
+
+    let mut http = Client::new(server::build_router(
+        harness.state_with_config(FixtureArchive::behind_a_solver_wall(), config),
+    ));
+    register(&mut http, "override@example.org", "override").await;
+
+    let (status, body) = http.get("/api/v1/imports/sources").await;
+    assert_eq!(status, StatusCode::OK, "sources: {body}");
+    let entry = body["items"]
+        .as_array()
+        .and_then(|items| items.iter().find(|item| item["key"] == SOURCE))
+        .expect("the source is in the catalogue");
+
+    assert_eq!(entry["robots"]["honour_disallow"], false);
+    // The override is about *permission*, and the catalogue says plainly that it
+    // did not touch the *pace* — a reader on such an instance should be able to
+    // tell that the instance is still polite even where it stopped asking.
+    assert_eq!(entry["robots"]["honour_crawl_delay"], true);
+    assert!(
+        entry["robots"]["note"]
+            .as_str()
+            .is_some_and(|note| note.contains("honour_robots = false")),
+        "the note names the setting that did it: {}",
+        entry["robots"]
+    );
+
+    harness.cleanup().await;
+}
+
+/// The setting reaches the fetcher, not only the catalogue.
+///
+/// A catalogue that reported a setting the importer did not use would be worse
+/// than one that reported nothing: it would describe an instance that does not
+/// exist. This asserts the one seam every import path goes through.
+#[tokio::test]
+async fn the_import_policy_carries_the_instances_robots_answer() {
+    let harness = Harness::new("robots-policy").await;
+    let adapter = FixtureArchive::behind_a_solver_wall();
+
+    let mut config = config_for(&harness.dir);
+    assert!(
+        lorehaven_app::imports::policy_for(&adapter, &config).honour_robots,
+        "an unmodified instance complies"
+    );
+
+    config.imports.honour_robots = false;
+    assert!(
+        !lorehaven_app::imports::policy_for(&adapter, &config).honour_robots,
+        "and the override reaches the fetcher the importer builds"
+    );
+
+    harness.cleanup().await;
+}
+
 /// A source that needs a credential is refused *before* anything is fetched,
 /// and the refusal is fatal rather than retried five times.
 #[tokio::test]

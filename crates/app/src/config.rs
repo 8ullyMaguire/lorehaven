@@ -174,7 +174,7 @@ pub struct AccountsConfig {
 /// instance is willing to run; the adapter supplies the need. Neither can grant
 /// the other's half, which is why the two are merged in
 /// [`ImportsConfig::unblock_for`] rather than either being the whole answer.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ImportsConfig {
     /// A FlareSolverr-compatible service this instance may drive.
     ///
@@ -192,6 +192,56 @@ pub struct ImportsConfig {
     /// that can put a work back in front of readers that its author withdrew.
     /// That is a preservation decision an operator should make deliberately.
     pub archive_fallback: bool,
+    /// Whether a path a source's `robots.txt` forbids is refused.
+    ///
+    /// **On by default.** `robots.txt` is how a host states which of its pages
+    /// it wants crawled, and a crawler that reads the file and then ignores it
+    /// is the thing the file exists to be told about. So the compliant
+    /// behaviour is what an instance does without being asked, and switching
+    /// this off is a deliberate edit with a name on it.
+    ///
+    /// # Why an operator may switch it off
+    ///
+    /// Because this is a self-hosted archiving platform, and there are archives
+    /// whose `robots.txt` forbids the whole site while they serve a public
+    /// reading view. Where such a host has invited the public to read something,
+    /// an operator may conclude that a personal import for personal reading is
+    /// not what the rule was aimed at — a judgement about *their* instance, made
+    /// by the only person who can answer for it. That judgement is theirs to
+    /// make, and this is where they make it.
+    ///
+    /// # What it does not switch
+    ///
+    /// **Pacing.** `Crawl-delay` from the same file, and the one-second floor
+    /// beneath it, are still enforced. A permission question and a load question
+    /// arrive in one file; answering the first differently says nothing about
+    /// the second, and an instance that overrode the permission and then
+    /// hammered the host would have turned a lost permission into a lost
+    /// address.
+    ///
+    /// **Access control.** `robots.txt` is a crawling convention, not
+    /// authentication. Nothing here reads a credential, defeats a login, or
+    /// reaches a page the host's own code gates — spec §11.5's prohibition on
+    /// circumventing access control is untouched, and a page behind an age gate
+    /// or a challenge is still out of reach.
+    ///
+    /// **The record.** Every overridden path is counted on the fetcher, and the
+    /// first one per host is logged at `warn` naming the host and the setting.
+    /// An operator who switches this on is the one who has to say how much it
+    /// cost, and the count is what answers that.
+    pub honour_robots: bool,
+}
+
+impl Default for ImportsConfig {
+    fn default() -> Self {
+        Self {
+            solver_url: None,
+            archive_fallback: false,
+            // Compliance, because the alternative is a crawler nobody asked
+            // for. See the field documentation for what switching it off means.
+            honour_robots: true,
+        }
+    }
 }
 
 impl ImportsConfig {
@@ -591,6 +641,10 @@ impl Config {
                 .map(|url| url.trim().to_owned())
                 .filter(|url| !url.is_empty()),
             archive_fallback: imports_file.archive_fallback.unwrap_or(false),
+            // Compliance unless the file says otherwise. `unwrap_or(true)`
+            // rather than `ImportsConfig::default()`'s value read back, because
+            // this is the line that decides it and it should read that way.
+            honour_robots: imports_file.honour_robots.unwrap_or(true),
         };
 
         let config = Self {
@@ -779,6 +833,8 @@ struct ImportsSection {
     solver_url: Option<String>,
     /// Whether an archived copy may be read as a last resort.
     archive_fallback: Option<bool>,
+    /// Whether a path a source's `robots.txt` forbids is refused. Default true.
+    honour_robots: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1019,6 +1075,69 @@ port = 7000
         let config = Config::development_defaults();
         assert!(config.imports.solver_url.is_none());
         assert!(!config.imports.archive_fallback);
+        // And it reads the rules it is asked to follow. The list above is of
+        // things an instance must *not* do unasked; this is the one thing it
+        // must do unasked.
+        assert!(
+            config.imports.honour_robots,
+            "an instance complies with robots.txt unless its operator says otherwise"
+        );
+    }
+
+    #[test]
+    fn a_source_forbidding_what_an_adapter_needs_is_still_imported_when_the_operator_says_so() {
+        // The override an operator reaches for when an archive's `robots.txt`
+        // forbids the site while it serves a public reading view. Read from the
+        // file rather than built by assignment, because the point is that an
+        // operator can set it without a code change.
+        let parsed = load_from(
+            "robots",
+            "environment = \"development\"\n\
+             [imports]\n\
+             honour_robots = false\n",
+        )
+        .expect("an operator may override a source's Disallow rules");
+        assert!(!parsed.imports.honour_robots);
+
+        // And the default holds when the section is present but silent about it.
+        let parsed = load_from(
+            "robots-default",
+            "environment = \"development\"\n\
+             [imports]\n\
+             archive_fallback = true\n",
+        )
+        .expect("a partial imports section is valid");
+        assert!(parsed.imports.honour_robots);
+    }
+
+    #[test]
+    fn the_shipped_example_configuration_parses() {
+        // The example is what an operator copies, so a section it documents and
+        // the parser does not accept is a startup failure handed to every new
+        // instance. Every other config test writes its own file; this one reads
+        // the one that ships.
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lorehaven.toml.example");
+        let body = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("the example config must exist: {error}"));
+        // `load` needs a real path, and the example is not writable in a
+        // checkout, so it is parsed through the same entry point by copying it.
+        let dir = std::env::temp_dir().join(format!("lorehaven-example-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let target = dir.join("lorehaven.toml");
+        std::fs::write(&target, body).expect("copy the example");
+        let parsed = Config::load(&GlobalArgs {
+            config: Some(target),
+            ..GlobalArgs::default()
+        })
+        .expect("the shipped example must be a configuration this build accepts");
+
+        // Named settings the example documents, asserted so a rename in the
+        // parser cannot leave the example describing something that no longer
+        // exists — `deny_unknown_fields` would not catch a *comment*.
+        assert!(parsed.imports.honour_robots);
+        assert!(parsed.imports.solver_url.is_none());
+        assert!(!parsed.imports.archive_fallback);
     }
 
     #[test]

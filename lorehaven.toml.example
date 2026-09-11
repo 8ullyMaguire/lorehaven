@@ -71,6 +71,40 @@ format = "pretty"
 # compiled into the binary.
 # dir = "./frontend/dist"
 
+[imports]
+# Whether a path a source's `robots.txt` forbids is refused.
+#
+# True by default, and the default is the recommended setting: `robots.txt` is
+# how a host says which of its pages it wants crawled, and reading the file and
+# then ignoring it is what the file exists to prevent. Some archives, though,
+# forbid the whole site while serving a public reading view, and an operator of a
+# personal instance may judge that importing a work for their own reading is not
+# what the rule was aimed at. That judgement is yours to make; it is not made for
+# you here.
+#
+# Switching this off does **not** switch off pacing. The same file's
+# `Crawl-delay`, and the one-second floor beneath it, are still enforced exactly
+# as before — a permission question and a load question arrive in one file, and
+# answering one differently says nothing about the other. Every path that is read
+# anyway is counted, and the first one per host is logged at `warn` naming the
+# host and this setting, so an instance that switches it off can say what it cost.
+#
+# It is also unrelated to access control: `robots.txt` is a crawling convention,
+# not authentication. Nothing here defeats a login, an age gate, or a challenge.
+# honour_robots = true
+
+# A FlareSolverr-compatible service this instance may drive, e.g. Byparr or
+# obscura-solverr on loopback. Needed only for a source whose adapter declares it
+# answers a bot challenge a plain request cannot pass; without one, such a source
+# is refused before an import is queued, naming this setting.
+# solver_url = "http://127.0.0.1:8191"
+
+# Whether a page the source will not serve may be read from the Internet Archive
+# instead. Off by default: it is the one fallback that reads a *different*
+# resource, and for a work the source has deleted it can put a work back in front
+# of readers that its author withdrew.
+# archive_fallback = false
+
 [dev]
 # Whether `lorehaven seed` may write development fixtures. Defaults to true
 # outside production and false in it; enabling it in production is a startup

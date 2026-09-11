@@ -1507,12 +1507,25 @@ Do not implement CAPTCHA, paywall, or access-control circumvention.
 "Respect source rate limits" means the source's published number, not one chosen here. For every host an import reads:
 
 - Fetch that host's `robots.txt` and read it as the source's own statement of how it wants to be read. Its `Crawl-delay` sets the minimum gap between requests to that host. Adapter-declared intervals are a fallback, not an override: the operator of a server knows what it can take, and a number in this repository is a guess that goes stale.
-- Honor `Disallow` as a refusal, not a warning. A path the source forbids is not fetched, and an import that needs it reports the restriction rather than a parse failure. Matching is the de-facto standard's: `*` and trailing `$` supported, most-specific rule wins, `Allow` breaks a tie, and a group naming our product token applies ahead of the `*` group. The token is our `User-Agent`'s leading word (`Lorehaven`).
+- Honor `Disallow` as a refusal, not a warning. A path the source forbids is not fetched, and an import that needs it reports the restriction rather than a parse failure. Matching is the de-facto standard's: `*` and trailing `$` supported, most-specific rule wins, `Allow` breaks a tie, and a group naming our product token applies ahead of the `*` group. The token is our `User-Agent`'s leading word (`Lorehaven`). **An instance operator may switch this off** — see below.
 - Use **one request per second** when no delay is published. "No information" must not be read as "no limit", and absence is not permission to go faster. One second is also the floor for a host whose published delay is shorter or unreadable, so a malformed directive can never become a faster pace.
 - Treat a `404` or `410` for `robots.txt` as a site with no restrictions. Treat any other failure to read it as rules unknown: proceed at the default pace, and record the condition against the source's health rather than refusing a reader's import over a file that is temporarily broken.
 - Read it once per host per import run, and cache it for a bounded interval when a process outlives one run.
 
 This is enforced inside the shared fetcher, for the same reason the address checks are: an adapter that could opt out of pacing would make the rule advisory. An import is resumable, so a slow import is a cost the reader can wait out; an import that hammers a volunteer-run archive is a cost somebody else pays.
+
+#### The `Disallow` override is the operator's, and it is narrow
+
+`robots.txt` is a convention between a crawler and a host, and the operator of an instance is the party who answers for that instance's crawling. So an instance may be configured not to honour `Disallow` (`imports.honour_robots`), and it honours it by default.
+
+The override is deliberately narrow, and each limit is a rule rather than an implementation detail:
+
+- **It does not touch pacing.** `Crawl-delay` from the same file, and the one-second floor beneath it, are read and enforced exactly as before. A permission question and a load question arrive in one file; answering the first differently says nothing about the second. An instance that overrode the permission and then hammered the host would have converted a lost permission into a lost address.
+- **It is not access-control circumvention.** This section's prohibition stands untouched. `robots.txt` states what a host wants crawled; it is not authentication, and nothing here defeats a login, an age gate, a paywall, or a challenge. A page the host's own code gates remains out of reach on every setting.
+- **It is instance-wide and visible.** A per-source switch would let an override be made once and forgotten about for the source it affects, so it is a single instance-level setting that shows up in the configuration an operator reads. It is reported on the source's catalogue entry rather than being invisible in a log, so a reader on such an instance can see how it is configured.
+- **Every overridden read is counted, and the first per host is logged.** An operator who switched it off has to be able to say what it cost, and a number is the smallest thing that answers that.
+
+The reason this is a configuration value and not a build flag: it is a judgement about *whose* instance is doing the crawling. An operator may reasonably conclude that an archive which forbids the whole site while serving a public reading view did not aim its rule at a person importing one work to read privately — but that is the operator's judgement to make, on their own instance, and it must be made where it can be seen rather than assumed by a default.
 
 ## 11.6 Per-source credential vault
 
