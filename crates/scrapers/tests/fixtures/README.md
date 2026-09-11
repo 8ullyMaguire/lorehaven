@@ -362,3 +362,128 @@ follows the WHATWG alias table and reads the label `ISO-8859-1` the way every
 browser does — as windows-1252. A fixture read with `std::fs::read_to_string`
 does not decode at all, and one read lossily loses the apostrophes that
 `tests/efiction_fixtures.rs` asserts on.
+
+## ffnet
+
+Two hosts, one script. FanFiction.net and FictionPress run the same software and
+serve the same shapes, and these recordings exist because assuming that is the
+same as knowing it. They were recorded on 2026-09-11, and **the recording needed
+the unblock path**: a plain client is refused with `403` by both.
+
+| File | Source | Recorded |
+|---|---|---|
+| `ffnet-work.html` | `https://www.fanfiction.net/s/12345678/1/` (2 chapters) | 2026-09-11 |
+| `ffnet-work-complete.html` | `https://www.fanfiction.net/s/5782108/1/` (122 chapters, `Status: Complete`) | 2026-09-11 |
+| `ffnet-chapter-2.html` | `https://www.fanfiction.net/s/12345678/2/Jillian-Holtzmann-Ace-Attorney` | 2026-09-11 |
+| `ffnet-not-found.html` | `https://www.fanfiction.net/s/99999999999999/1/` (an id that does not exist) | 2026-09-11 |
+| `fictionpress-work.html` | `https://www.fictionpress.com/s/3280165/1/Unrelenting` (17 chapters) | 2026-09-11 |
+| `fictionpress-work-second.html` | `https://www.fictionpress.com/s/2171761/1/Vampiric-Desires` (4 chapters) | 2026-09-11 |
+| `fictionpress-not-found.html` | `https://www.fictionpress.com/s/99999999999999/1/` | 2026-09-11 |
+
+`FanFiction.net` was recorded through the browser fingerprint (`primp`) and
+`FictionPress` through the solver service, which is not a convenience: measured on
+the same day, FanFiction.net accepts a fingerprint and FictionPress refuses it.
+The two hosts are the clearest example in this repository of a wall being a
+property of one host rather than of the software it runs, and recording them
+needed two different mechanisms to say so.
+
+`ffnet-work` and `ffnet-work-complete` are the pair that matters. The two-chapter
+work **has no `Status:` field at all**, and the completed 122-chapter work has
+`Status: Complete` — so the field is present or absent, and a work that does not
+carry it must be recorded as `unknown` rather than as ongoing. The ported code
+hardcoded "ongoing" for every work; on this site that is the wrong answer half the
+time with nothing to indicate it.
+
+### The chapter list is `#chap_select`, and it is complete
+
+Every chapter of a work is an `<option>` in `#chap_select`, all of them: 122 for
+the long work, 17 and 4 for the two FictionPress ones. There is no pagination to
+walk and no separate table of contents. The option's `value` is the ordinal and
+its text is `{ordinal}. {title}`.
+
+So on this source **the ordinal is the source's own chapter key**, because the
+site has nothing better and says so — there is no per-chapter id in the list. That
+makes the port's index-as-key defect harmless *here*, which is worth stating
+explicitly rather than being quietly grateful for: the rule is to use the source's
+own key, and on this source the ordinal is it. The chapter's own address is
+`/s/{work id}/{ordinal}/{slug}`, and the slug is decorative — the same chapter is
+served with or without it, so it must not be part of the key.
+
+The list is rendered **twice** per page, in the top and bottom navigation, and the
+two are identical. Reading the first is what the adapter does; the recording is
+here so that a page where they disagree can be recognised rather than guessed at.
+
+### What the two siblings disagree about
+
+Same script, different answers. Each of these is a defect waiting for a parser
+that assumes the first host it saw was the shape of the source.
+
+| | FanFiction.net | FictionPress |
+|---|---|---|
+| Attribute quoting | unquoted (`id=chap_select`, `value=1 selected`) | quoted (`id="chap_select"`, `value="1" selected=""`) |
+| Visible dates | `3/14/2015` (numeric) | `Jun 20, 2016` (abbreviated month) |
+| `<title>` on chapter 2 | `… Chapter 2, a ghostbusters fanfic` | `Vampiric Desires Vampiric Desires Chapter 1, a fantasy fiction` |
+| Untitled chapters render as | `2. Chapter 2` | `2. Vampiric Desires Chapter 2` |
+| Characters field | present | **absent on both recordings** |
+
+The quoting difference is invisible to a real HTML parser and lethal to a
+hand-rolled regex — during reconnaissance it produced a false finding that
+FictionPress omits its first chapter, because `selected=""` did not match a
+pattern written for `selected>`. The chapter list was complete all along. This is
+the argument for writing the parser against a parsed document rather than against
+the bytes, and for recording fixtures rather than reasoning about them.
+
+The date difference is the same lesson as the eFiction family's, in a smaller
+space: the two hosts of one script write the same field two ways, so a date parser
+that reads one shape returns `None` for the other host and the work arrives with no
+published date at all. **The visible text is not the value to read.** Both hosts
+carry the real timestamp in a `data-xutime` attribute — epoch seconds — and that
+is what the adapter reads:
+
+```
+Updated: <span data-xutime='1426348782'>3/14/2015</span>      (FanFiction.net)
+Updated: <span data-xutime="1466437099">Jun 20, 2016</span>   (FictionPress)
+```
+
+The characters field is absent from both FictionPress recordings and present on
+both FanFiction.net ones, which settles a question the shape of the line raises:
+the metadata is one ` - `-delimited run with **three unlabeled fields** in it —
+language, genres, characters — and they cannot be read by position, because a work
+with no listed characters has two where another has three. The adapter identifies
+the language against the site's own short list of languages and tells genres from
+characters by shape, and the recordings are here to hold that to.
+
+### The prose, and the id that is not the one you want
+
+The chapter body is `div#storytext`, and it is nested inside `div#storytextp` —
+one character apart, so a prefix match on `storytext` selects the container *and*
+the prose, and a body read that way arrives wrapped in its own wrapper. The exact
+id is the selector.
+
+### Not found, and a phrase that is not a moderation hold
+
+Both hosts answer a missing work with **HTTP `200`**, and the page carries no
+`profile_top`, no `storytext` and no `chap_select`. Status cannot be used; the
+document has to be read.
+
+The page's heading is `Story Not Found`. It *also* contains the sentence **"Story
+is unavailable for reading."** — boilerplate that appears on this page for a work
+that simply does not exist. Nothing may therefore be inferred from that sentence
+alone, and in particular it must not be read as the moderation hold the eFiction
+adapter distinguishes: doing so would send an operator to look for a takedown that
+never happened.
+
+**A genuinely withheld FanFiction.net work has not been recorded**, so this
+adapter claims `NotFound` for this page and claims nothing about a hold. That is
+the honest limit of these recordings, and the place to extend them is here rather
+than in a guess.
+
+### One thing an operator should know
+
+Both hosts serve every one of these pages — the missing-work page included — with
+`NOARCHIVE` in a `robots` meta tag, FanFiction.net capitalised (`<META NAME='ROBOTS'
+CONTENT='NOARCHIVE'>`) and FictionPress lowercase (`<meta name="ROBOTS"
+content="NOARCHIVE">`), which is the sibling difference again in one more place.
+That is a directive about search-engine caches rather than about a reader keeping a
+copy of a work they are reading, and it is recorded here rather than resolved,
+because an instance's operator is the one who decides what their instance stores.
