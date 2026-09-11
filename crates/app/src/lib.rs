@@ -15,6 +15,7 @@ pub mod cli;
 pub mod config;
 pub mod crypto;
 pub mod doctor;
+pub mod exports;
 pub mod http;
 pub mod imports;
 pub mod limiter;
@@ -35,6 +36,8 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use clap::Parser;
 use lorehaven_db::Database;
+
+use lorehaven_domain::jobs::{JobKind, RetryPolicy};
 
 use crate::cli::{Cli, Command};
 use crate::config::Config;
@@ -93,6 +96,27 @@ pub async fn run(cli: Cli) -> Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
 
+        Command::Maintain(args) => {
+            let db = connect(&config).await?;
+            for task in MAINTENANCE_TASKS {
+                if args.dry_run {
+                    println!("would queue {task}");
+                    continue;
+                }
+                let job_id = lorehaven_db::jobs::enqueue(
+                    &db,
+                    JobKind::Maintenance,
+                    &serde_json::json!({ "task": task }).to_string(),
+                    None,
+                    None,
+                    0,
+                    &RetryPolicy::default(),
+                )
+                .await?;
+                println!("queued {task} as {job_id}");
+            }
+            Ok(ExitCode::SUCCESS)
+        }
         Command::Doctor(args) => {
             let report = doctor::run(&config, &args).await;
             print!("{}", doctor::render(&report));
@@ -105,6 +129,13 @@ pub async fn run(cli: Cli) -> Result<ExitCode> {
         }
     }
 }
+
+/// The recurring maintenance tasks, in the order they are queued.
+///
+/// A list rather than a match arm so the CLI and the worker's task names cannot
+/// drift: this is the only place a task name is written for scheduling, and the
+/// worker's own `match` refuses anything it does not know.
+pub const MAINTENANCE_TASKS: [&str; 3] = ["reap_jobs", "collect_blobs", "purge_exports"];
 
 /// What one `worker --once` pass did, for an operator watching the queue move.
 fn print_pass_report(report: &worker::PassReport) {

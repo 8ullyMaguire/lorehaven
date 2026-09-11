@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod collaborators;
+pub mod exports;
 pub mod health;
 pub mod imports;
 pub mod jobs;

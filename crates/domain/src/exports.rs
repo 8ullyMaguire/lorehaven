@@ -156,6 +156,33 @@ impl ExportFormat {
         }
     }
 
+    /// The name a reader sees in a picker.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::PlainText => "Plain text",
+            Self::Html => "HTML",
+            Self::Markdown => "Markdown",
+            Self::Epub => "EPUB",
+            Self::Pdf => "PDF",
+            Self::Azw3 => "AZW3",
+            Self::Mobi => "MOBI",
+        }
+    }
+
+    /// What an operator would have to install for this format, if anything.
+    ///
+    /// Empty for the formats this instance builds itself. The point of the
+    /// sentence is that a reader who wanted a PDF is told what would make one
+    /// possible, rather than being told "not available" and left to guess.
+    #[must_use]
+    pub const fn requires(self) -> &'static str {
+        match self.converters().first() {
+            Some(converter) => converter.install_hint(),
+            None => "",
+        }
+    }
+
     /// The file extension an exported file carries.
     #[must_use]
     pub const fn extension(self) -> &'static str {
@@ -216,6 +243,65 @@ impl ExportOptions {
             font_size_pt: None,
         }
     }
+
+    /// The stored form.
+    #[must_use]
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
+    }
+
+    /// Read the stored form.
+    ///
+    /// Anything unreadable becomes the defaults rather than an error: the options
+    /// were written by this instance, and a row that somehow holds something else
+    /// should produce an export with sensible choices rather than no export at
+    /// all. The `deny_unknown_fields` attribute means an option removed later
+    /// cannot resurrect a stale setting.
+    #[must_use]
+    pub fn from_json(raw: Option<&str>) -> Self {
+        raw.and_then(|text| serde_json::from_str(text).ok())
+            .unwrap_or_else(Self::defaults)
+    }
+}
+
+/// A stable identifier for an export of one subject at one moment.
+///
+/// Name-based rather than random, so that exporting the same unchanged work twice
+/// produces the same `dc:identifier` and the same bytes — which is what lets the
+/// blob store recognise the second export as the first one's file instead of
+/// storing a copy. A revised work gets a different moment and therefore a
+/// different identifier, which is the other half of the same property: two
+/// exports of different revisions must not claim to be the same publication.
+///
+/// FNV-1a, twice with different offsets, rather than SHA-256: the value names a
+/// file, nothing depends on it being hard to invert, and a hash of the content is
+/// already what `content_blobs` uses for that job.
+#[must_use]
+pub fn stable_identifier(parts: &[&str]) -> String {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut forward = OFFSET;
+    let mut backward = OFFSET ^ 0x5555_5555_5555_5555;
+    for part in parts {
+        for byte in part.as_bytes() {
+            forward = (forward ^ u64::from(*byte)).wrapping_mul(PRIME);
+        }
+        for byte in part.as_bytes().iter().rev() {
+            backward = (backward ^ u64::from(*byte)).wrapping_mul(PRIME);
+        }
+        // A separator, so ("ab", "c") and ("a", "bc") cannot collide.
+        forward = (forward ^ 0x1f).wrapping_mul(PRIME);
+        backward = (backward ^ 0x1f).wrapping_mul(PRIME);
+    }
+    let hex = format!("{forward:016x}{backward:016x}");
+    format!(
+        "urn:uuid:{}-{}-4{}-8{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[13..16],
+        &hex[17..20],
+        &hex[20..32]
+    )
 }
 
 /// Where a work came from, and on what terms it may be passed on (spec §13.2).
@@ -505,20 +591,18 @@ pub fn html_to_text(html: &str) -> String {
                     // prose, and running it into the base text reads as a stutter:
                     // 漢字かんじ instead of 漢字. The annotation runs to its own
                     // closing tag, which the sanitizer never nests.
-                    "rt" | "rp" if !closing => {
-                        loop {
-                            match chars.next() {
-                                None => break,
-                                Some('<') => {
-                                    let inner = read_tag_body(&mut chars);
-                                    if inner.trim_start().starts_with('/') {
-                                        break;
-                                    }
+                    "rt" | "rp" if !closing => loop {
+                        match chars.next() {
+                            None => break,
+                            Some('<') => {
+                                let inner = read_tag_body(&mut chars);
+                                if inner.trim_start().starts_with('/') {
+                                    break;
                                 }
-                                Some(_) => {}
                             }
+                            Some(_) => {}
                         }
-                    }
+                    },
                     _ => {}
                 }
             }

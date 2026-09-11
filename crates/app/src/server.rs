@@ -270,6 +270,18 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // Exports: a reader's own files, and the token-addressed download that
+        // needs no session because the token is the credential.
+        .merge(classified(
+            routes::exports::authed_router(),
+            RouteClass::Write,
+            &state,
+        ))
+        .merge(classified(
+            routes::exports::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // The operator surface. Gated on configuration inside the handlers,
         // because "who is an operator" is a decision about an account and not
         // about a route tree.

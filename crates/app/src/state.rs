@@ -27,6 +27,12 @@ struct Inner {
     /// could route to one adapter when previewed and another when imported, and
     /// the reader would have confirmed a plan that nothing then followed.
     registry: Registry,
+    /// The external converters this instance found at startup.
+    ///
+    /// Detected once rather than per request: what an instance can produce is a
+    /// property of the machine it runs on, and an interface that offered a format
+    /// on one request and not the next would be describing nothing.
+    converters: crate::exports::Converters,
 }
 
 impl AppState {
@@ -41,6 +47,7 @@ impl AppState {
                 rate_limiter,
                 started_at: Instant::now(),
                 registry: lorehaven_scrapers::sites::default_registry(),
+                converters: crate::exports::Converters::detect(),
             }),
         }
     }
@@ -55,6 +62,12 @@ impl AppState {
     #[must_use]
     pub fn registry(&self) -> &Registry {
         &self.inner.registry
+    }
+
+    /// The external converters this instance found at startup.
+    #[must_use]
+    pub fn converters(&self) -> &crate::exports::Converters {
+        &self.inner.converters
     }
 
     /// Replace the adapters.

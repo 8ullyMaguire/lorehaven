@@ -122,6 +122,22 @@ pub enum Command {
 
     /// Run the background worker: jobs and outbox delivery.
     Worker(WorkerArgs),
+
+    /// Queue the recurring maintenance work and exit. For cron.
+    ///
+    /// The tasks are idempotent and each reads only what is due, so running this
+    /// more often than needed costs a query and nothing else. It exists because
+    /// retention is a promise — an export is kept seven days and then removed —
+    /// and a promise nothing enqueues is not kept.
+    Maintain(MaintainArgs),
+}
+
+/// Options for `maintain`.
+#[derive(Debug, Args)]
+pub struct MaintainArgs {
+    /// List the tasks that would be queued, and queue nothing.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 /// Options for `serve`.
