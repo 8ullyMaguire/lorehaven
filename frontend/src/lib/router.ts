@@ -27,6 +27,7 @@ export type RouteId =
   | 'history'
   | 'import'
   | 'library'
+  | 'exports'
   | 'jobs'
   | 'admin-jobs'
   | 'planned'
@@ -81,6 +82,7 @@ const FIXED_ROUTES: Record<string, RouteId> = {
   '/write': 'write',
   '/import': 'import',
   '/library': 'library',
+  '/exports': 'exports',
   '/jobs': 'jobs',
   '/admin/jobs': 'admin-jobs',
 };

@@ -18,6 +18,7 @@ describe('routing', () => {
     // These were a placeholder until the import machinery existed. They are
     // real pages now, and a stale placeholder would hide a working surface.
     expect(matchRoute('/library').id).toBe('library');
+    expect(matchRoute('/exports').id).toBe('exports');
     expect(matchRoute('/import').id).toBe('import');
     expect(matchRoute('/import/').id).toBe('import');
   });

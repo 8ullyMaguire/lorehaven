@@ -12,7 +12,7 @@
 //!
 //! Spec §13.2 and the milestone plan both put an export's life at seven days,
 //! after which the row, its grant and its output blob go. The blob is the part
-//! that needs care: it is stored through [`BlobStore`], which is content
+//! that needs care: it is stored through [`crate::storage::BlobStore`], which is content
 //! addressed, and the collector deletes blobs that nothing references. **An
 //! export's output must therefore be referenced** while it is alive, or the next
 //! collection run deletes a file the reader is about to download. The reference

@@ -633,6 +633,56 @@ and a wrapper around it, measured rather than asserted: **636 kB** wrapped again
 **93 kB** raw. Whether a real snapshot of a real FFN chapter parses is still
 unverified, because no page of the recorded work has one.
 
+## Milestone 7 — Exports, device delivery and offline reading
+
+Milestone 7's first two obligations are **built and locally tested**: a reader can
+ask for a work as a file, wait for a job to make it, fetch it through a
+short-lived link, keep a copy in their browser and read it without a connection.
+The third — spec §13.4's send-to-Kindle and device-email delivery — is
+**deliberately not built** and is tracked as `M7-03`: spec calls that adapter
+optional and this build has no mail transport at all, so what ships is the schema
+and the refusal rather than a promise.
+
+The end-to-end evidence is `crates/app/tests/milestone_7.rs` (10 tests) against
+the real router, a real SQLite file, a real storage directory and the real
+worker. The work is authored through the real API, so the export renders the same
+document the reader's page renders.
+
+| # | Acceptance criterion | Status | Evidence |
+|---|---|---|---|
+| 1 | An export is a job, not a request | Implemented and locally tested | `an_export_is_a_job_not_a_request` — `202` with `state: queued`, `downloadable: false` and a job id, then `ready` after one worker pass with `output_bytes > 0`. |
+| 2 | An EPUB opens and contains every chapter, in order | Implemented and locally tested | `an_epub_export_opens_and_contains_every_chapter` — the downloaded bytes start `PK\x03\x04`, the media type is `application/epub+zip`, and `epub::validate` reads the container back: title, all three chapter titles in order, a language and a navigation document. |
+| 3 | The plain-text export matches the rendered text | Implemented and locally tested | `crates/domain/src/exports.rs::the_plain_text_export_matches_the_rendered_text` — every paragraph present, no markup surviving, a chapter with no title rendered as `Chapter 2`. |
+| 4 | A format this instance cannot produce is refused before a job exists | Implemented and locally tested | `a_format_with_no_converter_is_refused_with_what_to_install` asserts the refusal *and* the catalogue agree — `state.converters().can_produce(Pdf)` decides which of the two answers is the correct one on this machine — and the install hint is in the message; `an_unknown_format_is_refused_before_a_job_is_created` covers a format that does not exist, with the export list still empty afterwards. |
+| 5 | The privacy notice must be acknowledged | Implemented and locally tested | `the_privacy_notice_must_be_acknowledged` — `422` with the notice text in the refusal, and nothing queued. The notice is returned by the server, so the text a reader reads and the text the server enforces cannot drift. |
+| 6 | An empty export is an error the reader can act on | Implemented and locally tested | `exporting_a_work_with_no_chapters_is_refused` — refused with "no chapters" before any job exists. Spec §13's fourth pitfall. |
+| 7 | A download grant expires and is single use | Implemented and locally tested | `the_download_grant_expires_and_is_single_use` — the token opens the file once from a browser with no session, and a second attempt is `404`; an export with no file cannot mint one. |
+| 8 | A download URL is a capability, not an address | Implemented and locally tested | Only the SHA-256 of the token is stored (`repo::mint_grant`), it lives an hour, and the row it opens carries the format, so a caller holding a link chooses nothing. Expired, spent and never-existed answer identically. |
+| 9 | One reader's export is not another's | Implemented and locally tested | `one_readers_export_is_not_anothers` — a second account gets `404` for the export and never the file, and the owner still can. |
+| 10 | Retention runs, and does not delete what is shared | Implemented and locally tested | `the_retention_sweep_removes_the_export_and_its_output` — a second reference is held on the same blob, the export is aged and the sweep runs; the row is gone and the bytes are still there. `the_sweep_task_is_one_the_worker_knows` pins the task name the CLI queues against the worker's own knowledge of it. |
+| 11 | The interface offers what the server will accept | Implemented and locally tested | `frontend/src/routes/Exports.test.ts` — an unavailable format is shown, disabled, with what to install for it; the action is refused until the notice is ticked; a queued export shows its state rather than looking like nothing happened. |
+| 12 | Offline reading, and what it costs the reader | Implemented and locally tested | `frontend/src/lib/offline.test.ts` (6 tests) pins the eviction rule — oldest first, only as many as must go, a file that cannot fit at all is refused rather than half-stored — and `frontend/static/service-worker.js` keeps the shell, one chapter response (network-first, never `no-store`), and nothing else about the API. The chapter cache is dropped on sign-out unconditionally; the exported files are the reader's and are removed only when they agree. |
+
+**What was not verified, stated rather than implied.** No `epubcheck` is
+available on this machine, so the EPUB container is verified structurally and
+against two independent readers — python's `zipfile` (all CRCs correct,
+`mimetype` first and stored, exactly the right bytes) and `unzip -t` (no errors
+across all nine entries) — plus python's XML parser for well-formedness of every
+part. It was *not* verified against the reference EPUB validator. The converter
+formats were not exercised end to end either: whether this machine can produce a
+PDF at all is discovered at runtime by the tests rather than assumed, and
+`calibre`/`pandoc` were not installed to prove the conversion path.
+
+### Two bugs the database caught
+
+The export row holds a foreign key to its queue row, and both insert orders I
+tried were wrong before the right one worked. The first wrote the export before
+the job existed. The second generated a `JobId` locally and handed it to
+`enqueue`, which mints its own — so the key pointed at a row that was never
+written. The second is the interesting one: the first fix looked correct, and
+only the constraint disagreed. The order is now stated in the code, with the
+reason, because it is not free to change.
+
 ## Known limitations and open risks
 
 1. **PostgreSQL has never been executed.** Every PostgreSQL statement is

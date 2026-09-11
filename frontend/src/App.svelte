@@ -1,9 +1,11 @@
 <script lang="ts">
   import Button from './lib/components/Button.svelte';
+  import { clearCopies, copiesUsage } from './lib/offline';
   import Drawer from './lib/components/Drawer.svelte';
   import Select from './lib/components/Select.svelte';
   import Account from './routes/Account.svelte';
   import AdminJobs from './routes/AdminJobs.svelte';
+  import Exports from './routes/Exports.svelte';
   import History from './routes/History.svelte';
   import Import from './routes/Import.svelte';
   import Library from './routes/Library.svelte';
@@ -37,6 +39,7 @@
     { href: '/search', label: 'Search', primary: true },
     { href: '/library', label: 'Library', primary: true },
     { href: '/import', label: 'Import', primary: true },
+    { href: '/exports', label: 'Exports', primary: false },
     { href: '/write', label: 'Write', primary: true },
     { href: '/community', label: 'Community', primary: false },
     { href: '/notifications', label: 'Notifications', primary: false },
@@ -104,6 +107,29 @@
 
   async function signOut() {
     moreOpen = false;
+    // Spec §13.6: signing out *offers* to remove what this browser is holding.
+    // It is an offer rather than a rule because the copies are the reader's
+    // files, and removing them unasked would be the site deleting something off
+    // someone's device. Cancelling keeps them.
+    try {
+      const { count } = await copiesUsage();
+      if (count > 0) {
+        const remove = window.confirm(
+          `${count} exported ${count === 1 ? 'file is' : 'files are'} kept in this browser for ` +
+            'offline reading. Remove them? They stay on the server either way, and you can ' +
+            'download them again.',
+        );
+        if (remove) await clearCopies();
+      }
+    } catch {
+      // A browser that cannot keep files has nothing to offer about them.
+    }
+    // The chapter cache goes unconditionally, and is not offered: those responses
+    // are the reader's own content that they never chose to keep, and a cached
+    // chapter left behind for whoever uses this browser next is a leak. The
+    // exported files above are different — they *were* chosen, which is why the
+    // reader is asked.
+    navigator.serviceWorker?.controller?.postMessage({ type: 'clear-reads' });
     await session.signOutNow();
   }
 </script>
@@ -226,6 +252,8 @@
     <History />
   {:else if route.id === 'import'}
     <Import />
+  {:else if route.id === 'exports'}
+    <Exports />
   {:else if route.id === 'library'}
     <Library />
   {:else if route.id === 'jobs'}
