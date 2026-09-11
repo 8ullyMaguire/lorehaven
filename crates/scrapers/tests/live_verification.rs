@@ -84,6 +84,7 @@ fn adapter_for(key: &str) -> Box<dyn SourceAdapter> {
         "efiction" => Box::new(sites::efiction::Efiction::new()),
         "royalroad" => Box::new(sites::royalroad::RoyalRoad::new()),
         "syosetu" => Box::new(sites::syosetu::Syosetu::new()),
+        "ficbook" => Box::new(sites::ficbook::Ficbook::new()),
         other => panic!("no owned constructor for {other}"),
     }
 }
@@ -758,5 +759,82 @@ async fn an_operators_robots_answer_decides_whether_wattpads_prose_is_readable()
         compliant.robots_overrides(),
         0,
         "a compliant fetcher counts nothing"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Ficbook: reachable with no escalation at all, so this is the one live test
+// that drives a source through the plain path end to end.
+// ---------------------------------------------------------------------------
+
+/// A real work, read live through the fetcher, prose included.
+///
+/// Ficbook needs no allowance from anybody: its reading pages answer a plain
+/// request, and the only rule it publishes that touches this adapter is
+/// `Disallow: /*?*` — which is why the addresses it builds carry no query, and
+/// why this test passing is also evidence that they do not.
+///
+/// ```text
+/// cargo test -p lorehaven-scrapers --all-features --test live_verification \
+///     -- --ignored --nocapture --test-threads=1 ficbook
+/// ```
+#[tokio::test]
+#[ignore = "live: reaches ficbook.net"]
+async fn ficbook_is_read_plainly_and_its_parts_come_back_whole() {
+    const WORK: &str = "https://ficbook.net/readfic/01899919-f575-76ed-8476-cec2348b02bf";
+
+    let adapter = sites::ficbook::Ficbook::new();
+    let url = Url::parse(WORK).expect("a work address");
+    assert!(adapter.can_handle(&url));
+
+    // 1. The work, under the default policy. Nothing to escalate for.
+    let fetch = fetcher_for("ficbook");
+    let work = adapter
+        .preview(&fetch, &url, None)
+        .await
+        .expect("ficbook answers a plain request");
+    assert_eq!(work.title, "Проклятая река");
+    assert_eq!(work.word_count, Some(77_507));
+    assert_eq!(work.chapters.len(), 24);
+    assert!(!work.tags.is_empty());
+    println!(
+        "preview: {:?} by {:?}, {} parts, {:?} words, {:?}",
+        work.title,
+        work.author_text,
+        work.chapter_count(),
+        work.word_count,
+        work.status
+    );
+
+    // 2. One part, fetched on its own — the `per_chapter_fetch` path, so a
+    //    retry re-reads one part and touches nothing else.
+    let chapter = adapter
+        .fetch_chapter(&fetch, &work, 1, None)
+        .await
+        .expect("the first part is readable");
+    assert_eq!(chapter.ordinal, 1);
+    assert!(
+        chapter.content_html.len() > 5_000,
+        "the first part is {} bytes",
+        chapter.content_html.len()
+    );
+    // The notes are gathered out of the script and numbered where the reader
+    // meets them; their `\u` escapes are decoded rather than stored.
+    assert!(
+        chapter.content_html.contains("<sup>[1]</sup>"),
+        "the first reference is numbered"
+    );
+    assert!(
+        !chapter.content_html.contains("\\u"),
+        "no escape survives into the stored prose"
+    );
+    assert!(
+        !chapter.content_html.contains("class=\"footnote\""),
+        "the empty placeholders do not survive"
+    );
+    println!(
+        "part 1: {:?} — {} bytes, notes gathered",
+        chapter.title,
+        chapter.content_html.len()
     );
 }

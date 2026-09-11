@@ -24,6 +24,7 @@
 pub mod ao3;
 pub mod efiction;
 pub mod ffnet;
+pub mod ficbook;
 pub mod royalroad;
 pub mod syosetu;
 pub mod wattpad;
@@ -42,6 +43,7 @@ pub fn default_registry() -> Registry {
     registry.register(Box::new(efiction::Efiction::new()));
     registry.register(Box::new(ffnet::FanFiction::fanfiction_net()));
     registry.register(Box::new(ffnet::FanFiction::fiction_press()));
+    registry.register(Box::new(ficbook::Ficbook::new()));
     registry.register(Box::new(royalroad::RoyalRoad::new()));
     registry.register(Box::new(syosetu::Syosetu::new()));
     registry.register(Box::new(wattpad::Wattpad::new()));
