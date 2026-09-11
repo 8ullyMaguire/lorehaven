@@ -29,6 +29,13 @@ axum = { version = "0.8", default-features = false, features = [
 ] }
 base64 = "0.22"
 clap = { version = "4", features = ["derive", "env", "wrap_help"] }
+# The EPUB container is a ZIP, and these two are already in the tree
+# transitively (via `sqlx`), so writing the container costs no new dependency
+# tree. `crc32fast` computes the checksum a ZIP entry header requires, and
+# `flate2` deflates the entries — every one except the `mimetype` entry, which
+# the OCF specification requires to be stored uncompressed and first.
+crc32fast = "1.5"
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 # Charset decoding for fetched pages. The importer reads old PHP archives that
 # declare `ISO-8859-1` and emit Windows-1252, and this crate implements the
 # WHATWG alias table that browsers use to resolve exactly that (see
