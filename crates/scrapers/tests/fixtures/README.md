@@ -676,3 +676,110 @@ claims.
 
 No `Crawl-delay` is published, so the fetcher's one-second floor is the pace: a
 site that asked for nothing gets nothing slower than the default.
+
+## scribblehub
+
+| File | Source | Recorded |
+|---|---|---|
+| `story.json` | `/wp-json/fictionapp/v1/stories/2357420` | 2026-09-11 |
+| `chapters.json` | `/wp-json/fictionapp/v1/stories/2357420/chapters` | 2026-09-11 |
+| `chapters-page-2.json` | the same, `?page=2` | 2026-09-11 |
+| `chapters-page-3.json` | the same, `?page=3` | 2026-09-11 |
+| `chapters-page-4.json` | the same, `?page=4` — empty | 2026-09-11 |
+| `story-completed.json` | `/wp-json/fictionapp/v1/stories/2102556` | 2026-09-11 |
+| `chapter-1.html` | `/read/2357420-worlds-cutest-alchemist/chapter/2357479/` | 2026-09-11 |
+| `work.html` | `/series/2357420/worlds-cutest-alchemist/` | 2026-09-11 |
+| `missing-story.json` | `/wp-json/fictionapp/v1/stories/999999999` | 2026-09-11 |
+| `robots.txt` | `https://www.scribblehub.com/robots.txt` | 2026-09-11 |
+
+`chapter-1.html`, `work.html` and `robots.txt` were recorded through the solver,
+because the reading pages and the robots file are behind an interactive
+challenge. The API responses were recorded plainly — see below.
+
+### The wall is not uniform
+
+Measured on 2026-09-11, and the reason this adapter is shaped the way it is:
+
+| Path | Plain | Fingerprint | Solver |
+|---|---|---|---|
+| `/series/{id}/{slug}/` | refused | refused | 33 KB |
+| `/read/.../chapter/{id}/` | refused | refused | ~71 KB |
+| `/wp-json/fictionapp/v1/stories/{id}` | **200** | — | — |
+| `/wp-json/fictionapp/v1/stories/{id}/chapters` | **200** | — | — |
+
+The site's own mobile-app API answers a plain request while every reading page
+needs a driven browser. So the adapter reads the **metadata and the chapter list
+from the API** and the **prose from the reading pages**, and declares
+`Wall::Solver`, because a work cannot be imported without its text.
+
+### What the pages establish
+
+* **The series page shows fifteen chapters of a hundred and thirteen**, in
+  descending order, with a header (`span.cnt_toc`) stating the real size. An
+  adapter built on it would import fifteen chapters and report a hundred and
+  thirteen — a partial import that looks complete. `work.html` is recorded as
+  the evidence for why the adapter does not read it.
+* **The `?toc=N` pagination behind that page cannot be read through the solver.**
+  Three attempts — `/series/2357420/...?toc=1`, `?toc=2`, and `?toc=2#content1`
+  with the site's own fragment — timed out at 62–93 seconds each with *Challenge
+  detected, waiting for it to clear*, while the **same path without a query**
+  solved in about seven. A query string is the whole difference.
+* **The API's chapter list is fifty to a page.** `per_page`, `offset` and
+  `limit` are all ignored — measured, not assumed — and `page=N` is the only
+  thing that moves it. The recorded work arrives as `50 + 50 + 13`; `page=4`
+  returns an empty list rather than an error, which is how the adapter knows it
+  has the end.
+* **The chapters add up to the work's own word count.** The 113 recorded
+  chapters' `wordCount` values sum to exactly `241715`, the story object's
+  `wordCount`. That is the cross-check which proves the recorded pages are the
+  whole list rather than the first page of it, and the adapter refuses when the
+  count it collects disagrees with `chapterCount`.
+* **The site's chapter `number` has gaps.** The recorded work runs `1, 3, 4, 5
+  …` because chapter 2 was deleted, and its last chapter is numbered 115 while
+  being the 113th. The import's ordinal is dense and is what a reader's progress
+  and bookmarks are mapped onto, so the ordinal is the chapter's *position* and
+  the site's number stays where the site puts it — in the chapter title.
+* **The list endpoint carries no prose.** `content` is empty on all 113
+  chapters, which is why the wall has to be declared: the text is only on the
+  reading page.
+* **A missing story is a `404` with a `fa_story_not_found` envelope**, and its
+  `data` is a *status object* (`{"status":404}`), not a payload. Typing `data` as
+  the payload makes the missing-story case a deserialisation failure about an
+  integer where a string was expected — a parse error for a work that simply
+  does not exist. The known fault code becomes `NotFound`; a fault code this
+  build has never seen stays loud.
+* **The status vocabulary is lowercase** — `ongoing` and `completed` are the two
+  recorded values, from the work and from `?status=completed` respectively.
+  `story-completed.json` (`Bloodkin`, 119 chapters) is recorded so the second one
+  is asserted against a real response.
+* **The story object carries no language field.** No language is reported, rather
+  than inferred from the prose.
+* **A reading page states its own address** in `<link rel="canonical">`, which is
+  how the chapter parser knows which chapter it was handed.
+
+### What the site's robots.txt says
+
+```text
+User-agent: *
+Disallow: /wp-admin/
+Allow: /wp-admin/admin-ajax.php
+```
+
+Only one path is disallowed, and nothing this adapter reads is inside it: the
+API lives under `/wp-json/`, the reading pages under `/read/`, the series pages
+under `/series/`.
+
+The file is itself behind the challenge, so the fetcher's plain read of it is
+refused and its rules are recorded as **unknown** — which means the default pace
+rather than no pace. That is the correct behaviour and it is deliberate: reading
+`robots.txt` is one plain request and never escalates, because a rules file
+obtained through a browser we drove would be a rules file obtained by the very
+behaviour it is meant to be consulted about. The solver's copy is what is
+recorded here, and the adapter does not ask for it.
+
+An incidental fact about the solver's contract is worth recording here: asked for
+a **non-HTML** document, Byparr returns Chrome's plaintext viewer wrapping —
+`<html><head><link rel="stylesheet" href="resource://content-accessible/…"`
+around `<pre>`. Nothing reads `robots.txt` through the solver, so nothing is
+affected today, but a source whose *chapter* is served as `text/plain` would
+arrive wrapped and would need unwrapping.

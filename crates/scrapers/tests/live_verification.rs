@@ -838,3 +838,111 @@ async fn ficbook_is_read_plainly_and_its_parts_come_back_whole() {
         chapter.content_html.len()
     );
 }
+
+// ---------------------------------------------------------------------------
+// Scribble Hub: the metadata path needs nothing, the prose path needs a solver.
+// ---------------------------------------------------------------------------
+
+/// The wall is not uniform, and this is what pins that down.
+///
+/// Scribble Hub's own app API answers a plain request while every reading page
+/// answers an interactive challenge. The adapter is built on that difference —
+/// the chapter *list* comes from the API and the *text* from the reading pages —
+/// so this test asserts both halves separately. If the API ever starts
+/// challenging us, the adapter loses the list and this says so; if the reading
+/// pages ever stop challenging us, the declared wall is wrong and this says so
+/// too.
+///
+/// ```text
+/// cargo test -p lorehaven-scrapers --all-features --test live_verification \
+///     -- --ignored --nocapture --test-threads=1 scribblehub
+/// ```
+#[tokio::test]
+#[ignore = "live: reaches scribblehub.com"]
+async fn scribblehubs_api_answers_plainly_and_its_prose_needs_the_solver() {
+    const STORY: &str = "https://www.scribblehub.com/series/2357420/worlds-cutest-alchemist/";
+    let hosts: Vec<String> = ["scribblehub.com"]
+        .iter()
+        .map(|h| (*h).to_owned())
+        .collect();
+    let adapter = sites::scribblehub::ScribbleHub::new();
+
+    // 1. The API, under the plain policy. No escalation: if this ever needs one,
+    //    the adapter's whole shape has to change, and a silent failure here
+    //    would look like a parser bug instead.
+    let plain = SafeFetcher::new(hosts.clone(), live_policy(Unblock::none()));
+    let story = adapter
+        .parse_story(
+            &plain
+                .get(&adapter.api_story("2357420"))
+                .await
+                .expect("the site's own API answers a plain request")
+                .body,
+            "2357420",
+        )
+        .expect("the story object parses");
+    println!(
+        "story: {:?} by {:?}, {} chapters, {} words, {:?}",
+        story.title, story.author.display_name, story.chapter_count, story.word_count, story.status
+    );
+    assert_eq!(story.chapter_count, 113);
+
+    // 2. The reading page, under the plain policy: refused. Asserting the
+    //    refusal is what makes the solver half meaningful — a success here would
+    //    mean the wall is gone and the declared one is wrong.
+    let page = adapter.chapter_url("2357420", &story.slug, "2357479");
+    assert!(
+        matches!(
+            plain.get(&page).await,
+            Err(SourceError::Blocked) | Err(SourceError::Refused(_))
+        ),
+        "a plain client should not be served a reading page"
+    );
+
+    // 3. And through the solver configured from the environment.
+    let Some(endpoint) = std::env::var("LOREHAVEN_SOLVER_URL").ok() else {
+        println!("skipped the solver half: set LOREHAVEN_SOLVER_URL to run it");
+        return;
+    };
+    let through_solver = SafeFetcher::new(
+        hosts,
+        live_policy(Unblock::none().with_solver(SolverConfig::new(&endpoint))),
+    );
+
+    let story = adapter
+        .parse_story(
+            &through_solver
+                .get(&adapter.api_story("2357420"))
+                .await
+                .expect("the API is still reachable")
+                .body,
+            "2357420",
+        )
+        .unwrap();
+
+    // The whole work, through the real preview path: the list from the API, and
+    // the count checked against the story's own.
+    let work = adapter
+        .preview(&through_solver, &Url::parse(STORY).unwrap(), None)
+        .await
+        .expect("a Scribble Hub work previews");
+    assert_eq!(work.chapters.len(), 113);
+    assert_eq!(work.word_count, Some(241_715));
+
+    let chapter = adapter
+        .fetch_chapter(&through_solver, &work, 1, None)
+        .await
+        .expect("the first chapter is readable through the solver");
+    assert_eq!(chapter.ordinal, 1);
+    assert!(
+        chapter.content_html.len() > 100,
+        "the first chapter is {} bytes",
+        chapter.content_html.len()
+    );
+    println!(
+        "through the solver: {}/{} chapters listed, chapter 1 is {} bytes",
+        work.chapters.len(),
+        story.chapter_count,
+        chapter.content_html.len()
+    );
+}

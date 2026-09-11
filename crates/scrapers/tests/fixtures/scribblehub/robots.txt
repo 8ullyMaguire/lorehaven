@@ -1,0 +1,6 @@
+<html><head><link rel="stylesheet" href="resource://content-accessible/plaintext.css"></head><body><pre>User-agent: *
+Disallow: /wp-admin/
+Allow: /wp-admin/admin-ajax.php
+
+User-agent: AmazonAdBot
+Disallow:</pre></body></html>
