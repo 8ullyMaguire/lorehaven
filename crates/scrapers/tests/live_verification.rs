@@ -21,11 +21,21 @@
 //! **`--test-threads=1` is not optional.** These are crawls of real sites, and the
 //! crate they test exists partly to be polite to those sites. Run in parallel they
 //! defeat that: eight concurrent crawls from one address is precisely the behaviour
-//! the pacing rules are for, and the cost is not only impoliteness — Cloudflare's
-//! edge rate-limits per address, so one test's traffic gets another test
-//! challenged. That was measured rather than assumed: the fingerprint test below
-//! passes consistently alone and under `--test-threads=1`, and failed once in a
-//! parallel run, with a real challenge rather than a broken assertion.
+//! the pacing rules exist to prevent, and the cost is not only impoliteness.
+//!
+//! Measured, across three parallel runs and three serial ones:
+//!
+//! | Test | Alone | In a parallel run |
+//! |---|---|---|
+//! | `archive_of_our_own_still_reads` | `ok` in 2.21s | once exceeded the 60-second policy timeout and failed |
+//! | `a_challenged_source_is_readable_through_a_browser_fingerprint` | `ok` 3/3 | once refused with `Blocked` — the challenge wall — while passing in another |
+//! | the whole suite | 8/8 in about 54s | never clean |
+//!
+//! So the victim varies and the cause is the same: a test that takes two seconds
+//! alone took over sixty under load, and an attempt that is normally served came
+//! back challenged. Both are contention — the machine and the source's edge both
+//! see eight crawls where they expect one — and neither is a flaky assertion. A
+//! failure here is a reason to re-run serially, not to edit a parser.
 //!
 //! # What they assert
 //!
