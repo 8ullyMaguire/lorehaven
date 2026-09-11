@@ -1534,6 +1534,129 @@ pub fn decode_body(body: &[u8], declared_charset: Option<&str>) -> String {
     text.into_owned()
 }
 
+/// The most bytes a compressed body may expand to.
+///
+/// A ceiling on memory, like [`FetchPolicy::max_bytes`], and enforced the same
+/// way — while reading rather than after. A body that expands past this is
+/// truncated instead of allocated, so a decompression bomb costs this much and
+/// no more. Truncation is visible downstream as a parse failure, which is the
+/// right outcome: a page too large to hold is a page this importer cannot read,
+/// and saying so beats both the allocation and a silent half-page.
+const MAX_DECOMPRESSED_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Decode a response body: decompress it, then work out its charset.
+///
+/// # Why decompression belongs here
+///
+/// A source may compress a response whether or not the request asked for it.
+/// `wattpad.com`'s chapter endpoint answers `content-encoding: gzip` to an
+/// explicit `Accept-Encoding: identity` — verified 2026-09-11 — and a fetcher
+/// that passed those bytes on would hand an adapter gzip for a chapter body.
+/// Nothing fails: the bytes are stored, the parse finds no prose, and the import
+/// reports a chapter that is empty. It is the same class of silent corruption as
+/// a mis-read charset, and it is handled in the same place for the same reason.
+///
+/// # What is not handled
+///
+/// `br` and `zstd` are not decoded: neither has been observed from a source an
+/// adapter reads, and adding a decompressor for one that has not is a dependency
+/// bought with a guess. An encoding that arrives anyway is **named in a warning**
+/// rather than passed off as text, because the alternative is exactly the silent
+/// corruption this function exists to prevent.
+#[must_use]
+pub fn decode_response_body(
+    body: &[u8],
+    declared_charset: Option<&str>,
+    content_encoding: Option<&str>,
+) -> String {
+    let Some(encoding) = content_encoding else {
+        return decode_body(body, declared_charset);
+    };
+
+    // A list, in the order the encodings were applied — so undoing them means
+    // walking it backwards. `Content-Encoding: gzip` is the only shape a source
+    // here has sent; the loop costs nothing and does not pretend otherwise.
+    let encodings: Vec<String> = encoding
+        .split(',')
+        .map(|part| part.trim().to_ascii_lowercase())
+        .filter(|part| !part.is_empty())
+        .collect();
+
+    let mut current: Vec<u8> = body.to_vec();
+    for name in encodings.iter().rev() {
+        match name.as_str() {
+            // `identity` is the no-op encoding, and a source that names it must
+            // not be treated as though it had compressed.
+            "identity" => {}
+            "gzip" | "x-gzip" => match inflate_gzip(&current) {
+                Ok(plain) => current = plain,
+                Err(why) => {
+                    tracing::warn!(
+                        encoding = %name,
+                        %why,
+                        "a response declared a compression this fetcher could not undo"
+                    );
+                    break;
+                }
+            },
+            "deflate" => match inflate_deflate(&current) {
+                Ok(plain) => current = plain,
+                Err(why) => {
+                    tracing::warn!(
+                        encoding = %name,
+                        %why,
+                        "a response declared a compression this fetcher could not undo"
+                    );
+                    break;
+                }
+            },
+            other => {
+                tracing::warn!(
+                    encoding = %other,
+                    "a response used a compression this fetcher does not decode; the bytes are \
+                     being decoded as text, which will not be the page"
+                );
+                break;
+            }
+        }
+    }
+
+    decode_body(&current, declared_charset)
+}
+
+/// Gunzip, bounded.
+fn inflate_gzip(body: &[u8]) -> Result<Vec<u8>, std::io::Error> {
+    use std::io::Read;
+    let mut out = Vec::with_capacity(body.len().saturating_mul(4));
+    flate2::read::GzDecoder::new(body)
+        .take(MAX_DECOMPRESSED_BYTES)
+        .read_to_end(&mut out)?;
+    Ok(out)
+}
+
+/// Inflate a raw or zlib-wrapped deflate stream.
+///
+/// Both, because `Content-Encoding: deflate` is specified as zlib and served as
+/// raw deflate often enough that every browser accepts either. Trying zlib first
+/// matches what they do.
+fn inflate_deflate(body: &[u8]) -> Result<Vec<u8>, std::io::Error> {
+    use std::io::Read;
+    let mut out = Vec::with_capacity(body.len().saturating_mul(4));
+    if flate2::read::ZlibDecoder::new(body)
+        .take(MAX_DECOMPRESSED_BYTES)
+        .read_to_end(&mut out)
+        .is_ok()
+        && !out.is_empty()
+    {
+        return Ok(out);
+    }
+    out.clear();
+    flate2::read::DeflateDecoder::new(body)
+        .take(MAX_DECOMPRESSED_BYTES)
+        .read_to_end(&mut out)?;
+    Ok(out)
+}
+
 /// How much of a body to search for a `<meta>` charset declaration.
 ///
 /// Every archive in this family declares its charset inside the first kilobyte —
@@ -1727,6 +1850,88 @@ mod tests {
     }
 
     #[test]
+    fn a_gzipped_body_is_undone_before_it_is_read_as_text() {
+        // Measured: `wattpad.com`'s part-text endpoint answers
+        // `content-encoding: gzip` to an explicit `Accept-Encoding: identity`.
+        // A fetcher that passed those bytes on would store a chapter body as
+        // mojibake and report success.
+        use std::io::Write;
+
+        let page = "<p>Abby was the first to greet them.</p>";
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(page.as_bytes()).expect("compress");
+        let compressed = encoder.finish().expect("finish");
+
+        assert_ne!(compressed, page.as_bytes(), "the fixture must compress");
+        assert_eq!(
+            decode_response_body(&compressed, Some("text/plain; charset=UTF-8"), Some("gzip")),
+            page
+        );
+        // And the same bytes with no encoding declared are the corruption this
+        // test exists to catch — so the assertion above is not vacuous.
+        assert_ne!(
+            decode_response_body(&compressed, Some("text/plain; charset=UTF-8"), None),
+            page
+        );
+    }
+
+    #[test]
+    fn an_uncompressed_body_is_left_alone_whatever_it_declares() {
+        let page = b"<p>Plain prose.</p>";
+        let expected = "<p>Plain prose.</p>";
+
+        // `identity` is the no-op encoding, and a source that names it must not
+        // be treated as though it had compressed.
+        assert_eq!(
+            decode_response_body(page, Some("text/html; charset=UTF-8"), Some("identity")),
+            expected
+        );
+        // And the common case: no encoding header at all.
+        assert_eq!(
+            decode_response_body(page, Some("text/html; charset=UTF-8"), None),
+            expected
+        );
+    }
+
+    #[test]
+    fn a_declared_compression_that_cannot_be_undone_does_not_take_the_page_with_it() {
+        // An unknown encoding must not turn a readable body into a panic or into
+        // nothing. It is passed through as text and named in a warning; the
+        // assertion here is only that the call still answers.
+        let body = b"<p>Not actually compressed.</p>";
+        let text = decode_response_body(body, Some("text/html; charset=UTF-8"), Some("br"));
+        assert!(!text.is_empty());
+
+        // And a body that *claims* gzip but is not gzip is handled the same way
+        // rather than panicking on a decode error.
+        let text = decode_response_body(body, Some("text/html; charset=UTF-8"), Some("gzip"));
+        assert!(!text.is_empty(), "a failed decode still returns something");
+    }
+
+    #[test]
+    fn a_chain_of_encodings_is_undone_in_reverse() {
+        // The encodings are listed in the order they were applied, so undoing
+        // them means walking the list backwards. Asserted with a real chain
+        // rather than trusted, because getting the order wrong would decode
+        // something and produce text that looks plausible.
+        use std::io::Write;
+
+        let page = "<p>Twice through.</p>";
+        let mut once = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        once.write_all(page.as_bytes()).expect("compress");
+        let once = once.finish().expect("finish");
+        let mut twice = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        twice.write_all(&once).expect("compress");
+        let twice = twice.finish().expect("finish");
+
+        assert_eq!(
+            decode_response_body(&twice, None, Some("gzip, gzip")),
+            page,
+            "the list is undone outside-in"
+        );
+    }
+
+    #[test]
     fn compliance_is_the_default_policy() {
         // An instance does not have to be told to read a host's rules. This is
         // the assertion that fails if somebody ever flips the default.
@@ -1743,8 +1948,8 @@ mod tests {
         );
     }
     use super::{
-        charset_of_content_type, decode_body, describe_status, robots_gate, sniff_charset,
-        Escalation, RobotsGate, SafeFetcher, Step, Unblock,
+        charset_of_content_type, decode_body, decode_response_body, describe_status, robots_gate,
+        sniff_charset, Escalation, RobotsGate, SafeFetcher, Step, Unblock,
     };
     use crate::engine::Impersonation;
     use crate::solver::SolverConfig;

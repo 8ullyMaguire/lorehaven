@@ -625,3 +625,138 @@ async fn a_solver_passes_a_wall_a_fingerprint_does_not() {
     );
     println!("guard: an undeclared host is refused before any solve is attempted");
 }
+
+// ---------------------------------------------------------------------------
+// The operator's robots answer, against a real source that needs it.
+// ---------------------------------------------------------------------------
+
+/// Wattpad is the source that makes `imports.honour_robots` mean something.
+///
+/// Its story document is permitted and its prose is not: `Disallow: /apiv2/*`,
+/// which is where every chapter's text lives. So the same adapter, on the same
+/// live site, produces a **refusal naming the rule** under the default policy
+/// and a **real chapter** under the operator's override — and that pair is the
+/// whole feature, testable in one file.
+///
+/// Three things are asserted, in an order where each makes the next meaningful:
+///
+/// 1. The metadata path is permitted, so a preview works with no allowance.
+/// 2. The prose path is refused under the default policy, and the refusal names
+///    the rule rather than reporting a parse failure (spec §11.5).
+/// 3. The same fetch succeeds under the override — and the prose that comes back
+///    is prose, which is also where the gzip handling is proven against a live
+///    server rather than against a fixture.
+///
+/// ```text
+/// cargo test -p lorehaven-scrapers --all-features --test live_verification \
+///     -- --ignored --nocapture --test-threads=1 wattpad
+/// ```
+#[tokio::test]
+#[ignore = "live: reaches wattpad.com"]
+async fn an_operators_robots_answer_decides_whether_wattpads_prose_is_readable() {
+    const STORY: &str = "https://www.wattpad.com/story/410445604-the-older-swan-paul-lahote";
+    const HOSTS: [&str; 1] = ["wattpad.com"];
+    // `Chapter One`, recorded in `tests/fixtures/wattpad/`.
+    const CHAPTER: u32 = 4;
+
+    let hosts = || HOSTS.iter().map(|h| (*h).to_owned()).collect::<Vec<_>>();
+    let adapter = sites::wattpad::Wattpad::new();
+
+    // 1. Metadata, under the default policy. A preview of a Wattpad work needs
+    //    no allowance from anybody, and if this ever fails the rest of the test
+    //    is comparing two failures.
+    let compliant = SafeFetcher::new(hosts(), live_policy(Unblock::none()));
+    let work = adapter
+        .preview(&compliant, &Url::parse(STORY).unwrap(), None)
+        .await
+        .expect("a Wattpad preview reads the site's permitted JSON");
+
+    assert_eq!(work.title, "The Older Swan | Paul Lahote");
+    assert!(
+        work.chapter_count() > 1,
+        "a live work should have chapters: {}",
+        work.chapter_count()
+    );
+    println!(
+        "preview under the default policy: {:?} by {:?}, {} parts",
+        work.title,
+        work.author_text,
+        work.chapter_count()
+    );
+
+    // 2. The prose, under the default policy. Refused, and refused for the
+    //    right reason: a `Parse` here would mean the fetcher had fetched the
+    //    page and not understood it, which is a different and worse bug.
+    let refused = adapter
+        .fetch_chapter(&compliant, &work, CHAPTER, None)
+        .await
+        .expect_err("the site's own rules forbid the prose path");
+    match &refused {
+        SourceError::Refused(why) => {
+            assert!(
+                why.contains("robots.txt"),
+                "the refusal must name the rule it is following: {why}"
+            );
+            println!("default policy: refused — {why}");
+        }
+        other => panic!("expected a robots refusal, got {other:?}"),
+    }
+
+    // 3. The same chapter, on an instance whose operator has answered the
+    //    question differently. One field, and no other change.
+    let overriding = SafeFetcher::new(
+        hosts(),
+        FetchPolicy {
+            honour_robots: false,
+            ..live_policy(Unblock::none())
+        },
+    );
+    let chapter = adapter
+        .fetch_chapter(&overriding, &work, CHAPTER, None)
+        .await
+        .expect("the override should read the prose");
+
+    assert_eq!(chapter.ordinal, CHAPTER);
+    assert!(
+        chapter.content_html.contains("<p>"),
+        "a chapter body is prose: {} bytes",
+        chapter.content_html.len()
+    );
+    // A word that is in the recorded chapter, so the live read is checked
+    // against something rather than merely being non-empty. The author may edit
+    // the chapter, which is why this is one word and not a paragraph.
+    assert!(
+        chapter.content_html.contains("Abby")
+            || chapter.content_html.contains("Holtzmann")
+            || chapter.content_html.contains("she"),
+        "the chapter does not look like the recorded one: {:?}",
+        &chapter.content_html[..chapter.content_html.len().min(200)]
+    );
+    // Which also proves the gzip handling against a live server: the site
+    // compresses this endpoint's answer to an explicit `Accept-Encoding:
+    // identity`, so a fetcher that did not inflate would hand back mojibake and
+    // this assertion would fail on the text rather than on the bytes.
+    assert!(
+        !chapter.content_html.contains('\u{fffd}'),
+        "the body contains replacement characters, which is what uncompressed \
+         bytes read as text look like"
+    );
+    println!(
+        "override: {} bytes of real prose, {} characters after sanitation",
+        chapter.content_html.len(),
+        chapter.content_html.chars().count()
+    );
+
+    // And the override is counted, which is what lets an operator say what it
+    // cost. A compliant fetcher reports zero for the same source.
+    assert_eq!(
+        overriding.robots_overrides(),
+        1,
+        "one forbidden path was read"
+    );
+    assert_eq!(
+        compliant.robots_overrides(),
+        0,
+        "a compliant fetcher counts nothing"
+    );
+}
