@@ -135,14 +135,25 @@ code alone.
 The board set is not yet chosen. It is one adapter for the family, on the eFiction
 pattern: pick the boards by robot's-rule survey first, as that family did.
 
-## 3. `M6-10` — deliberately not built
+## 3. Deliberately not built
 
-Approved preservation batches stay in **Milestone 17**, behind a documented
-permission basis, the operator role and a dry-run report (spec §14.5). M6 shipped
-the machinery they will use and nothing that could be mistaken for the
-authorisation: the destination field exists and accepts only the reader's own
-library. `M6-10` is `unsupported` in `docs/requirements.csv` and should stay there
-until M17 does that work.
+**`M6-10` — approved preservation batches.** These stay in **Milestone 17**,
+behind a documented permission basis, the operator role and a dry-run report
+(spec §14.5). M6 shipped the machinery they will use and nothing that could be
+mistaken for the authorisation: the destination field exists and accepts only the
+reader's own library. `M6-10` is `unsupported` in `docs/requirements.csv` and
+should stay there until M17 does that work.
+
+**`M6-13` — import result quality.** Added to the spec as §11.14 on 2026-09-11,
+after M6 closed, by folding in the one idea worth taking from FicNexus's scraper
+layer. §11.8 grades the *source* and this grades the *result*; M6 built the first
+and not the second. What is missing is a classifier over fetched metadata —
+accepted, rejected with a reason, or held for a person — a zero word count being
+held rather than rejected, and the reason recorded on the job report. Nothing in
+M6's code contradicts it, and the fixture seam (`preview_from_html`) is where its
+tests belong, so it is a small piece of work rather than a reshaping. It stays
+`unsupported` until somebody builds it, and it is written down here so that the
+gap is a decision rather than an oversight.
 
 ## 4. Verification gaps to close, in the order they matter
 

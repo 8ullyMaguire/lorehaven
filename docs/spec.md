@@ -1460,6 +1460,12 @@ Optional capability interfaces for bibliography enumeration, update checking, so
 
 Capability absence must be visible. Adapters use the shared safe fetcher.
 
+**The transport is handed in, never held.** An adapter receives its fetcher for the call it is making (`preview`, `fetch_chapters`, `fetch_chapter`) and constructs, owns and configures no client of its own: no transport field, no constructor taking an endpoint or a timeout, no route to a host its `hosts()` does not name.
+
+This is a requirement rather than a style preference, because the alternative fails quietly. An adapter that built its own client would still compile, still satisfy the trait and still pass its own parser tests, while bypassing every guard in §11.5 — SSRF refusal, robots compliance, per-domain pacing, credential handling — and nothing in review would show it, because the bypass sits inside a call that looks ordinary. Handing the fetcher in makes those guards unreachable by construction rather than by discipline.
+
+It is also what makes §11.7's fixtures possible. `preview_from_html` and `chapters_from_html` parse a recorded page with no transport in sight, so a parser test is an offline test and stays one.
+
 ## 11.2 Destinations
 
 Explicit choice:
@@ -1647,6 +1653,27 @@ Cross-posting is a manual per-work action. Automatic cross-posting of every publ
 
 Never overwrite imported copies destructively. Create a new snapshot and preserve notes, shelves, bookmarks, ratings, and progress where mappable. Show review notices for removed, reordered, or substantially changed chapters.
 
+## 11.14 Import result quality
+
+§11.8 grades the **source**; this grades the **result**, and the two must not be conflated. A source that answers every request promptly while every answer is a challenge page is `healthy` by §11.8 and useless in fact. Health says whether to keep asking; quality says whether what came back is a work.
+
+Every fetched candidate is classified before it is offered:
+
+- **accepted** — a real title, a real author, a non-zero length.
+- **rejected** — certainly not a work: an empty or placeholder title or author, or canonical filler text in a metadata field. A rejection carries its reason, and the candidate is never imported silently.
+- **held** — no confident call could be made. Held for a person rather than deleted.
+
+A zero word count is **held, not rejected**. A real work with no counted words exists, and a rule that called it junk would lose it without trace.
+
+Norms:
+
+- Classification is a pure function of the fetched metadata, so it is testable without a network and answers identically in the preview, the import and the update check.
+- The default is *reject the obvious junk, hold the rest*: a rejected candidate is a reason shown to whoever asked, and a held one waits for a decision.
+- A rejection is never an outage. One unreadable page does not trip §11.8's circuit breaker, does not mark the source degraded, and does not abandon the other candidates in the same import.
+- The reason is recorded on the job's report beside the candidate's URL, so an operator sees what was refused and why rather than a count.
+- Quality never overrides eligibility (§7.6). A readable, eligible work is imported whether or not it looks impressive, and an ineligible one is refused however immaculate it looks.
+- An adapter may contribute source-specific evidence — a marker the site itself uses for an unposted or withdrawn work — and the shared classification remains the floor beneath it. Evidence may harden a rejection; it may not turn a rejection into an acceptance.
+
 ## Acceptance
 
 - Repeat imports avoid accidental duplicates.
@@ -1661,6 +1688,7 @@ Never overwrite imported copies destructively. Create a new snapshot and preserv
 - Preservation dry runs do not publish anything.
 - Author watches respect rate limits and can be paused.
 - Cross-posting requires explicit destination authentication.
+- An unreadable page is a rejected candidate carrying its reason, not a degraded source and not a lost import.
 
 ---
 
@@ -3222,7 +3250,22 @@ Cover images use content-addressed storage, permission checks, and size limits.
 
 Everything here is deferred. What this section fixes is the shape: identity, provenance and permission travel with federated records, and no instance's policy, moderation decision or canonicalization is overridden by a peer's.
 
-## Acceptance
+## 23.11 Compatibility surfaces
+
+None ships, and this section fixes the shape for the same reason §23.10 does: so that the first one to be wanted is built as a surface with a boundary rather than as a second API quietly growing inside the first.
+
+A compatibility surface is an interface that exists to look like something else — another service's API, so that a client written for it can be pointed here, or a retiring instance's interface, so that its readers can be moved. This instance has no such clients to keep working, which makes one a liability rather than a courtesy: it pins this project to a shape its own design did not choose, and that shape then has to be carried forward.
+
+If one is ever needed, it must take this shape:
+
+- **Separate, and named as such.** Its own route prefix, its own handler module, its own documentation. It is never this application's API wearing a different hat, and it never changes §3.3's envelope: a caller wanting a legacy payload shape gets it on the legacy prefix and nowhere else.
+- **Provenance-marked.** Every response says which surface answered, so a client can tell the emulation from the real interface and a reader is never shown a number this instance did not compute.
+- **Contract-pinned by test.** Whatever is being reproduced — an identifier derivation, a field mapping, a payload shape, a slug — is pinned by a test that reproduces the original algorithm, not by a comment asserting equivalence.
+- **Incompatibilities documented as known.** Differences are listed where the surface lives and are part of that surface's specification rather than defects for a user to discover. A surface that is faithful except for the parts it names is usable; one that is silently unfaithful is a trap.
+- **No privileged path.** It passes the same authorization, eligibility, privacy and rate-limit checks as any other request (§23.1). Compatibility is not an exemption, and standing in for another service does not make its callers trusted.
+- **Deletable.** Nothing in the instance depends on it, so removing it removes the surface and nothing else.
+
+An instance may decline to run any compatibility surface. The default is that none is configured, and an instance that runs none is complete rather than degraded.
 
 - API examples execute against test instances.
 - Token revocation affects bots promptly.
@@ -3234,6 +3277,7 @@ Everything here is deferred. What this section fixes is the shape: identity, pro
 - Sharing cards render for public eligible works only.
 - Natural-language search shows parsed AST before execution.
 - Sitemap excludes private and restricted content.
+- A compatibility surface, where configured, answers only on its own prefix, carries its documented incompatibilities, and passes the same checks as any other request.
 
 ---
 
@@ -3764,6 +3808,8 @@ The tutorial, contextual help, API documentation, and operator documentation des
 - **Automatic deletion of dormant accounts.** Dormancy changes quota and ends credentials; it never removes what a person wrote.
 - **A card or preview that reveals a work to someone who may not read it.**
 - **Media hosting as a per-work decision.** "This instance does not host media" and "this media is a work on this instance" must both be expressible, and only an instance-level policy expresses both.
+- **A compatibility surface for another service's API by default.** None ships. If an instance ever needs one, §23.11 fixes its shape: a separate prefix, provenance-marked, pinned by tests, with its incompatibilities documented and no privileged path.
+- **Treating an unreadable page as an outage.** §11.14 separates a source's health from the quality of what it returned; one challenge page is a rejected candidate with a reason, not a degraded source.
 
 ## 28.11 Gamification
 
