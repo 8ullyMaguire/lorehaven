@@ -26,6 +26,7 @@ pub mod efiction;
 pub mod ffnet;
 pub mod royalroad;
 pub mod syosetu;
+pub mod wattpad;
 
 use crate::{Registry, SourceAdapter};
 
@@ -43,6 +44,7 @@ pub fn default_registry() -> Registry {
     registry.register(Box::new(ffnet::FanFiction::fiction_press()));
     registry.register(Box::new(royalroad::RoyalRoad::new()));
     registry.register(Box::new(syosetu::Syosetu::new()));
+    registry.register(Box::new(wattpad::Wattpad::new()));
     // An adapter that cannot read anything must not appear in the catalogue: a
     // source listed as available and answering "not implemented" is worse than
     // one that is absent, because the first wastes a reader's time and the

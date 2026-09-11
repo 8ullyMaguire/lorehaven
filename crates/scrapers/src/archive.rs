@@ -210,6 +210,14 @@ impl ArchiveClient {
                 .get(reqwest::header::CONTENT_TYPE)
                 .and_then(|v| v.to_str().ok())
                 .map(str::to_owned);
+            // An archived copy is served by the archive rather than by the
+            // source, so it may be compressed on its own account. Undone here
+            // for the same reason the live path undoes it.
+            let content_encoding = response
+                .headers()
+                .get(reqwest::header::CONTENT_ENCODING)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned);
             let bytes = response
                 .bytes()
                 .await
@@ -219,7 +227,11 @@ impl ArchiveClient {
                 // The URL asked for, so an adapter storing a canonical URL stores
                 // the work's real address and not the archive's.
                 final_url: url.to_owned(),
-                body: crate::safety::decode_body(&bytes, content_type.as_deref()),
+                body: crate::safety::decode_response_body(
+                    &bytes,
+                    content_type.as_deref(),
+                    content_encoding.as_deref(),
+                ),
                 content_type,
                 // An archived page carries the archive's validators, not the
                 // source's. Reusing them for a conditional request against the live

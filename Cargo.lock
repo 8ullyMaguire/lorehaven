@@ -1565,6 +1565,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "encoding_rs",
+ "flate2",
  "primp",
  "regex-lite",
  "reqwest",

@@ -237,6 +237,7 @@ impl Engine {
                     return Ok(parts.into_reply(String::new()));
                 }
                 let charset = parts.charset.clone();
+                let content_encoding = parts.content_encoding.clone();
                 let mut guard = BodyGuard::new(max_bytes);
                 while let Some(chunk) = response
                     .chunk()
@@ -245,7 +246,7 @@ impl Engine {
                 {
                     guard.push(&chunk)?;
                 }
-                Ok(parts.into_reply(guard.finish(charset.as_deref())))
+                Ok(parts.into_reply(guard.finish(charset.as_deref(), content_encoding.as_deref())))
             }
             #[cfg(feature = "cloudflare-impersonation")]
             Self::Impersonating(client) => {
@@ -263,6 +264,7 @@ impl Engine {
                     return Ok(parts.into_reply(String::new()));
                 }
                 let charset = parts.charset.clone();
+                let content_encoding = parts.content_encoding.clone();
                 let mut guard = BodyGuard::new(max_bytes);
                 while let Some(chunk) = response
                     .chunk()
@@ -271,7 +273,7 @@ impl Engine {
                 {
                     guard.push(&chunk)?;
                 }
-                Ok(parts.into_reply(guard.finish(charset.as_deref())))
+                Ok(parts.into_reply(guard.finish(charset.as_deref(), content_encoding.as_deref())))
             }
         }
     }
@@ -297,6 +299,12 @@ struct ReplyParts {
     last_modified: Option<String>,
     retry_after: Option<String>,
     charset: Option<String>,
+    /// The `Content-Encoding` the source sent, if any.
+    ///
+    /// Collected because a source may compress whether or not the request asked,
+    /// and the body must be undone before it is read as text. See
+    /// [`crate::safety::decode_response_body`].
+    content_encoding: Option<String>,
     diagnostics: Vec<(&'static str, String)>,
 }
 
@@ -328,6 +336,7 @@ impl ReplyParts {
             last_modified: get("last-modified"),
             retry_after: get("retry-after"),
             charset,
+            content_encoding: get("content-encoding"),
             diagnostics,
         }
     }
@@ -380,8 +389,8 @@ impl BodyGuard {
         Ok(())
     }
 
-    fn finish(self, charset: Option<&str>) -> String {
-        crate::safety::decode_body(&self.collected, charset)
+    fn finish(self, charset: Option<&str>, content_encoding: Option<&str>) -> String {
+        crate::safety::decode_response_body(&self.collected, charset, content_encoding)
     }
 }
 

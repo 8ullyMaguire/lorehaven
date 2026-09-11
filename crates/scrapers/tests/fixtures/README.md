@@ -487,3 +487,109 @@ content="NOARCHIVE">`), which is the sibling difference again in one more place.
 That is a directive about search-engine caches rather than about a reader keeping a
 copy of a work they are reading, and it is recorded here rather than resolved,
 because an instance's operator is the one who decides what their instance stores.
+
+## wattpad
+
+| File | Source | Recorded |
+|---|---|---|
+| `story.json` | `https://www.wattpad.com/api/v3/stories/410445604` | 2026-09-11 |
+| `part-text.html` | `https://www.wattpad.com/apiv2/?m=storytext&id=1623966332&page=` | 2026-09-11 |
+| `part-text.html.gz` | the same response, **as the site sent it** (`content-encoding: gzip`) | 2026-09-11 |
+| `part-empty.html` | `https://www.wattpad.com/apiv2/?m=storytext&id=1623782492&page=` (the `Photo Gallery` part) | 2026-09-11 |
+| `story-page.html` | `https://www.wattpad.com/story/410445604-the-older-swan-paul-lahote` | 2026-09-11 |
+| `part-page.html` | `https://www.wattpad.com/1623966332-…-chapter-one` | 2026-09-11 |
+| `robots.txt` | `https://www.wattpad.com/robots.txt` | 2026-09-11 |
+| `missing-story.json` | `https://www.wattpad.com/api/v3/stories/999999999999` (`400`) | 2026-09-11 |
+| `missing-story.html` | `https://www.wattpad.com/story/999999999999-definitely-not-real` (`404`) | 2026-09-11 |
+
+`The Older Swan | Paul Lahote` — 31 parts, 13 tags, ongoing — is recorded because
+it is the shape that made this adapter's design questions concrete: parts that are
+not prose, a word count that does not exist, and a metadata path and a prose path
+that the site's own `robots.txt` treats differently.
+
+### The two halves are on two paths, and only one is permitted
+
+`Disallow: /apiv2/*` is the line that matters. The story document at
+`/api/v3/stories/{id}` is on none of the disallowed prefixes and answers a plain
+client, so **a preview of a Wattpad work needs no allowance from anybody**. The
+prose at `/apiv2/?m=storytext&id={part}&page=` is disallowed by name, so **every
+chapter body is one the site has asked us not to read**.
+
+That is not a defect in the adapter and it is not worked around here. Under the
+default configuration the shared fetcher refuses the chapter fetch with a message
+naming the rule, which is what spec §11.5 asks for; under `imports.honour_robots
+= false` — an operator's own decision, on their own instance — the same code reads
+it with no change to the adapter. `tests/live_verification.rs` asserts both
+outcomes against the live site in one test, because a pair is what makes either
+half mean anything.
+
+The stories themselves are not behind a challenge: a plain client was served all
+of these, so this source needs no solver and no fingerprint. Its wall is its
+`robots.txt` and nothing else.
+
+### One request is a whole chapter
+
+The prose endpoint takes a `page` parameter and the reader app uses it to split a
+part across screens. Measured on 2026-09-11 against two parts: **`page=` empty is
+the whole chapter, byte-identical to the numbered pages joined** — 13,680 bytes
+against `page=1` + `page=2`, and 18,822 against `page=1` through `page=3`. So the
+adapter asks for the whole thing once. An adapter that walked `page=1..n` would
+spend five requests to get the same bytes, and one that read only `page=1` would
+import a fifth of every chapter and report success.
+
+### The response is compressed whether or not you asked
+
+`part-text.html.gz` and `part-text.html` are the **same response recorded twice**
+— 12,514 compressed bytes and 25,434 plain — and both are here because the site
+answered `content-encoding: gzip` to an explicit `Accept-Encoding: identity`,
+then answered a later request to the same URL in plain text. The behaviour varies
+by edge, so it is not something an adapter can predict either way.
+
+This is the case where the failure would have been silent: the compressed bytes
+would be stored as a chapter body, decoded as text, and the import would report
+success with a chapter full of mojibake in the database. It is handled in the
+shared fetcher (`safety::decode_response_body`), not here, and the pair of
+recordings is what makes it testable against real bytes rather than against a
+gzip this repository made itself.
+
+### What the site does not publish
+
+* **A word count.** `length` is a *character* count: the recorded work's Chapter
+  One is `length: 18380` against a `wordCount: 3676` on the same chapter's own
+  page — a ratio of five, which is what characters look like. Per-part word
+  counts exist and are not in the story document, so summing them would cost one
+  request per part at preview time. The adapter reports **no word count**, which
+  is the honest answer; passing 291,689 off as one would be wrong by a factor a
+  reader would not check.
+* **Category names.** `categories: [6, 0]` is integers with no published table
+  behind them. Dropped rather than guessed at. The author's own tags are carried,
+  because those are text.
+* **The author's link.** The document names the author and does not link them.
+  `/user/{name}` is read off the site's own structured block on the work page and
+  built from it.
+
+### Parts that are not prose, and parts that are not published
+
+The recorded work's first three parts are `Photo Gallery`, `Playlist` and `Cast`
+— 54, 865 and 998 characters of the same `<p>` markup, one holding an `<img>`.
+They are parts the reader is shown, so they are chapters here, for the same reason
+Royal Road's announcement posts are: the site lists them, and an adapter that
+silently dropped them would report a work as shorter than its author published it.
+The image is removed by the sanitiser rather than pointed at, which leaves the
+text they contain.
+
+A part carries `draft`. An unauthenticated read only sees published parts, so this
+should never be `true` — but a part the author has not published is not part of
+the public work, and including one would publish it further. Drafts are excluded
+and the count they remove is logged rather than absorbed.
+
+### Not found arrives as `400`, and as HTML
+
+The API reports a missing story as a JSON error body — `{"error_code":1017,
+"error_type":"NotFound"}` — with **HTTP 400**, so the status code is not where
+this is decided. The site's *page* for the same missing work is a 37 KB HTML page
+with status 404 and a different message entirely (*"This page got lost in a good
+story and never came back."*). Both are recorded, because the adapter must
+distinguish the site's own not-found from a shape that changed: the first is
+`NotFound`, the second is a parse failure, and folding either into the other
+reports a deleted work as a bug or a bug as a deleted work.
