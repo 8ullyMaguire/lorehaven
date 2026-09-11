@@ -18,17 +18,17 @@ CREATE TABLE reading_progress (
     chapter_id        UUID,
     content_revision  UUID,
     paragraph_anchor  TEXT,
-    position_permille INTEGER NOT NULL DEFAULT 0 CHECK (position_permille BETWEEN 0 AND 1000),
+    position_permille BIGINT NOT NULL DEFAULT 0 CHECK (position_permille BETWEEN 0 AND 1000),
     device_id         TEXT,
     created_at        TEXT    NOT NULL,
     updated_at        TEXT    NOT NULL,
-    version           INTEGER NOT NULL DEFAULT 1
+    version           BIGINT NOT NULL DEFAULT 1
 );
 
 -- A NULL device_id is treated as distinct in a partial index, exactly as the
 -- SQLite migration does with its two partial unique indexes.
 CREATE UNIQUE INDEX reading_progress_unique
-    ON reading_progress (account_id, pseud_id, subject_type, subject_id)
+    ON reading_progress (account_id, pseud_id, subject_type, subject_id, device_id)
     WHERE device_id IS NOT NULL;
 CREATE UNIQUE INDEX reading_progress_no_device
     ON reading_progress (account_id, pseud_id, subject_type, subject_id)
@@ -40,11 +40,11 @@ CREATE TABLE rating (
     account_id   UUID NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
     pseud_id     UUID NOT NULL REFERENCES pseuds (id) ON DELETE CASCADE,
     work_id      UUID NOT NULL REFERENCES works (id) ON DELETE CASCADE,
-    stars        INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),
+    stars        BIGINT NOT NULL CHECK (stars BETWEEN 1 AND 5),
     is_public   BOOLEAN NOT NULL DEFAULT FALSE,
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL,
-    version      INTEGER NOT NULL DEFAULT 1,
+    version      BIGINT NOT NULL DEFAULT 1,
     deleted_at   TEXT
 );
 
@@ -62,7 +62,7 @@ CREATE TABLE review (
     published_at     TEXT,
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL,
-    version          INTEGER NOT NULL DEFAULT 1,
+    version          BIGINT NOT NULL DEFAULT 1,
     deleted_at       TEXT
 );
 
@@ -94,7 +94,7 @@ CREATE TABLE reader_note (
     body         TEXT NOT NULL,
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL,
-    version      INTEGER NOT NULL DEFAULT 1,
+    version      BIGINT NOT NULL DEFAULT 1,
     deleted_at   TEXT
 );
 
@@ -104,10 +104,10 @@ CREATE TABLE typography_preference (
     account_id        UUID PRIMARY KEY REFERENCES accounts (id) ON DELETE CASCADE,
     font_scale        REAL NOT NULL DEFAULT 1.0,
     line_height       REAL NOT NULL DEFAULT 1.6,
-    measure           INTEGER NOT NULL DEFAULT 66,
+    measure           BIGINT NOT NULL DEFAULT 66,
     reader_theme      TEXT NOT NULL DEFAULT 'sepia',
     distraction_free  BOOLEAN NOT NULL DEFAULT FALSE,
     created_at        TEXT NOT NULL,
     updated_at        TEXT NOT NULL,
-    version           INTEGER NOT NULL DEFAULT 1
+    version           BIGINT NOT NULL DEFAULT 1
 );

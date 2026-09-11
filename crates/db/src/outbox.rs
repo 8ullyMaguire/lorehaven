@@ -52,7 +52,7 @@ pub async fn enqueue(
          ON CONFLICT DO NOTHING",
         "INSERT INTO outbox_events (id, topic, payload, dedupe_key, created_at, available_at, attempts)
          VALUES (?::uuid, ?, ?, ?, ?, ?, 0)
-         ON CONFLICT DO NOTHING",
+         ON CONFLICT (dedupe_key) DO NOTHING",
     );
 
     let affected = match db.backend() {

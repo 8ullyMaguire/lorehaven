@@ -821,6 +821,7 @@ pub async fn list_library_items(
             sqlx::query_as(&sql)
                 .bind(account_id)
                 .bind(after_updated_bind)
+                .bind(after_id_bind.clone())
                 .bind(after_id_bind)
                 .bind(limit)
                 .fetch_all(db.postgres_pool().expect("postgres handle"))

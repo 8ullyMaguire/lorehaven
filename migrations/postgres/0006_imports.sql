@@ -19,11 +19,13 @@ CREATE TABLE sources (
     key             TEXT    NOT NULL UNIQUE,
     display_name    TEXT    NOT NULL,
     adapter_version TEXT    NOT NULL,
-    -- INTEGER rather than BOOLEAN, matching every other flag in this
+    -- BIGINT rather than BOOLEAN, matching every other flag in this
     -- schema: the repository decodes i64 on both engines and compares
     -- to zero, so a native BOOLEAN here would be the one column with a
-    -- second decode path (see ADR 0004).
-    enabled         INTEGER NOT NULL DEFAULT 1,
+    -- second decode path. BIGINT rather than INTEGER for the same reason
+    -- every other integer here is BIGINT: SQLite's INTEGER is 64-bit, so
+    -- a 32-bit column is a type the shared decode cannot read (ADR 0004).
+    enabled         BIGINT NOT NULL DEFAULT 1,
     disabled_reason TEXT,
     capability_json TEXT    NOT NULL DEFAULT '{}',
     health          TEXT    NOT NULL DEFAULT 'unknown'
@@ -31,7 +33,7 @@ CREATE TABLE sources (
     last_checked_at TEXT,
     created_at      TEXT    NOT NULL,
     updated_at      TEXT    NOT NULL,
-    version         INTEGER NOT NULL DEFAULT 1
+    version         BIGINT NOT NULL DEFAULT 1
 );
 
 CREATE TABLE source_credentials (
@@ -46,7 +48,7 @@ CREATE TABLE source_credentials (
     last_checked_at TEXT,
     created_at      TEXT    NOT NULL,
     updated_at      TEXT    NOT NULL,
-    version         INTEGER NOT NULL DEFAULT 1,
+    version         BIGINT NOT NULL DEFAULT 1,
     UNIQUE (pseud_id, source_key, label)
 );
 
@@ -75,7 +77,7 @@ CREATE TABLE library_items (
     provenance_json   TEXT    NOT NULL DEFAULT '{}',
     created_at        TEXT    NOT NULL,
     updated_at        TEXT    NOT NULL,
-    version           INTEGER NOT NULL DEFAULT 1,
+    version           BIGINT NOT NULL DEFAULT 1,
     UNIQUE (account_id, source_key, source_work_key)
 );
 
@@ -92,7 +94,7 @@ CREATE TABLE import_jobs (
     destination_type TEXT    NOT NULL
                              CHECK (destination_type IN ('library', 'draft')),
     destination_id   UUID,
-    dry_run          INTEGER NOT NULL DEFAULT 0,
+    dry_run          BIGINT NOT NULL DEFAULT 0,
     state            TEXT    NOT NULL DEFAULT 'queued'
                              CHECK (state IN ('queued', 'running', 'paused', 'completed',
                                               'failed', 'cancelled')),
@@ -100,7 +102,7 @@ CREATE TABLE import_jobs (
     report_json      TEXT,
     created_at       TEXT    NOT NULL,
     updated_at       TEXT    NOT NULL,
-    version          INTEGER NOT NULL DEFAULT 1
+    version          BIGINT NOT NULL DEFAULT 1
 );
 
 CREATE INDEX import_jobs_account ON import_jobs (account_id, created_at DESC);
@@ -111,7 +113,7 @@ CREATE TABLE import_chapters (
     import_job_id         UUID    NOT NULL REFERENCES import_jobs (id) ON DELETE CASCADE,
     library_item_id       UUID    REFERENCES library_items (id) ON DELETE CASCADE,
     source_chapter_key    TEXT    NOT NULL,
-    ordinal               INTEGER NOT NULL CHECK (ordinal >= 1),
+    ordinal               BIGINT NOT NULL CHECK (ordinal >= 1),
     title                 TEXT    NOT NULL DEFAULT '',
     state                 TEXT    NOT NULL DEFAULT 'pending'
                                   CHECK (state IN ('pending', 'stored', 'skipped', 'failed')),

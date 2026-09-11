@@ -3,8 +3,11 @@
 --
 -- Dialect: PostgreSQL.
 -- Identifiers are native UUID columns; timestamps are RFC 3339 UTC text, and
--- 0/1 flags are INTEGER, so the repository layer decodes identically on both
--- engines (ADR 0004). The reasoning behind the shape itself is documented in
+-- integers are BIGINT, so the repository layer decodes identically on both
+-- engines (ADR 0004). BIGINT rather than INTEGER because SQLite's INTEGER is
+-- 64-bit and every integer in `crates/db` is decoded as `i64`: a 32-bit
+-- PostgreSQL column is not a narrower version of the same thing, it is a
+-- different type that `sqlx` refuses to decode, and every read of one fails. The reasoning behind the shape itself is documented in
 -- `migrations/sqlite/0003_works.sql` and in ADR 0002/0005.
 --
 -- One deliberate dialect difference: PostgreSQL validates a foreign key target
@@ -31,10 +34,10 @@ CREATE TABLE works (
     scheduled_for       TEXT,
     published_at        TEXT,
     withdrawn_at        TEXT,
-    show_public_ratings INTEGER NOT NULL DEFAULT 1,
+    show_public_ratings BIGINT NOT NULL DEFAULT 1,
     created_at          TEXT    NOT NULL,
     updated_at          TEXT    NOT NULL,
-    version             INTEGER NOT NULL DEFAULT 1,
+    version             BIGINT NOT NULL DEFAULT 1,
     deleted_at          TEXT
 );
 
@@ -47,7 +50,7 @@ CREATE TABLE work_contributors (
     work_id            UUID    NOT NULL REFERENCES works (id) ON DELETE CASCADE,
     pseud_id           UUID    NOT NULL REFERENCES pseuds (id) ON DELETE CASCADE,
     role               TEXT    NOT NULL,
-    public_attribution INTEGER NOT NULL DEFAULT 1,
+    public_attribution BIGINT NOT NULL DEFAULT 1,
     created_at         TEXT    NOT NULL,
     PRIMARY KEY (work_id, pseud_id)
 );
@@ -57,12 +60,12 @@ CREATE INDEX work_contributors_pseud ON work_contributors (pseud_id);
 CREATE TABLE chapters (
     id                  UUID    PRIMARY KEY,
     work_id             UUID    NOT NULL REFERENCES works (id) ON DELETE CASCADE,
-    order_key           INTEGER NOT NULL,
+    order_key           BIGINT NOT NULL,
     title               TEXT    NOT NULL DEFAULT '',
     current_revision_id UUID,
     created_at          TEXT    NOT NULL,
     updated_at          TEXT    NOT NULL,
-    version             INTEGER NOT NULL DEFAULT 1,
+    version             BIGINT NOT NULL DEFAULT 1,
     deleted_at          TEXT
 );
 
@@ -72,11 +75,11 @@ CREATE INDEX chapters_revision ON chapters (current_revision_id);
 CREATE TABLE chapter_revisions (
     id                   UUID    PRIMARY KEY,
     chapter_id           UUID    NOT NULL REFERENCES chapters (id) ON DELETE CASCADE,
-    revision_number      INTEGER NOT NULL,
+    revision_number      BIGINT NOT NULL,
     document_json        TEXT    NOT NULL,
     sanitized_html       TEXT    NOT NULL,
     plain_text           TEXT    NOT NULL,
-    word_count           INTEGER NOT NULL,
+    word_count           BIGINT NOT NULL,
     note                 TEXT,
     created_by_pseud_id  UUID    NOT NULL REFERENCES pseuds (id),
     restored_from_id     UUID    REFERENCES chapter_revisions (id),
@@ -117,7 +120,7 @@ CREATE TABLE collaboration_invites (
     message             TEXT,
     created_at          TEXT    NOT NULL,
     updated_at          TEXT    NOT NULL,
-    version             INTEGER NOT NULL DEFAULT 1,
+    version             BIGINT NOT NULL DEFAULT 1,
     responded_at        TEXT
 );
 
@@ -134,7 +137,7 @@ CREATE TABLE outbox_events (
     available_at TEXT    NOT NULL,
     claimed_at   TEXT,
     delivered_at TEXT,
-    attempts     INTEGER NOT NULL DEFAULT 0,
+    attempts     BIGINT NOT NULL DEFAULT 0,
     last_error   TEXT,
     UNIQUE (dedupe_key)
 );

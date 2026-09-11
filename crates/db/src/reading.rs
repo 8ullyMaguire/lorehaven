@@ -92,6 +92,52 @@ pub async fn save_progress(db: &Database, input: ProgressInput<'_>) -> Result<()
     let revision_text = revision.as_ref().map(ToString::to_string);
     let fraction_i64 = i64::from(fraction);
 
+    /*
+     * Two dialects, two upsert keys.
+     *
+     * SQLite accepts a conflict target only when it names a unique index
+     * exactly, and its two partial indexes are not the ones PostgreSQL's are
+     * — the parenthesised key differs between the engines — so the SQLite
+     * statement stays bare and lets the engine pick. PostgreSQL infers a
+     * *partial* index only when the conflict target carries the index's own
+     * predicate, and which of the two indexes applies depends on whether the
+     * request has a device id, so the PostgreSQL variant is chosen here rather
+     * than by `db.sql`'s single string.
+     */
+    let postgres_sql = if device.is_some() {
+        "INSERT INTO reading_progress
+             (id, account_id, pseud_id, subject_type, subject_id, chapter_id,
+              content_revision, paragraph_anchor, position_permille, device_id,
+              created_at, updated_at, version)
+         VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?::uuid, ?::uuid,
+                 ?::uuid, ?, ?, ?, ?, ?, 1)
+         ON CONFLICT (account_id, pseud_id, subject_type, subject_id, device_id)
+             WHERE device_id IS NOT NULL
+         DO UPDATE SET
+              chapter_id = excluded.chapter_id,
+              content_revision = excluded.content_revision,
+              paragraph_anchor = excluded.paragraph_anchor,
+              position_permille = excluded.position_permille,
+              updated_at = excluded.updated_at,
+              version = reading_progress.version + 1"
+    } else {
+        "INSERT INTO reading_progress
+             (id, account_id, pseud_id, subject_type, subject_id, chapter_id,
+              content_revision, paragraph_anchor, position_permille, device_id,
+              created_at, updated_at, version)
+         VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?::uuid, ?::uuid,
+                 ?::uuid, ?, ?, ?, ?, ?, 1)
+         ON CONFLICT (account_id, pseud_id, subject_type, subject_id)
+             WHERE device_id IS NULL
+         DO UPDATE SET
+              chapter_id = excluded.chapter_id,
+              content_revision = excluded.content_revision,
+              paragraph_anchor = excluded.paragraph_anchor,
+              position_permille = excluded.position_permille,
+              updated_at = excluded.updated_at,
+              version = reading_progress.version + 1"
+    };
+
     let sql = db.sql(
         "INSERT INTO reading_progress
              (id, account_id, pseud_id, subject_type, subject_id, chapter_id,
@@ -105,19 +151,7 @@ pub async fn save_progress(db: &Database, input: ProgressInput<'_>) -> Result<()
               position_permille = excluded.position_permille,
               updated_at = excluded.updated_at,
               version = reading_progress.version + 1",
-        "INSERT INTO reading_progress
-             (id, account_id, pseud_id, subject_type, subject_id, chapter_id,
-              content_revision, paragraph_anchor, position_permille, device_id,
-              created_at, updated_at, version)
-         VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?::uuid, ?::uuid,
-                 ?::uuid, ?, ?, ?, ?, ?, 1)
-         ON CONFLICT DO UPDATE SET
-              chapter_id = excluded.chapter_id,
-              content_revision = excluded.content_revision,
-              paragraph_anchor = excluded.paragraph_anchor,
-              position_permille = excluded.position_permille,
-              updated_at = excluded.updated_at,
-              version = reading_progress.version + 1",
+        postgres_sql,
     );
 
     match db.backend() {
@@ -181,7 +215,7 @@ pub async fn progress_for(
            FROM reading_progress
           WHERE account_id = ? AND subject_type = ? AND subject_id = ?
           ORDER BY updated_at DESC",
-        "SELECT content_revision::text AS content_revision, paragraph_anchor, position_permille, device_id
+        "SELECT content_revision::text AS content_revision, paragraph_anchor AS anchor, position_permille, device_id
            FROM reading_progress
           WHERE account_id = ?::uuid AND subject_type = ? AND subject_id = ?::uuid
           ORDER BY updated_at DESC",
@@ -294,7 +328,7 @@ pub async fn touch_history(
              (id, account_id, pseud_id, subject_type, subject_id, last_read_at,
               revision_seen, created_at)
          VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?::uuid, ?, ?::uuid, ?)
-         ON CONFLICT DO UPDATE SET
+         ON CONFLICT (account_id, pseud_id, subject_type, subject_id) DO UPDATE SET
               last_read_at = excluded.last_read_at,
               revision_seen = excluded.revision_seen",
     );
@@ -517,7 +551,7 @@ pub async fn upsert_rating(
         "INSERT INTO rating
              (id, account_id, pseud_id, work_id, stars, is_public, created_at,
               updated_at, version, deleted_at)
-         VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?, ?, ?, ?, 1, NULL)
+         VALUES (?::uuid, ?::uuid, ?::uuid, ?::uuid, ?, ?::int::boolean, ?, ?, 1, NULL)
          ON CONFLICT (pseud_id, work_id) WHERE deleted_at IS NULL
          DO UPDATE SET stars = excluded.stars,
                        is_public = excluded.is_public,
@@ -579,7 +613,7 @@ pub async fn rating_for(db: &Database, pseud: PseudId, work: WorkId) -> Result<O
     let sql = db.sql(
         "SELECT stars, is_public, version, deleted_at FROM rating
           WHERE pseud_id = ? AND work_id = ? AND deleted_at IS NULL",
-        "SELECT stars, is_public::int, version, deleted_at FROM rating
+        "SELECT stars, is_public::int::bigint, version, deleted_at FROM rating
           WHERE pseud_id = ?::uuid AND work_id = ?::uuid AND deleted_at IS NULL",
     );
     let row: Option<(i64, i64, i64, Option<String>)> = match db.backend() {
@@ -692,7 +726,7 @@ pub struct Review {
 
 /// The row shape both engines return.
 ///
-/// PostgreSQL is asked for `::int` on the two flags and for `id::text`, so one
+/// PostgreSQL is asked for `::int::bigint` on the two flags and for `id::text`, so one
 /// tuple decodes on both engines (ADR 0004).
 #[derive(Debug, Clone, FromRow)]
 struct ReviewRow {
@@ -767,7 +801,7 @@ pub async fn upsert_review(
         "INSERT INTO review
              (id, account_id, pseud_id, work_id, body, contains_spoilers, is_public,
               published_at, created_at, updated_at, version, deleted_at)
-         VALUES (?::uuid, ?::uuid, ?::uuid, ?::uuid, ?, ?, ?, ?, ?, ?, 1, NULL)
+         VALUES (?::uuid, ?::uuid, ?::uuid, ?::uuid, ?, ?::int::boolean, ?::int::boolean, ?, ?, ?, 1, NULL)
          ON CONFLICT (pseud_id, work_id) WHERE deleted_at IS NULL
          DO UPDATE SET body = excluded.body,
                        contains_spoilers = excluded.contains_spoilers,
@@ -836,7 +870,7 @@ pub async fn review_for(db: &Database, pseud: PseudId, work: WorkId) -> Result<O
            JOIN pseuds p ON p.id = r.pseud_id
           WHERE r.pseud_id = ? AND r.work_id = ? AND r.deleted_at IS NULL",
         "SELECT r.id::text AS id, p.handle AS author_handle, r.body,
-                r.contains_spoilers::int, r.is_public::int, r.published_at,
+                r.contains_spoilers::int::bigint, r.is_public::int::bigint, r.published_at,
                 r.created_at, r.updated_at, r.version
            FROM review r
            JOIN pseuds p ON p.id = r.pseud_id
@@ -879,7 +913,7 @@ pub async fn public_reviews(db: &Database, work: WorkId) -> Result<Vec<Review>> 
             AND r.deleted_at IS NULL
           ORDER BY r.published_at DESC, r.id ASC",
         "SELECT r.id::text AS id, p.handle AS author_handle, r.body,
-                r.contains_spoilers::int, r.is_public::int, r.published_at,
+                r.contains_spoilers::int::bigint, r.is_public::int::bigint, r.published_at,
                 r.created_at, r.updated_at, r.version
            FROM review r
            JOIN pseuds p ON p.id = r.pseud_id
@@ -1183,7 +1217,7 @@ pub async fn typography_for(db: &Database, account: AccountId) -> Result<Typogra
     let sql = db.sql(
         "SELECT font_scale, line_height, measure, reader_theme, distraction_free, version
            FROM typography_preference WHERE account_id = ?",
-        "SELECT font_scale, line_height, measure, reader_theme, distraction_free::int, version
+        "SELECT font_scale, line_height, measure, reader_theme, distraction_free::int::bigint, version
            FROM typography_preference WHERE account_id = ?::uuid",
     );
     let row: Option<(f64, f64, i64, String, i64, i64)> = match db.backend() {

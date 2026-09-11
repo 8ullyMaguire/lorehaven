@@ -34,5 +34,5 @@ CREATE TABLE content_settings (
     excluded_warnings TEXT    NOT NULL DEFAULT '[]',
     created_at        TEXT    NOT NULL,
     updated_at        TEXT    NOT NULL,
-    version           INTEGER NOT NULL DEFAULT 1
+    version           BIGINT NOT NULL DEFAULT 1
 );

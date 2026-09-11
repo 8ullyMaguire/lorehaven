@@ -68,11 +68,11 @@ size.
 ## Consequences
 
 - PostgreSQL is genuinely second-class in one respect: **no PostgreSQL
-  integration tests run today**, because the development machine has no server
-  installed. `docs/verification.md` records this as *implemented but not
-  executed*, and the migration catalogue is kept identical by test so the
+  integration test suite runs today**, because the development machine has no
+  server installed. `docs/verification.md` records the single hand run that has
+  happened, and the migration catalogue is kept identical by test so the
   divergence cannot silently widen. This is the largest open risk in the
-  database layer.
+  database layer. (Amended 2026-09-11 — see below.)
 - The cast-based approach means `pseuds.account_id` etc. are compared as UUIDs
   on PostgreSQL (via `::uuid`) and as text on SQLite. Index usage is preserved
   on both, because the cast is on the parameter, not on the column.
@@ -92,3 +92,46 @@ size.
   SQL, which would justify `TIMESTAMPTZ` and the per-dialect decode cost.
 - The dialect-pair approach is measured to cost more maintenance than an ORM
   would, for example if a schema change starts touching dozens of statements.
+
+
+## Amendment, 2026-09-11 — the first live run
+
+This decision was made without a PostgreSQL server to test against, and the
+consequences section predicted its own failure mode: *"the compiler will not
+catch a missing cast — only a test against a real PostgreSQL instance will."*
+On 2026-09-11 the PostgreSQL half was run for the first time, against 17.11 in
+Docker on loopback, and eight defects fell out of it. `docs/verification.md`
+lists all eight; three of them change this decision.
+
+**1. Rule 2 extends to the width of an integer.** SQLite's `INTEGER` is 64-bit;
+PostgreSQL's is 32-bit. The repository decodes `i64`, and `sqlx` will not widen
+`INT4` into `INT8`, so every `version`, count and 0/1 flag failed to read. Every
+PostgreSQL column holding a number the repository reads as `i64` is now
+`BIGINT` — 38 of them across the eight migrations. This is rule 2 applied
+consistently rather than a new rule: the decode layer is shared, so the column
+has to be the type the shared decode expects.
+
+**2. Where the rule cannot hold, cast in the query.** A 0/1 flag the shared
+struct reads as `i64` stays `BOOLEAN` in PostgreSQL (it is the right type, and
+SQLite has nothing better), and is read as `bool::int::bigint`. The double cast
+is not redundant: PostgreSQL has no boolean-to-bigint cast.
+
+**3. `ON CONFLICT` targets cannot be inferred from a partial index's columns
+alone.** The alternatives section predicted this. The target must name the index
+*and repeat its predicate*, which means a statement can need a different string
+depending on whether a column is null — `reading_progress` has two partial unique
+indexes and now has two PostgreSQL statements.
+
+**The defect worth remembering is none of those three.** `set_password_hash`
+bound one parameter list for two statements whose placeholders are in different
+orders. On SQLite this was *silent*: the surplus parameter shifted every value by
+one, the `WHERE` compared an account id against a timestamp, no row matched, and
+the function returned `Ok(())`. A password change did nothing and reported
+success, and every test in the tree passed. PostgreSQL refused it outright, which
+is how it was found.
+
+That is the argument for the CI job the workflow already contains, and it is
+stronger than "the dialect should be exercised": **the second engine is not only
+a deployment target, it is the cheapest available check on the first one.** The
+SQLite path had a silent data-loss bug that only a type-checking engine could
+surface.

@@ -15,20 +15,20 @@ CREATE TABLE jobs (
     state             TEXT    NOT NULL DEFAULT 'queued',
     payload           TEXT    NOT NULL DEFAULT '{}',
     idempotency_key   TEXT,
-    priority          INTEGER NOT NULL DEFAULT 0,
-    attempts          INTEGER NOT NULL DEFAULT 0,
-    max_attempts      INTEGER NOT NULL DEFAULT 5,
+    priority          BIGINT NOT NULL DEFAULT 0,
+    attempts          BIGINT NOT NULL DEFAULT 0,
+    max_attempts      BIGINT NOT NULL DEFAULT 5,
     available_at      TEXT    NOT NULL,
     lease_owner       TEXT,
     lease_expires_at  TEXT,
-    progress_permille INTEGER NOT NULL DEFAULT 0
+    progress_permille BIGINT NOT NULL DEFAULT 0
                               CHECK (progress_permille BETWEEN 0 AND 1000),
     checkpoint        TEXT,
     last_error        TEXT,
     requested_by      UUID    REFERENCES accounts (id) ON DELETE SET NULL,
     created_at        TEXT    NOT NULL,
     updated_at        TEXT    NOT NULL,
-    version           INTEGER NOT NULL DEFAULT 1
+    version           BIGINT NOT NULL DEFAULT 1
 );
 
 CREATE UNIQUE INDEX jobs_idempotency_key
@@ -40,7 +40,7 @@ CREATE INDEX jobs_requested_by ON jobs (requested_by, created_at DESC);
 CREATE TABLE job_attempts (
     id          UUID    PRIMARY KEY,
     job_id      UUID    NOT NULL REFERENCES jobs (id) ON DELETE CASCADE,
-    attempt     INTEGER NOT NULL,
+    attempt     BIGINT NOT NULL,
     started_at  TEXT    NOT NULL,
     finished_at TEXT,
     outcome     TEXT,
@@ -53,7 +53,7 @@ CREATE INDEX job_attempts_job ON job_attempts (job_id, attempt);
 CREATE TABLE content_blobs (
     checksum           TEXT    PRIMARY KEY,
     storage_key        TEXT    NOT NULL UNIQUE,
-    byte_size          INTEGER NOT NULL CHECK (byte_size >= 0),
+    byte_size          BIGINT NOT NULL CHECK (byte_size >= 0),
     content_type       TEXT    NOT NULL,
     retention_class    TEXT    NOT NULL DEFAULT 'snapshot'
                                CHECK (retention_class IN ('snapshot', 'fetch_cache', 'preservation')),
@@ -92,7 +92,7 @@ CREATE TABLE secrets (
     ciphertext TEXT    NOT NULL,
     created_at TEXT    NOT NULL,
     updated_at TEXT    NOT NULL,
-    version    INTEGER NOT NULL DEFAULT 1,
+    version    BIGINT NOT NULL DEFAULT 1,
     UNIQUE (owner_type, owner_id, name)
 );
 
