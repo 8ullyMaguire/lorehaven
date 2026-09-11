@@ -707,6 +707,9 @@ the_export_privacy_notice_must_be_acknowledged
 
 ### Milestone 8 — Library, saved views, bookmarks and updates
 
+**Landed.** See `docs/plans/milestone-08-library.md` for what was built, the two
+decisions taken while building it, and what was left open.
+
 Spec §16. Tag `v0.09-library`. **Also carries whole-work mode**, re-scoped from
 M4 on 2026-09-10 (`M8-02`): the mode walks a whole work and belongs with the
 reader's library. It must paginate — append the next chapter when the reader

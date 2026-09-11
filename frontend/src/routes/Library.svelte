@@ -100,6 +100,14 @@
   let batchFailures = $state<BatchFailure[]>([]);
   /** What the reader typed into the "new shelf" box. */
   let newShelf = $state('');
+  /**
+   * A note about the view that was just applied, when the filter bar could not
+   * express everything the view carried.
+   *
+   * The bar holds one value per facet and a stored query may hold several. That
+   * is a real loss, so it is said rather than silently applied in part.
+   */
+  let viewNote = $state<string | null>(null);
 
   function query(): LibraryQueryParams {
     return {
@@ -328,6 +336,40 @@
     }
   }
 
+  /**
+   * Load a saved view's query into the filter bar.
+   *
+   * Each facet takes the first value it holds: the bar can hold one value per
+   * facet and a stored query may hold several, so anything beyond the first is
+   * reported in `viewNote` rather than dropped in silence.
+   */
+  function applyView(view: SavedView) {
+    const query = (view.query ?? {}) as {
+      shelves?: string[];
+      tags?: string[];
+      statuses?: ReadingStatus[];
+      source?: string;
+      updated_since?: string;
+    };
+    shelfFilter = query.shelves?.[0] ?? '';
+    tagFilter = query.tags?.[0] ?? '';
+    statusFilter = query.statuses?.[0] ?? '';
+    sourceFilter = query.source ?? '';
+    updatedSince = query.updated_since ?? '';
+    sort = view.sort;
+
+    const extra = [
+      query.shelves && query.shelves.length > 1 ? 'shelves' : null,
+      query.tags && query.tags.length > 1 ? 'tags' : null,
+      query.statuses && query.statuses.length > 1 ? 'statuses' : null,
+    ].filter((facet): facet is string => facet !== null);
+    viewNote = extra.length
+      ? `“${view.name}” filters on several ${extra.join(' and ')}; this bar shows the first of each.`
+      : null;
+
+    void reload();
+  }
+
   async function forgetView(id: string) {
     busy = true;
     error = null;
@@ -419,11 +461,14 @@
             {#each views as view (view.id)}
               <li class="view">
                 {#if view.needs_repair}
-                  <!-- A view whose query this build cannot read is still listed:
-                       renaming or deleting it must not require understanding it. -->
+                  <!-- A view whose query this build cannot read is still listed,
+                       and cannot be applied — renaming or deleting it must not
+                       require understanding it, but applying it would. -->
                   <span class="repair">{view.name} — needs repair</span>
                 {:else}
-                  <span>{view.name}</span>
+                  <button type="button" class="filter-link" onclick={() => applyView(view)}>
+                    {view.name}
+                  </button>
                 {/if}
                 {#if view.pinned}<span class="pinned" title="Pinned">pinned</span>{/if}
                 <button type="button" class="quiet" onclick={() => void forgetView(view.id)}>
@@ -484,6 +529,9 @@
       {/if}
       {#if lastBatch}
         <p class="batch-answer" role="status">{lastBatch}</p>
+      {/if}
+      {#if viewNote}
+        <p class="note" role="status">{viewNote}</p>
       {/if}
       {#if batchFailures.length > 0}
         <!-- Per item, not one flag: "3 of 5 removed" and which two did not is
@@ -819,6 +867,16 @@
     gap: var(--space-1);
     font-size: var(--text-sm);
     color: var(--color-muted);
+    min-width: 0;
+    /* A control that refuses to shrink is the other way this bar overflows at
+       320px; `max-width` keeps a long value from pushing the row out. */
+    max-width: 100%;
+  }
+
+  .filter-bar input,
+  .filter-bar select {
+    max-width: 100%;
+    min-width: 0;
   }
 
   .actions {
@@ -855,7 +913,10 @@
     padding: 0;
     margin: 0;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+    /* `min(20rem, 100%)` and not a bare 20rem: a minimum track wider than the
+       container makes the grid overflow, and 20rem is wider than a 320px viewport
+       once the page's own padding is taken off. */
+    grid-template-columns: repeat(auto-fill, minmax(min(20rem, 100%), 1fr));
     gap: var(--space-3);
   }
 

@@ -937,6 +937,84 @@ written. The second is the interesting one: the first fix looked correct, and
 only the constraint disagreed. The order is now stated in the code, with the
 reason, because it is not free to change.
 
+## Milestone 8 — Library, saved views, bookmarks and updates
+
+Both obligations are **built and locally tested**: the library is a place a reader
+can organise, and whole-work mode reads on without rendering a whole work at once.
+
+Evidence: `crates/app/tests/milestone_8.rs` (10 tests) against the real router, a
+real SQLite file and a real storage directory, plus 18 domain tests in
+`crates/domain/src/library.rs` and 8 in `frontend/src/routes/Library.test.ts`.
+Library items are seeded through `imports::upsert_library_item` — the same call an
+import makes — so the rows asserted on are the rows the product creates rather
+than a fixture shaped to agree with the assertions.
+
+| # | Acceptance criterion (spec §14) | Status | Evidence |
+|---|---|---|---|
+| 1 | Shelves, and a shelf is the reader's own | Implemented and locally tested | `a_shelf_is_private_until_it_is_published` — a new shelf is not shared; **and** a second account cannot read, rename, delete or fill it by identifier, because the shelf-item insert joins both ends against the account. A shelf that only checked its own `is_public` flag would pass half of this. |
+| 2 | Deleting a shelf does not delete its works | Implemented and locally tested | The same test: after the shelf is deleted the work is still in the library. |
+| 3 | Private tags, and never joined where a second account can see them | Implemented and locally tested | `a_private_tag_is_not_a_public_tag` — two readers tag their own copies of the same work with the same word; each sees only their own, the filter reaches only their own, and the other's untag attempt is `404` rather than a removal. A single `tags` table with an `is_private` column would fail one of those two halves. |
+| 4 | Batch operations report per item | Implemented and locally tested | `batch_delete_removes_only_the_selection` — `succeeded` holds exactly the two the account owns, `failed` names the third with code `NOT_FOUND`, and the summary is `2 of 3 removed; 1 could not be removed`. One code for *already deleted* and *never yours*, because distinguishing them would confirm which identifiers exist. |
+| 5 | Removing an item distinguishes a reference from a copy | Implemented and locally tested | `removing_an_item_and_deleting_its_copy_are_different_operations` — reference-only removal reports `freed_bytes: 0` and leaves the blob, unreferenced, for the maintenance sweep; `delete_copy` frees that item's bytes and reports them. |
+| 6 | Saved views round-trip, and a shared view cannot leak a filter | Implemented and locally tested | `a_saved_view_round_trips_its_query` — every field survives, including the RFC 3339 bound; a public view naming a shelf is `422` with the leaking filter named, and the same view stored privately is `201`. The check lives in the writer, not at the route. |
+| 7 | A view whose query this build cannot read is repairable, not misread | Implemented | `SavedView::needs_repair` is set when the stored document's version is unknown or it will not parse, and the view is still listed — renaming or deleting it must not require understanding it. Covered by the decoder; no HTTP-level test. |
+| 8 | A deleted item leaves the reader's bookmarks alone | Implemented and locally tested | `deleting_a_library_item_leaves_the_reader_s_bookmarks_alone` — the bookmark survives, keeps its note and its position, and is still editable and deletable on its own. |
+| 9 | Public bookmark lists exclude private entries | Implemented and locally tested | `a_public_bookmark_list_excludes_private_entries` — two bookmarks on one work, one shared; the public list has one. This is the one query in the module that is not account-scoped, which is why it filters on its own `is_public`. |
+| 10 | Storage usage is real | Implemented and locally tested | `storage_usage_matches_the_sum_of_the_items` — three distinct blobs across two items, one shared; `imported_bytes` counts the shared one **once** and `blob_count` is 3, and after a removal the shared blob is still accounted for. |
+| 11 | The update check is a job | Implemented and locally tested | `the_update_check_is_queued_as_a_job` — `202` with a job id and the item count, the job really in the queue as `update_check`, and an empty library refused rather than queued. |
+| 12 | Reading status follows the reader | Implemented and locally tested | `a_reading_status_keeps_its_first_start_and_follows_its_finish` — `started_at` is stamped once and never rewritten; `finished_at` is set on finishing and **cleared** on reopening; an unknown status is `422` rather than dropped, because dropping it would answer a different question than the one asked. |
+| 13 | Whole-work mode paginates (§9.2) | Implemented and locally tested | `frontend/src/routes/Reader.test.ts` — off by default with nothing fetched; turning it on appends the next chapter and leaves the first in place; a failed append says so and offers the same append again and the chapter's own page; turning it off drops what it appended, so the page and the address agree. |
+| 14 | The card carries the library's own facts at every density | Implemented and locally tested | `WorkCard.svelte` in `full`/`row`/`compact`, drawing reading status, private tags and shelves in all three — the M1-09 item M8 owned. |
+
+### The migration parity test now compares shape, not just names
+
+`crates/db/src/migrate.rs` compared the two dialects' migration *ids* and stopped
+there. That is the gap that let PostgreSQL's `reading_progress` unique index lose
+`device_id` while SQLite kept it, and it was written down as a limitation rather
+than closed. It now parses each migration's DDL — comments stripped, balanced
+parentheses — and compares the table names, the column names of each table, and
+the columns of each index. Types are deliberately not compared: they are
+*supposed* to differ (`INTEGER`/`BIGINT`, `REAL`/`DOUBLE PRECISION`).
+
+The check was falsified before it was trusted. Removing `subject_type` from the
+PostgreSQL `private_tags` index and running it produced:
+
+```text
+migration 0009_library: index private_tags_account_subject is defined
+  differently: sqlite has ["account_id", "subject_type", "subject_id", "tag"],
+  postgres has ["account_id", "subject_id", "tag"]
+```
+
+which is the sentence the `device_id` defect would have produced.
+
+### Three defects found while building it
+
+1. **`BatchOutcome::summary` rendered a sentence that stops mid-clause.** It took
+   one verb form, so `summary("removed")` produced `2 removed, 1 could not be`.
+   One form cannot fill both positions; it now takes the participle and the
+   infinitive and names the total. Caught by a test asserting the sentence a
+   reader is shown, not by a test asserting a count.
+2. **Reference-only removal left a dangling reference.** The first version
+   deleted the library item and kept its `content_references` row, so the blob
+   stayed *referenced by a row that no longer existed* — reachable by nothing and
+   collectable by nothing. It now drops the references always and lets
+   `delete_copy` decide when the bytes follow. Found by asserting what the reader
+   is told they freed, which is what exposed the accounting.
+3. **Whole-work mode's `remember()` reported the wrong chapter.** It read the
+   chapter the address named, so a reader who read on and left would have resumed
+   at the work's first chapter. It now follows the chapter on screen.
+
+### What was not verified
+
+The library tables have **not** been exercised against a live PostgreSQL server.
+The dialect rules were followed (`BIGINT` for `i64`, `?::int::boolean` on
+boolean writes, `::int::bigint` on reads, `?::uuid` on every identifier bind,
+`ON CONFLICT` with a named target) and the parity test covers the declared shape,
+but "the SQL is right" and "PostgreSQL accepted the SQL" are different claims and
+only the first one has been tested here. The update check's own network path has
+not been run against a live source either: the route and the job are covered, the
+per-item fetch is not.
+
 ## Known limitations and open risks
 
 1. **PostgreSQL is executed once, by hand, and not continuously.**

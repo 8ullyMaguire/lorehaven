@@ -72,6 +72,7 @@ const STORAGE = {
 let calls: Recorded[] = [];
 let items: typeof ITEM[] = [];
 let shelves: unknown[] = [];
+let views: unknown[] = [];
 let batch: unknown = null;
 let storage: unknown = STORAGE;
 
@@ -86,6 +87,7 @@ beforeEach(() => {
   calls = [];
   items = [{ ...ITEM }];
   shelves = [SHELF];
+  views = [];
   storage = STORAGE;
   batch = {
     succeeded: ['item-1', 'item-2'],
@@ -132,7 +134,7 @@ beforeEach(() => {
     if (path === '/api/v1/shelves' && (init?.method ?? 'GET') === 'GET') {
       return json({ items: shelves, next_cursor: null });
     }
-    if (path === '/api/v1/saved-views') return json({ items: [], next_cursor: null });
+    if (path === '/api/v1/saved-views') return json({ items: views, next_cursor: null });
     if (path === '/api/v1/library/storage') return json(storage);
     if (path === '/api/v1/library/items/batch') return json(batch);
     if (path === '/api/v1/library/updates/check') return json({ job_id: 'job-1', items: 3 });
@@ -277,6 +279,49 @@ describe('the library page', () => {
     await waitFor(() =>
       expect(document.body.textContent).toContain('It runs in the background'),
     );
+  });
+
+  it('loads a saved view’s query into the filter bar, and says what it could not', async () => {
+    views = [
+      {
+        id: 'view-1',
+        name: 'Unread royalroad',
+        query: {
+          shelves: ['Favourites', 'Later'],
+          tags: ['wip'],
+          statuses: [],
+          source: 'royalroad',
+          updated_since: '2026-01-01T00:00:00Z',
+          sort: 'words',
+        },
+        needs_repair: false,
+        query_version: 1,
+        sort: 'words',
+        scope: 'library',
+        pinned: true,
+        is_public: false,
+        created_at: '2026-09-08T00:00:00Z',
+        updated_at: '2026-09-08T00:00:00Z',
+        version: 1,
+      },
+    ];
+    render(Library);
+    await waitFor(() => expect(document.body.textContent).toContain('Unread royalroad'));
+
+    await fireEvent.click(buttonWith('Unread royalroad')!);
+
+    await waitFor(() =>
+      expect(
+        calls.some((call) => call.path.includes('tags=wip') && call.path.includes('source=royalroad')),
+      ).toBe(true),
+    );
+    const applied = calls.filter((call) => call.path.includes('source=royalroad')).at(-1);
+    expect(applied?.path).toContain('shelves=Favourites');
+    expect(applied?.path).toContain('sort=words');
+
+    // The bar holds one value per facet and the view held two shelves, so the
+    // loss is said rather than dropped in silence.
+    await waitFor(() => expect(document.body.textContent).toContain('shows the first of each'));
   });
 
   it('says so when the library is empty rather than showing an empty list', async () => {
