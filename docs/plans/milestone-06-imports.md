@@ -668,22 +668,109 @@ a fingerprint that omits them is not a browser's. The bound is unaffected — th
 ceiling is applied to the bytes as they arrive *after* decompression, which is the
 figure that matters for a decompression bomb.
 
-#### And the part that cannot be verified here
+#### The solver, run for real
 
-The solver tier is implemented against the protocol and tested against a stub
-service over a real socket, which covers the commands sent, the session it reuses,
-the session it replaces when the service forgets it, and the refusal of a URL
-outside the source's hosts. It has **not** been run against a live Byparr or
-obscura-solverr, because none is running on this machine — so the remaining
-verification is an operator pointing `imports.solver_url` at one and re-running the
-live tests.
+Both tiers below were verified against a stub on 2026-09-11 and that was recorded
+as the honest limit. It is no longer a limit: **Byparr 3.0.4 was installed and
+run**, and the live suite passes against it. `live_verification.rs` gained
+`a_solver_passes_a_wall_a_fingerprint_does_not`, which asserts four things in
+order:
 
-The archive tier is the same shape: verified against a stub, not against the
-Internet Archive, because archive.org was answering *"Internet Archive services are
-temporarily offline"* for the whole of 2026-09-11. Its URL construction, its
-provenance marking, its refusal of a snapshot that points off the archive, and its
-handling of a 500 that is HTML rather than JSON are all covered; whether a real
-snapshot of a real FFN chapter parses is not.
+```
+plain client: refused, as expected
+browser fingerprint: also refused, which is why the solver tier exists
+solver: 241315 bytes of the real story page via http://127.0.0.1:8191
+guard: an undeclared host is refused before any solve is attempted
+```
+
+The second line justifies the third tier's existence, and it contradicts what this
+plan earlier claimed. On **FimFiction a browser fingerprint is not enough**: three
+browsers (Chrome, Firefox, Safari) were all refused there, against a
+FanFiction.net that accepts one. A fingerprint is a per-host fact, not a
+per-family one, and the chain exists because the sources do not agree.
+
+Byparr's own log is the clearest statement of what these walls are:
+
+```
+INFO:     Challenge detected, waiting for it to clear...
+INFO:     Clicked the challenge checkbox (attempt 1).
+INFO:     Clicked the challenge checkbox (attempt 2).
+INFO:     Done https://www.fimfiction.net/story/594215/... in 12.26s
+```
+
+An interactive checkbox, twice. That is not a header a client can set, which is
+why tier two is a browser behind a process boundary and not more fingerprint work.
+It also sets the cost: **one solve per page, about twelve seconds** — which is why
+the pacing rule in §8 matters more here than anywhere else in the crate.
+
+The same fetcher, against the other walled sources, reads all of them — including
+FictionPress, which the fingerprint could not touch at all:
+
+| Source | Plain | Fingerprint | Solver |
+|---|---|---|---|
+| FanFiction.net | refused | 46,808 bytes | 48,743 bytes |
+| FictionPress | refused | refused | 35,740 bytes |
+| FimFiction | refused | refused | 241,315 bytes |
+| ScribbleHub | refused | refused | 33,742 bytes |
+| SpaceBattles | refused | refused | 1,526,890 bytes |
+
+#### Three bugs only a live service finds
+
+**The endpoint was posted to as configured.** `imports.solver_url` is naturally
+`http://127.0.0.1:8191`, and the client posted there — answering
+`405 Method Not Allowed`, because that address serves the service's documentation
+page and the contract's endpoint is `/v1`. Every stub test passed while this was
+broken. A stub asserts on the *body* it is sent and never cared which path the body
+arrived at. The client now accepts either spelling: a path the operator supplied is
+kept, and a bare address gets the versioned one appended.
+
+**Byparr has no session API at all.** The FlareSolverr v1 contract has one; the
+maintained successor dropped it. `POST /v1` accepts a single body —
+`LinkRequest{cmd, url, maxTimeout, blockMedia, returnOnlyCookies}` — and its source
+mentions `sessions`, `session` and `cmd` zero times, over a browser it shares
+internally. The proactive `sessions.create` was therefore parsed as a request for
+the empty URL and answered
+`502 Could not reach the target: ... Invalid url: "https://"`. The client had
+been treating a failed creation as "carry on statelessly", so reads worked and
+only the *log* was wrong — but an operator's solver log filled with errors about a
+service that is working, and every page paid for a wasted navigation.
+
+What replaced it is smaller and better than what was there. A session is now
+**proven, not assumed**, and a one-page fetch never pays for one: the first request
+goes stateless, because a session exists to make *later* requests cheaper, and
+support is attempted only once a second request makes it worth having. A service
+that answers "no" is remembered as stateless rather than asked again for every
+page. On FlareSolverr proper the session is still used. A test over a real socket
+asserts that a service answering `502` to a session command still serves all three
+pages, is asked exactly once, and is not asked on the first request.
+
+**The archive client followed redirects it had not checked.** The real archive
+answers its entry URL with a `302` to the snapshot's own address, and the client
+let `reqwest` follow that silently — a hop that could leave the archive, in a
+crate whose premise is that an answer is not authority to request wherever it
+points. Redirects are now followed by hand with every hop checked against the
+archive's host, as the source fetcher does, and provenance records the address
+actually read rather than the entry point that pointed at it.
+
+#### What the archive tier is now known to do
+
+archive.org is reachable again — it answered *"temporarily offline"* for the whole
+of 2026-09-11 and now answers this address with a `429` rate limit — which allowed
+the URL construction to be checked against the real service even where no snapshot
+of a given FFN page exists:
+
+- A missing snapshot is a **`404`**; a present one is a **`302`** to the resolved
+  address. Entry URL and resolution cannot be told apart by shape: the entry URL
+  already carries the `id_` modifier, and still redirects.
+- The timestamp fallback is correct as written. The entry form with no timestamp
+  resolves to the **newest** snapshot, verified landing on `20260826131158`.
+- `id_` is the difference between a page and a wrapper around it, measured rather
+  than asserted: the wrapped form of a page returned **636 kB** against **93 kB**
+  for its `id_` form — the archive's toolbar and the rewritten URLs inside it.
+
+Whether a real snapshot of a real FFN chapter parses is still unverified: no page
+of the recorded work has a snapshot, and the tier needs an adapter to reach. What
+is verified is everything up to the body.
 
 ---
 

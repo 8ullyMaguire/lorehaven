@@ -25,7 +25,7 @@ the result. Where a claim could only be checked by hand, it says so.
 
 | Field | Value |
 |---|---|
-| Date of last verification | 2026-09-10 |
+| Date of last verification | 2026-09-11 |
 | Commit | Milestone 6 in progress on `master`; last tag `v0.06-jobs` (Milestone 5). Previous checkpoints: `v0.05-reader` (Milestone 4), `v0.04-publishing` (Milestone 3), `v0.03-identity` (Milestone 2), `v0.01-running-app` (Milestone 0). Milestone 6 is **not** tagged: its import and credential machinery is built and tested, and its pages are not. |
 | Environment | Linux, Rust 1.98.0, Node 26.8.1, SQLite 3.53.4 |
 | PostgreSQL available | **No** |
@@ -525,10 +525,14 @@ one.
 Commands actually run, with their result:
 
 ```text
-cargo test --workspace            375 passed, 0 failed across 16 test binaries
-                                  (milestone_6.rs contributes 17; the scrapers
-                                  crate contributes 67 in-crate unit tests plus
-                                  9 fixture tests)
+cargo test --workspace --all-features
+                                  616 passed, 0 failed, 9 ignored across 21 test
+                                  binaries (milestone_6.rs contributes 28; the
+                                  scrapers crate contributes 185 in-crate unit
+                                  tests plus 98 fixture tests across the four
+                                  adapter families)
+cargo test -p lorehaven-scrapers --test live_verification -- --ignored \
+  --test-threads=1                9 passed against the live sources (see below)
 cargo clippy --workspace --all-targets --offline -- -D warnings   clean
 cargo fmt --all -- --check        clean
 ```
@@ -558,6 +562,76 @@ source's last-change date. Reading only `Updated:` left every finished work with
 no revision date at all — which is worse than a null, because it looks like the
 source never said, and an update check would decide there was nothing to compare
 against.
+
+### The unblock path, verified against real services
+
+FanFiction.net, FictionPress, FimFiction, ScribbleHub and the XenForo boards
+refuse a plain request. `crates/scrapers/src/` answers with a declared chain —
+a browser fingerprint (`engine.rs`), then a solver service (`solver.rs`), then an
+Internet Archive snapshot (`archive.rs`) — and on 2026-09-11 two of those tiers
+were run against a real service rather than a stub. Byparr 3.0.4 was installed
+and run; the archive was reached directly.
+
+```text
+plain client: refused, as expected
+browser fingerprint: also refused for FimFiction, which is why the solver exists
+solver: 241315 bytes of the real FimFiction story page via http://127.0.0.1:8191
+guard: an undeclared host is refused before any solve is attempted
+```
+
+| Source | Plain | Fingerprint | Solver |
+|---|---|---|---|
+| FanFiction.net | refused | 46,808 bytes | 48,743 bytes |
+| FictionPress | refused | refused | 35,740 bytes |
+| FimFiction | refused | refused | 241,315 bytes |
+| ScribbleHub | refused | refused | 33,742 bytes |
+| SpaceBattles | refused | refused | 1,526,890 bytes |
+
+The second row is the correction that matters: a browser fingerprint is a
+**per-host** fact. It passes FanFiction.net and is refused by FictionPress,
+FimFiction and ScribbleHub, with three different browsers tried. The solver's log
+shows why the third tier is a different kind of thing rather than more of the
+second — `Challenge detected` followed by `Clicked the challenge checkbox`, twice.
+An interactive checkbox is not a header a client can set. It also costs about
+twelve seconds per page, which is why the source's own `crawl-delay` is the floor
+for pacing rather than the crate's default.
+
+Three defects were found only because a real service was on the other end, and all
+three passed every stub test before that:
+
+1. **The configured endpoint was posted to as written.** `http://127.0.0.1:8191`
+   answers `405 Method Not Allowed` — it serves the service's documentation page,
+   and the contract's endpoint is `/v1`. A stub asserts on the *body* it is sent
+   and never cared which path the body arrived at. The client now keeps a path an
+   operator supplied and appends the versioned one to a bare address.
+2. **Byparr has no session API.** The FlareSolverr v1 contract has one; the
+   maintained successor accepts a single
+   `LinkRequest{cmd, url, maxTimeout, blockMedia, returnOnlyCookies}` and mentions
+   `sessions`, `session` and `cmd` zero times in its source. The proactive
+   `sessions.create` was parsed as a request for the empty URL and answered
+   `502 Could not reach the target: … Invalid url: "https://"`. Reads worked and
+   only the log was wrong, but an operator's solver log filled with errors about a
+   service that is working, and every page paid for a wasted navigation. A session
+   is now proven rather than assumed, and a one-page fetch never tries: the first
+   request goes stateless, and support is attempted only once a second request
+   makes one worth having, then remembered either way.
+3. **The archive client followed a redirect it had not checked.** The archive
+   answers its entry URL with a `302` to the snapshot's own address, and `reqwest`
+   was following that silently — a hop that could leave the archive, in a crate
+   whose premise is that an answer is not authority to request wherever it points.
+   Redirects are now followed by hand with every hop checked, and provenance
+   records the address actually read rather than the entry point.
+
+The archive tier's URL construction was checked against the real archive, which is
+reachable again (it answered *"temporarily offline"* for the whole of 2026-09-11
+and now rate-limits this address with a `429`). A missing snapshot is a `404` and a
+present one a `302`; the entry form and its resolution cannot be told apart by
+shape, because the entry URL already carries the `id_` modifier and still
+redirects. The bare-timestamp fallback resolves to the **newest** snapshot,
+verified landing on `20260826131158`. And `id_` is the difference between a page
+and a wrapper around it, measured rather than asserted: **636 kB** wrapped against
+**93 kB** raw. Whether a real snapshot of a real FFN chapter parses is still
+unverified, because no page of the recorded work has one.
 
 ## Known limitations and open risks
 
@@ -612,19 +686,35 @@ against.
     16 and the search index with Milestone 9. An instance's pending count will
     therefore stay above zero, and that is the honest state rather than a
     delivery that did not happen.
-11. **The import path has no page, and one adapter.** A reader cannot import
-    anything through the interface: the routes exist, are tested and are not
-    called by any component, so the plan's journey — paste a URL, see the
-    preview, confirm, watch it fetch — cannot be walked. Of the source family
-    list, the Archive-software family is built and the other nine tier-1 sources
-    are not. The importer is therefore reachable and real from the API and
-    invisible from the browser.
-12. **A source's health is reported, not maintained.** An operator can pause a
-    source and the importer will honour it without making a single request; what
-    nothing does is notice that a source has started failing and pause it, or
-    record repeated failures against the source row. The failure classes spec
-    §11.8 asks to distinguish are distinguished in the message a reader sees and
-    are not written back to the catalogue.
+11. **The import path has pages, four adapter families, and no progress.**
+    Corrected on 2026-09-11: `Import.svelte` and `Library.svelte` exist (M6-09),
+    so the journey — paste a URL, see the preview, confirm — is walkable, and its
+    one promise holds: the confirm button carries the plan the reader actually
+    saw, which the server re-derives and refuses if it no longer matches. What is
+    still absent is the per-chapter appearance of an import in progress; the page
+    reports the queued job and the library shows the result. Of the source
+    families, the Archive-software family, Royal Road, Syosetu and the eFiction
+    family (nineteen archives, eighteen hosts) are built; FanFiction.net,
+    FictionPress, ScribbleHub, FimFiction, the XenForo boards, wattpad and
+    ficbook are not, and are now blocked on parsing rather than on access.
+12. **A source's health is now derived, but cannot say why.** Corrected on
+    2026-09-11: a sweep recomputes health from the source's own finished imports
+    over a seven-day window after every import and on demand, and an unavailable
+    source refuses an import before it is queued. It never derives and never
+    overwrites `paused`, because a sweep that cleared an operator's decision would
+    silently re-enable a source somebody switched off on purpose. What is still
+    absent is the *reason*: the failure classes spec §11.8 asks to distinguish are
+    classified in the import's error mapping and are not written back, so a source
+    can report that it is degraded without reporting why.
+
+15. **The solver tier needs an operator to run one, and nothing detects its
+    absence.** The chain is declared per source and switched on per instance;
+    `imports.solver_url` is unset by default, so an instance that wants ScribbleHub
+    or FimFiction must run Byparr or a FlareSolverr-compatible service and point
+    the setting at it. That is deliberate — the importer must not impersonate by
+    default — but it means the tier's cost is borne by whoever configures it: a
+    forked HTTP stack on the fingerprint path, and a browser service to maintain
+    for the solver path. Verified on 2026-09-11 against Byparr 3.0.4.
 13. **Nothing has been run against PostgreSQL, and nothing is deployed.**
     Unchanged from Milestone 5 and still the largest untested surface: every
     migration is written twice and only the SQLite half has ever been executed,
