@@ -783,3 +783,26 @@ a **non-HTML** document, Byparr returns Chrome's plaintext viewer wrapping —
 around `<pre>`. Nothing reads `robots.txt` through the solver, so nothing is
 affected today, but a source whose *chapter* is served as `text/plain` would
 arrive wrapped and would need unwrapping.
+
+## xenforo
+
+| File | Source | Recorded |
+|---|---|---|
+| `thread.html` | `forums.spacebattles.com/threads/by-the-horns-story-only-thread.262832/` | 2026-09-11 |
+| `threadmarks.html` | the same thread's `/threadmarks` | 2026-09-11 |
+| `post-11149727.html` | the same thread's `/post-11149727` | 2026-09-11 |
+| `robots-spacebattles.txt` | `forums.spacebattles.com/robots.txt` | 2026-09-11 |
+| `robots-sufficientvelocity.txt` | `forums.sufficientvelocity.com/robots.txt` | 2026-09-11 |
+
+**Recorded ahead of the adapter**, which has not been written yet. These are the
+pages the reconnaissance was measured from, and they are committed so the
+adapter can be written against them offline rather than against the live site.
+Every markup shape, every selector and every open question is written out in
+`docs/plans/milestone-06-xenforo-recon.md` — that file, not this table, is the
+thing to read before starting.
+
+The three HTML files were recorded through the solver; the two `robots.txt`
+files plainly, because neither host challenges them. The two robots files are
+**byte-identical**, which is why the recon doc lists SpaceBattles,
+SufficientVelocity and QuestionableQuesting as three separate sources rather
+than one: the software is shared and the walls are not.
