@@ -29,6 +29,7 @@ pub mod royalroad;
 pub mod scribblehub;
 pub mod syosetu;
 pub mod wattpad;
+pub mod xenforo;
 
 use crate::{Registry, SourceAdapter};
 
@@ -49,6 +50,9 @@ pub fn default_registry() -> Registry {
     registry.register(Box::new(scribblehub::ScribbleHub::new()));
     registry.register(Box::new(syosetu::Syosetu::new()));
     registry.register(Box::new(wattpad::Wattpad::new()));
+    for forum in xenforo::Forum::all() {
+        registry.register(Box::new(xenforo::XenForo::new(forum)));
+    }
     // An adapter that cannot read anything must not appear in the catalogue: a
     // source listed as available and answering "not implemented" is worse than
     // one that is absent, because the first wastes a reader's time and the

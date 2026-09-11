@@ -806,3 +806,125 @@ files plainly, because neither host challenges them. The two robots files are
 **byte-identical**, which is why the recon doc lists SpaceBattles,
 SufficientVelocity and QuestionableQuesting as three separate sources rather
 than one: the software is shared and the walls are not.
+
+## xenforo
+
+Three forums running the same software and the same threadmarks add-on. They are
+three separate sources because their walls and their policies differ — measured,
+not assumed.
+
+| File | Source | Recorded |
+|---|---|---|
+| `thread.html` | `forums.spacebattles.com/threads/by-the-horns-story-only-thread.262832/` | 2026-09-11 |
+| `threadmarks.html` | the same thread's `/threadmarks`, page 1 | 2026-09-11 |
+| `threadmarks-page-2.html` | the same thread's `/threadmarks?per_page=25&page=2` | 2026-09-11 |
+| `post-11149727.html` | the same thread's `/post-11149727` | 2026-09-11 |
+| `threadmarks-complete.html` | `forums.spacebattles.com/threads/in-memory-of-a-lost-cat.1333280/threadmarks` | 2026-09-11 |
+| `threadmarks-sufficientvelocity.html` | `forums.sufficientvelocity.com/threads/marci-of-the-dreadfort.148769/threadmarks` | 2026-09-11 |
+| `thread-sufficientvelocity.html` | the same thread's page | 2026-09-11 |
+| `post-sufficientvelocity.html` | the same thread's `/post-39100025` | 2026-09-11 |
+| `threadmarks-questionablequesting.html` | `forum.questionablequesting.com/threads/margin-of-error.39359/threadmarks` | 2026-09-11 |
+| `robots-spacebattles.txt` | `forums.spacebattles.com/robots.txt` | 2026-09-11 |
+| `robots-sufficientvelocity.txt` | `forums.sufficientvelocity.com/robots.txt` | 2026-09-11 |
+
+The SpaceBattles pages were recorded through the solver; everything else was
+recorded with a plain request, because the other two hosts serve one.
+
+### The walls differ between hosts
+
+| Host | `robots.txt` | Plain request, honest agent | Declared wall |
+|---|---|---|---|
+| `forums.spacebattles.com` | 200, `Allow: /` for `*` | **200**, the real 128 KB page | `Wall::None` |
+| `forums.sufficientvelocity.com` | byte-identical to the above | **200**, the real page | `Wall::None` |
+| `forum.questionablequesting.com` | **404, no file** | **200**, the real page | `Wall::None` |
+
+The two 3178-byte `robots.txt` files are **byte-identical** — two hosts run by the
+same people, with the same software, the same add-on and the same rules file. What
+differs is the third host, which publishes no file at all.
+
+### A wall this adapter first recorded wrongly, and why
+
+SpaceBattles was recorded as needing a solver: `403`, *Just a moment*, to both a
+plain request and a browser fingerprint. The second measurement disagreed, and the
+difference was the **probe**, not the host:
+
+| Client | Result |
+|---|---|
+| `Lorehaven/{version} (+import)` — this fetcher's own agent | **200**, the real 128 KB page |
+| `curl/8.0` | **200**, the real page |
+| a Chrome `User-Agent` over plain TLS | **403**, *Just a moment* |
+
+A request that says what it is gets served; one that claims to be a browser
+without behaving like one gets challenged. The reconnaissance sent a browser agent
+from a non-browser client, and the 403 was Cloudflare noticing exactly that — so
+the probe caused the wall it reported.
+
+Declaring `Wall::Solver` on that evidence would have been wrong in the expensive
+direction: every instance without a solver configured refuses to import from
+SpaceBattles at all, before queueing, for a host that answers a plain request. All
+three hosts now declare `Wall::None`, a challenge is still escalated when the
+instance has a solver, and the live test asserts the plain path for each of them
+so this cannot go stale quietly. Note that `Wall::None` is documented as a
+*starting* point, not as a claim that no wall exists.
+
+### Our own user agent decides whether we may read at all
+
+Both published files are `Allow: /` for `User-agent: *` followed by about ninety
+lines that disallow individual crawlers **by name** — `GPTBot`, `ClaudeBot`,
+`anthropic-ai`, `CCBot`, `Bytespider`, `PerplexityBot`, `AhrefsBot` and the rest.
+`RobotsRules::parse` is called with `product_token(&policy.user_agent)`, and this
+fetcher's default agent is `Lorehaven/{version} (+import)`, whose token is
+`Lorehaven`. The claim the adapter rests on is that our token is not one of those
+names, and the fixture suite asserts it **both ways**: our token is allowed these
+paths, and `GPTBot` — parsed from the same recorded file — is not. Without the
+second half, a file that allowed everything to everybody would pass the first.
+
+### What the pages establish
+
+* **The chapter count is stated and is checkable.** The list header carries
+  `Threadmarks: 42` beside `Created` and `Status`. The recorded work arrives as
+  25 + 17 = 42, and the adapter refuses a list that does not add up to the stated
+  count. This is the safety property that a partial import cannot pass.
+* **`per_page` is silently clamped.** `per_page=50` and `per_page=100` are
+  honoured; **`per_page=1000` returns 25**, the site's default, with no error. An
+  adapter that asked for a large page and trusted it would import 25 chapters of
+  42 and report success. This one asks for 100 and checks the total regardless.
+* **A thread page carries a widget list of recent threadmarks.** The recorded
+  thread page parses as a perfectly valid five-item chapter list with
+  `Threadmarks: 42` beside it. Nothing reads a thread page as a chapter list, and
+  the count check is what would catch it if anything ever did — the fixture suite
+  asserts the widget's shape so that stays true.
+* **The newest date is not the last chapter.** The recorded list ends on a
+  chapter posted 2021-11-30, but its newest date is 2024-04-08 — a chapter at
+  **ordinal 6**, added years after the ones around it. A work's last change is the
+  newest date, not the final entry.
+* **The status label differs between hosts.** SpaceBattles and
+  SufficientVelocity write `Ongoing`; QuestionableQuesting writes `Incomplete`
+  for the same state. The site's own machine vocabulary is visible in its forum
+  filters — `incomplete`, `complete`, `hiatus`, `dropped` — and `dropped` is its
+  word for what the domain calls *cancelled*.
+* **Threadmark links are written two different ways.** SpaceBattles and
+  SufficientVelocity write `/threads/{slug}.{id}/#post-11149727`; Questionable
+  Questing writes an absolute URL with the id as a path segment,
+  `.../threads/{slug}.{id}/post-13124301`. Reading only the fragment form returns
+  **zero chapters** on that host, which is how the difference was found.
+* **The wall was in the probe.** See above: a browser `User-Agent` over
+  non-browser TLS is challenged by Cloudflare, which is what the first
+  measurement saw. Every host here serves a client that is honest about itself.
+* **A post address serves the whole thread.** `/post-{id}` returns the containing
+  page — 26 articles on the recorded one, each with its own `.bbWrapper` — so the
+  parse is scoped to `article[data-content="post-{id}"]`. An unscoped selector
+  returns the first post's prose for every chapter, which the fixture suite
+  asserts against directly: the requested post's prose contains `Stephen T Bynum`,
+  and the first post's does not.
+* **The forum's timestamps use a compact offset.** `2013-06-24T23:28:23-0400` —
+  `-0400`, which RFC 3339 does not allow, so the well-known parser refuses it and
+  the date would be lost rather than wrong.
+* **A tag's anchor carries its category.** The theme renders `Setting battletech`
+  for one tag called `battletech`, because the category lives in the icon's
+  `<title>`. The category is stripped.
+* **A post-only address resolves to its thread.** `/posts/{id}/` redirects to the
+  containing thread page, which states `data-content-key="thread-{id}"`. That is
+  what lets a pasted "copy link to post" address be imported rather than refused.
+* **Word counts are abbreviated.** The list states `1.7k` for a chapter, so no
+  work total can be summed and none is reported: the forum states no total at all.

@@ -85,6 +85,10 @@ fn adapter_for(key: &str) -> Box<dyn SourceAdapter> {
         "royalroad" => Box::new(sites::royalroad::RoyalRoad::new()),
         "syosetu" => Box::new(sites::syosetu::Syosetu::new()),
         "ficbook" => Box::new(sites::ficbook::Ficbook::new()),
+        "scribblehub" => Box::new(sites::scribblehub::ScribbleHub::new()),
+        "spacebattles" => Box::new(sites::xenforo::XenForo::spacebattles()),
+        "sufficientvelocity" => Box::new(sites::xenforo::XenForo::sufficient_velocity()),
+        "questionablequesting" => Box::new(sites::xenforo::XenForo::questionable_questing()),
         other => panic!("no owned constructor for {other}"),
     }
 }
@@ -945,4 +949,88 @@ async fn scribblehubs_api_answers_plainly_and_its_prose_needs_the_solver() {
         story.chapter_count,
         chapter.content_html.len()
     );
+}
+
+// ---------------------------------------------------------------------------
+// XenForo: three forums running one piece of software, and three different
+// answers to the same request.
+// ---------------------------------------------------------------------------
+
+/// Every XenForo host is readable with a plain request — including the one that
+/// was first recorded as needing a solver.
+///
+/// SpaceBattles was measured as `Wall::Solver` (`403`, *Just a moment*) until the
+/// probe itself was found to be the cause: a browser `User-Agent` sent over
+/// non-browser TLS, which is exactly what Cloudflare challenges. Re-measured with
+/// each client's own honest agent, all three hosts serve the real page.
+///
+/// So this test asserts the cheap path for all three, and needs no solver to run.
+/// If a host ever starts challenging, this fails loudly — and the adapter, which
+/// declares `Wall::None` and escalates on a challenge when a solver is
+/// configured, would still import for an instance that has one.
+///
+/// ```text
+/// cargo test -p lorehaven-scrapers --all-features --test live_verification \
+///     -- --ignored --nocapture --test-threads=1 xenforo
+/// ```
+#[tokio::test]
+#[ignore = "live: reaches three XenForo forums"]
+async fn every_xenforo_host_is_readable_with_a_plain_request() {
+    for (key, raw, expected_chapters) in [
+        (
+            "spacebattles",
+            "https://forums.spacebattles.com/threads/262832/",
+            42_usize,
+        ),
+        (
+            "sufficientvelocity",
+            "https://forums.sufficientvelocity.com/threads/marci-of-the-dreadfort.148769/",
+            77_usize,
+        ),
+        (
+            "questionablequesting",
+            "https://forum.questionablequesting.com/threads/margin-of-error.39359/",
+            17_usize,
+        ),
+    ] {
+        let adapter = adapter_for(key);
+        let url = Url::parse(raw).expect("a thread address");
+        assert!(adapter.can_handle(&url), "{key} should claim {raw}");
+
+        // The plain fetcher the registry would build: no solver, no
+        // impersonation, nothing escalated to.
+        assert_eq!(adapter.wall(), lorehaven_scrapers::Wall::None, "{key}");
+        let fetch = fetcher_for(key);
+
+        let work = adapter
+            .preview(&fetch, &url, None)
+            .await
+            .unwrap_or_else(|error| panic!("{key} should serve a plain request: {error}"));
+
+        // The chapter list added up to the count the header states — the adapter
+        // refuses otherwise, so reaching here is that check passing.
+        assert_eq!(work.chapters.len(), expected_chapters, "{key}");
+        assert!(!work.title.is_empty(), "{key}");
+        assert!(!work.author_text.is_empty(), "{key}");
+        println!(
+            "{key}: {:?} by {:?}, {} chapters, {:?}",
+            work.title,
+            work.author_text,
+            work.chapters.len(),
+            work.status
+        );
+
+        // One chapter, through the same plain fetcher. The prose is read out of
+        // the article for that post, not the first post on the page.
+        let chapter = adapter
+            .fetch_chapter(&fetch, &work, 1, None)
+            .await
+            .unwrap_or_else(|error| panic!("{key} chapter 1: {error}"));
+        assert!(
+            chapter.content_html.len() > 100,
+            "{key} chapter 1 is not empty"
+        );
+        assert_eq!(chapter.ordinal, 1, "{key}");
+        println!("{key}: chapter 1 is {} bytes", chapter.content_html.len());
+    }
 }
