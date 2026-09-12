@@ -324,6 +324,11 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        .merge(classified(
+            routes::discovery::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // The reader's library: shelves, bookmarks, private tags, reading
         // statuses, saved views, storage and the update check. Every route
         // needs a session and most of them write, so the whole tree sits under
