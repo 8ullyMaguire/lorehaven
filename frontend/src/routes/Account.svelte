@@ -1,13 +1,18 @@
 <script lang="ts">
   import {
     fetchContentSettings,
+    fetchFeedbackInbox,
+    fetchFeedbackPreferences,
     fetchPrivacy,
     fetchSessions,
     patchContentSettings,
     patchPrivacy,
+    putFeedbackPreferences,
     revokeAllSessions,
     revokeSession,
     type ContentSettings,
+    type FeedbackInbox,
+    type FeedbackPreferencesView,
     // Aliased: `PrivacySettings` below is the component that renders them.
     type PrivacySettings as PrivacySettingsResponse,
     type SessionSummary,
@@ -35,6 +40,7 @@
   const TABS = [
     { id: 'sessions', label: 'Sessions' },
     { id: 'reading', label: 'Reading' },
+    { id: 'feedback', label: 'Feedback' },
     { id: 'privacy', label: 'Privacy' },
   ];
 
@@ -43,6 +49,8 @@
   let sessions = $state<SessionSummary[] | null>(null);
   let privacy = $state<PrivacySettingsResponse | null>(null);
   let content = $state<ContentSettings | null>(null);
+  let feedback = $state<FeedbackPreferencesView | null>(null);
+  let inbox = $state<FeedbackInbox | null>(null);
 
   let error = $state<unknown>(null);
   let loading = $state(false);
@@ -68,14 +76,19 @@
     loading = true;
     error = null;
     try {
-      const [sessionList, privacySettings, contentSettings] = await Promise.all([
-        fetchSessions(),
-        fetchPrivacy(),
-        fetchContentSettings(),
-      ]);
+      const [sessionList, privacySettings, contentSettings, feedbackPrefs, feedbackInbox] =
+        await Promise.all([
+          fetchSessions(),
+          fetchPrivacy(),
+          fetchContentSettings(),
+          fetchFeedbackPreferences(),
+          fetchFeedbackInbox(),
+        ]);
       sessions = sessionList;
       privacy = privacySettings;
       content = contentSettings;
+      feedback = feedbackPrefs;
+      inbox = feedbackInbox;
     } catch (failure) {
       error = failure;
     } finally {
@@ -90,6 +103,8 @@
       sessions = null;
       privacy = null;
       content = null;
+      feedback = null;
+      inbox = null;
     } finally {
       signingOut = false;
     }
@@ -244,6 +259,76 @@
                 What you are shown is the lower of your preference and the instance
                 policy. Both are reported above so a setting that has no effect says so.
               </p>
+            {/if}
+          </div>
+        {:else if id === 'feedback'}
+          <div class="panel">
+            {#if loading && !feedback}
+              <Skeleton lines={4} label="Loading your feedback preferences" />
+            {:else if feedback}
+              <p class="note" role="status">{feedback.effective_policy}</p>
+              <label class="share">
+                <input
+                  type="checkbox"
+                  checked={feedback.accept_constructive}
+                  onchange={async (event) => {
+                    const accept_constructive = (event.target as HTMLInputElement).checked;
+                    try {
+                      feedback = await putFeedbackPreferences({
+                        accept_constructive,
+                        expected_version: feedback?.version ?? 0,
+                      });
+                      say('Feedback preferences saved.', 'success');
+                    } catch (failure) {
+                      error = failure;
+                    }
+                  }}
+                />
+                Receive constructive critique (opt-in, off by default)
+              </label>
+              <label class="share">
+                <input
+                  type="checkbox"
+                  checked={feedback.comments_enabled}
+                  onchange={async (event) => {
+                    const comments_enabled = (event.target as HTMLInputElement).checked;
+                    try {
+                      feedback = await putFeedbackPreferences({
+                        comments_enabled,
+                        expected_version: feedback?.version ?? 0,
+                      });
+                      say('Feedback preferences saved.', 'success');
+                    } catch (failure) {
+                      error = failure;
+                    }
+                  }}
+                />
+                Receive new feedback at all (pausing holds it, never deletes it)
+              </label>
+              {#if inbox}
+                <h3>Received feedback</h3>
+                {#if inbox.items.length === 0}
+                  <p class="note">No delivered feedback yet.</p>
+                {:else}
+                  <ul class="sessions">
+                    {#each inbox.items as item (item.review_id)}
+                      <li>
+                        <div class="device">
+                          <strong>@{item.author_handle}</strong>
+                          <span class="badge">{item.class}</span>
+                        </div>
+                        <p>{item.body}</p>
+                        <p class="note">On {item.work_title}</p>
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+                {#if inbox.held_count > 0}
+                  <p class="note" role="status">
+                    {inbox.held_count} held for review. Held text is counted, never shown.
+                  </p>
+                {/if}
+              {/if}
             {/if}
           </div>
         {:else}

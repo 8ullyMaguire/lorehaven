@@ -24,6 +24,7 @@ pub mod jobs;
 pub mod library;
 pub mod migrate;
 pub mod outbox;
+pub mod positivity;
 pub mod reading;
 pub mod revisions;
 pub mod secrets;
