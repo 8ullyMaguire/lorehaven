@@ -11,5 +11,7 @@ pub mod library;
 pub mod meta;
 pub mod pseuds;
 pub mod reading;
+pub mod search;
 pub mod settings;
+pub mod taxonomy;
 pub mod works;

@@ -27,9 +27,11 @@ pub mod outbox;
 pub mod positivity;
 pub mod reading;
 pub mod revisions;
+pub mod search;
 pub mod secrets;
 pub mod sessions;
 pub mod storage;
+pub mod taxonomy;
 
 use std::borrow::Cow;
 use std::path::Path;
