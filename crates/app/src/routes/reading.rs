@@ -616,6 +616,11 @@ async fn upsert_review(
     // The positivity gate (spec §12): classify against the author's
     // effective preferences *before* the review is read back, and record
     // the outcome. Held text stays stored but leaves every listing.
+    //
+    // D8 — compensating action: if classification fails, the review was
+    // already written, so we withdraw (delete) it rather than leave a
+    // phantom review the positivity pipeline never saw. The 500 the caller
+    // gets is honest; the DB stays consistent.
     let outcome = if is_public {
         let author = positivity::author_account_for_work(state.db(), work_id).await?;
         match author {
@@ -626,7 +631,7 @@ async fn upsert_review(
                 let policy = effective(&prefs, &work_ov);
                 let (allow, deny) =
                     positivity::list_membership(state.db(), author_account, pseud_id).await?;
-                let stored = positivity::classify_review(
+                let stored = match positivity::classify_review(
                     state.db(),
                     &review.id,
                     &request.body,
@@ -634,7 +639,17 @@ async fn upsert_review(
                     allow,
                     deny,
                 )
-                .await?;
+                .await
+                {
+                    Ok(s) => s,
+                    Err(e) => {
+                        reading::delete_review(state.db(), pseud_id, work_id).await.ok();
+                        return Err(ApiError(AppError::internal(
+                            "classifying the review",
+                            e,
+                        )));
+                    }
+                };
                 stored.outcome
             }
         }

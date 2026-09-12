@@ -58,6 +58,8 @@ pub enum ErrorCode {
     ExtensionPermissionDenied,
     /// Our fault. Details are logged, never returned.
     Internal,
+    /// The operation is recognised but not yet implemented.
+    NotImplemented,
 }
 
 impl ErrorCode {
@@ -79,6 +81,7 @@ impl ErrorCode {
             Self::InsufficientCredits => "INSUFFICIENT_CREDITS",
             Self::ExtensionPermissionDenied => "EXTENSION_PERMISSION_DENIED",
             Self::Internal => "INTERNAL",
+            Self::NotImplemented => "NOT_IMPLEMENTED",
         }
     }
 }
@@ -190,6 +193,9 @@ pub enum AppError {
     /// An unexpected fault. The inner error is logged, never returned.
     #[error("internal error")]
     Internal(#[from] anyhow::Error),
+    /// The operation is recognised but not yet implemented.
+    #[error("not implemented")]
+    NotImplemented,
 }
 
 impl AppError {
@@ -212,6 +218,7 @@ impl AppError {
             Self::InsufficientCredits { .. } => ErrorCode::InsufficientCredits,
             Self::ExtensionPermissionDenied { .. } => ErrorCode::ExtensionPermissionDenied,
             Self::Internal(_) => ErrorCode::Internal,
+            Self::NotImplemented => ErrorCode::NotImplemented,
         }
     }
 
@@ -233,6 +240,7 @@ impl AppError {
             Self::InsufficientCredits { .. } => 402,
             Self::SourceUnavailable { .. } => 502,
             Self::JobFailed { .. } | Self::Internal(_) => 500,
+            Self::NotImplemented => 501,
         }
     }
 
