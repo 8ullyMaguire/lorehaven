@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod collaborators;
+pub mod community;
 pub mod discovery;
 pub mod exports;
 pub mod feedback;
