@@ -1,5 +1,6 @@
 //! Lorehaven domain primitives.
 
+pub mod blocking;
 pub mod content;
 pub mod discovery;
 pub mod document;
