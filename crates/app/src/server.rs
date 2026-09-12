@@ -17,6 +17,7 @@
 //! router            the application
 //! ```
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
@@ -26,6 +27,7 @@ use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::Router;
 use lorehaven_db::migrate::{self, MigrationReport};
+use lorehaven_db::outbox;
 use lorehaven_db::Database;
 use lorehaven_domain::ids::RequestId;
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -89,7 +91,61 @@ pub async fn serve(config: Config, db: Database, args: &ServeArgs) -> Result<()>
     // `lorehaven worker` process is the better one when the queue is busy. Both
     // are supported and both stop on the same signal.
     if args.with_worker {
-        let worker = crate::worker::Worker::new(crate::worker::WorkerOptions::default());
+        let worker = crate::worker::Worker::new(crate::worker::WorkerOptions::default())
+            .with_topic("publish.index", {
+                let handler: crate::worker::TopicHandler = Arc::new(|_state: &AppState, event: &outbox::OutboxEvent| {
+                    let work_id = event.payload.split("\"work_id\":\"").nth(1)
+                        .and_then(|s| s.split('"').next())
+                        .unwrap_or("")
+                        .to_owned();
+                    let state = _state.clone();
+                    Box::pin(async move {
+                        if work_id.is_empty() {
+                            return Err(anyhow::anyhow!("missing work_id in payload"));
+                        }
+                        let job_payload = serde_json::json!({ "work_id": work_id }).to_string();
+                        lorehaven_db::jobs::enqueue(
+                            state.db(),
+                            lorehaven_domain::jobs::JobKind::Reindex,
+                            &job_payload,
+                            Some(&format!("reindex:{}", work_id)),
+                            None,
+                            5,
+                            &lorehaven_domain::jobs::RetryPolicy::default(),
+                        ).await?;
+                        Ok(())
+                    })
+                });
+                handler
+            })
+            .with_topic("withdraw.deindex", {
+                let handler: crate::worker::TopicHandler = Arc::new(|_state: &AppState, event: &outbox::OutboxEvent| {
+                    let work_id = event.payload.split("\"work_id\":\"").nth(1)
+                        .and_then(|s| s.split('"').next())
+                        .unwrap_or("")
+                        .to_owned();
+                    let state = _state.clone();
+                    Box::pin(async move {
+                        if work_id.is_empty() {
+                            return Err(anyhow::anyhow!("missing work_id in payload"));
+                        }
+                        let sql = state.db().sql(
+                            "DELETE FROM works_index_terms WHERE work_id = ?; DELETE FROM works_index WHERE work_id = ?",
+                            "DELETE FROM works_index_terms WHERE work_id = $1::uuid; DELETE FROM works_index WHERE work_id = $1::uuid",
+                        );
+                        match state.db().backend() {
+                            lorehaven_db::Backend::Sqlite => {
+                                sqlx::query(&sql).bind(&work_id).bind(&work_id).execute(state.db().sqlite_pool().expect("sqlite")).await?;
+                            }
+                            lorehaven_db::Backend::Postgres => {
+                                sqlx::query(&sql).bind(&work_id).bind(&work_id).execute(state.db().postgres_pool().expect("postgres")).await?;
+                            }
+                        }
+                        Ok(())
+                    })
+                });
+                handler
+            });
         let worker_state = state.clone();
         tracing::info!(worker = %worker.options().id, "worker running in this process");
         tokio::spawn(async move {
@@ -261,6 +317,11 @@ pub fn build_router(state: AppState) -> Router {
         .merge(classified(
             routes::feedback::router(),
             RouteClass::Write,
+            &state,
+        ))
+        .merge(classified(
+            routes::search::router(),
+            RouteClass::Default,
             &state,
         ))
         // The reader's library: shelves, bookmarks, private tags, reading

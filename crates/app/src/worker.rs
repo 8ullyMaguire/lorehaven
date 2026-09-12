@@ -444,16 +444,50 @@ impl Worker {
                 })?;
                 crate::library_updates::run(state, &payload).await
             }
-            JobKind::Reindex | JobKind::Thumbnail => {
-                // A kind with no handler is a *fatal* failure: retrying it five
-                // times cannot make a handler appear, and a job that quietly
-                // succeeds without doing its work is the one outcome nobody can
-                // detect later.
-                Err(HandlerError::Fatal(format!(
-                    "no handler for a {} job in this build",
-                    kind.as_str()
-                )))
+            JobKind::Reindex => {
+                let work_id: String = serde_json::from_str(&job.payload).map_err(|error| {
+                    HandlerError::Fatal(format!("the reindex payload is not JSON: {error}"))
+                })?;
+                let work_id: lorehaven_domain::ids::WorkId = work_id
+                    .parse()
+                    .map_err(|_| HandlerError::Fatal(format!("invalid work id: {work_id}")))?;
+                // Inline query: get the plain text of the latest published chapter.
+                // A chapter is indexed when it has a live revision
+                // (current_revision_id IS NOT NULL). The work's lifecycle
+                // ('draft'|'published') governs *visibility* in search results,
+                // not whether the text is indexed — the Reindex job fills the
+                // index; the search route filters on lifecycle.
+                let plain_text: String = match state.db().backend() {
+                    lorehaven_db::Backend::Sqlite => sqlx::query_scalar(
+                        "SELECT COALESCE(GROUP_CONCAT(cr.plain_text, ' '), '')
+                         FROM chapters c
+                         JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                         WHERE c.work_id = ?",
+                    )
+                    .bind(work_id.to_string())
+                    .fetch_one(state.db().sqlite_pool().expect("sqlite"))
+                    .await
+                    .unwrap_or_default(),
+                    lorehaven_db::Backend::Postgres => sqlx::query_scalar(
+                        "SELECT COALESCE(STRING_AGG(cr.plain_text, ' '), '')
+                         FROM chapters c
+                         JOIN chapter_revisions cr ON cr.id = c.current_revision_id::uuid
+                         WHERE c.work_id = $1::uuid",
+                    )
+                    .bind(work_id.to_string())
+                    .fetch_one(state.db().postgres_pool().expect("postgres"))
+                    .await
+                    .unwrap_or_default(),
+                };
+                lorehaven_db::search::rebuild_work_index(state.db(), &work_id, &plain_text)
+                    .await
+                    .map_err(|e| HandlerError::Fatal(format!("rebuild index failed: {e}")))?;
+                Ok(())
             }
+            JobKind::Thumbnail => Err(HandlerError::Fatal(format!(
+                "no handler for a {} job in this build",
+                kind.as_str()
+            ))),
         }
     }
 
