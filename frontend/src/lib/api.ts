@@ -875,7 +875,7 @@ export interface RatingView {
   version: number;
 }
 
-/** A review. */
+/** A review. `receipt` is the only sender-visible delivery string (posted vs held). */
 export interface ReviewView {
   id: string;
   author_handle: string;
@@ -884,6 +884,7 @@ export interface ReviewView {
   is_public: boolean;
   published_at: string | null;
   version: number;
+  receipt?: string | null;
 }
 
 /** The envelope every collection answers with (spec §3.3). */
@@ -1088,6 +1089,75 @@ export function patchTypography(request: TypographyRequest): Promise<TypographyV
     method: 'PATCH',
     body: JSON.stringify(request),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Positivity filter and feedback delivery (spec §12)
+// ---------------------------------------------------------------------------
+
+/** The author's own feedback defaults, plus the one-line effective policy. */
+export interface FeedbackPreferencesView {
+  accept_constructive: boolean;
+  ambiguous_auto: boolean;
+  comments_enabled: boolean;
+  version: number;
+  effective_policy: string;
+}
+
+/** The policy in force for one work. */
+export interface WorkPolicyView {
+  accept_constructive: boolean;
+  ambiguous_auto: boolean;
+  comments_enabled: boolean;
+  effective_policy: string;
+}
+
+/** One delivered review on the author's own works. */
+export interface FeedbackInboxItem {
+  review_id: string;
+  work_id: string;
+  work_title: string;
+  author_handle: string;
+  body: string;
+  class: string;
+  published_at: string | null;
+}
+
+/** The author's inbox: delivered items, a held count (never held content). */
+export interface FeedbackInbox {
+  items: FeedbackInboxItem[];
+  held_count: number;
+  next_cursor: string | null;
+}
+
+/** Read the author's own feedback defaults. */
+export function fetchFeedbackPreferences(signal?: AbortSignal): Promise<FeedbackPreferencesView> {
+  return apiFetch<FeedbackPreferencesView>('/feedback/preferences', { signal });
+}
+
+/** Update the author's own feedback defaults. Returns 409 on stale version. */
+export function putFeedbackPreferences(request: {
+  accept_constructive?: boolean;
+  ambiguous_auto?: boolean;
+  comments_enabled?: boolean;
+  expected_version?: number;
+}): Promise<FeedbackPreferencesView> {
+  return apiFetch<FeedbackPreferencesView>('/feedback/preferences', {
+    method: 'PUT',
+    body: JSON.stringify(request),
+  });
+}
+
+/** Read the effective policy for one work. */
+export function fetchWorkPolicy(workId: string, signal?: AbortSignal): Promise<WorkPolicyView> {
+  return apiFetch<WorkPolicyView>(`/feedback/preferences/works/${encodeURIComponent(workId)}`, {
+    signal,
+  });
+}
+
+/** The author's delivered feedback, plus the held count. */
+export function fetchFeedbackInbox(signal?: AbortSignal): Promise<FeedbackInbox> {
+  return apiFetch<FeedbackInbox>('/feedback/inbox', { signal });
 }
 
 // ---------------------------------------------------------------------------

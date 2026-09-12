@@ -81,11 +81,17 @@
     }
   }
 
+  let reviewReceipt = $state<string | null>(null);
+
   async function publishReview() {
     if (reviewDraft.trim() === '') return;
     reviewError = null;
+    reviewReceipt = null;
     try {
-      await upsertReview(workId, { body: reviewDraft, is_public: reviewPublic });
+      const saved = await upsertReview(workId, { body: reviewDraft, is_public: reviewPublic });
+      // The receipt is the only delivery signal the server sends (spec §12.4):
+      // posted vs held for review, never the class or the author's settings.
+      reviewReceipt = saved.receipt ?? null;
       reviewDraft = '';
       reviewPublic = false;
       reviews = (await fetchReviews(workId)).items;
@@ -207,6 +213,9 @@
       </label>
       {#if reviewError}
         <ErrorSummary error={reviewError} />
+      {/if}
+      {#if reviewReceipt}
+        <p class="note" role="status">{reviewReceipt}</p>
       {/if}
       <button type="button" onclick={publishReview} disabled={reviewDraft.trim() === ''}>
         Save review

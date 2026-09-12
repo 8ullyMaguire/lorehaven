@@ -255,6 +255,14 @@ pub fn build_router(state: AppState) -> Router {
             &state,
         ))
         .merge(routes::reading::authed_router())
+        // Positivity filter: the author's own defaults, per-work policy and
+        // inbox. Session-scoped like the library: every route needs one and
+        // most write, so the whole tree sits under the writers' class.
+        .merge(classified(
+            routes::feedback::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // The reader's library: shelves, bookmarks, private tags, reading
         // statuses, saved views, storage and the update check. Every route
         // needs a session and most of them write, so the whole tree sits under

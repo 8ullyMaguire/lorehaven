@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod collaborators;
 pub mod exports;
+pub mod feedback;
 pub mod health;
 pub mod imports;
 pub mod jobs;

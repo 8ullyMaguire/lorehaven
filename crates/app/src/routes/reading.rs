@@ -34,7 +34,9 @@ use axum::http::StatusCode;
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use lorehaven_db::content;
+use lorehaven_db::positivity;
 use lorehaven_db::reading::{self, HistoryRow, Note, Rating, Review};
+use lorehaven_domain::positivity::{effective, sender_receipt};
 use lorehaven_domain::reading::{resolve_progress, ProgressResolution, ReadingPosition};
 use lorehaven_domain::{AppError, WorkId};
 use serde::{Deserialize, Serialize};
@@ -253,10 +255,13 @@ struct ReviewView {
     /// would have to work around.
     published_at: Option<String>,
     version: i64,
+    /// The sender-visible receipt (spec §12.4): "posted" or "held for
+    /// review". Never the class, never the author's settings.
+    receipt: String,
 }
 
-impl From<Review> for ReviewView {
-    fn from(review: Review) -> Self {
+impl ReviewView {
+    fn with_receipt(review: Review, receipt: String) -> Self {
         Self {
             id: review.id,
             author_handle: review.author_handle,
@@ -265,7 +270,14 @@ impl From<Review> for ReviewView {
             is_public: review.is_public,
             published_at: review.published_at,
             version: review.version,
+            receipt,
         }
+    }
+}
+
+impl From<Review> for ReviewView {
+    fn from(review: Review) -> Self {
+        Self::with_receipt(review, "Comment posted.".to_owned())
     }
 }
 
@@ -523,13 +535,14 @@ async fn list_reviews(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<ReviewListView>> {
-    // Public and anonymous by design (§9): the query refuses a review that was
-    // never published or has been withdrawn, so this handler adds no check of
-    // its own — a second check here is how a private review eventually leaks.
+    // Public and anonymous by design (§9): only delivered public reviews are
+    // listed — held text is hidden in SQL, never filtered in the handler.
+    // Pre-filter reviews (no classification row) count as delivered, so no
+    // backfill can silently hide them.
     let work_id: WorkId = id
         .parse()
         .map_err(|_| ApiError(AppError::NotFound { resource: "work" }))?;
-    let reviews = reading::public_reviews(state.db(), work_id).await?;
+    let reviews = positivity::visible_reviews(state.db(), work_id).await?;
     Ok(Json(ReviewListView {
         items: reviews.into_iter().map(ReviewView::from).collect(),
         // A work's public reviews are read in one go; the envelope is here for
@@ -600,7 +613,41 @@ async fn upsert_review(
         })?;
     debug_assert_eq!(review.version, version);
 
-    Ok(Json(ReviewView::from(review)))
+    // The positivity gate (spec §12): classify against the author's
+    // effective preferences *before* the review is read back, and record
+    // the outcome. Held text stays stored but leaves every listing.
+    let outcome = if is_public {
+        let author = positivity::author_account_for_work(state.db(), work_id).await?;
+        match author {
+            None => lorehaven_domain::positivity::DeliveryOutcome::Delivered,
+            Some(author_account) => {
+                let prefs = positivity::preferences_for(state.db(), author_account).await?;
+                let work_ov = positivity::override_for(state.db(), work_id).await?;
+                let policy = effective(&prefs, &work_ov);
+                let (allow, deny) =
+                    positivity::list_membership(state.db(), author_account, pseud_id).await?;
+                let stored = positivity::classify_review(
+                    state.db(),
+                    &review.id,
+                    &request.body,
+                    &policy,
+                    allow,
+                    deny,
+                )
+                .await?;
+                stored.outcome
+            }
+        }
+    } else {
+        // Private reviews are the author's own notes-to-self: no gate, and
+        // no classification row, so publishing later classifies then.
+        lorehaven_domain::positivity::DeliveryOutcome::Delivered
+    };
+
+    Ok(Json(ReviewView::with_receipt(
+        review,
+        sender_receipt(outcome).to_owned(),
+    )))
 }
 
 async fn delete_review(
