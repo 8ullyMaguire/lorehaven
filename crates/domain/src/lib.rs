@@ -1,6 +1,7 @@
 //! Darkhold domain primitives.
 
 pub mod content;
+pub mod discovery;
 pub mod document;
 pub mod error;
 pub mod exports;
