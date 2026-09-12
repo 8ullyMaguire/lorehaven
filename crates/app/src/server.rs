@@ -379,6 +379,20 @@ pub fn build_router(state: AppState) -> Router {
             &state,
         ))
         .merge(account_routes)
+        // Taxonomy (nodes, aliases, tags) — M10. Every route needs a session and
+        // most write, so it sits under the writers' class.
+        .merge(classified(
+            routes::taxonomy::router(),
+            RouteClass::Write,
+            &state,
+        ))
+        // Community (comments, forums, groups, messaging, blocks) — M12 groundwork.
+        // Every route needs a session and most write, so writers' class.
+        .merge(classified(
+            routes::community::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Session loading wraps everything under /api/v1 so that the CSRF layer
         // and the limiter installed per subtree can both see who is asking.
         .layer(middleware::from_fn_with_state(

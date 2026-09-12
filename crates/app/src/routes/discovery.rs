@@ -53,17 +53,14 @@ async fn get_taste_profile(
 }
 
 async fn put_taste_profile(
-    State(state): State<AppState>,
-    RequireSession(user): RequireSession,
-    Json(signals): Json<serde_json::Value>,
+    State(_state): State<AppState>,
+    RequireSession(_): RequireSession,
+    Json(_signals): Json<serde_json::Value>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    use time::OffsetDateTime;
-    let now = OffsetDateTime::now_utc().to_string();
-    let account_id = user.account_id.to_string();
-    save_taste_profile(state.db(), &account_id, &signals, &now)
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e)))?;
-    Ok(Json(serde_json::json!({ "status": "saved" })))
+    // D7 — the taste profile is derived from reading behaviour
+    // (spec §16.5), not client-writable. PUT is reserved for the
+    // worker that derives it; today it returns 501.
+    Err(ApiError(AppError::NotImplemented))
 }
 
 async fn delete_taste_profile(
