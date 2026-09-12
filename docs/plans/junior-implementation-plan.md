@@ -1,1888 +1,2703 @@
-# The implementation plan, start to finish
+# Junior implementation plan — the rest of Lorehaven
 
-This is the plan for the **whole website**: Lorehaven, a self-hosted fanfiction
-platform with a forum. It is written for someone who knows Rust and Svelte but
-has never seen this repository, and it is detailed enough to be followed from
-an empty morning to a tagged release without asking anyone a question.
+**Audience:** an AI agent or junior dev who knows Rust, SQL and Svelte but has
+never opened this repository. Read this file top to bottom **before opening an
+editor**, then read the spec section named at the top of the milestone brief
+you are about to build, in full.
 
-Two other documents sit beside it and neither is optional:
-
-* `docs/spec.md` — *what* the platform must do, section by section. When this
-  plan and the spec disagree, the spec wins and this plan is the thing that is
-  wrong. Every milestone below names the spec sections it implements.
-* `docs/plans/README.md` — the house rules and the reasoning behind them. They
-  are repeated in Part 1 in shortened form because a rule you have to go and
-  look up is a rule that gets skipped; the long version in `README.md` says why
-  each one exists, with the defect that caused it.
-
-`docs/requirements.csv` and `docs/verification.md` are the bookkeeping. They are
-updated **as part of** finishing a milestone, in the same commit, never "later".
+**What "current" means here:** as of **2026-09-11**, Milestones 0–8 are built
+and tagged (`v0.09-library` is the latest tag). Everything below is the work
+that remains. If `docs/verification.md`, `docs/requirements.csv` or the git log
+disagree with this plan, they were updated after it was — re-verify before
+acting, and update this plan file in the same commit as any change you find.
 
 ---
 
-## Part 0 — How to work
+## 0. Where the site stands (honest baseline)
 
-### 0.1 Where the project is on the day you start
+The spec's section numbers (§0–§31) do **not** correspond one-to-one to the
+repository's worked milestones. This plan uses spec **§-numbers** for
+requirements and repo **M-numbers** for schedule slots; every brief below names
+both.
 
-```text
-Milestone 0  Platform skeleton          done     tag v0.01-running-app
-Milestone 1  Design system, navigation  done
-Milestone 2  Accounts, pseuds, privacy  done     tag v0.03-identity
-Milestone 3  Drafts, chapters, publish  done     tag v0.04-publishing
-Milestone 4  Reader, ratings, history   done     tag v0.05-reader
-Milestones 5–18                         not built
-```
+### 0.1 What is built
 
-`README.md` at the repository root explains how to run it. The short version:
+| Spec | Repo | Topic | State |
+|---|---|---|---|
+| §5 | M0 | Repository, tooling, running application | built, tagged |
+| §6 | M1 | Design system, navigation, localisation | built, tagged |
+| §7 | M2 | Accounts, pseuds, privacy, age policy | built, tagged; block/mute are inert tables (0.3) |
+| §8 | M3 | Drafts, chapters, publishing, revisions | built, tagged |
+| §9 | M4 | Reader, ratings, reactions, history | built, tagged; search-within-work re-scoped to repo M10 |
+| §10 | M5 | Jobs, storage, cache boundaries, secrets | built, tagged |
+| §11 | M6 | Imports, credentials, batches, preservation | built; preservation batches deferred (0.3) |
+| §13 | M7 | Exports, device delivery, offline reading | built; device delivery refused by default (0.3) |
+| §14 | M8 | Library, saved views, bookmarks, updates | built, tagged `v0.09-library` |
 
-```bash
-just migrate        # create the database and apply every migration
-just seed           # a development account and a little content
-just serve          # http://127.0.0.1:8080
-```
+Facts you can rely on:
 
-### 0.2 The loop, for every single milestone
+- Migration head is `0009_library.sql`, present under both `migrations/sqlite/`
+  and `migrations/postgres/` (a test keeps the two sets identical).
+- Route modules: `crates/app/src/routes/{auth,pseuds,works,reading,settings,imports,exports,library,jobs,collaborators,health,meta}.rs`,
+  wired in `build_router` (`crates/app/src/server.rs`).
+- Frontend routes live in `frontend/src/routes/`, registered in
+  `frontend/src/lib/router.ts`; linked-but-unbuilt pages render a `Planned`
+  panel naming the milestone that will fill them — never mock data.
+- `docs/verification.md` holds the evidence for every claim above; `just check`
+  is the gate CI runs.
 
-Do not reorder these. The order is what makes the work checkable.
+### 0.2 The numbering map for the rest of the build
 
-```text
-1. read the milestone's spec section, in full, before opening an editor
-2. migration  (both dialects, identical ids)
-3. domain     types and pure policy functions, with their unit tests
-4. repository the SQL, one statement written twice
-5. routes     register them or they do not exist
-6. pages      the interface
-7. drive the journey by hand in a browser, both themes, 320px wide
-8. write the tests that pin what the journey proved
-9. update requirements.csv and verification.md
-10. cargo fmt/clippy/test + the frontend build and tests
-11. commit, then tag
-```
+Two spec milestones (§12 and §22) were skipped by the schedule that produced
+tags `v0.05-reader` … `v0.09-library`: they have no rows in
+`docs/requirements.csv` and no code. This plan restores them.
 
-Steps 7 and 8 are the pair that gets collapsed by people in a hurry and the pair
-that matters most. A test written before the journey is a test written against
-what you *meant*; a test written after it is a test against what the code does.
+| Repo | Spec | Topic | Depends on |
+|---|---|---|---|
+| M9 | §12 | Positivity filter and feedback delivery | M3–M5 |
+| M10 | §15 | Structured taxonomy, body search, query language | M3, M4 |
+| M11 | §16 | Discovery, private taste influence, recipes, dashboards | M10 |
+| M12 | §17 | Comments, forums, groups, messaging, presence | M9 |
+| M13 | §18 | Collections, challenges, requests, wishlists, events | M9, M10 |
+| M14 | §19 | Trust, reports, quorum, appeals, sanctions | M9, M12 |
+| M15 | §20 | Credits, fair queues, bounties, billing | M9–M14 |
+| M16 | §21 | Marketplace, extension isolation, webhooks, gallery | M15 |
+| M17 | §22 | Translation pipeline | M9, M10, M15 |
+| M18 | §23 | Public API, bots, feeds, push, federation, AI providers | M9–M17 |
+| M19 | §24 | Administration, statistics, abuse defence, privacy, operations | M14–M18 |
+| M20 | §25 | Hardening and release | everything |
 
-### 0.3 Definitions you will need
+The order is a dependency order, not a preference. Three examples, because a
+junior will be tempted to reorder:
 
-* **Vertical slice.** One journey end to end — migration, domain, repository,
-  route, page — checked by hand, and only then broadened. Never all the
-  migrations, then all the routes, then all the pages.
-* **Dual dialect.** Every migration and every statement exists twice, for SQLite
-  and PostgreSQL, with identical ids and identical semantics. A test fails if
-  the migration ids drift apart.
-* **The envelope.** Every collection answers with
-  `{ "items": [...], "next_cursor": null }` (spec §3.3). Not a bare array.
-* **A tag.** Every milestone ends with a git tag named in
-  `docs/tutorial/README.md`. Tags are the milestones; do not invent new names.
-* **Done.** A milestone is done when: `cargo test --workspace`,
-  `cargo clippy --all-targets --all-features -- -D warnings`,
-  `cargo fmt --all -- --check`, the frontend build and the frontend tests all
-  pass, the journeys have been driven in a browser, `requirements.csv` has no
-  `unsupported` row left for that milestone, and the tag exists.
+- **M9 before M12.** Every comment surface must apply feedback preferences
+  *before* storage. Building forums first would mean re-opening every comment
+  path once the classifier lands.
+- **M10 before M11.** Two recommendation engines read the inverted index and
+  the tag graph; neither exists until M10 builds them.
+- **M14 before M15.** Credits must never purchase trust or moderation authority
+  (spec §0.3). The trust model has to exist and be tested before anything
+  buyable is minted, or the invariant cannot even be stated.
 
-### 0.4 The commands
+### 0.3 Debt register (carried explicitly, closed inside named milestones)
 
-```bash
-# everything, in the order CI runs it
-cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --workspace
-bash frontend/scripts/fe.sh build
-bash frontend/scripts/fe.sh test
+| Item | Where it lands |
+|---|---|
+| `M2-06` block/mute primitives enforce nothing | **M12** — a block must hold on every new path (search, mentions, replies, messages, notifications); M12 is the first milestone with all of those surfaces |
+| `M6-10` approved preservation batches | **M14** — behind a documented permission basis, the operator role and a dry-run report (spec §11.5) |
+| `M7-03` device delivery (Kindle/email) refused by default | **M18** — when a mail transport arrives; priced through the credit quote flow |
+| Source revision cache unpopulated (`M6-12`) | **M10** — its search reading pass is the natural populator; if not reached, re-register before tagging M10 |
+| Chapter delete/reorder routes have no pages (verification limitation 14) | **M12** opportunistically, when WorkEditor is opened; otherwise the next milestone that opens it |
+| `M17-01` administration beyond `doctor` | **M19** — that *is* the admin milestone |
 
-# one acceptance test while you are working on it
-cargo test -p lorehaven-app --test milestone_5 a_claimed_job_is_not_claimed_twice
+### 0.4 Ledger first, code second
 
-# one crate's unit tests
-cargo test -p lorehaven-db
-cargo test -p lorehaven-domain
-```
-
-`bash frontend/scripts/fe.sh` exists because this checkout lives on a mount
-where `node_modules/.bin` is not executable. Use it when `npm run` cannot find
-its own binaries. It takes `build`, `test`, `check` and `dev`.
-
-### 0.5 Commits
-
-One commit per coherent change, with a message that says **what was wrong** as
-well as what you did. Look at the existing log before writing yours; every
-message in it explains the defect it fixes. A commit that says "update files"
-tells the next person nothing, and the next person is you in four months.
-
-Do not squash a milestone into one commit. The history is read during a
-post-mortem; a 40-file commit makes that impossible.
-
-### 0.6 When you find a bug
-
-Fix it, and write the test that would have caught it, in the same commit. Eight
-of this repository's defects were found this way and **none** of them were found
-by reading the code. If the bug is in another milestone's area and small, fix it
-anyway and say so in the message.
+`docs/requirements.csv` currently has **no rows** for spec §12 (positivity) or
+§22 (translation). The **first task** of M9 and M17 respectively is to add
+those rows — before any code — using the same `M<repo>-NN` id scheme, so the
+requirements ledger never loses a section again. Each brief below lists its
+rows; step 1 of the workflow (§1) is always this.
 
 ---
 
-## Part 1 — The machine you are building on
+## 1. The workflow loop (identical for every milestone)
 
-### 1.1 The shape of the repository
+The vertical-slice rule from spec §1.3, made concrete. Never write all
+migrations for a milestone, then all routes, then all pages. Build **one
+journey end to end**, check it by hand in a browser, then broaden:
 
 ```text
-Cargo.toml                    workspace
-crates/domain/                types, policies, the document schema. No I/O.
-  error.rs                    AppError: every failure mode, with a code and a status
-  ids.rs                      AccountId, PseudId, WorkId, ChapterId, RevisionId
-  policy.rs                   authorization as pure functions
-  content.rs                  content policy (can_access_content, MIN_PUBLIC_RATINGS)
-  document.rs                 the restricted editor schema, to_sanitized_html()
-  reading.rs                  position resolution, reading-time estimate
-crates/db/                    every SQL statement, twice
-  lib.rs                      Database, Backend, Database::sql(), sql_owned
-  migrate.rs                  the embedded migration catalogue
-  identity.rs content.rs collaboration.rs reading.rs sessions.rs outbox.rs
-crates/app/                   the HTTP application
-  server.rs                   build_router: the only place routes become reachable
-  auth.rs                     sessions, RequireSession/RequirePseud/MaybeSession, CSRF
-  http.rs                     ApiError, ApiResult, the error envelope
-  limiter.rs                  per-class token buckets, fails closed
-  routes/                     auth works reading pseuds settings collaborators meta health
-  worker.rs                   (M5) the background worker
-  assets.rs cli.rs config.rs doctor.rs logging.rs privacy.rs safety.rs seed.rs
-frontend/                     SvelteKit-less Svelte 5 + Vite, embedded into the binary
-  src/App.svelte              the shell and the route switch
-  src/lib/router.ts           path → view; unbuilt paths resolve to `Planned`
-  src/lib/api.ts              mirrors the routes exactly
-  src/lib/components/         the primitives
-  src/routes/                 one file per view
-migrations/sqlite/000N_*.sql  and migrations/postgres/000N_*.sql — identical ids
-docs/spec.md                  the specification
-docs/plans/                   this plan
-docs/requirements.csv         every requirement, with a status and evidence
-docs/verification.md          the evidence behind every claim
-docs/adr/                     decision records
+ 1. ledger rows       add M<n>-NN rows to docs/requirements.csv (status planned)
+ 2. migration         BOTH dialects, identical sets (the drift test enforces it)
+ 3. domain types      crates/domain/src/<module>.rs — policy functions, no I/O
+ 4. repositories      crates/db/src/<module>.rs — both dialects written out
+ 5. routes            crates/app/src/routes/<module>.rs, wired in build_router
+ 6. pages             frontend/src/routes/<Name>.svelte + api.ts + router.ts
+ 7. hand journey      drive it in a browser against `just serve-dev`
+ 8. pin it            acceptance tests in crates/app/tests/milestone_<n>.rs
+                      + component tests in *.test.ts beside each page
+ 9. record            verification.md rows with real evidence; flip CSV rows;
+                      update docs/plans/README.md's table if scope moved
+10. tag               v0.<nn>-<name> per docs/tutorial/README.md
 ```
 
-### 1.2 The house rules, shortened
+Steps 8–10 are part of the feature, not a follow-up. A milestone is done only
+when `just check` is green, the CSV rows are flipped **with evidence**, and the
+hand journey has actually been driven. If any step cannot be completed, the
+milestone is not done — say so in `docs/verification.md` using the status
+vocabulary (`implemented but not executed` exists for exactly this).
 
-Read `docs/plans/README.md` §2 for the long form. These are the ones a newcomer
-gets wrong:
+---
 
-**Database**
+## 2. House rules
 
-* Every statement is written twice and binds **only `String` and `i64`** (and
-  `Option<…>` of those). PostgreSQL `uuid` columns are written `?::uuid` and
-  read `id::text AS id`. This is what lets one row type decode on both engines
-  (ADR 0004). A `f64` column is not allowed for exactly this reason — store a
-  scaled integer instead (`position_permille`, `mean_permille`).
-* `db.sql("… ?", "… ?::uuid")` picks the dialect and rewrites `?` to `$1…$n`
-  for PostgreSQL. Use `db.sql_owned` when the statement is assembled at
-  runtime, because `db.sql` borrows.
-* Never put a literal `?` inside SQL text: it is always a placeholder.
-* A function that needs several statements in one transaction writes the SQLite
-  branch and the PostgreSQL branch out separately. Do not abstract over them.
-* Every migration says, in a comment, its **deletion and retention** rule —
-  what cascades, what soft-deletes, and why (spec §4.1).
+Each rule exists because its absence already caused a defect in this
+repository; the commit messages say so. Skim them here, re-read the section for
+the layer you are touching.
 
-**Errors and policy**
+### 2.1 Database layer (`crates/db`)
 
-* Failures are `AppError`. A new failure mode gets a variant with a stable code,
-  an HTTP status and a public message. Never return a raw `anyhow::Error`.
-* Authorization lives in **pure functions** in `crates/domain/src/policy.rs`:
-  `fn can_do_thing(actor, facts) -> Decision`. No database, no clock, no I/O.
-  `if account_id == ...` inside a handler is the thing this rule forbids.
-* Reading content goes through `can_access_content` and nothing else. If you
-  need a second check, add a fact to `ContentFacts` instead — a second check is
-  how restricted content eventually leaks.
-* A resource the caller may not reach is `404`, not `403`, whenever saying
-  "forbidden" would confirm that it exists. `AppError::NotFound` takes a coarse
-  noun ("work"), never an identifier.
+- Every statement is written **twice**: once for SQLite, once for PostgreSQL.
+  `db.sql("<sqlite with ?>", "<postgres with ?>::uuid>")` picks one and rewrites
+  `?` to `$1…$n` for PostgreSQL. Copy any function in
+  `crates/db/src/content.rs` for the shape.
+- Statements assembled from shared column lists use `sql_owned` — `db.sql`
+  borrows, and a temporary `format!` result does not live long enough.
+- Bind only `String` and `i64` (and `Option` of those). PostgreSQL `uuid`
+  columns are bound `?::uuid` and read `id::text AS id`; integers are `BIGINT`
+  (ADR 0004). This is what lets one row type decode on both engines.
+- Never put a literal `?` inside SQL text; it is always a placeholder.
+- Multi-statement transactions: write the SQLite branch and the PostgreSQL
+  branch out **separately** — they are different transaction types. Do not
+  abstract over them; the duplication is how dialect drift gets noticed.
+- Migrations are numbered `NNNN_name.sql` under both `migrations/sqlite/` and
+  `migrations/postgres/`, kept identical by a test. Add the next number; today
+  that is `0010_<topic>.sql`.
+- List endpoints return the cursor envelope
+  `{ "items": [...], "next_cursor": ... }` (spec §3.3) and use keyset cursors
+  (copy the library's `library_items` cursor). Bare arrays are a known
+  inconsistency; do not add to it.
 
-**Optimistic concurrency**
+### 2.2 Domain crate (`crates/domain`)
 
-* Every editable row has `version`. Every mutating statement carries
-  `… AND version = ?`. Zero rows affected means the caller lost a race: re-read
-  and return `AppError::RevisionConflict { expected, actual }`. **Never**
-  `SELECT` then `UPDATE` without the version predicate.
+- No I/O and no transport types. Policy functions live here so routes, workers
+  and tests share them: the positivity classifier (M9), taxonomy shapes (M10),
+  trust thresholds (M14). Each gets `crates/domain/src/<module>.rs` with unit
+  tests in the same file.
+- Errors use the one taxonomy in `crates/domain/src/error.rs`. Add variants
+  there; never `anyhow::bail!` a user-facing condition. Map taxonomy codes to
+  HTTP status in the route layer (the way `REVISION_CONFLICT` → 409 does).
+- Identifiers come from `crates/domain/src/ids.rs`; do not invent a second id
+  scheme.
+- Content that reaches `{@html}` is produced only by the sanitiser in
+  `crates/domain/src/document.rs`. New rich-text surfaces extend that module;
+  they never hand-roll escaping.
 
-**HTTP**
+### 2.3 HTTP layer (`crates/app`)
 
-* A route that is not registered in `build_router` does not exist. There is no
-  discovery.
-* Every route tree is wrapped in `classified(...)`, which declares its rate-limit
-  class. The limiter **fails closed**: a tree merged without `classified` returns
-  500 to every request, and this has already happened once.
-* Cookie-authenticated state changes need the CSRF layer, which
-  `build_router` applies to the `account_routes` subtree. `Write`-class routes
-  belong under it.
-* Handlers that need a session take `RequireSession` (or `RequirePseud`);
-  handlers a visitor may reach take `MaybeSession`. Extracting the extractor
-  **is** the authentication check.
+- Handlers use `classified(...)` which layers the request-class limiter outside
+  the limiter marker. Use it; do not write the layers by hand.
+- Cookie-authenticated state changes go under the CSRF layer (the
+  `account_routes` subtree in `build_router`). New `Write`-class routes belong
+  under it.
+- `RequireSession`/`RequirePseud` where sign-in is required (extracting the
+  extractor **is** the auth check); `MaybeSession` where a visitor may reach.
+- Pseud isolation (ADR 0003): a work belongs to its pseud; switching faces
+  makes it a 404, never a transfer.
+- Optimistic concurrency: works/chapters carry `version` in the `WHERE` clause
+  of every mutating statement; a stale save writes nothing and answers
+  `409 REVISION_CONFLICT`.
+- Limits (rate, body, batch sizes) are configuration values with documented
+  defaults, never numbers in code — `lorehaven.toml.example` is the pattern.
 
-**Frontend**
+### 2.4 Frontend rules
 
-* Svelte 5 runes: `$state`, `$derived`, `$effect`, `$props`. No stores, no
+- Svelte 5 runes only: `$state`, `$derived`, `$effect`, `$props`. No stores, no
   `export let`.
-* A field component takes a `$bindable` value. `bind:value` without
-  `$bindable()` compiles and silently does nothing; this shipped once and every
-  form submitted empty.
-* `api.ts` mirrors the routes exactly and never navigates on a failure.
-* A linked-but-unbuilt destination resolves to `Planned` and says which
-  milestone will fill it. Never to mock data.
-* Server HTML is rendered with `{@html}` **only** for `sanitized_html` produced
-  by `crates/domain/src/document.rs`.
+- Field components take a `$bindable` value; `bind:value` without
+  `$bindable()` on the child compiles and silently submits empty forms — this
+  shipped once. `FieldBinding.test.ts` pins it.
+- `frontend/src/lib/api.ts` mirrors the routes exactly and never navigates on
+  failure. Types come from the server's response shapes; where the server omits
+  a field, the type has no field.
+- Router paths live in `frontend/src/lib/router.ts`. A linked-but-unbuilt
+  destination resolves to `Planned` and names the milestone that will fill it.
+- `{@html}` only for `sanitized_html` produced by
+  `crates/domain/src/document.rs` — never for author text any other way.
+- Every user-facing string goes through `frontend/src/lib/labels.ts` with both
+  `en` and `eo` filled in the same commit (spec §7: translate everything).
+- Run the frontend through `bash frontend/scripts/fe.sh build|test|check`;
+  `npm run` may not find the binaries on this checkout (see `justfile` header).
 
-**Honesty**
+### 2.5 Testing and honesty
 
-* Do not claim something works until you have run it. `verification.md` has a
-  status vocabulary for exactly this; use `implemented but not executed` when
-  that is the truth.
-* A test asserts the property, not the implementation. "A stale save writes
-  nothing at all" is a property. "update_work returns Ok(false)" is not.
-
----
-
-## Part 2 — The milestones
-
-Each milestone below has the same seven parts: the journey it delivers, the
-migration, the domain code, the repository, the routes, the pages, the tests,
-and the pitfalls. The house rules from Part 1 apply to every task and are not
-repeated.
-
----
-
-### Milestone 5 — Jobs, storage, cache and secrets
-
-Spec §10. Tag `v0.06-jobs`. **Built** — see `docs/plans/milestone-05-jobs.md` for
-the record and `docs/verification.md` for the evidence. **This milestone unlocks
-M6 and M7; do not skip it.**
-
-#### The journey
-
-A signed-in writer uploads a file, and instead of the request doing the work the
-server answers `202` with a job id; the page watches the job's progress and the
-job ends. Then the writer cancels a second job mid-flight and the worker stops
-at the next checkpoint rather than running to completion.
-
-#### Why first
-
-Importing is a background job. Every export is a job that writes a file to
-storage. Nothing in M6 or M7 can be written honestly before there is a job model
-with leases and retries. An import "for now, inline in the request" times out on
-a 300-chapter work and the retry does it all again from scratch.
-
-#### Migration 0005 — `jobs`, `job_attempts`, `content_blobs`, `content_references`, `encryption_keys`, `secrets`
-
-```text
-jobs
-    id, kind, state, payload (TEXT, JSON), idempotency_key (nullable),
-    priority INTEGER, attempts INTEGER, max_attempts INTEGER,
-    available_at TEXT, lease_owner TEXT (nullable), lease_expires_at TEXT
-    (nullable), progress_permille INTEGER, checkpoint TEXT (nullable),
-    last_error TEXT (nullable), requested_by (nullable, accounts),
-    created_at, updated_at, version
-    UNIQUE (idempotency_key) WHERE idempotency_key IS NOT NULL
-    INDEX (state, available_at)
-
-job_attempts
-    id, job_id, attempt INTEGER, started_at, finished_at (nullable),
-    outcome TEXT (nullable), error TEXT (nullable), worker TEXT
-
-content_blobs
-    checksum TEXT PRIMARY KEY, storage_key TEXT, byte_size INTEGER,
-    content_type TEXT, created_at, last_referenced_at
-    -- content-addressed: the checksum *is* the identity
-
-content_references
-    id, checksum, owner_type, owner_id, created_at
-    INDEX (checksum)          -- the deletion check reads this
-    UNIQUE (checksum, owner_type, owner_id)
-
-encryption_keys
-    key_id TEXT PRIMARY KEY, algorithm TEXT, created_at, retired_at (nullable)
-
-secrets
-    id, owner_type, owner_id, name, key_id, nonce, ciphertext,
-    created_at, updated_at, version
-    UNIQUE (owner_type, owner_id, name)
-```
-
-Retention comments to write in the file:
-
-* `jobs` and `job_attempts` are kept for 30 days after reaching a terminal state
-  and then deleted by a maintenance job; they are diagnostics, not history.
-  `requested_by` is kept even after the account is deleted, so an operator can
-  see that *a* job ran — set it NULL on account deletion rather than cascading.
-* `content_blobs` are never deleted by cascade. A blob is removed only when
-  `content_references` has no row for its checksum, and that check is the only
-  thing standing between an unused blob and data loss. Say so in the comment.
-* `content_references` cascade with their owner (`work`, `chapter_revision`,
-  `export`, `library_item`).
-* `secrets` cascade with their owner. The ciphertext goes with the row; the key
-  lives outside the database and is never stored in it.
-
-#### Domain — `crates/domain/src/jobs.rs`
-
-```rust
-pub enum JobState { Queued, Leased, Running, Succeeded, Failed, Cancelled }
-pub enum JobKind { Import, Export, Reindex, Notify, Thumbnail, Maintenance }
-
-pub struct RetryPolicy { pub max_attempts: u32, pub base_delay: Duration,
-                         pub backoff: f64, pub jitter_permille: u16 }
-
-/// The moment a failed attempt may be retried. Pure: `now` is passed in.
-pub fn next_attempt_at(attempt: u32, policy: &RetryPolicy, jitter_seed: u64,
-                       now: OffsetDateTime) -> OffsetDateTime;
-
-/// Whether a job may be cancelled in its current state. A terminal job may not.
-pub fn can_cancel(state: JobState) -> bool;
-
-/// The state a job moves to when a worker reports an outcome.
-pub fn next_state(state: JobState, outcome: AttemptOutcome) -> JobState;
-```
-
-Unit tests: `a_first_failure_waits_the_base_delay`; `each_retry_waits_longer`;
-`a_retry_is_never_sooner_than_the_base_delay` (the jitter must be able to make it
-later but never earlier, or a stampede gets worse); `a_finished_job_cannot_be_cancelled`.
-
-#### Repository — `crates/db/src/jobs.rs`
-
-```text
-enqueue(db, kind, payload, idempotency_key, requested_by) -> JobId
-claim_next(db, worker, lease_secs, now) -> Option<Job>
-heartbeat(db, job, worker, lease_secs) -> bool
-complete(db, job, worker) -> ()
-fail(db, job, worker, error) -> ()        // reschedules per the retry policy
-cancel(db, job) -> bool
-requeue_expired_leases(db, now) -> u64
-progress(db, job, permille, checkpoint) -> ()
-jobs_for(db, account, limit) -> Vec<JobRow>
-```
-
-**The claim is one statement.** Not a select followed by an update:
-
-```sql
--- SQLite, inside a transaction
-UPDATE jobs SET state = 'leased', lease_owner = ?, lease_expires_at = ?,
-                updated_at = ?, version = version + 1
- WHERE id = (SELECT id FROM jobs
-              WHERE state IN ('queued') AND available_at <= ?
-              ORDER BY priority DESC, available_at ASC
-              LIMIT 1)
-RETURNING id;
-
--- PostgreSQL, no transaction needed around it
-UPDATE jobs SET ... FROM (SELECT id FROM jobs
-                           WHERE state = 'queued' AND available_at <= ?
-                           ORDER BY priority DESC, available_at ASC
-                           LIMIT 1
-                           FOR UPDATE SKIP LOCKED) AS claimed
- WHERE jobs.id = claimed.id
-RETURNING jobs.id;
-```
-
-Two workers racing must not both get the same row. That is the whole point of
-`FOR UPDATE SKIP LOCKED`, and on SQLite the write lock does the same job.
-
-#### Storage — `crates/db/src/storage.rs`
-
-```text
-put(db, bytes, content_type) -> (checksum, storage_key)   // idempotent
-get(db, checksum) -> Option<Vec<u8>>
-stat(db, checksum) -> Option<BlobStat>
-reference(db, checksum, owner_type, owner_id) -> ()
-unreference(db, checksum, owner_type, owner_id) -> ()
-delete_if_unreferenced(db, checksum) -> bool
-```
-
-Files land at `storage/objects/<first two hex>/<checksum>`. `put` writes to a
-temporary file in the same directory and renames it into place, so a crash never
-leaves a half-written blob under a name that claims to be complete. Re-putting
-the same bytes must not change `last_referenced_at` in a way that resurrects a
-blob something else is deleting.
-
-#### Secrets — `crates/app/src/secrets.rs`
-
-`xchacha20poly1305`, a key from `LOREHAVEN_SECRET_KEY` or a key file, a random
-nonce per record, and the `key_id` recorded on the row so a rotation can
-re-encrypt lazily. The associated data is `owner_type|owner_id|name`, so a
-ciphertext moved to another row fails to open rather than silently decrypting.
-
-**Never log a plaintext or a key.** The `Debug` implementation of the wrapper
-type prints `<secret>` and nothing else, so a stray `?secret` in a log line
-cannot leak one. Write that as a test: `a_secret_is_not_in_the_logs`.
-
-#### Worker — `crates/app/src/worker.rs`
-
-Started by `lorehaven serve --with-worker` or by its own `lorehaven worker`
-subcommand. Loop: claim → check for cancellation → do one unit of work →
-heartbeat → repeat → complete or fail. Claims expire, so a worker that is killed
-mid-job leaves a lease that `requeue_expired_leases` returns to the queue.
-
-Graceful shutdown: on `SIGTERM`/`SIGINT`, stop claiming, finish the unit in
-flight, release the lease, exit. A job interrupted mid-way must be resumable
-from its `checkpoint`, not from the beginning.
-
-#### Outbox delivery
-
-The worker drains `outbox_events`, which Milestone 3 has been writing since it
-shipped and which nothing has ever read (`verification.md` lists this as an open
-risk). A failing topic retries with backoff and records `last_error`. Do not
-delete an event until its handler returns success.
-
-#### Routes and pages
-
-```text
-POST   /jobs/:id/cancel                 Write class, RequireSession
-GET    /jobs?cursor=…                   the caller's own jobs, envelope
-GET    /admin/jobs?state=…&cursor=…     operators only
-POST   /admin/jobs/:id/retry            operators only
-```
-
-The `admin` routes need an operator, and **there is no staff model yet**. Add
-`config.administration.operator_account_id: Option<AccountId>` and gate the
-routes on it, with a comment saying plainly that M13 replaces this with a trust
-level. Do not invent a boolean `is_admin` column — it will survive into
-production and be wrong.
-
-Pages: `/jobs` (the caller's own queue, with cancel) and `/admin/jobs` (a table
-with filters, retry, cancel). A job in progress shows its `progress_permille` and
-its checkpoint; a failed job shows `last_error`.
-
-#### Tests
-
-```text
-a_claimed_job_is_not_claimed_twice
-a_lease_that_expires_is_requeued
-a_cancelled_job_stops_at_the_next_checkpoint
-a_retry_uses_the_backoff
-replaying_one_idempotency_key_enqueues_one_job
-the_same_bytes_stored_twice_share_one_blob
-deleting_one_reference_keeps_the_blob
-deleting_the_last_reference_removes_the_blob
-a_secret_is_not_in_the_logs
-a_ciphertext_moved_to_another_row_does_not_open
-```
-
-#### Pitfalls
-
-1. **Cancellation is checked between units of work, not only at the start.** A
-   cancel that only takes effect at the beginning is a lie about a job that runs
-   for ten minutes.
-2. **A lease must expire.** Without expiry, one killed worker takes a job out of
-   the queue forever.
-3. **`delete_if_unreferenced` is the only safe deletion.** A "clean up old
-   blobs" job that deletes by age will delete a blob the reader is streaming.
-4. **Do not hold a database transaction across the network.** Claim in one
-   transaction, release it, do the I/O, then record the outcome.
-5. **The worker is a second entry point into every table you have.** Anything it
-   writes must go through the same repository functions, or the invariants will
-   hold in the web path and not in the worker.
+- Rust: `cargo test --workspace`. Acceptance tests live in
+  `crates/app/tests/milestone_<n>.rs` against the real router, a real SQLite
+  file and a cookie jar that mimics a browser. Copy the harness from
+  `milestone_8.rs` (the latest).
+- Seed through the product's own entry points — e.g. imports seed library items
+  via `imports::upsert_library_item` — never through hand-shaped fixtures.
+- Frontend tests: `vitest`, in `*.test.ts` beside what they test.
+- A test asserts the **property**, not the implementation: "a stale save writes
+  nothing at all" is a property; "update_work returns Ok(false)" is not.
+- When you find a bug during anything else, fix it and write the test that
+  would have caught it.
+- `docs/verification.md` has a status vocabulary; use `implemented but not
+  executed` when that is the truth. Never claim a run you did not run.
+- Every milestone ends with: `just check` green; CSV rows flipped with an
+  `evidence` column naming a command or test (never a bare file path); a tag
+  `v0.10-positivity` (next number, name your milestone); and the tutorial
+  chapter written when `docs/tutorial/README.md` lists one.
 
 ---
 
-### Milestone 6 — Imports, source credentials, batches and preservation
+## 3. Milestone 9 (repo) — Positivity filter and feedback delivery
 
-Spec §14 tags `M6`; the import flow is spec §12.2. Tag `v0.07-imports`.
+**Read first:** spec §12 in full, plus §0.2 (priority 3) and §0.3. Also read
+spec §8.6 — the feedback preferences stored since M3 are inert data; M9 is
+where they start governing delivery.
 
-#### The journey
+### 3.1 Why this is next
 
-A reader pastes a work's URL from a supported source, sees a metadata preview
-(title, author, chapter count, rating), picks a destination and confirms. The
-import is queued as a job, they watch it fetch chapters one by one, and it ends
-as a library item they can read. A second run of the same URL updates the item
-instead of duplicating it.
+Every later milestone creates comment-shaped surfaces: forums (M12), extension
+reviews (M16), translation reviews (M17). Spec §12 is the gate they all pass
+through. Building it on the two surfaces that already exist (work comments and
+reviews) means the classification rule is built **once** and later milestones
+inherit it.
 
-#### Migration 0006 — import framework
+The non-negotiable (spec §0.3): only positive or constructive criticism reaches
+authors; constructive critique requires opt-in; nothing destructive is ever
+stored or shown.
 
-```text
-sources              id, key, display_name, adapter_version, enabled,
-                     capability_json, created_at, updated_at, version
-source_credentials   id, account_id, source_key, secret_id, label,
-                     expires_at (nullable), last_checked_at (nullable),
-                     status TEXT, created_at, updated_at, version
-                     UNIQUE (account_id, source_key, label)
-import_jobs          id, job_id (jobs), account_id, source_key, source_url,
-                     destination_type, destination_id (nullable),
-                     dry_run INTEGER, state TEXT, report_json (nullable),
-                     created_at, updated_at, version
-import_chapters      id, import_job_id, source_chapter_key, ordinal INTEGER,
-                     state TEXT, content_blob_checksum (nullable),
-                     chapter_id (nullable), note (nullable)
-                     UNIQUE (import_job_id, source_chapter_key)
-library_items        id, account_id, work_id (nullable), source_key,
-                     source_work_key, title, author_text, summary,
-                     last_synced_at (nullable), provenance_json,
-                     created_at, updated_at, version
-                     UNIQUE (account_id, source_key, source_work_key)
-```
+### 3.2 Ledger rows (add these before any code)
 
-Retention: `import_jobs` and `import_chapters` are **permanent** — they are the
-provenance record, and `library_items.provenance_json` points back at them.
-`source_credentials` cascade with the account, and the row's `secret_id` cascade
-removes the ciphertext with it. An imported copy is never overwritten
-destructively (spec §14.4): a new snapshot is created and the reader's notes,
-shelves, bookmarks, ratings and progress are mapped onto it, with a visible
-notice for removed, reordered or substantially changed chapters.
+`docs/requirements.csv` has no §12 rows today. Add:
 
-#### Domain — `crates/domain/src/imports.rs`
+- `M9-01` incoming text classified before storage, per the author's preferences
+  (spec §12.1–12.2)
+- `M9-02` constructive critique reaches only opted-in authors, framed as
+  requested, withdrawable by its writer (spec §12.3)
+- `M9-03` delivery through the positivity layer with receipts; non-delivery is
+  invisible to the sender where the author chose silence (spec §12.4–12.5)
+- `M9-04` appeals limited to classification errors, resolved by evidence; no
+  re-litigation of taste (spec §12.6)
+- `M9-05` the feedback-preferences panel is live and shows its **effective**
+  policy, not just toggles (spec §8.6, §12.2)
 
-```rust
-pub struct SourceCapabilities { pub chapters: bool, pub metadata: bool,
-    pub authentication: AuthKind, pub incremental: bool, pub rate_hint: Option<u32> }
-
-pub struct FetchedWork { pub source_key: String, pub title: String,
-    pub author_text: String, pub summary: String, pub chapters: Vec<FetchedChapter> }
-
-/// What an import would do, decided without touching anything.
-pub enum ImportPlan { Create, Update { changed: Vec<ChapterChange> }, NoChange }
-pub fn plan_import(existing: Option<&LibraryItem>, fetched: &FetchedWork) -> ImportPlan;
-
-/// Whether a duplicate is the same work under a different source key.
-pub fn looks_like_a_duplicate(a: &FetchedWork, b: &LibraryItem) -> bool;
-```
-
-#### The source adapter trait
-
-```rust
-#[async_trait]
-pub trait SourceAdapter: Send + Sync {
-    fn key(&self) -> &'static str;
-    fn capabilities(&self) -> SourceCapabilities;
-    async fn preview(&self, url: &str, creds: Option<&Credentials>) -> Result<FetchedWork>;
-    async fn fetch_chapter(&self, work: &FetchedWork, ordinal: u32,
-                           creds: Option<&Credentials>) -> Result<FetchedChapter>;
-}
-```
-
-Adapters live in `crates/scrapers/` (a new crate), one module per source, each
-with its own recorded fixtures. **Never write an adapter against the live site
-in a test**: record the response to `tests/fixtures/<source>/<case>.html` and
-parse the file. A test that reaches the network is a test that fails on a plane.
-
-Rate limits: honour the source's `robots.txt`, wait between requests, and put the
-wait in the adapter so no caller can forget it. A 429 from a source is a *retry
-later*, not a failure of the import.
-
-#### Routes
+### 3.3 Migration `0010_positivity.sql` (both dialects)
 
 ```text
-GET    /imports/sources                     the catalogue, with capabilities
-POST   /imports/preview                     { url } → FetchedWork, no writes
-POST   /imports                             { url, destination, dry_run } → 202 + job id
-GET    /imports/:id                         the report
-POST   /imports/:id/retry-failed-chapters   re-fetch only what failed
-GET    /source-credentials                  the caller's connections
-PUT    /source-credentials/:source          store a credential (Write class)
-DELETE /source-credentials/:source/:label
-GET    /library/items?cursor=…              the caller's imported works
+classifications(
+  id TEXT PRIMARY KEY,          -- uuid (TEXT + ?::uuid binding, ADR 0004)
+  subject_type TEXT NOT NULL,   -- 'comment' | 'review'
+  subject_id TEXT NOT NULL,
+  class TEXT NOT NULL,          -- 'positive' | 'constructive' | 'other'
+  confidence_bp INTEGER NOT NULL,  -- basis points 0..10000 (binds as i64)
+  signals TEXT NOT NULL,        -- JSON document, machine-inspectable
+  classified_at TEXT NOT NULL   -- RFC 3339
+)
+index (subject_type, subject_id)
+
+deliveries(
+  id TEXT PRIMARY KEY,
+  classification_id TEXT NOT NULL,
+  author_account TEXT NOT NULL,   -- the author whose preferences apply
+  outcome TEXT NOT NULL,          -- 'delivered' | 'held' | 'withdrawn'
+  created_at TEXT NOT NULL,
+  resolved_at TEXT
+)
+index (author_account, outcome)
+
+preference_changes(
+  id TEXT PRIMARY KEY,
+  account TEXT NOT NULL,
+  changed_at TEXT NOT NULL,
+  document TEXT NOT NULL          -- the preference snapshot, for audits
+)
 ```
 
-`POST /imports/preview` reads and parses but **writes nothing**. That is what
-makes "preview" honest; a preview that has already imported is a trap.
+Notes:
 
-#### Pages
+- Append-only stores. A withdrawal is a **new** state on the delivery row
+  (`outcome` transitions to `withdrawn`, timestamped) — history is never
+  rewritten.
+- No foreign keys to works/comments beyond `subject_id`: the classifier must
+  not care which surface produced the text, which keeps it reusable by
+  M12/M16/M17.
+- Store confidence as basis points (`INTEGER`), not `REAL` — it binds as `i64`
+  under the house binding rules and survives both dialects unchanged.
 
-`/import` — a URL box, the preview, a destination picker, a dry-run option, a
-confirm button. `/library` gains a list of imported items with their provenance
-and a "check for updates" action. The job page from M5 shows the import's
-progress chapter by chapter.
+### 3.4 Domain module `crates/domain/src/positivity.rs`
 
-#### Tests
+Pure functions, unit tests in-file, no I/O:
+
+- `classify(&str, &ClassificationContext) -> Classification` with
+  `Classification { class: Class, confidence_bp: i64, signals: Vec<Signal> }`.
+  Start **rule-based** (category pattern lists tuned on a fixture corpus), not
+  ML: the spec requires inspectability, and a ruleset you can print is
+  inspectable. Signals name the matched category — they never quote the user's
+  text.
+- `resolve_delivery(Class, &FeedbackPreferences) -> Outcome` — the single
+  function encoding §12.2's matrix: positive → deliver; constructive → deliver
+  only if the author opted in, otherwise hold silently; other → refuse storage
+  outright with a generic message.
+- The constructive-framing constructor: constructive feedback is presented the
+  way the author asked (or the platform default) — a pure transformation over
+  the stored body, testable without a database.
+
+Build a fixture corpus first (`crates/domain/testdata/positivity/*.txt` or
+in-file `const` tests): praise; praise with questions; constructive with
+concrete suggestions; constructive that tips into cruelty; pure cruelty;
+
+### 3.5 Repository `crates/db/src/positivity.rs`
+
+- `record_classification`, `record_delivery`, `withdraw_critique`
+- `feedback_preferences_for(account)` — reads the **existing** M3 preferences;
+  do not duplicate that table
+- `pending_deliveries_for_author(account)` — what the outbox pass renders
+- `classification_for_subject(type, id)` — idempotency: re-submitting the same
+  comment must not double-classify
+
+Classification + comment insert is **one repository transaction** with both
+dialect branches written out. If classification refuses (`other`), nothing is
+written anywhere.
+
+### 3.6 Routes (`crates/app/src/routes/feedback.rs`, wired in `build_router`)
 
 ```text
-a_preview_writes_nothing
-an_import_is_queued_and_does_not_block_the_request
- importing_the_same_url_twice_updates_rather_than_duplicates
-a_failed_chapter_is_retried_without_refetching_the_rest
-an_expired_credential_is_reported_before_the_import_starts
-an_imported_copy_reports_removed_and_reordered_chapters
-the_adapter_is_not_called_when_the_source_is_disabled
+POST /api/v1/works/:id/comments   (existing route gains classification)
+POST /api/v1/works/:id/reviews    (existing route gains classification)
+GET  /api/v1/me/feedback-preferences
+PUT  /api/v1/me/feedback-preferences
+GET  /api/v1/me/feedback/inbox    (author-side received feedback)
+POST /api/v1/feedback/:deliveryId/withdraw
 ```
 
-#### Pitfalls
+- Classification runs **before** the comment row is stored (§8.6: preferences
+  apply before comments are stored — M3's acceptance line becomes true
+  end-to-end here). An `other` classification is refused with a generic
+  message and nothing persisted.
+- Sender-visible responses never reveal the author's preference state beyond
+  what §12.5 allows: "sent" or platform silence, never the reason.
+- These are `Write`-class routes: CSRF applies; per-account rate limits come
+  from configuration.
 
-1. **Never store a source password in plain text.** It goes through
-   `crates/app/src/secrets.rs` from M5 or it does not go anywhere.
-2. **Never let an adapter see the database.** It gets a URL and credentials and
-   returns data. An adapter that writes rows cannot be tested and cannot be
-   audited.
-3. **A source that changes its HTML must fail loudly.** A parser that silently
-   returns zero chapters produces an empty library item that looks like success.
-4. **`library_items` is per account.** Two readers importing the same URL get
-   two items; they are private copies, not catalogue entries.
-5. **Preservation imports are a different thing and need a permission basis**
-   (spec §14.5). Do not build them by waving a flag in M6; they arrive in M17
-   with the operator role and a dry-run report.
+### 3.7 Pages
+
+- `frontend/src/routes/Feedback.svelte` — the author's feedback inbox:
+  delivered items, a held-but-counted summary line (never held content),
+  preferences link, withdrawal of their own critique threads. Loading, empty,
+  error and success states (spec §1.1).
+- The account settings page gains the feedback-preferences panel; it must show
+  the **effective** policy ("you receive praise; constructive critique on") so
+  a preference can never look like it took effect when it did not.
+- The reader comment form gains the platform's framing text and the sender's
+  receipt line.
+- Decide and record: backfill classifications for pre-M9 comments (a doctor
+  command or a migration data pass). Either is acceptable; an undocumented
+  gap is not.
+
+### 3.8 Hand journey (drive before writing tests)
+
+1. Author A opts into constructive critique, default framing.
+2. Reader B leaves a positive comment → appears in A's inbox.
+3. Reader B leaves a critique → appears framed, withdrawable by B.
+4. Reader C leaves a non-constructive negative → generic rejection, **nothing
+   stored** (verify in the DB, not just the UI).
+5. Author D (opted out) receives a critique attempt → held; C sees platform
+   silence; D's inbox shows the held count, not the content.
+6. B withdraws their critique on A → A's inbox reflects it.
+
+### 3.9 Acceptance tests (`crates/app/tests/milestone_9.rs`)
+
+One test per spec §12 acceptance line:
+
+- positive comment stored and delivered to opted-in and default authors
+- constructive comment delivered only to opted-in authors; held otherwise
+- destructive comment never stored; sender gets a generic response
+- withdrawal removes the critique from the author's view; the audit trail shows
+  the withdrawal happened
+- a preference change applies to **subsequent** items only (no retroactive
+  reclassification)
+- classification is deterministic for the same input (fixture corpus)
+- the sender-visible payload contains no reason field (assert on the JSON)
+- re-submitting the same comment does not double-classify
+
+Frontend: `Feedback.test.ts` covers the empty/loading/error states and the
+held-count line; the preferences panel test asserts the effective-policy line
+renders.
+
+### 3.10 Pitfalls
+
+- **Do not** filter after insert. "Preferences apply before comments are
+  stored" is the exact defect class this milestone closes; classify, then
+  store, in one transaction.
+- **Do not** put the classifier behind a network call or a job. It is a pure
+  domain function; the job queue is for *delivery*, not classification — that
+  keeps the request path deterministic and testable.
+- **Do not** leak the author's preference state to the sender's UI. Assert the
+  sender payload has no reason field.
+- Dialect trap: `confidence_bp` and the `signals` JSON column must survive the
+  SQLite/PostgreSQL split — bind as `String`/`i64` only (ADR 0004).
 
 ---
 
-### Milestone 7 — Exports, device delivery and offline reading
+## 4. Milestone 10 (repo) — Structured taxonomy, body search, query language
 
-Spec §15. Tag `v0.08-exports`.
+**Read first:** spec §15 in full, plus the M4 re-scope note in
+`docs/verification.md` (search-within-work lives here as `M10-03`).
 
-#### The journey
+### 4.1 Why this is next
 
-A reader exports a work as EPUB, is told where it will be delivered, picks a
-format, confirms a privacy notice, and downloads it when the job finishes. Then
-they install the site on their phone, go offline, and still read a chapter they
-opened before.
+Discovery (M11) reads two artefacts this milestone builds: the inverted index
+and the tag graph. Nothing in M11 can be written honestly before they exist.
+It also closes `M9-01`'s sibling debt: search-within-a-work was re-scoped from
+M4 to here because it is the same index a second client-side scanner would
+duplicate.
 
-#### Migration 0008 — exports and offline
+### 4.2 Ledger rows
 
-> Renumbered from `0007`: the source revision cache took `0007` during Milestone
-> 6, and this plan allots one migration number per milestone. Every migration
-> from here on is one higher than this document originally said.
+- `M10-01` structured taxonomy: fandoms, relationships, characters, tags,
+  warnings — with aliases and canonicalisation (spec §15.1–15.3)
+- `M10-02` advanced search over the taxonomy with boolean and facet filters
+  (spec §15.4)
+- `M10-03` search within the current work (re-scoped from M4, 2026-09-10)
+- `M10-04` query language with saved queries (spec §15.5–15.6)
+- `M10-05` fuzzy matching with a documented similarity floor (spec §15.7)
+- `M10-06` mood search (spec §15.8)
 
-```text
-export_jobs        id, job_id, account_id, subject_type, subject_id,
-                   format TEXT, options_json, privacy_acknowledged_at,
-                   state, output_blob_checksum (nullable), created_at,
-                   updated_at, version
-download_grants    id, export_job_id, token_hash, expires_at, used_at
-                   (nullable), single_use INTEGER, created_at
-device_deliveries  id, export_job_id, target TEXT, address, state,
-                   last_error (nullable), created_at, delivered_at
-user_devices       id, account_id, label, push_subscription_json (nullable),
-                   last_seen_at, created_at, updated_at
-```
-
-Retention: exports and their output blobs are deleted 7 days after creation by a
-maintenance job; the `download_grants` row goes with it. `device_deliveries`
-persist for diagnostics and are not cascaded away, because "we sent it and it
-bounced" is exactly the thing you need later. The delivery address is personal
-data: it is written to the audit log as a hash, never in the clear.
-
-#### Formats
-
-```rust
-pub enum ExportFormat { PlainText, Html, Epub, Pdf, Mobi }
-pub fn render(work: &ExportWork, format: ExportFormat, options: &ExportOptions) -> Result<Vec<u8>>;
-```
-
-EPUB is built from the sanitized HTML the reader already renders, plus a
-generated OPF/NCX and one XHTML file per chapter. CSS lives in one file inside
-the package; a chapter's own styling is not carried over, because the reader's
-`reader_theme` is not the exporter's business.
-
-PDF and MOBI shell out to `pandoc` and `ebook-convert`. `doctor` already detects
-them; the exporter must use the detected path, report a clear error when the
-tool is missing, and never pretend it produced a file it did not. Mark those two
-formats `unsupported` in the interface when the tool is absent — the interface
-must not offer what the server will refuse.
-
-#### Offline (PWA)
-
-* A service worker registered from `frontend/src/main.ts`.
-* Cache-first for the app shell and its hashed assets; they are immutable.
-* Network-first with a cache fallback for `GET /works/:id/chapters/:chapter`, so
-  a chapter read once is readable offline.
-* **Never cache a response for a mutation, and never cache a response carrying
-  `Cache-Control: no-store`.** A cached 200 for `GET /auth/me` after a sign-out
-  is a security bug, not a performance win.
-* The offline reading list is opt-in per work, stored in IndexedDB, and the
-  reader is told what is available offline and what is not.
-
-#### Tests
+### 4.3 Migration `0011_taxonomy.sql` (both dialects)
 
 ```text
-an_export_is_a_job_not_a_request
-the_download_grant_expires_and_is_single_use
-the_plain_text_export_matches_the_rendered_text
-an_epub_export_opens_and_contains_every_chapter
-an_unsupported_format_is_refused_before_a_job_is_created
-the_export_privacy_notice_must_be_acknowledged
+taxonomy_nodes(
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,        -- 'fandom' | 'ship' | 'character' | 'tag' | 'mood'
+  canonical TEXT NOT NULL,
+  norm TEXT NOT NULL,        -- normalised lookup form (lowercase, trimmed)
+  created_at TEXT NOT NULL
+)
+unique (kind, norm)
+
+taxonomy_aliases(
+  alias TEXT NOT NULL,
+  norm TEXT NOT NULL,
+  node_id TEXT NOT NULL,
+  source TEXT NOT NULL       -- 'author' | 'import' | 'operator'
+)
+index (norm)
+
+work_tags(
+  work_id TEXT NOT NULL,
+  node_id TEXT NOT NULL,
+  weight INTEGER NOT NULL DEFAULT 0,   -- e.g. main vs side character
+  added_at TEXT NOT NULL
+)
+primary key (work_id, node_id)
+
+works_index(
+  work_id TEXT PRIMARY KEY,
+  body_text TEXT NOT NULL     -- sanitised text stripped of markup, for body search
+)
+index on body_text via a keyword table:
+
+works_index_terms(
+  work_id TEXT NOT NULL,
+  term TEXT NOT NULL,          -- lowercased token
+  pos INTEGER NOT NULL         -- ordinal token position
+)
+index (term, work_id)
+index (work_id, pos)
+
+moods(
+  node_id TEXT PRIMARY KEY,
+  axes TEXT NOT NULL           -- JSON vector, e.g. {"warmth":0.8,"tension":0.3}
+)
+
+work_moods(
+  work_id TEXT NOT NULL,
+  node_id TEXT NOT NULL,
+  score INTEGER NOT NULL       -- 0..100
+)
+primary key (work_id, node_id)
 ```
 
-#### Pitfalls
+Notes:
 
-1. **A download URL is a capability.** It is a random token, stored hashed, and
-   it expires. Do not put the work id in it.
-2. **Do not export a draft.** The export loads through `can_access_content`, the
-   same as the reader. A second check here is the leak.
-3. **The service worker must not survive a deploy.** Version the cache and
-   delete the previous one on activate, or readers get a stale bundle forever.
-4. **Never generate an empty file and call it success.** A work with no chapters
-   is an error the reader can act on.
+- `works_index` and `works_index_terms` are **derived data**: they are rebuilt
+  from `content_revisions` by a job, not written by hand. The job kind already
+  exists (M5); add `JobKind::IndexWork`.
+- The taxonomy is **site-level**, not per-pseud — the reader-private layer is
+  M8's private tags, which already exist and stay private (M8's own test
+  `a_private_tag_is_not_a_public_tag` pins this; do not merge the tables).
+
+### 4.4 Domain modules
+
+- `crates/domain/src/taxonomy.rs`: node kinds, normalisation
+  (`canonical_form`), alias resolution returning the node or "no such alias";
+  merge policy (two nodes merge behind one canonical id, aliases point at the
+  survivor).
+- `crates/domain/src/query.rs`: the query language — a small grammar
+  (`fandom:`, `ship:`, `tag:`, `word_count:>10k`, `updated:>2026-01-01`, free
+  text), parsed to an AST, rendered to both a SQL fragment pair (SQLite and
+  PostgreSQL) and a saved-query JSON document. The AST is also what saved views
+  store (M8's saved views already store a versioned JSON query document —
+  reuse `SavedView::needs_repair` semantics: an unparseable stored query is
+  repairable, never misread).
+
+### 4.5 Repository `crates/db/src/search.rs`
+
+- `rebuild_work_index(work_id)` — tokenise the sanitised body into
+  `works_index_terms`; called by the `IndexWork` job.
+- `search_works(query: &QueryAst, viewer: Option<Viewer>) -> Cursor<WorkSummary>`
+  — joins terms and taxonomy through the AST; unpublished work is invisible to
+  anonymous viewers (the visibility rule already lives in content.rs; reuse it,
+  do not restate it).
+- `search_in_work(work_id, needle)` — positional lookup: find term positions
+  and return paragraph anchors so the reader can jump. This is why `pos`
+  exists.
+- `resolve_alias(norm) -> Option<node_id>`
+- `merge_nodes(survivor, absorbed)` — one transaction; aliases redirect.
+
+### 4.6 Routes
+
+```text
+GET  /api/v1/search?q=...&cursor=...    (AST or free text; the AST parser
+                                        accepts the query language)
+GET  /api/v1/search/in-work/:id?needle=...
+GET  /api/v1/taxonomy?kind=...&prefix=...   (autocomplete)
+GET  /api/v1/taxonomy/:id
+POST /api/v1/taxonomy/aliases            (operator; audited)
+```
+
+The query parser errors are `422` with the character offset named, so the UI
+can point at the mistake instead of a bare refusal.
+
+### 4.7 Pages
+
+- `frontend/src/routes/Search.svelte` — facets from the taxonomy, boolean
+  forms, saved queries, results with the cursor envelope. Empty query → the
+  page renders help, not a spinner.
+- Reader in-work search: extend `Reader.svelte` (the re-scoped M4 row): a
+  needle, match list with paragraph anchors, jump-to-match. Long works must
+  not require rendering every paragraph at once (spec §9.2) — the jump uses
+  the anchor mechanism the reader already has.
+
+### 4.8 Hand journey
+
+1. Tag a work with fandom/ship/character/tags via WorkEditor.
+2. Search `fandom:x tag:y` → the work appears.
+3. Alias: search a known alias → canonical node; merge two nodes → old alias
+   redirects.
+4. Save a query; load it from the library's saved-views list.
+5. In-work search for a word mid-book → jump lands on the right paragraph.
+
+### 4.9 Acceptance tests
+
+- taxonomy normalisation: the same tag typed in three casings lands on one node
+- alias resolution returns the canonical node or none
+- merging two nodes redirects their aliases; the absorbed node's work tags move
+  to the survivor in one transaction
+- search honours visibility: unpublished work is invisible to anonymous viewers
+- results use the cursor envelope with keyset pagination
+- in-work search returns paragraph anchors the reader can jump to
+- a saved query round-trips; an unparseable stored query is repairable, never
+  misread (`needs_repair`, listed with a repair affordance)
+
+### 4.10 Pitfalls
+
+- Do not invent a second index implementation for in-work search. One term
+  table serves both site search and in-work search — the M4 re-scope exists
+  precisely to prevent the second implementation.
+- Rebuilding the index must be idempotent per work and crash-safe: a rebuild
+  that dies halfway leaves the previous index intact (stage the new term set,
+  then swap inside one transaction).
+- The fuzzy-match similarity floor is configuration with a documented default,
+  not a constant in code.
+- Tokenisation happens on the **sanitised** text (strip markup first), or
+  search results will surface markup artefacts.
 
 ---
 
-### Milestone 8 — Library, saved views, bookmarks and updates
+## 5. Milestone 11 (repo) — Discovery, private taste influence, recipes, dashboards
 
-**Landed.** See `docs/plans/milestone-08-library.md` for what was built, the two
-decisions taken while building it, and what was left open.
+**Read first:** spec §16 in full, plus §0.2 (priority 4) and §0.3 (the admin's
+taste profile must never be visible, inferable, or hinted at).
 
-Spec §16. Tag `v0.09-library`. **Also carries whole-work mode**, re-scoped from
-M4 on 2026-09-10 (`M8-02`): the mode walks a whole work and belongs with the
-reader's library. It must paginate — append the next chapter when the reader
-approaches the end — never render one long DOM (spec §9.2).
+### 5.1 Why this is next
 
-#### The journey
+M10 built the index and tag graph; two of the recommendation engines read them
+directly. This milestone completes the reader loop (search → read → be offered
+the next thing) and establishes the influence mechanism every later ranking
+surface (M13 events, M14 trust) must reuse rather than reinvent.
 
-A reader's library is a place: shelves they made, private tags, reading statuses,
-bookmarks with notes, a list of what updated since they last looked, and their
-storage usage with a way to free space.
+### 5.2 Ledger rows
 
-#### Migration 0009
+- `M11-01` recommendations from multiple engines, blended, each result
+  explainable at engine level (spec §16.1)
+- `M11-02` private taste profile derived from the reader's own behaviour,
+  inspectable and clearable by that reader, never visible to anyone else
+  (spec §16.2)
+- `M11-03` operator taste influence: private work affinities applied as ranking
+  multipliers, audit-logged server-side, never surfaced in any API response,
+  label, or credit breakdown (spec §16.3–16.4)
+- `M11-04` diversity mechanisms: exploration slots and per-fandom caps so
+  influence cannot make the site monothematic (spec §16.4)
+- `M11-05` recipes: shareable recommendation formulas, sandboxed to the saved-
+  query subset, honouring every reader's own opt-outs (spec §16.5)
+- `M11-06` dashboards: personal home assembly from widgets in the M1 slots
+  (spec §16.6)
 
-```text
-shelves           id, account_id, name, description, is_public INTEGER,
-                  position INTEGER, created_at, updated_at, version
-shelf_items       id, shelf_id, library_item_id, position INTEGER,
-                  created_at, UNIQUE (shelf_id, library_item_id)
-bookmarks         id, account_id, subject_type, subject_id, chapter_id
-                  (nullable), position_permille (nullable), note,
-                  created_at, updated_at, version
-private_tags      id, account_id, subject_type, subject_id, tag,
-                  created_at, UNIQUE (account_id, subject_type, subject_id, tag)
-reading_status    id, account_id, subject_type, subject_id, status TEXT,
-                  started_at, finished_at (nullable), updated_at, version
-saved_views       id, account_id, name, query_json, created_at, updated_at
-storage_usage     -- a view or a materialised column, not a new table
-update_checks     id, account_id, library_item_id, checked_at,
-                  found_changes INTEGER, report_json
-```
-
-Retention: everything here is private to the account and cascades with it.
-`private_tags` and `reading_status` are **not** the public taxonomy of M9 — say
-in the comment that a public tag lives in M9's `work_tags` and never here.
-`update_checks` keeps 90 days.
-
-#### Domain
-
-```rust
-pub enum ReadingStatus { WantToRead, Reading, OnHold, Dropped, Finished }
-pub struct LibraryQuery { pub shelves: Vec<String>, pub tags: Vec<String>,
-    pub statuses: Vec<ReadingStatus>, pub source: Option<String>,
-    pub updated_since: Option<OffsetDateTime>, pub sort: LibrarySort }
-
-/// A saved view is a query, checked before it is stored.
-pub fn validate_query(query: &LibraryQuery) -> Result<(), QueryError>;
-```
-
-#### Routes
+### 5.3 Migration `0012_discovery.sql` (both dialects)
 
 ```text
-GET/POST/PATCH/DELETE  /shelves[/:id]
-POST/DELETE            /shelves/:id/items/:libraryItemId
-GET/POST/PATCH/DELETE  /bookmarks[/:id]
-PUT/DELETE             /library/items/:id/tags/:tag
-PUT                    /library/items/:id/status
-GET/POST/DELETE        /saved-views[/:id]
-GET                    /library/items?<LibraryQuery as query params>   envelope
-POST                   /library/updates/check                          → 202 + job
-GET                    /library/storage
+taste_profiles(
+  account TEXT PRIMARY KEY,
+  signals TEXT NOT NULL,      -- JSON: {fandom:{id:bp}, tag:{...}, mood:{...}}
+  computed_at TEXT NOT NULL
+)
+
+operator_affinities(
+  work_id TEXT PRIMARY KEY,
+  affinity_bp INTEGER NOT NULL,   -- -5000..10000
+  operator TEXT NOT NULL,         -- who set it, for the audit trail only
+  rationale TEXT NOT NULL,        -- operator-private, never rendered
+  set_at TEXT NOT NULL
+)
+
+recipes(
+  id TEXT PRIMARY KEY,
+  owner TEXT NOT NULL,
+  name TEXT NOT NULL,
+  document TEXT NOT NULL,         -- versioned JSON: filters + weights
+  is_public INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+)
+
+dashboard_layouts(
+  account TEXT PRIMARY KEY,
+  slots TEXT NOT NULL,            -- JSON: slot name -> widget id + params
+  updated_at TEXT NOT NULL
+)
 ```
 
-#### Pages
+Weights, caps and exploration rates are **configuration** with documented
+defaults (`discovery.*` in `lorehaven.toml.example`), not rows and not
+constants.
 
-`/library` becomes a real library: a sidebar of shelves, a filter bar (source,
-tag, status, updated-since), a grid of item cards, batch selection with batch
-actions, and a storage panel with a "free space" action that says what it will
-delete before it deletes it.
+### 5.4 Domain modules
 
-#### Tests
+- `crates/domain/src/discovery.rs`: an engine is a **pure scoring function**
+  `(signals, candidates) -> Vec<(candidate, score, reason)>`. Ship three:
+  `MoreLikeThis` (index terms + tags), `SameFandomFresh` (taxonomy + recency),
+  `ReaderHistory` (the reader's own history/notes). Blending is deterministic
+  and capped; the reason is engine-level only.
+- `crates/domain/src/influence.rs`: applies `operator_affinities` as a
+  multiplier inside the blend. The rule that has teeth: the parameter's name in
+  code and config is neutral (`affinity_weight`), and no response field, log
+  line the client can read, or UI label may distinguish an influenced result
+  from an organic one. Tests assert response-shape equality between influenced
+  and uninfluenced runs.
+- `crates/domain/src/recipe.rs`: a recipe document is the M10 query AST plus
+  engine weights; it validates against a fixed schema version and carries no
+  code. A recipe cannot override another reader's opt-outs or visibility.
+
+### 5.5 Repository `crates/db/src/discovery.rs`
+
+- `recompute_taste_profile(account)` — derived from history, ratings, notes
+  and bookmarks (all already exist); scheduled as a job, bounded input.
+- `candidates_for(engine, profile, limit)` — bounded candidate SQL per engine;
+  cap *before* scoring, scoring in the domain, not SQL.
+- `affinities_for(work_ids)`, `save_recipe`, `public_recipes(cursor)`,
+  `dashboard_layout_for`, `save_dashboard_layout`.
+- Taste profiles are read only by their owner: no repository function takes
+  "another account's profile" as an argument.
+
+### 5.6 Routes
 
 ```text
-a_shelf_is_private_until_it_is_published
-a_private_tag_is_not_a_public_tag
-batch_delete_removes_only_the_selection
-a_saved_view_round_trips_its_query
-deleting_a_library_item_leaves_the_reader_s_bookmarks_alone
-storage_usage_matches_the_sum_of_the_items
+GET  /api/v1/discovery                    (blended feed, cursor envelope)
+GET  /api/v1/discovery/why/:workId        (engine-level reason only)
+GET|PUT|DELETE /api/v1/me/taste-profile   (inspect; clear)
+GET|POST /api/v1/recipes  GET /api/v1/recipes/:id
+GET|PUT  /api/v1/me/dashboard             (slot layout)
+POST /api/v1/operator/affinities          (operator role; audited; never
+                                          linked from any public page)
 ```
 
-#### Pitfalls
+### 5.7 Pages
 
-1. **Do not join `private_tags` into anything a second account can see.** This
-   is the same rule as `reading_history_entry`.
-2. **A private tag and a public tag are different rows in different tables.**
-   A single `tags` table with an `is_private` column will be leaked by the first
-   query that forgets the flag.
-3. **Batch operations report per-item results**, not one boolean. "3 of 5
-   removed, 2 were already gone" is the honest answer.
+- `frontend/src/routes/Discovery.svelte` — the feed, a "why am I seeing this"
+  affordance per card (engine reason only), and the recipe switcher.
+- `frontend/src/routes/Dashboard.svelte` — assemble widgets into the M1 slots;
+  unknown/deprecated widget ids degrade to an empty slot, never an error page.
+- Recipe editor as a section of Discovery or its own route; sharing a recipe
+  makes it public and versioned.
+
+### 5.8 Hand journey
+
+1. Read two chapters of a fic; open Discovery → the feed reflects reading
+   without a full reload.
+2. The "why" affordance names the engine, never a multiplier.
+3. Clear the taste profile → feed falls back to neutral/popular; profile read
+   returns empty; history rows are untouched.
+4. As operator, set an affinity on a low-read work; confirm: rankings move,
+   and *no* visible field, label or reason changes shape.
+5. Save a recipe, share it, load it as a second account with different
+   opt-outs → it cannot show anything that account opted out of.
+
+### 5.9 Acceptance tests
+
+- no route returns another account's profile; a second account's feed is
+  byte-identical whether or not the first has a profile (no shape leak)
+- influence invisibility: influenced vs uninfluenced responses differ only in
+  result order, never in field presence or naming
+- diversity: a feed window respects the per-fandom cap and includes exploration
+  slots (configuration-driven; the test asserts the cap holds)
+- recipes honour the *viewer's* opt-outs and visibility
+- dashboards with unknown widget ids render empty slots, not errors
+- a cleared profile zeroes out without deleting the reader's history rows
+
+### 5.10 Pitfalls
+
+- **Silent means silent.** Spec §20's "author demand multiplier (silent)" rule
+  originates here: if an influence is detectable from the response, the
+  implementation is wrong. Test by diffing field sets, not by reading code.
+- Credits (M15) must never write `operator_affinities` or ranking weights —
+  when M15 lands, add the negative test there too.
+- The profile is derived from behaviour the reader already controls; clearing
+  clears the profile only, and says so. It never deletes history rows.
+- Bound everything: candidate cap before scoring, cursor page size, bounded
+  recompute jobs. A runaway feed query is a production incident on a
+  self-hosted box.
 
 ---
 
-### Milestone 9 — Taxonomy, body search and the query language
+## 6. Milestone 12 (repo) — Comments, forums, groups, messaging, presence
 
-Spec §17. Tag `v0.10-search`. **Also carries search within a single work**,
-re-scoped from M4 on 2026-09-10 (`M9-02`): it is the same index this milestone
-builds, and a separate client-side scanner would be the second implementation of
-one rule, which Part 1 forbids.
+**Read first:** spec §17 in full, plus §0.3 (blocks must be honoured
+everywhere) and the debt register (M2-06 lands here).
 
-#### The journey
+### 6.1 Why this is next
 
-A reader searches for a work by fandom, relationship, character, rating, warning
-and word count, with the results updating as they type, and finds a phrase in the
-body of a chapter. A curator proposes a new tag and it enters a review queue.
+This milestone is the platform's social spine and the first milestone with a
+**real-time** surface (presence), so it also introduces the SSE/WebSocket
+pattern. M9's classifier becomes the gate for every new comment-shaped
+surface built here.
 
-#### Why before M10
+### 6.2 Ledger rows
 
-Two of the recommendation engines read an inverted index and a tag graph.
-Neither exists until this milestone has built them.
+- `M12-01` comments on works and chapters through the positivity gate; threads,
+  per-thread reply, soft delete, pseud-only posting (spec §17.1)
+- `M12-02` forums: categories, topics, replies; moderated per trust level
+  (spec §17.2–17.3)
+- `M12-03` groups: membership, privacy (open/closed/hidden), roles, group
+  forums (spec §17.4)
+- `M12-04` messaging: 1:1 conversations, block-aware, report-capable
+  (spec §17.5)
+- `M12-05` presence: online indicators and typing states, opt-in, off by
+  default (spec §17.6)
+- `M12-06` block/mute become real on every path (spec §7.2.2; closes `M2-06`
+  and the debt register)
 
-#### Migration 0010
-
-```text
-tags              id, slug, display_name, kind TEXT, parent_id (nullable),
-                  created_at, updated_at, UNIQUE (kind, slug)
-tag_aliases       id, tag_id, alias_slug, UNIQUE (alias_slug)
-work_tags         work_id, tag_id, kind, source TEXT ('author'|'curator'|'auto'),
-                  added_by (nullable), added_at, PRIMARY KEY (work_id, tag_id)
-tag_proposals     id, proposed_by, kind, display_name, evidence, state,
-                  reviewed_by (nullable), created_at, decided_at
-work_search       -- SQLite: an FTS5 virtual table; PostgreSQL: tsvector + GIN
-                  work_id, title, summary, body_text, taxonomy_text,
-                  (tsvector column on PostgreSQL)
-search_index_jobs id, work_id, revision_id, state, created_at, finished_at
-```
-
-Retention: tags are permanent and never cascade with a work — the taxonomy
-outlives the works that used it. `work_tags` cascades with the work.
-`tag_proposals` are kept after a decision, with `decided_at`, because "who asked
-for this and who refused it" is the record that stops the same proposal arriving
-every month.
-
-**The two dialects differ here and that is allowed.** SQLite gets FTS5 with a
-`porter unicode61` tokenizer; PostgreSQL gets `tsvector` with a GIN index. The
-repository exposes the same functions; only the SQL differs. Write the divergence
-down in an ADR, because it is the first place the two engines are not merely
-syntactic variants of each other.
-
-#### Domain — `crates/domain/src/search.rs`
-
-```rust
-pub struct WorkQuery { pub text: Option<String>, pub fandom: Vec<String>,
-    pub characters: Vec<String>, pub relationships: Vec<String>,
-    pub rating: Vec<Rating>, pub warnings: Vec<String>, pub status: Vec<String>,
-    pub words: Option<RangeInclusive<u32>>, pub updated_since: Option<OffsetDateTime>,
-    pub sort: SearchSort, pub cursor: Option<Cursor> }
-
-/// Parses the query language (`fandom:hp rating:teen words:>5000 "a phrase"`).
-pub fn parse_query(input: &str) -> Result<WorkQuery, QueryError>;
-
-/// Builds the search terms. Pure, so it is testable without a database.
-pub fn to_terms(query: &WorkQuery) -> SearchTerms;
-
-/// The score contribution of each term, so ranking is explainable.
-pub fn score(hit: &SearchHit, terms: &SearchTerms) -> i64;
-```
-
-**Unknown metadata is explicit** (spec §17): a work whose fandom nobody has
-recorded is not "all fandoms" and is not hidden either. It is returned with a
-marker, and the interface says "fandom not recorded" rather than guessing.
-
-#### Routes
+### 6.3 Migration `0013_community.sql` (both dialects)
 
 ```text
-GET    /search                         the query language, envelope
-GET    /search/suggest?q=…             tag suggestions, ≤20, fast
-GET    /tags/:kind/:slug               a tag page with its works
-POST   /tags/proposals                 a proposal (Write)
-GET    /tags/proposals?state=…         the queue
-POST   /tags/proposals/:id/decide      accept or refuse, with a reason
+comments(
+  id TEXT PRIMARY KEY,
+  subject_type TEXT NOT NULL,     -- 'work' | 'chapter' | 'topic' | 'user'
+  subject_id TEXT NOT NULL,
+  author_pseud TEXT NOT NULL,
+  body TEXT NOT NULL,             -- raw text; render only via sanitiser
+  body_version TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  edited_at TEXT,
+  deleted_at TEXT                 -- soft delete; body retained for moderation
+)
+index (subject_type, subject_id, created_at)
+index (author_pseud)
+
+comment_threads(
+  id TEXT PRIMARY KEY,
+  subject_type TEXT NOT NULL,
+  subject_id TEXT NOT NULL,
+  root_comment TEXT NOT NULL,
+  reply_count INTEGER NOT NULL DEFAULT 0
+)
+
+forum_categories(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  min_trust INTEGER NOT NULL DEFAULT 0
+)
+
+forum_topics(
+  id TEXT PRIMARY KEY,
+  category_id TEXT NOT NULL,
+  author_pseud TEXT NOT NULL,
+  title TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_post_at TEXT,
+  locked INTEGER NOT NULL DEFAULT 0
+)
+
+forum_posts(
+  id TEXT PRIMARY KEY,
+  topic_id TEXT NOT NULL,
+  author_pseud TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  deleted_at TEXT
+)
+index (topic_id, created_at)
+
+groups(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  privacy TEXT NOT NULL,          -- 'open' | 'closed' | 'hidden'
+  owner TEXT NOT NULL,
+  created_at TEXT NOT NULL
+)
+
+group_members(
+  group_id TEXT NOT NULL,
+  account TEXT NOT NULL,
+  role TEXT NOT NULL,             -- 'owner' | 'moderator' | 'member'
+  joined_at TEXT NOT NULL
+)
+primary key (group_id, account)
+
+conversations(
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL
+)
+
+conversation_participants(
+  conversation_id TEXT NOT NULL,
+  account TEXT NOT NULL,
+  last_read_at TEXT,
+  muted_until TEXT
+)
+primary key (conversation_id, account)
+
+messages(
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  sender TEXT NOT NULL,
+  body TEXT NOT NULL,
+  sent_at TEXT NOT NULL,
+  deleted_at TEXT
+)
+index (conversation_id, sent_at)
+
+blocks(
+  blocker TEXT NOT NULL,
+  blocked TEXT NOT NULL,
+  scope TEXT NOT NULL,            -- 'all' | 'messages' | 'comments'
+  created_at TEXT NOT NULL,
+  note TEXT
+)
+primary key (blocker, blocked, scope)
+
+mutes(
+  muter TEXT NOT NULL,
+  muted TEXT NOT NULL,
+  until TEXT,
+  created_at TEXT NOT NULL
+)
+primary key (muter, muted)
+
+presence(
+  account TEXT PRIMARY KEY,
+  last_seen_at TEXT NOT NULL,
+  typing_until TEXT,
+  enabled INTEGER NOT NULL DEFAULT 0   -- presence is opt-in
+)
 ```
 
-#### Pages
+**DDL discipline note:** the sketch above is a field-meaning guide, not final
+DDL — type the real DDL from spec §17's field definitions and ADR 0004's
+storage rules, and keep the two dialects identical (the drift test catches a
+miss).
 
-`/search` with a filter rail that mirrors `WorkQuery` exactly, a result list with
-the score explanation behind a disclosure, and a tag page. The filter rail and the
-query string are two views of one object: changing a filter changes the URL, and
-a shared URL reproduces the search.
+### 6.4 Domain modules
 
-#### Tests
+- `crates/domain/src/community.rs`: thread shapes, edit windows, soft-delete
+  semantics, posting rules (pseud-only), and the visibility matrix for
+  open/closed/hidden groups (who may list, join, post, moderate).
+- `crates/domain/src/blocking.rs`: the resolution function
+  `blocked_between(viewer, subject, scope) -> bool` used by **every** social
+  read/write path. Spec §7.2.2's rule has teeth here: a block that hides a
+  comment but lets a mention through is not a block.
+
+### 6.5 Repository `crates/db/src/community.rs`
+
+- Comments: `insert_comment` (one transaction with the M9 classify call),
+  `thread_for_subject` (cursor-paginated), `soft_delete_comment`,
+  `edit_comment` (edit-window policy from the domain).
+- Forums/groups/messaging: topic and post CRUD with trust gates from
+  `crates/domain/src/trust.rs`'s thresholds (trust itself is built in M14 —
+  until then the gate reads trust level 0 and the operator's manual role
+  assignments), group membership transitions with the visibility matrix,
+  conversation/message functions with `blocked_between` applied **before**
+  send and **after** read.
+- `blocked_between(blocker, blocked, scope)` and its mute twin; a **view** or
+  a join guard, not scattered `WHERE` clauses — one query helper per surface.
+
+### 6.6 Routes
 
 ```text
-a_search_by_fandom_and_rating_narrows_the_result
-a_phrase_search_finds_text_inside_a_chapter
-a_work_with_no_fandom_is_marked_not_hidden
-an_index_is_rebuilt_when_a_chapter_changes
-an_unknown_filter_is_refused_rather_than_ignored
-the_query_language_round_trips_through_a_url
-a_proposal_needs_a_decision_and_a_reason
+-- comments
+GET  /api/v1/works/:id/comments            (cursor envelope; threaded)
+POST /api/v1/works/:id/comments            (positivity gate)
+POST /api/v1/comments/:id/delete           (author or subject owner)
+-- forums
+GET  /api/v1/forums  GET /api/v1/forums/:category/topics (cursor)
+POST /api/v1/forums/:category/topics       (trust gate)
+GET  /api/v1/topics/:id  POST /api/v1/topics/:id/replies
+POST /api/v1/topics/:id/lock               (moderator)
+-- groups
+GET|POST /api/v1/groups  GET /api/v1/groups/:id
+POST /api/v1/groups/:id/join|leave|role
+-- messaging
+GET  /api/v1/conversations  POST /api/v1/conversations
+GET  /api/v1/conversations/:id/messages    (cursor; ascending)
+POST /api/v1/conversations/:id/messages    (blocked_between first)
+-- blocks and mutes
+GET|POST|DELETE /api/v1/me/blocks  GET|DELETE /api/v1/me/mutes
+-- presence
+GET  /api/v1/presence/stream               (SSE; typing + online, opt-in)
 ```
 
-#### Pitfalls
+### 6.7 Real-time pattern (first use; define it here, reuse later)
 
-1. **An unknown filter must be an error, not a silent no-op.** A search that
-   quietly ignores `fandom:typo` shows everything and looks like it worked.
-2. **Index maintenance is a job.** A chapter save enqueues a reindex; the search
-   is stale for a moment and the page says so rather than lying.
-3. **Do not search `private_tags`.** Ever.
-4. **Explain the ranking.** A list of results with no explanation is
-   unfalsifiable, and the first complaint about relevance cannot be answered.
+- **SSE over a single authenticated stream**, not WebSockets: one connection,
+  server-pushed events (`typing`, `online`, `message`), auto-reconnect with
+  `Last-Event-ID` resume from the client. No new daemon: the stream is an axum
+  route reading an in-process broadcast channel; message fan-out also writes
+  to `messages` so offline readers catch up by polling.
+- Heartbeats every 30s; connections are dropped server-side after 2 missed
+  beats. Stream handles are per-account, never per-pseud.
+- All SSE payloads pass the same classification and privacy rules as REST;
+  nothing over the stream that the REST surface would refuse.
+
+### 6.8 Pages
+
+- `Comments.svelte` (embedded in WorkPage/Reader): threads, reply, edit within
+  the window, delete (tombstone), report affordance (M14 wires the backend).
+- `Forums.svelte`, `ForumTopic.svelte`, `Groups.svelte`, `GroupPage.svelte`,
+  `Messages.svelte` (list + thread pane), and a Settings section for blocks,
+  mutes and the presence toggle.
+- Every new page: loading, empty, error, success states; both `en` and `eo`
+  labels; API types mirrored from server shapes.
+
+### 6.9 Hand journey
+
+1. Two accounts: A comments on B's work; B replies; A edits within the window;
+   A deletes (tombstone shows for others).
+2. A blocks B → B's comments vanish from A's views; B can still see their own;
+   a message from B to A is refused at send with a **generic** error (never
+   "you are blocked").
+3. B @mentions A in a forum → no notification reaches A (block holds across
+   paths).
+4. Group: create closed group, second account requests, owner approves, member
+   posts to the group forum; hidden group is invisible to non-members.
+5. Presence: A opts in; B sees "typing" while A types; A opts out → B sees
+   nothing, and the setting survives a reload.
+
+### 6.10 Acceptance tests
+
+- comment through the positivity gate: constructive held when the work's author
+  opted out (the M9 rule applies to the new surface unchanged)
+- block semantics across paths: comment hiding, message refusal, mention
+  suppression, notification suppression — one block, every path
+- mute expiry: after `until`, the muted account's content reappears
+- group visibility matrix: hidden not listed, closed listed but join-gated,
+  open joinable; non-member cannot read a hidden group's forum
+- messaging pagination is stable under concurrent sends (cursor envelope)
+- presence is opt-in: with `enabled=0`, no stream event names the account
+- soft-deleted comment: hidden for others, retained for moderation, author sees
+  their own tombstone
+
+### 6.11 Pitfalls
+
+- Do not run the positivity classifier again for content already classified and
+  stored; store the classification id on the new row (surface change) instead.
+- The block check is a **domain decision rendered as SQL**, not ad-hoc SQL per
+  route: one helper per surface, tested once, reused everywhere. A route that
+  hand-rolls its own block filter will be the one that leaks.
+- Presence leaks via timestamps: a last-seen value is itself a presence signal.
+  The opt-out must suppress derived signals too, not just the indicator.
+- Mentions: parsing @pseud in bodies is a domain function with tests for
+  lookalike names (unicode confusables) before any notification is queued.
 
 ---
 
-### Milestone 10 — Discovery, private taste influence, recipes and dashboards
+## 7. Milestone 13 (repo) — Collections, challenges, requests, wishlists, events
 
-Spec §18. Tag `v0.11-discovery`.
+**Read first:** spec §18 in full, plus §0.3 (a challenge entry is a work: the
+positivity filter and pseud rules apply unchanged).
 
-#### The journey
+### 7.1 Why this is next
 
-A reader opens Discover and sees recommendations they can explain: each card
-says why it is there ("because you finished X", "popular in a fandom you read").
-They turn off one source of influence and the list changes. A blind-date card
-shows a work without its author.
+Challenge entries are works with a deadline; wishlist fulfilment is an import
+or a write with a claimant. Both reuse the writing, publishing, importing and
+positivity machinery that already exists instead of inventing parallel flows —
+this milestone is mostly **composition**, which is why it follows M12 and not
+the reverse.
 
-#### The rule that shapes the milestone
+### 7.2 Ledger rows
 
-**Personal taste is private and off by default** (spec §18). The instance
-operator chooses whether an aggregate signal exists at all; an individual
-chooses whether their own reading contributes. Both switches exist, both default
-to off, and the interface says which is which.
+- `M13-01` collections: curated groupings with open/closed moderation and
+  item-level inclusion policy (spec §18.1)
+- `M13-02` challenges: prompts, schedules, open/closed entry windows,
+  constraint checks (spec §18.2)
+- `M13-03` requests/exchanges: claims, anonymous-until-reveal, assignment
+  integrity (spec §18.3)
+- `M13-04` wishlists: wanted stories with claims and fulfilment links (spec
+  §18.4)
+- `M13-05` writing events with a shared timeline and per-event rules (spec
+  §18.5)
 
-#### Migration 0011
-
-```text
-recommendation_settings  account_id PRIMARY KEY, use_history INTEGER,
-                         use_ratings INTEGER, use_bookmarks INTEGER,
-                         allow_blind_date INTEGER, updated_at, version
-instance_discovery_config  id, aggregate_signals_enabled INTEGER,
-                           updated_by, updated_at   -- instance-wide, one row
-taste_signals            id, account_id, kind, subject_type, subject_id,
-                         weight INTEGER, computed_at
-                         -- derived, per account, never readable by another
-recommendation_recipes   id, account_id (nullable = a built-in),
-                         name, definition_json, is_public INTEGER, version
-recommendation_runs      id, job_id, account_id, recipe_id, produced INTEGER,
-                         created_at, finished_at
-dashboards               id, account_id, name, layout_json, created_at, updated_at
-```
-
-Retention: `taste_signals` are derived data and are deleted when the reader turns
-the feature off, not merely flagged — the point of the switch is that the data
-stops existing. `recommendation_runs` keep 30 days. Built-in recipes have
-`account_id IS NULL` and cannot be edited by a reader.
-
-#### Domain — `crates/domain/src/discovery.rs`
-
-```rust
-pub struct Recommendation { pub work_id: WorkId, pub reason: Reason, pub score: i64 }
-pub enum Reason { Finished(WorkId), SimilarTags(TagId), PopularInFandom(String),
-                  SameAuthor(PseudId), BlindDate }
-
-/// Whether a reader's signal may be used at all.
-pub fn may_use(signal: SignalKind, settings: &RecommendationSettings,
-               instance: InstanceDiscovery) -> bool;
-
-/// Turns signals into candidates. Pure: rows in, candidates out.
-pub fn recommend(signals: &[TasteSignal], candidates: &[Candidate],
-                 limit: usize) -> Vec<Recommendation>;
-```
-
-Every recommendation carries a `Reason`. A recommendation with no reason is not
-returned. That single rule is what makes the feature explainable.
-
-#### Routes and pages
+### 7.3 Migration `0014_events.sql` (both dialects)
 
 ```text
-GET    /discover                        the reader's own recommendations
-GET/PATCH /settings/recommendations      the per-reader switches
-GET/PATCH /admin/discovery               the instance switch, operators only
-GET/POST/PATCH/DELETE /recipes[/:id]
-GET/POST/PATCH/DELETE /dashboards[/:id]
+collections(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  owner TEXT NOT NULL,
+  item_policy TEXT NOT NULL,      -- 'owner_only' | 'open' | 'moderated'
+  is_public INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL
+)
+
+collection_items(
+  collection_id TEXT NOT NULL,
+  work_id TEXT NOT NULL,
+  added_by TEXT NOT NULL,
+  added_at TEXT NOT NULL,
+  note TEXT
+)
+primary key (collection_id, work_id)
+
+challenges(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  rules TEXT NOT NULL,            -- versioned JSON document (constraint list)
+  schedule TEXT NOT NULL,         -- windows: opens/closes RFC 3339
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+)
+
+challenge_entries(
+  challenge_id TEXT NOT NULL,
+  work_id TEXT NOT NULL,
+  entered_at TEXT NOT NULL,
+  constraint_check TEXT NOT NULL  -- JSON: pass/fail per constraint, at entry
+)
+primary key (challenge_id, work_id)
+
+requests(
+  id TEXT PRIMARY KEY,
+  requester TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  anonym_until TEXT,
+  created_at TEXT NOT NULL
+)
+
+claims(
+  request_id TEXT NOT NULL,
+  claimant TEXT NOT NULL,
+  claimed_at TEXT NOT NULL,
+  fulfilled_by_work TEXT,
+  fulfilled_at TEXT
+)
+primary key (request_id, claimant)
+
+wishlists(
+  account TEXT PRIMARY KEY,
+  is_public INTEGER NOT NULL DEFAULT 0
+)
+
+wishlist_items(
+  wishlist TEXT NOT NULL,
+  node_id TEXT,                   -- taxonomy node (fandom/ship/tag) or work
+  work_id TEXT,
+  note TEXT,
+  added_at TEXT NOT NULL
+)
+
+events(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  document TEXT NOT NULL,         -- versioned JSON: rules, timeline, rewards
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+)
+
+event_participation(
+  event_id TEXT NOT NULL,
+  account TEXT NOT NULL,
+  joined_at TEXT NOT NULL
+)
+primary key (event_id, account)
 ```
 
-`/discover` shows the reason on every card, a link to the settings, and — when
-the instance switch is off — a plain statement that recommendations are disabled
-here rather than an empty list pretending nobody has anything to recommend.
+Constraint checks run at entry and again at close; a work edited after entry
+re-checks (the M3 revision system supplies the trigger).
 
-#### Tests
+### 7.4 Domain modules
+
+- `crates/domain/src/collections.rs`: item policy transitions (owner_only →
+  moderated moves approval to the owner), the "add to collection" permission
+  function, and the public-listing visibility rule (a private collection's
+  existence is not confirmed to non-members).
+- `crates/domain/src/challenges.rs`: constraint evaluation as data — a
+  constraint is `{kind, params}`, evaluated against a work + taxonomy facts:
+  word count bounds, required/forbidden tags, fandom, rating ceiling, deadline.
+  No constraint type may execute code; evaluation is a pure match over kinds.
+- `crates/domain/src/exchange.rs`: request/claim state machine
+  (`open → claimed → fulfilled | expired`), assignment integrity (a request has
+  at most one active claim), and the anonymity window.
+
+### 7.5 Repository `crates/db/src/events.rs`
+
+- Collection CRUD + `add_item` (policy-checked), `remove_item`, public listing
+  with cursor envelope, private-collection existence guard (a read that would
+  confirm a private collection's existence to a non-member returns the same
+  404 as a nonexistent one).
+- Challenge CRUD, `enter_work` (window + constraints in one transaction),
+  re-check job at close (M5's `JobKind` extension), entry listing.
+- Requests/claims: `claim_request` (at most one active claim — enforced in the
+  write, not just a check-then-insert), `fulfil_with(work_id)`, `expire_claims`
+  job.
+- Wishlist functions honour `is_public`; a private wishlist's items are never
+  in any public query path.
+
+### 7.6 Routes
 
 ```text
-recommendations_are_off_until_the_reader_turns_them_on
-turning_the_setting_off_deletes_the_signals
-a_recommendation_always_carries_a_reason
-an_instance_with_signals_disabled_computes_nothing
-a_blind_date_hides_the_author_until_it_is_opened
-a_reader_cannot_see_another_readers_signals
+GET|POST /api/v1/collections  GET|PUT|DELETE /api/v1/collections/:id
+POST /api/v1/collections/:id/items  DELETE /api/v1/collections/:id/items/:workId
+GET|POST /api/v1/challenges  GET|PUT /api/v1/challenges/:id
+POST /api/v1/challenges/:id/entries
+GET|POST /api/v1/requests  POST /api/v1/requests/:id/claims
+POST /api/v1/claims/:id/fulfil
+GET|POST /api/v1/wishlists/:account  (owner or public)
+POST /api/v1/wishlist-items  DELETE /api/v1/wishlist-items/:id
+GET|POST /api/v1/events  GET /api/v1/events/:id  POST /api/v1/events/:id/join
 ```
 
-#### Pitfalls
+### 7.7 Pages
 
-1. **A "similar readers also liked" feature is a disclosure.** If the instance
-   operator enables aggregation, the interface must say so in plain words.
-2. **Do not compute recommendations in a request.** They are a job, cached, and
-   a reader sees the last run with its timestamp.
-3. **A blind date that reveals the author in the markup is not blind.** Check
-   the network tab, not the screen.
+- `Collections.svelte`, `CollectionPage.svelte` — items, policy control,
+  moderation queue for `moderated` collections.
+- `Challenges.svelte`, `ChallengePage.svelte` — rules rendered from the
+  versioned document, entry window state machine visible to the reader
+  (opens in / open / closed), entry list.
+- `Requests.svelte` (exchange board), `Wishlist.svelte`,
+  `EventPage.svelte` (timeline, rules, participation).
+- Reader-side affordances: "add to collection" on WorkPage; "fulfils" on a
+  wishlist item linking to the work.
+
+### 7.8 Hand journey
+
+1. Create a moderated collection; a second account proposes an item; owner
+   approves → item appears; a third account sees nothing pending.
+2. Challenge with a word-count constraint: enter a compliant work (pass),
+   enter a non-compliant work (refused with the failing constraint named),
+   edit the work to break the constraint → re-check flags it at close.
+3. Request with anonymous window: claimant writes and fulfils; requester's
+   name hidden until reveal; after reveal both see identities.
+4. Wishlist: add an item by taxonomy node; another reader claims it; fulfil
+   with a new work; the wishlist owner receives the credit-relevant event
+   (M15 consumes it later; M13 only emits it).
+5. Event: join, see the timeline, participants list honours privacy settings.
+
+### 7.9 Acceptance tests
+
+- private collection: existence not confirmable by non-members (same 404 as
+  nonexistent); membership grants read; leaving forfeits read
+- moderated collection: proposer cannot self-approve; approval is the owner's
+- challenge windows: entry refused outside the window with a timestamped
+  reason; constraints evaluated at entry; re-check at close uses the revision
+  current at close
+- exchange: a request cannot hold two active claims; the same work cannot
+  fulfil two claims from one claimant (anti-gaming, spec §18.3)
+- wishlist: private wishlist items never appear in public queries
+- event participation respects the reader's privacy settings on public lists
+
+### 7.10 Pitfalls
+
+- Constraint checks read the **taxonomy** snapshot current at entry; a later
+  tag rename must not retroactively fail an entry (record the node ids used).
+- Anonymous windows are enforced in the query layer, not the UI: the requester
+  identity is absent from the response, not merely hidden.
+- Anti-gaming rules (one work, one claim) are database constraints or
+  transactions, not UI warnings.
+- The "fulfils" link is a claim record, not free text: fulfilment without a
+  claim is refused.
 
 ---
 
-### Milestone 11 — Comments, forums, groups and messaging
+## 8. Milestone 14 (repo) — Trust, reports, quorum, appeals, sanctions
 
-Spec §12, §19. Tag `v0.12-community`.
+**Read first:** spec §19 in full, plus §0.2 (priorities 5–6) and §0.3 (no
+purchased trust; credits can never touch this milestone's tables — M15 will
+add the negative test).
 
-#### The journey
+### 8.1 Why this is next
 
-A reader leaves a comment on a chapter; because the author has not opted into
-auto-delivery, it is held for a moderator and the reader is told so in those
-words. Elsewhere a group holds a discussion thread, and two readers exchange a
-private message that respects a block.
+M12's report affordances and M13's anti-gaming needs both point here; M15's
+credits must never purchase trust, so the trust model must exist and be
+tested before the economy mints anything. This milestone also lands the
+`M6-10` preservation batches (debt register) behind a documented permission
+basis.
 
-#### Migration 0012
+### 8.2 Ledger rows
 
-```text
-comments          id, subject_type, subject_id, author_pseud_id, body,
-                  classification TEXT ('positive'|'ambiguous'|'negative'),
-                  state TEXT ('delivered'|'held'|'hidden'|'approved'),
-                  parent_id (nullable), created_at, updated_at, version,
-                  deleted_at
-comment_revisions id, comment_id, body, edited_at
-classifications   id, comment_id, decided_by, decision, rationale, decided_at
-forums            id, slug, name, description, visibility, created_at, version
-forum_threads     id, forum_id, title, author_pseud_id, pinned INTEGER,
-                  locked INTEGER, created_at, updated_at, version
-forum_posts       id, thread_id, author_pseud_id, body, parent_id (nullable),
-                  created_at, updated_at, version, deleted_at
-groups            id, slug, name, description, visibility, created_at, version
-group_members     id, group_id, pseud_id, role, joined_at, UNIQUE (group_id, pseud_id)
-messages          id, sender_pseud_id, recipient_pseud_id, body, read_at
-                  (nullable), created_at, deleted_at
-blocks            id, blocker_pseud_id, blocked_pseud_id, created_at, UNIQUE (…)
-mutes             id, muter_pseud_id, muted_pseud_id, created_at, UNIQUE (…)
-```
+- `M14-01` trust levels TL0–TL6 with documented progression and regress
+  criteria, derived from behaviour records, never purchases (spec §19.1)
+- `M14-02` reports: any user-visible content reportable; queue with quorum
+  review for account-level outcomes (spec §19.2)
+- `M14-03` quorum: multiple reviewers, independence rules, audit trail, no
+  self-review of own content (spec §19.3)
+- `M14-04` appeals: one active appeal per sanction; evidence-based; resolved
+  by reviewers who did not issue the sanction (spec §19.4)
+- `M14-05` sanctions: staged (rate-limit → shadow → suspend), always
+  time-bounded, with expiry and automatic regress (spec §19.5)
+- `M14-06` process feedback: closed-loop feedback on moderation outcomes to
+  refine written policy, not per-case overrides (spec §19.6)
 
-Retention: `comments`, `forum_posts` and `messages` soft-delete so a moderation
-record survives; a hidden comment is kept with its classification and its
-decision. `classifications` are permanent — they are the evidence for a sanction.
-`blocks` and `mutes` are one-way and permanent until removed by the person who
-set them: **a block is never removed by blocking back.**
-
-#### The classification pipeline (spec §12.4)
-
-```rust
-pub enum Classification { Positive, Ambiguous, Negative }
-
-/// The rule, in one pure function, so the same comment cannot be classified
-/// two ways in two code paths.
-pub fn classify(comment: &str, author_prefs: FeedbackPreferences) -> Classification;
-
-pub enum Delivery { AutoDeliver, HoldForReview, Hide }
-pub fn deliver(classification: Classification, prefs: FeedbackPreferences) -> Delivery;
-```
-
-The defaults are the spec's: positive is auto-delivered, ambiguous is held unless
-the author has enabled auto-delivery, negative is hidden from the author, held
-for a moderator, and **never surfaces publicly on the work page**. The reader is
-told "Comment held for moderator review." — the honest sentence, not "posted".
-
-Blocks are enforced in `can_access_content`'s neighbours, not in each handler: a
-blocked reader must not be able to comment, reply, quote, react, message, or
-appear in a list. Write a single `fn may_interact(actor, target, facts) -> Decision`
-in `policy.rs` and route every one of those through it. The moment there are two
-checks, one of them will be missing.
-
-#### Routes
+### 8.3 Migration `0015_governance.sql` (both dialects)
 
 ```text
-GET/POST/PATCH/DELETE  /works/:id/comments[/:commentId]
-POST                   /comments/:id/approve | /hide
-GET                    /forums  /forums/:slug/threads  /threads/:id
-POST                   /forums/:slug/threads  /threads/:id/posts
-GET/POST               /groups[/:slug]  /groups/:slug/members
-GET/POST               /messages  /messages/:id/read
-GET/POST/DELETE        /blocks[/:pseudId]  /mutes[/:pseudId]
+trust_levels(
+  account TEXT PRIMARY KEY,
+  level INTEGER NOT NULL,           -- 0..6
+  computed_at TEXT NOT NULL,
+  basis TEXT NOT NULL               -- JSON: behaviour records behind it
+)
+
+reports(
+  id TEXT PRIMARY KEY,
+  subject_type TEXT NOT NULL,       -- comment|review|work|message|profile|user
+  subject_id TEXT NOT NULL,
+  reporter TEXT NOT NULL,
+  reason TEXT NOT NULL,             -- enum from config (+ free text field)
+  created_at TEXT NOT NULL,
+  state TEXT NOT NULL,              -- open|in_review|resolved|dismissed
+  resolved_at TEXT,
+  resolution TEXT NOT NULL
+)
+index (state, created_at)
+
+review_tasks(
+  id TEXT PRIMARY KEY,
+  reviewer TEXT NOT NULL,
+  report_id TEXT NOT NULL,
+  assigned_at TEXT NOT NULL,
+  decided_at TEXT,
+  outcome TEXT NOT NULL             -- uphold|dismiss|escalate|recuse
+)
+index (report_id)
+
+sanctions(
+  id TEXT PRIMARY KEY,
+  account TEXT NOT NULL,
+  kind TEXT NOT NULL,               -- rate_limit|shadow|suspend
+  reason_ref TEXT NOT NULL,         -- report or review task id
+  starts_at TEXT NOT NULL,
+  ends_at TEXT,                     -- NULL = until appeal or operator action
+  issued_by TEXT NOT NULL,
+  lifted_at TEXT,
+  lifted_by TEXT
+)
+index (account, starts_at)
+
+appeals(
+  id TEXT PRIMARY KEY,
+  sanction_id TEXT NOT NULL,
+  appellant TEXT NOT NULL,
+  statement TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  state TEXT NOT NULL,              -- open|decided
+  decided_at TEXT,
+  decision TEXT NOT NULL,           -- upheld|reduced|overturned
+  decided_by TEXT NOT NULL          -- a reviewer who did not issue it
+)
+
+audit_log(
+  id TEXT PRIMARY KEY,
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  subject_type TEXT NOT NULL,
+  subject_id TEXT NOT NULL,
+  document TEXT NOT NULL,
+  created_at TEXT NOT NULL
+)
+index (subject_type, subject_id, created_at)
+
+operator_role(
+  account TEXT PRIMARY KEY,
+  role TEXT NOT NULL,               -- 'operator' | 'preservation_officer'
+  granted_at TEXT NOT NULL
+)
+
+preservation_batches(
+  id TEXT PRIMARY KEY,
+  source TEXT NOT NULL,
+  query TEXT NOT NULL,
+  destination TEXT NOT NULL,        -- public archive only (M6's guard holds)
+  dry_run INTEGER NOT NULL,
+  approval_basis TEXT NOT NULL,     -- permission basis + quorum record
+  approved_by TEXT NOT NULL,
+  ran_at TEXT,
+  summary TEXT                      -- JSON: what a dry run found
+)
 ```
 
-#### Pages
+### 8.4 Domain modules
 
-The work page gains a comment box that says where the comment will go before it
-is sent. `/community` becomes a forum index; a thread is a paginated post list.
-`/messages` is a two-pane inbox. A blocked person does not appear as a gap or a
-"[blocked]" row — they are absent, and the interface does not explain the
-absence, because explaining it discloses the block.
+- `crates/domain/src/trust.rs`: TL0–TL6 constants, progression function
+  `(behaviour records) -> level` with **documented, configuration-specified**
+  criteria; regress on sanctions; never a purchase input. Trust never grants
+  permissions — only the ceilings spec §19 already fixes.
+- `crates/domain/src/quorum.rs`: assignment with independence (no self-review,
+  recusal for same-work conflicts, no sanction-issuer deciding its appeal),
+  quorum size from configuration, and the "no quorum available" degraded
+  state that parks the report for the operator instead of letting one
+  reviewer decide alone.
 
-#### Tests
+### 8.5 Repository `crates/db/src/governance.rs`
+
+- Trust: `trust_for(account)`, `recompute_trust(account)` (job, bounded), a
+  behaviour-records read that never joins against purchases.
+- Reports/review tasks: `open_report` (idempotent per reporter+subject while
+  open), `assign_task` (independence-checked), `decide_task`, quorum tally.
+- Sanctions: `issue_sanction` (staged kinds only; ends_at required except
+  operator-held suspends), `lift_sanction`, `expire_sanctions` job with
+  automatic trust regress.
+- Appeals: `open_appeal` (one active per sanction), `decide_appeal`
+  (independence enforced in the write).
+- `audit_log` append-only; **every** governance mutation writes one row in
+  the same transaction.
+- Preservation: `create_batch` (dry-run first), `record_dry_run`,
+  `approve_batch` (operator role + approval basis document required),
+  `run_batch` (reuses M6's import machinery; destination guard unchanged).
+
+### 8.6 Routes
 
 ```text
-a_negative_comment_is_never_shown_to_the_author
-an_ambiguous_comment_is_held_unless_the_author_opted_in
-a_blocked_reader_cannot_comment_reply_or_message
-blocking_is_one_way_and_blocking_back_does_not_unblock
-a_hidden_comment_keeps_its_classification_record
-a_message_respects_a_block_set_after_it_was_started
+POST /api/v1/reports                        (any user-visible content)
+GET  /api/v1/moderation/queue               (reviewer role)
+POST /api/v1/moderation/reviews/:taskId/decide|recuse
+GET  /api/v1/moderation/reports/:id         (reviewer role)
+POST /api/v1/sanctions  POST /api/v1/sanctions/:id/lift
+POST /api/v1/appeals  GET /api/v1/me/appeals
+GET  /api/v1/me/trust                       (own level + the written criteria)
+POST /api/v1/operator/preservation-batches  (operator role; dry-run first)
+POST /api/v1/operator/preservation-batches/:id/approve|run
 ```
 
-#### Pitfalls
+### 8.7 Pages
 
-1. **The classification pipeline is one function.** A second implementation in
-   a forum route is how the forum ends up nicer than the comment box.
-2. **Do not leak the existence of a block** through an error message, a
-   timestamp, or an ordering difference.
-3. **A moderator's decision is recorded, with a reason.** An unexplained
-   moderation action is indistinguishable from a bug.
-4. **Rate-limit before storing.** Spec §12.4: repeated negative comments trigger
-   rate limits. Check the limiter before the insert, not after.
+- `Report.svelte` (or an embedded dialog on every reportable surface —
+  WorkPage, Comments, Messages, Profiles).
+- `Moderation.svelte` — the reviewer queue with task detail, quorum state,
+  decision/recuse affordances; a supervisor view for the operator showing
+  audit log entries (read-only).
+- `Sanctions.svelte`/appeals pages under settings; `Trust.svelte` — the
+  reader's own level and the written criteria, always visible, no hidden
+  thresholds.
+- Operator: preservation batch console (dry run → review summary → approve →
+  run), surfacing M6's dry-run report format.
+
+### 8.8 Hand journey
+
+1. Reader reports a comment; two reviewers pick it up; quorum upholds →
+   sanction issues automatically at the staged floor; audit rows exist for
+   every step.
+2. The sanctioned author appeals; a reviewer who did not issue decides; the
+   sanction is reduced; trust regresses less than a suspension would.
+3. A reviewer attempts to review a report on their own work → the UI refuses
+   and the server refuses (`recuse` is the only path).
+4. Operator runs a preservation batch: dry run (summary shows what would be
+   imported), approve with basis document, run, items land in the public
+   archive; the audit trail names the basis.
+5. Sanction expiry: a time-bounded rate-limit ends; the account's effective
+   limits return without operator action.
+
+### 8.9 Acceptance tests
+
+- quorum: an account-level outcome requires N independent reviewers;
+  a single reviewer cannot decide alone (the write refuses)
+- independence: self-review refused; sanction issuer cannot decide its appeal
+- sanctions are always time-bounded except operator-held; expiry job restores
+  prior limits; trust regress applies and is recorded in `basis`
+- one active appeal per sanction; a decided appeal cannot reopen
+- every governance mutation produced exactly one audit row (count them)
+- preservation batch: run without dry-run summary or without approval basis
+  is refused; destination is the public archive only
+- reports are idempotent per reporter+subject while open
+
+### 8.10 Pitfalls
+
+- Quorum size 1 is not quorum. Configure minimums in config and refuse to
+  start with impossible values (`doctor`).
+- The audit log is append-only: no UPDATE path exists for it, in code or in
+  migrations. If a test can update a row, the schema is wrong.
+- Never display quorum reviewer identities to the reported account, and never
+  show the reporter's identity to the reported account. Anonymity of process
+  protects everyone; record it in `audit_log`, not in user-facing responses.
+- Trust recomputation must read behaviour records only; a join to credits
+  (M15) is the one invariant M15's negative tests will check — keep the
+  schemas separate so the join cannot even be written naturally.
 
 ---
 
-### Milestone 12 — Collections, challenges, requests and events
+## 9. Milestone 15 (repo) — Credits, fair queues, bounties, billing
 
-Spec §20. Tag `v0.13-collections`.
+**Read first:** spec §20 in full (the credit economy table and the quote →
+reserve → submit → complete → capture flow), plus §0.3 (credits never purchase
+trust, ranking, or moderation authority) and §19.5.
 
-#### The journey
+### 9.1 Why this is next
 
-A moderator opens a gift exchange: a sign-up window, a matching run, a deadline,
-and a reveal. A reader requests a translation of a work and follows the request
-until it is fulfilled.
+Priority jobs (imports, conversions, translation, AI) already exist behind M5's
+job queue and M7's exports; M17 and M18 will price translation and AI through
+this milestone's quote flow. The economy also powers event rewards (M13
+emitted the events) — but the founding invariant is negative: **the economy
+changes ceilings, never permissions** (spec §19.5).
 
-#### Migration 0013
+### 9.2 Ledger rows
 
-```text
-collections        id, slug, name, description, owner_pseud_id, visibility,
-                   closed INTEGER, created_at, updated_at, version
-collection_items   id, collection_id, work_id, state, added_by, added_at,
-                   UNIQUE (collection_id, work_id)
-challenges         id, collection_id, name, rules, opens_at, closes_at,
-                   signup_closes_at, created_at, version
-challenge_signups  id, challenge_id, pseud_id, offers_json, wants_json, state,
-                   created_at, UNIQUE (challenge_id, pseud_id)
-challenge_matches  id, challenge_id, giver_pseud_id, recipient_pseud_id,
-                   revealed_at (nullable), created_at
-requests           id, requested_by, kind ('translation'|'podfic'|'art'|'beta'),
-                   subject_work_id, description, state, fulfilled_by (nullable),
-                   created_at, updated_at, version
-events             id, slug, name, description, starts_at, ends_at, created_at
-event_participants id, event_id, pseud_id, created_at, UNIQUE (event_id, pseud_id)
-```
+- `M15-01` double-entry credit ledger with idempotency keys and balanced
+  transactions (spec §20.1)
+- `M15-02` job charging: quote → reserve → submit → complete → capture actual,
+  with release or documented partial charge on failure (spec §20.2)
+- `M15-03` the initial credit economy table wired to real actions with per-
+  action daily caps (spec §20.3)
+- `M15-04` daily action caps by tier (50/75/100) and author caps (100/work/day,
+  300/author/day, 5,000/author/month) (spec §20.3)
+- `M15-05` fair queues: priority is paid, order within a class stays
+  first-come, queue position is observable (spec §20.4)
+- `M15-06` bounties: escrow on a job's outcome, released on completion
+  (spec §20.5)
+- `M15-07` subscriptions and billing providers behind one interface, with
+  grants that change ceilings only (spec §20.6–20.7)
 
-Retention: a collection is permanent; its items cascade. A sign-up cascades with
-the account. A match is **never deleted** once revealed — the person who received
-a gift must not lose the record of it.
-
-#### Domain
-
-```rust
-/// Sign-ups, matched into pairs. Deterministic for a given seed so a re-run
-/// produces the same pairing and can be audited.
-pub fn match_participants(signups: &[Signup], seed: u64) -> Vec<Match>;
-
-/// Whether sign-ups are open.
-pub fn signup_is_open(challenge: &Challenge, now: OffsetDateTime) -> bool;
-pub fn offers_satisfy(offers: &Signup, wants: &Signup) -> bool;
-```
-
-A matching run is a **job** (M5), produces a report, and can be reviewed before
-the matches are announced. Never match inside a request.
-
-#### Routes and pages
+### 9.3 Migration `0016_economy.sql` (both dialects)
 
 ```text
-GET/POST/PATCH         /collections[/:slug]
-POST/DELETE            /collections/:slug/items/:workId
-GET/POST               /collections/:slug/challenges[/:id]
-POST                   /challenges/:id/signup | /withdraw
-POST                   /challenges/:id/run-matching      → 202 + job
-POST                   /challenges/:id/reveal
-GET/POST               /requests[/:id]  /requests/:id/fulfil
-GET/POST               /events[/:slug]
+credit_transactions(
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,             -- earn|spend|grant|purchase|hold|release|capture
+  idempotency_key TEXT NOT NULL,  -- unique; the client supplies it
+  reference TEXT NOT NULL,        -- job id, work id, event id...
+  created_at TEXT NOT NULL
+)
+unique (idempotency_key)
+
+credit_entries(
+  transaction_id TEXT NOT NULL,
+  account TEXT NOT NULL,
+  bucket TEXT NOT NULL,           -- earned|granted|purchased|held
+  amount_bp INTEGER NOT NULL,     -- signed; debits negative; balances check
+  created_at TEXT NOT NULL
+)
+index (account, created_at)
+
+credit_holds(
+  id TEXT PRIMARY KEY,
+  account TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  job_id TEXT NOT NULL,
+  expires_at TEXT NOT NULL,       -- reserve TTL; release on expiry
+  released_at TEXT,
+  captured_at TEXT
+)
+index (job_id)
+
+queue_slots(
+  job_id TEXT PRIMARY KEY,
+  priority_class TEXT NOT NULL,   -- free|priority|subscription
+  position INTEGER NOT NULL,      -- monotonic within class
+  enqueued_at TEXT NOT NULL
+)
+
+bounties(
+  id TEXT PRIMARY KEY,
+  job_kind TEXT NOT NULL,
+  terms TEXT NOT NULL,            -- versioned JSON
+  escrow_transaction TEXT NOT NULL,
+  state TEXT NOT NULL,            -- open|claimed|paid|expired
+  claimant TEXT,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+)
+
+subscriptions(
+  account TEXT NOT NULL,
+  tier TEXT NOT NULL,             -- reader|author|curator
+  state TEXT NOT NULL,            -- active|past_due|canceled
+  period_end TEXT NOT NULL,
+  provider TEXT,                  -- billing provider id, nullable in dev
+  external_ref TEXT
+)
+primary key (account, tier)
+
+usage_counters(
+  account TEXT NOT NULL,
+  action TEXT NOT NULL,           -- the capped action key
+  day TEXT NOT NULL,              -- UTC date
+  count INTEGER NOT NULL DEFAULT 0
+)
+primary key (account, action, day)
 ```
 
-Pages: `/collections/:slug`, a challenge page with the rules, a sign-up form, and
-a "your match" page that stays hidden until the reveal.
+The economy values in spec §20.3's table are **configuration** (`economy.*`
+in `lorehaven.toml.example`) with the spec values as documented defaults —
+the operator tunes, the code reads config, nothing is hardcoded.
 
-#### Tests
+### 9.4 Domain modules
+
+- `crates/domain/src/ledger.rs`: transaction/entry invariants — a transaction
+  is balanced across buckets (sum of entries = 0, holds excluded), an
+  idempotency key replays the **same** transaction (replay with a different
+  payload is an error, not a second write), bucket precedence for spending
+  (held → earned → granted → purchased, expiring first where applicable).
+- `crates/domain/src/charging.rs`: the quote flow state machine
+  (`quoted → reserved → submitted → completed|failed`) with the capture rule
+  (actual charge may be less; more requires a new quote) and the failure rule
+  (release the hold, or apply the documented partial charge).
+- `crates/domain/src/fairqueue.rs`: position assignment per class; a paid job
+  never jumps ahead of an enqueued paid job in the same class; position is
+  observable to the job's owner. The queue is fair *within* classes; classes
+  differ only in relative order, which the config publishes.
+- `crates/domain/src/caps.rs`: the daily/monthly cap evaluation over
+  `usage_counters`, including the "credits show the cap and the effective
+  value" semantics — the interface must let a preference (or cap) never look
+  like it took effect when it did not.
+
+### 9.5 Repository `crates/db/src/economy.rs`
+
+- Ledger: `post_transaction(entries, idempotency_key) -> TxnId` — one
+  transaction, both dialects; replay-safe via the unique key; balanced-entry
+  check in the same transaction.
+- Holds: `reserve(account, job, quote)`, `capture(hold, actual)`, `release(hold)`,
+  `expire_holds` job (TTL).
+- Caps: `bump_counter(account, action) -> (count, cap)` — atomic increment
+  with the cap check inside the statement pair; `usage_for(account, day)`.
+- Queue: `enqueue_classed(job, class)`, `next_in_class(class, worker)`,
+  `position_of(job_id)` — position assignment in the same transaction as
+  enqueue.
+- Subscriptions: `active_tiers(account)`, `grant_periodic` (job), provider
+  callbacks recorded through the idempotency key.
+- Every economy write goes through the ledger module — no direct table writes
+  from routes or workers.
+
+### 9.6 Routes
 
 ```text
-matching_is_deterministic_for_a_seed
-a_signup_before_the_window_is_closed_is_refused
-a_match_is_not_visible_before_the_reveal
-a_request_can_be_fulfilled_once
-withdrawing_a_signup_removes_it_from_matching
+GET  /api/v1/me/credits               (balances by bucket + recent ledger)
+GET  /api/v1/me/credits/quote?kind=...&params=...   (job quote)
+POST /api/v1/me/credits/reserve       (hold for a job)
+GET  /api/v1/jobs/:id/queue-position  (observable position)
+GET  /api/v1/me/usage                 (cap + effective count per action)
+GET|POST /api/v1/bounties  POST /api/v1/bounties/:id/claim|pay
+GET|POST /api/v1/me/subscription      (status; provider checkout handled by
+                                       the provider adapter, not this route)
 ```
 
-#### Pitfalls
+Job submission paths (imports, exports, translation, AI) call
+`charging::quote_flow` server-side; the quote is an API response the client
+shows *before* submit, per §20.2's consent rule.
 
-1. **Never reveal matches early**, including in an API response the page does
-   not display.
-2. **A request is not a work.** Do not create a draft when someone asks; the
-   fulfil action links the eventual work.
-3. **The exchange is a deadline-sensitive feature.** Every date is stored in UTC
-   and rendered in the reader's zone.
+### 9.7 Pages
+
+- `Credits.svelte` — balances by bucket, recent transactions, usage vs caps
+  (the cap and the effective value, always both).
+- Quote-and-reserve flow on the existing Jobs/Import/Exports pages: show the
+  quote, get consent, submit, show queue position, show capture receipt.
+- `Bounties.svelte` — open bounties, claim, pay on completion.
+- Subscription page: tiers, state, period end; the provider checkout lives in
+  the provider's hosted flow — the app only records the outcome.
+
+### 9.8 Hand journey
+
+1. Earn: daily login grant; read a chapter (capped); react (capped) — the
+   ledger shows balanced transactions, replaying the same idempotency key does
+   not double-credit.
+2. Spend: request a priority import quote → consent → reserve → job runs →
+   capture actual ≤ quote; receipt matches the ledger.
+3. Failure: kill the worker mid-job → hold released (or documented partial
+   charge), never a silent loss.
+4. Fair queue: enqueue 3 free jobs and 1 priority job; the priority job runs
+   first, the free jobs keep their arrival order; positions observable.
+5. Caps: exhaust a daily cap; the action refuses with cap and effective count
+   shown, and the refusal is honest (no partial credit taken).
+6. Bounty: escrow, claim, complete job, pay; expiry returns escrow.
+
+### 9.9 Acceptance tests
+
+- ledger invariants: every transaction balances; idempotency replay returns
+  the same result; a replay with a different payload is refused
+- holds: capture ≤ reserve; release returns the full hold; expiry releases
+- caps: per-action daily caps enforced server-side; tier ceilings (50/75/100)
+  and author caps enforced; counters roll over at UTC midnight
+- fair queue: paid never jumps a same-class peer; free jobs preserve arrival
+  order; position observable and monotonic
+- bounty escrow released on expiry, paid exactly once on completion
+- subscription grants change ceilings only: no new permission appears with a
+  tier change (test the permission matrix before/after)
+- **negative invariant (the founding one):** no code path — purchase, bounty,
+  subscription or leaderboard — writes to `trust_levels`, `operator_role`,
+  taxonomy ranking weights, or `operator_affinities`. Write the test that
+  proves the join doesn't exist.
+
+### 9.10 Pitfalls
+
+- Money-like tables get money-like discipline: every mutation in one
+  transaction, idempotency keys on every external callback, no "adjust later"
+  writes. A ledger you can't reconcile is a ledger you can't refund from.
+- **No raw balance column.** Balances are derived from entries (or cached
+  totals verified against them); a mutable balance column invites drift.
+- The purchase provider is behind one trait (`BillingProvider`) with a dev
+  implementation (manual grant) and a stub for the real one; a paid feature
+  must never call the provider directly.
+- Leaderboard rewards (spec §20.3) are periodic jobs writing earned credits —
+  they must not write ranking weights either. Same negative test covers it.
 
 ---
 
-### Milestone 13 — Trust, reports, quorum, appeals and process feedback
+## 10. Milestone 16 (repo) — Marketplace, extension isolation, webhooks, gallery
 
-Spec §21. Tag `v0.14-governance`. **This is the prerequisite for M17.**
+**Read first:** spec §21 in full, plus the M16 memory-tier budgets referenced
+from §19 (trust grants no exemptions; the isolation budget is per-extension).
 
-#### The journey
+### 10.1 Why this is next
 
-A reader reports a work. The report enters a queue. A trusted moderator proposes
-hiding it; a second moderator confirms and it is hidden; the author appeals, and
-the appeal is decided by two people who were not in the original decision.
+The marketplace monetises the craft surfaces M9–M15 built (paid works,
+commission listings) and opens the platform to third-party code — which is
+exactly why it comes after the trust and economy invariants exist to constrain
+it. Extensions are the largest new attack surface in the build; the isolation
+budget is the milestone's real deliverable, the storefront is a catalog over
+existing flows.
 
-#### The trust model — and this is the milestone's real content
+### 10.2 Ledger rows
 
-There is **no `is_admin` column**. There is no `role` column. Access is a
-function of a numeric `trust_level` on the account plus the facts of the
-decision.
+- `M16-01` marketplace listings: paid works, commissions with a quote and
+  state machine, billed only through the M15 ledger (spec §21.1–21.2)
+- `M16-02` reader community marketplace: listings, ask/response, moderation
+  via the M14 report path (spec §21.3)
+- `M16-03` extensions: versioned manifests, capability grants, explicit
+  reader consent, revocation (spec §21.4)
+- `M16-04` extension isolation: dedicated workers, cgroup/seccomp profile,
+  memory tiers (150/300/600 MiB), no ambient network, W3C-style origin
+  separation, kill-on-overrun (spec §21.4)
+- `M16-05` webhooks: HMAC-signed, bounded payload, user-installed, replay
+  protection (spec §21.5)
+- `M16-06` gallery pages: embedded rich content via the sanitiser's gallery
+  extension only, reader-blocking honoured (spec §21.6)
 
-```rust
-pub struct TrustProfile { pub level: u8, pub standing: Standing, pub since: OffsetDateTime }
-pub enum Standing { Good, Probation, Suspended }
-
-/// Every privileged action goes through exactly this.
-pub fn may_exercise(actor: &TrustProfile, action: PrivilegedAction,
-                    facts: &ActionFacts) -> Decision;
-```
-
-Rules to implement, with a test each:
-
-* A higher `trust_level` may do everything a lower one may; capability is
-  monotone in level.
-* An actor may never decide a case in which they are the subject, the reporter,
-  or a contributor to the work. `conflict_of_interest(actor, case) -> bool`.
-* A quorum is met only by **distinct accounts**: two pseuds of one account count
-  once. Write `quorum_met(decisions, required) -> bool` and a test named
-  `two_pseuds_of_one_account_are_one_decision`.
-* A suspended account keeps its history and loses its powers.
-
-#### Migration 0014
+### 10.3 Migration `0017_marketplace.sql` (both dialects)
 
 ```text
-trust_levels      account_id PRIMARY KEY, level INTEGER, standing TEXT,
-                  granted_by (nullable), granted_at, reason, updated_at, version
-reports           id, reporter_pseud_id, subject_type, subject_id, reason,
-                  detail, state, created_at, resolved_at
-cases             id, report_id (nullable), kind, subject_type, subject_id,
-                  state, opened_at, closed_at, outcome
-decisions         id, case_id, actor_account_id, actor_pseud_id, action,
-                  rationale, created_at
-appeals           id, case_id, appellant_pseud_id, argument, state,
-                  created_at, decided_at
-appeal_decisions  id, appeal_id, actor_account_id, action, rationale, created_at
-process_feedback  id, account_id, subject_type, subject_id, body, created_at
+listings(
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,             -- paid_work | commission | ask
+  owner TEXT NOT NULL,
+  work_id TEXT,                   -- paid_work
+  terms TEXT NOT NULL,            -- versioned JSON: price points, turnaround
+  state TEXT NOT NULL,            -- draft|active|paused|closed
+  created_at TEXT NOT NULL
+)
+index (kind, state, created_at)
+
+commissions(
+  id TEXT PRIMARY KEY,
+  listing_id TEXT NOT NULL,
+  client TEXT NOT NULL,
+  state TEXT NOT NULL,            -- quoted|accepted|in_progress|delivered|
+                                  -- accepted_final|refunded|disputed
+  quote_transaction TEXT,         -- M15 ledger reference
+  delivery_work TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)
+
+extension_manifests(
+  id TEXT PRIMARY KEY,            -- slug
+  version TEXT NOT NULL,
+  document TEXT NOT NULL,         -- the manifest, versioned, signed hash
+  submitted_by TEXT NOT NULL,
+  state TEXT NOT NULL,            -- pending|approved|rejected|revoked
+  created_at TEXT NOT NULL
+)
+index (id, version)
+
+extension_grants(
+  account TEXT NOT NULL,
+  manifest_id TEXT NOT NULL,
+  version TEXT NOT NULL,
+  capabilities TEXT NOT NULL,     -- JSON: the granted capability list
+  granted_at TEXT NOT NULL,
+  revoked_at TEXT
+)
+primary key (account, manifest_id)
+
+webhook_endpoints(
+  id TEXT PRIMARY KEY,
+  owner TEXT NOT NULL,
+  url TEXT NOT NULL,
+  secret TEXT NOT NULL,           -- HMAC key; store like a password
+  events TEXT NOT NULL,           -- JSON list of subscribed event types
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL
+)
+
+webhook_deliveries(
+  id TEXT PRIMARY KEY,
+  endpoint_id TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  payload TEXT NOT NULL,          -- bounded; the bound is configuration
+  signature TEXT NOT NULL,
+  attempted_at TEXT NOT NULL,
+  status TEXT NOT NULL,           -- ok|retrying|failed
+  attempts INTEGER NOT NULL DEFAULT 0
+)
+index (endpoint_id, attempted_at)
+
+gallery_items(
+  id TEXT PRIMARY KEY,
+  work_id TEXT NOT NULL,
+  owner TEXT NOT NULL,
+  media_type TEXT NOT NULL,
+  storage_key TEXT NOT NULL,      -- M5 object storage; presigned only
+  alt_text TEXT NOT NULL,
+  sanitized_document TEXT NOT NULL,  -- the sanitiser's gallery output
+  created_at TEXT NOT NULL
+)
+index (work_id)
 ```
 
-Retention: every one of these is **permanent and never cascaded**, including for
-a deleted account. A moderation record that vanishes when someone leaves is a
-moderation record that can be erased by leaving. Set the actor columns NULL and
-keep the row; the pseud handle is stored denormalised on the decision so the
-record still reads correctly afterwards.
+### 10.4 Domain modules
 
-#### Routes and pages
+- `crates/domain/src/marketplace.rs`: listing/commission state machines with
+  the rule that **money moves only through the M15 ledger** — a commission
+  transition that implies payment names its `quote_transaction`; the refund
+  path references the original capture.
+- `crates/domain/src/extension.rs`: manifest schema (versioned), capability
+  vocabulary (`storage.read`, `work.read`, `webhook.send`, …), the grant
+  subset rule (a grant can only narrow a manifest's requested capabilities),
+  consent record, revocation. The manifest **cannot** request ambient network
+  access or arbitrary process control — the vocabulary has no such capability,
+  so the request cannot parse.
+- `crates/domain/src/webhook.rs`: event envelope (type, id, created_at,
+  payload), HMAC signing over the serialised envelope, the bounded-payload
+  rule (bound from configuration), and replay protection via `event_id` +
+  timestamp window.
+
+### 10.5 Repository `crates/db/src/marketplace.rs`
+
+- Listings/commissions CRUD + state transitions; each transition that implies
+  money movement requires and records the ledger reference (the write refuses
+  without one).
+- Extensions: manifest CRUD, grants with the subset rule checked in the
+  write, revocation (revocation must **disable** the extension's scheduled
+  jobs and webhooks in the same transaction).
+- Webhooks: endpoint CRUD, `record_delivery`, `pending_deliveries` (the
+  webhook worker's input), retry accounting.
+- Gallery: `add_gallery_item` (sanitised document required; the sanitiser's
+  gallery extension output is the only path), presigned URL issuance at read.
+
+### 10.6 Extension isolation (the real deliverable)
+
+- A dedicated worker binary (`crates/app/src/bin/extension_worker.rs`) spawned
+  per job with: its own cgroup (memory tier from configuration: 150 / 300 /
+  600 MiB), seccomp profile (no exec, no new namespaces, no raw sockets),
+  no ambient network namespace (network only via the host's capability
+  broker), its own tmpfs, wall-clock kill timer.
+- The capability broker is an in-process channel to the host with **no
+  ambient authority**: an extension must present a grant token per call; the
+  broker validates the grant subset before any host call.
+- Memory tier selection: manifest-declared tier, capped by configuration;
+  overrun → kill + event to the owner + trust-relevant record for M14 (the
+  kill is not a sanction; repeated overruns are).
+- Kill-on-overrun must leave no partial writes: the broker serialises host
+  mutations so a killed extension's transaction aborts.
+- OSS note (spec §0.5.2): Landlock restricts filesystem reach; seccomp
+  restricts syscalls; cgroups bound memory. On the dev machine without
+  Landlock, the tests still pass — the profile is **best-effort documented
+  and tested where the kernel allows**, never silently absent.
+
+### 10.7 Routes
 
 ```text
-POST    /reports                      any reader
-GET     /moderation/queue             trust_level ≥ 1
-POST    /moderation/cases/:id/decide  with a rationale
-POST    /moderation/cases/:id/appeal
-GET     /moderation/appeals           deciders who were not in the original
-POST    /moderation/appeals/:id/decide
-POST    /feedback                     process feedback, any reader
-GET/PATCH /admin/trust/:accountId     level changes, with a reason
+GET|POST /api/v1/listings  GET|PUT|DELETE /api/v1/listings/:id
+POST /api/v1/listings/:id/commissions  POST /api/v1/commissions/:id/accept|deliver|accept-final|refund
+GET  /api/v1/extensions  GET /api/v1/extensions/:slug
+POST /api/v1/extensions/:slug/grant  POST /api/v1/extensions/:slug/revoke
+GET  /api/v1/me/extension-grants
+GET|POST|DELETE /api/v1/me/webhooks  (bounded payload; secret shown once)
+GET  /api/v1/works/:id/gallery  POST /api/v1/works/:id/gallery
+GET  /api/v1/gallery-items/:id/media   (presigned, short TTL)
 ```
 
-Pages: a report dialog that says what happens next, `/moderation` with the queue
-and a decision form that shows the case's full history, and an appeal page.
+### 10.8 Pages
 
-#### Tests
+- `Marketplace.svelte` (listings), `ListingPage.svelte` (quote → accept
+  state machine visible), commission thread view with receipt links into
+  `Credits.svelte`.
+- `Extensions.svelte` (gallery of extensions, manifest view, consent screen
+  naming each capability in plain language), `MyExtensions.svelte` (grants,
+  revoke).
+- `Webhooks.svelte` (endpoints, delivery log, redelivery affordance).
+- `Gallery.svelte` sections on WorkPage: sanitiser-rendered rich items,
+  reader-side block-aware (a blocked owner's gallery items do not render).
 
-```text
-a_trust_level_is_monotone_in_capability
-an_actor_cannot_decide_their_own_case
-two_pseuds_of_one_account_are_one_decision
-a_second_moderator_is_required_for_a_repeat_offender
-an_appeal_cannot_be_decided_by_the_original_decider
-a_decision_without_a_rationale_is_refused
-a_suspended_account_keeps_its_record_and_loses_its_powers
-```
+### 10.9 Hand journey
 
-#### Pitfalls
+1. Author lists a commission with terms; reader requests quote → accept →
+   deliver → accept-final; the ledger shows exactly two balanced transactions
+   (charge and payout); the receipt links resolve.
+2. Refund path: dispute → refund; the refund transaction references the
+   original capture; balances reconcile.
+3. Install an extension: consent screen lists capabilities; install; run a
+   job; revoke — scheduled jobs and webhooks stop in the same transaction.
+4. Overrun: an extension exceeding its memory tier is killed; the owner sees
+   the event; nothing partial is stored.
+5. Webhook: install an endpoint, trigger an event, verify the HMAC signature
+   with the stored secret, replay the same delivery → refused by `event_id`.
+6. Gallery: embed an image with alt text; a reader who blocked the owner
+   sees the gallery items suppressed.
 
-1. **Do not put a trust check inline in a handler.** Every privileged action
-   goes through `may_exercise`, or the seventh one will forget.
-2. **A quorum counted by pseud is a quorum of one person with two faces.** This
-   is the single most likely way this milestone ships broken.
-3. **An appeal heard by the original decider is not an appeal.**
-4. **Never delete a moderation record.** Not on account deletion, not on case
-   closure.
+### 10.10 Acceptance tests
+
+- commission money movements are ledger transactions (no transition stores a
+  price without a ledger reference; refund references the capture)
+- extension grant subset rule: a grant cannot exceed the manifest request
+- revocation stops scheduled jobs and webhooks atomically
+- extension worker: memory overrun kills the process, emits the owner event,
+  aborts partial writes; seccomp/cgroup profile applied where the kernel
+  allows, and the deviation is **documented** in `docs/verification.md`
+- webhooks: signature verifies; payload bound enforced; replay refused;
+  failed delivery retries with backoff and then parks as `failed`
+- gallery renders only sanitiser output; blocked owner's items suppressed
+- marketplace surfaces are reportable and the report flows into M14's queue
+
+### 10.11 Pitfalls
+
+- The extension runtime is the risk: prototype the worker **first**, with a
+  "hello" extension under each memory tier, before building any storefront
+  UI. If the isolation story cannot be demonstrated, stop and escalate rather
+  than shipping a weaker sandbox quietly.
+- Never sign webhooks over a payload the bound would reject — truncate at the
+  boundary and document it, don't silently drop events.
+- Grant tokens are per-call and short-lived; a long-lived token in an
+  extension's hands is an ambient authority by another name.
+- Commission "delivery" is a work reference (M3), not an upload into the
+  commission row; the delivery flow publishes a draft like any other work.
 
 ---
 
-### Milestone 14 — Credits, fair queues, bounties and billing
+## 11. Milestone 17 (repo) — Translation pipeline
 
-Spec §22. Tag `v0.15-credits`.
+**Read first:** spec §22 in full, plus §12's classifier (translation reviews
+pass through it) and §20's quote flow (priced via M15).
 
-#### The journey
+### 11.1 Why this is next
 
-A reader earns credits for contributions, spends them to jump a queue, and sees
-every movement in a ledger they can read. A writer posts a bounty for a
-translation and the credits move when it is fulfilled.
+Translation is a **job pipeline** over content that already exists: chapters
+(M3), jobs (M5), the positivity gate (M9), the taxonomy for language facets
+(M10), credits (M15) and the public API surface (M18 consumes it). It is
+stacked here, before the API milestone, so M18 can expose translation state
+without re-opening content routes.
 
-#### The rule that shapes the milestone
+### 11.2 Ledger rows
 
-**Credits are a ledger, not a balance.** There is a `credit_entries` table and
-the balance is its sum. A single `balance` column that gets `+=` is a bug waiting
-for the first crash between the debit and the credit.
+- `M17-01` translation pipeline: language detection, translation jobs, memory
+  and glossary, review gates, publication as sibling works (spec §22.1–22.3)
+- `M17-02` translation memory: paragraph-level reuse across works; the author
+  controls inclusion of their own memory (spec §22.2)
+- `M17-03` review gates: each translation passes reviewer gates with the
+  positivity classifier applied to review text (spec §22.3)
+- `M17-04` provenance: machine vs human, model/version recorded, shown to
+  readers per §21's disclosure rules (spec §22.4)
+- `M17-05` priced via the M15 quote flow with consent before submit
+  (spec §22.5)
 
-#### Migration 0015
-
-```text
-credit_accounts   account_id PRIMARY KEY, held INTEGER, created_at, updated_at
-credit_entries    id, account_id, delta INTEGER, reason, ref_type, ref_id,
-                  created_at, idempotency_key (nullable)
-                  UNIQUE (idempotency_key) WHERE idempotency_key IS NOT NULL
-                  -- append-only. No UPDATE, no DELETE, ever.
-queue_tickets     id, account_id, subject_type, subject_id, kind, priority
-                  INTEGER, credits_spent INTEGER, created_at, used_at
-bounties          id, posted_by, subject_type, subject_id, amount, state,
-                  claimed_by (nullable), created_at, expires_at, released_at
-billing_periods   id, account_id, period_start, period_end, state, created_at
-invoices          id, account_id, period_id, amount_minor INTEGER, currency,
-                  state, provider_ref, created_at, paid_at
-```
-
-Retention: `credit_entries` are **append-only and permanent**; a correction is a
-new opposing entry with a reason, never an edit. `invoices` are permanent for the
-retention period the operator's jurisdiction requires and then archived, not
-deleted.
-
-Moving credits is one transaction: insert the debit, insert the credit, check the
-balance is not negative, commit. All three or none.
-
-#### Domain
-
-```rust
-pub struct Ledger { /* the entries, in order */ }
-impl Ledger { pub fn balance(&self) -> i64; pub fn is_consistent(&self) -> bool }
-
-/// A transfer is refused if it would take the sender below zero.
-pub fn plan_transfer(from: &Ledger, to: &Ledger, amount: i64) -> Result<Transfer, CreditError>;
-
-/// What a queue position costs, from the instance's published schedule.
-pub fn queue_price(kind: QueueKind, schedule: &CreditSchedule) -> i64;
-```
-
-#### Routes and pages
+### 11.3 Migration `0018_translation.sql` (both dialects)
 
 ```text
-GET     /credits                       the balance, and the ledger, envelope
-GET     /credits/ledger?cursor=…
-POST    /credits/transfer              Write, idempotency key required
-POST    /queue/tickets                 buy a priority ticket
-GET/POST /bounties[/:id]  /bounties/:id/claim  /bounties/:id/release
-GET     /billing/periods  /billing/invoices
+translation_jobs(
+  id TEXT PRIMARY KEY,
+  source_work TEXT NOT NULL,
+  source_lang TEXT NOT NULL,       -- BCP-47
+  target_lang TEXT NOT NULL,
+  provider TEXT NOT NULL,          -- 'human' | 'machine:<provider>:<version>'
+  quote_transaction TEXT,          -- M15 ledger (machine jobs)
+  state TEXT NOT NULL,             -- quoted|reserved|in_progress|in_review|
+                                   -- approved|published|failed|cancelled
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)
+index (source_work, target_lang)
+
+translation_units(
+  id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL,
+  chapter_id TEXT NOT NULL,
+  paragraph_index INTEGER NOT NULL,
+  source_text TEXT NOT NULL,
+  target_text TEXT,
+  state TEXT NOT NULL,             -- pending|translated|reviewed|approved
+  memory_hit TEXT                  -- the memory entry id reused, if any
+)
+index (job_id, chapter_id, paragraph_index)
+
+translation_memory(
+  id TEXT PRIMARY KEY,
+  owner TEXT NOT NULL,             -- the author whose memory this is
+  source_lang TEXT NOT NULL,
+  target_lang TEXT NOT NULL,
+  source_hash TEXT NOT NULL,       -- normalised paragraph hash
+  source_text TEXT NOT NULL,
+  target_text TEXT NOT NULL,
+  quality_bp INTEGER NOT NULL,     -- reviewer-assessed, 0..10000
+  created_at TEXT NOT NULL
+)
+index (owner, source_lang, target_lang, source_hash)
+
+translation_glossaries(
+  id TEXT PRIMARY KEY,
+  owner TEXT NOT NULL,             -- work owner or group
+  work_id TEXT,                    -- scoped to a work when present
+  source_lang TEXT NOT NULL,
+  target_lang TEXT NOT NULL,
+  term TEXT NOT NULL,
+  translation TEXT NOT NULL,
+  case_sensitive INTEGER NOT NULL DEFAULT 0
+)
+index (owner, source_lang, target_lang)
+
+translation_reviews(
+  id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL,
+  reviewer TEXT NOT NULL,
+  gate TEXT NOT NULL,              -- 'linguistic' | 'cultural' | 'final'
+  state TEXT NOT NULL,             -- pending|approved|changes_requested
+  notes TEXT,
+  created_at TEXT NOT NULL,
+  decided_at TEXT
+)
+
+translation_publications(
+  id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL,
+  work_id TEXT NOT NULL,           -- the sibling work created by M3 flows
+  published_at TEXT NOT NULL
+)
 ```
 
-Page: `/credits` shows the balance large, the ledger below it, and — this is the
-point — a plain sentence for every entry saying what it was for. A ledger of
-numbers is not a ledger.
+### 11.4 Domain modules
 
-#### Tests
+- `crates/domain/src/translation.rs`: job state machine; unit segmentation
+  (paragraph boundaries from M3's chapter model, stable indices so a re-run
+  reuses unchanged paragraphs); memory lookup (exact hash, then fuzzy with the
+  M10 similarity floor); glossary application order (exact → case-insensitive
+  → longest match); quality thresholds per gate from configuration.
+- `crates/domain/src/translation_policy.rs`: who may request a translation of
+  a work (the author, or an authorised translator via M3's collaboration
+  model), whose memory may be consulted (only the author's, or opted-in
+  shared), and the disclosure rule — the published sibling work carries
+  provenance (machine/human, model, version) in its front matter, rendered by
+  WorkPage per §21's disclosure requirements.
+
+### 11.5 Repository `crates/db/src/translation.rs`
+
+- Jobs: `create_job` (quote attached for machine jobs), `transition_job`
+  (state machine in the write), `units_for_job`, `upsert_unit`,
+  `publish_job` (creates the sibling work through M3's normal publish path —
+  never a direct content-table write).
+- Memory: `lookup_memory(owner, langs, hash)`, `fuzzy_memory(...)`, `add_memory`
+  (quality from review), `memory_opt_in(owner, share)` — inclusion in others'
+  lookups is the owner's choice.
+- Glossaries: CRUD + `apply_glossary(text, direction)`.
+- Reviews: `open_review_gate`, `decide_review_gate` (notes pass the M9
+  classifier before storage, like any comment).
+
+### 11.6 Routes
 
 ```text
-a_credit_transfer_is_one_transaction
-replaying_a_transfer_idempotency_key_moves_credits_once
-a_balance_can_never_go_negative
-the_ledger_sum_is_the_balance
-a_bounty_release_pays_exactly_once
-a_correction_is_a_new_entry_not_an_edit
+POST /api/v1/works/:id/translations            (quote → consent → job)
+GET  /api/v1/translations/:jobId               (state, units progress)
+GET  /api/v1/translations/:jobId/reviews       (reviewer role)
+POST /api/v1/translations/:jobId/reviews/:gate/decide
+POST /api/v1/translations/:jobId/publish
+GET|PUT /api/v1/me/translation-memory          (inspect, opt-in/out, clear)
+GET|POST|DELETE /api/v1/me/translation-glossaries
+GET  /api/v1/works/:id/translations            (public: published siblings)
 ```
 
-#### Pitfalls
+### 11.7 Pages
 
-1. **Never mutate a ledger row.** The audit value of the table is the whole
-   reason it exists.
-2. **Check the balance inside the transaction**, not before it.
-3. **Billing is the one area where a bug is a legal problem.** Say plainly in
-   the interface what is charged, when, and how to cancel; a subscription that
-   cannot be cancelled is not shippable.
+- `Translate.svelte` (author/translator): request a translation with quote
+  consent, watch unit progress, per-gate review queue with diff view
+  (source/target paragraph pairs), publish with provenance preview.
+- WorkPage: published translations listed as siblings with the provenance
+  badge (machine/human + model/version per §21 disclosure).
+- `TranslationMemory.svelte` (settings): opt-in/out, inspect entries, clear.
+
+### 11.8 Hand journey
+
+1. Author requests a machine translation of a 3-chapter work → quote shown →
+   consent → job runs; unchanged paragraphs on re-run reuse memory (verify
+   `memory_hit`).
+2. Glossary: add a term; re-run; the term's translation appears verbatim.
+3. Review gates: linguistic reviewer requests changes; notes go through the
+   classifier; author updates; final gate approves; publish creates a sibling
+   work with the provenance badge.
+4. Memory opt-out: with sharing off, a second author's job does not hit the
+   first author's memory.
+5. Failure: machine job fails mid-way → hold released, units retain
+   `translated` state so a retry is incremental.
+
+### 11.9 Acceptance tests
+
+- quote/consent precedes any machine job (no job without a quote transaction)
+- re-run reuses unchanged paragraphs (stable indices; `memory_hit` recorded)
+- glossary precedence: exact > case-insensitive > longest
+- memory sharing is opt-in: default is private; opted-out memory never appears
+  in another account's lookups
+- review notes pass the positivity classifier before storage
+- published sibling works carry provenance in front matter; WorkPage renders
+  the badge; the API exposes it per §21
+- a failed machine job releases the hold and preserves completed units
+
+### 11.10 Pitfalls
+
+- **Never** write translated chapters directly into content tables — always
+  through M3's publish path so revisions, versioning and positivity apply
+  unchanged.
+- Paragraph indices are contract: re-segmentation on re-run must not renumber
+  existing units (append-only units; deletions tombstone).
+- Provenance is data, not decoration: if the model/version is not in the
+  front matter, the disclosure rule is violated even if the UI shows a badge.
+- Machine providers are behind a trait (`TranslationProvider`) with a dev
+  implementation (identity/echo) — the pipeline is testable without network.
 
 ---
 
-### Milestone 15 — Marketplace, extension isolation and gallery mechanics
+## 12. Milestone 18 (repo) — Public API, bots, feeds, push, federation, AI providers
 
-Spec §19 extension marketplace, §4.4. Tag `v0.16-extensions`.
+**Read first:** spec §23 in full, plus §0.3 (the public API is not a bypass:
+every rule the web app applies applies here) and the M7-03 debt row (device
+delivery lands here when a mail transport exists).
 
-#### The journey
+### 12.1 Why this is next
 
-An operator installs an extension from a package, grants it two permissions, sees
-what it did, and revokes it. An extension that asks for a permission nobody
-granted fails and says so.
+The public API is a **projection** of everything already built: the same
+content rules, the same visibility, the same positivity gate, the same caps.
+It comes after the feature surface exists so that M19's admin and abuse
+tooling can see the whole external surface it must defend. AI provider access
+is last here because it is the most sensitive external dependency.
 
-#### The architecture, decided before any code
+### 12.2 Ledger rows
 
-An extension runs **out of process**, in a sandbox, speaking a narrow protocol to
-the core. It does not get a database handle, a session, or the user's cookie. It
-gets a capability token scoped to the permissions the installer granted.
+- `M18-01` public REST API: read endpoints with visibility and rate limits,
+  write endpoints for account holders with CSRF-free token auth (spec §23.1)
+- `M18-02` bots: registered API agents with scoped tokens, audited, owner-
+  accountable, revocable (spec §23.2)
+- `M18-03` feeds: RSS/Atom for works, series, tags; podcast for audio
+  chapters (spec §23.3)
+- `M18-04` web push: opt-in, per-device, quiet hours from the reader's
+  settings (spec §23.4)
+- `M18-05` federation: instance blocklist/allowlist, trust propagation as
+  bounded data, content moderation on inbound content (spec §23.5)
+- `M18-06` AI provider access: consented, scoped, per-work consent records,
+  rate-limited, paid through M15 where priced (spec §23.6)
+- `M18-07` device delivery (Kindle/email): refused-by-default until a mail
+  transport is configured; when enabled, priced through the M15 quote flow
+  (closes `M7-03`; spec §13.4)
 
-```rust
-pub struct ExtensionManifest { pub id: String, pub version: String,
-    pub permissions: Vec<Permission>, pub entrypoint: String,
-    pub max_memory_bytes: u64, pub max_runtime_ms: u64 }
-
-pub enum Permission { ReadWork(Scope), WriteWork(Scope), Network(Vec<String>),
-                      Storage(u64), Notify, Webhook(Vec<String>) }
-
-/// The decision, pure: is this call inside the grant?
-pub fn may_call(grant: &Grant, call: &ExtensionCall) -> Decision;
-```
-
-#### Migration 0016
-
-```text
-extension_packages   id, package_id, version, manifest_json, checksum,
-                     signature (nullable), published_by, created_at
-extension_installations  id, account_id (nullable = instance-wide), package_id,
-                     version, state, installed_by, installed_at
-extension_grants     id, installation_id, permission, scope_json, granted_at,
-                     revoked_at (nullable)
-extension_calls      id, installation_id, call, decision, decided_at,
-                     duration_ms, error (nullable)
-extension_revocations id, installation_id, reason, revoked_by, revoked_at
-extension_ratings    id, package_id, account_id, stars, review, created_at
-extension_purchases  id, package_id, account_id, credits_spent, created_at
-```
-
-Retention: `extension_calls` keep 30 days; they are the audit trail that makes
-"what did this thing do" answerable. `extension_grants` are permanent while the
-installation exists and are **not** silently re-granted on upgrade — an upgrade
-that wants a new permission asks again, and the interface shows what changed.
-
-#### Routes and pages
+### 12.3 Migration `0019_external.sql` (both dialects)
 
 ```text
-GET     /extensions                    the gallery
-GET     /extensions/:id                the detail page, with permissions
-POST    /extensions/:id/install        → 202 + job
-POST    /extensions/:id/revoke
-GET/PATCH /extensions/:id/grants
-GET     /extensions/:id/activity       what it called, and what was refused
+api_tokens(
+  id TEXT PRIMARY KEY,
+  account TEXT NOT NULL,
+  kind TEXT NOT NULL,             -- personal | bot
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL,       -- store the hash, show the token once
+  scopes TEXT NOT NULL,           -- JSON scope list, subset of the vocabulary
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  revoked_at TEXT
+)
+index (account)
+
+bot_registrations(
+  id TEXT PRIMARY KEY,
+  token_id TEXT NOT NULL,
+  owner TEXT NOT NULL,            -- the accountable human
+  contact TEXT NOT NULL,
+  user_agent TEXT NOT NULL,
+  state TEXT NOT NULL,            -- active|suspended|revoked
+  registered_at TEXT NOT NULL
+)
+
+feed_handles(
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,             -- work|series|tag|user
+  subject TEXT NOT NULL,
+  handle TEXT NOT NULL UNIQUE,    -- the stable feed path segment
+  created_at TEXT NOT NULL
+)
+
+push_subscriptions(
+  id TEXT PRIMARY KEY,
+  account TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  keys TEXT NOT NULL,             -- p256dh + auth
+  device_name TEXT,
+  created_at TEXT NOT NULL,
+  revoked_at TEXT
+)
+index (account)
+
+federation_peers(
+  id TEXT PRIMARY KEY,
+  host TEXT NOT NULL,
+  direction TEXT NOT NULL,        -- allow | block
+  reason TEXT,
+  set_by TEXT NOT NULL,
+  set_at TEXT NOT NULL
+)
+unique (host)
+
+federation_inbound(
+  id TEXT PRIMARY KEY,
+  peer_host TEXT NOT NULL,
+  object_type TEXT NOT NULL,
+  object_id TEXT NOT NULL,
+  received_at TEXT NOT NULL,
+  state TEXT NOT NULL,            -- accepted|quarantined|rejected
+  note TEXT
+)
+index (peer_host, received_at)
+
+ai_consents(
+  id TEXT PRIMARY KEY,
+  work_id TEXT NOT NULL,
+  provider TEXT NOT NULL,         -- provider id from configuration
+  consent TEXT NOT NULL,          -- versioned JSON: scope, expiry, revocation
+  granted_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  revoked_at TEXT
+)
+unique (work_id, provider)
+
+ai_requests(
+  id TEXT PRIMARY KEY,
+  work_id TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  account TEXT,                   -- the requesting account, when known
+  purpose TEXT NOT NULL,
+  charged_transaction TEXT,       -- M15 ledger when priced
+  requested_at TEXT NOT NULL,
+  served_at TEXT
+)
+index (work_id, requested_at)
 ```
 
-Page: the install dialog lists every permission in plain words ("read the works
-you write", "make network requests to these three hosts") and there is no
-"allow all".
+### 12.4 Domain modules
 
-#### Tests
+- `crates/domain/src/api_scopes.rs`: the scope vocabulary (`content.read`,
+  `content.write`, `library.read`, `comments.write`, `translation.read`, …),
+  token validation, scope subset rule (a bot's token cannot exceed its
+  registration's requested scopes).
+- `crates/domain/src/feeds.rs`: feed document builders (RSS 2.0 and Atom)
+  from the same internal model, escaping via the sanitiser's escaping rules,
+  podcast enclosures for audio chapters, stable IDs (tag URIs with the
+  instance base URL from configuration).
+- `crates/domain/src/push.rs`: payload builder (no content beyond what the
+  reader opted into), quiet-hours evaluation from the reader's settings
+  (quiet hours suppress delivery, not storage), device revocation.
+- `crates/domain/src/federation.rs`: inbound pipeline stages (peer check →
+  payload bound → classification → quarantine on failure), outbound rate
+  limits per peer, trust propagation as **bounded data** (numbers with
+  defined meaning, never strings of policy).
+- `crates/domain/src/ai_gate.rs`: the consent check (`ai_consents` valid for
+  work + provider + scope + expiry), the rate-limit check, the charge
+  decision (paid providers route through `charging::quote_flow`), and the
+  refusal that names nothing beyond "not consented".
+
+### 12.5 Repository `crates/db/src/external.rs`
+
+- Tokens: `issue_token` (hash, scopes), `resolve_token` (hash → scopes,
+  updates `last_used_at`), `revoke_token`.
+- Bots: registration CRUD, suspend/revive, the owner-accountability join for
+  abuse lookups.
+- Feeds: `feed_handle_for(kind, subject)`, `upsert_feed_handle`.
+- Push: `register_subscription`, `subscriptions_for(account)` (the send job's
+  input), `revoke_subscription`.
+- Federation: `peer_policy(host)`, `record_inbound`, `quarantine`,
+  `reject_object`.
+- AI: `consent_for(work, provider)`, `record_request`, `serve_request`.
+- Device delivery: reuses M7's export targets; the route stays **refused by
+  default** with a distinct error until mail configuration exists (the same
+  refusal the M7 tests pin).
+
+### 12.6 Routes
 
 ```text
-an_extension_without_a_grant_is_refused
-revoking_a_grant_stops_the_extension_at_the_next_call
-an_upgrade_that_asks_for_more_permissions_is_held_for_review
-an_extension_cannot_reach_the_database
-a_timed_out_extension_is_killed_not_leaked
-the_activity_log_records_a_refusal_as_well_as_a_call
+-- public read API (token or anonymous; visibility + rate limits apply)
+GET /api/v1/public/works/:id
+GET /api/v1/public/search?q=...            (the M10 AST, read scopes)
+GET /api/v1/public/taxonomy?...
+-- token management (session; CSRF applies)
+GET|POST /api/v1/me/tokens  DELETE /api/v1/me/tokens/:id
+POST /api/v1/me/bots                       (registration + token together)
+-- feeds (public, no auth)
+GET /feeds/:handle.xml  GET /feeds/:handle.atom
+GET /feeds/:handle/podcast.xml             (audio chapters)
+-- push
+POST /api/v1/me/push/subscribe  POST /api/v1/me/push/:id/revoke
+-- federation (inbound under a dedicated mount, signed)
+POST /federation/inbox  GET /federation/actor/:slug
+-- AI provider access (token with `ai.read` + consent + rate limit)
+GET /api/v1/ai/works/:id?purpose=...       (serves only with valid consent)
+-- device delivery (refused by default; closes M7-03)
+POST /api/v1/exports/:id/deliver           (requires mail transport config)
 ```
 
-#### Pitfalls
+### 12.7 Pages
 
-1. **Never run extension code in the server process.** One panic takes the site
-   down; one escape reads the database.
-2. **A permission is checked on every call**, not at install time only.
-3. **Never log the arguments of a call that carries a secret.**
-4. **Do not auto-upgrade.** An extension that changes under the installer is a
-   supply-chain attack with a friendly name.
+- `ApiTokens.svelte`, `Bots.svelte` (settings): issue/revoke, scope picker
+  with plain-language descriptions, last-used column, bot contact field.
+- `Notifications.svelte`: the push opt-in flow (browser permission prompt
+  only after the reader clicks opt-in), device list, quiet hours.
+- WorkPage: subscribe affordances (RSS/podcast icons linking feed handles).
+- Operator: federation peer console (allow/block with reason; inbound
+  quarantine list with accept/reject).
+
+### 12.8 Hand journey
+
+1. Issue a personal token; read a public work anonymously and with the token
+   (rate limits differ); a private work 404s anonymously and with a token
+   lacking scope.
+2. Bot: register with scopes `content.read library.read`; the bot reads;
+   a write attempt with a read-scoped token is refused; owner revokes →
+   the bot's next request 401s.
+3. Feeds: subscribe to a work feed in a reader; publish a chapter; the feed
+   updates; the podcast feed lists the audio chapter enclosure.
+4. Push: opt in on one device; a followed work updates; delivery respects
+   quiet hours; revoke the device.
+5. Federation: block a peer → inbound quarantines; unblock → accepted; a
+   poisoned payload (oversized, malformed) → rejected with the reason
+   recorded.
+6. AI: grant a provider consent on one work; the provider reads it; a second
+   work without consent → refusal; revoke → next request refuses.
+7. Device delivery: without mail config the endpoint answers the documented
+   refusal; configure a dev transport → the export delivers and charges
+   through the quote flow.
+
+### 12.9 Acceptance tests
+
+- API visibility equals web visibility (same work matrix, same positivity
+  rules, same block rules) — the same fixture suite runs against both
+- token auth: hash-only storage; scope enforcement per endpoint; revocation
+  immediate; `last_used_at` updated
+- bot accountability: every bot action resolves to an owner account
+- feeds: valid XML (validate against the RSS/Atom schemas), stable IDs,
+  unchanged content → unchanged feed (conditional-GET friendly)
+- push: quiet hours suppress delivery but not storage; revoked device stops
+  receiving; payload contains nothing beyond the opt-in
+- federation: blocked peer quarantined; inbound content passes the same
+  classifier; trust propagation values bounded (reject out-of-range)
+- AI: no consent → refusal; expired consent → refusal; charged requests
+  reference the ledger; rate limits per provider
+- device delivery refused without mail config (the pinned M7-03 refusal)
+
+### 12.10 Pitfalls
+
+- The public API must not bypass a single rule the web app enforces. Where a
+  rule lives only in a route handler, lift it into the domain first — this is
+  the milestone's hidden cost, and it is worth it.
+- Rate limits are per-token and per-IP, from configuration; anonymous limits
+  are lower than authenticated ones and the **docs say so**.
+- Feed handles are stable: a feed URL that changes breaks subscribers — the
+  handle table exists so handles never encode internal ids.
+- AI consent is per work and per provider with expiry; a site-wide "AI
+  allowed" switch does not exist in the spec — do not invent one.
+- Federation trust propagation is numbers with defined meaning only; free
+  text "reputation" imports are refused at parse time.
 
 ---
 
-### Milestone 16 — Public API, bots, feeds, push, federation and optional AI
+## 13. Milestone 19 (repo) — Administration, statistics, abuse defence, privacy, operations
 
-Spec §23. Tag `v0.17-integrations`.
+**Read first:** spec §24 in full, plus the debt register (`M17-01` — admin
+beyond `doctor` — is this milestone) and §19 (the operator's role in
+governance).
 
-#### The journey
+### 13.1 Why this is next
 
-A reader subscribes to their favourite author's feed in an RSS reader. A bot
-posts a new chapter through an API token with one scope. A push notification
-arrives on a phone with generic lock-screen text.
+Every milestone so far left its operational surface implicit (jobs, config,
+logs). This milestone makes the **operator a first-class user**: statistics
+that answer real questions, privacy requests that complete legally-required
+flows, abuse defence that acts before a small self-hosted box drowns, and
+administrative tools that don't require hand-written SQL. It is last before
+hardening because it needs the whole surface to exist to defend it.
 
-#### Migration 0017
+### 13.2 Ledger rows
 
-```text
-api_tokens        id, account_id, pseud_id, name, token_hash, scopes_json,
-                  last_used_at, expires_at (nullable), created_at, revoked_at
-webhooks          id, account_id, url, secret_id, events_json, state, created_at
-webhook_deliveries id, webhook_id, event, attempt, response_status,
-                   error, delivered_at
-push_subscriptions id, account_id, endpoint, keys_json, created_at,
-                   last_success_at, failure_count
-feed_tokens       id, account_id, token_hash, scope, created_at, revoked_at
-federation_state  -- only if the operator opts in; see spec §23
-ai_settings       id, account_id (nullable = instance), feature, enabled,
-                  provider, model, updated_at
-```
+- `M19-01` admin console: role-gated (operator, preservation officer),
+  every action audited through M14's `audit_log` (spec §24.1)
+- `M19-02` statistics: reading, posting, engagement, discovery — derived,
+  privacy-preserving, honest about gaps (spec §24.2)
+- `M19-03` abuse defence: per-IP and per-account circuit breakers, signup
+  controls, challenge gates, emergency rate config without redeploy (spec
+  §24.3)
+- `M19-04` privacy: data export (the reader's own, complete), account deletion
+  with the documented cascade, removal of derivatives, the provider data map
+  (spec §24.4)
+- `M19-05` operations: backup/restore drills, migrations run and verified,
+  the `doctor` command grown into the ops surface, log hygiene (spec §24.5)
 
-Retention: `api_tokens` are stored **hashed** like session tokens; the plaintext
-is shown once at creation and never again. `webhook_deliveries` keep 30 days.
-`push_subscriptions` are deleted on a 410 from the push service, because a dead
-subscription is not data worth keeping.
-
-#### The rules
-
-* **An API token is scoped.** A token with `read:works` cannot post a comment.
-  `may_call(grant, call)` from M15 is the same function, reused.
-* **Push text is generic on the lock screen** (spec §23): "A new chapter is
-  available", never the title of a work whose reading is private.
-* **Federation is opt-in and off by default.** If it is on, the instance
-  publishes only what the author has made public, and the settings page lists
-  exactly what is published. A federated instance that leaks a draft is the
-  worst failure in this document.
-* **AI is optional per feature, off by default, and the interface says when it
-  is used.** An AI-suggested tag is marked as such and enters the M9 review queue
-  rather than being applied.
-
-#### Routes
+### 13.3 Migration `0020_admin.sql` (both dialects)
 
 ```text
-GET/POST/DELETE  /api-tokens[/:id]
-POST             /webhooks  GET /webhooks/:id/deliveries
-POST             /push/subscriptions  DELETE /push/subscriptions/:id
-GET              /feeds/works/:pseudHandle.rss | .atom | .json
-GET              /feeds/tag/:slug.rss
-GET/PUT          /settings/integrations
-POST             /admin/federation/enable   (operators only, with a warning)
+admin_actions(
+  id TEXT PRIMARY KEY,
+  actor TEXT NOT NULL,             -- operator account
+  action TEXT NOT NULL,            -- the admin verb
+  subject_type TEXT NOT NULL,
+  subject_id TEXT NOT NULL,
+  document TEXT NOT NULL,          -- parameters + result summary
+  created_at TEXT NOT NULL
+)
+index (actor, created_at)
+
+feature_flags(
+  key TEXT PRIMARY KEY,
+  state TEXT NOT NULL,             -- off | on | rollout
+  rollout_bp INTEGER NOT NULL DEFAULT 0,   -- for gradual rollout
+  note TEXT NOT NULL,
+  updated_by TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)
+
+announcements(
+  id TEXT PRIMARY KEY,
+  body TEXT NOT NULL,              -- sanitised document
+  level TEXT NOT NULL,             -- info | warning | maintenance
+  starts_at TEXT NOT NULL,
+  ends_at TEXT,
+  created_by TEXT NOT NULL
+)
+
+stat_snapshots(
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,              -- reading|posting|engagement|discovery
+  period TEXT NOT NULL,            -- the bucket (day/week)
+  document TEXT NOT NULL,          -- aggregated, k-anonymised numbers
+  computed_at TEXT NOT NULL
+)
+unique (kind, period)
+
+privacy_requests(
+  id TEXT PRIMARY KEY,
+  account TEXT NOT NULL,
+  kind TEXT NOT NULL,              -- export | delete | derivative_removal
+  state TEXT NOT NULL,             -- pending|processing|done|failed
+  requested_at TEXT NOT NULL,
+  completed_at TEXT,
+  result_ref TEXT                  -- storage key of the export archive
+)
+
+abuse_counters(
+  key TEXT NOT NULL,               -- 'ip:1.2.3.4' | 'account:x' | 'global:x'
+  window TEXT NOT NULL,            -- the bucket key
+  count INTEGER NOT NULL DEFAULT 0,
+  blocked_until TEXT
+)
+primary key (key, window)
+
+ip_policy(
+  ip TEXT PRIMARY KEY,
+  state TEXT NOT NULL,             -- allow | challenge | block
+  reason TEXT,
+  set_by TEXT NOT NULL,
+  set_at TEXT NOT NULL
+)
+
+signup_controls(
+  id TEXT PRIMARY KEY CHECK (id = 'singleton'),
+  mode TEXT NOT NULL,              -- open | invite | closed
+  challenge INTEGER NOT NULL DEFAULT 0,   -- require a challenge gate
+  updated_by TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)
 ```
 
-The public API lives under `/api/v1/public/…` and is documented in
-`docs/api.md` with a worked curl example per endpoint. An undocumented endpoint
-is an accident.
+### 13.4 Domain modules
 
-#### Tests
+- `crates/domain/src/stats.rs`: the aggregation definitions (what counts as a
+  read, how buckets roll up), k-anonymity floor for any per-entity stat
+  (numbers below the floor aggregate into "other"), and the honesty rule —
+  a statistic that could not be computed reports its gap, never a zero.
+- `crates/domain/src/abuse.rs`: circuit-breaker policy (windows, thresholds,
+  blocked_until transitions from configuration), the challenge decision, and
+  the emergency-ladder semantics (raising limits is a config change, not a
+  redeploy; the operator console writes config overrides with audit rows).
+- `crates/domain/src/privacy.rs`: the export manifest (every table that
+  carries the account's data, with the column list), the deletion cascade
+  order (what is anonymised, what is hard-deleted, what is retained for
+  legal/audit with the retention window), and the derivative-removal rule
+  (translation publications, gallery derivatives, AI served responses).
+
+### 13.5 Repository `crates/db/src/admin.rs`
+
+- `record_admin_action` (in-transaction with every admin mutation), admin
+  queries for listings/lookups the console needs, `feature_flags` CRUD,
+  announcements CRUD, `stat_snapshots` upsert (a recompute job per kind).
+- Privacy: `open_privacy_request`, `complete_privacy_request`; the export job
+  walks the manifest and writes the archive to M5 storage; the delete job
+  runs the documented cascade in **one transaction per table group**, with
+  the retention-window table list derived from `crates/domain/src/privacy.rs`.
+- Abuse: `bump_abuse_counter(key, window) -> (count, blocked_until)`,
+  `blocked(key)`, `ip_policy` CRUD, `signup_controls` read/write.
+- `doctor` grows subcommands: `doctor stats`, `doctor privacy-audit`,
+  `doctor backup-check`, `doctor abuse-config` — each prints what it
+  verified and exits non-zero on failure.
+
+### 13.6 Routes
 
 ```text
-a_token_without_the_scope_is_refused
-a_revoked_token_stops_working_immediately
-a_feed_contains_only_published_works
-a_lock_screen_message_does_not_name_the_work
-a_410_from_the_push_service_deletes_the_subscription
-federation_publishes_nothing_the_author_has_not_published
-an_ai_suggestion_is_marked_and_queued_not_applied
+GET  /api/v1/admin/stats?kind=...&period=...       (operator)
+GET|POST /api/v1/admin/feature-flags               (operator; audited)
+GET|POST /api/v1/admin/announcements               (operator; audited)
+GET  /api/v1/admin/abuse            (counters, blocked keys, ip policy)
+POST /api/v1/admin/abuse/ip-policy  POST /api/v1/admin/abuse/overrides
+POST /api/v1/admin/signup-controls
+GET|POST /api/v1/admin/privacy-requests  POST /api/v1/admin/privacy-requests/:id/run
+GET  /api/v1/me/privacy/export  POST /api/v1/me/privacy/delete
+GET  /api/v1/admin/audit-log?q=...                  (read-only)
 ```
 
-#### Pitfalls
+### 13.7 Pages
 
-1. **Show the token once.** A token you can read back is a token anyone with a
-   database dump can use.
-2. **A feed is a cache-busting surface.** It must respect `withdrawn_at` and the
-   work's visibility, and it must never carry a draft.
-3. **Webhooks are SSRF.** Resolve the URL, refuse private address ranges, and
-   time out.
+- `Admin/Stats.svelte` — snapshots by kind/period with honesty gaps shown;
+  no per-user drill-down below the k-anonymity floor.
+- `Admin/Console.svelte` — flags, announcements, signup controls; each
+  mutation shows the audit-log entry it produced.
+- `Admin/Abuse.svelte` — live counters, blocked keys with expiry, IP policy
+  editor, the emergency ladder (config overrides) with before/after diff.
+- `Admin/Privacy.svelte` — the request queue; run/complete with result
+  links; the data map (every table, every retention window) rendered from
+  `crates/domain/src/privacy.rs`'s manifest so docs and code can't diverge.
+- Reader-facing: `Privacy.svelte` (export download, delete with cascade
+  preview and confirmation typing), notifications for completion.
+
+### 13.8 Hand journey
+
+1. Operator flips a feature flag with a rollout percentage; a reader session
+   below the threshold sees the flag off; above, on; the audit row exists.
+2. Statistics: generate activity across accounts; snapshots compute; numbers
+   below the k floor aggregate into "other"; a gap reports as a gap.
+3. Abuse: hammer an endpoint from one IP → the breaker opens (`blocked_until`),
+   the response is the documented 429-with-retry-after; the operator raises
+   the threshold from the console (config override, no redeploy) and the
+   breaker honours it on the next window.
+4. Privacy export: request → job → archive in storage → download link (the
+   archive contents match the manifest, table by table).
+5. Delete: request with typed confirmation → cascade runs → the account's
+   works are anonymised (attribution removed), sessions revoked, audit rows
+   retained within their window; a second delete request 404s.
+6. Signup: switch to invite mode → registration requires an invite; the
+   challenge gate trips for flagged IPs.
+
+### 13.9 Acceptance tests
+
+- every admin mutation writes `admin_actions` **and** `audit_log` (count both)
+- feature flag rollout is stable for a given account (hash-based, not random
+  per request)
+- stats: k-anonymity floor holds; gaps report as gaps; snapshots are
+  idempotent per kind+period
+- circuit breaker opens on threshold, honours `blocked_until`, and the
+  config override applies without redeploy
+- privacy export archive contents match the manifest exactly (table names and
+  column lists compared)
+- delete cascade: attribution removed, derivatives removed or anonymised per
+  the manifest, audit retained for its window; a deleted account's requests
+  404 afterwards
+- signup controls: invite mode refuses open registration; challenge gate
+  trips for policy-flagged IPs
+- `doctor stats|privacy-audit|backup-check` exit non-zero on failure (test
+  the failure path by breaking a fixture)
+
+### 13.10 Pitfalls
+
+- The privacy export must include **everything** the manifest lists; a table
+  added later must update the manifest in the same commit (add a test that
+  fails when a new account-carrying table is missing from it — search the
+  migrations for the account column and diff against the manifest).
+- Deletion cascades run in the documented order; a cascade that orphans a
+  translation publication or gallery derivative violates §24.4 — the
+  derivative-removal rule is a test, not a comment.
+- Statistics are not surveillance: no per-user drill-down below the k floor,
+  and the operator UI says so. If a chart needs individual rows, it is the
+  wrong chart.
+- Circuit breakers must fail **closed** for writes and **open** for reads
+  sensibly: a breaker that locks readers out of the site entirely is worse
+  than the abuse it stops — the ladder's first rungs protect the box, the
+  last rungs protect the community.
 
 ---
 
-### Milestone 17 — Administration, statistics, abuse defence, privacy and ops
+## 14. Milestone 20 (repo) — Hardening and release
 
-Spec §24. Tag `v0.18-operations`.
+**Read first:** spec §25 in full, plus `docs/verification.md` end to end —
+this milestone's definition of done is **the spec's**, not a reduced one.
 
-#### The journey
+### 14.1 Why this is next
 
-An operator opens the admin dashboard, sees the queue lengths and the error
-rates, exports a reader's data for a subject access request, and runs a backup
-that restores on a second machine.
+Everything is built; nothing is trusted until it is exercised as a whole.
+M20 is not a feature milestone: it is the pass that makes the site releasable
+per the spec's definition of release, with the verification matrix full and
+the honest status vocabulary intact.
 
-#### Migration 0018
+### 14.2 Ledger rows
 
-```text
-instance_settings    key PRIMARY KEY, value_json, updated_by, updated_at
-statistics_daily     day, metric, value INTEGER, PRIMARY KEY (day, metric)
-abuse_signals        id, kind, subject_type, subject_id, weight, observed_at,
-                     action_taken (nullable)
-audit_log            id, at, actor_account_id (nullable), actor_type
-                     ('account'|'operator'|'system'|'extension'),
-                     action, subject_type, subject_id, detail_json, request_id
-                     -- append-only, never updated, never deleted
-data_requests        id, account_id, kind, state, requested_at,
-                     fulfilled_at, artefact_blob_checksum (nullable)
-backup_runs          id, started_at, finished_at, byte_size, checksum,
-                     destination, state, error (nullable)
-```
+- `M20-01` cross-milestone regression sweep: the full verification matrix
+  executed, gaps documented (spec §25.1)
+- `M20-02` performance and bounds: the documented bounds hold at 2× the
+  defaults on the reference self-hosted box (spec §25.2)
+- `M20-03` security pass: threat model walkthrough, permissions matrix
+  verified, secrets hygiene, dependency audit (spec §25.3)
+- `M20-04` accessibility and i18n: a11y audit per §6, every user-facing
+  string in both `en` and `eo` (spec §25.4)
+- `M20-05` release: docs, tutorial, tag, migration story for operators
+  upgrading from `v0.09-library` (spec §25.5)
 
-Retention: `audit_log` is **append-only and permanent**, and it never contains
-personal data in the clear — a subject is an id, an address is a hash. Privacy
-jobs themselves are logged; a data export that leaves no trace is a data export
-nobody can be held to.
+### 14.3 Work breakdown (no new tables; the migration counter stops at `0020`)
 
-#### The admin surface
+**14.3.1 Verification sweep (M20-01).** Walk `docs/requirements.csv` row by
+row; every row is either evidenced, re-tested now, or marked with an honest
+gap. Any row citing "implemented but not executed" gets executed or the gap
+becomes a release blocker discussion. Re-run every `milestone_*.rs` suite; a
+flaky test is a bug — fix it, don't retry it.
 
-```text
-GET     /admin                          the dashboard: queue lengths, error rates, storage
-GET     /admin/jobs  /admin/jobs/:id
-GET     /admin/reports  /admin/cases
-GET     /admin/users/:accountId         with the trust history and the audit trail
-POST    /admin/backups                  → 202 + job
-GET     /admin/audit?cursor=…           the audit log, read-only always
-POST    /data-requests                  a subject access or erasure request
-POST    /data-requests/:id/fulfil       → 202 + job
-```
+**14.3.2 Performance and bounds (M20-02).** Script the bounds from the spec:
+a 2× dataset (double the defaults), the reference self-hosted profile, and
+the documented commands (import a large work, run search, render the reader
+with 1,000-paragraph chapters, run discovery with 2× candidates, queue 2×
+jobs). Record numbers in `docs/verification.md`. A bound that fails gets
+either fixed or becomes a documented limitation with the failing number.
 
-**The audit log has no delete route.** Not for an operator, not for the
-instance owner. If you find yourself writing one, the requirement is wrong.
+**14.3.3 Security pass (M20-03).** Walk the permissions matrix (spec §5.4)
+end to end: every route × every role (anonymous, reader, author, reviewer,
+operator) → expected vs actual. Then: secrets hygiene (no secret in logs, in
+errors, in client payloads — grep the codebase), dependency audit
+(`cargo audit`, `npm audit`), the extension worker profile verified on the
+reference box, webhook HMAC verification from the outside, CSRF coverage on
+every cookie-authenticated `Write` route (list them all, tick them all).
 
-#### Privacy tooling
+**14.3.4 Accessibility and i18n (M20-04).** Keyboard-walk every page
+(WorkPage, Reader, forms, admin console); focus order and labels verified;
+`labels.ts` audited: a `grep` for raw strings in templates must return only
+sanctioned literals (numbers, punctuation). Both `en` and `eo` complete for
+every new string since M9.
 
-An export produces a machine-readable archive of everything the platform holds
-about an account. An erasure anonymises rather than deletes where a moderation
-record needs the row: `decisions.actor_account_id` becomes NULL and the pseud
-handle is replaced by `[deleted]`, while the case itself survives. That is the
-honest reading of "right to erasure" against "moderation record", and it must be
-written in `docs/verification.md` where a reader can find it.
+**14.3.5 Release (M20-05).** Update `docs/tutorial/README.md` (the chapter
+map to the M-numbering used here), regenerate any spec cross-references,
+write the operator upgrade note (migrations `0010`–`0020` with the dialect
+notes), tag `v0.20-release` (per docs/tutorial/README.md's scheme), and only
+then run the full `just check` one final time.
 
-#### Tests
+### 14.4 Hand journey (the release rehearsal)
 
-```text
-the_audit_log_has_no_delete_path
-an_erasure_anonymises_a_moderation_record_rather_than_destroying_it
-a_data_export_contains_every_table_that_names_the_account
-a_backup_restores_into_an_empty_database
-an_operator_cannot_read_a_private_note
-```
+Run the **whole site** as one story on the reference box, in one sitting:
 
-#### Pitfalls
+1. Fresh install → `doctor` → sign up (reader) → import a fic (author) →
+   publish (editor, revision, chapter reorder via the UI now that M12 opened
+   it) → read with a second account → rate/react → comment through the
+   positivity gate → follow → library updates → discovery feed → search with
+   the query language → save a view.
+2. Translation: request, review, publish, provenance badge.
+3. Economy: earn, quote, reserve, priority import, capture, receipts.
+4. Community: forum thread, group, message, block across paths, presence.
+5. Governance: report, quorum, sanction, appeal, expiry.
+6. Extensions: install with consent, run, overrun, revoke; webhook verify.
+7. Admin: flag rollout, stats, abuse breaker + override, privacy export and
+   delete.
+8. API: token, bot, feeds, push, federation blocklist, AI consent refusal.
 
-1. **An operator is not a reader.** Trust level does not grant access to private
-   notes, history, or ratings. If a case needs them, the case needs a warrant and
-   a different feature.
-2. **A dashboard that reads live tables will fall over.** Statistics are computed
-   by a nightly job into `statistics_daily`.
-3. **A backup that has never been restored is not a backup.** The restore is a
-   numbered test, run in CI against SQLite and manually against PostgreSQL.
+Each step: recorded in `docs/verification.md` as it happens, with the
+command or click path. A step that cannot be completed is a release blocker
+or a documented limitation — decided explicitly, never silently.
 
----
+### 14.5 Acceptance tests (release gate)
 
-### Milestone 18 — Hardening and release
+- the full matrix: every CSV row evidenced or an open, documented gap
+- `just check` green on the reference box, twice in a row (flakiness check)
+- both dialects: the migration sets identical (the drift test), and a
+  **fresh install on PostgreSQL** from `v0.09-library` → head succeeds
+- bounds: the 2× script's numbers recorded; every bound either holds or has
+  a documented limitation with the number that failed
+- no raw user-facing strings in templates outside `labels.ts` (the grep is
+  part of CI now)
+- secrets hygiene greps clean; dependency audit clean or exceptions
+  documented with reasons
 
-Spec §25. Tag `v1.0`.
+### 14.6 Pitfalls
 
-This milestone is not a feature. It is the list of things you cannot ship
-without.
-
-#### Security
-
-* Every route audited against `crates/domain/src/policy.rs`. Write the audit in
-  `docs/verification.md` as a table: route, class, extractor, policy function,
-  and the test that pins it. A route with a blank cell is a release blocker.
-* `cargo audit` clean, or every advisory explicitly accepted with a written
-  reason and a date.
-* CSRF, CSP, `SameSite`, cookie flags, body limits and timeouts asserted in
-  tests, not only configured.
-* A password hashing parameter review (the cost factor), written down.
-* Rate limiting exercised with a real burst against the running binary.
-
-#### Correctness
-
-* `cargo test --workspace` on SQLite **and** against a live PostgreSQL in CI.
-  This is the open risk `verification.md` has carried since M0 and M18 is where
-  it closes.
-* The Playwright suite spec §23 asks for: one automated journey per milestone,
-  driven in a browser. Milestones 2 and 3 both shipped frontend defects that the
-  unit tests could not see.
-* A load profile: the numbers in `docs/plans/cross-cutting.md` (a work page
-  answers in under 200 ms at p95 with 100 concurrent readers) measured and
-  recorded, with the machine's specification beside them.
-
-#### Accessibility
-
-* Every journey walked with a keyboard only, at 320 CSS pixels wide, with a
-  screen reader, in all three themes and in both colour-scheme preferences.
-* The results written into `verification.md` per screen, including the ones that
-  failed and what was changed.
-
-#### Documentation
-
-* `docs/tutorial/` has a numbered page per milestone, each reproducible from an
-  empty checkout.
-* `docs/adr/` has a record for every decision this plan said to write down.
-* `docs/api.md` covers the public API.
-* A `CHANGELOG.md` whose entries are written for a reader, not a committer.
-
-#### Data
-
-* A restore rehearsed from the documented backup procedure on a different
-  machine.
-* A migration run against a copy of a real database, timed, with the downtime
-  measured and stated.
-* Retention jobs verified by running them and checking what they deleted.
-
-#### Release
-
-```text
-tag v1.0
-```
-
-The release checklist is a file, `docs/release-checklist.md`, and the release is
-not tagged until every box is ticked **with a command or a test next to it**.
-Same rule as `verification.md`: an unticked box is fine, an untested tick is not.
+- Do not "fix" a flaky test by retrying or by sleeping; find the race or the
+  clock dependency. The release gate runs the suite **twice**.
+- The bounds script is part of the repo (`docs/scripts/bounds.sh` or similar)
+  so the next person can re-run it — a number without a reproduction is a
+  rumour.
+- Release ordering matters: docs and tutorial **before** the tag, so the tag
+  points at a commit where the docs are already true.
+- Do not silently re-scope M20's rows. If the sweep finds unverifiable rows,
+  they stay visible in `docs/verification.md` with their gap statement —
+  honesty is the release gate, not a nice-to-have.
 
 ---
 
-## Part 3 — The frontend, across all milestones
+## 15. Cross-cutting sign-off checklist (run at every milestone tag)
 
-The backend plan is per milestone. The frontend has its own shape and it is
-worth reading once, here, rather than rediscovering it eighteen times.
+- [ ] Ledger: rows added **before** code; flipped after evidence; `M<repo>-NN`
+      ids unique; spec §-references present
+- [ ] Migrations: both dialects, identical sets; drift test green; the
+      migration counter is the next expected number
+- [ ] Domain: policy in `crates/domain`, unit-tested, no I/O; error taxonomy
+      extended, not bypassed
+- [ ] Repository: both dialects written out; binds are `String`/`i64`;
+      cursor envelope on lists; transactions where invariants demand
+- [ ] Routes: `classified(...)`; CSRF on cookie-authenticated writes;
+      extractors gate auth; visibility honoured; limits from configuration
+- [ ] Frontend: runes only; field bindings tested; api.ts mirrored; router
+      `Planned` never dead-links; labels in `en` and `eo`; state quartet
+      (loading/empty/error/success) on every page
+- [ ] Tests: acceptance suite in `crates/app/tests/milestone_<n>.rs`;
+      component tests beside pages; properties not implementation details;
+      bugs found on the way got their tests
+- [ ] Docs: `verification.md` rows with real evidence; `README.md` plan table
+      current; tutorial chapter if listed; ADRs written for the decisions a
+      reviewer would otherwise have to ask about
+- [ ] Tag: `v0.<nn>-<name>`, tutorial README's scheme, annotated tag message
+      naming the milestone and its ledger rows
 
-### 3.1 The shell
+### 15.1 The four questions before every tag
 
-```text
-frontend/src/App.svelte      the header, the nav, the route switch, the drawer
-frontend/src/lib/router.ts   matchRoute: path → RouteId
-frontend/src/lib/api.ts      one function per route, mirroring it exactly
-frontend/src/lib/session.svelte.ts   who is signed in, which pseud is acting
-```
+1. **Which journey does a human drive, and did they drive it?**
+2. **Which invariant does a test prove, and would it fail if broken?**
+3. **What does the ledger say, and does the evidence column name a command?**
+4. **What are we honestly not doing, and where is that written?**
 
-Adding a screen is three edits and all three are mandatory:
+If any answer is a shrug, the milestone is not done.
 
-1. `router.ts` — a `RouteId`, a `matchRoute` branch, and a `PLANNED_ROUTES`
-   entry if it is not built yet.
-2. `App.svelte` — an `import` and a branch in the `{#if}` chain.
-3. `api.ts` — the functions the page calls.
+### 15.2 Escalation and the honesty vocabulary
 
-There is no fourth step and no discovery. A page that exists and is not in the
-`{#if}` chain renders `NotFound`, which is exactly the bug that was found in
-Milestone 4 when `/library/history` resolved to the history view but `App.svelte`
-had no branch for it.
+When a step cannot be completed: stop, write the gap in
+`docs/verification.md` with the status vocabulary, register it in the debt
+register (§0.3) if it outlives the milestone, and tell the operator. The
+repository's culture is that an honest "not done, here is why" is a
+completed task, and a silent downgrade is a defect. Never let a milestone
+tag paper over a gap — the spec's own release gate (§25) is built on the
+same rule.
 
-### 3.2 The rule for every page
+### 15.3 A note on spec drift
 
-**Do not offer what the server will refuse.**
-
-* A visitor sees "Sign in to rate this work", not five stars that fail on click.
-* A format whose converter is not installed is marked unavailable, not offered
-  and then rejected.
-* A reader below the public-rating threshold sees "not enough ratings yet", not
-  a mean computed from two people.
-* A permission the extension was not granted is not in its list.
-
-This rule is not cosmetic. Every violation is a page that lies about the
-server's behaviour, and the user finds out by being refused.
-
-### 3.3 Components
-
-`frontend/src/lib/components/` holds the primitives. Extend it; do not write a
-fourth text input. A new component needs:
-
-* `$props()` with `$bindable` on anything a form binds to,
-* a visible focus state (`:focus-visible`),
-* a label associated with the control,
-* a test beside it if it has behaviour (see `Dialog.test.ts` for the shape).
-
-As of M4 the missing listed primitives are the combobox and the richer work-card
-variants (`requirements.csv` M1-03 tracks this). They arrive with M9's search and
-M8's library respectively.
-
-### 3.4 State
-
-There are no stores. State is either:
-
-* **local** — `$state` in a component,
-* **shared and tiny** — a `.svelte.ts` module with runes
-  (`session.svelte.ts` is the model),
-* **on the server** — the truth, read with `api.ts`.
-
-Never cache server state in a module-level variable to avoid a fetch. The second
-tab is the test case and it will disagree.
-
-### 3.5 Loading, empty and error
-
-Every screen that fetches has four states and all four are designed:
-
-```text
-loading   a Skeleton that occupies the final layout's space
-empty     an EmptyState that says what would be here and how to make one
-error     an ErrorSummary with the request id, and a next action
-content   the thing
-```
-
-An empty list rendered as nothing is indistinguishable from a failure. Say
-"you have not read anything yet", not "".
-
-### 3.6 Accessibility, per screen, every time
-
-* Walk it with `Tab` only. If you cannot reach a control, it does not exist.
-* Walk it at 320 CSS pixels. The breakpoint is 48rem/52rem depending on the
-  shell; check both.
-* Walk it in all three themes. `after-hours` is where contrast bugs live.
-* Every image has an `alt`; every icon-only button has an `aria-label`; every
-  form error is announced (`role="alert"` or a live region).
-* Respect `prefers-reduced-motion` — `app.css` has the override and a component
-  that animates must be inside it.
-
-### 3.7 Performance budgets
-
-From `docs/plans/cross-cutting.md`, restated because a budget nobody reads is a
-budget nobody meets:
-
-* Work page: under 200 ms p95 at 100 concurrent readers.
-* Chapter read: under 300 ms p95, and the text starts rendering before the
-  position and note requests have answered.
-* Search: under 150 ms p95 for a query that returns 20 results.
-* The main bundle stays under 200 KB gzipped; anything larger is a lazy import
-  behind a route.
-
----
-
-## Part 4 — Cross-cutting work
-
-### 4.1 Verification, honestly
-
-`docs/verification.md` uses a fixed vocabulary. Use it exactly:
-
-```text
-implemented-locally-tested      a command or a test exercises it, here
-implemented-not-executed        the code exists and nothing has run it
-partially-implemented           some of the requirement holds
-unsupported                     not written
-```
-
-Every claim has an `evidence` value that is **a command or a test name**, never
-a file path on its own. "`crates/app/src/routes/reading.rs`" is not evidence;
-"`cargo test -p lorehaven-app --test milestone_4 a_private_rating_changes_no_public_number`"
-is.
-
-### 4.2 Migrations
-
-* Two files per migration, identical ids, in `migrations/sqlite/` and
-  `migrations/postgres/`.
-* The comment at the top states the deletion and retention rule.
-* A test fails if the ids drift.
-* Never edit a migration that has been applied anywhere. Add the next one.
-* Migrations are forward-only. There is no `down`. A mistake is corrected by a
-  following migration, which is also the honest record of the mistake.
-
-### 4.3 The database conventions, once more
-
-Bind only `String` and `i64`. PostgreSQL uuids as `?::uuid`, read as `id::text`.
-No floating point columns — scale to an integer and say the scale in the name
-(`position_permille`, `mean_permille`, `amount_minor`).
-
-### 4.4 Localisation
-
-Spec §8 requires English and Spanish initially, and says not to advertise a
-locale as complete until it has been reviewed. So:
-
-* `frontend/src/lib/i18n/` with one file per locale, typed against the English
-  one so a missing key is a compile error.
-* No string concatenation across a variable: `"Read " + count + " chapters"`
-  cannot be translated. Use a plural-aware formatter.
-* Dates and numbers through `Intl`, with the locale from the account.
-* Server-side messages: `AppError::public_message()` returns English today. Add
-  a `message_key` to the variant and translate on the client, so a Spanish
-  reader does not get an English error.
-
-### 4.5 Retention and deletion, per table
-
-Every migration states it; `verification.md` collects the summary. The rules that
-recur:
-
-* Private reading data cascades with the account.
-* Moderation and audit records never cascade; they anonymise.
-* Ledger entries are append-only and permanent.
-* Content-addressed blobs are deleted only when unreferenced.
-* A soft-deleted row keeps its `deleted_at` and its history, and every read path
-  filters on it.
-
-### 4.6 What to do when this plan is wrong
-
-It will be, in places. When you find one:
-
-1. Fix the code the way the **spec** says.
-2. Fix this plan in the same commit.
-3. If the spec itself is ambiguous, write an ADR with the options and the
-   choice, and link it from the milestone.
-
-A plan that is not corrected when it is wrong is worse than no plan, because the
-next person trusts it.
-
-
+This plan was written against spec + verification as of 2026-09-11. When the
+spec changes, update this plan in the same commit as the spec change (the
+spec's own header says it is the single source of truth; this plan exists so
+a junior never has to re-derive the current state from git archaeology).
+If you find this plan contradicting `docs/requirements.csv`, the CSV wins —
+fix this plan and note the correction in the commit message.

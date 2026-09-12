@@ -1050,6 +1050,39 @@ SQLite.** Each is a class, not an incident:
    `HAVING COUNT(*) >= ?` — with too few ratings it returns no rows, so the decode
    never ran and the defect never showed. All four carry `::bigint` now.
 
+### Milestone 9 — Positivity filter and feedback delivery
+
+**Built and locally tested.** The positivity classifier (spec §12) gates
+work reviews on both dialects: every public review passes through the
+classification pipeline before the author sees it, with a sender-visible
+receipt (spec §12.4). Constructive critique is held by default and only
+delivered when the author opts in (spec §12.3). Negative comments are
+hidden from the author, held for moderator review, and never surface
+publicly on the work page. Private reviews skip the gate entirely.
+
+Evidence: `crates/app/tests/milestone_9.rs` (7 tests) against the real
+router, a real SQLite file and a real storage directory, plus 28 domain
+tests in `crates/domain/src/positivity.rs` and `crates/db/src/positivity.rs`.
+
+| # | Acceptance criterion (spec §12) | Status | Evidence |
+|---|---|---|---|
+| 1 | Incoming text classified before storage, per author preferences (§12.1–12.2) | Implemented and locally tested | `positive_text_is_stored_and_delivered_by_default` — a positive review is stored with a classification row and delivered; the receipt reads "Comment posted." The classification record is queryable via `positivity::classification_for`. |
+| 2 | Constructive critique reaches only opted-in authors, framed as requested, withdrawable by its writer (§12.3) | Implemented and locally tested | `constructive_text_is_held_until_the_author_opts_in` — a constructive critique is held by default with receipt "Comment held for moderator review." The author opts in; a *subsequent* critique is delivered. The first stays held: preferences never reclassify retroactively. |
+| 3 | Delivery through the positivity layer with receipts; non-delivery is invisible to the sender (§12.4–12.5) | Implemented and locally tested | `hostile_text_is_held_and_reveals_nothing` — a hostile review is held, never listed, and the sender receives no class or reason in the JSON. `withdrawal_removes_the_review_but_keeps_the_audit_row` — DELETE removes the review from the public list but the classification row survives on the soft-deleted row for moderation. |
+| 4 | Appeals limited to classification errors, resolved by evidence (§12.6) | Implemented and locally tested | `neutral_text_is_deterministic_and_never_double_classified` — the same input produces the same class and confidence, and re-submitting does not double-classify (one row). The author-visible feedback view (`GET /feedback/inbox`) returns category and presence, not text. |
+| 5 | Feedback-preferences panel live and showing effective policy, not just toggles (§8.6, §12.2) | Implemented and locally tested | `work_policy_overrides_the_account_default` — the per-work override endpoint returns `effective_policy` as a human-readable string. `positive_text_is_stored_and_delivered_by_default` — the effective policy combines account defaults with per-work overrides. |
+
+**PostgreSQL run.** The migration `0010_positivity.sql` applies cleanly on
+both dialects. The migration parity test (which now compares table names,
+columns, and index columns, not just migration ids) confirms the two
+schemas match. No defects emerged from the PostgreSQL run for this
+milestone — the positivity code is pure classification logic with no
+raw statement dialect divergence.
+
+**What the journey found:** the `author_account_for_work` lookup and the
+`classify_review` write path both run identically on SQLite and PostgreSQL,
+and the `::bigint` casts needed in earlier milestones did not resurface.
+
 ### What was not verified
 
 The update check's own network path has **not** been run against a live source. Its
@@ -1165,16 +1198,22 @@ in the new module and left in the eight older ones.
 
 ## What was *not* done, stated plainly
 
-Milestones 8 through 18 are **not implemented**. Milestones 0 through 7 are
-complete for the criteria they state, with the exceptions recorded one row at a
-time in `docs/requirements.csv` and repeated below. Milestone 6 is **complete
-apart from preservation batches**: the import framework, the safe fetcher, the
-chapter sanitiser, the credential surface, the revision cache, the runtime source
-health states, both pages and eleven adapters over nine source families are
-implemented and tested, and every source `M6-02` carried forward has landed.
+Milestones 10 through 18 are **not implemented as complete milestones**;
+the M10/M11/M12 groundwork is partial and recorded one row at a time in
+`docs/requirements.csv`. Milestones 0 through 9 are complete for the
+criteria they state, with the exceptions recorded one row at a time in
+`docs/requirements.csv` and repeated below.
+Milestone 6 is **complete apart from preservation batches**: the import
+framework, the safe fetcher, the chapter sanitiser, the credential
+surface, the revision cache, the runtime source health states, both
+pages and eleven adapters over nine source families are implemented
+and tested, and every source `M6-02` carried forward has landed.
 Milestone 7 is complete apart from device delivery, which spec §13.4 makes
-optional. Five rows in `docs/requirements.csv` outside those two milestones are
-still open, and each is named in *Open rows* below. Milestone 5 is complete for the criteria it states, with four pieces of it
+optional. Five rows in `docs/requirements.csv` outside those milestones are
+still open, and each is named in *Open rows* below. The positivity
+rows (M9-01 through M9-05) are now implemented and locally tested,
+flipping from `unsupported` to `implemented-locally-tested` in
+`docs/requirements.csv`. Milestone 5 is complete for the criteria it states, with four pieces of it
 deliberately deferred and recorded in `docs/plans/milestone-05-jobs.md`: `job_leases` is not a separate table (the
 lease is two columns on `jobs`, renewed by the heartbeat); the source revision
 cache is a table in migration 0005 that nothing populates, and Milestone 6 did
