@@ -85,8 +85,8 @@ M10-03,reading,Search within the current work,M10,implemented-locally-tested,"cr
 M10-04,search,Query language with saved queries and visual filter builder,M10,implemented-locally-tested,"crates/domain/src/query.rs + crates/domain/src/query_sql.rs + crates/db/src/search/ast_search.rs + crates/app/src/routes/search.rs","Parser and renderer wired into the search route. Saved queries reuse M8's saved-views mechanism (versioned JSON AST). No visual filter builder (deferred to M11 discovery UI)."
 M10-05,search,Fuzzy matching with a documented similarity floor,M10,planned,,
 M10-06,discovery,Mood search with curated mood taxonomy,M10,planned,,
-M11-01,discovery,Recommendations from multiple engines blended,M11,planned,,
-M11-02,discovery,Private taste profile derived from reader behaviour,M11,planned,,
+M11-01,discovery,Recommendations from multiple engines blended,M11,implemented-locally-tested,"crates/domain/src/discovery.rs + crates/db/src/discovery.rs + crates/app/src/routes/discovery.rs + crates/app/tests/milestone_11.rs + frontend/src/routes/Discovery.svelte","Three engines (MoreLikeThis, SameFandomFresh, ReaderHistory) blended deterministically. Taste profile derived from reading history, ratings, notes, bookmarks. Configurable weights and diversity caps."
+M11-02,discovery,Private taste profile derived from reader behaviour,M11,implemented-locally-tested,crates/db/src/discovery.rs (recompute_taste_profile) + crates/app/src/routes/discovery.rs,"Profile signals computed from history/ratings/notes/bookmarks. Owner-only access. Clearable without deleting history rows."
 M11-03,discovery,Operator taste influence as ranking multipliers,M11,planned,,
 M11-04,discovery,Diversity mechanisms (exploration slots per-fandom caps),M11,planned,,
 M11-05,discovery,Recipes (shareable recommendation formulas),M11,planned,,
