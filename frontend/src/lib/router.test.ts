@@ -57,7 +57,7 @@ describe('routing', () => {
   });
 
   it('ignores trailing slashes so links and URLs agree', () => {
-    expect(matchRoute('/search/').id).toBe('planned');
+    expect(matchRoute('/search/').id).toBe('search');
     expect(matchRoute('//').id).toBe('home');
   });
 

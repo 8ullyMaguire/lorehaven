@@ -17,10 +17,12 @@ pub async fn search_works_ast(
     let (user_where, user_binds) = if query.trim().is_empty() {
         ("1=1".to_owned(), Vec::new())
     } else {
-        let ast = parse_query(query)
-            .map_err(|e| anyhow::anyhow!("query parse error: {} at offset {}", e.message, e.offset))?;
-        let fragment = render_query(&ast)
-            .map_err(|e| anyhow::anyhow!("query render error: {} at offset {}", e.message, e.offset))?;
+        let ast = parse_query(query).map_err(|e| {
+            anyhow::anyhow!("query parse error: {} at offset {}", e.message, e.offset)
+        })?;
+        let fragment = render_query(&ast).map_err(|e| {
+            anyhow::anyhow!("query render error: {} at offset {}", e.message, e.offset)
+        })?;
         (fragment.sql, fragment.binds)
     };
 
@@ -43,7 +45,9 @@ pub async fn search_works_ast(
                  ORDER BY score DESC, works.updated_at DESC \
                  LIMIT ?"
             );
-            let user_where_pg = renumber_placeholders(&user_where, 1);
+            // $1 is the viewer account and $2 is LIMIT, so the user
+            // fragment's placeholders must start at $3.
+            let user_where_pg = renumber_placeholders(&user_where, 2);
             let pg = format!(
                 "SELECT works.id::text, works.title, pseuds.handle AS author_handle, \
                         (SELECT COALESCE(SUM(cr.word_count), 0) FROM chapters c \
@@ -57,7 +61,7 @@ pub async fn search_works_ast(
                  WHERE ((works.lifecycle = 'published' AND works.visibility != 'restricted') \
                         OR works.owner_pseud_id IN (SELECT id FROM pseuds WHERE account_id = $1)) \
                    AND ({user_where_pg}) \
-                 GROUP BY works.id \
+                 GROUP BY works.id, works.updated_at \
                  ORDER BY score DESC, works.updated_at DESC \
                  LIMIT $2"
             );
@@ -93,7 +97,7 @@ pub async fn search_works_ast(
                  JOIN pseuds ON pseuds.id = works.owner_pseud_id \
                  WHERE (works.lifecycle = 'published' AND works.visibility = 'public') \
                    AND ({user_where_pg}) \
-                 GROUP BY works.id \
+                 GROUP BY works.id, works.updated_at \
                  ORDER BY score DESC, works.updated_at DESC \
                  LIMIT $1"
             );
@@ -111,8 +115,7 @@ pub async fn search_works_ast(
                 q = q.bind(b.clone());
             }
             q = q.bind(limit);
-            q.fetch_all(db.sqlite_pool().expect("sqlite"))
-                .await?
+            q.fetch_all(db.sqlite_pool().expect("sqlite")).await?
         }
         Backend::Postgres => {
             let mut q = sqlx::query_as::<_, (String, String, String, i64, i64)>(&sql);
@@ -123,20 +126,21 @@ pub async fn search_works_ast(
                 q = q.bind(b.clone());
             }
             q = q.bind(limit);
-            q.fetch_all(db.postgres_pool().expect("postgres"))
-                .await?
+            q.fetch_all(db.postgres_pool().expect("postgres")).await?
         }
     };
 
     Ok(rows
         .into_iter()
-        .map(|(id, title, author_handle, word_count, score)| SearchResult {
-            work_id: id,
-            title,
-            author_handle,
-            word_count,
-            score,
-        })
+        .map(
+            |(id, title, author_handle, word_count, score)| SearchResult {
+                work_id: id,
+                title,
+                author_handle,
+                word_count,
+                score,
+            },
+        )
         .collect())
 }
 
