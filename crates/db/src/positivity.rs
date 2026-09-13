@@ -653,3 +653,92 @@ pub async fn classify_review(
         .expect("just recorded");
     Ok(stored)
 }
+
+/// Classify and store the delivery outcome for one comment write.
+pub async fn classify_comment(
+    db: &Database,
+    comment_id: &str,
+    body: &str,
+    prefs: &FeedbackPreferences,
+    allow: bool,
+    deny: bool,
+) -> Result<StoredClassification> {
+    use lorehaven_domain::positivity::{classify, resolve_delivery};
+    let verdict = classify(body);
+    let outcome = resolve_delivery(verdict.class, prefs, allow, deny);
+    record_comment_classification(db, comment_id, &verdict, outcome).await?;
+    let stored = comment_classification_for(db, comment_id)
+        .await?
+        .expect("just recorded");
+    Ok(stored)
+}
+
+/// Record one comment classification plus its outcome.
+pub async fn record_comment_classification(
+    db: &Database,
+    comment_id: &str,
+    verdict: &Classification,
+    outcome: DeliveryOutcome,
+) -> Result<()> {
+    let now = now_rfc3339();
+    let signals = serde_json::to_string(&verdict.signals).unwrap_or_else(|_| "[]".to_owned());
+    let sql = db.sql(
+        "INSERT INTO comment_classifications (comment_id, class, confidence_bp, signals, outcome, classified_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (comment_id) DO UPDATE SET class = excluded.class, confidence_bp = excluded.confidence_bp, signals = excluded.signals, outcome = excluded.outcome, classified_at = excluded.classified_at",
+        "INSERT INTO comment_classifications (comment_id, class, confidence_bp, signals, outcome, classified_at)
+         VALUES (?::uuid, ?, ?, ?, ?, ?)
+         ON CONFLICT (comment_id) DO UPDATE SET class = excluded.class, confidence_bp = excluded.confidence_bp, signals = excluded.signals, outcome = excluded.outcome, classified_at = excluded.classified_at",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(comment_id)
+                .bind(verdict.class.as_str())
+                .bind(verdict.confidence_bp)
+                .bind(&signals)
+                .bind(outcome.as_str())
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(comment_id)
+                .bind(verdict.class.as_str())
+                .bind(verdict.confidence_bp)
+                .bind(&signals)
+                .bind(outcome.as_str())
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Load one stored comment classification, if any.
+pub async fn comment_classification_for(
+    db: &Database,
+    comment_id: &str,
+) -> Result<Option<StoredClassification>> {
+    let sql = db.sql(
+        "SELECT class, confidence_bp, signals, outcome, classified_at FROM comment_classifications WHERE comment_id = ?",
+        "SELECT class, confidence_bp, signals, outcome, classified_at FROM comment_classifications WHERE comment_id = ?::uuid",
+    );
+    let row: Option<ClassificationRow> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(comment_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(comment_id)
+                .fetch_optional(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(row.and_then(ClassificationRow::decode))
+}
