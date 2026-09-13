@@ -3,8 +3,8 @@
 CREATE TABLE trust_levels (
     account TEXT PRIMARY KEY,
     level INTEGER NOT NULL,
-    computed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    basis JSONB NOT NULL
+    computed_at TEXT NOT NULL,
+    basis TEXT NOT NULL
 );
 
 CREATE TABLE reports (
@@ -13,9 +13,9 @@ CREATE TABLE reports (
     subject_id TEXT NOT NULL,
     reporter TEXT NOT NULL,
     reason TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at TEXT NOT NULL,
     state TEXT NOT NULL,
-    resolved_at TIMESTAMPTZ,
+    resolved_at TEXT,
     resolution TEXT NOT NULL
 );
 CREATE INDEX idx_reports_state_created ON reports(state, created_at);
@@ -24,8 +24,8 @@ CREATE TABLE review_tasks (
     id TEXT PRIMARY KEY,
     reviewer TEXT NOT NULL,
     report_id TEXT NOT NULL,
-    assigned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    decided_at TIMESTAMPTZ,
+    assigned_at TEXT NOT NULL,
+    decided_at TEXT,
     outcome TEXT NOT NULL
 );
 CREATE INDEX idx_review_tasks_report ON review_tasks(report_id);
