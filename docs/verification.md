@@ -25,7 +25,7 @@ the result. Where a claim could only be checked by hand, it says so.
 
 | Field | Value |
 |---|---|
-| Date of last verification | 2026-09-11 |
+| Date of last verification | 2026-09-13 |
 | Commit | `a54e3bc` on `master`. Milestones 0 to 7 are complete and tagged: `v0.01-running-app`, `v0.03-identity`, `v0.04-publishing`, `v0.05-reader`, `v0.06-jobs`, `v0.07-imports`, `v0.08-exports`. Every row in `docs/requirements.csv` for those milestones is `implemented-locally-tested` or a deliberate `unsupported`. |
 | Environment | Linux, Rust 1.98.0, Node 26.8.1, SQLite 3.53.4 |
 | PostgreSQL available | Yes — 17.11 in Docker on loopback (the development machine still has none installed) |
@@ -1188,6 +1188,20 @@ fault. Every route module in the tree takes `Path<String>` and behaves this way,
 it is a class rather than this milestone's mistake; it is recorded rather than fixed
 in the new module and left in the eight older ones.
 
+### Milestone 13 — Events: collections, challenges, requests, wishlists, events
+
+**Implemented and locally tested.** All five M13 entity types are built: collections with open/closed item policy and CRUD + items, challenges with entries (word count recorded), requests with claims (one active claim enforced, double claim returns 422), wishlists with implicit create and privacy (404 for strangers), and writing events with idempotent join.
+
+Evidence: `crates/app/tests/milestone_13.rs` (9 tests) against the real router and a real SQLite file, plus migration `0014_events.sql` for the collections, challenges, requests, wishlists, and events tables.
+
+| # | Acceptance criterion (spec §18) | Status | Evidence |
+|---|---|---|---|
+| 1 | Collections CRUD + items (§18.1) | Implemented and locally tested | `a_collection_can_be_created_listed_and_published`, `an_unauthenticated_user_cannot_create_a_collection` — open/closed policy, public flag, PUT update |
+| 2 | Challenges + entries (§18.2) | Implemented and locally tested | `a_challenge_can_be_created_and_listed`, `entering_a_challenge_records_word_count` — word count recorded on entry |
+| 3 | Requests + claims (§18.3) | Implemented and locally tested | `a_request_can_be_created_claimed_and_fulfilled` — one active claim enforced, double claim returns 422 |
+| 4 | Wishlists (§18.4) | Implemented and locally tested | `a_wishlist_can_have_items_added_and_retrieved`, `a_private_wishlist_is_hidden_from_other_users` — implicit create, 404 for strangers |
+| 5 | Writing events + join (§18.5) | Implemented and locally tested | `an_event_can_be_created_joined_and_listed`, `duplicate_event_join_is_idempotent` — join is idempotent |
+
 ## Known limitations and open risks
 
 1. **PostgreSQL is executed once, by hand, and not continuously.**
@@ -1291,7 +1305,7 @@ in the new module and left in the eight older ones.
 ## What was *not* done, stated plainly
 
 Milestones 10 through 18 are **not implemented as complete milestones**;
-the M10/M11/M12 groundwork is partial and recorded one row at a time in
+the M10/M11/M12/M13 groundwork is partial and recorded one row at a time in
 `docs/requirements.csv`. Milestones 0 through 9 are complete for the
 criteria they state, with the exceptions recorded one row at a time in
 `docs/requirements.csv` and repeated below.
