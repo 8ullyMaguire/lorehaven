@@ -1,9 +1,5 @@
 <script lang="ts">
-  import {
-    searchWorks,
-    type SearchResult,
-    type SearchResultList,
-  } from '../lib/api';
+  import { searchWorks, type SearchResultList } from '../lib/api';
   import EmptyState from '../lib/components/EmptyState.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';

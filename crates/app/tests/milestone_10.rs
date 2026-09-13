@@ -180,12 +180,7 @@ async fn register(client: &mut Client, email: &str, handle: &str) -> (String, St
     (account, pseud)
 }
 
-async fn published_work(
-    harness: &Harness,
-    email: &str,
-    handle: &str,
-    title: &str,
-) -> String {
+async fn published_work(harness: &Harness, email: &str, handle: &str, title: &str) -> String {
     let mut author = harness.client();
     let _ = register(&mut author, email, handle).await;
     let (status, body) = author
@@ -249,7 +244,9 @@ async fn search_by_title_finds_matching_work() {
     let items = body["items"].as_array().expect("items");
     assert!(!items.is_empty(), "expected match for 'winter': {body}");
     assert!(
-        items.iter().any(|i| i["title"].as_str().unwrap().contains("Winter")),
+        items
+            .iter()
+            .any(|i| i["title"].as_str().unwrap().contains("Winter")),
         "{body}"
     );
     harness.cleanup().await;
@@ -263,7 +260,10 @@ async fn search_fielded_fandom_uses_exists() {
     let _ = register(&mut client, "b@example.com", "AuthorB").await;
     // Create a fandom node.
     let (status, body) = client
-        .post("/api/v1/taxonomy", json!({ "kind": "fandom", "canonical": "HarryPotter" }))
+        .post(
+            "/api/v1/taxonomy",
+            json!({ "kind": "fandom", "canonical": "HarryPotter" }),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "create node: {body}");
     let node_id = body["node"]["id"].as_str().expect("id");
@@ -279,7 +279,10 @@ async fn search_fielded_fandom_uses_exists() {
     let (status, body) = client.get("/api/v1/search?q=fandom:harrypotter").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let items = body["items"].as_array().expect("items");
-    assert!(!items.is_empty(), "expected match for fandom:harrypotter: {body}");
+    assert!(
+        !items.is_empty(),
+        "expected match for fandom:harrypotter: {body}"
+    );
     harness.cleanup().await;
 }
 
@@ -337,17 +340,25 @@ async fn taxonomy_autocomplete_returns_nodes() {
 
     // Create some nodes.
     let (status, _) = client
-        .post("/api/v1/taxonomy", json!({ "kind": "fandom", "canonical": "Harry Potter" }))
+        .post(
+            "/api/v1/taxonomy",
+            json!({ "kind": "fandom", "canonical": "Harry Potter" }),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "create harry potter");
 
     let (status, _) = client
-        .post("/api/v1/taxonomy", json!({ "kind": "fandom", "canonical": "Lord of the Rings" }))
+        .post(
+            "/api/v1/taxonomy",
+            json!({ "kind": "fandom", "canonical": "Lord of the Rings" }),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "create lotr");
 
     // Autocomplete by prefix.
-    let (status, body) = client.get("/api/v1/taxonomy?kind=fandom&prefix=harry").await;
+    let (status, body) = client
+        .get("/api/v1/taxonomy?kind=fandom&prefix=harry")
+        .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let items = body["items"].as_array().expect("items");
     assert!(!items.is_empty(), "expected autocomplete matches: {body}");
