@@ -1118,6 +1118,30 @@ the main query (which already uses `$1` for the viewer ID). SQLite uses
 debounced queries, result cards linking to work pages, and proper
 empty/loading/error states.
 
+### Milestone 11 — Discovery, taste profiles, recommendations
+
+**Built and locally tested.** The discovery pipeline (spec §16) serves
+public recommendations to anonymous readers and personalized
+recommendations to signed-in readers based on taste profiles derived
+from reading history. Taste profiles are owner-only and clearable.
+
+Evidence: `crates/app/tests/milestone_11.rs` (8 tests) against the real
+router and a real SQLite file.
+
+| # | Acceptance criterion (spec §16) | Status | Evidence |
+|---|---|---|---|
+| 1 | Recommendations from multiple engines blended (§16.1) | Implemented and locally tested | `discovery_returns_public_works_for_anonymous` and `discovery_returns_public_works_for_signed_in` — recommendations are returned as work IDs. Domain `blend` function merges engine results deterministically. |
+| 2 | Private taste profile derived from reader behaviour (§16.2) | Implemented and locally tested | `taste_profile_empty_initially` — profile starts empty. `taste_profile_clear_returns_empty` — clearing zeroes signals without deleting history. `taste_profile_requires_session` — profile is owner-only. |
+| 3 | Operator taste influence as ranking multipliers (§16.3) | Planned | Schema exists; operator route not built. |
+| 4 | Diversity mechanisms (§16.4) | Planned | Configuration planned; not implemented. |
+| 5 | Recipes (§16.5) | Planned | Schema exists; UI deferred. |
+| 6 | Dashboards (§16.6) | Planned | Schema exists; UI deferred. |
+
+**Personalization.** Signed-in readers with a taste profile get
+personalized recommendations based on work tags from their reading
+history. Readers without a taste profile fall back to public
+recommendations.
+
 ### What was not verified
 
 The update check's own network path has **not** been run against a live source. Its
