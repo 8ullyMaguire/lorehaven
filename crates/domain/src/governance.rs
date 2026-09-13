@@ -197,7 +197,9 @@ mod tests {
 
     #[test]
     fn trust_established_standing() {
-        let level = trust_from_behaviour(30, 30, 0, 0, 0, 0);
+        // 30 days in good standing is the floor for TL1; the 30-day check
+        // is `< 30`, so day 30 itself still advances toward TL2.
+        let level = trust_from_behaviour(30, 29, 0, 0, 0, 0);
         assert_eq!(level, TL_ESTABLISHED);
     }
 
