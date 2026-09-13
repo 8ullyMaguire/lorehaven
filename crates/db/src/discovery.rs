@@ -122,7 +122,7 @@ pub async fn recompute_taste_profile(db: &Database, account: &str) -> Result<()>
         crate::Backend::Postgres => {
             sqlx::query_as::<_, (String,)>(
                 "SELECT COALESCE(json_agg(DISTINCT wt.node_id)::text, '[]')
-                 FROM reading_history rh
+                 FROM reading_history_entry rh
                  JOIN work_tags wt ON wt.work_id = rh.subject_id
                  WHERE rh.account_id = $1
                  AND rh.subject_type = 'work'
@@ -139,10 +139,7 @@ pub async fn recompute_taste_profile(db: &Database, account: &str) -> Result<()>
 }
 
 /// Get public recommendations (popular recent works).
-pub async fn public_recommendations(
-    db: &Database,
-    limit: i64,
-) -> Result<Vec<WorkId>> {
+pub async fn public_recommendations(db: &Database, limit: i64) -> Result<Vec<WorkId>> {
     let rows: Vec<(String,)> = match db.backend() {
         crate::Backend::Sqlite => {
             sqlx::query_as(
@@ -167,7 +164,10 @@ pub async fn public_recommendations(
             .await?
         }
     };
-    Ok(rows.into_iter().map(|(id,)| id.parse().unwrap_or_default()).collect())
+    Ok(rows
+        .into_iter()
+        .map(|(id,)| id.parse().unwrap_or_default())
+        .collect())
 }
 
 /// Get personalized recommendations based on taste profile.
@@ -210,7 +210,7 @@ pub async fn personalized_recommendations(
                          JOIN work_tags wt ON wt.work_id = w.id
                          WHERE w.lifecycle = 'published' AND w.visibility = 'public'
                          AND wt.node_id IN (
-                             SELECT json_array_elements_text(tp.signals)
+                             SELECT json_array_elements_text(tp.signals::json)
                              FROM taste_profiles tp
                              WHERE tp.account = $1
                          )
@@ -227,7 +227,10 @@ pub async fn personalized_recommendations(
                     .await?
                 }
             };
-            Ok(rows.into_iter().map(|(id,)| id.parse().unwrap_or_default()).collect())
+            Ok(rows
+                .into_iter()
+                .map(|(id,)| id.parse().unwrap_or_default())
+                .collect())
         }
         None => public_recommendations(db, limit).await,
     }
