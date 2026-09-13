@@ -8,6 +8,7 @@ pub mod document;
 pub mod error;
 pub mod events;
 pub mod exports;
+pub mod governance;
 pub mod ids;
 pub mod imports;
 pub mod jobs;

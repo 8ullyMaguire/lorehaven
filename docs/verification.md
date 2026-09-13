@@ -1204,6 +1204,23 @@ Evidence: `crates/app/tests/milestone_13.rs` (9 tests) against the real router a
 
 ## Known limitations and open risks
 
+### Milestone 14 — Governance: trust, reports, quorum, appeals, sanctions
+
+**Implemented and locally tested.** Trust levels table with TL_NEW baseline, steward-gated reports/tasks/sanctions/appeals. Reports submittable by anyone (anonymous attributed). Quorum via TL_STEWARD gate. Sanctions support optional expiry via time::OffsetDateTime. Appeal decision flips report state. Audit log append + my-audit-log read.
+
+Evidence: `crates/app/tests/milestone_14.rs` (6 tests) against the real router and a real SQLite file, plus migration `0016_governance.sql` and domain module `crates/domain/src/governance.rs`.
+
+| # | Acceptance criterion (spec §19) | Status | Evidence |
+|---|---|---|---|
+| 1 | Reports (submit, list, view) | Implemented and locally tested | `a_report_can_be_submitted_and_listed` — anyone can submit, reporters can list |
+| 2 | Moderation tasks (assign, decide) | Implemented and locally tested | `an_unauthenticated_user_can_submit_a_report_but_not_assign_tasks` — task assignment requires session |
+| 3 | Sanctions (issue, lift, list mine) | Implemented and locally tested | `a_steward_can_issue_a_sanction` — steward-gated, optional expiry, lifted sanctions recorded |
+| 4 | Appeals (open, list mine, decide) | Implemented and locally tested | `a_user_can_open_and_list_their_own_appeals` — appeals visible to opener, decide flips state |
+| 5 | Trust level (my/trust) | Implemented and locally tested | `my_trust_returns_a_trust_level` — new accounts get TL_NEW (0) |
+| 6 | Audit log (my/audit-log) | Implemented and locally tested | `my_audit_log_returns_entries_for_an_account` — appends on report submit, sanction, appeal |
+
+## Known limitations and open risks
+
 1. **PostgreSQL is executed once, by hand, and not continuously.**
    It has been run end to end against a live server (see *PostgreSQL, executed*),
    which has found defects on every run so far — four of them in milestone 8's own
