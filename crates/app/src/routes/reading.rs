@@ -643,11 +643,10 @@ async fn upsert_review(
                 {
                     Ok(s) => s,
                     Err(e) => {
-                        reading::delete_review(state.db(), pseud_id, work_id).await.ok();
-                        return Err(ApiError(AppError::internal(
-                            "classifying the review",
-                            e,
-                        )));
+                        reading::delete_review(state.db(), pseud_id, work_id)
+                            .await
+                            .ok();
+                        return Err(ApiError(AppError::internal("classifying the review", e)));
                     }
                 };
                 stored.outcome

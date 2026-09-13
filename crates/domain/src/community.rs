@@ -207,7 +207,11 @@ mod tests {
 
     #[test]
     fn group_privacy_round_trips() {
-        for p in [GroupPrivacy::Open, GroupPrivacy::Closed, GroupPrivacy::Hidden] {
+        for p in [
+            GroupPrivacy::Open,
+            GroupPrivacy::Closed,
+            GroupPrivacy::Hidden,
+        ] {
             assert_eq!(GroupPrivacy::parse(p.as_str()), Some(p));
         }
         assert_eq!(GroupPrivacy::parse("secret"), None);
@@ -231,12 +235,18 @@ mod tests {
         // closed: listable, joinable (request), postable for members
         assert!(group_can_list(GroupPrivacy::Closed));
         assert!(group_can_join(GroupPrivacy::Closed));
-        assert!(group_can_post(GroupPrivacy::Closed, Some(GroupRole::Member)));
+        assert!(group_can_post(
+            GroupPrivacy::Closed,
+            Some(GroupRole::Member)
+        ));
         // hidden: not listable, not joinable, non-members cannot post
         assert!(!group_can_list(GroupPrivacy::Hidden));
         assert!(!group_can_join(GroupPrivacy::Hidden));
         assert!(!group_can_post(GroupPrivacy::Hidden, None));
-        assert!(group_can_post(GroupPrivacy::Hidden, Some(GroupRole::Member)));
+        assert!(group_can_post(
+            GroupPrivacy::Hidden,
+            Some(GroupRole::Member)
+        ));
         // moderator can moderate
         assert!(group_can_moderate(Some(GroupRole::Moderator)));
         assert!(group_can_moderate(Some(GroupRole::Owner)));
