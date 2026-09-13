@@ -118,12 +118,6 @@ impl Client {
     async fn post(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
         self.request("POST", uri, Some(body)).await
     }
-    async fn patch(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
-        self.request("PATCH", uri, Some(body)).await
-    }
-    async fn put(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
-        self.request("PUT", uri, Some(body)).await
-    }
 }
 
 struct Harness {
@@ -267,9 +261,7 @@ async fn a_report_can_be_submitted_and_listed() {
     let (status, body) = reporter.get("/api/v1/reports").await;
     assert_eq!(status, StatusCode::OK, "list: {body}");
     let items = body["items"].as_array().expect("items");
-    assert!(
-        items.iter().any(|i| i["id"].as_str() == Some(&report_id))
-    );
+    assert!(items.iter().any(|i| i["id"].as_str() == Some(&report_id)));
 
     harness.cleanup().await;
 }
@@ -277,8 +269,7 @@ async fn a_report_can_be_submitted_and_listed() {
 #[tokio::test]
 async fn an_unauthenticated_user_can_submit_a_report_but_not_assign_tasks() {
     let harness = Harness::new("report-anon").await;
-    let (work_id, _, _) =
-        published_work(&harness, "a@example.com", "Author", "Anon Report").await;
+    let (work_id, _, _) = published_work(&harness, "a@example.com", "Author", "Anon Report").await;
     let mut anon = harness.client();
 
     let (status, _body) = anon
@@ -294,10 +285,7 @@ async fn an_unauthenticated_user_can_submit_a_report_but_not_assign_tasks() {
     assert_eq!(status, StatusCode::OK, "anon submit OK");
 
     let (status, body) = anon
-        .post(
-            "/api/v1/moderation/reports/placeholder/assign",
-            json!({}),
-        )
+        .post("/api/v1/moderation/reports/placeholder/assign", json!({}))
         .await;
     assert!(
         !matches!(status, StatusCode::OK),
@@ -317,9 +305,7 @@ async fn my_audit_log_returns_entries_for_an_account() {
     let mut user = harness.client();
     let (_account, _) = register(&mut user, "audit@example.com", "Auditor").await;
 
-    let (status, _body) = user
-        .get("/api/v1/me/audit-log")
-        .await;
+    let (status, _body) = user.get("/api/v1/me/audit-log").await;
     assert!(
         status == StatusCode::OK || status == StatusCode::NOT_FOUND,
         "audit log: {status}"
@@ -359,14 +345,9 @@ async fn a_steward_can_issue_a_sanction() {
     let (s_account, _) = register(&mut steward, "steward@example.com", "Steward").await;
 
     // Promote the steward to TL 4 so they can issue sanctions.
-    lorehaven_db::governance::set_trust(
-        &harness.db,
-        &s_account,
-        4,
-        "steward-test",
-    )
-    .await
-    .expect("promote steward");
+    lorehaven_db::governance::set_trust(&harness.db, &s_account, 4, "steward-test")
+        .await
+        .expect("promote steward");
 
     // Submit a report first (so there is something to sanction around).
     let mut reporter = harness.client();

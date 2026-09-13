@@ -3,17 +3,15 @@
 use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use lorehaven_domain::governance::TL_STEWARD;
+use lorehaven_domain::AppError;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use time::{Duration, OffsetDateTime};
-
-use lorehaven_domain::governance::{self, TL_STEWARD};
-use lorehaven_domain::AppError;
 
 use crate::auth::{MaybeSession, RequireSession};
+use crate::format_rfc3339;
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
-use crate::format_rfc3339;
 
 pub fn router() -> Router<AppState> {
     routes()
@@ -100,11 +98,7 @@ async fn get_report(
     let found = items.into_iter().find(|r| r["id"].as_str() == Some(&id));
     match found {
         Some(r) => Ok(Json(r)),
-        None => Err(ApiError(AppError::field(
-            "report",
-            "not found",
-        )
-        )),
+        None => Err(ApiError(AppError::field("report", "not found"))),
     }
 }
 
@@ -122,10 +116,7 @@ async fn moderation_queue(
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
     if level < TL_STEWARD {
-        return Err(ApiError(AppError::field(
-            "role",
-            "reviewer trust required",
-        )));
+        return Err(ApiError(AppError::field("role", "reviewer trust required")));
     }
     let items = lorehaven_db::governance::list_open_reports(state.db(), 100)
         .await
@@ -147,10 +138,7 @@ async fn assign_task(
         .await
         .map_err(|e| {
             if e.to_string().contains("self-review") {
-                AppError::field(
-                    "reviewer",
-                    "self-review not allowed",
-                )
+                AppError::field("reviewer", "self-review not allowed")
             } else {
                 AppError::Internal(e.into())
             }
@@ -348,12 +336,8 @@ async fn decide_appeal(
     let decider = user.account_id.to_string();
 
     // The decider must not be the issuer of the sanction (independence).
-    // We check via the audit log for the sanction.issuer action.
-    let appeal = lorehaven_db::governance::list_open_reports(state.db(), 1000)
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
-
-    // In a full implementation, we'd query appeals by id. For now, proceed.
+    // Independence checking against the audit log lands with the M14
+    // quorum work; for now the decision is recorded as given.
     lorehaven_db::governance::decide_appeal(state.db(), &appeal_id, &body.decision, &decider)
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
@@ -373,11 +357,11 @@ async fn decide_appeal(
 }
 
 async fn list_my_appeals(
-    State(state): State<AppState>,
-    RequireSession(user): RequireSession,
+    State(_state): State<AppState>,
+    RequireSession(_user): RequireSession,
 ) -> ApiResult<Json<Value>> {
-    let account = user.account_id.to_string();
-    // We'd need a list_appeals query. For now return empty.
+    // Listing one account's appeals needs a query that does not exist yet;
+    // the stub returns empty rather than pretending.
     Ok(Json(json!({ "items": [] })))
 }
 
@@ -405,16 +389,14 @@ async fn my_trust(
         _ => "Unknown",
     };
 
-    Ok(Json(
-        json!({ "level": level, "description": description }),
-    ))
+    Ok(Json(json!({ "level": level, "description": description })))
 }
 
 async fn my_audit_log(
-    State(state): State<AppState>,
-    RequireSession(user): RequireSession,
+    State(_state): State<AppState>,
+    RequireSession(_user): RequireSession,
 ) -> ApiResult<Json<Value>> {
-    let account = user.account_id.to_string();
-    // Return audit entries for this actor. We'd need a query.
+    // Per-actor audit entries need a query that does not exist yet; the
+    // stub returns empty rather than pretending.
     Ok(Json(json!({ "items": [] })))
 }
