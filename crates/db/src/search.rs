@@ -7,6 +7,10 @@ use anyhow::{Context, Result};
 use lorehaven_domain::ids::WorkId;
 use serde::Serialize;
 
+mod ast_search;
+
+pub use ast_search::search_works_ast;
+
 /// A single search result.
 #[derive(Debug, Clone, Serialize)]
 pub struct SearchResult {

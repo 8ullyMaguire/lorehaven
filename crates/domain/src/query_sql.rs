@@ -34,7 +34,7 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
     match ast {
         QueryAst::Text(text) => {
             let sql =
-                "(works.title ILIKE ? OR works.summary ILIKE ? OR works_index.body_text ILIKE ?)"
+                "(LOWER(works.title) LIKE LOWER(?) OR LOWER(works.summary) LIKE LOWER(?) OR LOWER(works_index.body_text) LIKE LOWER(?))"
                     .to_owned();
             let pattern = format!("%{}%", text);
             Ok(SqlFragment::new(sql)
@@ -43,7 +43,7 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
                 .with_bind(pattern))
         }
         QueryAst::Phrase(phrase) => {
-            let sql = "(works_index.body_text ILIKE ?)";
+            let sql = "(LOWER(works_index.body_text) LIKE LOWER(?))";
             let pattern = format!("%{}%", phrase);
             Ok(SqlFragment::new(sql).with_bind(pattern))
         }
@@ -93,11 +93,11 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
 fn render_fielded(field: &QueryField, value: &str) -> Result<SqlFragment, QueryError> {
     match field {
         QueryField::Title => {
-            let sql = "(works.title ILIKE ?)";
+            let sql = "(LOWER(works.title) LIKE LOWER(?))";
             Ok(SqlFragment::new(sql).with_bind(format!("%{}%", value)))
         }
         QueryField::Author => {
-            let sql = "(pseuds.handle ILIKE ?)";
+            let sql = "(LOWER(pseuds.handle) LIKE LOWER(?))";
             Ok(SqlFragment::new(sql).with_bind(format!("%{}%", value)))
         }
         QueryField::Fandom => {
@@ -121,11 +121,11 @@ fn render_fielded(field: &QueryField, value: &str) -> Result<SqlFragment, QueryE
             Ok(SqlFragment::new(sql).with_bind(value.to_lowercase().trim().to_owned()))
         }
         QueryField::Summary => {
-            let sql = "(works.summary ILIKE ?)";
+            let sql = "(LOWER(works.summary) LIKE LOWER(?))";
             Ok(SqlFragment::new(sql).with_bind(format!("%{}%", value)))
         }
         QueryField::Body => {
-            let sql = "(works_index.body_text ILIKE ?)";
+            let sql = "(LOWER(works_index.body_text) LIKE LOWER(?))";
             Ok(SqlFragment::new(sql).with_bind(format!("%{}%", value)))
         }
         QueryField::Language => {
@@ -133,7 +133,7 @@ fn render_fielded(field: &QueryField, value: &str) -> Result<SqlFragment, QueryE
             Ok(SqlFragment::new(sql).with_bind(value.trim().to_owned()))
         }
         QueryField::Status => {
-            let sql = "(works.status = ?)";
+            let sql = "(works.lifecycle = ?)";
             Ok(SqlFragment::new(sql).with_bind(value.trim().to_owned()))
         }
     }
@@ -148,7 +148,7 @@ mod tests {
     fn render_text_produces_like() {
         let ast = parse_query("winter").unwrap();
         let frag = render_query(&ast).unwrap();
-        assert!(frag.sql.contains("ILIKE"));
+        assert!(frag.sql.contains("LIKE"));
         assert_eq!(frag.binds.len(), 3);
         assert_eq!(frag.binds[0], "%winter%");
     }
@@ -201,10 +201,10 @@ mod tests {
 
     #[test]
     fn render_status_uses_equality() {
-        let ast = parse_query("status:complete").unwrap();
+        let ast = parse_query("status:published").unwrap();
         let frag = render_query(&ast).unwrap();
-        assert!(frag.sql.contains("works.status = ?"));
-        assert_eq!(frag.binds, vec!["complete".to_owned()]);
+        assert!(frag.sql.contains("works.lifecycle = ?"));
+        assert_eq!(frag.binds, vec!["published".to_owned()]);
     }
 
     #[test]
@@ -220,5 +220,12 @@ mod tests {
         let ast = parse_query("fandom:MyFandom").unwrap();
         let frag = render_query(&ast).unwrap();
         assert_eq!(frag.binds, vec!["myfandom".to_owned()]);
+    }
+
+    #[test]
+    fn render_status_published_matches_lifecycle() {
+        let ast = parse_query("status:published").unwrap();
+        let frag = render_query(&ast).unwrap();
+        assert_eq!(frag.binds, vec!["published".to_owned()]);
     }
 }

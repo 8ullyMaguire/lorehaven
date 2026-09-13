@@ -8,6 +8,7 @@
   import Exports from './routes/Exports.svelte';
   import History from './routes/History.svelte';
   import Import from './routes/Import.svelte';
+  import Search from './routes/Search.svelte';
   import Library from './routes/Library.svelte';
   import Jobs from './routes/Jobs.svelte';
   import Home from './routes/Home.svelte';
@@ -252,6 +253,8 @@
     <History />
   {:else if route.id === 'import'}
     <Import />
+  {:else if route.id === 'search'}
+    <Search />
   {:else if route.id === 'exports'}
     <Exports />
   {:else if route.id === 'library'}

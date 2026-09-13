@@ -2,20 +2,20 @@
 //!
 //! Spec §15.4, §15.9.
 
-use crate::auth::RequireSession;
+use crate::auth::MaybeSession;
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::routing::get;
 use axum::{Json, Router};
-use lorehaven_db::search::{search_in_work, search_works, InWorkMatch, SearchResult};
+use lorehaven_db::search::{search_in_work, search_works_ast, InWorkMatch};
 use lorehaven_domain::ids::WorkId;
 use serde::Deserialize;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/v1/search", get(search))
-        .route("/api/v1/search/in-work/{id}", get(in_work))
+        .route("/search", get(search))
+        .route("/search/in-work/{id}", get(in_work))
 }
 
 #[derive(Debug, Deserialize)]
@@ -32,18 +32,19 @@ fn default_limit() -> i64 {
 
 async fn search(
     State(state): State<AppState>,
-    RequireSession(_user): RequireSession,
+    MaybeSession(session): MaybeSession,
     Query(params): Query<SearchQuery>,
-) -> ApiResult<Json<Vec<SearchResult>>> {
-    let results = search_works(state.db(), &params.q, params.limit)
+) -> ApiResult<Json<serde_json::Value>> {
+    let viewer_id = session.as_ref().map(|s| s.account_id.to_string());
+    let results = search_works_ast(state.db(), &params.q, viewer_id.as_deref(), params.limit)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
-    Ok(Json(results))
+    Ok(Json(serde_json::json!({ "items": results })))
 }
 
 async fn in_work(
     State(state): State<AppState>,
-    RequireSession(_user): RequireSession,
+    MaybeSession(_session): MaybeSession,
     Path(id): Path<String>,
     Query(params): Query<SearchQuery>,
 ) -> ApiResult<Json<Vec<InWorkMatch>>> {

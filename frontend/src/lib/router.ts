@@ -29,6 +29,7 @@ export type RouteId =
   | 'library'
   | 'exports'
   | 'jobs'
+  | 'search'
   | 'admin-jobs'
   | 'planned'
   | 'not-found';
@@ -44,19 +45,13 @@ export interface PlannedRoute {
 export const PLANNED_ROUTES: Record<string, PlannedRoute> = {
   '/discover': {
     title: 'Discover',
-    milestone: 'Milestone 10',
+    milestone: 'Milestone 11',
     summary:
       'Recommendation engines, blind date, and the private taste-influence controls that are off by default per instance.',
   },
-  '/search': {
-    title: 'Search',
-    milestone: 'Milestone 9',
-    summary:
-      'Structured search over characters, relationships, prominence and attributes, with explicit handling of unknown metadata.',
-  },
   '/community': {
     title: 'Community',
-    milestone: 'Milestone 11',
+    milestone: 'Milestone 12',
     summary: 'Comments, forums, groups and messages, with blocks enforced everywhere.',
   },
   '/notifications': {
@@ -84,6 +79,7 @@ const FIXED_ROUTES: Record<string, RouteId> = {
   '/library': 'library',
   '/exports': 'exports',
   '/jobs': 'jobs',
+  '/search': 'search',
   '/admin/jobs': 'admin-jobs',
 };
 

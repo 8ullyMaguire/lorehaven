@@ -1161,6 +1161,79 @@ export function fetchFeedbackInbox(signal?: AbortSignal): Promise<FeedbackInbox>
 }
 
 // ---------------------------------------------------------------------------
+// Search, taxonomy, and tagging (spec §15)
+// ---------------------------------------------------------------------------
+
+/** A single search result. */
+export interface SearchResult {
+  work_id: string;
+  title: string;
+  author_handle: string;
+  word_count: number;
+  score: number;
+}
+
+/** The search result envelope. */
+export interface SearchResultList {
+  items: SearchResult[];
+}
+
+/** Search works using the AST query language. */
+export function searchWorks(
+  query: string,
+  limit = 20,
+  signal?: AbortSignal,
+): Promise<SearchResultList> {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  return apiFetch<SearchResultList>(`/search?${params}`, { signal });
+}
+
+/** Search within a single work. */
+export function searchInWork(
+  workId: string,
+  needle: string,
+  signal?: AbortSignal,
+): Promise<{ pos: number; snippet: string }[]> {
+  const params = new URLSearchParams({ q: needle });
+  return apiFetch<{ pos: number; snippet: string }[]>(
+    `/search/in-work/${encodeURIComponent(workId)}?${params}`,
+    { signal },
+  );
+}
+
+/** A taxonomy node for autocomplete. */
+export interface TaxonomyNode {
+  id: string;
+  kind: string;
+  canonical: string;
+  norm: string;
+  created_at: string;
+}
+
+/** Autocomplete taxonomy nodes. */
+export function autocompleteTaxonomy(
+  kind: string,
+  prefix: string,
+  limit = 20,
+  signal?: AbortSignal,
+): Promise<{ items: TaxonomyNode[] }> {
+  const params = new URLSearchParams({ kind, prefix, limit: String(limit) });
+  return apiFetch<{ items: TaxonomyNode[] }>(`/taxonomy?${params}`, { signal });
+}
+
+/** Tag a work with a taxonomy node. */
+export function tagWork(
+  workId: string,
+  nodeId: string,
+  weight = 0,
+): Promise<unknown> {
+  return apiFetch(`/works/${encodeURIComponent(workId)}/tags`, {
+    method: 'POST',
+    body: JSON.stringify({ node_id: nodeId, weight }),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // The job queue (spec §10.1)
 // ---------------------------------------------------------------------------
 
