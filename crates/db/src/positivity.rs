@@ -687,7 +687,7 @@ pub async fn record_comment_classification(
          VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT (comment_id) DO UPDATE SET class = excluded.class, confidence_bp = excluded.confidence_bp, signals = excluded.signals, outcome = excluded.outcome, classified_at = excluded.classified_at",
         "INSERT INTO comment_classifications (comment_id, class, confidence_bp, signals, outcome, classified_at)
-         VALUES ($1, ?, ?, ?, ?, ?)
+         VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (comment_id) DO UPDATE SET class = excluded.class, confidence_bp = excluded.confidence_bp, signals = excluded.signals, outcome = excluded.outcome, classified_at = excluded.classified_at",
     );
     match db.backend() {
