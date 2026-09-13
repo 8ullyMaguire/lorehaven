@@ -1120,17 +1120,22 @@ empty/loading/error states.
 
 ### Milestone 11 — Discovery, taste profiles, recommendations
 
-**Built and locally tested.** The discovery pipeline (spec §16) serves
-public recommendations to anonymous readers and personalized
-recommendations to signed-in readers based on taste profiles derived
-from reading history. Taste profiles are owner-only and clearable.
+**Built and locally tested, with one honest gap.** The discovery feed
+(spec §16.1–16.2) serves public recommendations to anonymous readers
+and personalized recommendations to signed-in readers based on taste
+profiles derived from reading history. Taste profiles are owner-only
+and clearable. The gap: §16.1's "multiple engines, blended" is only
+half-real — the domain `blend` function exists and is unit-tested, but
+no engines feed it and nothing calls it, so the feed is a single
+query, not a blend. M11-01 is recorded `partially-implemented` for
+that reason.
 
 Evidence: `crates/app/tests/milestone_11.rs` (8 tests) against the real
 router and a real SQLite file.
 
 | # | Acceptance criterion (spec §16) | Status | Evidence |
 |---|---|---|---|
-| 1 | Recommendations from multiple engines blended (§16.1) | Implemented and locally tested | `discovery_returns_public_works_for_anonymous` and `discovery_returns_public_works_for_signed_in` — recommendations are returned as work IDs. Domain `blend` function merges engine results deterministically. |
+| 1 | Recommendations from multiple engines blended (§16.1) | Partially implemented | `discovery_returns_public_works_for_anonymous` and `discovery_returns_public_works_for_signed_in` — recommendations are returned as work IDs from a single feed query. The domain `blend` function merges engine results deterministically and is unit-tested, but no engines are implemented and nothing calls it yet. |
 | 2 | Private taste profile derived from reader behaviour (§16.2) | Implemented and locally tested | `taste_profile_empty_initially` — profile starts empty. `taste_profile_clear_returns_empty` — clearing zeroes signals without deleting history. `taste_profile_requires_session` — profile is owner-only. |
 | 3 | Operator taste influence as ranking multipliers (§16.3) | Planned | Schema exists; operator route not built. |
 | 4 | Diversity mechanisms (§16.4) | Planned | Configuration planned; not implemented. |

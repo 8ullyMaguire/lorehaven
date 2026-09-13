@@ -252,10 +252,14 @@ async fn taste_profile_clear_returns_empty() {
     let mut client = harness.client();
     register(&mut client, "reader@example.com", "Reader").await;
     // Recompute first (will be empty if no history)
-    let (status, _) = client.post("/api/v1/discovery/taste-profile/recompute", json!({})).await;
+    let (status, _) = client
+        .post("/api/v1/discovery/taste-profile/recompute", json!({}))
+        .await;
     assert_eq!(status, StatusCode::OK, "recompute");
     // Clear
-    let (status, body) = client.post("/api/v1/discovery/taste-profile/clear", json!({})).await;
+    let (status, body) = client
+        .post("/api/v1/discovery/taste-profile/clear", json!({}))
+        .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["status"], "cleared", "{body}");
     // Now should be empty

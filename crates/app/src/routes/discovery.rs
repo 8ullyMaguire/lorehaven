@@ -15,7 +15,10 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/discovery", get(get_discovery))
         .route("/discovery/taste-profile", get(get_taste_profile))
-        .route("/discovery/taste-profile/recompute", post(recompute_taste_profile))
+        .route(
+            "/discovery/taste-profile/recompute",
+            post(recompute_taste_profile),
+        )
         .route("/discovery/taste-profile/clear", post(clear_taste_profile))
 }
 
@@ -27,7 +30,8 @@ async fn get_discovery(
     let work_ids = match session {
         Some(s) => {
             let account_id = s.account_id.to_string();
-            lorehaven_db::discovery::personalized_recommendations(state.db(), &account_id, limit).await
+            lorehaven_db::discovery::personalized_recommendations(state.db(), &account_id, limit)
+                .await
         }
         None => lorehaven_db::discovery::public_recommendations(state.db(), limit).await,
     }
