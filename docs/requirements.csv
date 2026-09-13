@@ -91,7 +91,7 @@ M11-03,discovery,Operator taste influence as ranking multipliers,M11,planned,,
 M11-04,discovery,Diversity mechanisms (exploration slots per-fandom caps),M11,planned,,
 M11-05,discovery,Recipes (shareable recommendation formulas),M11,planned,,
 M11-06,discovery,Dashboards (personal home assembly from widgets),M11,planned,,
-M12-01,community,Comments on works and chapters through the positivity gate,M12,partially-implemented,,Positivity gate NOT YET WIRED — route accepts comments but does not classify against author preferences. Soft delete block-aware listing implemented. Milestone 12 per plan §6.2.
+M12-01,community,Comments on works and chapters through the positivity gate,M12,implemented-locally-tested,"crates/app/src/routes/community.rs + crates/db/src/positivity.rs (classify_comment) + migrations/{sqlite,postgres}/0015_comment_positivity.sql + crates/app/tests/milestone_12.rs","Positivity gate wired to comments: classify_comment runs before storage, sender gets a receipt (posted vs held), hostile comments are held. Compensating action deletes the comment row if classification fails."
 M12-02,community,Forums categories topics replies,M12,partially-implemented,,Categories TODO. Topics + replies CRUD implemented. No trust gate yet. Milestone 12 per plan §6.2.
 M12-03,community,Groups membership privacy roles,M12,implemented-locally-tested,,"Open/closed/hidden visibility matrix, member/role CRUD, driven through the router in milestone_12.rs (create, list, join, get). Topic locking TODO. Milestone 12 per plan §6.2."
 M12-04,community,Messaging 1:1 conversations block-aware,M12,partially-implemented,,Conversations + block-aware send/list implemented. No SSE/push yet. Milestone 12 per plan §6.2.

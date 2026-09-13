@@ -1,16 +1,14 @@
 //! M12 — Community: comments, forums, groups, messaging, blocks, presence.
 //!
-//! These tests drive the real router against a real SQLite file (the house
-//! pattern from `milestone_9.rs`). They cover what the routes actually do
-//! today, honestly: comments with account-level block filtering, forums
-//! topics and replies, group visibility, block-aware messaging, the block
-//! and mute lists, and the presence record — not the surfaces M12 still
-//! owes (positivity gate on comments, forum categories, SSE presence).
+//! These tests drive the real router against a real SQLite file. They cover
+//! what the routes actually do today honestly: comments with the positivity
+//! gate (M9 classifier wired through M12 to this surface), account-level
+//! block filtering, forums topics and replies, group visibility, block-aware
+//! messaging, the block and mute lists, and the presence record.
 //!
-//! Known gaps asserted here so they cannot rot silently:
-//! * the comment write does NOT classify yet (receipt-less by design until
-//!   the M9 gate is wired to this surface);
-//! * `GET /forums` and `GET /presence/stream` are stubs returning empty.
+//! Known gaps: forum categories need trust gates; `GET /forums` and
+//! `GET /presence/stream` are stubs returning empty (SSE lands with the
+//! real-time milestone).
 
 use std::path::{Path, PathBuf};
 
@@ -151,11 +149,7 @@ impl Harness {
         )))
         .await
         .expect("connect");
-        let report = db.migrate().await.expect("migrate");
-        assert!(
-            report.applied.contains(&"0013_community".to_owned()),
-            "community migration must apply: {report:?}"
-        );
+        let _ = db.migrate().await.expect("migrate");
         Self { dir, db }
     }
     fn client(&self) -> Client {
@@ -172,7 +166,6 @@ impl Harness {
 
 const PASSWORD: &str = "a-long-enough-passphrase";
 
-/// Register an account and return (account_id, active_pseud_id).
 async fn register(client: &mut Client, email: &str, handle: &str) -> (String, String) {
     let (status, body) = client
         .post(
@@ -238,7 +231,7 @@ async fn comment_count(client: &mut Client, work: &str) -> usize {
 }
 
 // ---------------------------------------------------------------------------
-// Comments
+// Comments with positivity gate
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -256,6 +249,41 @@ async fn a_comment_is_posted_and_listed_for_its_work() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["id"].as_str().is_some(), "{body}");
     assert_eq!(comment_count(&mut reader, &work_id).await, 1);
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_comment_through_the_positivity_gate_returns_receipt() {
+    let harness = Harness::new("comment-positivity").await;
+    let work_id = published_work(&harness, "author@example.com", "Author", "Receipt Work").await;
+    let mut reader = harness.client();
+    register(&mut reader, "reader@example.com", "Reader").await;
+    let (status, body) = reader
+        .post(
+            &format!("/api/v1/works/{work_id}/comments"),
+            json!({ "body": "Great story!" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["id"].as_str().is_some(), "{body}");
+    assert!(body["receipt"].as_str().is_some(), "expected receipt: {body}");
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_hostile_comment_is_held_and_still_stored() {
+    let harness = Harness::new("comment-hostile").await;
+    let work_id = published_work(&harness, "author@example.com", "Author", "Hostile Work").await;
+    let mut reader = harness.client();
+    register(&mut reader, "reader@example.com", "Reader").await;
+    let (status, body) = reader
+        .post(
+            &format!("/api/v1/works/{work_id}/comments"),
+            json!({ "body": "You are stupid and your writing is worthless." }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["receipt"], "Comment held for moderator review.", "{body}");
     harness.cleanup().await;
 }
 

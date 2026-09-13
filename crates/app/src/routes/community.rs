@@ -108,6 +108,22 @@ async fn post_comment(
             "A comment needs some words.",
         )));
     }
+    let work_id: darkhold_domain::WorkId = id
+        .parse()
+        .map_err(|_| ApiError(darkhold_domain::AppError::NotFound { resource: "work" }))?;
+    let author_account = darkhold_db::positivity::author_account_for_work(state.db(), work_id)
+        .await
+        .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
+    let (allow, deny, prefs) = match author_account {
+        Some(author) => {
+            let prefs = darkhold_db::positivity::preferences_for(state.db(), author).await
+                .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
+            let (allow, deny) = darkhold_db::positivity::list_membership(state.db(), author, pseud_id).await
+                .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
+            (allow, deny, prefs)
+        }
+        None => (false, false, darkhold_domain::positivity::FeedbackPreferences::default()),
+    };
     let id = darkhold_db::community::insert_comment(
         state.db(),
         "work",
@@ -118,7 +134,22 @@ async fn post_comment(
     )
     .await
     .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
-    Ok(Json(serde_json::json!({ "id": id })))
+    let stored = match darkhold_db::positivity::classify_comment(
+        state.db(),
+        &id,
+        &body.body,
+        &prefs,
+        allow,
+        deny,
+    ).await {
+        Ok(s) => s,
+        Err(e) => {
+            darkhold_db::community::soft_delete_comment(state.db(), &id, &pseud_id.to_string()).await.ok();
+            return Err(ApiError(darkhold_domain::AppError::Internal(e)));
+        }
+    };
+    let receipt = darkhold_domain::positivity::sender_receipt(stored.outcome);
+    Ok(Json(serde_json::json!({ "id": id, "receipt": receipt })))
 }
 
 async fn delete_comment(
