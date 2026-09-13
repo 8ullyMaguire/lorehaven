@@ -91,12 +91,12 @@ M11-03,discovery,Operator taste influence as ranking multipliers,M11,planned,,
 M11-04,discovery,Diversity mechanisms (exploration slots per-fandom caps),M11,planned,,
 M11-05,discovery,Recipes (shareable recommendation formulas),M11,planned,,
 M11-06,discovery,Dashboards (personal home assembly from widgets),M11,planned,,
-M12-01,community,Comments on works and chapters through the positivity gate,M12,unsupported,,Spec §17.1. Milestone 12 per plan §6.2.
-M12-02,community,Forums categories topics replies,M12,unsupported,,Spec §17.2–17.3. Milestone 12 per plan §6.2.
-M12-03,community,Groups membership privacy roles,M12,unsupported,,Spec §17.4. Milestone 12 per plan §6.2.
-M12-04,community,Messaging 1:1 conversations block-aware,M12,unsupported,,Spec §17.5. Milestone 12 per plan §6.2.
-M12-05,community,Presence online indicators typing states,M12,unsupported,,Spec §17.6. Milestone 12 per plan §6.2.
-M12-06,identity,Block and mute become real on every path,M12,unsupported,,Closes M2-06 debt. Spec §7.2.2. Milestone 12 per plan §6.2.
+M12-01,community,Comments on works and chapters through the positivity gate,M12,partially-implemented,,Positivity gate NOT YET WIRED — route accepts comments but does not classify against author preferences. Soft delete, block-aware listing implemented. Milestone 12 per plan §6.2.
+M12-02,community,Forums categories topics replies,M12,partially-implemented,,Categories TODO. Topics + replies CRUD implemented. No trust gate yet. Milestone 12 per plan §6.2.
+M12-03,community,Groups membership privacy roles,M12,implemented-locatively-tested,,"Open/closed/hidden visibility matrix, member/role CRUD. Locking TODO. Milestone 12 per plan §6.2."
+M12-04,community,Messaging 1:1 conversations block-aware,M12,partially-implemented,,Conversations + block-aware send/list implemented. No SSE/push yet. Milestone 12 per plan §6.2.
+M12-05,community,Presence online indicators typing states,M12,partially-implemented,,DB upsert/fetch implemented. SSE stream NOT YET WIRED (route returns empty). Milestone 12 per plan §6.2.
+M12-06,identity,Block and mute become real on every path,M12,partially-implemented,,Block/mute CRUD + block-aware comment/message filtering implemented. Search/mention enforcement TODO. Closes M2-06 debt partially. Milestone 12 per plan §6.2.
 M13-01,events,Collections challenges and writing events,M13,unsupported,--,Spec §18. Milestone 13 per plan §7.
 M14-01,governance,Trust reports quorum and appeals,M14,unsupported,--,Spec §19. Milestone 14 per plan §8.
 M15-01,economy,Credits fair queues and billing,M15,unsupported,--,Spec §20. Milestone 15 per plan §9.
