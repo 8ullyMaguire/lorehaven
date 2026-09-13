@@ -266,7 +266,10 @@ async fn a_comment_through_the_positivity_gate_returns_receipt() {
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["id"].as_str().is_some(), "{body}");
-    assert!(body["receipt"].as_str().is_some(), "expected receipt: {body}");
+    assert!(
+        body["receipt"].as_str().is_some(),
+        "expected receipt: {body}"
+    );
     harness.cleanup().await;
 }
 
@@ -283,7 +286,18 @@ async fn a_hostile_comment_is_held_and_still_stored() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["receipt"], "Comment held for moderator review.", "{body}");
+    assert_eq!(
+        body["receipt"], "Comment held for moderator review.",
+        "{body}"
+    );
+    // Spec §12.3: held text never surfaces publicly on the work page —
+    // and the sender's own view is a listing too, so it is hidden there
+    // just the same. The row stays stored for moderation.
+    assert_eq!(
+        comment_count(&mut reader, &work_id).await,
+        0,
+        "a held comment is listed nowhere"
+    );
     harness.cleanup().await;
 }
 

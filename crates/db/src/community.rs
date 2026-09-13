@@ -142,16 +142,20 @@ pub async fn list_comments(
             "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at
              FROM comments c
              JOIN pseuds pa ON pa.id = c.author_pseud
+             LEFT JOIN comment_classifications cc ON cc.comment_id = c.id
              WHERE c.subject_type = ?1 AND c.subject_id = ?2 AND c.deleted_at IS NULL AND c.created_at < ?3
                AND pa.account_id NOT IN (SELECT blocked FROM blocks WHERE blocker = ?4 AND (scope = 'all' OR scope = 'comments'))
                AND pa.account_id NOT IN (SELECT blocker FROM blocks WHERE blocked = ?4 AND (scope = 'all' OR scope = 'comments'))
+               AND (cc.outcome IS NULL OR cc.outcome = 'delivered')
              ORDER BY c.created_at DESC LIMIT ?5",
             "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at
              FROM comments c
              JOIN pseuds pa ON pa.id::text = c.author_pseud
+             LEFT JOIN comment_classifications cc ON cc.comment_id = c.id
              WHERE c.subject_type = $1 AND c.subject_id = $2 AND c.deleted_at IS NULL AND c.created_at < $3
                AND pa.account_id NOT IN (SELECT blocked FROM blocks WHERE blocker = $4 AND (scope = 'all' OR scope = 'comments'))
                AND pa.account_id NOT IN (SELECT blocker FROM blocks WHERE blocked = $4 AND (scope = 'all' OR scope = 'comments'))
+               AND (cc.outcome IS NULL OR cc.outcome = 'delivered')
              ORDER BY c.created_at DESC LIMIT $5",
         )
     } else {
@@ -159,16 +163,20 @@ pub async fn list_comments(
             "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at
              FROM comments c
              JOIN pseuds pa ON pa.id = c.author_pseud
+             LEFT JOIN comment_classifications cc ON cc.comment_id = c.id
              WHERE c.subject_type = ?1 AND c.subject_id = ?2 AND c.deleted_at IS NULL
                AND pa.account_id NOT IN (SELECT blocked FROM blocks WHERE blocker = ?3 AND (scope = 'all' OR scope = 'comments'))
                AND pa.account_id NOT IN (SELECT blocker FROM blocks WHERE blocked = ?3 AND (scope = 'all' OR scope = 'comments'))
+               AND (cc.outcome IS NULL OR cc.outcome = 'delivered')
              ORDER BY c.created_at DESC LIMIT ?4",
             "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at
              FROM comments c
              JOIN pseuds pa ON pa.id::text = c.author_pseud
+             LEFT JOIN comment_classifications cc ON cc.comment_id = c.id
              WHERE c.subject_type = $1 AND c.subject_id = $2 AND c.deleted_at IS NULL
                AND pa.account_id NOT IN (SELECT blocked FROM blocks WHERE blocker = $3 AND (scope = 'all' OR scope = 'comments'))
                AND pa.account_id NOT IN (SELECT blocker FROM blocks WHERE blocked = $3 AND (scope = 'all' OR scope = 'comments'))
+               AND (cc.outcome IS NULL OR cc.outcome = 'delivered')
              ORDER BY c.created_at DESC LIMIT $4",
         )
     };

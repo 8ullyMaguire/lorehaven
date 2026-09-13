@@ -687,7 +687,7 @@ pub async fn record_comment_classification(
          VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT (comment_id) DO UPDATE SET class = excluded.class, confidence_bp = excluded.confidence_bp, signals = excluded.signals, outcome = excluded.outcome, classified_at = excluded.classified_at",
         "INSERT INTO comment_classifications (comment_id, class, confidence_bp, signals, outcome, classified_at)
-         VALUES (?::uuid, ?, ?, ?, ?, ?)
+         VALUES ($1, ?, ?, ?, ?, ?)
          ON CONFLICT (comment_id) DO UPDATE SET class = excluded.class, confidence_bp = excluded.confidence_bp, signals = excluded.signals, outcome = excluded.outcome, classified_at = excluded.classified_at",
     );
     match db.backend() {
@@ -724,7 +724,7 @@ pub async fn comment_classification_for(
 ) -> Result<Option<StoredClassification>> {
     let sql = db.sql(
         "SELECT class, confidence_bp, signals, outcome, classified_at FROM comment_classifications WHERE comment_id = ?",
-        "SELECT class, confidence_bp, signals, outcome, classified_at FROM comment_classifications WHERE comment_id = ?::uuid",
+        "SELECT class, confidence_bp, signals, outcome, classified_at FROM comment_classifications WHERE comment_id = $1",
     );
     let row: Option<ClassificationRow> = match db.backend() {
         Backend::Sqlite => {
