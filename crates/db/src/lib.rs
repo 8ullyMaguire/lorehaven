@@ -19,6 +19,7 @@ pub mod collaboration;
 pub mod community;
 pub mod content;
 pub mod discovery;
+pub mod events;
 pub mod exports;
 pub mod identity;
 pub mod imports;

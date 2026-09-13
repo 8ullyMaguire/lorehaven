@@ -4,6 +4,7 @@ pub mod auth;
 pub mod collaborators;
 pub mod community;
 pub mod discovery;
+pub mod events;
 pub mod exports;
 pub mod feedback;
 pub mod health;

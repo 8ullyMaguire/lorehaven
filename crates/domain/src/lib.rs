@@ -6,6 +6,7 @@ pub mod content;
 pub mod discovery;
 pub mod document;
 pub mod error;
+pub mod events;
 pub mod exports;
 pub mod ids;
 pub mod imports;

@@ -393,6 +393,12 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // Events (collections, challenges, requests, wishlists, events) — M13.
+        .merge(classified(
+            routes::events::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Session loading wraps everything under /api/v1 so that the CSRF layer
         // and the limiter installed per subtree can both see who is asking.
         .layer(middleware::from_fn_with_state(
