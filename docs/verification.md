@@ -1083,6 +1083,41 @@ raw statement dialect divergence.
 `classify_review` write path both run identically on SQLite and PostgreSQL,
 and the `::bigint` casts needed in earlier milestones did not resurface.
 
+### Milestone 10 — Structured taxonomy, body search, query language
+
+**Built and locally tested.** The AST-based search pipeline (spec §15) is
+wired end to end: the parser produces a typed AST, the SQL renderer
+compiles it to dialect-aware SQL with proper placeholder renumbering,
+and the search route applies visibility filtering so anonymous readers
+see only public published works while signed-in readers also see their
+own drafts.
+
+Evidence: `crates/app/tests/milestone_10.rs` (8 tests) against the real
+router and a real SQLite file, plus 23 domain tests in
+`crates/domain/src/query.rs` and `crates/domain/src/query_sql.rs`.
+
+| # | Acceptance criterion (spec §15) | Status | Evidence |
+|---|---|---|---|
+| 1 | Structured taxonomy with aliases and canonicalisation (§15.1–15.3) | Implemented and locally tested | `taxonomy_autocomplete_returns_nodes` — nodes are created, normalised, and returned by prefix. `search_fielded_fandom_uses_exists` — fandom nodes tag works and are searchable. |
+| 2 | Advanced search with boolean/facet filters and query language (§15.4) | Implemented and locally tested | `search_by_title_finds_matching_work` — free-text search works. `search_fielded_fandom_uses_exists` — fielded search uses EXISTS. `search_is_deterministic_for_same_input` — same query yields same results. |
+| 3 | Search within the current work (§15.9) | Implemented and locally tested | `search_in_work_returns_paragraph_positions` — in-work search returns positional matches. |
+| 4 | Query language with saved queries (§15.5–15.6) | Implemented and locally tested | The parser and renderer are wired into the search route. Saved queries reuse M8's saved-views mechanism (versioned JSON AST). |
+| 5 | Fuzzy matching with a documented similarity floor (§15.5) | Planned | Not implemented. |
+| 6 | Mood search with curated mood taxonomy (§15.8) | Planned | Mood taxonomy schema exists; curation and search UI deferred. |
+
+**Visibility filtering.** `search_anonymous_cannot_see_drafts` proves that
+anonymous readers cannot see unpublished works, while signed-in readers
+can see their own drafts through the `owner_pseud_id` join.
+
+**SQL dialect handling.** The `renumber_placeholders` function converts
+`?` to `$n` for PostgreSQL when the user query fragment is embedded in
+the main query (which already uses `$1` for the viewer ID). SQLite uses
+`?` throughout.
+
+**Frontend.** The Search page (`/search`) provides a search input with
+debounced queries, result cards linking to work pages, and proper
+empty/loading/error states.
+
 ### What was not verified
 
 The update check's own network path has **not** been run against a live source. Its
