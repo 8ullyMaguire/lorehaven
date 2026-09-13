@@ -399,6 +399,12 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // Governance (reports, moderation, sanctions, appeals, trust) — M14.
+        .merge(classified(
+            routes::governance::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Session loading wraps everything under /api/v1 so that the CSRF layer
         // and the limiter installed per subtree can both see who is asking.
         .layer(middleware::from_fn_with_state(

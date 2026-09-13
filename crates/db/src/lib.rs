@@ -21,6 +21,7 @@ pub mod content;
 pub mod discovery;
 pub mod events;
 pub mod exports;
+pub mod governance;
 pub mod identity;
 pub mod imports;
 pub mod jobs;
