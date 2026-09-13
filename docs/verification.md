@@ -1162,7 +1162,7 @@ for the `comment_classifications` table.
 
 | # | Acceptance criterion (spec §17) | Status | Evidence |
 |---|---|---|---|
-| 1 | Comments through the positivity gate (§17.1) | Implemented and locally tested | `a_comment_through_the_positivity_gate_returns_receipt`, `a_hostile_comment_is_held_and_still_stored` |
+| 1 | Comments through the positivity gate (§17.1) | Implemented and locally tested | `a_comment_through_the_positivity_gate_returns_receipt`, `a_hostile_comment_is_held_and_still_stored` — the held test also asserts the comment never appears in any listing (spec §12.3: held text never surfaces publicly). |
 | 2 | Forums categories topics replies (§17.2–17.3) | Partially implemented | Topics + replies CRUD exists. Categories need trust gates. |
 | 3 | Groups membership privacy roles (§17.4) | Implemented and locally tested | `a_group_is_created_listed_and_joined` — visibility matrix, member/role CRUD |
 | 4 | Messaging block-aware (§17.5) | Partially implemented | Conversations + block-aware send/list. No SSE/push yet. |

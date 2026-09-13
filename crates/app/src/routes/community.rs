@@ -116,13 +116,20 @@ async fn post_comment(
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     let (allow, deny, prefs) = match author_account {
         Some(author) => {
-            let prefs = lorehaven_db::positivity::preferences_for(state.db(), author).await
+            let prefs = lorehaven_db::positivity::preferences_for(state.db(), author)
+                .await
                 .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
-            let (allow, deny) = lorehaven_db::positivity::list_membership(state.db(), author, pseud_id).await
-                .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+            let (allow, deny) =
+                lorehaven_db::positivity::list_membership(state.db(), author, pseud_id)
+                    .await
+                    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
             (allow, deny, prefs)
         }
-        None => (false, false, lorehaven_domain::positivity::FeedbackPreferences::default()),
+        None => (
+            false,
+            false,
+            lorehaven_domain::positivity::FeedbackPreferences::default(),
+        ),
     };
     let id = lorehaven_db::community::insert_comment(
         state.db(),
@@ -141,10 +148,14 @@ async fn post_comment(
         &prefs,
         allow,
         deny,
-    ).await {
+    )
+    .await
+    {
         Ok(s) => s,
         Err(e) => {
-            lorehaven_db::community::soft_delete_comment(state.db(), &id, &pseud_id.to_string()).await.ok();
+            lorehaven_db::community::soft_delete_comment(state.db(), &id, &pseud_id.to_string())
+                .await
+                .ok();
             return Err(ApiError(lorehaven_domain::AppError::Internal(e)));
         }
     };
