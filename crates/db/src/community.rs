@@ -44,7 +44,7 @@ pub async fn insert_comment(
         "INSERT INTO comments (id, subject_type, subject_id, author_pseud, body, body_version, classification_id, created_at, edited_at, deleted_at)
          VALUES (?, ?, ?, ?, ?, 'v1', ?, ?, NULL, NULL)",
         "INSERT INTO comments (id, subject_type, subject_id, author_pseud, body, body_version, classification_id, created_at, edited_at, deleted_at)
-         VALUES ($1::uuid, $2, $3, $4::uuid, $5, 'v1', $6::uuid, $7, NULL, NULL)",
+         VALUES ($1, $2, $3, $4, $5, 'v1', $6, $7, NULL, NULL)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -79,7 +79,7 @@ pub async fn insert_comment(
 pub async fn comment_by_id(db: &Database, comment_id: &str) -> Result<Option<Comment>> {
     let sql = db.sql(
         "SELECT id, subject_type, subject_id, author_pseud, body, created_at, edited_at, deleted_at FROM comments WHERE id = ?",
-        "SELECT id, subject_type, subject_id, author_pseud, body, created_at, edited_at, deleted_at FROM comments WHERE id = $1::uuid",
+        "SELECT id, subject_type, subject_id, author_pseud, body, created_at, edited_at, deleted_at FROM comments WHERE id = $1",
     );
     let row = match db.backend() {
         Backend::Sqlite => sqlx::query_as::<_, CommentRow>(&sql)
@@ -130,35 +130,46 @@ pub async fn list_comments(
     db: &Database,
     subject_type: &str,
     subject_id: &str,
-    viewer_pseud: &str,
+    viewer_account: &str,
     cursor: Option<&str>,
     limit: i64,
 ) -> Result<Vec<Comment>> {
+    // Blocks are account-keyed and comment authors are pseuds, so the filter
+    // resolves each author's account. It is bidirectional: either side of a
+    // block in the comments scope stops seeing the other.
     let sql = if cursor.is_some() {
         db.sql(
-            "SELECT id, subject_type, subject_id, author_pseud, body, created_at, edited_at, deleted_at
-             FROM comments
-             WHERE subject_type = ? AND subject_id = ? AND deleted_at IS NULL AND created_at < ?
-               AND author_pseud NOT IN (SELECT blocked FROM blocks WHERE blocker = ? AND (scope = 'all' OR scope = 'comments'))
-             ORDER BY created_at DESC LIMIT ?",
-            "SELECT id, subject_type, subject_id, author_pseud, body, created_at, edited_at, deleted_at
-             FROM comments
-             WHERE subject_type = $1 AND subject_id = $2 AND deleted_at IS NULL AND created_at < $4
-               AND author_pseud NOT IN (SELECT blocked FROM blocks WHERE blocker = $5 AND (scope = 'all' OR scope = 'comments'))
-             ORDER BY created_at DESC LIMIT $6",
+            "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at
+             FROM comments c
+             JOIN pseuds pa ON pa.id = c.author_pseud
+             WHERE c.subject_type = ?1 AND c.subject_id = ?2 AND c.deleted_at IS NULL AND c.created_at < ?3
+               AND pa.account_id NOT IN (SELECT blocked FROM blocks WHERE blocker = ?4 AND (scope = 'all' OR scope = 'comments'))
+               AND pa.account_id NOT IN (SELECT blocker FROM blocks WHERE blocked = ?4 AND (scope = 'all' OR scope = 'comments'))
+             ORDER BY c.created_at DESC LIMIT ?5",
+            "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at
+             FROM comments c
+             JOIN pseuds pa ON pa.id::text = c.author_pseud
+             WHERE c.subject_type = $1 AND c.subject_id = $2 AND c.deleted_at IS NULL AND c.created_at < $3
+               AND pa.account_id NOT IN (SELECT blocked FROM blocks WHERE blocker = $4 AND (scope = 'all' OR scope = 'comments'))
+               AND pa.account_id NOT IN (SELECT blocker FROM blocks WHERE blocked = $4 AND (scope = 'all' OR scope = 'comments'))
+             ORDER BY c.created_at DESC LIMIT $5",
         )
     } else {
         db.sql(
-            "SELECT id, subject_type, subject_id, author_pseud, body, created_at, edited_at, deleted_at
-             FROM comments
-             WHERE subject_type = ? AND subject_id = ? AND deleted_at IS NULL
-               AND author_pseud NOT IN (SELECT blocked FROM blocks WHERE blocker = ? AND (scope = 'all' OR scope = 'comments'))
-             ORDER BY created_at DESC LIMIT ?",
-            "SELECT id, subject_type, subject_id, author_pseud, body, created_at, edited_at, deleted_at
-             FROM comments
-             WHERE subject_type = $1 AND subject_id = $2 AND deleted_at IS NULL
-               AND author_pseud NOT IN (SELECT blocked FROM blocks WHERE blocker = $4 AND (scope = 'all' OR scope = 'comments'))
-             ORDER BY created_at DESC LIMIT $5",
+            "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at
+             FROM comments c
+             JOIN pseuds pa ON pa.id = c.author_pseud
+             WHERE c.subject_type = ?1 AND c.subject_id = ?2 AND c.deleted_at IS NULL
+               AND pa.account_id NOT IN (SELECT blocked FROM blocks WHERE blocker = ?3 AND (scope = 'all' OR scope = 'comments'))
+               AND pa.account_id NOT IN (SELECT blocker FROM blocks WHERE blocked = ?3 AND (scope = 'all' OR scope = 'comments'))
+             ORDER BY c.created_at DESC LIMIT ?4",
+            "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at
+             FROM comments c
+             JOIN pseuds pa ON pa.id::text = c.author_pseud
+             WHERE c.subject_type = $1 AND c.subject_id = $2 AND c.deleted_at IS NULL
+               AND pa.account_id NOT IN (SELECT blocked FROM blocks WHERE blocker = $3 AND (scope = 'all' OR scope = 'comments'))
+               AND pa.account_id NOT IN (SELECT blocker FROM blocks WHERE blocked = $3 AND (scope = 'all' OR scope = 'comments'))
+             ORDER BY c.created_at DESC LIMIT $4",
         )
     };
     let rows = match db.backend() {
@@ -169,7 +180,7 @@ pub async fn list_comments(
             if let Some(c) = cursor {
                 q = q.bind(c);
             }
-            q.bind(viewer_pseud)
+            q.bind(viewer_account)
                 .bind(limit)
                 .fetch_all(db.sqlite_pool().expect("sqlite"))
                 .await?
@@ -184,7 +195,7 @@ pub async fn list_comments(
             if let Some(c) = cursor {
                 q = q.bind(c);
             }
-            q.bind(viewer_pseud)
+            q.bind(viewer_account)
                 .bind(limit)
                 .fetch_all(db.postgres_pool().expect("postgres"))
                 .await?
@@ -205,7 +216,7 @@ pub async fn soft_delete_comment(
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "UPDATE comments SET deleted_at = ?, body = '[deleted]' WHERE id = ? AND author_pseud = ? AND deleted_at IS NULL",
-        "UPDATE comments SET deleted_at = ?, body = '[deleted]' WHERE id = $1::uuid AND author_pseud = $2::uuid AND deleted_at IS NULL",
+        "UPDATE comments SET deleted_at = ?, body = '[deleted]' WHERE id = $1 AND author_pseud = $2 AND deleted_at IS NULL",
     );
     let rows = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
@@ -239,7 +250,7 @@ pub async fn is_blocked(
 ) -> Result<bool> {
     let sql = db.sql(
         "SELECT 1 FROM blocks WHERE blocker = ? AND blocked = ? AND (scope = 'all' OR scope = ?)",
-        "SELECT 1 FROM blocks WHERE blocker = $1::uuid AND blocked = $2::uuid AND (scope = 'all' OR scope = $3)",
+        "SELECT 1 FROM blocks WHERE blocker = $1 AND blocked = $2 AND (scope = 'all' OR scope = $3)",
     );
     let row: Option<(i64,)> = match db.backend() {
         Backend::Sqlite => {
@@ -266,7 +277,7 @@ pub async fn is_blocked(
 pub async fn is_muted(db: &Database, muter: &str, muted: &str) -> Result<bool> {
     let sql = db.sql(
         "SELECT 1 FROM mutes WHERE muter = ? AND muted = ?",
-        "SELECT 1 FROM mutes WHERE muter = $1::uuid AND muted = $2::uuid",
+        "SELECT 1 FROM mutes WHERE muter = $1 AND muted = $2",
     );
     let row: Option<(i64,)> = match db.backend() {
         Backend::Sqlite => {
@@ -288,6 +299,69 @@ pub async fn is_muted(db: &Database, muter: &str, muted: &str) -> Result<bool> {
 }
 
 /// Insert a block.
+/// A block row as the owner sees it.
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+pub struct BlockRow {
+    pub blocked: String,
+    pub scope: String,
+    pub note: Option<String>,
+    pub created_at: String,
+}
+
+/// The caller's blocks. A list, never another account's.
+pub async fn list_blocks(db: &Database, blocker: &str) -> Result<Vec<BlockRow>> {
+    let sql = db.sql(
+        "SELECT blocked, scope, note, created_at FROM blocks WHERE blocker = ? ORDER BY created_at DESC",
+        "SELECT blocked, scope, note, created_at FROM blocks WHERE blocker = $1 ORDER BY created_at DESC",
+    );
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(blocker)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(blocker)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(rows)
+}
+
+/// A mute row as the owner sees it.
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+pub struct MuteRow {
+    pub muted: String,
+    pub until: Option<String>,
+    pub created_at: String,
+}
+
+/// The caller's mutes. A list, never another account's.
+pub async fn list_mutes(db: &Database, muter: &str) -> Result<Vec<MuteRow>> {
+    let sql = db.sql(
+        "SELECT muted, until, created_at FROM mutes WHERE muter = ? ORDER BY created_at DESC",
+        "SELECT muted, until, created_at FROM mutes WHERE muter = $1 ORDER BY created_at DESC",
+    );
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(muter)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(muter)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(rows)
+}
+
 pub async fn insert_block(
     db: &Database,
     blocker: &str,
@@ -298,7 +372,7 @@ pub async fn insert_block(
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "INSERT INTO blocks (blocker, blocked, scope, created_at, note) VALUES (?, ?, ?, ?, ?)",
-        "INSERT INTO blocks (blocker, blocked, scope, created_at, note) VALUES ($1::uuid, $2::uuid, $3, $4, $5)",
+        "INSERT INTO blocks (blocker, blocked, scope, created_at, note) VALUES ($1, $2, $3, $4, $5)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -329,7 +403,7 @@ pub async fn insert_block(
 pub async fn delete_block(db: &Database, blocker: &str, blocked: &str) -> Result<bool> {
     let sql = db.sql(
         "DELETE FROM blocks WHERE blocker = ? AND blocked = ?",
-        "DELETE FROM blocks WHERE blocker = $1::uuid AND blocked = $2::uuid",
+        "DELETE FROM blocks WHERE blocker = $1 AND blocked = $2",
     );
     let rows = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
@@ -358,7 +432,7 @@ pub async fn insert_mute(
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "INSERT INTO mutes (muter, muted, until, created_at) VALUES (?, ?, ?, ?)",
-        "INSERT INTO mutes (muter, muted, until, created_at) VALUES ($1::uuid, $2::uuid, $3, $4)",
+        "INSERT INTO mutes (muter, muted, until, created_at) VALUES ($1, $2, $3, $4)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -387,7 +461,7 @@ pub async fn insert_mute(
 pub async fn delete_mute(db: &Database, muter: &str, muted: &str) -> Result<bool> {
     let sql = db.sql(
         "DELETE FROM mutes WHERE muter = ? AND muted = ?",
-        "DELETE FROM mutes WHERE muter = $1::uuid AND muted = $2::uuid",
+        "DELETE FROM mutes WHERE muter = $1 AND muted = $2",
     );
     let rows = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
@@ -426,7 +500,7 @@ pub async fn create_group(db: &Database, name: &str, privacy: &str, owner: &str)
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "INSERT INTO groups (id, name, privacy, owner, created_at) VALUES (?, ?, ?, ?, ?)",
-        "INSERT INTO groups (id, name, privacy, owner, created_at) VALUES ($1::uuid, $2, $3, $4::uuid, $5)",
+        "INSERT INTO groups (id, name, privacy, owner, created_at) VALUES ($1, $2, $3, $4, $5)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -457,7 +531,7 @@ pub async fn create_group(db: &Database, name: &str, privacy: &str, owner: &str)
 pub async fn group_by_id(db: &Database, group_id: &str) -> Result<Option<Group>> {
     let sql = db.sql(
         "SELECT id, name, privacy, owner, created_at FROM groups WHERE id = ?",
-        "SELECT id, name, privacy, owner, created_at FROM groups WHERE id = $1::uuid",
+        "SELECT id, name, privacy, owner, created_at FROM groups WHERE id = $1",
     );
     let row = match db.backend() {
         Backend::Sqlite => sqlx::query_as::<_, GroupRow>(&sql)
@@ -496,11 +570,7 @@ impl From<GroupRow> for Group {
 }
 
 /// List groups visible to a viewer (hidden groups are excluded for non-members).
-pub async fn list_groups(
-    db: &Database,
-    viewer_account: &str,
-    limit: i64,
-) -> Result<Vec<Group>> {
+pub async fn list_groups(db: &Database, viewer_account: &str, limit: i64) -> Result<Vec<Group>> {
     let sql = db.sql(
         "SELECT g.id, g.name, g.privacy, g.owner, g.created_at
          FROM groups g
@@ -511,8 +581,8 @@ pub async fn list_groups(
         "SELECT g.id, g.name, g.privacy, g.owner, g.created_at
          FROM groups g
          WHERE g.privacy != 'hidden'
-            OR g.owner = $1::uuid
-            OR EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = g.id AND gm.account = $2::uuid)
+            OR g.owner = $1
+            OR EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = g.id AND gm.account = $2)
          ORDER BY g.created_at DESC LIMIT $3",
     );
     let rows = match db.backend() {
@@ -548,7 +618,7 @@ pub async fn add_group_member(
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "INSERT INTO group_members (group_id, account, role, joined_at) VALUES (?, ?, ?, ?)",
-        "INSERT INTO group_members (group_id, account, role, joined_at) VALUES ($1::uuid, $2::uuid, $3, $4)",
+        "INSERT INTO group_members (group_id, account, role, joined_at) VALUES ($1, $2, $3, $4)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -574,14 +644,10 @@ pub async fn add_group_member(
 }
 
 /// Get a member's role in a group.
-pub async fn member_role(
-    db: &Database,
-    group_id: &str,
-    account: &str,
-) -> Result<Option<String>> {
+pub async fn member_role(db: &Database, group_id: &str, account: &str) -> Result<Option<String>> {
     let sql = db.sql(
         "SELECT role FROM group_members WHERE group_id = ? AND account = ?",
-        "SELECT role FROM group_members WHERE group_id = $1::uuid AND account = $2::uuid",
+        "SELECT role FROM group_members WHERE group_id = $1 AND account = $2",
     );
     let row: Option<(String,)> = match db.backend() {
         Backend::Sqlite => {
@@ -611,7 +677,7 @@ pub async fn update_member_role(
 ) -> Result<bool> {
     let sql = db.sql(
         "UPDATE group_members SET role = ? WHERE group_id = ? AND account = ?",
-        "UPDATE group_members SET role = $1 WHERE group_id = $2::uuid AND account = $3::uuid",
+        "UPDATE group_members SET role = $1 WHERE group_id = $2 AND account = $3",
     );
     let rows = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
@@ -633,14 +699,10 @@ pub async fn update_member_role(
 }
 
 /// Remove a member from a group.
-pub async fn remove_group_member(
-    db: &Database,
-    group_id: &str,
-    account: &str,
-) -> Result<bool> {
+pub async fn remove_group_member(db: &Database, group_id: &str, account: &str) -> Result<bool> {
     let sql = db.sql(
         "DELETE FROM group_members WHERE group_id = ? AND account = ?",
-        "DELETE FROM group_members WHERE group_id = $1::uuid AND account = $2::uuid",
+        "DELETE FROM group_members WHERE group_id = $1 AND account = $2",
     );
     let rows = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
@@ -675,6 +737,31 @@ pub struct ForumTopic {
     pub locked: bool,
 }
 
+/// Whether a forum category exists. `create_topic` refuses dangling
+/// topics: the schema deliberately carries no foreign key (SQLite cannot
+/// add one by ALTER), so the check lives here where every writer passes.
+pub async fn category_exists(db: &Database, category_id: &str) -> Result<bool> {
+    let sql = db.sql(
+        "SELECT 1 FROM forum_categories WHERE id = ?",
+        "SELECT 1 FROM forum_categories WHERE id = $1",
+    );
+    let found: Option<i64> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar(&sql)
+                .bind(category_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar(&sql)
+                .bind(category_id)
+                .fetch_optional(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(found.is_some())
+}
+
 /// Create a forum topic.
 pub async fn create_topic(
     db: &Database,
@@ -686,7 +773,7 @@ pub async fn create_topic(
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "INSERT INTO forum_topics (id, category_id, author_pseud, title, created_at, last_post_at, locked) VALUES (?, ?, ?, ?, ?, ?, 0)",
-        "INSERT INTO forum_topics (id, category_id, author_pseud, title, created_at, last_post_at, locked) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $5, 0)",
+        "INSERT INTO forum_topics (id, category_id, author_pseud, title, created_at, last_post_at, locked) VALUES ($1, $2, $3, $4, $5, $5, 0)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -718,7 +805,7 @@ pub async fn create_topic(
 pub async fn topic_by_id(db: &Database, topic_id: &str) -> Result<Option<ForumTopic>> {
     let sql = db.sql(
         "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked FROM forum_topics WHERE id = ?",
-        "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked FROM forum_topics WHERE id = $1::uuid",
+        "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked::int::bigint AS locked FROM forum_topics WHERE id = $1",
     );
     let row = match db.backend() {
         Backend::Sqlite => sqlx::query_as::<_, ForumTopicRow>(&sql)
@@ -771,7 +858,7 @@ pub async fn create_post(
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "INSERT INTO forum_posts (id, topic_id, author_pseud, body, created_at, deleted_at) VALUES (?, ?, ?, ?, ?, NULL)",
-        "INSERT INTO forum_posts (id, topic_id, author_pseud, body, created_at, deleted_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, NULL)",
+        "INSERT INTO forum_posts (id, topic_id, author_pseud, body, created_at, deleted_at) VALUES ($1, $2, $3, $4, $5, NULL)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -808,12 +895,12 @@ pub async fn list_posts(
     let sql = if cursor.is_some() {
         db.sql(
             "SELECT id, topic_id, author_pseud, body, created_at, deleted_at FROM forum_posts WHERE topic_id = ? AND deleted_at IS NULL AND created_at > ? ORDER BY created_at ASC LIMIT ?",
-            "SELECT id, topic_id, author_pseud, body, created_at, deleted_at FROM forum_posts WHERE topic_id = $1::uuid AND deleted_at IS NULL AND created_at > $2 ORDER BY created_at ASC LIMIT $3",
+            "SELECT id, topic_id, author_pseud, body, created_at, deleted_at FROM forum_posts WHERE topic_id = $1 AND deleted_at IS NULL AND created_at > $2 ORDER BY created_at ASC LIMIT $3",
         )
     } else {
         db.sql(
             "SELECT id, topic_id, author_pseud, body, created_at, deleted_at FROM forum_posts WHERE topic_id = ? AND deleted_at IS NULL ORDER BY created_at ASC LIMIT ?",
-            "SELECT id, topic_id, author_pseud, body, created_at, deleted_at FROM forum_posts WHERE topic_id = $1::uuid AND deleted_at IS NULL ORDER BY created_at ASC LIMIT $2",
+            "SELECT id, topic_id, author_pseud, body, created_at, deleted_at FROM forum_posts WHERE topic_id = $1 AND deleted_at IS NULL ORDER BY created_at ASC LIMIT $2",
         )
     };
     let rows = match db.backend() {
@@ -888,7 +975,7 @@ pub async fn create_conversation(db: &Database) -> Result<String> {
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "INSERT INTO conversations (id, created_at) VALUES (?, ?)",
-        "INSERT INTO conversations (id, created_at) VALUES ($1::uuid, $2)",
+        "INSERT INTO conversations (id, created_at) VALUES ($1, $2)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -913,7 +1000,7 @@ pub async fn create_conversation(db: &Database) -> Result<String> {
 pub async fn add_participant(db: &Database, conversation_id: &str, account: &str) -> Result<()> {
     let sql = db.sql(
         "INSERT INTO conversation_participants (conversation_id, account, last_read_at, muted_until) VALUES (?, ?, NULL, NULL)",
-        "INSERT INTO conversation_participants (conversation_id, account, last_read_at, muted_until) VALUES ($1::uuid, $2::uuid, NULL, NULL)",
+        "INSERT INTO conversation_participants (conversation_id, account, last_read_at, muted_until) VALUES ($1, $2, NULL, NULL)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -935,14 +1022,10 @@ pub async fn add_participant(db: &Database, conversation_id: &str, account: &str
 }
 
 /// Check if an account is a participant in a conversation.
-pub async fn is_participant(
-    db: &Database,
-    conversation_id: &str,
-    account: &str,
-) -> Result<bool> {
+pub async fn is_participant(db: &Database, conversation_id: &str, account: &str) -> Result<bool> {
     let sql = db.sql(
         "SELECT 1 FROM conversation_participants WHERE conversation_id = ? AND account = ?",
-        "SELECT 1 FROM conversation_participants WHERE conversation_id = $1::uuid AND account = $2::uuid",
+        "SELECT 1 FROM conversation_participants WHERE conversation_id = $1 AND account = $2",
     );
     let row: Option<(i64,)> = match db.backend() {
         Backend::Sqlite => {
@@ -974,7 +1057,7 @@ pub async fn send_message(
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "INSERT INTO messages (id, conversation_id, sender, body, sent_at, deleted_at) VALUES (?, ?, ?, ?, ?, NULL)",
-        "INSERT INTO messages (id, conversation_id, sender, body, sent_at, deleted_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, NULL)",
+        "INSERT INTO messages (id, conversation_id, sender, body, sent_at, deleted_at) VALUES ($1, $2, $3, $4, $5, NULL)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -1011,31 +1094,37 @@ pub async fn list_messages(
     cursor: Option<&str>,
     limit: i64,
 ) -> Result<Vec<Message>> {
+    // Bidirectional like the comment filter: a block in the messages scope
+    // hides the other side's messages from the viewer and vice versa.
     let sql = if cursor.is_some() {
         db.sql(
             "SELECT id, conversation_id, sender, body, sent_at, deleted_at
              FROM messages
-             WHERE conversation_id = ? AND deleted_at IS NULL AND sent_at > ?
-               AND sender NOT IN (SELECT blocked FROM blocks WHERE blocker = ? AND (scope = 'all' OR scope = 'messages'))
-             ORDER BY sent_at ASC LIMIT ?",
+             WHERE conversation_id = ?1 AND deleted_at IS NULL AND sent_at > ?2
+               AND sender NOT IN (SELECT blocked FROM blocks WHERE blocker = ?3 AND (scope = 'all' OR scope = 'messages'))
+               AND sender NOT IN (SELECT blocker FROM blocks WHERE blocked = ?3 AND (scope = 'all' OR scope = 'messages'))
+             ORDER BY sent_at ASC LIMIT ?4",
             "SELECT id, conversation_id, sender, body, sent_at, deleted_at
              FROM messages
-             WHERE conversation_id = $1::uuid AND deleted_at IS NULL AND sent_at > $3
-               AND sender NOT IN (SELECT blocked FROM blocks WHERE blocker = $5 AND (scope = 'all' OR scope = 'messages'))
-             ORDER BY sent_at ASC LIMIT $6",
+             WHERE conversation_id = $1 AND deleted_at IS NULL AND sent_at > $2
+               AND sender NOT IN (SELECT blocked FROM blocks WHERE blocker = $3 AND (scope = 'all' OR scope = 'messages'))
+               AND sender NOT IN (SELECT blocker FROM blocks WHERE blocked = $3 AND (scope = 'all' OR scope = 'messages'))
+             ORDER BY sent_at ASC LIMIT $4",
         )
     } else {
         db.sql(
             "SELECT id, conversation_id, sender, body, sent_at, deleted_at
              FROM messages
-             WHERE conversation_id = ? AND deleted_at IS NULL
-               AND sender NOT IN (SELECT blocked FROM blocks WHERE blocker = ? AND (scope = 'all' OR scope = 'messages'))
-             ORDER BY sent_at ASC LIMIT ?",
+             WHERE conversation_id = ?1 AND deleted_at IS NULL
+               AND sender NOT IN (SELECT blocked FROM blocks WHERE blocker = ?2 AND (scope = 'all' OR scope = 'messages'))
+               AND sender NOT IN (SELECT blocker FROM blocks WHERE blocked = ?2 AND (scope = 'all' OR scope = 'messages'))
+             ORDER BY sent_at ASC LIMIT ?3",
             "SELECT id, conversation_id, sender, body, sent_at, deleted_at
              FROM messages
-             WHERE conversation_id = $1::uuid AND deleted_at IS NULL
-               AND sender NOT IN (SELECT blocked FROM blocks WHERE blocker = $4 AND (scope = 'all' OR scope = 'messages'))
-             ORDER BY sent_at ASC LIMIT $5",
+             WHERE conversation_id = $1 AND deleted_at IS NULL
+               AND sender NOT IN (SELECT blocked FROM blocks WHERE blocker = $2 AND (scope = 'all' OR scope = 'messages'))
+               AND sender NOT IN (SELECT blocker FROM blocks WHERE blocked = $2 AND (scope = 'all' OR scope = 'messages'))
+             ORDER BY sent_at ASC LIMIT $3",
         )
     };
     let rows = match db.backend() {
@@ -1102,11 +1191,6 @@ impl From<MessageRow> for Message {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Presence
-// ---------------------------------------------------------------------------
-
-/// Upsert a presence row (opt-in, last-seen, typing).
 pub async fn upsert_presence(
     db: &Database,
     account: &str,
@@ -1114,22 +1198,19 @@ pub async fn upsert_presence(
     typing_until: Option<&str>,
     enabled: bool,
 ) -> Result<()> {
+    let enabled_int = i64::from(enabled);
     let sql = db.sql(
         "INSERT INTO presence (account, last_seen_at, typing_until, enabled)
          VALUES (?, ?, ?, ?)
-         ON CONFLICT(account) DO UPDATE SET last_seen_at = ?, typing_until = ?, enabled = ?",
+         ON CONFLICT(account) DO UPDATE SET last_seen_at = excluded.last_seen_at, typing_until = excluded.typing_until, enabled = excluded.enabled",
         "INSERT INTO presence (account, last_seen_at, typing_until, enabled)
-         VALUES ($1::uuid, $2, $3, $4)
-         ON CONFLICT(account) DO UPDATE SET last_seen_at = $5, typing_until = $6, enabled = $7",
+         VALUES ($1, $2, $3, $4::int::boolean)
+         ON CONFLICT(account) DO UPDATE SET last_seen_at = excluded.last_seen_at, typing_until = excluded.typing_until, enabled = excluded.enabled",
     );
-    let enabled_int = if enabled { 1 } else { 0 };
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query(&sql)
                 .bind(account)
-                .bind(last_seen_at)
-                .bind(typing_until)
-                .bind(enabled_int)
                 .bind(last_seen_at)
                 .bind(typing_until)
                 .bind(enabled_int)
@@ -1139,9 +1220,6 @@ pub async fn upsert_presence(
         Backend::Postgres => {
             sqlx::query(&sql)
                 .bind(account)
-                .bind(last_seen_at)
-                .bind(typing_until)
-                .bind(enabled_int)
                 .bind(last_seen_at)
                 .bind(typing_until)
                 .bind(enabled_int)
@@ -1159,7 +1237,7 @@ pub async fn presence_for(
 ) -> Result<Option<(String, Option<String>, bool)>> {
     let sql = db.sql(
         "SELECT last_seen_at, typing_until, enabled FROM presence WHERE account = ?",
-        "SELECT last_seen_at, typing_until, enabled FROM presence WHERE account = $1::uuid",
+        "SELECT last_seen_at, typing_until, enabled::int::bigint AS enabled FROM presence WHERE account = $1",
     );
     let row: Option<(String, Option<String>, i64)> = match db.backend() {
         Backend::Sqlite => {
@@ -1185,7 +1263,7 @@ pub async fn conversation_participants(
 ) -> Result<Vec<String>> {
     let sql = db.sql(
         "SELECT account FROM conversation_participants WHERE conversation_id = ?",
-        "SELECT account FROM conversation_participants WHERE conversation_id = $1::uuid",
+        "SELECT account FROM conversation_participants WHERE conversation_id = $1",
     );
     let rows: Vec<(String,)> = match db.backend() {
         Backend::Sqlite => {

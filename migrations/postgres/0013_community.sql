@@ -1,3 +1,9 @@
+-- Drop the inert placeholder tables from migration 0001: no code ever wrote
+-- them, and 0013 replaces them with the real community schema (twin of the
+-- SQLite file, whose header states the design).
+DROP TABLE IF EXISTS mutes;
+DROP TABLE IF EXISTS blocks;
+
 CREATE TABLE comments (
     id TEXT PRIMARY KEY,
     subject_type TEXT NOT NULL,
