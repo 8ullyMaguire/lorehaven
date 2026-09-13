@@ -1147,6 +1147,34 @@ personalized recommendations based on work tags from their reading
 history. Readers without a taste profile fall back to public
 recommendations.
 
+### Milestone 12 — Community: comments, forums, groups, messaging, blocks
+
+**Partially implemented.** The positivity gate (M9 classifier) is now wired
+to work and chapter comments: `classify_comment` runs before storage,
+the sender receives a receipt ("Comment posted." vs "Comment held for
+moderator review.") but never the author's preference state. Hostile
+comments are held. If classification fails, the comment row is deleted
+as a compensating action.
+
+Evidence: `crates/app/tests/milestone_12.rs` (13 tests) against the real
+router and a real SQLite file, plus migration `0015_comment_positivity.sql`
+for the `comment_classifications` table.
+
+| # | Acceptance criterion (spec §17) | Status | Evidence |
+|---|---|---|---|
+| 1 | Comments through the positivity gate (§17.1) | Implemented and locally tested | `a_comment_through_the_positivity_gate_returns_receipt`, `a_hostile_comment_is_held_and_still_stored` |
+| 2 | Forums categories topics replies (§17.2–17.3) | Partially implemented | Topics + replies CRUD exists. Categories need trust gates. |
+| 3 | Groups membership privacy roles (§17.4) | Implemented and locally tested | `a_group_is_created_listed_and_joined` — visibility matrix, member/role CRUD |
+| 4 | Messaging block-aware (§17.5) | Partially implemented | Conversations + block-aware send/list. No SSE/push yet. |
+| 5 | Presence online indicators (§17.6) | Partially implemented | DB upsert/fetch. SSE stream is a stub. |
+| 6 | Block/mute become real (§7.2.2) | Partially implemented | Block/mute CRUD + filtering on comments/messages. Search/mention enforcement TODO. |
+
+**Positivity gate design.** The gate reuses the existing M9 classifier
+(`classify`) and delivery resolver (`resolve_delivery`) unchanged — the
+same rule matrix applies to comments as to reviews. The `receipt` field
+is the only sender-visible signal; the classification details and the
+author's preference state stay server-side.
+
 ### What was not verified
 
 The update check's own network path has **not** been run against a live source. Its
