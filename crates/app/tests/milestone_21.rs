@@ -342,7 +342,7 @@ async fn a_signed_in_caller_reaches_the_monetization_contracts() {
     assert_eq!(status, StatusCode::OK);
 
     let (status, _) = client.get("/api/v1/me/gifts").await;
-    assert_eq!(status, StatusCode::OK, "authenticated caller can list gifts");
+    assert_eq!(status, StatusCode::OK);
 
     fx.cleanup().await;
 }
@@ -371,6 +371,19 @@ async fn monetization_earnings_endpoint_is_implemented() {
     let (status, body) = client.get("/api/v1/me/earnings").await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body, json!({ "earnings": [] }));
+
+    fx.cleanup().await;
+}
+
+#[tokio::test]
+async fn monetization_purchase_endpoint_is_implemented() {
+    let fx = Fixture::new("money-purchase").await;
+    let mut client = fx.client();
+    register(&mut client, "m21-buyer@example.com", "m21buyer").await;
+
+    // Purchasing a non-existent work returns NotFound.
+    let (status, _) = client.post("/api/v1/works/0189dc5a-4c81-7120-8200-4758243e9e6a/purchase", json!({})).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 
     fx.cleanup().await;
 }
