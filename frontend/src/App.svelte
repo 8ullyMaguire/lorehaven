@@ -5,12 +5,14 @@
   import Select from './lib/components/Select.svelte';
   import Account from './routes/Account.svelte';
   import AdminJobs from './routes/AdminJobs.svelte';
+  import Community from './routes/Community.svelte';
+  import Discover from './routes/Discover.svelte';
   import Exports from './routes/Exports.svelte';
   import History from './routes/History.svelte';
   import Import from './routes/Import.svelte';
-  import Search from './routes/Search.svelte';
-  import Library from './routes/Library.svelte';
   import Jobs from './routes/Jobs.svelte';
+  import Library from './routes/Library.svelte';
+  import Notifications from './routes/Notifications.svelte';
   import Home from './routes/Home.svelte';
   import NotFound from './routes/NotFound.svelte';
   import PasswordReset from './routes/PasswordReset.svelte';
@@ -19,6 +21,7 @@
   import Pseuds from './routes/Pseuds.svelte';
   import Reader from './routes/Reader.svelte';
   import Register from './routes/Register.svelte';
+  import Search from './routes/Search.svelte';
   import SignIn from './routes/SignIn.svelte';
   import WorkEditor from './routes/WorkEditor.svelte';
   import WorkPage from './routes/WorkPage.svelte';
@@ -263,6 +266,12 @@
     <Jobs />
   {:else if route.id === 'admin-jobs'}
     <AdminJobs />
+  {:else if route.id === 'discover'}
+    <Discover />
+  {:else if route.id === 'community'}
+    <Community />
+  {:else if route.id === 'notifications'}
+    <Notifications />
   {:else if route.id === 'planned' && route.planned}
     <Planned route={route.planned} />
   {:else}
