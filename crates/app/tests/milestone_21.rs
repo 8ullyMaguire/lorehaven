@@ -334,6 +334,36 @@ async fn a_signed_in_caller_reaches_the_monetization_contracts() {
 }
 
 #[tokio::test]
+async fn monetization_entitlements_endpoint_is_implemented() {
+    let fx = Fixture::new("money-entitlements").await;
+    let mut client = fx.client();
+    register(&mut client, "m21-reeder@example.com", "m21reeder").await;
+
+    // my_entitlements is implemented (not a 501 stub): it returns 200 with
+    // an entitlements array — empty when the reader has none.
+    let (status, body) = client.get("/api/v1/me/entitlements").await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body, json!({ "entitlements": [] }));
+
+    fx.cleanup().await;
+}
+
+#[tokio::test]
+async fn monetization_earnings_endpoint_is_implemented() {
+    let fx = Fixture::new("money-earnings").await;
+    let mut client = fx.client();
+    register(&mut client, "m21-author2@example.com", "m21author2").await;
+
+    // my_earnings is implemented (not a 501 stub): it returns 200 with
+    // an earnings array — empty when the author has none.
+    let (status, body) = client.get("/api/v1/me/earnings").await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body, json!({ "earnings": [] }));
+
+    fx.cleanup().await;
+}
+
+#[tokio::test]
 async fn subscription_and_alert_routes_refuse_anonymous_callers() {
     let fx = Fixture::new("subs-anon").await;
     let mut client = fx.client();

@@ -7,7 +7,9 @@
 use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::Json;
+use lorehaven_db::monetization;
 use serde::Deserialize;
+use serde_json::json;
 use serde_json::Value;
 
 use crate::auth::RequireSession;
@@ -68,17 +70,46 @@ pub async fn tip(
 }
 
 pub async fn my_entitlements(
-    State(_state): State<AppState>,
-    RequireSession(_user): RequireSession,
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
 ) -> ApiResult<Json<Value>> {
-    Err(not_implemented())
+    let rows = monetization::get_entitlements(&state.db(), &user.account_id.to_string())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let out: Vec<Value> = rows
+        .into_iter()
+        .map(|r| json!({
+            "id": r.id,
+            "work_id": r.work_id,
+            "kind": r.kind,
+            "source_payment_id": r.source_payment_id,
+            "granted_at": r.granted_at,
+            "expires_at": r.expires_at,
+        }))
+        .collect();
+    Ok(Json(json!({ "entitlements": out })))
 }
 
 pub async fn my_earnings(
-    State(_state): State<AppState>,
-    RequireSession(_user): RequireSession,
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
 ) -> ApiResult<Json<Value>> {
-    Err(not_implemented())
+    let rows = monetization::get_earnings(&state.db(), &user.account_id.to_string())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let out: Vec<Value> = rows
+        .into_iter()
+        .map(|r| json!({
+            "id": r.id,
+            "amount_minor": r.amount_minor,
+            "currency": r.currency,
+            "kind": r.kind,
+            "payment_id": r.payment_id,
+            "idempotency_key": r.idempotency_key,
+            "created_at": r.created_at,
+        }))
+        .collect();
+    Ok(Json(json!({ "earnings": out })))
 }
 
 pub async fn request_payout(

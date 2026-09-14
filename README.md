@@ -32,6 +32,7 @@ a status, and `docs/verification.md` records the evidence behind each claim.
 | 5 | Jobs, storage, secret encryption, outbox delivery | Done, tested, driven in a browser — tag `v0.06-jobs` |
 | 6 | Imports, source credentials, batches, preservation | **Partly built**: API, importer and one source adapter tested; pages not built and nine of the ten planned sources not ported |
 | 7–18 | Offline, library, search, discovery, community, events, governance, economy, extensions, integrations, operations | Not implemented |
+| 21 | Monetization, subscriptions, gifts, saved-search alerts, AI-training assertion | **Skeleton**: tables in migration 0022, domain rules pinned (14 tests), routes return 501 stubs; contract pinned by `milestone_21.rs` |
 
 No screen in this repository displays mock data. Pages that exist show real
 values from the server; routes that are linked but unbuilt say so plainly.

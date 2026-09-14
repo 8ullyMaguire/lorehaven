@@ -401,6 +401,25 @@ pub async fn decide_appeal(
     decision: &str,
     decided_by: &str,
 ) -> Result<(), sqlx::Error> {
+    // §19.4: the decision-maker must not be the appellant — independence is
+    // a hard rule, not a policy toggle.
+    let appellant: Option<String> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar("SELECT appellant FROM appeals WHERE id = ?")
+                .bind(appeal_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar("SELECT appellant FROM appeals WHERE id = $1")
+                .bind(appeal_id)
+                .fetch_optional(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    if appellant.as_deref() == Some(decided_by) {
+        return Err(sqlx::Error::Protocol("appeal decision must be made by a different account than the appellant".into()));
+    }
     let now = crate::identity::now_rfc3339();
     match db.backend() {
         Backend::Sqlite => {
