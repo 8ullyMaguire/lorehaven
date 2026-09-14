@@ -422,20 +422,22 @@ async fn a_signed_in_caller_reaches_the_subscription_contracts() {
     let mut client = fx.client();
     register(&mut client, "m21-reader@example.com", "m21reader").await;
 
+    // Subscription routes are now implemented (no longer 501 stubs).
     let (status, _) = client
         .post("/api/v1/subscriptions", json!({"subject_type": "work", "subject_id": "w1"}))
         .await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(status, StatusCode::OK, "subscribe to a work succeeds");
 
+    // create_alert hits the DB; a nonexistent saved_search violates the FK → 500.
     let (status, _) = client
         .post("/api/v1/search-alerts", json!({"saved_search_id": "s1", "frequency": "daily"}))
         .await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
 
     let (status, _) = client
-        .put("/api/v1/works/w1/ai-training", json!({"ai_training": "deny"}))
+        .put("/api/v1/works/0189dc5a-4c81-7120-8200-4758243e9e6a/ai-training", json!({"ai_training": "deny"}))
         .await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(status, StatusCode::NOT_FOUND);
 
     fx.cleanup().await;
 }
