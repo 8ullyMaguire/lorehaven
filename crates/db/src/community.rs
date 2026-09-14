@@ -779,6 +779,29 @@ pub async fn category_exists(db: &Database, category_id: &str) -> Result<bool> {
     Ok(found.is_some())
 }
 
+/// Fetch the minimum trust level required to post in a category.
+pub async fn category_min_trust(db: &Database, category_id: &str) -> Result<Option<i64>> {
+    let sql = db.sql(
+        "SELECT min_trust FROM forum_categories WHERE id = ?",
+        "SELECT min_trust FROM forum_categories WHERE id = $1",
+    );
+    let row: Option<i64> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar(&sql)
+                .bind(category_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar(&sql)
+                .bind(category_id)
+                .fetch_optional(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(row)
+}
+
 /// List all forum categories, ordered by position.
 pub async fn list_forum_categories(db: &Database) -> Result<Vec<ForumCategory>> {
     let sql = db.sql(
