@@ -1,13 +1,17 @@
 //! Lorehaven domain primitives.
 
 pub mod blocking;
+pub mod caps;
+pub mod charging;
 pub mod community;
 pub mod content;
 pub mod discovery;
 pub mod document;
+pub mod economy;
 pub mod error;
 pub mod events;
 pub mod exports;
+pub mod fairqueue;
 pub mod governance;
 pub mod ids;
 pub mod imports;

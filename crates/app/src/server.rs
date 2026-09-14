@@ -405,6 +405,12 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // Economy (credits, fair queues, bounties, billing) — M15.
+        .merge(classified(
+            routes::economy::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // Session loading wraps everything under /api/v1 so that the CSRF layer
         // and the limiter installed per subtree can both see who is asking.
         .layer(middleware::from_fn_with_state(
