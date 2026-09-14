@@ -5,7 +5,7 @@
 //! require an authenticated session with a selected pseud.
 
 use axum::extract::{Path, State};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{post, put};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -237,7 +237,7 @@ pub async fn set_ai_training(
             )));
         }
     };
-    // Resolve work to owner pseud via content
+    // Resolve work to owner pseud via content.
     let wid = work_id
         .parse::<lorehaven_domain::WorkId>()
         .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
@@ -245,6 +245,10 @@ pub async fn set_ai_training(
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    let author_pseud = lorehaven_db::identity::find_pseud(&state.db(), work.owner_pseud_id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "author" }))?;
     if opt_in {
         subscriptions::ai_training_opt_in(&state.db(), &work.owner_pseud_id.to_canonical_string(), true)
             .await
