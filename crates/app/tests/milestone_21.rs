@@ -364,6 +364,21 @@ async fn monetization_earnings_endpoint_is_implemented() {
 }
 
 #[tokio::test]
+async fn monetization_list_gifts_endpoint_is_implemented() {
+    let fx = Fixture::new("money-gifts").await;
+    let mut client = fx.client();
+    register(&mut client, "m21-gifter@example.com", "m21gifter").await;
+
+    // list_gifts is implemented (not a 501 stub): it returns
+    // 200 with a gifts array — empty when the recipient has none.
+    let (status, body) = client.get("/api/v1/me/gifts").await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body, json!({ "gifts": [] }));
+
+    fx.cleanup().await;
+}
+
+#[tokio::test]
 async fn subscription_and_alert_routes_refuse_anonymous_callers() {
     let fx = Fixture::new("subs-anon").await;
     let mut client = fx.client();
