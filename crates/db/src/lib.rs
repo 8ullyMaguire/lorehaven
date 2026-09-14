@@ -40,6 +40,7 @@ pub mod storage;
 pub mod taxonomy;
 pub mod translation;
 pub mod external;
+pub mod admin;
 
 use std::borrow::Cow;
 use std::path::Path;
