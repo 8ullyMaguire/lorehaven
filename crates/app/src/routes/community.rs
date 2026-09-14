@@ -302,10 +302,18 @@ async fn post_reply(
 
 async fn lock_topic(
     State(state): State<AppState>,
-    RequirePseud { .. }: RequirePseud,
-    Path(_id): Path<String>,
+    RequirePseud { pseud_id, .. }: RequirePseud,
+    Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
-    let _ = state;
+    let _ = pseud_id;
+    let updated = lorehaven_db::community::toggle_topic_lock(state.db(), &id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    if !updated {
+        return Err(ApiError(lorehaven_domain::AppError::NotFound {
+            resource: "topic",
+        }));
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -439,10 +447,15 @@ pub struct SendMessageBody {
 
 async fn get_conversations(
     State(state): State<AppState>,
-    RequireSession(_): RequireSession,
+    RequireSession(user): RequireSession,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let _ = state;
-    Ok(Json(serde_json::json!({ "items": [] })))
+    let items = lorehaven_db::community::list_conversations(
+        state.db(),
+        &user.account_id.to_string(),
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    Ok(Json(serde_json::json!({ "items": items })))
 }
 
 async fn post_conversation(

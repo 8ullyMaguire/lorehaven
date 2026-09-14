@@ -2039,7 +2039,7 @@ export async function markNotificationRead(id: string): Promise<void> {
 
 export interface Forum {
   id: string;
-  title: string;
+  name: string;
   description?: string;
   category?: string;
 }
@@ -2048,8 +2048,10 @@ export interface Group {
   id: string;
   name: string;
   description?: string;
-  visibility: string;
+  privacy: string;
   member_count?: number;
+  owner?: string;
+  created_at?: string;
 }
 
 export interface Conversation {
@@ -2060,25 +2062,25 @@ export interface Conversation {
 }
 
 export interface Block {
-  id: string;
-  handle: string;
+  blocked: string;
+  scope: string;
   created_at: string;
 }
 
 export async function fetchForums(signal?: AbortSignal): Promise<Forum[]> {
-  return apiFetch<Forum[]>('/community/forums', { signal });
+  return apiFetch<Forum[]>('/forums', { signal });
 }
 
 export async function fetchGroups(signal?: AbortSignal): Promise<Group[]> {
-  return apiFetch<Group[]>('/community/groups', { signal });
+  return apiFetch<Group[]>('/groups', { signal });
 }
 
 export async function fetchConversations(signal?: AbortSignal): Promise<Conversation[]> {
-  return apiFetch<Conversation[]>('/community/conversations', { signal });
+  return apiFetch<Conversation[]>('/conversations', { signal });
 }
 
 export async function fetchBlocks(signal?: AbortSignal): Promise<Block[]> {
-  return apiFetch<Block[]>('/community/blocks', { signal });
+  return apiFetch<Block[]>('/me/blocks', { signal });
 }
 
 // ---------------------------------------------------------------------------

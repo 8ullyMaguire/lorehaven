@@ -6,9 +6,9 @@
 //! block filtering, forums topics and replies, group visibility, block-aware
 //! messaging, the block and mute lists, and the presence record.
 //!
-//! Known gaps: forum categories need trust gates; `GET /forums` and
-//! `GET /presence/stream` are stubs returning empty (SSE lands with the
-//! real-time milestone).
+//! Known gaps: forum categories need trust gates; `GET /presence/stream` is
+//! a stub returning empty (SSE lands with the real-time milestone); block-aware
+//! filtering on search/mention paths is still TODO.
 
 use std::path::{Path, PathBuf};
 
@@ -17,7 +17,7 @@ use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
-use lorehaven_db::{Database, DatabaseConfig};
+use lorehaven_db::{Backend, Database, DatabaseConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -579,5 +579,121 @@ async fn presence_record_is_stored_but_the_stream_is_still_a_stub() {
     let (status, body) = user.get("/api/v1/presence/stream").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["items"].as_array().expect("items").len(), 0, "{body}");
+    harness.cleanup().await;
+}
+
+
+#[tokio::test]
+async fn a_forum_topic_can_be_created_replied_to_and_locked() {
+    let harness = Harness::new("forum-full").await;
+    let mut user = harness.client();
+    register(&mut user, "forum@example.com", "ForumUser").await;
+
+    // Seed a category directly (test DBs don't run the dev seed).
+    let cat_id = "11111111-1111-1111-1111-111111111111";
+    let sql = "INSERT INTO forum_categories (id, name, position, min_trust) VALUES (?, 'Test Category', 0, 0)";
+    match harness.db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(sql)
+                .bind(cat_id)
+                .execute(harness.db.sqlite_pool().expect("sqlite"))
+                .await
+                .expect("seed category");
+        }
+        Backend::Postgres => {
+            sqlx::query(sql)
+                .bind(cat_id)
+                .execute(harness.db.postgres_pool().expect("postgres"))
+                .await
+                .expect("seed category");
+        }
+    }
+
+    // Create a topic in the category.
+    let (status, body) = user
+        .post(
+            &format!("/api/v1/forums/{cat_id}/topics"),
+            json!({ "title": "Hello World" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let topic_id = body["id"].as_str().expect("topic id").to_owned();
+
+    // Topic appears in the category listing.
+    let (status, body) = user.get(&format!("/api/v1/forums/{cat_id}/topics")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body["items"].as_array().expect("items");
+    assert!(items.iter().any(|t| t["id"] == topic_id), "topic should appear in listing");
+
+    // Reply to the topic.
+    let (status, body) = user
+        .post(&format!("/api/v1/topics/{topic_id}/replies"), json!({ "body": "First!" }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["id"].as_str().is_some(), "reply has id");
+
+    // Topic page shows unlocked state initially.
+    let (status, body) = user.get(&format!("/api/v1/topics/{topic_id}")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!body["topic"]["locked"].as_bool().unwrap(), "fresh topic is unlocked");
+
+    // Lock the topic.
+    let (status, _) = user.post(&format!("/api/v1/topics/{topic_id}/lock"), json!({})).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = user.get(&format!("/api/v1/topics/{topic_id}")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["topic"]["locked"].as_bool().unwrap(), "topic is locked after toggle");
+
+    // Toggle again unlocks it.
+    let (status, _) = user.post(&format!("/api/v1/topics/{topic_id}/lock"), json!({})).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = user.get(&format!("/api/v1/topics/{topic_id}")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!body["topic"]["locked"].as_bool().unwrap(), "topic is unlocked after second toggle");
+
+    // Locking a nonexistent topic returns 404.
+    let (status, _) = user.post("/api/v1/topics/nonexistent/lock", json!({})).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn conversations_are_listed_with_a_preview() {
+    let harness = Harness::new("conversation-list").await;
+    let mut a = harness.client();
+    let (a_account, _) = register(&mut a, "a@example.com", "SenderA").await;
+    let mut b = harness.client();
+    let (b_account, _) = register(&mut b, "b@example.com", "ReceiverB").await;
+
+    // A creates a conversation with B and sends a message.
+    let (status, body) = a
+        .post("/api/v1/conversations", json!({ "participant": b_account }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let conv_id = body["id"].as_str().expect("id").to_owned();
+    let (status, _) = a
+        .post(&format!("/api/v1/conversations/{conv_id}/messages"), json!({ "body": "hello there" }))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // A's conversation list shows it with a preview.
+    let (status, body) = a.get("/api/v1/conversations").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body["items"].as_array().expect("items");
+    assert_eq!(items.len(), 1, "A sees 1 conversation");
+    let entry = &items[0];
+    assert_eq!(entry["id"], conv_id);
+    assert_eq!(entry["other_handle"], b_account, "A sees B as other handle in listing");
+    assert_eq!(entry["last_message"], "hello there");
+    assert!(entry["updated_at"].as_str().is_some(), "updated_at present");
+
+    // B's list also shows the conversation with A as the other handle.
+    let (status, body) = b.get("/api/v1/conversations").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body["items"].as_array().expect("items");
+    assert_eq!(items.len(), 1, "B sees 1 conversation");
+    assert_eq!(items[0]["other_handle"], a_account);
+
     harness.cleanup().await;
 }

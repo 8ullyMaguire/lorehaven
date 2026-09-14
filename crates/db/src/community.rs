@@ -1390,3 +1390,109 @@ pub async fn conversation_participants(
     };
     Ok(rows.into_iter().map(|r| r.0).collect())
 }
+
+/// A conversation row for the listing.
+#[derive(Debug, Clone, Serialize)]
+pub struct Conversation {
+    pub id: String,
+    pub other_handle: String,
+    pub last_message: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct ConversationRow {
+    id: String,
+    other_handle: String,
+    last_message: Option<String>,
+    updated_at: Option<String>,
+}
+
+impl From<ConversationRow> for Conversation {
+    fn from(r: ConversationRow) -> Self {
+        Self {
+            id: r.id,
+            other_handle: r.other_handle,
+            last_message: r.last_message,
+            updated_at: r.updated_at,
+        }
+    }
+}
+
+/// List conversations for a participant, ordered by most recent activity.
+/// Each conversation shows the other participant's handle and the latest
+/// message preview (if any).
+pub async fn list_conversations(
+    db: &Database,
+    viewer_account: &str,
+) -> Result<Vec<Conversation>> {
+    let sql = db.sql(
+        "SELECT c.id,
+                (SELECT account FROM conversation_participants
+                 WHERE conversation_id = c.id AND account != ?1 LIMIT 1) as other_handle,
+                (SELECT body FROM messages
+                 WHERE conversation_id = c.id AND deleted_at IS NULL
+                 ORDER BY sent_at DESC LIMIT 1) as last_message,
+                (SELECT sent_at FROM messages
+                 WHERE conversation_id = c.id AND deleted_at IS NULL
+                 ORDER BY sent_at DESC LIMIT 1) as updated_at
+         FROM conversations c
+         JOIN conversation_participants cp ON cp.conversation_id = c.id
+         WHERE cp.account = ?1
+         ORDER BY COALESCE(updated_at, c.created_at) DESC",
+        "SELECT c.id,
+                (SELECT account FROM conversation_participants
+                 WHERE conversation_id = c.id AND account != $1 LIMIT 1) as other_handle,
+                (SELECT body FROM messages
+                 WHERE conversation_id = c.id AND deleted_at IS NULL
+                 ORDER BY sent_at DESC LIMIT 1) as last_message,
+                (SELECT sent_at FROM messages
+                 WHERE conversation_id = c.id AND deleted_at IS NULL
+                 ORDER BY sent_at DESC LIMIT 1) as updated_at
+         FROM conversations c
+         JOIN conversation_participants cp ON cp.conversation_id = c.id
+         WHERE cp.account = $1
+         ORDER BY COALESCE(updated_at, c.created_at) DESC",
+    );
+    let rows: Vec<ConversationRow> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, ConversationRow>(&sql)
+                .bind(viewer_account)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, ConversationRow>(&sql)
+                .bind(viewer_account)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(rows.into_iter().map(Conversation::from).collect())
+}
+
+/// Toggle the locked state of a forum topic. Returns true if a row was
+/// updated, false if the topic does not exist.
+pub async fn toggle_topic_lock(db: &Database, topic_id: &str) -> Result<bool> {
+    let sql = db.sql(
+        "UPDATE forum_topics SET locked = CASE WHEN locked = 0 THEN 1 ELSE 0 END WHERE id = ?",
+        "UPDATE forum_topics SET locked = CASE WHEN locked = 0 THEN 1 ELSE 0 END WHERE id = $1",
+    );
+    let affected = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(topic_id)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?
+                .rows_affected()
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(topic_id)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?
+                .rows_affected()
+        }
+    };
+    Ok(affected > 0)
+}

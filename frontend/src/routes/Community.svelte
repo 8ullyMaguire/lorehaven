@@ -135,7 +135,7 @@
               href={`/community/forums/${encodeURIComponent(forum.id)}`}
               onclick={(event) => handleLinkClick(event, `/community/forums/${encodeURIComponent(forum.id)}`)}
             >
-              <span class="card-title">{forum.title}</span>
+              <span class="card-title">{forum.name}</span>
               {#if forum.description}<span class="card-desc">{forum.description}</span>{/if}
             </a>
           </li>
@@ -153,7 +153,7 @@
             >
               <span class="card-title">{group.name}</span>
               {#if group.description}<span class="card-desc">{group.description}</span>{/if}
-              <span class="card-meta">{group.visibility}</span>
+              <span class="card-meta">{group.privacy}</span>
             </a>
           </li>
         {:else}
@@ -180,7 +180,7 @@
       <ul class="card-list">
         {#each blocks as block}
           <li>
-            <span class="card-title">{block.handle}</span>
+            <span class="card-title">{block.blocked}</span>
             <span class="card-meta">blocked</span>
           </li>
         {:else}
