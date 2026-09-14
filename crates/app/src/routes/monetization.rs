@@ -103,12 +103,99 @@ pub struct TipBody {
 }
 
 pub async fn tip(
-    State(_state): State<AppState>,
-    RequireSession(_user): RequireSession,
-    Path(_work_id): Path<String>,
-    Json(_body): Json<TipBody>,
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(work_id): Path<String>,
+    Json(body): Json<TipBody>,
 ) -> ApiResult<Json<Value>> {
-    Err(not_implemented())
+    let work_id = work_id
+        .parse::<lorehaven_domain::WorkId>()
+        .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    // Resolve the work's author account via owner pseud → account.
+    let work = lorehaven_db::content::find_work(&state.db(), work_id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let work = work.ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    let pseud = lorehaven_db::identity::find_pseud(&state.db(), work.owner_pseud_id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let author = pseud.ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "author" }))?;
+    let author_account = author.account_id.to_string();
+
+    // Refuse self-dealing (tips between pseuds of one account, §20.9.3).
+    if lorehaven_domain::monetization::Rules::self_dealing(&user.account_id.to_string(), &author_account) {
+        return Err(ApiError(lorehaven_domain::AppError::field(
+            "work_id",
+            "cannot tip your own work",
+        )));
+    }
+
+    let idempotency = format!(
+        "tip:{}-{}:{}:{}",
+        user.account_id, work_id, body.currency, body.amount_minor
+    );
+
+    match body.channel.as_str() {
+        "money" => {
+            // Money tip: author receives 85%, platform keeps 15%, each
+            // as a separate ledger entry (ADR 0004: balanced entries).
+            let (author_amt, platform_amt) =
+                lorehaven_domain::monetization::Rules::split(body.amount_minor, 1_500);
+            let auth_id = monetization::post_earnings(
+                &state.db(),
+                &author_account,
+                author_amt,
+                &body.currency,
+                "tip",
+                None,
+                Some(&idempotency),
+            )
+            .await
+            .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+            let plat_id = monetization::post_earnings(
+                &state.db(),
+                "platform",
+                platform_amt,
+                &body.currency,
+                "platform_fee",
+                None,
+                Some(&format!("platform:{}", idempotency)),
+            )
+            .await
+            .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+            Ok(Json(json!({
+                "author_earning_id": auth_id,
+                "platform_fee_id": plat_id,
+                "author_amount_minor": author_amt,
+                "platform_amount_minor": platform_amt,
+            })))
+        }
+        "credit" => {
+            // Credit tip: a balanced credit transaction moving the tipper's
+            // money bucket to the author's money bucket.
+            let entries = vec![
+                (user.account_id.to_string(), "money".to_string(), -body.amount_minor),
+                (author_account.clone(), "money".to_string(), body.amount_minor),
+            ];
+            let txn_id = lorehaven_db::economy::post_transaction(
+                &state.db(),
+                lorehaven_domain::economy::TxnType::Spend,
+                &idempotency,
+                &format!("tip:{}", work_id.to_string()),
+                &entries,
+            )
+            .await
+            .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+            Ok(Json(json!({
+                "transaction_id": txn_id,
+                "credit_amount_minor": body.amount_minor,
+            })))
+        }
+        _ => Err(ApiError(lorehaven_domain::AppError::field(
+            "channel",
+            "must be 'money' or 'credit'",
+        ))),
+    }
 }
 
 pub async fn my_entitlements(
@@ -193,6 +280,11 @@ pub async fn create_gift(
             "a pseud must be selected to create a gift",
         ))
     })?;
+    // Validate the work exists before inserting the gift.
+    let work = lorehaven_db::content::find_work(&state.db(), work_id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
     let gift_id = monetization::create_gift(
         &state.db(),
         &work_id.to_canonical_string(),
