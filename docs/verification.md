@@ -25,7 +25,7 @@ the result. Where a claim could only be checked by hand, it says so.
 
 | Field | Value |
 |---|---|
-| Date of last verification | 2026-09-13 |
+| Date of last verification | 2026-09-14 |
 | Commit | `a54e3bc` on `master`. Milestones 0 to 7 are complete and tagged: `v0.01-running-app`, `v0.03-identity`, `v0.04-publishing`, `v0.05-reader`, `v0.06-jobs`, `v0.07-imports`, `v0.08-exports`. Every row in `docs/requirements.csv` for those milestones is `implemented-locally-tested` or a deliberate `unsupported`. |
 | Environment | Linux, Rust 1.98.0, Node 26.8.1, SQLite 3.53.4 |
 | PostgreSQL available | Yes — 17.11 in Docker on loopback (the development machine still has none installed) |
