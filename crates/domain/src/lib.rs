@@ -1,5 +1,6 @@
 //! Lorehaven domain primitives.
 
+pub mod api_scopes;
 pub mod blocking;
 pub mod caps;
 pub mod charging;
@@ -13,6 +14,7 @@ pub mod events;
 pub mod exports;
 pub mod extension;
 pub mod fairqueue;
+pub mod feeds;
 pub mod governance;
 pub mod ids;
 pub mod imports;
@@ -24,11 +26,10 @@ pub mod positivity;
 pub mod query;
 pub mod query_sql;
 pub mod reading;
+pub mod stats;
 pub mod taxonomy;
 pub mod translation;
 pub mod webhook;
-pub mod api_scopes;
-pub mod feeds;
 
 pub use error::{AppError, ErrorCode, Result};
 pub use ids::*;
