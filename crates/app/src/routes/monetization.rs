@@ -165,10 +165,30 @@ pub async fn create_gift(
 }
 
 pub async fn list_gifts(
-    State(_state): State<AppState>,
-    RequireSession(_user): RequireSession,
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
 ) -> ApiResult<Json<Value>> {
-    Err(not_implemented())
+    let pseud = user.pseud_id.ok_or_else(|| {
+        ApiError(lorehaven_domain::AppError::field(
+            "pseud_id",
+            "a pseud must be selected to list gifts",
+        ))
+    })?;
+    let rows = monetization::get_gifts_for_recipient(&state.db(), &pseud.to_canonical_string())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let out: Vec<Value> = rows
+        .into_iter()
+        .map(|r| json!({
+            "id": r.id,
+            "work_id": r.work_id,
+            "gift_note": r.gift_note,
+            "challenge_fulfillment_id": r.challenge_fulfillment_id,
+            "created_at": r.created_at,
+            "declined_at": r.declined_at,
+        }))
+        .collect();
+    Ok(Json(json!({ "gifts": out })))
 }
 
 pub fn router() -> axum::Router<AppState> {
