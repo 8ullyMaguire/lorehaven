@@ -426,6 +426,33 @@ pub async fn list_gifts(
     Ok(Json(json!({ "gifts": out })))
 }
 
+/// Public pricing lookup — readable by anyone viewing a work page.
+/// Returns 404 if the work doesn't exist (no existence disclosure to strangers
+/// is NOT applied here: pricing is public metadata for published works, and
+/// an unpublished work returns 404 via find_work's lifecycle filter).
+pub async fn public_pricing(
+    State(state): State<AppState>,
+    Path(work_id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let work_id = work_id
+        .parse::<lorehaven_domain::WorkId>()
+        .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    let pricing = monetization::get_pricing(&state.db(), &work_id.to_canonical_string())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let enabled: Vec<Value> = pricing
+        .into_iter()
+        .filter(|p| p.enabled)
+        .map(|p| json!({
+            "model": p.model,
+            "price_minor": p.price_minor,
+            "currency": p.currency,
+            "public_at_offset": p.public_at_offset,
+        }))
+        .collect();
+    Ok(Json(json!({ "pricing": enabled })))
+}
+
 pub fn router() -> axum::Router<AppState> {
     axum::Router::new()
         .route("/works/{work_id}/pricing", axum::routing::post(set_pricing).delete(delete_pricing))
@@ -437,6 +464,7 @@ pub fn router() -> axum::Router<AppState> {
 
 pub fn read_router() -> axum::Router<AppState> {
     axum::Router::new()
+        .route("/works/{work_id}/pricing", get(public_pricing))
         .route("/me/entitlements", get(my_entitlements))
         .route("/me/earnings", get(my_earnings))
 }

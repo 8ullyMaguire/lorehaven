@@ -582,6 +582,39 @@ async fn tip_only_work_is_free_to_read() {
     let (status, _) = anon.get(&format!("/api/v1/works/{work_id}")).await;
     assert_eq!(status, StatusCode::OK, "tips-only work is free to read");
 
+    // Anonymous can fetch public pricing metadata.
+    let (status, body) = anon.get(&format!("/api/v1/works/{work_id}/pricing")).await;
+    assert_eq!(status, StatusCode::OK, "public pricing endpoint");
+    assert!(body["pricing"].is_array(), "pricing is an array");
+
+    fx.cleanup().await;
+}
+
+#[tokio::test]
+async fn public_pricing_returns_price_for_purchased_work() {
+    let fx = Fixture::new("pricing-endpoint").await;
+    let mut author = fx.client();
+    register(&mut author, "m21-author6@example.com", "m21author6").await;
+    let work_id = create_work(&mut author, "Paid Story").await;
+    let _chapter_id = add_chapter(&mut author, &work_id, "Chapter 1", "Content.").await;
+    publish_work(&mut author, &work_id, 1).await;
+
+    let (status, _) = author
+        .post(
+            &format!("/api/v1/works/{work_id}/pricing"),
+            json!({ "model": "purchase", "price_minor": 500, "currency": "USD", "public_at_offset": null }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "set purchase pricing");
+
+    // Anonymous can read the price without buying.
+    let mut anon = fx.client();
+    let (status, body) = anon.get(&format!("/api/v1/works/{work_id}/pricing")).await;
+    assert_eq!(status, StatusCode::OK, "anonymous pricing lookup");
+    assert_eq!(body["pricing"][0]["model"], "purchase");
+    assert_eq!(body["pricing"][0]["price_minor"], 500);
+    assert_eq!(body["pricing"][0]["currency"], "USD");
+
     fx.cleanup().await;
 }
 
