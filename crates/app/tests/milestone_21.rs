@@ -316,14 +316,14 @@ async fn a_signed_in_caller_reaches_the_monetization_contracts() {
     let mut client = fx.client();
     register(&mut client, "m21-author@example.com", "m21author").await;
 
-    // Contract accepted at the boundary; the handler is a 501 stub.
+    // Contract accepted at the boundary; set_pricing is now implemented.
     let (status, body) = client
         .post(
             "/api/v1/works/w1/pricing",
             json!({"model": "purchase", "price_minor": 500, "currency": "EUR", "public_at_offset": null}),
         )
         .await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "body: {body}");
+    assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
 
     let (status, _) = client
         .post("/api/v1/works/w1/tips", json!({"amount_minor": 300, "currency": "EUR", "channel": "money"}))
