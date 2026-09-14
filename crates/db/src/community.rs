@@ -808,7 +808,7 @@ pub async fn list_topics_in_category(
     limit: i64,
 ) -> Result<Vec<ForumTopic>> {
     let sql = match cursor {
-        Some(c) => db.sql(
+        Some(_) => db.sql(
             "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked FROM forum_topics WHERE category_id = ? AND last_post_at < ? ORDER BY last_post_at DESC LIMIT ?",
             "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked::int::bigint AS locked FROM forum_topics WHERE category_id = $1 AND last_post_at < $2 ORDER BY last_post_at DESC LIMIT $3",
         ),
