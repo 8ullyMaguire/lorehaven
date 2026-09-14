@@ -10,6 +10,11 @@ pub enum ExtensionState {
 }
 
 impl ExtensionState {
+    /// Inherent form so tests and callers need not import `FromStr`.
+    pub fn from_str(s: &str) -> Result<Self, String> {
+        std::str::FromStr::from_str(s)
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Pending => "pending",
@@ -45,6 +50,11 @@ pub enum Capability {
 }
 
 impl Capability {
+    /// Inherent form so tests and callers need not import `FromStr`.
+    pub fn from_str(s: &str) -> Result<Self, String> {
+        std::str::FromStr::from_str(s)
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::StorageRead => "storage.read",

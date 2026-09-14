@@ -1,6 +1,5 @@
 //! M18 — External repository: tokens, bots, feeds, push, federation, AI.
 
-use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -14,7 +13,7 @@ use crate::{Backend, Database};
 pub async fn issue_token(
     db: &Database,
     account: &str,
-    kind: &str,
+    _kind: &str,
     name: &str,
     token_hash: &str,
     scopes: &[Scope],

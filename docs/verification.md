@@ -1383,3 +1383,12 @@ as `unsupported`, and `docs/plans/` is the build plan for them. Within Milestone
 data: the pages that exist show real values from the server, and the routes that
 are linked but unbuilt render an explicit "not built yet" panel naming the
 milestone that will fill them.
+
+## 2026-09-14 spec revision — skeleton status
+
+The 2026-09-14 spec revision (monetization, subscriptions, saved-search alerts, gifts, editor blocks, AI-crawler posture, customization-first changes) is recorded honestly:
+
+- Migration 0022 (all revision tables + works.ai_training) — implemented in both dialects, migration-drift test passes.
+- API contract routes — registered and returning typed 501 stubs; shapes pinned by `milestone_21.rs`.
+- Domain functions — signatures in `crates/domain/src/monetization.rs` and `crates/domain/src/subscriptions.rs` with stub bodies returning `Todo`.
+- Everything else in the revision — `unsupported` until the agent implements it; the routes returning 501 is the honest state, not a claim of behavior.

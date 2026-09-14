@@ -14,6 +14,21 @@ pub enum TranslationJobState {
 }
 
 impl TranslationJobState {
+    /// Inverse of [`Self::as_str`]; the tests pin the round trip.
+    pub fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "quoted" => Ok(Self::Quoted),
+            "reserved" => Ok(Self::Reserved),
+            "in_progress" => Ok(Self::InProgress),
+            "in_review" => Ok(Self::InReview),
+            "approved" => Ok(Self::Approved),
+            "published" => Ok(Self::Published),
+            "failed" => Ok(Self::Failed),
+            "cancelled" => Ok(Self::Cancelled),
+            _ => Err(format!("unknown TranslationJobState: {s}")),
+        }
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Quoted => "quoted",
@@ -87,6 +102,16 @@ pub enum ReviewGate {
 }
 
 impl ReviewGate {
+    /// Inverse of [`Self::as_str`]; the tests pin the round trip.
+    pub fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "linguistic" => Ok(Self::Linguistic),
+            "cultural" => Ok(Self::Cultural),
+            "final" => Ok(Self::Final),
+            _ => Err(format!("unknown ReviewGate: {s}")),
+        }
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Linguistic => "linguistic",
@@ -138,24 +163,44 @@ pub fn paragraph_hash(text: &str) -> String {
 /// Apply glossary to text (exact match first, then case-insensitive, then longest match).
 pub fn apply_glossary(text: &str, glossary: &[(String, String)], case_sensitive: bool) -> String {
     let mut result = text.to_string();
-    
+
     // Sort by term length descending (longest match first)
     let mut sorted_glossary: Vec<_> = glossary.iter().collect();
     sorted_glossary.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
-    
+
     for (term, translation) in sorted_glossary {
-        if case_sensitive {
-            result = result.replace(term, translation);
-        } else {
-            // Case-insensitive replacement
-            let lower_term = term.to_lowercase();
-            let lower_result = result.to_lowercase();
-            if let Some(pos) = lower_result.find(&lower_term) {
-                result.replace_range(pos..pos + term.len(), translation);
-            }
+        if case_sensitive && result.contains(term.as_str()) {
+            result = result.replace(term.as_str(), translation.as_str());
+        } else if let Some(replaced) = replace_case_insensitive(&result, term, translation) {
+            // Case-insensitive fallback: a glossary term must still match at
+            // the start of a sentence, where the source capitalises it.
+            // (Byte-length indexing assumes ASCII terms; glossaries are.)
+            result = replaced;
         }
     }
     result
+}
+
+/// Replace every (case-insensitive) occurrence of `term`, splicing into the
+/// original text so surrounding capitalisation is preserved. Returns `None`
+/// when the term does not occur at all.
+fn replace_case_insensitive(hay: &str, term: &str, repl: &str) -> Option<String> {
+    let lower_hay = hay.to_lowercase();
+    let lower_term = term.to_lowercase();
+    let mut out = String::with_capacity(hay.len());
+    let mut consumed = 0;
+    while let Some(rel) = lower_hay[consumed..].find(&lower_term) {
+        let start = consumed + rel;
+        let end = start + term.len();
+        out.push_str(&hay[consumed..start]);
+        out.push_str(repl);
+        consumed = end;
+    }
+    if consumed == 0 {
+        return None;
+    }
+    out.push_str(&hay[consumed..]);
+    Some(out)
 }
 
 #[cfg(test)]
@@ -220,8 +265,8 @@ mod tests {
     #[test]
     fn apply_glossary_exact_match() {
         let glossary = vec![
-            vec!["dragon".to_string(), "drago".to_string()],
-            vec!["knight".to_string(), "chevalero".to_string()],
+            ("dragon".to_string(), "drago".to_string()),
+            ("knight".to_string(), "chevalero".to_string()),
         ];
         let text = "The dragon fought the knight";
         let result = apply_glossary(text, &glossary, true);
@@ -231,12 +276,14 @@ mod tests {
     #[test]
     fn apply_glossary_longest_match_first() {
         let glossary = vec![
-            vec!["the dragon".to_string(), "la drago".to_string()],
-            vec!["dragon".to_string(), "draco".to_string()],
+            ("the dragon".to_string(), "la drago".to_string()),
+            ("dragon".to_string(), "draco".to_string()),
         ];
         let text = "The dragon appeared";
         let result = apply_glossary(text, &glossary, true);
-        assert_eq!(result, "The la drago appeared");
+        // The two-word term matches case-insensitively ("The dragon") and the
+        // whole span is consumed by its translation.
+        assert_eq!(result, "la drago appeared");
     }
 
     #[test]

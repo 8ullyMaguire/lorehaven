@@ -1,7 +1,5 @@
 //! M19 — Admin repository: admin actions, feature flags, abuse tracking, privacy requests.
 
-use serde_json::Value;
-use sqlx::Row;
 use uuid::Uuid;
 
 use crate::{Backend, Database};

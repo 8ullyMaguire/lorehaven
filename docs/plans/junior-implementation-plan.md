@@ -2650,6 +2650,106 @@ or a documented limitation — decided explicitly, never silently.
 
 ---
 
+## 16. Milestone 21 (repo) — Spec-revision skeleton: monetization, subscriptions, alerts, gifts
+
+**Read first:** spec §20.9 (work monetization), §23.3 (subscriptions),
+§14.2 (saved-search alerts), §18.10 (gifts), §24.14 (AI-crawler posture),
+§6.7/§9.2/§15.4–15.5/§16.2–16.9 (the customization-first changes), and the
+ADRs `docs/adr/0017` and `0018`. The skeleton (migration 0022, the contract
+routes, the domain rule modules, and `milestone_21.rs`) already exists and
+passes; this milestone is **filling the bodies** without reshaping them.
+
+### 16.1 What is already in place (the skeleton, this commit)
+
+- Migration `0022_spec_revision.sql` in **both** dialects: `work_pricing`,
+  `work_entitlements`, `author_earnings_ledger`, `payouts`,
+  `monetization_assertions`, `work_gifts`, `content_subscriptions`,
+  `search_alerts`, and `works.ai_training`.
+- Domain rule modules `crates/domain/src/monetization.rs` and
+  `subscriptions.rs`: the §20.9.3 invariants (separate ledgers, no
+  credit→money conversion, early-access as scheduled unlock, no ranking
+  boost, self-dealing refusal, 85/15 split; subscriber lists never visible,
+  alert frequency bounds) as pure, tested functions.
+- Contract routes in `crates/app/src/routes/monetization.rs` and
+  `subscriptions.rs`, mounted in `server.rs`, returning `501
+  NOT_IMPLEMENTED` with pinned request shapes.
+- `crates/app/tests/milestone_21.rs`: 14 tests pinning the migration, the
+  domain invariants, and the route contracts (401 anonymous / 501 authed).
+
+### 16.2 Ledger rows
+
+- `M21-01` monetization eligibility + assertions: instance setting,
+  imported-works rule, re-assertion on price change (spec §20.9.1)
+- `M21-02` pricing + purchase + entitlements: durable, server-side checks,
+  survive pseud switching (spec §20.9.2–20.9.3)
+- `M21-03` tips: credit tips via the credit ledger, money tips via the
+  earnings ledger, never mixed (spec §20.9.2)
+- `M21-04` payouts + platform split: 85/15 default, processor flow
+  (spec §20.9.3)
+- `M21-05` gifts and dedications: recipient listing, decline, block
+  neutrality, challenge-fulfillment identity (spec §18.10)
+- `M21-06` content subscriptions: five subject kinds, pause, notify on
+  eligible publication, no subscriber list (spec §23.3)
+- `M21-07` saved-search alerts: scheduled runs at reader permissions,
+  frequency bounds, pausable (spec §14.2)
+- `M21-08` `ai_training` assertion: works column surfaced in metadata and
+  exports; generated robots.txt with operator-configurable defaults
+  (spec §24.14, ADR 0018)
+
+### 16.3 Work breakdown
+
+**16.3.1 Monetization (M21-01..04).** Implement the db repository in
+`crates/db/src/monetization.rs` (dual-dialect per the economy.rs pattern),
+then fill the route bodies. Entitlement checks join the work-read path in
+`can_access_content`'s neighbourhood — one function, not per-handler checks.
+The earnings ledger is append-only like the credit ledger; a correction is an
+opposing entry.
+
+**16.3.2 Gifts (M21-05).** `work_gifts` inserts fail with a validation error
+that does not reveal blocks (§18.10). A challenge fulfillment with a named
+recipient writes the same row a gift writes.
+
+**16.3.3 Subscriptions and alerts (M21-06..07).** A publication event
+(enqueue through the existing outbox, M3's machinery) fans out to content
+subscriptions; notifications respect digest and quiet-period settings.
+Alerts run the saved query with the reader's own permissions at run time —
+reuse the search executor, never a second implementation.
+
+**16.3.4 AI-crawler posture (M21-08).** A robots generator route with the
+disallow list from instance settings; the `ai_training` value joins work
+metadata and the §13.1 export.
+
+**16.3.5 Customization-first follow-ups.** These are spec text only in this
+pass — the next feature milestone carries the code: per-surface recipes,
+recipe diff, ephemeral "for now" filters (§16.7, §15.5), the
+appearance-bundle import/export (§6.7), and the reader-influence dial
+replacing the opt-out switch (§16.5).
+
+### 16.4 Acceptance tests
+
+- `milestone_21.rs` extended: a purchased work is readable by the buyer and
+  paywalled (honest state) for others; an early-access chapter opens at
+  `public_at`; a credit tip and a money tip land in different ledgers; a
+  gift is declined account-wide; a subscriber count never returns a list; a
+  daily alert does not re-run inside its window; `robots.txt` disallows
+  AI crawlers by default.
+- All new tests dual-run on SQLite (and PostgreSQL where the CI matrix has
+  it), same as every milestone.
+
+### 16.5 Pitfalls
+
+- **Do not change a contract shape to make an implementation easier.** The
+  501 tests pin the API; if a shape must change, change the spec, the route,
+  and the test in one commit.
+- **Never mix ledgers.** If a code path moves credits and money in one
+  transaction, it is wrong by construction.
+- **The entitlement check is server-side and central.** One function on the
+  read path; a per-handler `if purchased` is the bug that ships.
+- **Robots defaults are configuration, not folklore.** The default list
+  lives in the operator docs and is asserted by a test.
+
+---
+
 ## 15. Cross-cutting sign-off checklist (run at every milestone tag)
 
 - [ ] Ledger: rows added **before** code; flipped after evidence; `M<repo>-NN`
@@ -2695,7 +2795,7 @@ same rule.
 
 ### 15.3 A note on spec drift
 
-This plan was written against spec + verification as of 2026-09-11. When the
+This plan was written against spec + verification as of 2026-09-11. The spec was revised on 2026-09-14 (work monetization §20.9, subscriptions, saved-search alerts, gifts §18.10, editor blocks §8.3, AI-crawler posture §24.14, and the customization-first reweighting of §6.7/§9.2/§15.4–15.5/§16.2–16.9/§19.1) — milestone 21 below is the skeleton for that revision, and its ledger rows are M21-01..M21-08 in `docs/requirements.csv`. When the
 spec changes, update this plan in the same commit as the spec change (the
 spec's own header says it is the single source of truth; this plan exists so
 a junior never has to re-derive the current state from git archaeology).

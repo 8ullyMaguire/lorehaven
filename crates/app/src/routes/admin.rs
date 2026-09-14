@@ -12,7 +12,7 @@ use crate::state::AppState;
 
 /// Get admin stats.
 pub async fn get_stats(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     MaybeSession(user): MaybeSession,
 ) -> ApiResult<Json<Value>> {
     // Anonymous users get basic stats; operators get detailed
@@ -56,7 +56,7 @@ pub async fn record_admin_action(
 
 /// Get privacy requests for the current user.
 pub async fn list_privacy_requests(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     MaybeSession(user): MaybeSession,
 ) -> ApiResult<Json<Value>> {
     let account = user.map(|u| u.account_id.to_string()).unwrap_or_default();
@@ -91,7 +91,7 @@ pub async fn create_privacy_request(
 
 /// Abuse defence: check if IP/account is blocked.
 pub async fn check_abuse_status(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Path(key): Path<String>,
 ) -> ApiResult<Json<Value>> {
     // Placeholder: real implementation would check abuse_counters table

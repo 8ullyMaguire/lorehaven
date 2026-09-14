@@ -1,7 +1,5 @@
 //! M18 — Feed document builders (RSS 2.0 and Atom).
 
-use serde_json::Value;
-
 /// Feed kinds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeedKind {
@@ -152,7 +150,7 @@ mod tests {
             },
         ];
         let rss = build_rss("My Feed", "https://example.com", "Description", &items);
-        assert!(rss.contains("<rss version="2.0">"));
+        assert!(rss.contains(r#"<rss version="2.0">"#));
         assert!(rss.contains("<title>My Feed</title>"));
         assert!(rss.contains("<item>"));
         assert!(rss.contains("<title>Test</title>"));
