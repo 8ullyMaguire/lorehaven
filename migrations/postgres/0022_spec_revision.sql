@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS work_pricing (
     enabled          INTEGER NOT NULL DEFAULT 1,
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL,
-    version          INTEGER NOT NULL DEFAULT 1
+    version          INTEGER NOT NULL DEFAULT 1,
+    UNIQUE (work_id)
 );
 CREATE INDEX IF NOT EXISTS idx_work_pricing_work ON work_pricing(work_id);
 
@@ -80,7 +81,7 @@ CREATE TABLE IF NOT EXISTS monetization_assertions (
 CREATE TABLE IF NOT EXISTS work_gifts (
     id                      TEXT PRIMARY KEY,
     work_id                 TEXT NOT NULL REFERENCES works (id) ON DELETE CASCADE,
-    recipient_pseud_id      TEXT NOT NULL REFERENCES pseuds (id) ON DELETE CASCADE,
+    recipient_pseud_id      TEXT REFERENCES pseuds (id) ON DELETE SET NULL,
     gift_note               TEXT,
     challenge_fulfillment_id TEXT,
     created_at              TEXT NOT NULL,
@@ -104,14 +105,21 @@ CREATE INDEX IF NOT EXISTS idx_content_sub_subject ON content_subscriptions(subj
 
 -- §14.2 — saved-search alerts: scheduled runs of a saved view.
 CREATE TABLE IF NOT EXISTS search_alerts (
-    id            TEXT PRIMARY KEY,
-    saved_search_id TEXT NOT NULL,
-    owner_pseud_id  TEXT NOT NULL REFERENCES pseuds (id) ON DELETE CASCADE,
-    frequency      TEXT NOT NULL DEFAULT 'daily',
-    state          TEXT NOT NULL DEFAULT 'active',  -- active | paused
-    last_run_at    TEXT,
-    created_at     TEXT NOT NULL
+    id               TEXT PRIMARY KEY,
+    saved_search_id  TEXT NOT NULL REFERENCES saved_searches (id) ON DELETE CASCADE,
+    owner_pseud_id   TEXT NOT NULL REFERENCES pseuds (id) ON DELETE CASCADE,
+    frequency        TEXT NOT NULL DEFAULT 'daily',       -- daily | weekly | monthly
+    last_run_at      TEXT,
+    created_at       TEXT NOT NULL,
+    UNIQUE (owner_pseud_id, saved_search_id)
 );
 
 -- §24.14 — the author's stated AI-training preference, per work.
 ALTER TABLE works ADD COLUMN ai_training TEXT NOT NULL DEFAULT 'unset';
+
+-- §24.14 — per-author AI-training preference assertion (opt-in, not work-level).
+CREATE TABLE IF NOT EXISTS author_ai_training (
+    pseud_id   TEXT PRIMARY KEY,
+    opt_in     INTEGER NOT NULL DEFAULT 0,      -- 0 = opt-out, 1 = opt-in
+    updated_at TEXT NOT NULL
+);

@@ -98,7 +98,7 @@ async fn fetch_pricing_postgres(pool: &sqlx::postgres::PgPool, work_id: &str) ->
         price_minor: r.get::<i64, _>("price_minor"),
         currency: r.get::<String, _>("currency"),
         public_at_offset: r.get::<Option<i64>, _>("public_at_offset"),
-        enabled: r.get::<bool, _>("enabled"),
+        enabled: r.get::<i64, _>("enabled") != 0,
         created_at: r.get::<String, _>("created_at"),
         updated_at: r.get::<String, _>("updated_at"),
         version: r.get::<i64, _>("version"),
@@ -167,19 +167,6 @@ async fn fetch_earnings_postgres(pool: &sqlx::postgres::PgPool, account_id: &str
     }).collect())
 }
 
-async fn has_idem_sqlite(pool: &sqlx::SqlitePool, key: &str) -> Result<Option<String>, sqlx::Error> {
-    sqlx::query_scalar("SELECT id FROM author_earnings_ledger WHERE idempotency_key = ?")
-        .bind(key)
-        .fetch_optional(pool)
-        .await
-}
-
-async fn has_idem_postgres(pool: &sqlx::postgres::PgPool, key: &str) -> Result<Option<String>, sqlx::Error> {
-    sqlx::query_scalar("SELECT id FROM author_earnings_ledger WHERE idempotency_key = $1")
-        .bind(key)
-        .fetch_optional(pool)
-        .await
-}
 
 async fn fetch_assertion_sqlite(pool: &sqlx::SqlitePool, work_id: &str, kind: &str) -> Result<Option<AssertionRow>, sqlx::Error> {
     let opt = sqlx::query("SELECT id, assertion_kind, policy_version, accepted_at, revoked_at FROM monetization_assertions WHERE work_id = ? AND assertion_kind = ? ORDER BY accepted_at DESC LIMIT 1")
@@ -271,7 +258,7 @@ pub async fn set_pricing(
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO work_pricing (id, work_id, model, price_minor, currency, public_at_offset, enabled, created_at, updated_at, version)
-                 VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, 1)
+                 VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8, 1)
                  ON CONFLICT(work_id) DO UPDATE SET
                    model = excluded.model, price_minor = excluded.price_minor, currency = excluded.currency,
                    public_at_offset = excluded.public_at_offset, updated_at = excluded.updated_at, version = work_pricing.version + 1"
@@ -303,7 +290,7 @@ pub async fn disable_pricing(db: &Database, work_id: &str) -> Result<u64, sqlx::
             Ok(r.rows_affected())
         }
         Backend::Postgres => {
-            let r = sqlx::query("UPDATE work_pricing SET enabled = false, updated_at = $1 WHERE work_id = $2")
+            let r = sqlx::query("UPDATE work_pricing SET enabled = 0, updated_at = $1 WHERE work_id = $2")
                 .bind(&now).bind(work_id)
                 .execute(db.postgres_pool().expect("postgres")).await?;
             Ok(r.rows_affected())
@@ -386,37 +373,55 @@ pub async fn post_earnings(
     payment_id: Option<&str>,
     idempotency_key: Option<&str>,
 ) -> Result<String, sqlx::Error> {
-    if let Some(key) = idempotency_key {
-        let existing = match db.backend() {
-            Backend::Sqlite => has_idem_sqlite(db.sqlite_pool().expect("sqlite"), key).await?,
-            Backend::Postgres => has_idem_postgres(db.postgres_pool().expect("postgres"), key).await?,
-        };
-        if let Some(id) = existing {
-            return Ok(id);
-        }
-    }
-
     let id = Uuid::new_v4().to_string();
     let now = crate::identity::now_rfc3339();
 
     match db.backend() {
         Backend::Sqlite => {
+            let mut tx = db.sqlite_pool().expect("sqlite").begin().await?;
+            if let Some(key) = idempotency_key {
+                let existing: Option<String> = sqlx::query_scalar(
+                    "SELECT id FROM author_earnings_ledger WHERE idempotency_key = ?"
+                )
+                .bind(key)
+                .fetch_optional(&mut *tx)
+                .await?;
+                if let Some(id) = existing {
+                    tx.commit().await?;
+                    return Ok(id);
+                }
+            }
             sqlx::query(
                 "INSERT INTO author_earnings_ledger (id, author_account_id, amount_minor, currency, kind, payment_id, idempotency_key, created_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
             )
             .bind(&id).bind(author_account_id).bind(amount_minor).bind(currency).bind(kind)
             .bind(payment_id).bind(idempotency_key).bind(&now)
-            .execute(db.sqlite_pool().expect("sqlite")).await?;
+            .execute(&mut *tx).await?;
+            tx.commit().await?;
         }
         Backend::Postgres => {
+            let mut tx = db.postgres_pool().expect("postgres").begin().await?;
+            if let Some(key) = idempotency_key {
+                let existing: Option<String> = sqlx::query_scalar(
+                    "SELECT id FROM author_earnings_ledger WHERE idempotency_key = $1"
+                )
+                .bind(key)
+                .fetch_optional(&mut *tx)
+                .await?;
+                if let Some(id) = existing {
+                    tx.commit().await?;
+                    return Ok(id);
+                }
+            }
             sqlx::query(
                 "INSERT INTO author_earnings_ledger (id, author_account_id, amount_minor, currency, kind, payment_id, idempotency_key, created_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
             )
             .bind(&id).bind(author_account_id).bind(amount_minor).bind(currency).bind(kind)
             .bind(payment_id).bind(idempotency_key).bind(&now)
-            .execute(db.postgres_pool().expect("postgres")).await?;
+            .execute(&mut *tx).await?;
+            tx.commit().await?;
         }
     }
     Ok(id)

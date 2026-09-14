@@ -59,9 +59,10 @@ impl Rules {
         false
     }
 
-    /// Imported works are never monetizable in `original` mode (§20.9.1).
+    /// Imported works are never monetizable in `original` mode, and never when
+    /// monetization is globally disabled (§20.9.1).
     pub fn imported_work_monetizable(eligibility: Eligibility) -> bool {
-        !matches!(eligibility, Eligibility::Original)
+        !matches!(eligibility, Eligibility::Original | Eligibility::Disabled)
     }
 
     /// `any-with-assertion` demands a stored assertion; `original` demands an
@@ -71,8 +72,10 @@ impl Rules {
     }
 
     /// Early access is a scheduled unlock, not a lock (§20.9.2).
-    pub fn early_access_unlocked(public_at_offset_seconds: i64, now_epoch: i64) -> bool {
-        now_epoch >= public_at_offset_seconds
+    /// `unlock_epoch_seconds` is the absolute Unix timestamp at which the work
+    /// becomes public; `now_epoch_seconds` is the current time.
+    pub fn early_access_unlocked(unlock_epoch_seconds: i64, now_epoch_seconds: i64) -> bool {
+        now_epoch_seconds >= unlock_epoch_seconds
     }
 
     /// A priced work gains no ranking advantage (§20.9.3). Always false; the
@@ -112,6 +115,7 @@ mod tests {
     #[test]
     fn imported_works_never_monetizable_in_original_mode() {
         assert!(!Rules::imported_work_monetizable(Eligibility::Original));
+        assert!(!Rules::imported_work_monetizable(Eligibility::Disabled));
         assert!(Rules::imported_work_monetizable(Eligibility::AnyWithAssertion));
     }
 

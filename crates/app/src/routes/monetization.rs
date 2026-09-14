@@ -10,7 +10,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::auth::{MaybeSession, RequireSession};
+use crate::auth::RequireSession;
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -19,7 +19,7 @@ pub struct PricingBody {
     pub model: String,
     pub price_minor: i64,
     pub currency: String,
-    pub pub_at_offset: Option<i64>,
+    pub public_at_offset: Option<i64>,
 }
 
 fn not_implemented() -> ApiError {
@@ -90,7 +90,7 @@ pub async fn request_payout(
 
 pub async fn admin_monetization(
     State(_state): State<AppState>,
-    MaybeSession(_user): MaybeSession,
+    RequireSession(_user): RequireSession,
 ) -> ApiResult<Json<Value>> {
     Err(not_implemented())
 }
