@@ -625,3 +625,56 @@ pub async fn get_gifts_for_recipient(db: &Database, recipient_pseud_id: &str) ->
         Backend::Postgres => fetch_gifts_postgres(db.postgres_pool().expect("postgres"), recipient_pseud_id).await,
     }
 }
+
+/// Total platform revenue (sum of `amount_minor` across all earnings rows),
+/// or 0 when the ledger is empty. ADR 0004: balanced ledger, idempotency keys.
+pub async fn total_platform_revenue(db: &Database) -> Result<i64, sqlx::Error> {
+    let sql = "SELECT COALESCE(SUM(amount_minor), 0) FROM monetization_earnings";
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar(sql).fetch_one(db.sqlite_pool().expect("sqlite")).await
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar(sql).fetch_one(db.postgres_pool().expect("postgres")).await
+        }
+    }
+}
+
+/// Total pending payouts (sum of amount_minor across payouts not yet processed).
+pub async fn pending_payout_total(db: &Database) -> Result<i64, sqlx::Error> {
+    let sql = "SELECT COALESCE(SUM(amount_minor), 0) FROM monetization_payouts WHERE status = 'pending'";
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar(sql).fetch_one(db.sqlite_pool().expect("sqlite")).await
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar(sql).fetch_one(db.postgres_pool().expect("postgres")).await
+        }
+    }
+}
+
+/// Count of distinct author accounts with earnings in the ledger.
+pub async fn active_earning_authors(db: &Database) -> Result<i64, sqlx::Error> {
+    let sql = "SELECT COUNT(DISTINCT author_account_id) FROM monetization_earnings";
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar(sql).fetch_one(db.sqlite_pool().expect("sqlite")).await
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar(sql).fetch_one(db.postgres_pool().expect("postgres")).await
+        }
+    }
+}
+
+/// Count of distinct purchasing account IDs that hold at least one entitlement.
+pub async fn active_purchaser_count(db: &Database) -> Result<i64, sqlx::Error> {
+    let sql = "SELECT COUNT(DISTINCT account_id) FROM monetization_entitlements";
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar(sql).fetch_one(db.sqlite_pool().expect("sqlite")).await
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar(sql).fetch_one(db.postgres_pool().expect("postgres")).await
+        }
+    }
+}

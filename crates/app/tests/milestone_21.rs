@@ -344,6 +344,10 @@ async fn a_signed_in_caller_reaches_the_monetization_contracts() {
     let (status, _) = client.get("/api/v1/me/gifts").await;
     assert_eq!(status, StatusCode::OK);
 
+    // Admin monetization endpoint gates on trust level.
+    let (status, _) = client.get("/api/v1/admin/monetization").await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
     fx.cleanup().await;
 }
 

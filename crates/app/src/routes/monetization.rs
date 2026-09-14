@@ -348,10 +348,36 @@ pub async fn request_payout(
 }
 
 pub async fn admin_monetization(
-    State(_state): State<AppState>,
-    RequireSession(_user): RequireSession,
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
 ) -> ApiResult<Json<Value>> {
-    Err(not_implemented())
+    let level = lorehaven_db::governance::trust_for(&state.db(), &user.account_id.to_string())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    if level < 5 {
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
+    }
+
+    let total_revenue = monetization::total_platform_revenue(&state.db())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let pending_payouts = monetization::pending_payout_total(&state.db())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let active_authors = monetization::active_earning_authors(&state.db())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let active_purchasers = monetization::active_purchaser_count(&state.db())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+
+    Ok(Json(json!({
+        "total_revenue_minor": total_revenue,
+        "pending_payout_minor": pending_payouts,
+        "active_earning_authors": active_authors,
+        "active_purchasers": active_purchasers,
+        "trust_level": level,
+    })))
 }
 
 pub async fn create_gift(
