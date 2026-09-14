@@ -88,11 +88,100 @@ pub async fn delete_pricing(
 }
 
 pub async fn purchase(
-    State(_state): State<AppState>,
-    RequireSession(_user): RequireSession,
-    Path(_work_id): Path<String>,
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(work_id): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    Err(not_implemented())
+    let work_id = work_id
+        .parse::<lorehaven_domain::WorkId>()
+        .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    let work = lorehaven_db::content::find_work(&state.db(), work_id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    let author_pseud = lorehaven_db::identity::find_pseud(&state.db(), work.owner_pseud_id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "author" }))?;
+    let pricing = monetization::get_pricing(&state.db(), &work_id.to_canonical_string())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
+        .into_iter()
+        .next()
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "pricing" }))?;
+    if !pricing.enabled {
+        return Err(ApiError(lorehaven_domain::AppError::field(
+            "work_id",
+            "this work is not currently for sale",
+        )));
+    }
+
+    let idempotency = format!("purchase:{}:{}", user.account_id, work_id.to_canonical_string());
+    // Idempotency: if already entitled, return the existing entitlement id.
+    // grant_entitlement uses an idempotency key on work_id+account, so re-calls
+    // return the same row. We check via has_entitlement first for a clean response.
+    let already = monetization::has_entitlement(
+        &state.db(),
+        &user.account_id.to_string(),
+        &work_id.to_canonical_string(),
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    if already {
+        let ent = monetization::get_entitlements(&state.db(), &user.account_id.to_string())
+            .await
+            .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
+            .into_iter()
+            .find(|e| e.work_id == work_id.to_canonical_string())
+            .ok_or_else(|| ApiError(lorehaven_domain::AppError::Internal(anyhow::anyhow!("entitlement race"))))?;
+        return Ok(Json(json!({ "entitlement_id": ent.id, "status": "already_granted" })));
+    }
+
+    let entitlement_id = monetization::grant_entitlement(
+        &state.db(),
+        &user.account_id.to_string(),
+        &work_id.to_canonical_string(),
+        "purchase",
+        None,
+        None,
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+
+    // 85/15 split: author gets 85%, platform keeps 15% as a separate ledger entry.
+    let (author_amt, _platform_amt) =
+        lorehaven_domain::monetization::Rules::split(pricing.price_minor, 1_500);
+    let author_payment_id = format!("purchase:{}:author", entitlement_id);
+    let platform_payment_id = format!("purchase:{}:platform", entitlement_id);
+    let _author_earning = monetization::post_earnings(
+        &state.db(),
+        &author_pseud.account_id.to_string(),
+        author_amt,
+        &pricing.currency,
+        "purchase",
+        Some(&author_payment_id),
+        Some(&idempotency),
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let _platform_earning = monetization::post_earnings(
+        &state.db(),
+        "platform",
+        _platform_amt,
+        &pricing.currency,
+        "purchase_fee",
+        Some(&platform_payment_id),
+        Some(&format!("{}:platform", idempotency)),
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+
+    Ok(Json(json!({
+        "entitlement_id": entitlement_id,
+        "status": "purchased",
+        "amount_minor": pricing.price_minor,
+        "currency": pricing.currency,
+    })))
 }
 
 #[derive(Debug, Deserialize)]
