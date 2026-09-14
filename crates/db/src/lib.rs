@@ -38,6 +38,7 @@ pub mod secrets;
 pub mod sessions;
 pub mod storage;
 pub mod taxonomy;
+pub mod translation;
 
 use std::borrow::Cow;
 use std::path::Path;

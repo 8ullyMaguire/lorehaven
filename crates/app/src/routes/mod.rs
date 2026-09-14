@@ -20,4 +20,5 @@ pub mod reading;
 pub mod search;
 pub mod settings;
 pub mod taxonomy;
+pub mod translation;
 pub mod works;
