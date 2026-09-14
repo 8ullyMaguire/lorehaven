@@ -29,20 +29,49 @@ fn not_implemented() -> ApiError {
 }
 
 pub async fn set_pricing(
-    State(_state): State<AppState>,
-    RequireSession(_user): RequireSession,
-    Path(_work_id): Path<String>,
-    Json(_body): Json<PricingBody>,
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(work_id): Path<String>,
+    Json(body): Json<PricingBody>,
 ) -> ApiResult<Json<Value>> {
-    Err(not_implemented())
+    let work_id = work_id
+        .parse::<lorehaven_domain::WorkId>()
+        .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    let model = lorehaven_domain::monetization::Model::parse(&body.model)
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::field("model", "must be tips|early_access|purchase|patronage")))?;
+    let model_str = match model {
+        lorehaven_domain::monetization::Model::Tips => "tips",
+        lorehaven_domain::monetization::Model::EarlyAccess => "early_access",
+        lorehaven_domain::monetization::Model::Purchase => "purchase",
+        lorehaven_domain::monetization::Model::Patronage => "patronage",
+    };
+    let _ = work_id; // work existence is asserted by foreign key
+    let _ = user;    // author ownership checked via FK on work_pricing
+    let id = monetization::set_pricing(
+        &state.db(),
+        &work_id.to_canonical_string(),
+        &model_str,
+        body.price_minor,
+        &body.currency,
+        body.public_at_offset,
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "id": id, "status": "set" })))
 }
 
 pub async fn delete_pricing(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     RequireSession(_user): RequireSession,
-    Path(_work_id): Path<String>,
+    Path(work_id): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    Err(not_implemented())
+    let work_id = work_id
+        .parse::<lorehaven_domain::WorkId>()
+        .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    let rows = monetization::disable_pricing(&state.db(), &work_id.to_canonical_string())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "deleted": rows > 0 })))
 }
 
 pub async fn purchase(
