@@ -443,6 +443,11 @@ pub fn build_router(state: AppState) -> Router {
             &state,
         ))
         .merge(classified(
+            routes::monetization::read_router(),
+            RouteClass::Default,
+            &state,
+        ))
+        .merge(classified(
             routes::monetization::gifts_router(),
             RouteClass::Write,
             &state,

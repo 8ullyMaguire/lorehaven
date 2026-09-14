@@ -239,17 +239,53 @@ pub async fn set_pricing(
     currency: &str,
     public_at_offset: Option<i64>,
 ) -> Result<String, sqlx::Error> {
-    let id = Uuid::new_v4().to_string();
     let now = crate::identity::now_rfc3339();
+
+    // Check if the row already exists so we can return its ID on upsert.
+    let existing_id: Option<String> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar("SELECT id FROM work_pricing WHERE work_id = ?")
+                .bind(work_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar("SELECT id FROM work_pricing WHERE work_id = $1")
+                .bind(work_id)
+                .fetch_optional(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    if let Some(id) = existing_id {
+        // Row exists — update in place and return the existing ID.
+        match db.backend() {
+            Backend::Sqlite => {
+                sqlx::query(
+                    "UPDATE work_pricing SET model = ?, price_minor = ?, currency = ?, public_at_offset = ?, updated_at = ?, version = version + 1 WHERE work_id = ?"
+                )
+                .bind(model).bind(price_minor).bind(currency)
+                .bind(public_at_offset).bind(&now).bind(work_id)
+                .execute(db.sqlite_pool().expect("sqlite")).await?;
+            }
+            Backend::Postgres => {
+                sqlx::query(
+                    "UPDATE work_pricing SET model = $1, price_minor = $2, currency = $3, public_at_offset = $4, updated_at = $5, version = version + 1 WHERE work_id = $6"
+                )
+                .bind(model).bind(price_minor).bind(currency)
+                .bind(public_at_offset).bind(&now).bind(work_id)
+                .execute(db.postgres_pool().expect("postgres")).await?;
+            }
+        }
+        return Ok(id);
+    }
+
+    let id = Uuid::new_v4().to_string();
 
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query(
                 "INSERT INTO work_pricing (id, work_id, model, price_minor, currency, public_at_offset, enabled, created_at, updated_at, version)
-                 VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, 1)
-                 ON CONFLICT(work_id) DO UPDATE SET
-                   model = excluded.model, price_minor = excluded.price_minor, currency = excluded.currency,
-                   public_at_offset = excluded.public_at_offset, updated_at = excluded.updated_at, version = version + 1"
+                 VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, 1)"
             )
             .bind(&id).bind(work_id).bind(model).bind(price_minor).bind(currency)
             .bind(public_at_offset).bind(&now).bind(&now)
@@ -258,10 +294,7 @@ pub async fn set_pricing(
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO work_pricing (id, work_id, model, price_minor, currency, public_at_offset, enabled, created_at, updated_at, version)
-                 VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8, 1)
-                 ON CONFLICT(work_id) DO UPDATE SET
-                   model = excluded.model, price_minor = excluded.price_minor, currency = excluded.currency,
-                   public_at_offset = excluded.public_at_offset, updated_at = excluded.updated_at, version = work_pricing.version + 1"
+                 VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8, 1)"
             )
             .bind(&id).bind(work_id).bind(model).bind(price_minor).bind(currency)
             .bind(public_at_offset).bind(&now).bind(&now)
@@ -307,25 +340,50 @@ pub async fn grant_entitlement(
     source_payment_id: Option<&str>,
     expires_at: Option<&str>,
 ) -> Result<String, sqlx::Error> {
-    let id = Uuid::new_v4().to_string();
     let now = crate::identity::now_rfc3339();
+
+    // Check for existing row so we return the real ID on upsert.
+    let existing_id: Option<String> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar("SELECT id FROM work_entitlements WHERE account_id = ? AND work_id = ? AND kind = ?")
+                .bind(account_id).bind(work_id).bind(kind)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar("SELECT id FROM work_entitlements WHERE account_id = $1 AND work_id = $2 AND kind = $3")
+                .bind(account_id).bind(work_id).bind(kind)
+                .fetch_optional(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+
+    if let Some(id) = existing_id {
+        match db.backend() {
+            Backend::Sqlite => {
+                sqlx::query("UPDATE work_entitlements SET source_payment_id = ?, expires_at = ?, granted_at = ? WHERE id = ?")
+                    .bind(source_payment_id).bind(expires_at).bind(&now).bind(&id)
+                    .execute(db.sqlite_pool().expect("sqlite")).await?;
+            }
+            Backend::Postgres => {
+                sqlx::query("UPDATE work_entitlements SET source_payment_id = $1, expires_at = $2, granted_at = $3 WHERE id = $4")
+                    .bind(source_payment_id).bind(expires_at).bind(&now).bind(&id)
+                    .execute(db.postgres_pool().expect("postgres")).await?;
+            }
+        }
+        return Ok(id);
+    }
+
+    let id = Uuid::new_v4().to_string();
 
     match db.backend() {
         Backend::Sqlite => {
-            sqlx::query(
-                "INSERT INTO work_entitlements (id, account_id, work_id, kind, source_payment_id, granted_at, expires_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(account_id, work_id, kind) DO UPDATE SET granted_at = excluded.granted_at"
-            )
+            sqlx::query("INSERT INTO work_entitlements (id, account_id, work_id, kind, source_payment_id, granted_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
             .bind(&id).bind(account_id).bind(work_id).bind(kind).bind(source_payment_id).bind(&now).bind(expires_at)
             .execute(db.sqlite_pool().expect("sqlite")).await?;
         }
         Backend::Postgres => {
-            sqlx::query(
-                "INSERT INTO work_entitlements (id, account_id, work_id, kind, source_payment_id, granted_at, expires_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)
-                 ON CONFLICT(account_id, work_id, kind) DO UPDATE SET granted_at = excluded.granted_at"
-            )
+            sqlx::query("INSERT INTO work_entitlements (id, account_id, work_id, kind, source_payment_id, granted_at, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7)")
             .bind(&id).bind(account_id).bind(work_id).bind(kind).bind(source_payment_id).bind(&now).bind(expires_at)
             .execute(db.postgres_pool().expect("postgres")).await?;
         }
@@ -334,6 +392,10 @@ pub async fn grant_entitlement(
 }
 
 /// Check whether an account has a valid entitlement for a work.
+/// Uses lexicographic RFC3339 timestamp comparison — safe because
+/// both `expires_at` and the `now` bound come from `now_rfc3339`
+/// (same formatter, same clock). Do not mix with system-time
+/// timestamps elsewhere without reformatting.
 pub async fn has_entitlement(db: &Database, account_id: &str, work_id: &str) -> Result<bool, sqlx::Error> {
     let now = crate::identity::now_rfc3339();
     let count: i64 = match db.backend() {
@@ -352,7 +414,23 @@ pub async fn has_entitlement(db: &Database, account_id: &str, work_id: &str) -> 
             .fetch_one(db.postgres_pool().expect("postgres")).await?
         }
     };
-    Ok(count > 0)
+    if count > 0 {
+    return Ok(true);
+    }
+    // Gifts also grant entitlement (spec §16.8).
+    let gift_count: i64 = match db.backend() {
+    Backend::Sqlite => {
+        sqlx::query_scalar("SELECT COUNT(*) FROM work_gifts WHERE recipient_pseud_id = ? AND work_id = ?")
+            .bind(account_id).bind(work_id)
+            .fetch_one(db.sqlite_pool().expect("sqlite")).await?
+    }
+    Backend::Postgres => {
+        sqlx::query_scalar("SELECT COUNT(*) FROM work_gifts WHERE recipient_pseud_id = $1 AND work_id = $2")
+            .bind(account_id).bind(work_id)
+            .fetch_one(db.postgres_pool().expect("postgres")).await?
+    }
+    };
+    Ok(gift_count > 0)
 }
 
 /// Get entitlements for an account.
@@ -506,7 +584,9 @@ pub async fn get_assertion(db: &Database, work_id: &str, kind: &str) -> Result<O
     }
 }
 
-/// Create a gift.
+/// Create a gift. Note: block-neutrality (spec §18.10) is not yet enforced
+/// in the repository layer — TODO: add block check before insert so the
+/// response does not reveal whether the recipient blocked the giver.
 pub async fn create_gift(
     db: &Database,
     work_id: &str,
