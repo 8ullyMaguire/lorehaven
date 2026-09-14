@@ -20,6 +20,7 @@ pub mod community;
 pub mod content;
 pub mod discovery;
 pub mod events;
+pub mod economy;
 pub mod exports;
 pub mod governance;
 pub mod identity;

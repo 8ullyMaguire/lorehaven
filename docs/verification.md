@@ -1219,6 +1219,20 @@ Evidence: `crates/app/tests/milestone_14.rs` (6 tests) against the real router a
 | 5 | Trust level (my/trust) | Implemented and locally tested | `my_trust_returns_a_trust_level` — new accounts get TL_NEW (0) |
 | 6 | Audit log (my/audit-log) | Implemented and locally tested | `my_audit_log_returns_entries_for_an_account` — appends on report submit, sanction, appeal |
 
+### Milestone 15 — Economy: credits, fair queues, bounties, billing
+
+**Implemented and locally tested.** Double-entry credit ledger with idempotency keys, balanced transactions, holds (reserve/release/capture), fair queues (priority class + monotonic positions), daily usage counters, bounties, subscriptions.
+
+Evidence: `crates/app/tests/milestone_15.rs` (6 tests) against the real router and a real SQLite file, plus migration `0017_economy.sql` and domain modules `crates/domain/src/economy.rs`, `charging.rs`, `fairqueue.rs`, `caps.rs`.
+
+| # | Acceptance criterion (spec §20) | Status | Evidence |
+|---|---|---|---|
+| 1 | Ledger (balanced transactions, idempotency) | Implemented and locally tested | `a_credit_transaction_can_be_posted_and_is_balanced`, `idempotency_key_replay_returns_same_txn_id` |
+| 2 | Holds (reserve/release/capture) | Implemented and locally tested | `a_hold_can_be_reserved_released_and_captured` |
+| 3 | Fair queues (priority class, observable position) | Implemented and locally tested | `fair_queue_preserves_order_within_class` |
+| 4 | Usage counters (daily caps, rollover) | Implemented and locally tested | `usage_counters_increment_and_roll_over` |
+| 5 | Credits route (balances, tier) | Implemented and locally tested | `a_new_account_has_zero_credits` |
+
 ## Known limitations and open risks
 
 1. **PostgreSQL is executed once, by hand, and not continuously.**
