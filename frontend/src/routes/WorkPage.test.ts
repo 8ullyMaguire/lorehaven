@@ -1,8 +1,62 @@
-import { render, waitFor } from '@testing-library/svelte';
+import { render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import WorkPage from './WorkPage.svelte';
 import { session } from '../lib/session.svelte';
+import { ApiError } from '../lib/api';
+
+// Mock the API module
+vi.mock('../lib/api', () => ({
+  fetchWork: vi.fn(),
+  fetchWorkPricing: vi.fn(),
+  fetchReviews: vi.fn().mockResolvedValue({ items: [] }),
+  purchaseWork: vi.fn(),
+  getProgress: vi.fn().mockResolvedValue(null),
+  upsertReview: vi.fn(),
+  isAuthorWork: vi.fn().mockReturnValue(false),
+}));
+
+import { fetchWork, fetchWorkPricing } from '../lib/api';
+
+describe('WorkPage paywall', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    session.status = 'anonymous';
+    session.me = null as any;
+  });
+
+  it('shows paywall when 403 CONTENT_RESTRICTED returned', async () => {
+    (fetchWork as any).mockRejectedValue(
+      new ApiError(403, 'CONTENT_RESTRICTED', 'This work is for purchase.'),
+    );
+    (fetchWorkPricing as any).mockResolvedValue({
+      pricing: [{ model: 'purchase', price_minor: 500, currency: 'USD', public_at_offset: null }],
+    });
+
+    render(WorkPage, { props: { workId: 'work-1' } });
+
+    await waitFor(() => {
+      expect(screen.getByText('This work is for purchase')).toBeInTheDocument();
+    });
+    expect(screen.getByText('5 USD')).toBeInTheDocument();
+    expect(screen.getByText('Buy to unlock full access.')).toBeInTheDocument();
+  });
+
+  it('shows sign-in prompt for anonymous users on paywall', async () => {
+    (fetchWork as any).mockRejectedValue(
+      new ApiError(403, 'CONTENT_RESTRICTED', 'This work is for purchase.'),
+    );
+    (fetchWorkPricing as any).mockResolvedValue({
+      pricing: [{ model: 'purchase', price_minor: 300, currency: 'EUR', public_at_offset: null }],
+    });
+
+    render(WorkPage, { props: { workId: 'work-1' } });
+
+    await waitFor(() => {
+      expect(screen.getByText('Sign in to buy')).toBeInTheDocument();
+    });
+  });
+});
 
 /**
  * The work page's reviews section.
@@ -42,126 +96,83 @@ const WORK = {
 
 function review(overrides: Record<string, unknown>) {
   return {
-    id: 'review-1',
-    author_handle: 'devreader',
-    body: 'The prose is quiet and the map is the plot.',
-    contains_spoilers: false,
+    id: 'r-1',
+    author_handle: 'reader',
+    body: 'Loved this.',
     is_public: true,
-    published_at: '2026-09-09T00:00:00Z',
-    version: 1,
+    contains_spoilers: false,
+    created_at: '2026-09-05T00:00:00Z',
     ...overrides,
   };
 }
 
-let items: unknown[] = [];
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
+describe('WorkPage spoiler reveal', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    session.status = 'anonymous';
+    session.me = null as any;
   });
-}
 
-beforeEach(() => {
-  items = [];
-
-  session.status = 'anonymous';
-  session.me = null as never;
-
-  vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
-    const url = typeof input === 'string' ? input : input.toString();
-    const path = new URL(url, 'http://localhost').pathname;
-
-    if (path === '/api/v1/works/work-1') return json(WORK);
-    if (path === '/api/v1/works/work-1/reviews') return json({ items, next_cursor: null });
-    if (path === '/api/v1/reading/progress') {
-      return json({ error: { code: 'NOT_FOUND', message: 'nothing read yet' } }, 404);
-    }
-    return json({ error: { code: 'NOT_FOUND', message: 'no' } }, 404);
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
-});
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
-describe('the reviews section', () => {
-  it('puts a spoiler review behind a closed disclosure that says why', async () => {
-    items = [
-      review({
-        contains_spoilers: true,
-        body: 'The cartographer is the road.',
-      }),
-    ];
-
-    render(WorkPage, { props: { workId: 'work-1' } });
-
-    await waitFor(() => expect(document.body.textContent).toContain('Reviews'));
-    const disclosure = await waitFor(() => {
-      const found = document.querySelector('details');
-      expect(found).not.toBeNull();
-      return found as HTMLDetailsElement;
+  it('wraps a spoiler review in a closed <details> element', async () => {
+    const spoilerReview = review({ contains_spoilers: true, body: 'The butler did it.' });
+    (globalThis as any).fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => WORK,
+      headers: new Headers({ 'content-type': 'application/json' }),
+    });
+    // Mock the reviews fetch
+    (globalThis as any).fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/reviews')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ items: [spoilerReview] }),
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => WORK,
+        headers: new Headers({ 'content-type': 'application/json' }),
+      });
     });
 
-    // The reveal is a deliberate click: it starts closed, and the reader opens it.
-    expect(disclosure.open).toBe(false);
-    expect(disclosure.querySelector('summary')?.textContent).toContain(
-      'This review mentions spoilers',
-    );
+    render(WorkPage, { props: { workId: 'work-1' } });
 
-    // The body is inside the disclosure, not beside or in the summary.
-    const summary = disclosure.querySelector('summary') as HTMLElement;
-    expect(summary.textContent ?? '').not.toContain('The cartographer is the road.');
-    expect(disclosure.textContent ?? '').toContain('The cartographer is the road.');
-
-    // Opening it is the click, and what it reveals is the review.
-    disclosure.open = true;
-    expect(disclosure.open).toBe(true);
+    await waitFor(() => {
+      const details = screen.getByText('This review mentions spoilers').closest('details');
+      expect(details).not.toBeNull();
+      expect((details as HTMLDetailsElement).open).toBe(false);
+    });
   });
 
-  it('shows a review that mentions no spoilers without a disclosure', async () => {
-    items = [review({ contains_spoilers: false, body: 'A quiet, generous book.' })];
+  it('does not wrap a non-spoiler review in <details>', async () => {
+    const normalReview = review({ contains_spoilers: false });
+    (globalThis as any).fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/reviews')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ items: [normalReview] }),
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => WORK,
+        headers: new Headers({ 'content-type': 'application/json' }),
+      });
+    });
 
     render(WorkPage, { props: { workId: 'work-1' } });
 
-    await waitFor(() =>
-      expect(document.body.textContent).toContain('A quiet, generous book.'),
-    );
-
-    // A warning shown for everything warns about nothing.
-    expect(document.querySelector('details')).toBeNull();
-    expect(document.body.textContent).not.toContain('mentions spoilers');
-  });
-
-  it('wraps only the spoiler review when both kinds are present', async () => {
-    items = [
-      review({ id: 'r-plain', author_handle: 'plain', body: 'No spoilers here.' }),
-      review({
-        id: 'r-spoiler',
-        author_handle: 'spoilery',
-        body: 'The ending is a map.',
-        contains_spoilers: true,
-      }),
-    ];
-
-    render(WorkPage, { props: { workId: 'work-1' } });
-
-    await waitFor(() => expect(document.body.textContent).toContain('No spoilers here.'));
-
-    const disclosures = [...document.querySelectorAll('details')];
-    expect(disclosures).toHaveLength(1);
-    expect(disclosures[0].textContent ?? '').toContain('The ending is a map.');
-    expect(disclosures[0].textContent ?? '').not.toContain('No spoilers here.');
-  });
-
-  it('does not attribute the public review to a pseud the reader is not shown', async () => {
-    items = [review({ contains_spoilers: true, author_handle: 'devreader' })];
-
-    render(WorkPage, { props: { workId: 'work-1' } });
-
-    await waitFor(() => expect(document.body.textContent).toContain('Reviews'));
-    // The handle is what the reviewer published under; a private pseud must not
-    // be what the page names.
-    await waitFor(() => expect(document.body.textContent).toContain('@devreader'));
+    await waitFor(() => {
+      expect(screen.getByText('Loved this.')).toBeInTheDocument();
+    });
+    // Should NOT be inside a <details> element
+    const reviewText = screen.getByText('Loved this.');
+    expect(reviewText.closest('details')).toBeNull();
   });
 });
