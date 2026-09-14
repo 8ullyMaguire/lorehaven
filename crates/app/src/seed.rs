@@ -145,7 +145,6 @@ pub async fn run(config: &Config, db: &Database, args: &SeedArgs) -> Result<Seed
         .fetch_one(pool)
         .await?;
     if count == 0 {
-        let now = lorehaven_db::identity::now_rfc3339();
         let categories = [
             ("general", "General", 1, 0),
             ("fanworks", "Fanworks", 2, 0),
