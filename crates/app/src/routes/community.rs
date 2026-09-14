@@ -211,7 +211,7 @@ async fn get_forums_topics(
     Query(params): Query<CursorQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let topics = lorehaven_db::community::list_topics_in_category(
-        &state.db(),
+        state.db(),
         &category,
         params.cursor.as_deref(),
         params.limit,
