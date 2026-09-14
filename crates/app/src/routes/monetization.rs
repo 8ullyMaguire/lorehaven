@@ -116,10 +116,14 @@ pub fn router() -> axum::Router<AppState> {
         .route("/works/{work_id}/pricing", axum::routing::post(set_pricing).delete(delete_pricing))
         .route("/works/{work_id}/purchase", post(purchase))
         .route("/works/{work_id}/tips", post(tip))
-        .route("/me/entitlements", get(my_entitlements))
-        .route("/me/earnings", get(my_earnings))
         .route("/me/payouts", post(request_payout))
         .route("/admin/monetization", get(admin_monetization))
+}
+
+pub fn read_router() -> axum::Router<AppState> {
+    axum::Router::new()
+        .route("/me/entitlements", get(my_entitlements))
+        .route("/me/earnings", get(my_earnings))
 }
 
 pub fn gifts_router() -> axum::Router<AppState> {
