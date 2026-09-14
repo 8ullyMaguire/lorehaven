@@ -24,6 +24,19 @@ pub struct PricingBody {
     pub public_at_offset: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct GiftBody {
+    pub gift_note: Option<String>,
+    pub challenge_fulfillment_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PayoutBody {
+    pub amount_minor: i64,
+    pub currency: String,
+    pub processor_reference: String,
+}
+
 fn not_implemented() -> ApiError {
     ApiError(lorehaven_domain::AppError::NotImplemented)
 }
@@ -142,10 +155,20 @@ pub async fn my_earnings(
 }
 
 pub async fn request_payout(
-    State(_state): State<AppState>,
-    RequireSession(_user): RequireSession,
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Json(body): Json<PayoutBody>,
 ) -> ApiResult<Json<Value>> {
-    Err(not_implemented())
+    let payout_id = monetization::create_payout(
+        &state.db(),
+        &user.account_id.to_string(),
+        body.amount_minor,
+        &body.currency,
+        &body.processor_reference,
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "id": payout_id })))
 }
 
 pub async fn admin_monetization(
@@ -156,12 +179,30 @@ pub async fn admin_monetization(
 }
 
 pub async fn create_gift(
-    State(_state): State<AppState>,
-    RequireSession(_user): RequireSession,
-    Path(_work_id): Path<String>,
-    Json(_body): Json<Value>,
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(work_id): Path<String>,
+    Json(body): Json<GiftBody>,
 ) -> ApiResult<Json<Value>> {
-    Err(not_implemented())
+    let work_id = work_id
+        .parse::<lorehaven_domain::WorkId>()
+        .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    let pseud = user.pseud_id.ok_or_else(|| {
+        ApiError(lorehaven_domain::AppError::field(
+            "pseud_id",
+            "a pseud must be selected to create a gift",
+        ))
+    })?;
+    let gift_id = monetization::create_gift(
+        &state.db(),
+        &work_id.to_canonical_string(),
+        &pseud.to_canonical_string(),
+        body.gift_note.as_deref(),
+        body.challenge_fulfillment_id.as_deref(),
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "id": gift_id })))
 }
 
 pub async fn list_gifts(
