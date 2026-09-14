@@ -360,7 +360,7 @@ async fn read_work(
     let contributors = collaboration::contributors_for_work(state.db(), work_id).await?;
     let actor = actor_for(session.as_ref());
 
-    match reading_decision(&state, actor.as_ref(), &work, &contributors) {
+    match reading_decision(&state, actor.as_ref(), &work, &contributors).await {
         Reading::Contributor => {}
         Reading::Public => {
             // A public reader never receives the editor document, and never
@@ -638,7 +638,7 @@ async fn read_chapter(
     let actor = actor_for(session.as_ref());
 
     let (is_contributor, is_public) =
-        match reading_decision(&state, actor.as_ref(), &work, &contributors) {
+        match reading_decision(&state, actor.as_ref(), &work, &contributors).await {
             Reading::Contributor => (true, false),
             Reading::Public => (false, true),
             Reading::Denied(error) => return Err(ApiError(error)),
@@ -880,7 +880,37 @@ enum Reading {
     Denied(AppError),
 }
 
-fn reading_decision(
+/// Check whether the actor holds a valid entitlement for a priced work.
+/// Returns `Ok(true)` if entitled, `Ok(false)` if not entitled (but no
+/// DB error occurred), and `Err` if the DB lookup itself fails.
+async fn check_entitlement(
+    state: &AppState,
+    actor: &Actor,
+    work_id: &WorkId,
+) -> ApiResult<bool> {
+    let pricing = lorehaven_db::monetization::get_pricing(&state.db(), &work_id.to_canonical_string())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let Some(pricing) = pricing else {
+        // Not a priced work — no entitlement needed.
+        return Ok(true);
+    };
+    if pricing.model == "tips" || !pricing.enabled {
+        // Tips model is free-to-read; disabled pricing is effectively no pricing.
+        return Ok(true);
+    }
+    let account_id = actor.account_id.to_string();
+    let has = lorehaven_db::monetization::has_entitlement(
+        &state.db(),
+        &account_id,
+        &work_id.to_canonical_string(),
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(has)
+}
+
+async fn reading_decision(
     state: &AppState,
     actor: Option<&Actor>,
     work: &Work,
@@ -907,11 +937,33 @@ fn reading_decision(
 
     match can_access_content(actor, &facts, &policy) {
         Decision::Allow => {
-            if matches!(work.lifecycle_state(), Lifecycle::Published) {
-                Reading::Public
-            } else {
-                Reading::Denied(AppError::NotFound { resource: "work" })
+            if !matches!(work.lifecycle_state(), Lifecycle::Published) {
+                return Reading::Denied(AppError::NotFound { resource: "work" });
             }
+            // Entitlement check: a priced work (model == "purchase")
+            // requires a valid entitlement (purchase, patronage,
+            // early_access, or gift). Tips-model works are free to read.
+            match actor {
+                Some(actor) => match check_entitlement(state, actor, &work.id).await {
+                    Ok(true) => {} // entitled or free-to-read
+                    Ok(false) => return Reading::Denied(AppError::ContentRestricted),
+                    Err(error) => return Reading::Denied(error.0),
+                },
+                None => {
+                    // Anonymous: deny if the work is priced (purchase model).
+                    match lorehaven_db::monetization::is_work_priced(
+                        &state.db(),
+                        &work.id.to_canonical_string(),
+                    )
+                    .await
+                    {
+                        Ok(true) => return Reading::Denied(AppError::ContentRestricted),
+                        Ok(false) => {}
+                        Err(e) => return Reading::Denied(AppError::Internal(e.into())),
+                    }
+                }
+            }
+            Reading::Public
         }
         Decision::Deny(reason) => Reading::Denied(match reason {
             // Absence is reported as absence: a draft, a withheld work or a

@@ -441,3 +441,147 @@ async fn a_signed_in_caller_reaches_the_subscription_contracts() {
 
     fx.cleanup().await;
 }
+
+// ---------------------------------------------------------------------------
+// Acceptance tests: entitlement enforcement on the work-read path.
+// ---------------------------------------------------------------------------
+
+/// Create a work via the API and return its id.
+async fn create_work(client: &mut Client, title: &str) -> String {
+    let (status, body) = client
+        .post("/api/v1/works", json!({ "title": title }))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "create work: {body}");
+    body["id"].as_str().unwrap().to_owned()
+}
+
+/// Add a chapter with content so the work can be published.
+async fn add_chapter(client: &mut Client, work_id: &str, title: &str, text: &str) -> String {
+    let (status, body) = client
+        .post(
+            &format!("/api/v1/works/{work_id}/chapters"),
+            json!({ "title": title }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "add chapter: {body}");
+    let chapter_id = body["id"].as_str().unwrap().to_owned();
+    let version = body["version"].as_i64().unwrap_or(1);
+    let doc = json!({
+        "type": "doc",
+        "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}]
+    });
+    let (status, _) = client
+        .send("PATCH", &format!("/api/v1/chapters/{chapter_id}"), Some(json!({ "expected_version": version, "document": doc })))
+        .await;
+    assert_eq!(status, StatusCode::OK, "save chapter text");
+    chapter_id
+}
+
+/// Publish a work.
+async fn publish_work(client: &mut Client, work_id: &str, version: i64) {
+    let (status, _) = client
+        .post(
+            &format!("/api/v1/works/{work_id}/publish"),
+            json!({ "expected_version": version }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "publish work {work_id}");
+}
+
+#[tokio::test]
+async fn a_purchased_work_is_readable_by_the_buyer() {
+    let fx = Fixture::new("buy-read").await;
+    let mut buyer = fx.client();
+    register(&mut buyer, "m21-buyer@example.com", "m21buyer").await;
+
+    let mut author = fx.client();
+    register(&mut author, "m21-author3@example.com", "m21author3").await;
+
+    let work_id = create_work(&mut author, "Paid Story").await;
+    let _chapter_id = add_chapter(&mut author, &work_id, "Chapter 1", "Once upon a time.").await;
+    publish_work(&mut author, &work_id, 1).await;
+
+    // Price the work as purchase-only.
+    let (status, _) = author
+        .post(
+            &format!("/api/v1/works/{work_id}/pricing"),
+            json!({ "model": "purchase", "price_minor": 500, "currency": "EUR", "public_at_offset": null }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "set pricing");
+
+    // Buyer purchases.
+    let (status, _) = buyer
+        .post(&format!("/api/v1/works/{work_id}/purchase"), json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "purchase");
+
+    // Buyer can read.
+    let (status, _) = buyer.get(&format!("/api/v1/works/{work_id}")).await;
+    assert_eq!(status, StatusCode::OK, "buyer can read purchased work");
+
+    fx.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_paid_work_is_paywalled_for_non_buyers() {
+    let fx = Fixture::new("paywall").await;
+    let mut buyer = fx.client();
+    register(&mut buyer, "m21-buyer2@example.com", "m21buyer2").await;
+
+    let mut author = fx.client();
+    register(&mut author, "m21-author4@example.com", "m21author4").await;
+
+    let work_id = create_work(&mut author, "Locked Story").await;
+    let _chapter_id = add_chapter(&mut author, &work_id, "Chapter 1", "Secret content.").await;
+    publish_work(&mut author, &work_id, 1).await;
+
+    // Price the work.
+    let (status, _) = author
+        .post(
+            &format!("/api/v1/works/{work_id}/pricing"),
+            json!({ "model": "purchase", "price_minor": 300, "currency": "EUR", "public_at_offset": null }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "set pricing");
+
+    // A different reader without an entitlement is paywalled.
+    let mut other = fx.client();
+    register(&mut other, "m21-other@example.com", "m21other").await;
+    let (status, _) = other.get(&format!("/api/v1/works/{work_id}")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "non-buyer gets paywalled");
+
+    // But the author can still read their own work.
+    let (status, _) = author.get(&format!("/api/v1/works/{work_id}")).await;
+    assert_eq!(status, StatusCode::OK, "author can read own work");
+
+    fx.cleanup().await;
+}
+
+#[tokio::test]
+async fn tip_only_work_is_free_to_read() {
+    let fx = Fixture::new("tip-free").await;
+    let mut author = fx.client();
+    register(&mut author, "m21-author5@example.com", "m21author5").await;
+
+    let work_id = create_work(&mut author, "Tip Jar").await;
+    let _chapter_id = add_chapter(&mut author, &work_id, "Chapter 1", "Have a story.").await;
+    publish_work(&mut author, &work_id, 1).await;
+
+    // Price as tips-only (free to read).
+    let (status, _) = author
+        .post(
+            &format!("/api/v1/works/{work_id}/pricing"),
+            json!({ "model": "tips", "price_minor": 0, "currency": "EUR", "public_at_offset": null }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "set tips pricing");
+
+    // An anonymous reader can still read.
+    let mut anon = fx.client();
+    let (status, _) = anon.get(&format!("/api/v1/works/{work_id}")).await;
+    assert_eq!(status, StatusCode::OK, "tips-only work is free to read");
+
+    fx.cleanup().await;
+}
+

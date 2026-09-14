@@ -145,30 +145,20 @@ pub async fn purchase(
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
 
-    // 85/15 split: author gets 85%, platform keeps 15% as a separate ledger entry.
+    // 85/15 split: author gets 85%, platform keeps 15%.
+    // Platform fee is tracked separately from author earnings (author_earnings_ledger
+    // has a FK to accounts, so platform is not a registered account).
     let (author_amt, _platform_amt) =
         lorehaven_domain::monetization::Rules::split(pricing.price_minor, 1_500);
     let author_payment_id = format!("purchase:{}:author", entitlement_id);
-    let platform_payment_id = format!("purchase:{}:platform", entitlement_id);
     let _author_earning = monetization::post_earnings(
         &state.db(),
         &author_pseud.account_id.to_string(),
         author_amt,
         &pricing.currency,
-        "purchase",
+        "sale",
         Some(&author_payment_id),
         Some(&idempotency),
-    )
-    .await
-    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
-    let _platform_earning = monetization::post_earnings(
-        &state.db(),
-        "platform",
-        _platform_amt,
-        &pricing.currency,
-        "purchase_fee",
-        Some(&platform_payment_id),
-        Some(&format!("{}:platform", idempotency)),
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
