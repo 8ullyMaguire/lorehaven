@@ -41,6 +41,8 @@ pub mod taxonomy;
 pub mod translation;
 pub mod external;
 pub mod admin;
+pub mod monetization;
+pub mod subscriptions;
 
 use std::borrow::Cow;
 use std::path::Path;
