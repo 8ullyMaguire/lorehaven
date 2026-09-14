@@ -25,6 +25,7 @@ pub mod query;
 pub mod query_sql;
 pub mod reading;
 pub mod taxonomy;
+pub mod translation;
 pub mod webhook;
 
 pub use error::{AppError, ErrorCode, Result};
