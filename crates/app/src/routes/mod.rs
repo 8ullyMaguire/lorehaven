@@ -7,6 +7,7 @@ pub mod discovery;
 pub mod economy;
 pub mod events;
 pub mod exports;
+pub mod external;
 pub mod feedback;
 pub mod governance;
 pub mod health;

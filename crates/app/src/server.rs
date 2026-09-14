@@ -423,6 +423,12 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // Public API, bots, feeds, push, federation, AI — M18.
+        .merge(classified(
+            routes::external::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // Session loading wraps everything under /api/v1 so that the CSRF layer
         // and the limiter installed per subtree can both see who is asking.
         .layer(middleware::from_fn_with_state(

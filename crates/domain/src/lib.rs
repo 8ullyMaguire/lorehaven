@@ -27,6 +27,8 @@ pub mod reading;
 pub mod taxonomy;
 pub mod translation;
 pub mod webhook;
+pub mod api_scopes;
+pub mod feeds;
 
 pub use error::{AppError, ErrorCode, Result};
 pub use ids::*;
