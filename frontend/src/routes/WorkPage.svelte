@@ -14,14 +14,18 @@
   import {
     fetchReviews,
     fetchWork,
+    fetchWorkPricing,
+    purchaseWork,
     getProgress,
     isAuthorWork,
     upsertReview,
     type AuthorWork,
     type ProgressView,
     type PublicWork,
+    type PublicPricingResponse,
     type ReviewView,
   } from '../lib/api';
+  import { ApiError } from '../lib/api';
   import { describeCompletion, describeLifecycle, describeRating, describeVisibility } from '../lib/labels';
   import { handleLinkClick } from '../lib/router';
   import { session } from '../lib/session.svelte';
@@ -40,6 +44,9 @@
   let work = $state<PublicWork | AuthorWork | null>(null);
   let error = $state<unknown>(null);
   let loading = $state(true);
+
+  // Paywall state: set when fetchWork returns 403 CONTENT_RESTRICTED.
+  let paywall = $state<PublicPricingResponse | null>(null);
 
   let progress = $state<ProgressView | null>(null);
   let reviews = $state<ReviewView[]>([]);
@@ -74,6 +81,15 @@
         }
       }
     } catch (failure) {
+      // Paywall: a priced work returns 403 CONTENT_RESTRICTED for non-buyers.
+      // Fetch public pricing so we can render a buy screen.
+      if (failure instanceof ApiError && failure.code === 'CONTENT_RESTRICTED') {
+        try {
+          paywall = await fetchWorkPricing(workId);
+        } catch {
+          paywall = null;
+        }
+      }
       error = failure;
       work = null;
     } finally {
@@ -103,9 +119,41 @@
 
 {#if loading}
   <Skeleton lines={4} />
+{:else if paywall}
+  <!-- Paywall (spec §20.9): work exists and is priced, but the reader
+       has not purchased it. Show the price and a buy button. -->
+  <h1>This work is for purchase</h1>
+  <p class="paywall-price">
+    {#each paywall.pricing as p (p.currency)}
+      {#if p.model === 'purchase'}
+        {Math.round(p.price_minor / 100)} {p.currency}
+      {/if}
+    {/each}
+  </p>
+  <p>Buy to unlock full access.</p>
+  <button
+    type="button"
+    disabled={!session.isSignedIn}
+    onclick={async () => {
+      if (!session.isSignedIn) return;
+      try {
+        await purchaseWork(workId);
+        paywall = null;
+        void load();
+      } catch (failure) {
+        error = failure;
+      }
+    }}
+  >
+    {#if !session.isSignedIn}
+      Sign in to buy
+    {:else}
+      Buy now
+    {/if}
+  </button>
 {:else if error}
   <h1>Not found</h1>
-  <ErrorSummary error={error} />
+  <ErrorSummary {error} />
   <p>
     <a href="/" onclick={(event) => handleLinkClick(event, '/')}>Back to the front page</a>
   </p>
@@ -306,5 +354,11 @@
   .note {
     color: var(--color-muted);
     font-size: var(--text-sm);
+  }
+
+  .paywall-price {
+    font-size: var(--text-xl);
+    font-weight: bold;
+    color: var(--color-text);
   }
 </style>
