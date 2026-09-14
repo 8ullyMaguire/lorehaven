@@ -2080,3 +2080,109 @@ export async function fetchConversations(signal?: AbortSignal): Promise<Conversa
 export async function fetchBlocks(signal?: AbortSignal): Promise<Block[]> {
   return apiFetch<Block[]>('/community/blocks', { signal });
 }
+
+// ---------------------------------------------------------------------------
+// Monetization (spec §20.9)
+// ---------------------------------------------------------------------------
+
+/** Pricing model for a work. */
+export interface PricingRow {
+  id: string;
+  model: string;          // "purchase" | "tips"
+  price_minor: number;
+  currency: string;
+  public_at_offset: number | null;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  version: number;
+}
+
+/** An entitlement the acting account holds. */
+export interface EntitlementRow {
+  id: string;
+  work_id: string;
+  kind: string;
+  source_payment_id: string | null;
+  granted_at: string;
+  expires_at: string | null;
+}
+
+/** An earnings entry on the author's ledger. */
+export interface EarningsRow {
+  id: string;
+  amount_minor: number;
+  currency: string;
+  kind: string;
+  payment_id: string | null;
+  idempotency_key: string | null;
+  created_at: string;
+}
+
+/** Public pricing info for a work (anonymous-readable). */
+export interface PublicPricing {
+  model: string;
+  price_minor: number;
+  currency: string;
+  public_at_offset: number | null;
+}
+
+export interface PublicPricingResponse {
+  pricing: PublicPricing[];
+}
+
+/** Purchase result. */
+export interface PurchaseResult {
+  entitlement_id: string;
+  status: string;
+  amount_minor: number;
+  currency: string;
+}
+
+/** Fetch public pricing for a work (anonymous-readable). */
+export function fetchWorkPricing(
+  workId: string,
+  signal?: AbortSignal,
+): Promise<PublicPricingResponse> {
+  return apiFetch<PublicPricingResponse>(
+    `/works/${encodeURIComponent(workId)}/pricing`,
+    { signal },
+  );
+}
+
+/** Purchase a work. Requires a signed-in session with a pseud. */
+export function purchaseWork(workId: string): Promise<PurchaseResult> {
+  return apiFetch<PurchaseResult>(
+    `/works/${encodeURIComponent(workId)}/purchase`,
+    { method: 'POST' },
+  );
+}
+
+/** Set pricing on a work (author only). */
+export function setWorkPricing(
+  workId: string,
+  pricing: { model: string; price_minor: number; currency: string; public_at_offset: number | null },
+): Promise<PricingRow> {
+  return apiFetch<PricingRow>(
+    `/works/${encodeURIComponent(workId)}/pricing`,
+    { method: 'POST', body: JSON.stringify(pricing) },
+  );
+}
+
+/** Remove pricing from a work (author only). */
+export function deleteWorkPricing(workId: string): Promise<void> {
+  return apiFetch<void>(
+    `/works/${encodeURIComponent(workId)}/pricing`,
+    { method: 'DELETE' },
+  );
+}
+
+/** Fetch the acting account's entitlements. */
+export function fetchMyEntitlements(signal?: AbortSignal): Promise<EntitlementRow[]> {
+  return apiFetch<EntitlementRow[]>('/me/entitlements', { signal });
+}
+
+/** Fetch the acting account's earnings. */
+export function fetchMyEarnings(signal?: AbortSignal): Promise<EarningsRow[]> {
+  return apiFetch<EarningsRow[]>('/me/earnings', { signal });
+}
