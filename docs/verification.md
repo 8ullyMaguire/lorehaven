@@ -1233,6 +1233,20 @@ Evidence: `crates/app/tests/milestone_15.rs` (6 tests) against the real router a
 | 4 | Usage counters (daily caps, rollover) | Implemented and locally tested | `usage_counters_increment_and_roll_over` |
 | 5 | Credits route (balances, tier) | Implemented and locally tested | `a_new_account_has_zero_credits` |
 
+### Milestone 16 — Marketplace, extensions, webhooks, gallery
+
+**Implemented and locally tested.** Listings + commissions state machines, extension manifests with capability vocabulary + grant subset rule, webhooks (HMAC signing, bounded payload, replay protection), gallery items.
+
+Evidence: `crates/app/tests/milestone_16.rs` (6 tests) against the real router and a real SQLite file, plus migration `0018_marketplace.sql` and domain modules `crates/domain/src/marketplace.rs`, `extension.rs`, `webhook.rs`.
+
+| # | Acceptance criterion (spec §21) | Status | Evidence |
+|---|---|---|---|
+| 1 | Listings (create, list) | Implemented and locally tested | `a_listing_can_be_created_and_listed` |
+| 2 | Commissions (create, transition) | Implemented and locally tested | `a_commission_can_be_created_and_transitions` |
+| 3 | Extensions (grant, revoke) | Implemented and locally tested | `extension_grant_works` |
+| 4 | Webhooks (create, sign, verify) | Implemented and locally tested | `webhook_creation_works`, `webhook_signing_verifies` |
+| 5 | Gallery (add, list) | Implemented and locally tested | `gallery_item_can_be_added` |
+
 ## Known limitations and open risks
 
 1. **PostgreSQL is executed once, by hand, and not continuously.**

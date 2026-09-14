@@ -411,6 +411,12 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // Marketplace (listings, commissions, extensions, webhooks, gallery) — M16.
+        .merge(classified(
+            routes::marketplace::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // Session loading wraps everything under /api/v1 so that the CSRF layer
         // and the limiter installed per subtree can both see who is asking.
         .layer(middleware::from_fn_with_state(
