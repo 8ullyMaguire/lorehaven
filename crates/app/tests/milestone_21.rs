@@ -328,22 +328,34 @@ async fn a_signed_in_caller_reaches_the_monetization_contracts() {
     let (status, _) = client
         .post("/api/v1/works/w1/tips", json!({"amount_minor": 300, "currency": "EUR", "channel": "money"}))
         .await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // POST /works/{work_id}/gifts and POST /me/payouts are now implemented.
+    let (status, _) = client
+        .post("/api/v1/works/0189dc5a-4c81-7120-8200-4758243e9e6a/gifts", json!({"gift_note": "thanks"}))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "gifts to unknown work → 404");
+
+    let (status, _) = client
+        .post("/api/v1/me/payouts", json!({"amount_minor": 1000, "currency": "EUR", "processor_reference": "ref1"}))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = client.get("/api/v1/me/gifts").await;
+    assert_eq!(status, StatusCode::OK, "authenticated caller can list gifts");
 
     fx.cleanup().await;
 }
 
 #[tokio::test]
-async fn monetization_entitlements_endpoint_is_implemented() {
-    let fx = Fixture::new("money-entitlements").await;
+async fn monetization_list_gifts_endpoint_is_implemented() {
+    let fx = Fixture::new("money-gifts").await;
     let mut client = fx.client();
-    register(&mut client, "m21-reeder@example.com", "m21reeder").await;
+    register(&mut client, "m21-gifter@example.com", "m21gifter").await;
 
-    // my_entitlements is implemented (not a 501 stub): it returns 200 with
-    // an entitlements array — empty when the reader has none.
-    let (status, body) = client.get("/api/v1/me/entitlements").await;
+    let (status, body) = client.get("/api/v1/me/gifts").await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
-    assert_eq!(body, json!({ "entitlements": [] }));
+    assert_eq!(body, json!({ "gifts": [] }));
 
     fx.cleanup().await;
 }
@@ -363,20 +375,6 @@ async fn monetization_earnings_endpoint_is_implemented() {
     fx.cleanup().await;
 }
 
-#[tokio::test]
-async fn monetization_list_gifts_endpoint_is_implemented() {
-    let fx = Fixture::new("money-gifts").await;
-    let mut client = fx.client();
-    register(&mut client, "m21-gifter@example.com", "m21gifter").await;
-
-    // list_gifts is implemented (not a 501 stub): it returns
-    // 200 with a gifts array — empty when the recipient has none.
-    let (status, body) = client.get("/api/v1/me/gifts").await;
-    assert_eq!(status, StatusCode::OK, "body: {body}");
-    assert_eq!(body, json!({ "gifts": [] }));
-
-    fx.cleanup().await;
-}
 
 #[tokio::test]
 async fn subscription_and_alert_routes_refuse_anonymous_callers() {
