@@ -16,7 +16,7 @@ Lorehaven is a self-hosted, self-governing fanfiction platform that lets users s
 
 When two goals conflict, the higher-numbered priority yields to the lower-numbered one.
 
-1. **Fully customizable website** through installable themes, recommendation engines, widgets, writing tools, challenge variants, and reader enhancements.
+1. **Fully customizable website** through installable themes, recommendation engines, feed composition, widgets, writing tools, challenge variants, and reader enhancements.
 2. **Maximize available high-quality fiction** through aggressive importing, low-friction writing, effective discovery, and reader-behavior quality signals.
 3. **Maximize positive feedback and suppress destructive negativity.** Only positive or constructive criticism reaches authors. Constructive critique requires opt-in.
 4. **Grow admin-aligned fiction without becoming monothematic.** Private taste influence guided by deliberate diversity mechanisms.
@@ -36,6 +36,8 @@ These are not priorities that yield to others. They constrain every priority abo
 - Accessibility, child safety, and harassment protection are foundational.
 - No purchased trust, purchased ranking, or purchased moderation authority.
 - Credits and gamification rewards must never purchase trust, moderation authority, or search ranking.
+- No advertising, no third-party trackers, no sponsored placement anywhere in the product.
+- Third-party AI crawlers are refused by default (§24.14); a work's availability for AI training is the author's statement, not something the instance can enforce, and it is presented as such.
 - The administrator's taste profile must never be visible, inferable, or hinted at through any user-facing label, multiplier name, or credit breakdown.
 - Honest verification claims. Feature presence in this document is not evidence of implementation.
 
@@ -109,6 +111,8 @@ Store decisions in `docs/adr/`:
 0014-declarative-recipes-vs-scripting.md
 0015-shadowban-policy.md
 0016-presence-and-typing-indicators.md
+0017-work-monetization.md
+0018-ai-crawler-posture.md
 ```
 
 ## 1.5 Features do not override foundational protections
@@ -524,18 +528,18 @@ Alias uniqueness is scoped by type and namespace. Relationship participant sets 
 
 | Module | Tables |
 |---|---|
-| Library | bookmarks, notes, shelves, shelf_entries, reading_progress, reading_events, reading_aggregates, saved_searches, author_watches, reading_goals |
+| Library | bookmarks, notes, shelves, shelf_entries, reading_progress, reading_events, reading_aggregates, saved_searches, search_alerts, author_watches, reading_goals |
 | Reader feedback | ratings, reviews, review_revisions, work_metric_aggregates, quick_reactions, appreciation_notes, cheer_events |
 | Positivity | comment_classifications, feedback_holds, moderation_queue_entries, author_visible_feedback, classifier_training_signals |
 | Jobs | jobs, job_attempts, job_events, outbox_events |
 | Search | search_documents, search_index_state, search_demand_aggregates, fuzzy_correction_suggestions |
-| Community | comments, reactions, follows, groups, memberships, boards, topics, posts, polls, poll_votes, post_drafts, scheduled_posts |
+| Community | comments, reactions, follows, subscriptions, groups, memberships, boards, topics, posts, polls, poll_votes, post_drafts, scheduled_posts |
 | Forum depth | topic_read_states, topic_tags, topic_tag_assignments, watch_preferences, mention_events |
 | Messaging | conversations, conversation_members, messages, chat_rooms, presence_preferences |
 | Collections | collections, collection_roles, collection_submissions, collection_entries |
 | Writing events | challenges, prompts, signups, assignments, claims, fulfillments, mentorships, sprints, wishlist_items, wishlist_votes, request_candidates |
 | Governance | trust_policies, trust_history, expertise, role_assignments, reports, cases, proposals, votes, sanctions, appeals, audit_events, process_feedback, quorum_records, shadowban_actions |
-| Economy | wallets, ledger_transactions, ledger_entries, credit_holds, subscriptions, payment_events, bounties, entitlements |
+| Economy | wallets, ledger_transactions, ledger_entries, credit_holds, subscriptions, payment_events, bounties, entitlements, work_pricing, work_entitlements, author_earnings_ledger, payouts, monetization_assertions |
 | Extensions | packages, package_versions, manifests, installations, grants, reviews, approvals, execution_usage, revocations, extension_purchases, extension_ratings, webhook_subscriptions |
 | Discovery | user_preferences, taste_profiles, taste_profile_versions, permitted_signals, exposure_events, aggregate_affinities, similarity_suggestions, similarity_votes, recommendation_recipes, recipe_versions, diversity_budgets, editorial_picks |
 | Interface | dashboard_layouts, widget_instances, user_locale_preferences, navigation_customizations |
@@ -701,6 +705,13 @@ Two first-party layout presets:
 
 Themes and layout presets from the marketplace override these. Reader typography remains independently configurable. Neither preset may hide safety controls, attribution, or essential metadata.
 
+Beyond the presets:
+
+- **Accent colour choice** decoupled from full themes: one token, a small palette, trivial to ship, enormous felt customization.
+- **Reader-only themes** distinct from interface themes. A reader who wants a dark reading surface on a light interface, or the reverse, gets both without one overriding the other.
+- **Appearance import/export**: a full appearance bundle — theme, accent, reader settings, dashboard layout — as one JSON file. This is what makes customization portable between self-hosted instances.
+- **Per-pseud appearance.** An account shares identity across its pseuds but not necessarily an environment; appearance follows the same per-pseud rule as dashboard layouts (§16.8).
+
 ## Acceptance
 
 - Keyboard operation and visible focus.
@@ -722,6 +733,7 @@ Themes and layout presets from the marketplace override these. Reader typography
 
 - Registration, login, password reset, email verification.
 - Session listing and revocation.
+- Sign-in alerts: a new session on an account notifies the account's verified address, naming the device class and general region, and the alert is opt-out rather than opt-in.
 - TOTP and recovery codes.
 - Pseud creation and switching.
 - Privacy settings.
@@ -897,7 +909,10 @@ Explain that unlisted content is accessible to anyone with the URL under applica
 
 ## 8.3 Editor
 
-Restricted Tiptap schema: paragraphs, headings, emphasis, strong, lists, blockquotes, links, scene breaks.
+Restricted Tiptap schema: paragraphs, headings, emphasis, strong, lists, blockquotes, links, scene breaks, author notes, footnotes, endnotes.
+
+- **Author notes** are first-class blocks, placed before or after a chapter's body and clearly distinguished from the story text. A note before the body carries posting context — schedule, warning pointers, thanks; a note after it carries replies and next-chapter plans. Both collapse in the reader once a reader has hidden them, and both are excluded from word counts, from exports' main body, and from body search (§15.9).
+- **Footnotes and endnotes** are structured: a footnote anchor in the body resolves to a note rendered at the chapter's foot; an endnote collects to the work's end matter. They survive export (§13.1) as native EPUB footnotes where the format supports them and as clearly marked sections where it does not.
 
 No arbitrary HTML, scripts, iframes, or embedded objects initially.
 
@@ -1015,7 +1030,13 @@ Private imported content uses authenticated library routes.
 
 ## 9.2 Reader features
 
-Chapter navigation, whole-work mode, table of contents, typography settings, light/dark/sepia themes, width/line-height controls, distraction-free mode, spoiler reveal, progress, private notes, search within current work, reading-time estimates, end-of-work actions.
+Chapter navigation, whole-work mode, table of contents, typography settings — font family (including accessible and dyslexia-friendly options), size, line height, justification — light/dark/sepia/high-contrast themes, width/line-height controls, distraction-free mode, spoiler reveal, progress, private notes, search within current work, reading-time estimates, end-of-work actions.
+
+**Text-to-speech.** The reader can have any chapter read aloud. The default engine is the browser's own speech synthesis — free, offline, and no text leaves the device. Where an AI provider is configured, a higher-quality voice is available as a metered AI task (§23.7) under the budget guardrails (§22.11): it quotes before it runs, and it never produces a stored audiobook the author did not publish. A published podfic or audiobook unit (§30.1) always takes precedence over generated speech. TTS output is never stored as a work, never indexed, and never federated.
+
+**Reader layout persistence.** Paged, continuous and whole-work modes are saved per reader and per work, not per browser: a work read in one layout stays in that layout on the next device. Typography is remembered per work as well, because a work read in a right-to-left language and a work read in English do not share one setting.
+
+**Custom reader CSS.** A reader may supply free-form CSS scoped to the reading surface, sanitized by the same pipeline as marketplace themes, opt-in and warned about. It is the cheapest honest answer to "customize my reading experience" and is off by default.
 
 Long works must not require rendering every paragraph at once.
 
@@ -1074,6 +1095,8 @@ History contains recently opened, resumable, finished works with timestamps and 
 Settings separately control progress sync, detailed history retention, personal aggregate statistics, and recommendation learning. Disabling learning does not disable resume.
 
 Personal analytics: works marked finished, chapters read, estimated words read, approximate reading time, optional personal streak.
+
+A **year in review** page compiles the reader's own year: works finished, words read, fandoms visited, moods most read, bookmarks added, and the authors they appreciated most. It is private by default, shareable only as an explicit action, computed from data the reader already controls, and it shares the history settings' deletion behavior: cleared history is a cleared review.
 
 Do not count opens as proof of reading. Label estimates as such.
 
@@ -1317,6 +1340,15 @@ Missing a target is displayed as neutral information, not failure, and meeting
 one earns no credit bonus: the daily reading credit in 9.7.2 is unaffected by
 whether a goal exists, so a goal can never become a way to farm credits.
 
+**Writing goals** work the same way for authors: a daily or weekly word-count or
+drafting target, progress on the author dashboard, private by default, and
+granting nothing. Words outlined, drafted, or revised all count toward it,
+because the goal serves the author's own pacing and not a volume metric; there
+is no leaderboard for it (§9.7.5) and no credit attaches to it. Sprints
+(§18.4) remain the social form of the same need; the goal is the private one.
+
+**Writing goals** work the same way for authors: a daily or weekly word-count or drafting target, progress on the author dashboard, private by default, and granting nothing. Words outlined, drafted, or revised all count toward it, because the goal serves the author's own pacing and not a volume metric; there is no leaderboard for it (§9.7.5) and no credit attaches to it. Sprints (§18.4) remain the social form of the same need; the goal is the private one.
+
 **Acceptance**
 
 - Daily login credits award once per calendar day.
@@ -1350,6 +1382,25 @@ Completion rate:
 - Used as a quality signal in discovery.
 - Minimum sample threshold before display.
 - Never used to penalize experimental or unpublished-length works.
+
+**Author analytics.** Each work and each pseud has an analytics view holding
+only aggregate, non-identity data: reads and unique readers over time,
+completions and completion rate, reactions by label, positive comments,
+bookmarks, collection additions, subscriptions, downloads by format, and
+reading-time distribution. Every chart states its definition and exclusions,
+with the same documented semantics as §24.2's public statistics.
+
+- No per-reader data anywhere: no reader list, no reader journeys, no
+  per-identity timestamps. An author who wants to know who read their work can
+  ask them, and reader privacy answers.
+- Referrers are not collected by default. An operator may enable domain-level
+  referrer aggregation — no full URLs, no query strings, no cross-site
+  identifiers — and turning it on is recorded in the modlog (§19.12).
+- The view excludes other readers' private imports of the author's work; a
+  private copy someone else holds is that reader's business.
+- Author analytics feeds no ranking and never surfaces a demand-multiplier
+  component (§9.7.4): the charts show reader behavior, never the
+  administrator's taste.
 
 ## 9.9 Reading-time estimates
 
@@ -1981,6 +2032,18 @@ Relative filters ("updated in the last seven days") retain relative meaning. Aft
 
 Saved views can produce RSS feeds through the same scoped token system as other private feeds.
 
+**Saved-search alerts.** A saved view may run on a schedule and notify the
+reader when new eligible works match it — "tell me when someone posts a
+completed slow-burn under 20k in this fandom." The alert runs the saved query
+with the reader's own permissions at run time, so a match that has become
+ineligible is not reported. Results arrive in the notification stream (§23.3)
+with the count and the view's name, never the works' full metadata in the
+notification itself. Alerts are per-view, bounded in frequency (daily by
+default), pausable, and earn no credits. They are private: nobody, including
+the author of a matched work, is told that a view matched.
+
+**Pinned searches.** A saved view may be pinned to the dashboard or sidebar, where it renders as a live widget — the first page of current results, not a link — with its own default sort. Sorts are per saved query: last updated, date published, completion date, word count, appreciation count, public bookmark count, title, author, or random; the view states its sort like any other filter.
+
 ## 14.3 Batch outcomes
 
 ```json
@@ -2074,6 +2137,8 @@ mood:comfort AND status:complete
 
 Define operator precedence and implicit conjunction explicitly. Parser produces the same typed AST as the visual filter builder. Malformed syntax produces helpful errors. Never pass user query text directly as SQL.
 
+**Query aliases.** A reader may define a macro — `myfandom:` expanding to `fandom:x fandom:y tag:z` — as a named shorthand over the same AST. Aliases are private, expand before parsing, cannot shadow the built-in fields, and are expandable in the interface so a shared search link never depends on the recipient's aliases.
+
 ## 15.5 Fuzzy matching and typo tolerance
 
 Misspelled tags, author names, and fandom names produce "Did you mean?" suggestions rather than silent auto-correction.
@@ -2086,6 +2151,8 @@ Implementation:
 - Never auto-execute a corrected query; the user must confirm.
 
 Fuzzy matching applies to tag names, author handles, fandom names, and work titles in search input. It does not apply to body text (which uses exact phrase matching).
+
+**Ephemeral "for now" filters.** Above every feed and result list the reader can pin a temporary filter — "completed works only, this session" — without editing any saved view. It is one tap, visibly labeled as temporary, and clears with the session; it never writes to a recipe or a saved query.
 
 ## 15.6 Metadata completeness
 
@@ -2102,6 +2169,25 @@ Missing ship metadata is not proof that a story contains no ship.
 Characters and prominence, relationships and prominence, relationship kinds and exclusions, character attributes and roles, fandom and crossovers, completion, word/chapter ranges, rating and warnings, language, dates, author, collection, series, tropes, settings, moods, content notes (worldbuilding-heavy, dialogue-driven, etc.), length histogram, public works/private library scope, read/unread, user mutes.
 
 Bound query depth, clause count, result windows, execution time.
+
+**Sorts.** Every search presents an explicit sort menu with a stated default of
+best match for text queries and last updated for browses: last updated, date
+published, completion date, word count (with the §15.15 runtime substitution
+for media works), appreciation count, public bookmark count, public comment
+count, title, author name, and random. Exact sorts are exact: a sort by word
+count orders strictly by word count and is blended with no quality,
+freshness, or taste signal (§15.10, §16.2). Random is a stable shuffle per
+request window, so paging does not reshuffle underneath the reader. Where a
+sort draws on a public aggregate, works below the display threshold of §9.5
+sort at the end rather than as zero.
+
+**Additional freeform axes.** Beyond mood (§15.8), an instance may enable
+further curated classification axes — genre, AU type, POV, tense, narrative
+style — as first-class, filterable, canonicalizable tag namespaces. Each axis
+follows the tag workflow (§15.11), is proposed and quorum-reviewed like any
+taxonomy extension, feeds autocomplete, and can be hidden by readers who do
+not want it. Axes are opt-in per instance because every axis a reader must
+wade past in the filter panel is a cost paid on every search.
 
 ## 15.8 Mood and tone taxonomy
 
@@ -2235,34 +2321,21 @@ All candidates pass shared eligibility rules.
 
 Private bookmark and rating data are not silently pooled. Use explicitly permitted signals, aggregation thresholds, documented retention.
 
+**Feed reason transparency.** Every feed response may include, per item, the recipe reason — which of the reader's own recipe terms matched ("because: fandom:HP, tag:time travel"). This is the `reason` field of the engine contract (§16.1); surfacing it to its owner is the default. It is explicitly distinct from the administrator-influence secrecy rule (§0.3): truth about one's own feed costs nothing, and §16.5's dial governs the part that is not the reader's own.
+
 ## 16.2 Administrator taste profile
 
 Explicitly selected taste-source profile. Exclude moderation sessions, troubleshooting, import tests, accidental opens, activity marked private-from-learning.
 
 Signals: explicit likes/dislikes, selected bookmarks, private ratings, optional completion events, admin seed prompts, wishlist items.
 
-Long-term and recent profiles:
-
-```text
-profile = 0.65 × long_term + 0.35 × recent
-```
-
-Configurable decay and versioning.
+One profile, recomputed on demand and inspectable by its administrator. Long-term and recent behavior are both inputs; the blend is an implementation detail, not a published number, and it is not tuned before there is evidence to tune against. Profile versions are kept so an administrator can see what changed and when.
 
 ## 16.3 Influence layer
 
-Reference scoring:
+Administrator affinity is one bounded multiplier inside the reader's own recipe, not a term in a published scoring formula. The reader may set its weight to zero (§16.5); that zero is the strongest influence control in the system, and it is a dial rather than a switch.
 
-```text
-score = 0.65 × user_relevance
-      + 0.15 × administrator_affinity
-      + 0.10 × bridge_relevance
-      + 0.10 × quality_signals
-```
-
-Initial values are tunable, not universal guarantees.
-
-Additions: relevance floor, author concentration limits, repetition limits, negative-feedback cooldowns, diversity reranking, completion preference, positivity ratio consideration.
+Additions: relevance floor, author concentration limits, repetition limits, negative-feedback cooldowns, diversity reranking, completion preference, positivity ratio consideration. The weights among these are tunable, not universal guarantees, and are not printed in the interface because a score this specific invites exactly the inference §0.3 forbids.
 
 ## 16.4 Diversity budget
 
@@ -2281,7 +2354,7 @@ Setting:
 
 > Include this instance's evolving discovery preferences alongside your own interests.
 
-Turning it off removes administrator influence from candidate generation, ranking, reranking, recipes, dashboard widgets, prompts, challenges, notifications, and cached recommendations.
+The control is a **dial, not a switch**: a weight from zero to the maximum the instance allows. Zero removes administrator influence from candidate generation, ranking, reranking, recipes, dashboard widgets, prompts, challenges, notifications, and cached recommendations. Any weight above zero is stated to the reader in plain words ("a little", "some", "as the operator suggests") without exposing numbers that invite inference.
 
 Individual recommendations need not carry administrator-specific labels, but explanations must not be fabricated.
 
@@ -2309,6 +2382,11 @@ Recipes cannot override eligibility, re-enable opted-out administrator influence
 
 Public recipes remove private object references. Installation validates schema and resource cost. Marketplace-listed recipes integrate with paid extensions without requiring WASM execution.
 
+- **Per-surface recipes.** One recipe may serve `/discover`, another the library "updates" feed, another the e-mail digest. A single global recipe would make the feature far less useful; surfaces are selected per recipe.
+- **Recipe inheritance ("start from").** New readers do not build from a blank page: three first-party recipes — Fresh, Blind Date, Completionist — ship as ordinary saved recipes, inspectable and forkable. They cost nothing (rows in the same table) and they teach the feature.
+- **Recipe diff view.** Installing a recipe shows what it would change relative to the reader's current one. Without this, recipes are a black box people install blind.
+- **Ephemeral "for now" overrides.** A reader can say "only completed works this session" without editing a saved recipe — the one-tap temporary filter of §15.5, pinned above the feed.
+
 **Scripting is not part of recipes.** Users who want trigger-based automation build extensions in the WASM sandbox (Milestone 21). This is a deliberate security choice: declarative configuration cannot exfiltrate data or execute arbitrary code.
 
 ## 16.8 Widget-composed dashboard
@@ -2319,6 +2397,8 @@ Initial widgets: continue reading, recent library updates, import progress, save
 
 Add/remove, reorder, resize within accessible constraints, per-pseud layouts, mobile adaptation, reset, safe mode.
 
+The default layout is named, not implied: **Continue reading, Library updates, Saved views, Discover**. First run offers a choice between a reader home and a writer home — different default widgets from the same registry, no second code path. Widget configuration lives in the widget: each widget carries its own small settings control for its parameters, so configuration is not reachable only through the recipe builder.
+
 Dashboard is not the only route to essential features. Third-party widgets use extension permissions and bounded data APIs.
 
 Multiple dashboard views per pseud allow different layouts for different purposes (reading, writing, moderating).
@@ -2326,8 +2406,6 @@ Multiple dashboard views per pseud allow different layouts for different purpose
 ## 16.9 Automatic and admin-seeded writing opportunities
 
 Generate optional trope combinations, weekend prompts, response-fic opportunities, challenges, "write next" suggestions.
-
-**Admin seed prompts:** administrator plants specific prompt ideas into the public prompt pool, tagged as "instance prompt." Writers can respond. Distinct from algorithmic generation.
 
 **Wishlist board:** any user (including admin) posts "I'd love to read a fic where X." Others can claim, write, and link fulfillments. Admin wishes appear as one stream among many, not preferentially featured.
 
@@ -2527,7 +2605,12 @@ Collections do not grant permission to republish or expose private imports.
 
 Signups, prompt pools, assignments, claims, deadlines, reveal dates, anonymous-until-reveal submissions, fulfillment, withdrawal.
 
-Represent variants through a shared configurable workflow.
+Represent variants through a shared configurable workflow. Named variants
+include exchanges with assignments, pinch hits (reassignments when a
+participant defaults), treats (bonus fulfillments for unassigned prompts),
+fests with open prompt pools, and Big Bang variants with draft checkpoints and
+artist pairing. A variant is a configuration of the same signup, assignment,
+claim, deadline and reveal machinery, not a hard-coded event type.
 
 **Finished-work reading challenges:** "Read 5 completed fics under 10k words this month." Encourages completed-work reading.
 
@@ -2594,6 +2677,28 @@ A reading path is an ordered, curated walk through several works, and it is a fi
 - A path lists every stop's availability, so a reader who may not read one work still sees the shape of the whole and decides for themselves whether to skip it.
 - A path never reorders or re-ranks the works it contains, and a work's position in a path changes nothing about the work.
 
+## 18.10 Gift works and dedications
+
+A work may be gifted to a reader or dedicated to one or more pseuds.
+
+- The author names the recipient pseud at or after publication. The gift shows
+  on the work page, in the recipient's gifts listing, and nowhere else.
+- The recipient is notified once. A recipient who does not want gifts can
+  decline them account-wide, which stops new gifts and hides existing ones
+  from their listing without touching the work.
+- A gift confers nothing between the pseuds — no follow, no contact
+  permission, no exception to blocks. Gifting a user who blocks the author
+  fails with a validation error that does not reveal the block.
+- Gifts and dedications are public attribution, the same surface class as the
+  contributors line: the recipient's display name appears, never anything
+  about their account.
+- A challenge fulfillment with a named recipient (§18.2) and a gift are the
+  same link seen from two sides, not two records.
+
+| Table | Important fields |
+|---|---|
+| `work_gifts` | work_id, recipient_pseud_id, gift_note, challenge_fulfillment_id, created_at, declined_at |
+
 ## Acceptance
 
 - Challenge identities remain hidden until reveal.
@@ -2639,6 +2744,8 @@ Higher levels require reviewed conduct, not merely point totals. Core publishing
 - No pattern of held destructive comments.
 
 Trust is not calculated from XP, post count, kudos received, credits earned, or any activity-volume metric.
+
+**Single-admin mode is the default mode.** An instance with one operator skips quorum for every action: the quorum fields remain in the schema and the audit trail stays complete, but approvals default to the operator. Trust levels TL4–TL6 are opt-in — the levels stay defined and the code exists, but no surface requires them on a small instance. With fewer than two eligible reviewers, the operator decides appeals alone; the independence rule (§19.10) applies to instances large enough to have independence. The modlog (§19.12) is data first: the audit trail exists in the database, and a reader-facing modlog page is optional and off by default.
 
 ## 19.2 Effects
 
@@ -2776,6 +2883,8 @@ DMCA workflow respects legal requirements while preventing abuse of takedown mec
 Publish redacted decision summaries, not private evidence.
 
 Do not expose hidden pseud linkage, private messages, child-related evidence, reporter identity, source credentials, sensitive search or reading history, positivity classifier scores, individual shadowban targets, DMCA claimant identities.
+
+On a single-admin instance the modlog is the operator's own record, published or not as the operator chooses; nothing in this section obliges a small instance to staff a public page it cannot fill.
 
 ## 19.13 Community feedback on moderation process
 
@@ -2933,6 +3042,15 @@ Optional configurable reference plans:
 - **Curator:** €12/month. All Author benefits plus larger extension resource ceilings, priority marketplace review, larger batch import quotas.
 - **Patron:** €25/month. All Curator benefits plus custom recognition, direct support channel.
 
+Subscriptions are the standing way to obtain resource-intensive features: AI
+translation quota, AI comment classification, send-to-Kindle and export
+quotas, batch-import and bibliography quotas, priority job queues, extension
+resource ceilings, and author-watch scheduling. One-off heavy needs are bought
+with credits (§20.2–20.3); recurring needs belong on a plan. Free tiers keep
+every feature reachable in reduced form (§0.3): a subscriber gets more of a
+thing, never exclusive access to a thing free users are locked out of
+entirely.
+
 No unlimited compute, no purchased trust, no search-ranking advantage, no moderation authority, no positivity filter bypass.
 
 ## 20.7 Marketplace revenue
@@ -2944,6 +3062,128 @@ Marketplace ratings and reviews do not affect account trust. Popular extensions 
 ## 20.8 Webhook handling
 
 Signature verification, event-ID storage, idempotency, out-of-order handling, reconciliation.
+
+## 20.9 Work monetization
+
+The platform's own revenue is credits, subscriptions and marketplace fees
+(§0.2, §20.6, §20.7). This section gives *authors* a way to be paid for their
+work, because a positivity-first archive that funds its infrastructure but not
+its writers is asking writers to subsidize everyone else's hobby. It is
+optional at every level: an author who never touches it sees nothing, a
+billing-disabled instance has nothing to see, and the free core (§0.3) is not
+diminished — a reader can always read, comment, appreciate, download within
+quotas, and participate without paying anyone.
+
+### 20.9.1 What may be monetized
+
+```text
+Work monetization eligibility: original | any-with-assertion | disabled
+```
+
+- **`original`** (default where billing is enabled): only works the author
+  declares original — no fandom, no derivative basis — may carry a price. The
+  declaration is the author's statement on the record, and a work declared
+  original that is visibly derivative is a metadata-correction case (§15.11)
+  that can lose monetization.
+- **`any-with-assertion`**: the operator may allow fanworks to be monetized
+  too, but the author must then assert they hold whatever rights their basis
+  requires — permission from the original author where the basis demands it.
+  The assertion is stored, versioned, and demanded again when the price
+  changes. It is a statement of responsibility, not a copyright opinion: the
+  instance is not the arbiter of who owns a fandom's characters, and §19.11
+  (DMCA) remains the enforcement path when a rights holder disagrees.
+- **`disabled`**: no monetization; credit tips (below) still work, because
+  they move no money.
+
+Monetizing an imported work (§11) follows the same rule as republishing it: a
+source login demonstrates access, not permission. An imported work is never
+monetizable in `original` mode at all.
+
+### 20.9.2 Models
+
+```text
+Model: tips | early_access | purchase | patronage
+```
+
+- **Tips.** A reader sends the author money or credits. No unlock, no quid pro
+  quo. Money tips land in the author's earnings ledger; credit tips transfer
+  credits between wallets (§20.1) and are never convertible to money by the
+  platform — credits are a community currency, and mixing them into payouts
+  would turn every gamification rule into a money rule.
+- **Early access.** A chapter carries a `public_at` moment later than its
+  publication. Any reader may pay — or hold an active patronage — to read it
+  now; at `public_at` it becomes free to everyone, permanently. Nothing is
+  ever locked retroactively: a reader who read a chapter free keeps access to
+  it even if the author later prices the work. This is the model that fits an
+  archive built on scheduled publishing (§8.5): the author writes, supporters
+  read early, the archive stays open.
+- **Purchase.** One payment unlocks a complete work, or its future chapters,
+  for that reader. A work later made free does not refund its purchasers and
+  owes them nothing except the permanence of their access.
+- **Patronage.** A recurring monthly pledge to an author, cancelable at any
+  time, granting access to that author's early-access and purchased works
+  while active. Patronage is between reader and author: it buys no platform
+  entitlements, no badge outside the badge catalog, no trust (§19.1), and no
+  ranking.
+
+Every priced work remains fully eligible, filterable and searchable. A reader
+who has not paid sees the work's complete public metadata — title, summary,
+tags, content notes, length, reviews — and an honest paywall state on the
+body, never a truncated teaser unless the author publishes one as a real
+chapter.
+
+### 20.9.3 Money rules
+
+- **Separate ledgers.** Author earnings are money, accounted per author and
+  paid out through the payment processor's payout flow. They never touch the
+  credit ledger (§20.1), and the platform never converts credits to money in
+  an author's favor. Tax, invoicing and payout compliance are the operator's
+  setup, as §20.7 states for the marketplace.
+- **Split.** A configurable platform fee applies to money payments — default
+  85/15 in the author's favor — stated on every price the reader sees.
+- **Refunds.** A reader may request a refund within a bounded window for a
+  purchase whose content failed eligibility (§7.6) or was withdrawn unread;
+  otherwise refunds are the author's decision through a defined flow.
+  Chargebacks follow the processor's rules and suspend the entitlement
+  pending resolution.
+- **Entitlements are durable.** A purchase or active patronage is recorded as
+  an entitlement bound to the account, surviving pseud renames, pseud
+  switching (§7.2), and the work's later move between priced and free. Access
+  checks read entitlements server-side like every other policy (§3.6).
+- **No self-dealing.** The same-account pseud rules (§9.7.8) apply: purchases
+  and tips between pseuds of one account are refused, and author earnings
+  never accrue from the author's own reading.
+- **Paid changes nothing social.** A paying reader's comments pass the
+  positivity filter (§12.1) like anyone's; a paid work's ranking treatment is
+  identical to a free work's. "Monetized" is a facet a reader may filter on,
+  shown honestly, never a boost: no surface sorts or recommends by price or
+  by earnings.
+- **Privacy.** Purchases, tips and patronages are pseud-private (§3.7). A
+  public supporters list exists only if the reader opts in, and an author sees
+  totals, never a supporter roster they could expose.
+- **Foundational protections hold.** Monetization purchases no trust, no
+  moderation authority, no ranking (§0.3, §1.5). A paid work passes the same
+  eligibility, age policy, content-note and rating-check requirements (§15.11)
+  as a free one.
+
+| Table | Important fields |
+|---|---|
+| `work_pricing` | work_id, model, price_minor, currency, public_at_offset, enabled, version |
+| `work_entitlements` | account_id, work_id, kind, source_payment_id, granted_at, expires_at |
+| `author_earnings_ledger` | author_account_id, amount_minor, currency, kind, payment_id, idempotency_key |
+| `payouts` | author_account_id, amount_minor, currency, processor_reference, status, initiated_at |
+| `monetization_assertions` | work_id, assertion_kind, policy_version, accepted_at, revoked_at |
+
+```text
+POST   /api/v1/works/:id/pricing
+DELETE /api/v1/works/:id/pricing
+POST   /api/v1/works/:id/purchase
+POST   /api/v1/works/:id/tips
+GET    /api/v1/me/entitlements
+GET    /api/v1/me/earnings
+POST   /api/v1/me/payouts
+GET    /api/v1/admin/monetization
+```
 
 ## Acceptance
 
@@ -3240,7 +3480,7 @@ domain event → notification eligibility → in-app record → optional email/p
 
 Apply privacy, rating, and positivity restrictions before generating text and again where necessary before delayed delivery.
 
-Support: mention alerts, replies (positive only by default), source-update notices, credential expiry, batch completion, digests, delivery failures, positive feedback received, cheer received, wishlist fulfillment.
+Support: mention alerts, replies (positive only by default), source-update notices, credential expiry, batch completion, digests, delivery failures, positive feedback received, cheer received, wishlist fulfillment, saved-search alerts (§14.2), and subscriptions: a reader may subscribe to a work, a series, a collection, a fandom or an author and receive a notification when eligible new content appears. Subscriptions are the notification-bearing form of a follow: per-pseud, private, pausable, and bounded in delivery frequency by the same digest and quiet-period machinery as every other notification. A subscription never exposes the subscriber: the subscribed author sees a subscriber count, never a list, and the count itself is display-optional.
 
 ## 23.4 Push
 
@@ -3517,6 +3757,34 @@ Accounts outlive attention. The policy is stated, notified, and reversible for a
 - **A return restores the previous quota tier** without a support request, and the notices stop.
 - The policy states its relationship to the instance's retention and privacy obligations (§24.7, §24.8) explicitly, including whether dormant data is included in exports and backups, rather than leaving the question to be inferred.
 
+## 24.14 AI crawlers and scraping posture
+
+The instance serves pages to people and to search engines that send readers.
+It does not serve free bulk text to anyone else by default.
+
+- **`robots.txt` is generated, not static.** Public eligible content is
+  declared to well-behaved crawlers, AI-training crawlers are disallowed by
+  default, and the disallow list is operator configuration with the default
+  stated in the operator docs. A crawler that ignores `robots.txt` is not a
+  policy problem but an abuse one, and §24.5's layered defenses apply to it
+  like any other automated traffic.
+- **No bulk text endpoints.** There is no export, feed, API scope or sitemap
+  variant that returns complete bodies at volume to an anonymous or
+  broadly-scoped caller. Download quotas (§13), API rate limits (§23.1) and
+  the feed-token rules (§23.5) are the boundary, and they are already
+  per-identity and bounded.
+- **Authors state their wishes; the instance states its capabilities.** A work
+  carries an author-set `ai_training` assertion — allow, deny, unset — shown
+  as metadata and exported with the work. The instance enforces what an
+  instance can enforce (no bulk endpoints, robots defaults, API terms); it
+  does not pretend an assertion binds a scraper that never asked. The
+  assertion's honest description is "this author's stated preference,
+  recorded", never "protected".
+- **Instance terms say it once.** Scraping for AI training is not an accepted
+  use of the public API or the public pages, and access granted to a client
+  that does it is revoked. That is a terms-and-abuse statement enforced
+  through §24.4–24.5, not a technical guarantee, and both halves are stated.
+
 ---
 
 # 25. Milestone 20: Hardening and Release
@@ -3574,6 +3842,11 @@ Automate:
 47. Post a link to this instance's own work in the forum → verify the preview appears with no outbound request → post a link to an unknown host → verify it renders as a plain link.
 48. Make a work private → verify a previously cached preview stops being served.
 49. Register a new account → pick fandoms, moods, formats and content notes → verify the first session ends with a work opened and the reason stated.
+50. Author enables tips on a work → reader tips in credits and in money → verify the credit ledger and the earnings ledger record them separately → verify no ranking change for the priced work.
+51. Author sets early access on a chapter → paying reader reads it before `public_at` → non-paying reader sees the honest paywall state → after `public_at` everyone reads it → verify the paying reader's access persists after the work becomes free.
+52. Reader subscribes to a work → author publishes a chapter → verify one notification → verify the author cannot see the subscriber list.
+53. Save a search → enable its alert → a matching work is published → verify the notification names the view and respects the reader's permissions.
+54. Change the accent colour → verify it applies to both layout presets → export the appearance bundle → import it on a second account → verify reader settings and dashboard layout carried across → set custom reader CSS on one work → verify it is scoped to the reading surface and absent elsewhere.
 
 ## 25.2 Security tests
 
@@ -3737,6 +4010,17 @@ The tutorial, contextual help, API documentation, and operator documentation des
 - [ ] New voices and first works are surfaced by a bounded, labeled discovery slot.
 - [ ] Activity status distinguishes active, slow, dormant and concluded without penalizing any of them.
 - [ ] Content notes are a separate axis from tags, reader-configurable and quorum-suggestible.
+- [ ] Sorts are an explicit menu, exact sorts are exact, and random paging is stable within a request window.
+- [ ] Saved-search alerts run with the reader's permissions at run time, are pausable, and never reveal matching activity to authors.
+- [ ] Author notes, footnotes and endnotes are editor-native blocks, collapsible in the reader, excluded from word counts, and survive export.
+- [ ] Text-to-speech reads any chapter, prefers a published podfic unit over generated speech, and stores nothing.
+- [ ] A year-in-review page exists, is private by default, and shares history's deletion behavior.
+- [ ] Reader layout modes and typography are saved per work and per reader, not per browser.
+- [ ] Custom reader CSS is opt-in, sanitized, scoped to the reading surface, and off by default.
+- [ ] Accent colour is choosable independently of themes, and the appearance bundle imports and exports as one file.
+- [ ] Recipes are per-surface, forkable from shipped first-party recipes, diffable before install, and overridable for-now without editing anything saved.
+- [ ] The administrator-influence control is a reader-settable dial whose zero is honored everywhere influence flows, and feed reasons name the reader's own matched terms.
+- [ ] Subscriptions to works, series, collections, fandoms and authors deliver update notifications without exposing the subscriber list.
 
 ## 28.3 Positive feedback (Priority 3)
 
@@ -3871,6 +4155,7 @@ The tutorial, contextual help, API documentation, and operator documentation des
 - **Body retention as a per-work decision.** "This instance holds the words" and "this instance knows this work exists and points at it" must both be expressible, and only an instance-level setting expresses both without making every import a decision (§11.15).
 - **An aggregating instance that caches "while it is there".** An instance set to `aggregate` stores no body from any path, including a cache fill that would have been convenient.
 - **A caching instance that downgrades a failed fetch into a link.** A body that could not be fetched is a failed, retryable import, not a reclassification of the work.
+- **Unmoderated guest commenting.** Comments require an account; anonymous appreciation notes (§8.4) are the anonymous channel, because holding and reviewing destructive content (§12) needs an accountable identity behind the text.
 
 ## 28.11 Gamification
 
@@ -3931,6 +4216,19 @@ The tutorial, contextual help, API documentation, and operator documentation des
 - [ ] A link to an unknown host is a plain link and triggers no fetch.
 - [ ] An author can disable unfurling, and the setting is honored everywhere.
 - [ ] Sharing changes no ranking signal and awards no credits.
+
+## 28.15 Monetization, subscriptions, and scraping posture
+
+- [ ] Work monetization follows the instance's eligibility setting, and an imported work is never monetizable in `original` mode.
+- [ ] Rights assertions are demanded when `any-with-assertion` is enabled and re-demanded on price changes.
+- [ ] Money earnings and credit transfers are separate ledgers, and credits are never convertible to money by the platform.
+- [ ] Early-access chapters unlock permanently at `public_at`, and no previously-free chapter is ever locked retroactively.
+- [ ] Entitlements survive pseud switching and pricing changes.
+- [ ] Purchases, tips and patronages are private; a supporters list is opt-in and the author sees totals, never a roster.
+- [ ] Paid works gain no ranking, recommendation or moderation advantage, and their comments pass the positivity filter unchanged.
+- [ ] Self-purchases and same-account pseud transfers are refused.
+- [ ] Subscriptions meter resource-intensive features without removing the free tier's reduced form of them.
+- [ ] AI-training crawlers are disallowed by default in generated `robots.txt`, bulk text endpoints do not exist, and the author `ai_training` assertion is displayed and exported as a stated preference rather than advertised as protection.
 
 ---
 
@@ -4284,3 +4582,6 @@ PATCH /api/v1/admin/sharing
 ---
 
 The resulting project should be judged by these working behaviors—not by the number of screens, lines of code, imported feature names, or claims in a README.
+
+
+---

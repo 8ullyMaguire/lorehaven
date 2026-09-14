@@ -1,10 +1,9 @@
 //! M15 — Economy repository: ledger, holds, caps, queue, subscriptions.
 
-use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
 
-use lorehaven_domain::economy::{self, TxnType, BUCKET_PRECEDENCE};
+use lorehaven_domain::economy::TxnType;
 use crate::{Backend, Database};
 
 // ---------------------------------------------------------------------------

@@ -435,6 +435,28 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // M21 skeleton — spec revision 2026-09-14: monetization, gifts,
+        // content subscriptions, saved-search alerts, ai_training assertion.
+        .merge(classified(
+            routes::monetization::router(),
+            RouteClass::Write,
+            &state,
+        ))
+        .merge(classified(
+            routes::monetization::gifts_router(),
+            RouteClass::Write,
+            &state,
+        ))
+        .merge(classified(
+            routes::subscriptions::router(),
+            RouteClass::Write,
+            &state,
+        ))
+        .merge(classified(
+            routes::subscriptions::ai_training_router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Session loading wraps everything under /api/v1 so that the CSRF layer
         // and the limiter installed per subtree can both see who is asking.
         .layer(middleware::from_fn_with_state(

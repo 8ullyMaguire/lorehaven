@@ -31,6 +31,9 @@ export type RouteId =
   | 'jobs'
   | 'search'
   | 'admin-jobs'
+  | 'discover'
+  | 'community'
+  | 'notifications'
   | 'planned'
   | 'not-found';
 
@@ -81,6 +84,9 @@ const FIXED_ROUTES: Record<string, RouteId> = {
   '/jobs': 'jobs',
   '/search': 'search',
   '/admin/jobs': 'admin-jobs',
+  '/discover': 'discover',
+  '/community': 'community',
+  '/notifications': 'notifications',
 };
 
 export interface RouteMatch {

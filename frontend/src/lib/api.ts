@@ -1235,7 +1235,6 @@ export function tagWork(
 
 // ---------------------------------------------------------------------------
 // The job queue (spec §10.1)
-// ---------------------------------------------------------------------------
 
 /** One job, as the server describes it. */
 export interface Job {
@@ -1974,4 +1973,110 @@ export function startUpdateCheck(): Promise<{ job_id: string; items: number }> {
     method: 'POST',
     body: JSON.stringify({}),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Discovery and taste profile (spec §16)
+// ---------------------------------------------------------------------------
+
+export interface DiscoveryItem {
+  work_id: string;
+  title?: string;
+  author_handle?: string;
+  word_count?: number;
+}
+
+export interface DiscoveryFeed {
+  items: DiscoveryItem[];
+}
+
+export async function fetchDiscoveryFeed(signal?: AbortSignal): Promise<DiscoveryFeed> {
+  return apiFetch<DiscoveryFeed>('/discovery', { signal });
+}
+
+export async function recomputeTasteProfile(): Promise<void> {
+  await apiFetch('/discovery/taste-profile/recompute', { method: 'POST' });
+}
+
+export async function clearTasteProfile(): Promise<void> {
+  await apiFetch('/discovery/taste-profile/clear', { method: 'POST' });
+}
+
+// ---------------------------------------------------------------------------
+// Notifications (spec §23)
+// ---------------------------------------------------------------------------
+
+export interface NotificationItem {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  read: boolean;
+  created_at: string;
+  work_id?: string;
+}
+
+export interface NotificationList {
+  items: NotificationItem[];
+  unread_count: number;
+}
+
+export async function fetchNotifications(signal?: AbortSignal): Promise<NotificationList> {
+  return apiFetch<NotificationList>('/notifications', { signal });
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await apiFetch('/notifications/read-all', { method: 'POST' });
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  await apiFetch(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' });
+}
+
+// ---------------------------------------------------------------------------
+// Community — forums, groups, messages, blocks (spec §17)
+// ---------------------------------------------------------------------------
+
+export interface Forum {
+  id: string;
+  title: string;
+  description?: string;
+  category?: string;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  description?: string;
+  visibility: string;
+  member_count?: number;
+}
+
+export interface Conversation {
+  id: string;
+  other_handle: string;
+  last_message?: string;
+  updated_at?: string;
+}
+
+export interface Block {
+  id: string;
+  handle: string;
+  created_at: string;
+}
+
+export async function fetchForums(signal?: AbortSignal): Promise<Forum[]> {
+  return apiFetch<Forum[]>('/community/forums', { signal });
+}
+
+export async function fetchGroups(signal?: AbortSignal): Promise<Group[]> {
+  return apiFetch<Group[]>('/community/groups', { signal });
+}
+
+export async function fetchConversations(signal?: AbortSignal): Promise<Conversation[]> {
+  return apiFetch<Conversation[]>('/community/conversations', { signal });
+}
+
+export async function fetchBlocks(signal?: AbortSignal): Promise<Block[]> {
+  return apiFetch<Block[]>('/community/blocks', { signal });
 }

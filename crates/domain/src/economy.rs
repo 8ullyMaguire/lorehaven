@@ -16,6 +16,20 @@ pub enum TxnType {
 }
 
 impl TxnType {
+    /// Inverse of [`Self::as_str`]; the tests pin the round trip.
+    pub fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "earn" => Ok(Self::Earn),
+            "spend" => Ok(Self::Spend),
+            "grant" => Ok(Self::Grant),
+            "purchase" => Ok(Self::Purchase),
+            "hold" => Ok(Self::Hold),
+            "release" => Ok(Self::Release),
+            "capture" => Ok(Self::Capture),
+            _ => Err(format!("unknown TxnType: {s}")),
+        }
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Earn => "earn",

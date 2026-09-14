@@ -6,7 +6,6 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Sha256, Digest};
-use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::auth::MaybeSession;
