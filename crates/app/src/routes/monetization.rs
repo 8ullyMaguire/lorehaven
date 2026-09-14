@@ -1,8 +1,9 @@
 //! M21 — Monetization API routes (spec §20.9).
 //!
-//! These are stub endpoints returning 501 Not Implemented. The domain and
-//! repository layers exist but the full flow (payment processing, payouts)
-//! requires external provider integration.
+//! Implements monetization endpoints by delegating to the `lorehaven_db`
+//! repository layer. External payment-provider integration (webhooks, payouts)
+//! is deferred to the operator's configured gateway; routes enforce
+//! trust-level gate (TL >= 5) and idempotency where applicable.
 
 use axum::extract::{Path, State};
 use axum::routing::{get, post};
@@ -35,10 +36,6 @@ pub struct PayoutBody {
     pub amount_minor: i64,
     pub currency: String,
     pub processor_reference: String,
-}
-
-fn not_implemented() -> ApiError {
-    ApiError(lorehaven_domain::AppError::NotImplemented)
 }
 
 pub async fn set_pricing(
