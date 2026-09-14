@@ -733,6 +733,15 @@ pub async fn remove_group_member(db: &Database, group_id: &str, account: &str) -
 // Forums
 // ---------------------------------------------------------------------------
 
+/// A forum category.
+#[derive(Debug, Clone, Serialize)]
+pub struct ForumCategory {
+    pub id: String,
+    pub name: String,
+    pub position: i64,
+    pub min_trust: i64,
+}
+
 /// A forum topic row.
 #[derive(Debug, Clone, Serialize)]
 pub struct ForumTopic {
@@ -768,6 +777,79 @@ pub async fn category_exists(db: &Database, category_id: &str) -> Result<bool> {
         }
     };
     Ok(found.is_some())
+}
+
+/// List all forum categories, ordered by position.
+pub async fn list_forum_categories(db: &Database) -> Result<Vec<ForumCategory>> {
+    let sql = db.sql(
+        "SELECT id, name, position, min_trust FROM forum_categories ORDER BY position ASC",
+        "SELECT id, name, position, min_trust FROM forum_categories ORDER BY position ASC",
+    );
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, ForumCategoryRow>(&sql)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, ForumCategoryRow>(&sql)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(rows.into_iter().map(ForumCategory::from).collect())
+}
+
+/// List topics in a category, most-recently-active first.
+pub async fn list_topics_in_category(
+    db: &Database,
+    category_id: &str,
+    cursor: Option<&str>,
+    limit: i64,
+) -> Result<Vec<ForumTopic>> {
+    let sql = match cursor {
+        Some(c) => db.sql(
+            "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked FROM forum_topics WHERE category_id = ? AND last_post_at < ? ORDER BY last_post_at DESC LIMIT ?",
+            "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked::int::bigint AS locked FROM forum_topics WHERE category_id = $1 AND last_post_at < $2 ORDER BY last_post_at DESC LIMIT $3",
+        ),
+        None => db.sql(
+            "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked FROM forum_topics WHERE category_id = ? ORDER BY last_post_at DESC LIMIT ?",
+            "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked::int::bigint AS locked FROM forum_topics WHERE category_id = $1 ORDER BY last_post_at DESC LIMIT $2",
+        ),
+    };
+    let rows: Vec<ForumTopicRow> = match db.backend() {
+        Backend::Sqlite => {
+            match cursor {
+                Some(c) => sqlx::query_as::<_, ForumTopicRow>(&sql)
+                    .bind(category_id)
+                    .bind(c)
+                    .bind(limit)
+                    .fetch_all(db.sqlite_pool().expect("sqlite"))
+                    .await?,
+                None => sqlx::query_as::<_, ForumTopicRow>(&sql)
+                    .bind(category_id)
+                    .bind(limit)
+                    .fetch_all(db.sqlite_pool().expect("sqlite"))
+                    .await?,
+            }
+        }
+        Backend::Postgres => {
+            match cursor {
+                Some(c) => sqlx::query_as::<_, ForumTopicRow>(&sql)
+                    .bind(category_id)
+                    .bind(c)
+                    .bind(limit)
+                    .fetch_all(db.postgres_pool().expect("postgres"))
+                    .await?,
+                None => sqlx::query_as::<_, ForumTopicRow>(&sql)
+                    .bind(category_id)
+                    .bind(limit)
+                    .fetch_all(db.postgres_pool().expect("postgres"))
+                    .await?,
+            }
+        }
+    };
+    Ok(rows.into_iter().map(ForumTopic::from).collect())
 }
 
 /// Create a forum topic.
@@ -851,6 +933,25 @@ impl From<ForumTopicRow> for ForumTopic {
             created_at: r.created_at,
             last_post_at: r.last_post_at,
             locked: r.locked != 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct ForumCategoryRow {
+    id: String,
+    name: String,
+    position: i64,
+    min_trust: i64,
+}
+
+impl From<ForumCategoryRow> for ForumCategory {
+    fn from(r: ForumCategoryRow) -> Self {
+        Self {
+            id: r.id,
+            name: r.name,
+            position: r.position,
+            min_trust: r.min_trust,
         }
     }
 }

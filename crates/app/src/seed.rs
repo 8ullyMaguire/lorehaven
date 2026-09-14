@@ -137,6 +137,35 @@ pub async fn run(config: &Config, db: &Database, args: &SeedArgs) -> Result<Seed
         .await?;
     }
 
+    // --- forum categories ---------------------------------------------------
+    // Seed a minimal set of forum categories so GET /forums has content.
+    // Idempotent: only insert if the table is empty.
+    let pool = db.sqlite_pool().expect("sqlite in seed");
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM forum_categories")
+        .fetch_one(pool)
+        .await?;
+    if count == 0 {
+        let now = lorehaven_db::identity::now_rfc3339();
+        let categories = [
+            ("general", "General", 1, 0),
+            ("fanworks", "Fanworks", 2, 0),
+            ("discussion", "Discussion", 3, 0),
+            ("help", "Help & Feedback", 4, 0),
+        ];
+        for (id, name, position, min_trust) in categories {
+            sqlx::query(
+                "INSERT OR IGNORE INTO forum_categories (id, name, position, min_trust) VALUES (?, ?, ?, ?)",
+            )
+            .bind(id)
+            .bind(name)
+            .bind(position)
+            .bind(min_trust)
+            .execute(pool)
+            .await?;
+        }
+        tracing::info!("seeded {} forum categories", categories.len());
+    }
+
     Ok(SeedSummary {
         account_id,
         email: args.email.clone(),

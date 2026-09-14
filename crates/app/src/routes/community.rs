@@ -198,18 +198,27 @@ async fn get_forums(
     State(state): State<AppState>,
     RequireSession(_): RequireSession,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let _ = state;
-    Ok(Json(serde_json::json!({ "items": [] })))
+    let categories = lorehaven_db::community::list_forum_categories(&state.db())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(serde_json::json!({ "items": categories })))
 }
 
 async fn get_forums_topics(
     State(state): State<AppState>,
     RequireSession(_): RequireSession,
     Path(category): Path<String>,
-    Query(_params): Query<CursorQuery>,
+    Query(params): Query<CursorQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let _ = (state, category);
-    Ok(Json(serde_json::json!({ "items": [] })))
+    let topics = lorehaven_db::community::list_topics_in_category(
+        &state.db(),
+        &category,
+        params.cursor.as_deref(),
+        params.limit,
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(serde_json::json!({ "items": topics })))
 }
 
 async fn post_topic(
