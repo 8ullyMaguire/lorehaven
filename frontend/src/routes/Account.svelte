@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     fetchContentSettings,
+    fetchEarnings,
     fetchFeedbackInbox,
     fetchFeedbackPreferences,
     fetchPrivacy,
@@ -11,6 +12,7 @@
     revokeAllSessions,
     revokeSession,
     type ContentSettings,
+    type EarningsRow,
     type FeedbackInbox,
     type FeedbackPreferencesView,
     // Aliased: `PrivacySettings` below is the component that renders them.
@@ -42,6 +44,7 @@
     { id: 'reading', label: 'Reading' },
     { id: 'feedback', label: 'Feedback' },
     { id: 'privacy', label: 'Privacy' },
+    { id: 'earnings', label: 'Earnings' },
   ];
 
   let tab = $state('sessions');
@@ -51,6 +54,7 @@
   let content = $state<ContentSettings | null>(null);
   let feedback = $state<FeedbackPreferencesView | null>(null);
   let inbox = $state<FeedbackInbox | null>(null);
+  let earnings = $state<EarningsRow[] | null>(null);
 
   let error = $state<unknown>(null);
   let loading = $state(false);
@@ -76,19 +80,21 @@
     loading = true;
     error = null;
     try {
-      const [sessionList, privacySettings, contentSettings, feedbackPrefs, feedbackInbox] =
+      const [sessionList, privacySettings, contentSettings, feedbackPrefs, feedbackInbox, earningsList] =
         await Promise.all([
           fetchSessions(),
           fetchPrivacy(),
           fetchContentSettings(),
           fetchFeedbackPreferences(),
           fetchFeedbackInbox(),
+          fetchEarnings(),
         ]);
       sessions = sessionList;
       privacy = privacySettings;
       content = contentSettings;
       feedback = feedbackPrefs;
       inbox = feedbackInbox;
+      earnings = earningsList;
     } catch (failure) {
       error = failure;
     } finally {
@@ -346,6 +352,38 @@
                   say('Privacy settings saved.', 'success');
                 }}
               />
+            {/if}
+          </div>
+        {:else if id === 'earnings'}
+          <div class="panel">
+            {#if loading && !earnings}
+              <Skeleton lines={4} label="Loading your earnings" />
+            {:else if earnings}
+              <h3>Earnings ledger</h3>
+              <p class="note">Entries are ordered newest first. Amounts in minor units (e.g., 500 = 5.00).</p>
+              <ul class="sessions">
+                {#each earnings as row (row.id)}
+                  <li>
+                    <div class="device">
+                      <strong>{row.kind}</strong>
+                      <span class="badge">{row.currency}</span>
+                    </div>
+                    <dl class="facts">
+                      <dt>Amount</dt>
+                      <dd>{row.amount_minor} {row.currency}</dd>
+                      <dt>Date</dt>
+                      <dd>{formatTimestamp(row.created_at)}</dd>
+                      {#if row.payment_id}
+                        <dt>Payment</dt>
+                        <dd>{row.payment_id}</dd>
+                      {/if}
+                    </dl>
+                  </li>
+                {/each}
+              </ul>
+              {#if earnings.length === 0}
+                <p class="note">No earnings yet. Publish a work and set a price to start earning.</p>
+              {/if}
             {/if}
           </div>
         {/if}
