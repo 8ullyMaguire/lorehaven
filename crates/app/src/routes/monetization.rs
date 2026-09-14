@@ -58,9 +58,9 @@ pub async fn set_pricing(
     let _ = work_id; // work existence is asserted by foreign key
     let _ = user;    // author ownership checked via FK on work_pricing
     let id = monetization::set_pricing(
-        &state.db(),
+        state.db(),
         &work_id.to_canonical_string(),
-        &model_str,
+        model_str,
         body.price_minor,
         &body.currency,
         body.public_at_offset,
@@ -78,7 +78,7 @@ pub async fn delete_pricing(
     let work_id = work_id
         .parse::<lorehaven_domain::WorkId>()
         .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
-    let rows = monetization::disable_pricing(&state.db(), &work_id.to_canonical_string())
+    let rows = monetization::disable_pricing(state.db(), &work_id.to_canonical_string())
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     Ok(Json(json!({ "deleted": rows > 0 })))
@@ -92,15 +92,15 @@ pub async fn purchase(
     let work_id = work_id
         .parse::<lorehaven_domain::WorkId>()
         .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
-    let work = lorehaven_db::content::find_work(&state.db(), work_id)
+    let work = lorehaven_db::content::find_work(state.db(), work_id)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
-    let author_pseud = lorehaven_db::identity::find_pseud(&state.db(), work.owner_pseud_id)
+    let author_pseud = lorehaven_db::identity::find_pseud(state.db(), work.owner_pseud_id)
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "author" }))?;
-    let pricing = monetization::get_pricing(&state.db(), &work_id.to_canonical_string())
+    let pricing = monetization::get_pricing(state.db(), &work_id.to_canonical_string())
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
         .into_iter()
@@ -118,14 +118,14 @@ pub async fn purchase(
     // grant_entitlement uses an idempotency key on work_id+account, so re-calls
     // return the same row. We check via has_entitlement first for a clean response.
     let already = monetization::has_entitlement(
-        &state.db(),
+        state.db(),
         &user.account_id.to_string(),
         &work_id.to_canonical_string(),
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     if already {
-        let ent = monetization::get_entitlements(&state.db(), &user.account_id.to_string())
+        let ent = monetization::get_entitlements(state.db(), &user.account_id.to_string())
             .await
             .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
             .into_iter()
@@ -135,7 +135,7 @@ pub async fn purchase(
     }
 
     let entitlement_id = monetization::grant_entitlement(
-        &state.db(),
+        state.db(),
         &user.account_id.to_string(),
         &work_id.to_canonical_string(),
         "purchase",
@@ -152,7 +152,7 @@ pub async fn purchase(
         lorehaven_domain::monetization::Rules::split(pricing.price_minor, 1_500);
     let author_payment_id = format!("purchase:{}:author", entitlement_id);
     let _author_earning = monetization::post_earnings(
-        &state.db(),
+        state.db(),
         &author_pseud.account_id.to_string(),
         author_amt,
         &pricing.currency,
@@ -188,13 +188,13 @@ pub async fn tip(
         .parse::<lorehaven_domain::WorkId>()
         .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
     // Resolve the work's author account via owner pseud → account.
-    let work = lorehaven_db::content::find_work(&state.db(), work_id)
+    let work = lorehaven_db::content::find_work(state.db(), work_id)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     let work = work.ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
-    let pseud = lorehaven_db::identity::find_pseud(&state.db(), work.owner_pseud_id)
+    let pseud = lorehaven_db::identity::find_pseud(state.db(), work.owner_pseud_id)
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     let author = pseud.ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "author" }))?;
     let author_account = author.account_id.to_string();
 
@@ -218,7 +218,7 @@ pub async fn tip(
             let (author_amt, platform_amt) =
                 lorehaven_domain::monetization::Rules::split(body.amount_minor, 1_500);
             let auth_id = monetization::post_earnings(
-                &state.db(),
+                state.db(),
                 &author_account,
                 author_amt,
                 &body.currency,
@@ -229,7 +229,7 @@ pub async fn tip(
             .await
             .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
             let plat_id = monetization::post_earnings(
-                &state.db(),
+                state.db(),
                 "platform",
                 platform_amt,
                 &body.currency,
@@ -254,10 +254,10 @@ pub async fn tip(
                 (author_account.clone(), "money".to_string(), body.amount_minor),
             ];
             let txn_id = lorehaven_db::economy::post_transaction(
-                &state.db(),
+                state.db(),
                 lorehaven_domain::economy::TxnType::Spend,
                 &idempotency,
-                &format!("tip:{}", work_id.to_string()),
+                &format!("tip:{}", work_id),
                 &entries,
             )
             .await
@@ -278,7 +278,7 @@ pub async fn my_entitlements(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
 ) -> ApiResult<Json<Value>> {
-    let rows = monetization::get_entitlements(&state.db(), &user.account_id.to_string())
+    let rows = monetization::get_entitlements(state.db(), &user.account_id.to_string())
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     let out: Vec<Value> = rows
@@ -299,7 +299,7 @@ pub async fn my_earnings(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
 ) -> ApiResult<Json<Value>> {
-    let rows = monetization::get_earnings(&state.db(), &user.account_id.to_string())
+    let rows = monetization::get_earnings(state.db(), &user.account_id.to_string())
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     let out: Vec<Value> = rows
@@ -323,7 +323,7 @@ pub async fn request_payout(
     Json(body): Json<PayoutBody>,
 ) -> ApiResult<Json<Value>> {
     let payout_id = monetization::create_payout(
-        &state.db(),
+        state.db(),
         &user.account_id.to_string(),
         body.amount_minor,
         &body.currency,
@@ -338,23 +338,23 @@ pub async fn admin_monetization(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
 ) -> ApiResult<Json<Value>> {
-    let level = lorehaven_db::governance::trust_for(&state.db(), &user.account_id.to_string())
+    let level = lorehaven_db::governance::trust_for(state.db(), &user.account_id.to_string())
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     if level < 5 {
         return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
 
-    let total_revenue = monetization::total_platform_revenue(&state.db())
+    let total_revenue = monetization::total_platform_revenue(state.db())
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
-    let pending_payouts = monetization::pending_payout_total(&state.db())
+    let pending_payouts = monetization::pending_payout_total(state.db())
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
-    let active_authors = monetization::active_earning_authors(&state.db())
+    let active_authors = monetization::active_earning_authors(state.db())
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
-    let active_purchasers = monetization::active_purchaser_count(&state.db())
+    let active_purchasers = monetization::active_purchaser_count(state.db())
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
 
@@ -383,12 +383,12 @@ pub async fn create_gift(
         ))
     })?;
     // Validate the work exists before inserting the gift.
-    let work = lorehaven_db::content::find_work(&state.db(), work_id)
+    let _work = lorehaven_db::content::find_work(state.db(), work_id)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
     let gift_id = monetization::create_gift(
-        &state.db(),
+        state.db(),
         &work_id.to_canonical_string(),
         &pseud.to_canonical_string(),
         body.gift_note.as_deref(),
@@ -409,7 +409,7 @@ pub async fn list_gifts(
             "a pseud must be selected to list gifts",
         ))
     })?;
-    let rows = monetization::get_gifts_for_recipient(&state.db(), &pseud.to_canonical_string())
+    let rows = monetization::get_gifts_for_recipient(state.db(), &pseud.to_canonical_string())
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     let out: Vec<Value> = rows
@@ -437,7 +437,7 @@ pub async fn public_pricing(
     let work_id = work_id
         .parse::<lorehaven_domain::WorkId>()
         .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
-    let pricing = monetization::get_pricing(&state.db(), &work_id.to_canonical_string())
+    let pricing = monetization::get_pricing(state.db(), &work_id.to_canonical_string())
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     let enabled: Vec<Value> = pricing

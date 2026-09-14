@@ -888,7 +888,7 @@ async fn check_entitlement(
     actor: &Actor,
     work_id: &WorkId,
 ) -> ApiResult<bool> {
-    let pricing = lorehaven_db::monetization::get_pricing(&state.db(), &work_id.to_canonical_string())
+    let pricing = lorehaven_db::monetization::get_pricing(state.db(), &work_id.to_canonical_string())
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     let Some(pricing) = pricing else {
@@ -901,7 +901,7 @@ async fn check_entitlement(
     }
     let account_id = actor.account_id.to_string();
     let has = lorehaven_db::monetization::has_entitlement(
-        &state.db(),
+        state.db(),
         &account_id,
         &work_id.to_canonical_string(),
     )
@@ -952,7 +952,7 @@ async fn reading_decision(
                 None => {
                     // Anonymous: deny if the work is priced (purchase model).
                     match lorehaven_db::monetization::is_work_priced(
-                        &state.db(),
+                        state.db(),
                         &work.id.to_canonical_string(),
                     )
                     .await

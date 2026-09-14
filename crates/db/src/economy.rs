@@ -163,7 +163,7 @@ pub async fn reserve_hold(
                 "INSERT INTO credit_holds (id, account, amount, job_id, expires_at)
                  VALUES (?, ?, ?, ?, ?)"
             )
-            .bind(&hold_id).bind(account).bind(amount).bind(job_id).bind(&expires_at.to_string())
+            .bind(&hold_id).bind(account).bind(amount).bind(job_id).bind(expires_at.to_string())
             .execute(db.sqlite_pool().expect("sqlite")).await?;
         }
         Backend::Postgres => {
@@ -171,7 +171,7 @@ pub async fn reserve_hold(
                 "INSERT INTO credit_holds (id, account, amount, job_id, expires_at)
                  VALUES ($1, $2, $3, $4, $5)"
             )
-            .bind(&hold_id).bind(account).bind(amount).bind(job_id).bind(&expires_at.to_string())
+            .bind(&hold_id).bind(account).bind(amount).bind(job_id).bind(expires_at.to_string())
             .execute(db.postgres_pool().expect("postgres")).await?;
         }
     }
