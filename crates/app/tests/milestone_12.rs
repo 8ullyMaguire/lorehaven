@@ -644,6 +644,12 @@ async fn a_forum_topic_can_be_created_replied_to_and_locked() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["topic"]["locked"].as_bool().unwrap(), "topic is locked after toggle");
 
+    // Replying to a locked topic is rejected (422).
+    let (status, body) = user
+        .post(&format!("/api/v1/topics/{topic_id}/replies"), json!({ "body": "nope" }))
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
     // Toggle again unlocks it.
     let (status, _) = user.post(&format!("/api/v1/topics/{topic_id}/lock"), json!({})).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
@@ -654,6 +660,58 @@ async fn a_forum_topic_can_be_created_replied_to_and_locked() {
     // Locking a nonexistent topic returns 404.
     let (status, _) = user.post("/api/v1/topics/nonexistent/lock", json!({})).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_trust_gate_rejects_underleveled_posters() {
+    let harness = Harness::new("forum-trust-gate").await;
+    let mut user = harness.client();
+    let (account_id, _) = register(&mut user, "lowtrust@example.com", "LowTrustUser").await;
+
+    // Category that requires editor-level trust (5).
+    let cat_id = "22222222-2222-2222-2222-222222222222";
+    let sql = "INSERT INTO forum_categories (id, name, position, min_trust) VALUES (?, 'Editors Only', 0, 5)";
+    match harness.db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(sql).bind(cat_id).execute(harness.db.sqlite_pool().expect("sqlite")).await.unwrap();
+        }
+        Backend::Postgres => {
+            sqlx::query(sql).bind(cat_id).execute(harness.db.postgres_pool().expect("postgres")).await.unwrap();
+        }
+    }
+
+    // TL_NEW (0) user cannot create a topic in a trust-5 category.
+    let (status, body) = user
+        .post(
+            &format!("/api/v1/forums/{}/topics", cat_id),
+            json!({ "title": "Should Fail" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "ACCESS_DENIED", "{body}");
+
+    // Promote the user to editor level.
+    let sql = "INSERT INTO trust_levels (account, level, computed_at, basis) VALUES (?, 5, datetime('now'), 'test')";
+    match harness.db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(sql).bind(&account_id).execute(harness.db.sqlite_pool().expect("sqlite")).await.unwrap();
+        }
+        Backend::Postgres => {
+            sqlx::query(sql).bind(&account_id).execute(harness.db.postgres_pool().expect("postgres")).await.unwrap();
+        }
+    }
+
+    // Now the same user can create a topic.
+    let (status, body) = user
+        .post(
+            &format!("/api/v1/forums/{}/topics", cat_id),
+            json!({ "title": "Should Succeed" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["id"].as_str().is_some(), "topic id");
 
     harness.cleanup().await;
 }

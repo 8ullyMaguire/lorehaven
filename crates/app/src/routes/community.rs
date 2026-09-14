@@ -223,19 +223,25 @@ async fn get_forums_topics(
 
 async fn post_topic(
     State(state): State<AppState>,
-    RequirePseud { pseud_id, .. }: RequirePseud,
+    RequirePseud { user, pseud_id }: RequirePseud,
     Path(category): Path<String>,
     Json(body): Json<CreateTopicBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // The schema carries no foreign key on category_id, so the write path
     // refuses a dangling topic itself.
-    let exists = darkhold_db::community::category_exists(state.db(), &category)
+    let min_trust = darkhold_db::community::category_min_trust(state.db(), &category)
         .await
-        .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
-    if !exists {
+        .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e.into())))?;
+    let Some(min_trust) = min_trust else {
         return Err(ApiError(darkhold_domain::AppError::NotFound {
             resource: "forum category",
         }));
+    };
+    let trust = darkhold_db::governance::trust_for(state.db(), &user.account_id.to_string())
+        .await
+        .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e.into())))?;
+    if trust < min_trust {
+        return Err(ApiError(darkhold_domain::AppError::AccessDenied));
     }
     let id = darkhold_db::community::create_topic(
         state.db(),
@@ -283,7 +289,7 @@ async fn get_topic_replies(
 
 async fn post_reply(
     State(state): State<AppState>,
-    RequirePseud { pseud_id, .. }: RequirePseud,
+    RequirePseud { user, pseud_id }: RequirePseud,
     Path(id): Path<String>,
     Json(body): Json<CreateReplyBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
@@ -293,11 +299,33 @@ async fn post_reply(
             "A reply needs some words.",
         )));
     }
-    let id =
+    let topic = darkhold_db::community::topic_by_id(state.db(), &id)
+        .await
+        .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
+    let topic = topic.ok_or_else(|| ApiError(darkhold_domain::AppError::NotFound {
+        resource: "topic",
+    }))?;
+    if topic.locked {
+        return Err(ApiError(darkhold_domain::AppError::field(
+            "body",
+            "this topic is locked",
+        )));
+    }
+    let min_trust = darkhold_db::community::category_min_trust(state.db(), &topic.category_id)
+        .await
+        .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e.into())))?;
+    let min_trust = min_trust.unwrap_or(0);
+    let trust = darkhold_db::governance::trust_for(state.db(), &user.account_id.to_string())
+        .await
+        .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e.into())))?;
+    if trust < min_trust {
+        return Err(ApiError(darkhold_domain::AppError::AccessDenied));
+    }
+    let pid =
         darkhold_db::community::create_post(state.db(), &id, &pseud_id.to_string(), &body.body)
             .await
             .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
-    Ok(Json(serde_json::json!({ "id": id })))
+    Ok(Json(serde_json::json!({ "id": pid })))
 }
 
 async fn lock_topic(
