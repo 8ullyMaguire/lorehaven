@@ -5,11 +5,18 @@ never opened this repository. Read this file top to bottom **before opening an
 editor**, then read the spec section named at the top of the milestone brief
 you are about to build, in full.
 
-**What "current" means here:** as of **2026-09-11**, Milestones 0–8 are built
-and tagged (`v0.09-library` is the latest tag). Everything below is the work
-that remains. If `docs/verification.md`, `docs/requirements.csv` or the git log
-disagree with this plan, they were updated after it was — re-verify before
-acting, and update this plan file in the same commit as any change you find.
+**What "current" means here:** as of **2026-09-14** (commit `cd87a07`),
+Milestones 0–8 are built and tagged (`v0.09-library` is the latest tag); M9's
+positivity rows are fully locally-tested; M10–M14 exist as **partial**
+single-row passes; M15–M20 exist as committed single-row milestones whose
+depth varies — `docs/requirements.csv` is the row-by-row authority, and
+`docs/sessions/2026-09-14.md` is the hand-off that explains how to read the
+two against each other. Milestone 21 is a **skeleton**: migration, contract
+routes (501), domain rule modules and contract tests are in; the bodies are
+the next work (§15 below). If `docs/verification.md`, `docs/requirements.csv`
+or the git log disagree with this plan, they were updated after it was —
+re-verify before acting, and update this plan file in the same commit as any
+change you find.
 
 ---
 
@@ -80,6 +87,13 @@ junior will be tempted to reorder:
   buyable is minted, or the invariant cannot even be stated.
 
 ### 0.3 Debt register (carried explicitly, closed inside named milestones)
+
+**How to read this register after the single-row passes (Sept 13–14):** each
+brief below describes a milestone's FULL scope. Where the CSV shows the
+milestone's rows already `implemented-locally-tested`, that covers only what
+those rows state — the brief's unlisted acceptance criteria are still owed and
+are the reason the full briefs are kept. `docs/sessions/2026-09-13.md` records
+per-milestone review findings (M10, M12) that list concrete owed pieces.
 
 | Item | Where it lands |
 |---|---|
@@ -2650,7 +2664,7 @@ or a documented limitation — decided explicitly, never silently.
 
 ---
 
-## 16. Milestone 21 (repo) — Spec-revision skeleton: monetization, subscriptions, alerts, gifts
+## 15. Milestone 21 (repo) — Spec-revision skeleton: monetization, subscriptions, alerts, gifts
 
 **Read first:** spec §20.9 (work monetization), §23.3 (subscriptions),
 §14.2 (saved-search alerts), §18.10 (gifts), §24.14 (AI-crawler posture),
@@ -2659,7 +2673,7 @@ ADRs `docs/adr/0017` and `0018`. The skeleton (migration 0022, the contract
 routes, the domain rule modules, and `milestone_21.rs`) already exists and
 passes; this milestone is **filling the bodies** without reshaping them.
 
-### 16.1 What is already in place (the skeleton, this commit)
+### 15.1 What is already in place (the skeleton, this commit)
 
 - Migration `0022_spec_revision.sql` in **both** dialects: `work_pricing`,
   `work_entitlements`, `author_earnings_ledger`, `payouts`,
@@ -2676,7 +2690,7 @@ passes; this milestone is **filling the bodies** without reshaping them.
 - `crates/app/tests/milestone_21.rs`: 14 tests pinning the migration, the
   domain invariants, and the route contracts (401 anonymous / 501 authed).
 
-### 16.2 Ledger rows
+### 15.2 Ledger rows
 
 - `M21-01` monetization eligibility + assertions: instance setting,
   imported-works rule, re-assertion on price change (spec §20.9.1)
@@ -2696,7 +2710,7 @@ passes; this milestone is **filling the bodies** without reshaping them.
   exports; generated robots.txt with operator-configurable defaults
   (spec §24.14, ADR 0018)
 
-### 16.3 Work breakdown
+### 15.3 Work breakdown
 
 **16.3.1 Monetization (M21-01..04).** Implement the db repository in
 `crates/db/src/monetization.rs` (dual-dialect per the economy.rs pattern),
@@ -2725,7 +2739,7 @@ recipe diff, ephemeral "for now" filters (§16.7, §15.5), the
 appearance-bundle import/export (§6.7), and the reader-influence dial
 replacing the opt-out switch (§16.5).
 
-### 16.4 Acceptance tests
+### 15.4 Acceptance tests
 
 - `milestone_21.rs` extended: a purchased work is readable by the buyer and
   paywalled (honest state) for others; an early-access chapter opens at
@@ -2736,7 +2750,7 @@ replacing the opt-out switch (§16.5).
 - All new tests dual-run on SQLite (and PostgreSQL where the CI matrix has
   it), same as every milestone.
 
-### 16.5 Pitfalls
+### 15.5 Pitfalls
 
 - **Do not change a contract shape to make an implementation easier.** The
   501 tests pin the API; if a shape must change, change the spec, the route,
@@ -2750,7 +2764,7 @@ replacing the opt-out switch (§16.5).
 
 ---
 
-## 15. Cross-cutting sign-off checklist (run at every milestone tag)
+## 16. Cross-cutting sign-off checklist (run at every milestone tag)
 
 - [ ] Ledger: rows added **before** code; flipped after evidence; `M<repo>-NN`
       ids unique; spec §-references present
@@ -2774,7 +2788,7 @@ replacing the opt-out switch (§16.5).
 - [ ] Tag: `v0.<nn>-<name>`, tutorial README's scheme, annotated tag message
       naming the milestone and its ledger rows
 
-### 15.1 The four questions before every tag
+### 16.1 The four questions before every tag
 
 1. **Which journey does a human drive, and did they drive it?**
 2. **Which invariant does a test prove, and would it fail if broken?**
@@ -2783,7 +2797,7 @@ replacing the opt-out switch (§16.5).
 
 If any answer is a shrug, the milestone is not done.
 
-### 15.2 Escalation and the honesty vocabulary
+### 16.2 Escalation and the honesty vocabulary
 
 When a step cannot be completed: stop, write the gap in
 `docs/verification.md` with the status vocabulary, register it in the debt
@@ -2793,7 +2807,7 @@ completed task, and a silent downgrade is a defect. Never let a milestone
 tag paper over a gap — the spec's own release gate (§25) is built on the
 same rule.
 
-### 15.3 A note on spec drift
+### 16.3 A note on spec drift
 
 This plan was written against spec + verification as of 2026-09-11. The spec was revised on 2026-09-14 (work monetization §20.9, subscriptions, saved-search alerts, gifts §18.10, editor blocks §8.3, AI-crawler posture §24.14, and the customization-first reweighting of §6.7/§9.2/§15.4–15.5/§16.2–16.9/§19.1) — milestone 21 below is the skeleton for that revision, and its ledger rows are M21-01..M21-08 in `docs/requirements.csv`. When the
 spec changes, update this plan in the same commit as the spec change (the

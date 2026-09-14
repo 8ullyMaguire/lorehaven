@@ -5,6 +5,12 @@ built**. `docs/spec.md` says what the platform must do; these files say what to
 type, in what order, and how to check it. They are written for someone who
 knows Rust and Svelte but has never seen this repository.
 
+> **Status note (2026-09-14):** this README's milestone list predates the
+> junior implementation plan and does not match its M-numbering — treat
+> `junior-implementation-plan.md` (§0.2 for the numbering map, §15 for the
+> current milestone) as the live plan, and `docs/sessions/2026-09-14.md` as
+> the hand-off describing exactly where the build stands today.
+
 Milestones 0–5 are done and Milestone 6 is **partly built** — its machinery is
 finished and its pages are not, so the work below is what remains of it.
 `docs/verification.md` records the evidence for each claim, and
