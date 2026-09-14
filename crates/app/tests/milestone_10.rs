@@ -366,6 +366,38 @@ async fn taxonomy_autocomplete_returns_nodes() {
 }
 
 #[tokio::test]
+async fn taxonomy_autocomplete_fuzzy_matches_typo() {
+    let harness = Harness::new("taxonomy-fuzzy-autocomplete").await;
+    let mut client = harness.client();
+    let _ = register(&mut client, "a@example.com", "AuthorA").await;
+
+    // Create a node with a typo-prone name.
+    let (status, _) = client
+        .post(
+            "/api/v1/taxonomy",
+            json!({ "kind": "fandom", "canonical": "Harry Potter" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create harry potter");
+
+    // Query with a typo: "harry poter" (missing second 't').
+    let (status, body) = client
+        .get("/api/v1/taxonomy?kind=fandom&prefix=harry%20poter")
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body["items"].as_array().expect("items array");
+    let norms: Vec<&str> = items
+        .iter()
+        .filter_map(|i| i["norm"].as_str())
+        .collect();
+    assert!(
+        norms.iter().any(|n| n.contains("harry potter")),
+        "expected fuzzy match for 'harry poter', got: {norms:?}"
+    );
+    harness.cleanup().await;
+}
+
+#[tokio::test]
 async fn search_is_deterministic_for_same_input() {
     let harness = Harness::new("search-deterministic").await;
     let _ = published_work(&harness, "a@example.com", "AuthorA", "Deterministic Work").await;

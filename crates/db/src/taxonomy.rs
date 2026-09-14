@@ -82,6 +82,112 @@ pub async fn search_nodes(
             created_at,
         })
         .collect())
+    }
+
+/// Search taxonomy nodes by prefix, then fall back to fuzzy matching.
+///
+/// Exact prefix matches are returned first (up to `limit`), then fuzzy
+/// matches fill any remaining slots. Fuzzy matching uses Levenshtein
+/// similarity with a floor of `lexicon::taxonomy::FUZZY_SIMILARITY_FLOOR`.
+pub async fn search_nodes_fuzzy(
+    db: &Database,
+    kind: Option<&str>,
+    query: &str,
+    limit: i64,
+) -> Result<Vec<TaxonomyNode>> {
+    use lorehaven_domain::taxonomy::{fuzzy_match, canonical_form};
+    use std::collections::HashMap;
+
+    let prefix = query.trim();
+    let normalized = canonical_form(prefix);
+
+    // 1. Exact prefix matches (normalized so LIKE is case-consistent).
+    let sql_prefix = db.sql(
+        "SELECT id, kind, canonical, norm, created_at FROM taxonomy_nodes
+         WHERE (?1 IS NULL OR kind = ?1) AND norm LIKE ?2 || '%'
+         ORDER BY norm ASC",
+        "SELECT id::text, kind, canonical, norm, created_at FROM taxonomy_nodes
+         WHERE ($1 IS NULL OR kind = $1) AND norm LIKE $2 || '%'
+         ORDER BY norm ASC",
+    );
+    let prefix_rows: Vec<(String, String, String, String, String)> = match db.backend() {
+        Backend::Sqlite => sqlx::query_as(&sql_prefix)
+            .bind(kind)
+            .bind(&normalized)
+            .fetch_all(db.sqlite_pool().expect("sqlite"))
+            .await?,
+        Backend::Postgres => sqlx::query_as(&sql_prefix)
+            .bind(kind)
+            .bind(&normalized)
+            .fetch_all(db.postgres_pool().expect("postgres"))
+            .await?,
+    };
+    let prefix_nodes: Vec<TaxonomyNode> = prefix_rows
+        .iter()
+        .map(|(id, kind, canonical, norm, created_at)| TaxonomyNode {
+            id: id.clone(),
+            kind: kind.clone(),
+            canonical: canonical.clone(),
+            norm: norm.clone(),
+            created_at: created_at.clone(),
+        })
+        .collect();
+
+    let exact_count = prefix_nodes.len();
+    if exact_count as i64 >= limit {
+        return Ok(prefix_nodes);
+    }
+
+    // 2. Fuzzy fallback: query non-prefix nodes and rank by similarity.
+    let remaining = (limit - exact_count as i64) as usize;
+    let sql_rest = db.sql(
+        "SELECT id, kind, canonical, norm, created_at FROM taxonomy_nodes
+         WHERE (?1 IS NULL OR kind = ?1) AND norm NOT LIKE ?2 || '%'
+         ORDER BY norm ASC",
+        "SELECT id::text, kind, canonical, norm, created_at FROM taxonomy_nodes
+         WHERE ($1 IS NULL OR kind = $1) AND norm NOT LIKE $2 || '%'
+         ORDER BY norm ASC",
+    );
+    let rest_rows: Vec<(String, String, String, String, String)> = match db.backend() {
+        Backend::Sqlite => sqlx::query_as(&sql_rest)
+            .bind(kind)
+            .bind(&normalized)
+            .fetch_all(db.sqlite_pool().expect("sqlite"))
+            .await?,
+        Backend::Postgres => sqlx::query_as(&sql_rest)
+            .bind(kind)
+            .bind(&normalized)
+            .fetch_all(db.postgres_pool().expect("postgres"))
+            .await?,
+    };
+
+    let candidates: Vec<(String, String)> = rest_rows
+        .iter()
+        .map(|(id, _, _, norm, _)| (id.clone(), norm.clone()))
+        .collect();
+    let fuzzy = fuzzy_match(&normalized, candidates, remaining);
+
+    // Map fuzzy match ids back to full TaxonomyNode records.
+    let lookup: HashMap<String, TaxonomyNode> = rest_rows
+        .into_iter()
+        .map(|(id, kind, canonical, norm, created_at)| {
+            (id.clone(), TaxonomyNode {
+                id,
+                kind,
+                canonical,
+                norm,
+                created_at,
+            })
+        })
+        .collect();
+
+    let mut result = prefix_nodes;
+    for m in fuzzy {
+        if let Some(node) = lookup.get(&m.id) {
+            result.push(node.clone());
+        }
+    }
+    Ok(result)
 }
 
 /// Get a node by id.

@@ -59,7 +59,7 @@ async fn autocomplete(
 ) -> ApiResult<Json<serde_json::Value>> {
     let kind = params.kind.as_deref();
     let prefix = params.prefix.as_deref().unwrap_or("");
-    let nodes = taxonomy::search_nodes(state.db(), kind, prefix, params.limit)
+    let nodes = taxonomy::search_nodes_fuzzy(state.db(), kind, &prefix, params.limit)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     Ok(Json(serde_json::json!({ "items": nodes })))
