@@ -678,3 +678,17 @@ pub async fn active_purchaser_count(db: &Database) -> Result<i64, sqlx::Error> {
         }
     }
 }
+
+/// Check whether a work has an enabled "purchase" pricing model (i.e., is monetized).
+pub async fn is_work_priced(db: &Database, work_id: &str) -> Result<bool, sqlx::Error> {
+    let sql = "SELECT EXISTS(SELECT 1 FROM work_pricing WHERE work_id = ? AND model = 'purchase' AND enabled)";
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar(sql).bind(work_id).fetch_one(db.sqlite_pool().expect("sqlite")).await
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM work_pricing WHERE work_id = $1 AND model = 'purchase' AND enabled)")
+                .bind(work_id).fetch_one(db.postgres_pool().expect("postgres")).await
+        }
+    }
+}
