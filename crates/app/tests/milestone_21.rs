@@ -229,6 +229,7 @@ fn credits_and_money_are_separate_ledgers() {
 #[test]
 fn imported_works_are_never_monetizable_in_original_mode() {
     assert!(!MoneyRules::imported_work_monetizable(Eligibility::Original));
+    assert!(!MoneyRules::imported_work_monetizable(Eligibility::Disabled));
     assert!(MoneyRules::imported_work_monetizable(Eligibility::AnyWithAssertion));
     assert!(!MoneyRules::assertion_required(Eligibility::Disabled));
 }
