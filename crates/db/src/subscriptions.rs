@@ -6,10 +6,32 @@ use uuid::Uuid;
 use crate::{Backend, Database};
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Common types
 // ---------------------------------------------------------------------------
 
-async fn fetch_subscriptions_sqlite(pool: &sqlx::SqlitePool, pseud_id: &str) -> Result<Vec<SubscriptionRow>, sqlx::Error> {
+#[derive(Debug, Clone)]
+pub struct SubscriptionRow {
+    pub id: String,
+    pub subject_type: String,
+    pub subject_id: String,
+    pub state: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AlertRow {
+    pub id: String,
+    pub saved_search_id: String,
+    pub frequency: String,
+    pub last_run_at: Option<String>,
+    pub created_at: String,
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers: each dialect returns a common type
+// ---------------------------------------------------------------------------
+
+async fn fetch_subs_sqlite(pool: &sqlx::SqlitePool, pseud_id: &str) -> Result<Vec<SubscriptionRow>, sqlx::Error> {
     let rows = sqlx::query("SELECT id, subject_type, subject_id, state, created_at FROM content_subscriptions WHERE subscriber_pseud_id = ? ORDER BY created_at DESC")
         .bind(pseud_id)
         .fetch_all(pool)
@@ -23,7 +45,7 @@ async fn fetch_subscriptions_sqlite(pool: &sqlx::SqlitePool, pseud_id: &str) -> 
     }).collect())
 }
 
-async fn fetch_subscriptions_postgres(pool: &sqlx::postgres::PgPool, pseud_id: &str) -> Result<Vec<SubscriptionRow>, sqlx::Error> {
+async fn fetch_subs_postgres(pool: &sqlx::postgres::PgPool, pseud_id: &str) -> Result<Vec<SubscriptionRow>, sqlx::Error> {
     let rows = sqlx::query("SELECT id, subject_type, subject_id, state, created_at FROM content_subscriptions WHERE subscriber_pseud_id = $1 ORDER BY created_at DESC")
         .bind(pseud_id)
         .fetch_all(pool)
@@ -37,14 +59,14 @@ async fn fetch_subscriptions_postgres(pool: &sqlx::postgres::PgPool, pseud_id: &
     }).collect())
 }
 
-async fn fetch_subscribers_sqlite(pool: &sqlx::SqlitePool, subject_type: &str, subject_id: &str) -> Result<Vec<String>, sqlx::Error> {
+async fn fetch_sub_ids_sqlite(pool: &sqlx::SqlitePool, subject_type: &str, subject_id: &str) -> Result<Vec<String>, sqlx::Error> {
     sqlx::query_scalar("SELECT subscriber_pseud_id FROM content_subscriptions WHERE subject_type = ? AND subject_id = ? AND state = 'active'")
         .bind(subject_type).bind(subject_id)
         .fetch_all(pool)
         .await
 }
 
-async fn fetch_subscribers_postgres(pool: &sqlx::postgres::PgPool, subject_type: &str, subject_id: &str) -> Result<Vec<String>, sqlx::Error> {
+async fn fetch_sub_ids_postgres(pool: &sqlx::postgres::PgPool, subject_type: &str, subject_id: &str) -> Result<Vec<String>, sqlx::Error> {
     sqlx::query_scalar("SELECT subscriber_pseud_id FROM content_subscriptions WHERE subject_type = $1 AND subject_id = $2 AND state = 'active'")
         .bind(subject_type).bind(subject_id)
         .fetch_all(pool)
@@ -79,26 +101,18 @@ async fn fetch_alerts_postgres(pool: &sqlx::postgres::PgPool, pseud_id: &str) ->
     }).collect())
 }
 
-// ---------------------------------------------------------------------------
-// Common types
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct SubscriptionRow {
-    pub id: String,
-    pub subject_type: String,
-    pub subject_id: String,
-    pub state: String,
-    pub created_at: String,
+async fn count_subs_sqlite(pool: &sqlx::SqlitePool, subject_type: &str, subject_id: &str) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM content_subscriptions WHERE subject_type = ? AND subject_id = ? AND state = 'active'")
+        .bind(subject_type).bind(subject_id)
+        .fetch_one(pool)
+        .await
 }
 
-#[derive(Debug, Clone)]
-pub struct AlertRow {
-    pub id: String,
-    pub saved_search_id: String,
-    pub frequency: String,
-    pub last_run_at: Option<String>,
-    pub created_at: String,
+async fn count_subs_postgres(pool: &sqlx::postgres::PgPool, subject_type: &str, subject_id: &str) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM content_subscriptions WHERE subject_type = $1 AND subject_id = $2 AND state = 'active'")
+        .bind(subject_type).bind(subject_id)
+        .fetch_one(pool)
+        .await
 }
 
 // ---------------------------------------------------------------------------
@@ -140,67 +154,60 @@ pub async fn subscribe(
 
 /// Pause or resume a subscription.
 pub async fn set_subscription_state(db: &Database, id: &str, state: &str) -> Result<u64, sqlx::Error> {
-    let res = match db.backend() {
+    match db.backend() {
         Backend::Sqlite => {
-            sqlx::query("UPDATE content_subscriptions SET state = ? WHERE id = ?")
+            let r = sqlx::query("UPDATE content_subscriptions SET state = ? WHERE id = ?")
                 .bind(state).bind(id)
-                .execute(db.sqlite_pool().expect("sqlite")).await?
+                .execute(db.sqlite_pool().expect("sqlite")).await?;
+            Ok(r.rows_affected())
         }
         Backend::Postgres => {
-            sqlx::query("UPDATE content_subscriptions SET state = $1 WHERE id = $2")
+            let r = sqlx::query("UPDATE content_subscriptions SET state = $1 WHERE id = $2")
                 .bind(state).bind(id)
-                .execute(db.postgres_pool().expect("postgres")).await?
+                .execute(db.postgres_pool().expect("postgres")).await?;
+            Ok(r.rows_affected())
         }
-    };
-    Ok(res.rows_affected())
+    }
 }
 
 /// Unsubscribe (hard delete).
 pub async fn unsubscribe(db: &Database, id: &str) -> Result<u64, sqlx::Error> {
-    let res = match db.backend() {
+    match db.backend() {
         Backend::Sqlite => {
-            sqlx::query("DELETE FROM content_subscriptions WHERE id = ?")
-                .bind(id).execute(db.sqlite_pool().expect("sqlite")).await?
+            let r = sqlx::query("DELETE FROM content_subscriptions WHERE id = ?")
+                .bind(id).execute(db.sqlite_pool().expect("sqlite")).await?;
+            Ok(r.rows_affected())
         }
         Backend::Postgres => {
-            sqlx::query("DELETE FROM content_subscriptions WHERE id = $1")
-                .bind(id).execute(db.postgres_pool().expect("postgres")).await?
+            let r = sqlx::query("DELETE FROM content_subscriptions WHERE id = $1")
+                .bind(id).execute(db.postgres_pool().expect("postgres")).await?;
+            Ok(r.rows_affected())
         }
-    };
-    Ok(res.rows_affected())
+    }
 }
 
 /// Get subscriptions for a pseud.
 pub async fn get_subscriptions(db: &Database, pseud_id: &str) -> Result<Vec<SubscriptionRow>, sqlx::Error> {
     match db.backend() {
-        Backend::Sqlite => fetch_subscriptions_sqlite(db.sqlite_pool().expect("sqlite"), pseud_id).await,
-        Backend::Postgres => fetch_subscriptions_postgres(db.postgres_pool().expect("postgres"), pseud_id).await,
+        Backend::Sqlite => fetch_subs_sqlite(db.sqlite_pool().expect("sqlite"), pseud_id).await,
+        Backend::Postgres => fetch_subs_postgres(db.postgres_pool().expect("postgres"), pseud_id).await,
     }
 }
 
 /// Get active subscriber pseud ids for a subject.
 pub async fn get_subscribers(db: &Database, subject_type: &str, subject_id: &str) -> Result<Vec<String>, sqlx::Error> {
     match db.backend() {
-        Backend::Sqlite => fetch_subscribers_sqlite(db.sqlite_pool().expect("sqlite"), subject_type, subject_id).await,
-        Backend::Postgres => fetch_subscribers_postgres(db.postgres_pool().expect("postgres"), subject_type, subject_id).await,
+        Backend::Sqlite => fetch_sub_ids_sqlite(db.sqlite_pool().expect("sqlite"), subject_type, subject_id).await,
+        Backend::Postgres => fetch_sub_ids_postgres(db.postgres_pool().expect("postgres"), subject_type, subject_id).await,
     }
 }
 
 /// Count active subscribers for a subject.
 pub async fn count_subscribers(db: &Database, subject_type: &str, subject_id: &str) -> Result<i64, sqlx::Error> {
-    let count: i64 = match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query_scalar("SELECT COUNT(*) FROM content_subscriptions WHERE subject_type = ? AND subject_id = ? AND state = 'active'")
-                .bind(subject_type).bind(subject_id)
-                .fetch_one(db.sqlite_pool().expect("sqlite")).await?
-        }
-        Backend::Postgres => {
-            sqlx::query_scalar("SELECT COUNT(*) FROM content_subscriptions WHERE subject_type = $1 AND subject_id = $2 AND state = 'active'")
-                .bind(subject_type).bind(subject_id)
-                .fetch_one(db.postgres_pool().expect("postgres")).await?
-        }
-    };
-    Ok(count)
+    match db.backend() {
+        Backend::Sqlite => count_subs_sqlite(db.sqlite_pool().expect("sqlite"), subject_type, subject_id).await,
+        Backend::Postgres => count_subs_postgres(db.postgres_pool().expect("postgres"), subject_type, subject_id).await,
+    }
 }
 
 /// Create a saved-search alert.
@@ -238,34 +245,36 @@ pub async fn create_alert(
 
 /// Update alert frequency.
 pub async fn update_alert(db: &Database, id: &str, frequency: &str) -> Result<u64, sqlx::Error> {
-    let res = match db.backend() {
+    match db.backend() {
         Backend::Sqlite => {
-            sqlx::query("UPDATE search_alerts SET frequency = ? WHERE id = ?")
+            let r = sqlx::query("UPDATE search_alerts SET frequency = ? WHERE id = ?")
                 .bind(frequency).bind(id)
-                .execute(db.sqlite_pool().expect("sqlite")).await?
+                .execute(db.sqlite_pool().expect("sqlite")).await?;
+            Ok(r.rows_affected())
         }
         Backend::Postgres => {
-            sqlx::query("UPDATE search_alerts SET frequency = $1 WHERE id = $2")
+            let r = sqlx::query("UPDATE search_alerts SET frequency = $1 WHERE id = $2")
                 .bind(frequency).bind(id)
-                .execute(db.postgres_pool().expect("postgres")).await?
+                .execute(db.postgres_pool().expect("postgres")).await?;
+            Ok(r.rows_affected())
         }
-    };
-    Ok(res.rows_affected())
+    }
 }
 
 /// Delete an alert.
 pub async fn delete_alert(db: &Database, id: &str) -> Result<u64, sqlx::Error> {
-    let res = match db.backend() {
+    match db.backend() {
         Backend::Sqlite => {
-            sqlx::query("DELETE FROM search_alerts WHERE id = ?")
-                .bind(id).execute(db.sqlite_pool().expect("sqlite")).await?
+            let r = sqlx::query("DELETE FROM search_alerts WHERE id = ?")
+                .bind(id).execute(db.sqlite_pool().expect("sqlite")).await?;
+            Ok(r.rows_affected())
         }
         Backend::Postgres => {
-            sqlx::query("DELETE FROM search_alerts WHERE id = $1")
-                .bind(id).execute(db.postgres_pool().expect("postgres")).await?
+            let r = sqlx::query("DELETE FROM search_alerts WHERE id = $1")
+                .bind(id).execute(db.postgres_pool().expect("postgres")).await?;
+            Ok(r.rows_affected())
         }
-    };
-    Ok(res.rows_affected())
+    }
 }
 
 /// Get alerts for a pseud.
@@ -279,17 +288,18 @@ pub async fn get_alerts(db: &Database, pseud_id: &str) -> Result<Vec<AlertRow>, 
 /// Update the last_run_at timestamp for an alert.
 pub async fn mark_alert_run(db: &Database, id: &str) -> Result<u64, sqlx::Error> {
     let now = crate::identity::now_rfc3339();
-    let res = match db.backend() {
+    match db.backend() {
         Backend::Sqlite => {
-            sqlx::query("UPDATE search_alerts SET last_run_at = ? WHERE id = ?")
+            let r = sqlx::query("UPDATE search_alerts SET last_run_at = ? WHERE id = ?")
                 .bind(&now).bind(id)
-                .execute(db.sqlite_pool().expect("sqlite")).await?
+                .execute(db.sqlite_pool().expect("sqlite")).await?;
+            Ok(r.rows_affected())
         }
         Backend::Postgres => {
-            sqlx::query("UPDATE search_alerts SET last_run_at = $1 WHERE id = $2")
+            let r = sqlx::query("UPDATE search_alerts SET last_run_at = $1 WHERE id = $2")
                 .bind(&now).bind(id)
-                .execute(db.postgres_pool().expect("postgres")).await?
+                .execute(db.postgres_pool().expect("postgres")).await?;
+            Ok(r.rows_affected())
         }
-    };
-    Ok(res.rows_affected())
+    }
 }

@@ -9,7 +9,64 @@ use uuid::Uuid;
 use crate::{Backend, Database};
 
 // ---------------------------------------------------------------------------
-// Helpers: each dialect returns a common type
+// Common types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct PricingRow {
+    pub id: String,
+    pub model: String,
+    pub price_minor: i64,
+    pub currency: String,
+    pub public_at_offset: Option<i64>,
+    pub enabled: bool,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct EntitlementRow {
+    pub id: String,
+    pub work_id: String,
+    pub kind: String,
+    pub source_payment_id: Option<String>,
+    pub granted_at: String,
+    pub expires_at: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EarningsRow {
+    pub id: String,
+    pub amount_minor: i64,
+    pub currency: String,
+    pub kind: String,
+    pub payment_id: Option<String>,
+    pub idempotency_key: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AssertionRow {
+    pub id: String,
+    pub assertion_kind: String,
+    pub policy_version: String,
+    pub accepted_at: String,
+    pub revoked_at: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GiftRow {
+    pub id: String,
+    pub work_id: String,
+    pub gift_note: Option<String>,
+    pub challenge_fulfillment_id: Option<String>,
+    pub created_at: String,
+    pub declined_at: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers: each dialect returns a common type
 // ---------------------------------------------------------------------------
 
 async fn fetch_pricing_sqlite(pool: &sqlx::SqlitePool, work_id: &str) -> Result<Vec<PricingRow>, sqlx::Error> {
@@ -110,14 +167,14 @@ async fn fetch_earnings_postgres(pool: &sqlx::postgres::PgPool, account_id: &str
     }).collect())
 }
 
-async fn has_idempotency_sqlite(pool: &sqlx::SqlitePool, key: &str) -> Result<Option<String>, sqlx::Error> {
+async fn has_idem_sqlite(pool: &sqlx::SqlitePool, key: &str) -> Result<Option<String>, sqlx::Error> {
     sqlx::query_scalar("SELECT id FROM author_earnings_ledger WHERE idempotency_key = ?")
         .bind(key)
         .fetch_optional(pool)
         .await
 }
 
-async fn has_idempotency_postgres(pool: &sqlx::postgres::PgPool, key: &str) -> Result<Option<String>, sqlx::Error> {
+async fn has_idem_postgres(pool: &sqlx::postgres::PgPool, key: &str) -> Result<Option<String>, sqlx::Error> {
     sqlx::query_scalar("SELECT id FROM author_earnings_ledger WHERE idempotency_key = $1")
         .bind(key)
         .fetch_optional(pool)
@@ -125,78 +182,61 @@ async fn has_idempotency_postgres(pool: &sqlx::postgres::PgPool, key: &str) -> R
 }
 
 async fn fetch_assertion_sqlite(pool: &sqlx::SqlitePool, work_id: &str, kind: &str) -> Result<Option<AssertionRow>, sqlx::Error> {
-    sqlx::query("SELECT id, assertion_kind, policy_version, accepted_at, revoked_at FROM monetization_assertions WHERE work_id = ? AND assertion_kind = ? ORDER BY accepted_at DESC LIMIT 1")
+    let opt = sqlx::query("SELECT id, assertion_kind, policy_version, accepted_at, revoked_at FROM monetization_assertions WHERE work_id = ? AND assertion_kind = ? ORDER BY accepted_at DESC LIMIT 1")
         .bind(work_id).bind(kind)
         .fetch_optional(pool)
-        .await
-        .map(|opt| opt.map(|r| AssertionRow {
-            id: r.get::<String, _>("id"),
-            assertion_kind: r.get::<String, _>("assertion_kind"),
-            policy_version: r.get::<String, _>("policy_version"),
-            accepted_at: r.get::<String, _>("accepted_at"),
-            revoked_at: r.get::<Option<String>, _>("revoked_at"),
-        }))
+        .await?;
+    Ok(opt.map(|r| AssertionRow {
+        id: r.get::<String, _>("id"),
+        assertion_kind: r.get::<String, _>("assertion_kind"),
+        policy_version: r.get::<String, _>("policy_version"),
+        accepted_at: r.get::<String, _>("accepted_at"),
+        revoked_at: r.get::<Option<String>, _>("revoked_at"),
+    }))
 }
 
 async fn fetch_assertion_postgres(pool: &sqlx::postgres::PgPool, work_id: &str, kind: &str) -> Result<Option<AssertionRow>, sqlx::Error> {
-    sqlx::query("SELECT id, assertion_kind, policy_version, accepted_at, revoked_at FROM monetization_assertions WHERE work_id = $1 AND assertion_kind = $2 ORDER BY accepted_at DESC LIMIT 1")
+    let opt = sqlx::query("SELECT id, assertion_kind, policy_version, accepted_at, revoked_at FROM monetization_assertions WHERE work_id = $1 AND assertion_kind = $2 ORDER BY accepted_at DESC LIMIT 1")
         .bind(work_id).bind(kind)
         .fetch_optional(pool)
-        .await
-        .map(|opt| opt.map(|r| AssertionRow {
-            id: r.get::<String, _>("id"),
-            assertion_kind: r.get::<String, _>("assertion_kind"),
-            policy_version: r.get::<String, _>("policy_version"),
-            accepted_at: r.get::<String, _>("accepted_at"),
-            revoked_at: r.get::<Option<String>, _>("revoked_at"),
-        }))
+        .await?;
+    Ok(opt.map(|r| AssertionRow {
+        id: r.get::<String, _>("id"),
+        assertion_kind: r.get::<String, _>("assertion_kind"),
+        policy_version: r.get::<String, _>("policy_version"),
+        accepted_at: r.get::<String, _>("accepted_at"),
+        revoked_at: r.get::<Option<String>, _>("revoked_at"),
+    }))
 }
 
-// ---------------------------------------------------------------------------
-// Common types (returned regardless of dialect)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct PricingRow {
-    pub id: String,
-    pub model: String,
-    pub price_minor: i64,
-    pub currency: String,
-    pub public_at_offset: Option<i64>,
-    pub enabled: bool,
-    pub created_at: String,
-    pub updated_at: String,
-    pub version: i64,
+async fn fetch_gifts_sqlite(pool: &sqlx::SqlitePool, recipient_pseud_id: &str) -> Result<Vec<GiftRow>, sqlx::Error> {
+    let rows = sqlx::query("SELECT id, work_id, gift_note, challenge_fulfillment_id, created_at, declined_at FROM work_gifts WHERE recipient_pseud_id = ? ORDER BY created_at DESC")
+        .bind(recipient_pseud_id)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.iter().map(|r| GiftRow {
+        id: r.get::<String, _>("id"),
+        work_id: r.get::<String, _>("work_id"),
+        gift_note: r.get::<Option<String>, _>("gift_note"),
+        challenge_fulfillment_id: r.get::<Option<String>, _>("challenge_fulfillment_id"),
+        created_at: r.get::<String, _>("created_at"),
+        declined_at: r.get::<Option<String>, _>("declined_at"),
+    }).collect())
 }
 
-#[derive(Debug, Clone)]
-pub struct EntitlementRow {
-    pub id: String,
-    pub work_id: String,
-    pub kind: String,
-    pub source_payment_id: Option<String>,
-    pub granted_at: String,
-    pub expires_at: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct EarningsRow {
-    pub id: String,
-    pub amount_minor: i64,
-    pub currency: String,
-    pub kind: String,
-    pub payment_id: Option<String>,
-    pub idempotency_key: Option<String>,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct AssertionRow {
-    pub id: String,
-    pub assertion_kind: String,
-    pub policy_version: String,
-    pub accepted_at: String,
-    pub revoked_at: Option<String>,
+async fn fetch_gifts_postgres(pool: &sqlx::postgres::PgPool, recipient_pseud_id: &str) -> Result<Vec<GiftRow>, sqlx::Error> {
+    let rows = sqlx::query("SELECT id, work_id, gift_note, challenge_fulfillment_id, created_at, declined_at FROM work_gifts WHERE recipient_pseud_id = $1 ORDER BY created_at DESC")
+        .bind(recipient_pseud_id)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.iter().map(|r| GiftRow {
+        id: r.get::<String, _>("id"),
+        work_id: r.get::<String, _>("work_id"),
+        gift_note: r.get::<Option<String>, _>("gift_note"),
+        challenge_fulfillment_id: r.get::<Option<String>, _>("challenge_fulfillment_id"),
+        created_at: r.get::<String, _>("created_at"),
+        declined_at: r.get::<Option<String>, _>("declined_at"),
+    }).collect())
 }
 
 // ---------------------------------------------------------------------------
@@ -221,12 +261,8 @@ pub async fn set_pricing(
                 "INSERT INTO work_pricing (id, work_id, model, price_minor, currency, public_at_offset, enabled, created_at, updated_at, version)
                  VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, 1)
                  ON CONFLICT(work_id) DO UPDATE SET
-                   model = excluded.model,
-                   price_minor = excluded.price_minor,
-                   currency = excluded.currency,
-                   public_at_offset = excluded.public_at_offset,
-                   updated_at = excluded.updated_at,
-                   version = version + 1"
+                   model = excluded.model, price_minor = excluded.price_minor, currency = excluded.currency,
+                   public_at_offset = excluded.public_at_offset, updated_at = excluded.updated_at, version = version + 1"
             )
             .bind(&id).bind(work_id).bind(model).bind(price_minor).bind(currency)
             .bind(public_at_offset).bind(&now).bind(&now)
@@ -237,12 +273,8 @@ pub async fn set_pricing(
                 "INSERT INTO work_pricing (id, work_id, model, price_minor, currency, public_at_offset, enabled, created_at, updated_at, version)
                  VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, 1)
                  ON CONFLICT(work_id) DO UPDATE SET
-                   model = excluded.model,
-                   price_minor = excluded.price_minor,
-                   currency = excluded.currency,
-                   public_at_offset = excluded.public_at_offset,
-                   updated_at = excluded.updated_at,
-                   version = work_pricing.version + 1"
+                   model = excluded.model, price_minor = excluded.price_minor, currency = excluded.currency,
+                   public_at_offset = excluded.public_at_offset, updated_at = excluded.updated_at, version = work_pricing.version + 1"
             )
             .bind(&id).bind(work_id).bind(model).bind(price_minor).bind(currency)
             .bind(public_at_offset).bind(&now).bind(&now)
@@ -254,55 +286,29 @@ pub async fn set_pricing(
 
 /// Get active pricing for a work.
 pub async fn get_pricing(db: &Database, work_id: &str) -> Result<Option<PricingRow>, sqlx::Error> {
-    let rows = match db.backend() {
-        Backend::Sqlite => {
-            let pool = db.sqlite_pool().expect("sqlite");
-            sqlx::query("SELECT id, model, price_minor, currency, public_at_offset, enabled, created_at, updated_at, version FROM work_pricing WHERE work_id = ? AND enabled = 1")
-                .bind(work_id).fetch_all(pool).await?
-        }
-        Backend::Postgres => {
-            let pool = db.postgres_pool().expect("postgres");
-            sqlx::query("SELECT id, model, price_minor, currency, public_at_offset, enabled, created_at, updated_at, version FROM work_pricing WHERE work_id = $1 AND enabled = true")
-                .bind(work_id).fetch_all(pool).await?
-        }
-    };
-    Ok(rows.first().map(|r| PricingRow {
-        id: r.get::<String, _>("id"),
-        model: r.get::<String, _>("model"),
-        price_minor: r.get::<i64, _>("price_minor"),
-        currency: r.get::<String, _>("currency"),
-        public_at_offset: if db.backend() == Backend::Sqlite {
-            r.get::<Option<i64>, _>("public_at_offset")
-        } else {
-            r.get::<Option<i64>, _>("public_at_offset")
-        },
-        enabled: if db.backend() == Backend::Sqlite {
-            r.get::<i64, _>("enabled") != 0
-        } else {
-            r.get::<bool, _>("enabled")
-        },
-        created_at: r.get::<String, _>("created_at"),
-        updated_at: r.get::<String, _>("updated_at"),
-        version: r.get::<i64, _>("version"),
-    }))
+    match db.backend() {
+        Backend::Sqlite => fetch_pricing_sqlite(db.sqlite_pool().expect("sqlite"), work_id).await,
+        Backend::Postgres => fetch_pricing_postgres(db.postgres_pool().expect("postgres"), work_id).await,
+    }.map(|r| r.into_iter().next())
 }
 
 /// Disable pricing for a work.
 pub async fn disable_pricing(db: &Database, work_id: &str) -> Result<u64, sqlx::Error> {
     let now = crate::identity::now_rfc3339();
-    let res = match db.backend() {
+    match db.backend() {
         Backend::Sqlite => {
-            sqlx::query("UPDATE work_pricing SET enabled = 0, updated_at = ? WHERE work_id = ?")
+            let r = sqlx::query("UPDATE work_pricing SET enabled = 0, updated_at = ? WHERE work_id = ?")
                 .bind(&now).bind(work_id)
-                .execute(db.sqlite_pool().expect("sqlite")).await?
+                .execute(db.sqlite_pool().expect("sqlite")).await?;
+            Ok(r.rows_affected())
         }
         Backend::Postgres => {
-            sqlx::query("UPDATE work_pricing SET enabled = false, updated_at = $1 WHERE work_id = $2")
+            let r = sqlx::query("UPDATE work_pricing SET enabled = false, updated_at = $1 WHERE work_id = $2")
                 .bind(&now).bind(work_id)
-                .execute(db.postgres_pool().expect("postgres")).await?
+                .execute(db.postgres_pool().expect("postgres")).await?;
+            Ok(r.rows_affected())
         }
-    };
-    Ok(res.rows_affected())
+    }
 }
 
 /// Grant an entitlement to an account.
@@ -322,8 +328,7 @@ pub async fn grant_entitlement(
             sqlx::query(
                 "INSERT INTO work_entitlements (id, account_id, work_id, kind, source_payment_id, granted_at, expires_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(account_id, work_id, kind) DO UPDATE SET
-                   granted_at = excluded.granted_at"
+                 ON CONFLICT(account_id, work_id, kind) DO UPDATE SET granted_at = excluded.granted_at"
             )
             .bind(&id).bind(account_id).bind(work_id).bind(kind).bind(source_payment_id).bind(&now).bind(expires_at)
             .execute(db.sqlite_pool().expect("sqlite")).await?;
@@ -332,8 +337,7 @@ pub async fn grant_entitlement(
             sqlx::query(
                 "INSERT INTO work_entitlements (id, account_id, work_id, kind, source_payment_id, granted_at, expires_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7)
-                 ON CONFLICT(account_id, work_id, kind) DO UPDATE SET
-                   granted_at = excluded.granted_at"
+                 ON CONFLICT(account_id, work_id, kind) DO UPDATE SET granted_at = excluded.granted_at"
             )
             .bind(&id).bind(account_id).bind(work_id).bind(kind).bind(source_payment_id).bind(&now).bind(expires_at)
             .execute(db.postgres_pool().expect("postgres")).await?;
@@ -344,21 +348,20 @@ pub async fn grant_entitlement(
 
 /// Check whether an account has a valid entitlement for a work.
 pub async fn has_entitlement(db: &Database, account_id: &str, work_id: &str) -> Result<bool, sqlx::Error> {
+    let now = crate::identity::now_rfc3339();
     let count: i64 = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_scalar(
-                "SELECT COUNT(*) FROM work_entitlements
-                 WHERE account_id = ? AND work_id = ? AND (expires_at IS NULL OR expires_at > ?)"
+                "SELECT COUNT(*) FROM work_entitlements WHERE account_id = ? AND work_id = ? AND (expires_at IS NULL OR expires_at > ?)"
             )
-            .bind(account_id).bind(work_id).bind(&crate::identity::now_rfc3339())
+            .bind(account_id).bind(work_id).bind(&now)
             .fetch_one(db.sqlite_pool().expect("sqlite")).await?
         }
         Backend::Postgres => {
             sqlx::query_scalar(
-                "SELECT COUNT(*) FROM work_entitlements
-                 WHERE account_id = $1 AND work_id = $2 AND (expires_at IS NULL OR expires_at > $3)"
+                "SELECT COUNT(*) FROM work_entitlements WHERE account_id = $1 AND work_id = $2 AND (expires_at IS NULL OR expires_at > $3)"
             )
-            .bind(account_id).bind(work_id).bind(&crate::identity::now_rfc3339())
+            .bind(account_id).bind(work_id).bind(&now)
             .fetch_one(db.postgres_pool().expect("postgres")).await?
         }
     };
@@ -383,11 +386,10 @@ pub async fn post_earnings(
     payment_id: Option<&str>,
     idempotency_key: Option<&str>,
 ) -> Result<String, sqlx::Error> {
-    // Idempotency check
     if let Some(key) = idempotency_key {
         let existing = match db.backend() {
-            Backend::Sqlite => has_idempotency_sqlite(db.sqlite_pool().expect("sqlite"), key).await?,
-            Backend::Postgres => has_idempotency_postgres(db.postgres_pool().expect("postgres"), key).await?,
+            Backend::Sqlite => has_idem_sqlite(db.sqlite_pool().expect("sqlite"), key).await?,
+            Backend::Postgres => has_idem_postgres(db.postgres_pool().expect("postgres"), key).await?,
         };
         if let Some(id) = existing {
             return Ok(id);
@@ -499,7 +501,7 @@ pub async fn get_assertion(db: &Database, work_id: &str, kind: &str) -> Result<O
     }
 }
 
-/// Create a gift. Returns error if the recipient has blocked the giver (reveals nothing).
+/// Create a gift.
 pub async fn create_gift(
     db: &Database,
     work_id: &str,
@@ -533,34 +535,8 @@ pub async fn create_gift(
 
 /// Get gifts for a recipient pseud.
 pub async fn get_gifts_for_recipient(db: &Database, recipient_pseud_id: &str) -> Result<Vec<GiftRow>, sqlx::Error> {
-    let rows = match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query("SELECT id, work_id, gift_note, challenge_fulfillment_id, created_at, declined_at FROM work_gifts WHERE recipient_pseud_id = ? ORDER BY created_at DESC")
-                .bind(recipient_pseud_id)
-                .fetch_all(db.sqlite_pool().expect("sqlite")).await?
-        }
-        Backend::Postgres => {
-            sqlx::query("SELECT id, work_id, gift_note, challenge_fulfillment_id, created_at, declined_at FROM work_gifts WHERE recipient_pseud_id = $1 ORDER BY created_at DESC")
-                .bind(recipient_pseud_id)
-                .fetch_all(db.postgres_pool().expect("postgres")).await?
-        }
-    };
-    Ok(rows.iter().map(|r| GiftRow {
-        id: r.get::<String, _>("id"),
-        work_id: r.get::<String, _>("work_id"),
-        gift_note: r.get::<Option<String>, _>("gift_note"),
-        challenge_fulfillment_id: r.get::<Option<String>, _>("challenge_fulfillment_id"),
-        created_at: r.get::<String, _>("created_at"),
-        declined_at: r.get::<Option<String>, _>("declined_at"),
-    }).collect())
-}
-
-#[derive(Debug, Clone)]
-pub struct GiftRow {
-    pub id: String,
-    pub work_id: String,
-    pub gift_note: Option<String>,
-    pub challenge_fulfillment_id: Option<String>,
-    pub created_at: String,
-    pub declined_at: Option<String>,
+    match db.backend() {
+        Backend::Sqlite => fetch_gifts_sqlite(db.sqlite_pool().expect("sqlite"), recipient_pseud_id).await,
+        Backend::Postgres => fetch_gifts_postgres(db.postgres_pool().expect("postgres"), recipient_pseud_id).await,
+    }
 }
