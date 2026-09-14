@@ -26,7 +26,7 @@ the result. Where a claim could only be checked by hand, it says so.
 | Field | Value |
 |---|---|
 | Date of last verification | 2026-09-14 |
-| Commit | `a54e3bc` on `master`. Milestones 0 to 7 are complete and tagged: `v0.01-running-app`, `v0.03-identity`, `v0.04-publishing`, `v0.05-reader`, `v0.06-jobs`, `v0.07-imports`, `v0.08-exports`. Every row in `docs/requirements.csv` for those milestones is `implemented-locally-tested` or a deliberate `unsupported`. |
+|| Commit | `620d89e` on `master`. Milestone 21 skeleton is complete and tagged `milestone_21`. Repository state, commit, and evidence rows current as of 2026-09-14. The 2026-09-14 codebase review found and fixed three runtime bombs (H1 column-name mismatch, H2 missing UNIQUE constraints, H3 PG `enabled` boolean→INTEGER mismatch) plus phantom-upsert IDs (M2), a check-then-insert race (M1), domain rule nits (M5), retention contradiction (M4), and operator gating on `/admin/monetization` (H4). ||
 | Environment | Linux, Rust 1.98.0, Node 26.8.1, SQLite 3.53.4 |
 | PostgreSQL available | Yes — 17.11 in Docker on loopback (the development machine still has none installed) |
 
@@ -1388,7 +1388,8 @@ milestone that will fill them.
 
 The 2026-09-14 spec revision (monetization, subscriptions, saved-search alerts, gifts, editor blocks, AI-crawler posture, customization-first changes) is recorded honestly:
 
-- Migration 0022 (all revision tables + works.ai_training) — implemented in both dialects, migration-drift test passes.
+- Migration 0022 (all revision tables + works.ai_training) — implemented in both dialects, migration-drift test passes. Also adds author_ai_training table and fixes: search_alerts now uses owner_pseud_id, work_pricing has UNIQUE(work_id), work_gifts uses ON DELETE SET NULL for retention.
 - API contract routes — registered and returning typed 501 stubs; shapes pinned by `milestone_21.rs`.
 - Domain functions — signatures in `crates/domain/src/monetization.rs` and `crates/domain/src/subscriptions.rs` with stub bodies returning `Todo`.
 - Everything else in the revision — `unsupported` until the agent implements it; the routes returning 501 is the honest state, not a claim of behavior.
+- Repository 2026-09-14 review fixes committed: `620d89e` (runtime bombs + domain rules) and `d404bf0` (phantom IDs + gifts entitlement + reads classified).
