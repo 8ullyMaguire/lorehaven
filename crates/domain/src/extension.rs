@@ -140,7 +140,11 @@ mod tests {
 
     #[test]
     fn grant_subset_rule() {
-        let manifest = vec![Capability::StorageRead, Capability::WorkRead, Capability::WebhookSend];
+        let manifest = vec![
+            Capability::StorageRead,
+            Capability::WorkRead,
+            Capability::WebhookSend,
+        ];
         let valid_grant = vec![Capability::StorageRead, Capability::WorkRead];
         let invalid_grant = vec![Capability::StorageRead, Capability::JobExecute];
 

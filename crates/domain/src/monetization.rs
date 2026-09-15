@@ -116,7 +116,9 @@ mod tests {
     fn imported_works_never_monetizable_in_original_mode() {
         assert!(!Rules::imported_work_monetizable(Eligibility::Original));
         assert!(!Rules::imported_work_monetizable(Eligibility::Disabled));
-        assert!(Rules::imported_work_monetizable(Eligibility::AnyWithAssertion));
+        assert!(Rules::imported_work_monetizable(
+            Eligibility::AnyWithAssertion
+        ));
     }
 
     #[test]

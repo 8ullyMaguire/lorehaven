@@ -48,21 +48,36 @@ mod tests {
     #[test]
     fn happy_path_transitions() {
         assert!(valid_transition(ChargeState::Quoted, ChargeState::Reserved));
-        assert!(valid_transition(ChargeState::Reserved, ChargeState::Submitted));
-        assert!(valid_transition(ChargeState::Submitted, ChargeState::Completed));
+        assert!(valid_transition(
+            ChargeState::Reserved,
+            ChargeState::Submitted
+        ));
+        assert!(valid_transition(
+            ChargeState::Submitted,
+            ChargeState::Completed
+        ));
     }
 
     #[test]
     fn failure_transitions() {
         assert!(valid_transition(ChargeState::Quoted, ChargeState::Failed));
         assert!(valid_transition(ChargeState::Reserved, ChargeState::Failed));
-        assert!(valid_transition(ChargeState::Submitted, ChargeState::Failed));
+        assert!(valid_transition(
+            ChargeState::Submitted,
+            ChargeState::Failed
+        ));
     }
 
     #[test]
     fn invalid_transitions() {
-        assert!(!valid_transition(ChargeState::Completed, ChargeState::Quoted));
-        assert!(!valid_transition(ChargeState::Failed, ChargeState::Submitted));
+        assert!(!valid_transition(
+            ChargeState::Completed,
+            ChargeState::Quoted
+        ));
+        assert!(!valid_transition(
+            ChargeState::Failed,
+            ChargeState::Submitted
+        ));
     }
 
     #[test]

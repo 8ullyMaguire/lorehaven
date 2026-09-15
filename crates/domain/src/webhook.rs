@@ -1,6 +1,6 @@
 //! M16 — Webhook domain: event envelope, HMAC signing, bounded payload.
 
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 /// Webhook event envelope.
 #[derive(Debug, Clone)]
@@ -14,10 +14,7 @@ pub struct WebhookEvent {
 impl WebhookEvent {
     /// Serialize the envelope for signing.
     pub fn canonical_string(&self) -> String {
-        format!(
-            "{}:{}:{}",
-            self.event_type, self.event_id, self.created_at
-        )
+        format!("{}:{}:{}", self.event_type, self.event_id, self.created_at)
     }
 
     /// Compute HMAC-SHA256 signature over the canonical string + payload.

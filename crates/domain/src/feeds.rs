@@ -30,7 +30,11 @@ pub struct FeedItem {
 
 /// Generate a stable feed handle from a subject.
 pub fn feed_handle(kind: &str, subject: &str) -> String {
-    format!("{}-{}", kind, subject.replace(|c: char| !c.is_alphanumeric(), "-"))
+    format!(
+        "{}-{}",
+        kind,
+        subject.replace(|c: char| !c.is_alphanumeric(), "-")
+    )
 }
 
 /// Escape XML special characters.
@@ -75,8 +79,10 @@ pub fn build_rss(title: &str, link: &str, description: &str, items: &[FeedItem])
         ));
     }
 
-    rss.push_str("</channel>
-</rss>");
+    rss.push_str(
+        "</channel>
+</rss>",
+    );
     rss
 }
 
@@ -140,15 +146,13 @@ mod tests {
 
     #[test]
     fn build_rss_produces_valid_structure() {
-        let items = vec![
-            FeedItem {
-                title: "Test".to_string(),
-                link: "https://example.com/1".to_string(),
-                description: "A test".to_string(),
-                published_at: "2026-09-14T12:00:00Z".to_string(),
-                guid: "guid-1".to_string(),
-            },
-        ];
+        let items = vec![FeedItem {
+            title: "Test".to_string(),
+            link: "https://example.com/1".to_string(),
+            description: "A test".to_string(),
+            published_at: "2026-09-14T12:00:00Z".to_string(),
+            guid: "guid-1".to_string(),
+        }];
         let rss = build_rss("My Feed", "https://example.com", "Description", &items);
         assert!(rss.contains(r#"<rss version="2.0">"#));
         assert!(rss.contains("<title>My Feed</title>"));
@@ -158,15 +162,13 @@ mod tests {
 
     #[test]
     fn build_atom_produces_valid_structure() {
-        let items = vec![
-            FeedItem {
-                title: "Test".to_string(),
-                link: "https://example.com/1".to_string(),
-                description: "A test".to_string(),
-                published_at: "2026-09-14T12:00:00Z".to_string(),
-                guid: "guid-1".to_string(),
-            },
-        ];
+        let items = vec![FeedItem {
+            title: "Test".to_string(),
+            link: "https://example.com/1".to_string(),
+            description: "A test".to_string(),
+            published_at: "2026-09-14T12:00:00Z".to_string(),
+            guid: "guid-1".to_string(),
+        }];
         let atom = build_atom("My Feed", "https://example.com", "Description", &items);
         assert!(atom.contains("<feed xmlns=\"http://www.w3.org/2005/Atom\">"));
         assert!(atom.contains("<title>My Feed</title>"));
