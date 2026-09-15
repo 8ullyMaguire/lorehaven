@@ -343,3 +343,265 @@ pub async fn list_operator_affinities(db: &Database) -> Result<Vec<OperatorAffin
         )
         .collect())
 }
+
+/// Save a recipe (create or update).
+pub async fn save_recipe(
+    db: &Database,
+    id: &str,
+    owner: &str,
+    name: &str,
+    document: &serde_json::Value,
+    is_public: bool,
+    created_at: &str,
+) -> Result<()> {
+    let now = created_at.to_string();
+    match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query(
+                "INSERT OR REPLACE INTO recipes (id, owner, name, document, is_public, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(id)
+            .bind(owner)
+            .bind(name)
+            .bind(document.to_string())
+            .bind(is_public as i64)
+            .bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
+        }
+        crate::Backend::Postgres => {
+            sqlx::query(
+                "INSERT INTO recipes (id, owner, name, document, is_public, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 ON CONFLICT (id) DO UPDATE SET
+                    owner = EXCLUDED.owner,
+                    name = EXCLUDED.name,
+                    document = EXCLUDED.document,
+                    is_public = EXCLUDED.is_public,
+                    created_at = EXCLUDED.created_at",
+            )
+            .bind(id)
+            .bind(owner)
+            .bind(name)
+            .bind(document.to_string())
+            .bind(is_public as i64)
+            .bind(&now)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Read a recipe by ID, enforcing visibility: a non-public recipe
+/// is only returned to its owner.
+pub async fn get_recipe(db: &Database, id: &str, viewer: &str) -> Result<Option<RecipeRow>> {
+    let row: Option<(String, String, String, String, i64, String)> = match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query_as(
+                "SELECT id, owner, name, document, is_public, created_at FROM recipes WHERE id = ?",
+            )
+            .bind(id)
+            .fetch_optional(db.sqlite_pool().expect("sqlite"))
+            .await?
+        }
+        crate::Backend::Postgres => {
+            sqlx::query_as(
+                "SELECT id, owner, name, document, is_public, created_at FROM recipes WHERE id = $1",
+            )
+            .bind(id)
+            .fetch_optional(db.postgres_pool().expect("postgres"))
+            .await?
+        }
+    };
+    match row {
+        Some((id, owner, name, document, is_public, created_at)) => {
+            if is_public == 0 && owner != viewer {
+                return Ok(None);
+            }
+            Ok(Some(RecipeRow {
+                id,
+                owner,
+                name,
+                document: serde_json::from_str(&document).unwrap_or_default(),
+                is_public: is_public != 0,
+                created_at,
+            }))
+        }
+        None => Ok(None),
+    }
+}
+
+/// List recipes visible to the viewer (all public ones + the viewer's own private ones).
+pub async fn list_recipes(db: &Database, viewer: &str) -> Result<Vec<RecipeRow>> {
+    let rows: Vec<(String, String, String, String, i64, String)> = match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query_as(
+                "SELECT id, owner, name, document, is_public, created_at FROM recipes WHERE is_public = 1 OR owner = ? ORDER BY created_at DESC",
+            )
+            .bind(viewer)
+            .fetch_all(db.sqlite_pool().expect("sqlite"))
+            .await?
+        }
+        crate::Backend::Postgres => {
+            sqlx::query_as(
+                "SELECT id, owner, name, document, is_public, created_at FROM recipes WHERE is_public = 1 OR owner = $1 ORDER BY created_at DESC",
+            )
+            .bind(viewer)
+            .fetch_all(db.postgres_pool().expect("postgres"))
+            .await?
+        }
+    };
+    Ok(rows
+        .into_iter()
+        .map(|(id, owner, name, document, is_public, created_at)| RecipeRow {
+            id,
+            owner,
+            name,
+            document: serde_json::from_str(&document).unwrap_or_default(),
+            is_public: is_public != 0,
+            created_at,
+        })
+        .collect())
+}
+
+/// Update a recipe's name or document (owner-only).
+pub async fn update_recipe(
+    db: &Database,
+    id: &str,
+    owner: &str,
+    name: &str,
+    document: &serde_json::Value,
+) -> Result<bool> {
+    let updated = match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query(
+                "UPDATE recipes SET name = ?, document = ? WHERE id = ? AND owner = ?",
+            )
+            .bind(name)
+            .bind(document.to_string())
+            .bind(id)
+            .bind(owner)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?
+            .rows_affected()
+        }
+        crate::Backend::Postgres => {
+            sqlx::query(
+                "UPDATE recipes SET name = $1, document = $2 WHERE id = $3 AND owner = $4",
+            )
+            .bind(name)
+            .bind(document.to_string())
+            .bind(id)
+            .bind(owner)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?
+            .rows_affected()
+        }
+    };
+    Ok(updated > 0)
+}
+
+/// Delete a recipe (owner-only).
+pub async fn delete_recipe(db: &Database, id: &str, owner: &str) -> Result<bool> {
+    let deleted = match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query("DELETE FROM recipes WHERE id = ? AND owner = ?")
+                .bind(id)
+                .bind(owner)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?
+                .rows_affected()
+        }
+        crate::Backend::Postgres => {
+            sqlx::query("DELETE FROM recipes WHERE id = $1 AND owner = $2")
+                .bind(id)
+                .bind(owner)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?
+                .rows_affected()
+        }
+    };
+    Ok(deleted > 0)
+}
+
+/// A recipe row read from the database.
+#[derive(Debug, Clone, Serialize)]
+pub struct RecipeRow {
+    pub id: String,
+    pub owner: String,
+    pub name: String,
+    pub document: serde_json::Value,
+    pub is_public: bool,
+    pub created_at: String,
+}
+
+/// A dashboard layout row read from the database.
+#[derive(Debug, Clone, Serialize)]
+pub struct DashboardLayout {
+    pub account: String,
+    pub slots: serde_json::Value,
+    pub updated_at: String,
+}
+
+/// Read a dashboard layout for an account.
+pub async fn get_dashboard_layout(db: &Database, account: &str) -> Result<Option<DashboardLayout>> {
+    let row: Option<(String, String, String)> = match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query_as(
+                "SELECT account, slots, updated_at FROM dashboard_layouts WHERE account = ?",
+            )
+            .bind(account)
+            .fetch_optional(db.sqlite_pool().expect("sqlite"))
+            .await?
+        }
+        crate::Backend::Postgres => {
+            sqlx::query_as(
+                "SELECT account, slots, updated_at FROM dashboard_layouts WHERE account = $1",
+            )
+            .bind(account)
+            .fetch_optional(db.postgres_pool().expect("postgres"))
+            .await?
+        }
+    };
+    Ok(row.map(|(account, slots, updated_at)| DashboardLayout {
+        account,
+        slots: serde_json::from_str(&slots).unwrap_or_default(),
+        updated_at,
+    }))
+}
+
+/// Save a dashboard layout for an account.
+pub async fn save_dashboard_layout(db: &Database, account: &str, slots: &serde_json::Value) -> Result<()> {
+    let now = crate::identity::now_rfc3339();
+    let slots_str = slots.to_string();
+    match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query(
+                "INSERT OR REPLACE INTO dashboard_layouts (account, slots, updated_at)
+                 VALUES (?, ?, ?)",
+            )
+            .bind(account)
+            .bind(&slots_str)
+            .bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
+        }
+        crate::Backend::Postgres => {
+            sqlx::query(
+                "INSERT INTO dashboard_layouts (account, slots, updated_at)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (account) DO UPDATE SET
+                    slots = EXCLUDED.slots,
+                    updated_at = EXCLUDED.updated_at",
+            )
+            .bind(account)
+            .bind(&slots_str)
+            .bind(&now)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?;
+        }
+    }
+    Ok(())
+}

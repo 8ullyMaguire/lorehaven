@@ -5,7 +5,7 @@
 use crate::auth::{MaybeSession, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use lorehaven_db;
@@ -21,6 +21,22 @@ pub fn router() -> Router<AppState> {
         )
         .route("/discovery/taste-profile/clear", post(clear_taste_profile))
         .route("/operator/affinities", post(set_operator_affinity))
+        .nest("/recipes", recipe_routes())
+        .nest("/dashboard", dashboard_routes())
+}
+
+fn recipe_routes() -> Router<AppState> {
+    Router::new()
+        .route("/", post(create_recipe))
+        .route("/{id}", get(get_recipe_route).post(update_recipe_route))
+        .route("/{id}/delete", post(delete_recipe_route))
+        .route("/list", get(list_recipes_route))
+}
+
+fn dashboard_routes() -> Router<AppState> {
+    Router::new()
+        .route("/", get(get_dashboard))
+        .route("/", post(save_dashboard))
 }
 
 async fn get_discovery(
@@ -235,4 +251,163 @@ async fn set_operator_affinity(
     .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     Ok(Json(serde_json::json!({ "status": "set" })))
+}
+
+// ---------------------------------------------------------------------------
+// M11-05: Recipes
+// ---------------------------------------------------------------------------
+
+async fn create_recipe(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Json(body): Json<serde_json::Value>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let recipe_id = body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ApiError(AppError::field("id", "id is required")))?
+        .to_string();
+    let name = body
+        .get("name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ApiError(AppError::field("name", "name is required")))?
+        .to_string();
+    let document = body
+        .get("document")
+        .cloned()
+        .unwrap_or(serde_json::json!({}));
+    let is_public = body
+        .get("is_public")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let owner = user.account_id.to_string();
+
+    lorehaven_db::discovery::save_recipe(
+        state.db(),
+        &recipe_id,
+        &owner,
+        &name,
+        &document,
+        is_public,
+        &lorehaven_db::identity::now_rfc3339(),
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
+
+    Ok(Json(serde_json::json!({ "id": recipe_id })))
+}
+
+async fn get_recipe_route(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let viewer = user.account_id.to_string();
+    let recipe = lorehaven_db::discovery::get_recipe(state.db(), &id, &viewer)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+    match recipe {
+        Some(r) => Ok(Json(serde_json::json!({
+            "id": r.id,
+            "owner": r.owner,
+            "name": r.name,
+            "document": r.document,
+            "is_public": r.is_public,
+            "created_at": r.created_at,
+        }))),
+        None => Err(ApiError(AppError::NotFound { resource: "recipe" })),
+    }
+}
+
+async fn list_recipes_route(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<serde_json::Value>> {
+    let viewer = user.account_id.to_string();
+    let recipes = lorehaven_db::discovery::list_recipes(state.db(), &viewer)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+    Ok(Json(serde_json::json!({ "recipes": recipes })))
+}
+
+async fn update_recipe_route(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let owner = user.account_id.to_string();
+    let name = body
+        .get("name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ApiError(AppError::field("name", "name is required")))?
+        .to_string();
+    let document = body
+        .get("document")
+        .cloned()
+        .unwrap_or(serde_json::json!({}));
+
+    let updated = lorehaven_db::discovery::update_recipe(
+        state.db(),
+        &id,
+        &owner,
+        &name,
+        &document,
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
+
+    if !updated {
+        return Err(ApiError(AppError::NotFound { resource: "recipe" }));
+    }
+    Ok(Json(serde_json::json!({ "status": "updated" })))
+}
+
+async fn delete_recipe_route(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let owner = user.account_id.to_string();
+    let deleted = lorehaven_db::discovery::delete_recipe(state.db(), &id, &owner)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+    if !deleted {
+        return Err(ApiError(AppError::NotFound { resource: "recipe" }));
+    }
+    Ok(Json(serde_json::json!({ "status": "deleted" })))
+}
+
+// ---------------------------------------------------------------------------
+// M11-06: Dashboards
+// ---------------------------------------------------------------------------
+
+async fn get_dashboard(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<serde_json::Value>> {
+    let account = user.account_id.to_string();
+    let layout = lorehaven_db::discovery::get_dashboard_layout(state.db(), &account)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+    match layout {
+        Some(l) => Ok(Json(serde_json::json!({ "slots": l.slots }))),
+        None => Ok(Json(serde_json::json!({ "slots": [] }))),
+    }
+}
+
+async fn save_dashboard(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Json(body): Json<serde_json::Value>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let account = user.account_id.to_string();
+    let slots = body
+        .get("slots")
+        .cloned()
+        .unwrap_or(serde_json::json!([]));
+    lorehaven_db::discovery::save_dashboard_layout(state.db(), &account, &slots)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+    Ok(Json(serde_json::json!({ "status": "saved" })))
 }
