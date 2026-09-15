@@ -806,3 +806,114 @@ async fn conversations_are_listed_with_a_preview() {
 
     harness.cleanup().await;
 }
+
+#[tokio::test]
+async fn a_reply_notifies_the_topic_author_and_the_inbox_settles() {
+    let harness = Harness::new("notify-reply").await;
+    let mut author = harness.client();
+    register(&mut author, "topic-author@example.com", "TopicAuthor").await;
+    let mut replier = harness.client();
+    register(&mut replier, "replier@example.com", "ReplyUser").await;
+
+    // Seed a category with min_trust 0 (test DBs don't run the dev seed).
+    let cat_id = "22222222-2222-2222-2222-222222222222";
+    let sql = "INSERT INTO forum_categories (id, name, position, min_trust) VALUES (?, 'Notify Category', 0, 0)";
+    match harness.db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(sql)
+                .bind(cat_id)
+                .execute(harness.db.sqlite_pool().expect("sqlite"))
+                .await
+                .expect("seed category");
+        }
+        Backend::Postgres => {
+            sqlx::query(sql)
+                .bind(cat_id)
+                .execute(harness.db.postgres_pool().expect("postgres"))
+                .await
+                .expect("seed category");
+        }
+    }
+
+    // The author starts with an empty inbox.
+    let (status, body) = author.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["unread_count"].as_i64(), Some(0), "{body}");
+    assert_eq!(body["items"].as_array().map(Vec::len), Some(0), "{body}");
+
+    // The author opens a topic; the replier answers it.
+    let (status, body) = author
+        .post(
+            &format!("/api/v1/forums/{cat_id}/topics"),
+            json!({ "title": "Notify me" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let topic_id = body["id"].as_str().expect("topic id").to_owned();
+
+    let (status, body) = replier
+        .post(
+            &format!("/api/v1/topics/{topic_id}/replies"),
+            json!({ "body": "consider it replied" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // The author's inbox now holds one unread reply notification.
+    let (status, body) = author.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["unread_count"].as_i64(), Some(1), "{body}");
+    let items = body["items"].as_array().expect("items");
+    assert_eq!(items.len(), 1, "{body}");
+    assert_eq!(items[0]["kind"], "reply", "{body}");
+    assert_eq!(items[0]["read"], false, "{body}");
+    let notification_id = items[0]["id"].as_str().expect("notification id").to_owned();
+
+    // Marking that one entry read settles the count; a replay is harmless.
+    let (status, _) = author
+        .post(
+            &format!("/api/v1/notifications/{notification_id}/read"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = author
+        .post(
+            &format!("/api/v1/notifications/{notification_id}/read"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = author.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["unread_count"].as_i64(), Some(0), "{body}");
+
+    // A second reply arrives and read-all closes it in one sweep.
+    let (status, _) = replier
+        .post(
+            &format!("/api/v1/topics/{topic_id}/replies"),
+            json!({ "body": "once more, with feeling" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, _) = author
+        .post("/api/v1/notifications/read-all", json!({}))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = author.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["unread_count"].as_i64(), Some(0), "{body}");
+    assert_eq!(body["items"].as_array().map(Vec::len), Some(2), "{body}");
+
+    // The replier's own inbox stays empty: replying never notifies yourself.
+    let (status, body) = replier.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["unread_count"].as_i64(), Some(0), "{body}");
+
+    // Notifications are session-scoped: a signed-out caller gets 401.
+    let mut stranger = harness.client();
+    let (status, _) = stranger.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    harness.cleanup().await;
+}

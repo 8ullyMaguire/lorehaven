@@ -32,6 +32,7 @@ pub mod library;
 pub mod marketplace;
 pub mod migrate;
 pub mod monetization;
+pub mod notifications;
 pub mod outbox;
 pub mod positivity;
 pub mod reading;

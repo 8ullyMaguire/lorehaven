@@ -462,6 +462,13 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // Notifications inbox — §5.5. Session-scoped reads plus idempotent
+        // mark-read writes; rows are produced by replies, sales and gifts.
+        .merge(classified(
+            routes::notifications::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Session loading wraps everything under /api/v1 so that the CSRF layer
         // and the limiter installed per subtree can both see who is asking.
         .layer(middleware::from_fn_with_state(
