@@ -571,14 +571,17 @@ async fn a_group_is_created_listed_and_joined() {
 }
 
 #[tokio::test]
-async fn presence_record_is_stored_but_the_stream_is_still_a_stub() {
-    let harness = Harness::new("presence-stub").await;
+async fn presence_stream_returns_active_viewer() {
+    let harness = Harness::new("presence-stream").await;
     let mut user = harness.client();
     register(&mut user, "presence@example.com", "Present").await;
-    // The stream is an honest stub for now.
     let (status, body) = user.get("/api/v1/presence/stream").await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["items"].as_array().expect("items").len(), 0, "{body}");
+    let items = body["items"].as_array().expect("items");
+    assert!(items.len() >= 1, "expected at least the caller's item: {body}");
+    let first = &items[0];
+    assert!(first["active_now"].as_bool().unwrap_or(false), "{body}");
+    assert!(first["enabled"].as_bool().unwrap_or(false), "{body}");
     harness.cleanup().await;
 }
 

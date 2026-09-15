@@ -1388,6 +1388,34 @@ pub async fn presence_for(
     Ok(row.map(|(a, b, c)| (a, b, c != 0)))
 }
 
+/// List all presence records (for the presence stream).
+///
+/// Returns `(account, last_seen_at, typing_until, enabled)` for every row.
+pub async fn list_presence(
+    db: &Database,
+) -> Result<Vec<(String, String, Option<String>, bool)>> {
+    let sql = db.sql(
+        "SELECT account, last_seen_at, typing_until, enabled FROM presence ORDER BY account",
+        "SELECT account, last_seen_at, typing_until, enabled::int::bigint AS enabled FROM presence ORDER BY account",
+    );
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, (String, String, Option<String>, bool)>(&sql)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, (String, String, Option<String>, i64)>(&sql)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+                .into_iter()
+                .map(|(a, l, t, e)| (a, l, t, e != 0))
+                .collect()
+        }
+    };
+    Ok(rows)
+}
+
 /// List participants in a conversation (for presence fan-out).
 pub async fn conversation_participants(
     db: &Database,
