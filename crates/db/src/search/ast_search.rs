@@ -45,13 +45,17 @@ pub async fn search_works_ast(
                                    WHERE blocks.blocker = ? \
                                      AND blocks.blocked = pseuds.account_id \
                                      AND blocks.scope = 'all') \
-                 GROUP BY works.id \
+                 GROUP BY works.id, pseuds.handle \
                  ORDER BY score DESC, works.updated_at DESC \
                  LIMIT ?"
             );
-            // $1 = viewer account, $2 = blocked account (same as $1), $3+ = user
-            // fragment placeholders, last = LIMIT.
-            let user_where_pg = renumber_placeholders(&user_where, 2);
+            // $1 is the viewer account (visibility filter and block filter
+            // share it); the user fragment's placeholders start at $2 and
+            // LIMIT follows the fragment. sqlx binds values in numeric
+            // placeholder order, and the binds below are viewer, fragment,
+            // LIMIT — so the numbering must not skip a value.
+            let user_where_pg = renumber_placeholders(&user_where, 1);
+            let limit_pg = 2 + user_binds.len();
             let pg = format!(
                 "SELECT works.id::text, works.title, pseuds.handle AS author_handle, \
                         (SELECT COALESCE(SUM(cr.word_count), 0) FROM chapters c \
@@ -69,9 +73,9 @@ pub async fn search_works_ast(
                                    WHERE blocks.blocker = $1 \
                                      AND blocks.blocked = pseuds.account_id \
                                      AND blocks.scope = 'all') \
-                 GROUP BY works.id, works.updated_at \
+                 GROUP BY works.id, works.updated_at, pseuds.handle \
                  ORDER BY score DESC, works.updated_at DESC \
-                 LIMIT $2"
+                 LIMIT ${limit_pg}"
             );
             sql_owned(db, sqlite, pg)
         }
@@ -88,11 +92,12 @@ pub async fn search_works_ast(
                  JOIN pseuds ON pseuds.id = works.owner_pseud_id \
                  WHERE (works.lifecycle = 'published' AND works.visibility = 'public') \
                    AND ({user_where}) \
-                 GROUP BY works.id \
+                 GROUP BY works.id, pseuds.handle \
                  ORDER BY score DESC, works.updated_at DESC \
                  LIMIT ?"
             );
             let user_where_pg = renumber_placeholders(&user_where, 0);
+            let limit_pg = 1 + user_binds.len();
             let pg = format!(
                 "SELECT works.id::text, works.title, pseuds.handle AS author_handle, \
                         (SELECT COALESCE(SUM(cr.word_count), 0) FROM chapters c \
@@ -105,9 +110,9 @@ pub async fn search_works_ast(
                  JOIN pseuds ON pseuds.id = works.owner_pseud_id \
                  WHERE (works.lifecycle = 'published' AND works.visibility = 'public') \
                    AND ({user_where_pg}) \
-                 GROUP BY works.id, works.updated_at \
+                 GROUP BY works.id, works.updated_at, pseuds.handle \
                  ORDER BY score DESC, works.updated_at DESC \
-                 LIMIT $1"
+                 LIMIT ${limit_pg}"
             );
             sql_owned(db, sqlite, pg)
         }
@@ -117,13 +122,13 @@ pub async fn search_works_ast(
         Backend::Sqlite => {
             let mut q = sqlx::query_as::<_, (String, String, String, i64, i64)>(&sql);
             if let Some(vid) = viewer_id {
-                q = q.bind(vid);        // viewer_id for visibility
+                q = q.bind(vid); // viewer_id for visibility
             }
             for b in &user_binds {
                 q = q.bind(b.clone());
             }
             if let Some(vid) = viewer_id {
-                q = q.bind(vid);        // viewer_id for NOT EXISTS block check
+                q = q.bind(vid); // viewer_id for NOT EXISTS block check
             }
             q = q.bind(limit);
             q.fetch_all(db.sqlite_pool().expect("sqlite")).await?
