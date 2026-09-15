@@ -6,7 +6,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master, main]
   pull_request:
 
 env:
@@ -164,8 +164,8 @@ jobs:
       # smoke pass walks, asserted at the HTTP layer on every run.
       - name: Golden-path journey against PostgreSQL
         env:
-          DATABASE_URL: postgres://darkhold:***@localhost:5432/darkhold
-          PSQL: psql postgres://darkhold:***@127.0.0.1:5432/darkhold
+          DATABASE_URL: postgres://darkhold:darkhold@localhost:5432/darkhold
+          PSQL: psql postgres://darkhold:darkhold@127.0.0.1:5432/darkhold
         run: bash scripts/postgres-journey.sh
 
   browser-journeys:
