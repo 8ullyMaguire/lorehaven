@@ -12,7 +12,7 @@ CREATE TABLE collections (
     description TEXT,
     owner TEXT NOT NULL,
     item_policy TEXT NOT NULL,
-    is_public INTEGER NOT NULL DEFAULT 1,
+    is_public BIGINT NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
 CREATE INDEX collections_owner ON collections (owner, created_at);
@@ -64,7 +64,7 @@ CREATE TABLE claims (
 
 CREATE TABLE wishlists (
     account TEXT PRIMARY KEY,
-    is_public INTEGER NOT NULL DEFAULT 0
+    is_public BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE wishlist_items (

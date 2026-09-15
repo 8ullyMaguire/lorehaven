@@ -1,7 +1,7 @@
 CREATE TABLE comment_classifications (
     comment_id TEXT PRIMARY KEY,
     class TEXT NOT NULL,
-    confidence_bp INTEGER NOT NULL,
+    confidence_bp BIGINT NOT NULL,
     signals TEXT NOT NULL,
     outcome TEXT NOT NULL,
     classified_at TEXT NOT NULL

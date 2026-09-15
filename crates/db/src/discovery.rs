@@ -124,8 +124,8 @@ pub async fn recompute_taste_profile(db: &Database, account: &str) -> Result<()>
             sqlx::query_as::<_, (String,)>(
                 "SELECT COALESCE(json_agg(DISTINCT wt.node_id)::text, '[]')
                  FROM reading_history_entry rh
-                 JOIN work_tags wt ON wt.work_id = rh.subject_id
-                 WHERE rh.account_id = $1
+                 JOIN work_tags wt ON wt.work_id = rh.subject_id::uuid
+                 WHERE rh.account_id = $1::uuid
                  AND rh.subject_type = 'work'
                  LIMIT 100",
             )
@@ -216,7 +216,7 @@ pub async fn personalized_recommendations(
                              WHERE tp.account = $1
                          )
                          AND w.owner_pseud_id NOT IN (
-                             SELECT id FROM pseuds WHERE account_id = $2
+                             SELECT id FROM pseuds WHERE account_id = $2::uuid
                          )
                          ORDER BY w.updated_at DESC
                          LIMIT $3",
