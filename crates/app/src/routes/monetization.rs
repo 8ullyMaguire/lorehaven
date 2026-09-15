@@ -181,6 +181,18 @@ pub async fn purchase(
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
 
+    // Tell the author their work sold. A failure here must not fail the
+    // purchase: the money state above is already committed.
+    let _ = lorehaven_db::notifications::notify(
+        state.db(),
+        &author_pseud.account_id.to_string(),
+        "sale",
+        "Someone bought your work",
+        &format!("{} was purchased.", work.title),
+        Some(work_id.to_canonical_string().as_str()),
+    )
+    .await;
+
     Ok(Json(json!({
         "entitlement_id": entitlement_id,
         "status": "purchased",
@@ -418,7 +430,7 @@ pub async fn create_gift(
         ))
     })?;
     // Validate the work exists before inserting the gift.
-    let _work = lorehaven_db::content::find_work(state.db(), work_id)
+    let work = lorehaven_db::content::find_work(state.db(), work_id)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
@@ -431,6 +443,24 @@ pub async fn create_gift(
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+
+    // The work's author learns their work was gifted. The gift row's
+    // recipient is the caller (a dedication claim), so the author is the
+    // party with something to hear about. Best-effort: never fail the gift.
+    if let Ok(Some(author)) =
+        lorehaven_db::identity::find_pseud(state.db(), work.owner_pseud_id).await
+    {
+        let _ = lorehaven_db::notifications::notify(
+            state.db(),
+            &author.account_id.to_string(),
+            "gift",
+            "Your work was gifted",
+            &format!("{} received a gift.", work.title),
+            Some(work_id.to_canonical_string().as_str()),
+        )
+        .await;
+    }
+
     Ok(Json(json!({ "id": gift_id })))
 }
 

@@ -326,6 +326,29 @@ async fn post_reply(
         lorehaven_db::community::create_post(state.db(), &id, &pseud_id.to_string(), &body.body)
             .await
             .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+
+    // Notify the topic's author about the reply — unless the replier IS the
+    // topic author. forum_topics stores the author as a pseud id string, so
+    // resolve it to its account. Best-effort: a notification failure must
+    // not fail the reply.
+    if let Ok(author_pseud) = topic.author_pseud.parse::<lorehaven_domain::PseudId>() {
+        if author_pseud != pseud_id {
+            if let Ok(Some(author)) =
+                lorehaven_db::identity::find_pseud(state.db(), author_pseud).await
+            {
+                let _ = lorehaven_db::notifications::notify(
+                    state.db(),
+                    &author.account_id.to_string(),
+                    "reply",
+                    "Someone replied to your topic",
+                    &format!("{} got a new reply.", topic.title),
+                    None,
+                )
+                .await;
+            }
+        }
+    }
+
     Ok(Json(serde_json::json!({ "id": pid })))
 }
 

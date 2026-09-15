@@ -670,3 +670,56 @@ async fn public_pricing_returns_price_for_purchased_work() {
 
     fx.cleanup().await;
 }
+
+#[tokio::test]
+async fn a_sale_notifies_the_author_through_the_inbox() {
+    let fx = Fixture::new("money-notify-sale").await;
+    let mut author = fx.client();
+    register(&mut author, "m21-author@example.com", "m21author").await;
+    let mut buyer = fx.client();
+    register(&mut buyer, "m21-purchaser@example.com", "m21purchaser").await;
+
+    // The author publishes a priced work.
+    let work_id = create_work(&mut author, "For Sale").await;
+    let _chapter = add_chapter(&mut author, &work_id, "Chapter 1", "Once upon a time.").await;
+    publish_work(&mut author, &work_id, 1).await;
+
+    let (status, body) = author
+        .post(
+            &format!("/api/v1/works/{work_id}/pricing"),
+            json!({ "model": "purchase", "price_minor": 500, "currency": "EUR" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "set pricing: {body}");
+
+    // The buyer's inbox is empty before the sale.
+    let (status, body) = buyer.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["unread_count"].as_i64(), Some(0), "{body}");
+
+    // The buyer purchases; the author's inbox records the sale.
+    let (status, body) = buyer
+        .post(&format!("/api/v1/works/{work_id}/purchase"), json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "purchase: {body}");
+    assert_eq!(body["status"], "purchased", "{body}");
+
+    let (status, body) = author.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["unread_count"].as_i64(), Some(1), "{body}");
+    let items = body["items"].as_array().expect("items");
+    assert_eq!(items[0]["kind"], "sale", "{body}");
+    assert_eq!(items[0]["work_id"], work_id, "{body}");
+
+    // Buying twice does not double-notify: the second purchase short-circuits
+    // as already_granted, so the inbox still holds exactly one entry.
+    let (status, _) = buyer
+        .post(&format!("/api/v1/works/{work_id}/purchase"), json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = author.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["items"].as_array().map(Vec::len), Some(1), "{body}");
+
+    fx.cleanup().await;
+}

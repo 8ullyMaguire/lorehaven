@@ -18,6 +18,7 @@ pub mod library;
 pub mod marketplace;
 pub mod meta;
 pub mod monetization;
+pub mod notifications;
 pub mod pseuds;
 pub mod reading;
 pub mod search;
