@@ -8,6 +8,8 @@ use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use lorehaven_domain::blocking::BlockScope;
 use serde::Deserialize;
+use time::format_description::well_known::Rfc3339;
+use time::{Duration, OffsetDateTime};
 
 use crate::auth::{RequirePseud, RequireSession};
 use crate::http::{ApiError, ApiResult};
@@ -686,8 +688,57 @@ async fn delete_mute(
 
 async fn get_presence_stream(
     State(state): State<AppState>,
-    RequireSession(_): RequireSession,
+    RequireSession(user): RequireSession,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let _ = state;
-    Ok(Json(serde_json::json!({ "items": [] })))
+    use lorehaven_db::identity::format_rfc3339;
+
+    // Upsert the viewer's presence record so they appear in the stream.
+    let account_id = user.account_id.to_string();
+    let now = format_rfc3339(OffsetDateTime::now_utc());
+    lorehaven_db::community::upsert_presence(
+        state.db(),
+        &account_id,
+        &now,
+        None::<&str>,
+        true,
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+
+    // Fetch all presence records and return as JSON items.
+    let rows = lorehaven_db::community::list_presence(state.db())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+
+    let items: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|(account, last_seen_at, typing_until, enabled)| {
+            let active_now = is_active_now(&last_seen_at);
+            serde_json::json!({
+                "account": account,
+                "active_now": active_now,
+                "typing": typing_until.as_ref().map_or(false, |t| {
+                    parse_datetime(t).map_or(false, |dt| dt > OffsetDateTime::now_utc())
+                }),
+                "last_seen_at": last_seen_at,
+                "enabled": enabled,
+            })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({ "items": items })))
+}
+
+/// Check if a presence record is "active now" (last seen within 5 minutes).
+fn is_active_now(last_seen_at: &str) -> bool {
+    parse_datetime(last_seen_at)
+        .map_or(false, |dt| {
+            let elapsed = OffsetDateTime::now_utc() - dt;
+            elapsed < Duration::minutes(5)
+        })
+}
+
+/// Parse an RFC 3339 datetime string.
+fn parse_datetime(s: &str) -> Option<OffsetDateTime> {
+    OffsetDateTime::parse(s, &Rfc3339).ok()
 }
