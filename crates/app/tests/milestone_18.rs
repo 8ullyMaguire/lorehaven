@@ -115,7 +115,8 @@ impl Client {
                 .unwrap_or(Value::String(String::from_utf8_lossy(&bytes).into_owned()))
         };
         (status, value)
-    }    async fn post(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
+    }
+    async fn post(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
         self.request("POST", uri, Some(body)).await
     }
 }

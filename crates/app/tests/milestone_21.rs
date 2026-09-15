@@ -125,6 +125,9 @@ impl Client {
     async fn get(&mut self, uri: &str) -> (StatusCode, Value) {
         self.send("GET", uri, None).await
     }
+    async fn delete(&mut self, uri: &str) -> (StatusCode, Value) {
+        self.send("DELETE", uri, None).await
+    }
 }
 
 struct Fixture {
@@ -720,6 +723,56 @@ async fn a_sale_notifies_the_author_through_the_inbox() {
     let (status, body) = author.get("/api/v1/notifications").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["items"].as_array().map(Vec::len), Some(1), "{body}");
+
+    fx.cleanup().await;
+}
+
+#[tokio::test]
+async fn only_the_owner_may_price_a_work() {
+    let fx = Fixture::new("money-pricing-authz").await;
+    let mut author = fx.client();
+    register(&mut author, "m21-priceowner@example.com", "m21priceowner").await;
+    let mut stranger = fx.client();
+    register(
+        &mut stranger,
+        "m21-pricestranger@example.com",
+        "m21pricestranger",
+    )
+    .await;
+
+    let work_id = create_work(&mut author, "Priced By Owner").await;
+    let _chapter = add_chapter(&mut author, &work_id, "Chapter 1", "Text.").await;
+    publish_work(&mut author, &work_id, 1).await;
+
+    // A stranger sees the work but cannot set or remove its pricing: the
+    // answer is the same NotFound a nonexistent work gets, so the API does
+    // not disclose who owns what.
+    let (status, body) = stranger
+        .post(
+            &format!("/api/v1/works/{work_id}/pricing"),
+            json!({ "model": "purchase", "price_minor": 1, "currency": "EUR" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    let (status, _) = stranger
+        .delete(&format!("/api/v1/works/{work_id}/pricing"))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // The owner can.
+    let (status, body) = author
+        .post(
+            &format!("/api/v1/works/{work_id}/pricing"),
+            json!({ "model": "purchase", "price_minor": 500, "currency": "EUR" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "owner sets pricing: {body}");
+
+    let (status, _) = author
+        .delete(&format!("/api/v1/works/{work_id}/pricing"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "owner removes pricing");
 
     fx.cleanup().await;
 }
