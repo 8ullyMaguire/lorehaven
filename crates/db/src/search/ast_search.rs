@@ -41,12 +41,16 @@ pub async fn search_works_ast(
                  WHERE ((works.lifecycle = 'published' AND works.visibility != 'restricted') \
                         OR works.owner_pseud_id IN (SELECT id FROM pseuds WHERE account_id = ?)) \
                    AND ({user_where}) \
+                   AND NOT EXISTS (SELECT 1 FROM blocks \
+                                   WHERE blocks.blocker = ? \
+                                     AND blocks.blocked = pseuds.account_id \
+                                     AND blocks.scope = 'all') \
                  GROUP BY works.id \
                  ORDER BY score DESC, works.updated_at DESC \
                  LIMIT ?"
             );
-            // $1 is the viewer account and $2 is LIMIT, so the user
-            // fragment's placeholders must start at $3.
+            // $1 = viewer account, $2 = blocked account (same as $1), $3+ = user
+            // fragment placeholders, last = LIMIT.
             let user_where_pg = renumber_placeholders(&user_where, 2);
             let pg = format!(
                 "SELECT works.id::text, works.title, pseuds.handle AS author_handle, \
@@ -61,6 +65,10 @@ pub async fn search_works_ast(
                  WHERE ((works.lifecycle = 'published' AND works.visibility != 'restricted') \
                         OR works.owner_pseud_id IN (SELECT id FROM pseuds WHERE account_id = $1)) \
                    AND ({user_where_pg}) \
+                   AND NOT EXISTS (SELECT 1 FROM blocks \
+                                   WHERE blocks.blocker = $1 \
+                                     AND blocks.blocked = pseuds.account_id \
+                                     AND blocks.scope = 'all') \
                  GROUP BY works.id, works.updated_at \
                  ORDER BY score DESC, works.updated_at DESC \
                  LIMIT $2"
@@ -109,10 +117,13 @@ pub async fn search_works_ast(
         Backend::Sqlite => {
             let mut q = sqlx::query_as::<_, (String, String, String, i64, i64)>(&sql);
             if let Some(vid) = viewer_id {
-                q = q.bind(vid);
+                q = q.bind(vid);        // viewer_id for visibility
             }
             for b in &user_binds {
                 q = q.bind(b.clone());
+            }
+            if let Some(vid) = viewer_id {
+                q = q.bind(vid);        // viewer_id for NOT EXISTS block check
             }
             q = q.bind(limit);
             q.fetch_all(db.sqlite_pool().expect("sqlite")).await?
