@@ -44,27 +44,51 @@ struct Client {
 
 impl Client {
     fn new(app: axum::Router) -> Self {
-        Self { app, cookies: Vec::new() }
+        Self {
+            app,
+            cookies: Vec::new(),
+        }
     }
     fn cookie(&self, name: &str) -> Option<&str> {
-        self.cookies.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
+        self.cookies
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
     }
     fn capture(&mut self, response: &axum::response::Response) {
         for value in response.headers().get_all(header::SET_COOKIE) {
-            let Ok(text) = value.to_str() else { continue; };
-            let Some((pair, _)) = text.split_once(';') else { continue; };
+            let Ok(text) = value.to_str() else {
+                continue;
+            };
+            let Some((pair, _)) = text.split_once(';') else {
+                continue;
+            };
             if let Some((name, value)) = pair.split_once('=') {
                 let name = name.trim().to_owned();
                 let value = value.trim().to_owned();
                 self.cookies.retain(|(k, _)| k != &name);
-                if !value.is_empty() { self.cookies.push((name, value)); }
+                if !value.is_empty() {
+                    self.cookies.push((name, value));
+                }
             }
         }
     }
-    async fn request(&mut self, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
+    async fn request(
+        &mut self,
+        method: &str,
+        uri: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
         let mut builder = Request::builder().method(method).uri(uri);
         if !self.cookies.is_empty() {
-            builder = builder.header(header::COOKIE, self.cookies.iter().map(|(n, v)| format!("{n}={v}")).collect::<Vec<_>>().join("; "));
+            builder = builder.header(
+                header::COOKIE,
+                self.cookies
+                    .iter()
+                    .map(|(n, v)| format!("{n}={v}"))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            );
         }
         if !matches!(method, "GET" | "HEAD" | "OPTIONS") {
             if let Some(token) = self.cookie("lorehaven_csrf").map(str::to_owned) {
@@ -72,18 +96,32 @@ impl Client {
             }
         }
         let request = match body {
-            Some(v) => builder.header(header::CONTENT_TYPE, "application/json").body(Body::from(serde_json::to_vec(&v).expect("serialise"))).expect("request"),
+            Some(v) => builder
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_vec(&v).expect("serialise")))
+                .expect("request"),
             None => builder.body(Body::empty()).expect("request"),
         };
         let response = self.app.clone().oneshot(request).await.expect("response");
         let status = response.status();
         self.capture(&response);
-        let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024).await.expect("body");
-        let value = if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap_or(Value::String(String::from_utf8_lossy(&bytes).into_owned())) };
+        let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
+            .await
+            .expect("body");
+        let value = if bytes.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(&bytes)
+                .unwrap_or(Value::String(String::from_utf8_lossy(&bytes).into_owned()))
+        };
         (status, value)
     }
-    async fn get(&mut self, uri: &str) -> (StatusCode, Value) { self.request("GET", uri, None).await }
-    async fn post(&mut self, uri: &str, body: Value) -> (StatusCode, Value) { self.request("POST", uri, Some(body)).await }
+    async fn get(&mut self, uri: &str) -> (StatusCode, Value) {
+        self.request("GET", uri, None).await
+    }
+    async fn post(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
+        self.request("POST", uri, Some(body)).await
+    }
 }
 
 struct Harness {
@@ -99,13 +137,28 @@ impl Harness {
             format: lorehaven_app::config::LogFormat::Pretty,
         });
         let dir = scratch_dir(tag);
-        let db = Database::connect(&DatabaseConfig::new(format!("sqlite://{}/lorehaven.sqlite?mode=rwc", dir.display()))).await.expect("connect");
+        let db = Database::connect(&DatabaseConfig::new(format!(
+            "sqlite://{}/lorehaven.sqlite?mode=rwc",
+            dir.display()
+        )))
+        .await
+        .expect("connect");
         let _ = db.migrate().await.expect("migrate");
         Self { dir, db }
     }
-    fn db(&self) -> &Database { &self.db }
-    fn client(&self) -> Client { Client::new(server::build_router(AppState::new(config_for(&self.dir), self.db.clone()))) }
-    async fn cleanup(self) { self.db.close().await; let _ = std::fs::remove_dir_all(self.dir); }
+    fn db(&self) -> &Database {
+        &self.db
+    }
+    fn client(&self) -> Client {
+        Client::new(server::build_router(AppState::new(
+            config_for(&self.dir),
+            self.db.clone(),
+        )))
+    }
+    async fn cleanup(self) {
+        self.db.close().await;
+        let _ = std::fs::remove_dir_all(self.dir);
+    }
 }
 
 const PASSWORD: &str = "a-long-enough-passphrase";
@@ -139,8 +192,15 @@ async fn admin_action_can_be_recorded() {
     let harness = Harness::new("admin-action").await;
 
     let id = lorehaven_db::admin::record_admin_action(
-        harness.db(), "operator-1", "ban_user", "account", "user-123", "{\"reason\": \"spam\"}",
-    ).await.expect("record admin action");
+        harness.db(),
+        "operator-1",
+        "ban_user",
+        "account",
+        "user-123",
+        "{\"reason\": \"spam\"}",
+    )
+    .await
+    .expect("record admin action");
 
     assert!(!id.is_empty());
 
@@ -154,23 +214,25 @@ async fn privacy_request_can_be_created_and_completed() {
 
     register(&mut client, "privacy@example.com", "PrivacyUser").await;
 
-    let account_id = sqlx::query_scalar::<_, String>(
-        "SELECT id FROM accounts WHERE email = ?",
-    )
-    .bind("privacy@example.com")
-    .fetch_one(harness.db().sqlite_pool().expect("sqlite"))
-    .await
-    .expect("account exists");
+    let account_id = sqlx::query_scalar::<_, String>("SELECT id FROM accounts WHERE email = ?")
+        .bind("privacy@example.com")
+        .fetch_one(harness.db().sqlite_pool().expect("sqlite"))
+        .await
+        .expect("account exists");
 
-    let id = lorehaven_db::admin::create_privacy_request(
-        harness.db(), &account_id, "export",
-    ).await.expect("create privacy request");
+    let id = lorehaven_db::admin::create_privacy_request(harness.db(), &account_id, "export")
+        .await
+        .expect("create privacy request");
 
     assert!(!id.is_empty());
 
     lorehaven_db::admin::complete_privacy_request(
-        harness.db(), &id, Some("storage/key/export.zip"),
-    ).await.expect("complete privacy request");
+        harness.db(),
+        &id,
+        Some("storage/key/export.zip"),
+    )
+    .await
+    .expect("complete privacy request");
 
     harness.cleanup().await;
 }
@@ -179,14 +241,16 @@ async fn privacy_request_can_be_created_and_completed() {
 async fn abuse_counter_can_be_incremented() {
     let harness = Harness::new("abuse").await;
 
-    let count1 = lorehaven_db::admin::increment_abuse_counter(
-        harness.db(), "ip:1.2.3.4", "2026-09-14",
-    ).await.expect("increment counter");
+    let count1 =
+        lorehaven_db::admin::increment_abuse_counter(harness.db(), "ip:1.2.3.4", "2026-09-14")
+            .await
+            .expect("increment counter");
     assert_eq!(count1, 1);
 
-    let count2 = lorehaven_db::admin::increment_abuse_counter(
-        harness.db(), "ip:1.2.3.4", "2026-09-14",
-    ).await.expect("increment counter again");
+    let count2 =
+        lorehaven_db::admin::increment_abuse_counter(harness.db(), "ip:1.2.3.4", "2026-09-14")
+            .await
+            .expect("increment counter again");
     assert_eq!(count2, 2);
 
     harness.cleanup().await;

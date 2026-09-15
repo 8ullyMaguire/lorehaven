@@ -51,20 +51,17 @@ async fn get_discovery(
 
     if let Some(ref account_id) = account_id {
         // Engine 1: tag-based personalization (from taste profile).
-        let personalized = lorehaven_db::discovery::personalized_recommendations(
-            state.db(),
-            account_id,
-            limit,
-        )
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e)))?;
+        let personalized =
+            lorehaven_db::discovery::personalized_recommendations(state.db(), account_id, limit)
+                .await
+                .map_err(|e| ApiError(AppError::Internal(e)))?;
         engines.push(
             personalized
                 .into_iter()
                 .enumerate()
                 .map(|(idx, id)| lorehaven_domain::discovery::Candidate {
                     work_id: id,
-                    score: (limit as i64 - idx as i64),
+                    score: (limit - idx as i64),
                     reason: "tags".into(),
                 })
                 .collect(),
@@ -81,7 +78,7 @@ async fn get_discovery(
             .enumerate()
             .map(|(idx, id)| lorehaven_domain::discovery::Candidate {
                 work_id: id,
-                score: (limit as i64 - idx as i64),
+                score: (limit - idx as i64),
                 reason: "popular".into(),
             })
             .collect(),
@@ -117,10 +114,9 @@ async fn get_discovery(
     // Apply diversity: per-fandom caps and exploration slots for signed-in
     // readers (configuration-driven). Anonymous readers pass through as-is.
     if let Some(ref account_id) = account_id {
-        if let Some(profile) =
-            lorehaven_db::discovery::taste_profile_for(state.db(), account_id)
-                .await
-                .map_err(|e| ApiError(AppError::Internal(e)))?
+        if let Some(profile) = lorehaven_db::discovery::taste_profile_for(state.db(), account_id)
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e)))?
         {
             let fandoms: Vec<String> = match &profile.signals {
                 serde_json::Value::Array(arr) => arr
@@ -141,11 +137,7 @@ async fn get_discovery(
             let known: std::collections::HashSet<String> = fandoms.into_iter().collect();
             let work_ids_ordered: Vec<lorehaven_domain::ids::WorkId> = items
                 .iter()
-                .filter_map(|item| {
-                    item["work_id"]
-                        .as_str()
-                        .and_then(|s| s.parse().ok())
-                })
+                .filter_map(|item| item["work_id"].as_str().and_then(|s| s.parse().ok()))
                 .collect();
             let capped = lorehaven_domain::discovery::apply_diversity(
                 work_ids_ordered,
@@ -211,9 +203,7 @@ fn require_operator(state: &AppState, user: &crate::auth::SessionUser) -> ApiRes
         operator_configured = configured.is_some(),
         "an operator route was reached by an account that is not the operator"
     );
-    Err(ApiError(AppError::NotFound {
-        resource: "page",
-    }))
+    Err(ApiError(AppError::NotFound { resource: "page" }))
 }
 
 /// Set an operator affinity on a work. Audit-logged; never surfaced publicly.
@@ -347,15 +337,9 @@ async fn update_recipe_route(
         .cloned()
         .unwrap_or(serde_json::json!({}));
 
-    let updated = lorehaven_db::discovery::update_recipe(
-        state.db(),
-        &id,
-        &owner,
-        &name,
-        &document,
-    )
-    .await
-    .map_err(|e| ApiError(AppError::Internal(e)))?;
+    let updated = lorehaven_db::discovery::update_recipe(state.db(), &id, &owner, &name, &document)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     if !updated {
         return Err(ApiError(AppError::NotFound { resource: "recipe" }));
@@ -402,10 +386,7 @@ async fn save_dashboard(
     Json(body): Json<serde_json::Value>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let account = user.account_id.to_string();
-    let slots = body
-        .get("slots")
-        .cloned()
-        .unwrap_or(serde_json::json!([]));
+    let slots = body.get("slots").cloned().unwrap_or(serde_json::json!([]));
     lorehaven_db::discovery::save_dashboard_layout(state.db(), &account, &slots)
         .await
         .map_err(|e| ApiError(AppError::Internal(e)))?;

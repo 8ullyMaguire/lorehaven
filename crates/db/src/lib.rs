@@ -15,13 +15,15 @@
 //!    placeholder, never something quoted inside a string literal. Do not put
 //!    a literal `?` inside a DML statement.
 
+pub mod admin;
 pub mod collaboration;
 pub mod community;
 pub mod content;
 pub mod discovery;
-pub mod events;
 pub mod economy;
+pub mod events;
 pub mod exports;
+pub mod external;
 pub mod governance;
 pub mod identity;
 pub mod imports;
@@ -29,6 +31,7 @@ pub mod jobs;
 pub mod library;
 pub mod marketplace;
 pub mod migrate;
+pub mod monetization;
 pub mod outbox;
 pub mod positivity;
 pub mod reading;
@@ -37,12 +40,9 @@ pub mod search;
 pub mod secrets;
 pub mod sessions;
 pub mod storage;
+pub mod subscriptions;
 pub mod taxonomy;
 pub mod translation;
-pub mod external;
-pub mod admin;
-pub mod monetization;
-pub mod subscriptions;
 
 use std::borrow::Cow;
 use std::path::Path;

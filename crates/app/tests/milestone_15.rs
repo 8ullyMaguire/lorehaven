@@ -8,7 +8,7 @@ use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
 use lorehaven_db::{Database, DatabaseConfig};
-use serde_json::{json, Value};
+use serde_json::Value;
 use tower::ServiceExt;
 
 // ---------------------------------------------------------------------------
@@ -118,11 +118,7 @@ impl Client {
     }
     async fn get(&mut self, uri: &str) -> (StatusCode, Value) {
         self.request("GET", uri, None).await
-    }
-    async fn post(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
-        self.request("POST", uri, Some(body)).await
-    }
-}
+    }}
 
 struct Harness {
     dir: PathBuf,
@@ -260,15 +256,9 @@ async fn a_hold_can_be_reserved_released_and_captured() {
     let harness = Harness::new("holds").await;
     let _client = harness.client();
 
-    let hold_id = lorehaven_db::economy::reserve_hold(
-        harness.db(),
-        "alice",
-        "job-123",
-        100,
-        3600,
-    )
-    .await
-    .expect("reserve hold");
+    let hold_id = lorehaven_db::economy::reserve_hold(harness.db(), "alice", "job-123", 100, 3600)
+        .await
+        .expect("reserve hold");
 
     // Release the hold
     lorehaven_db::economy::release_hold(harness.db(), &hold_id)
@@ -324,39 +314,24 @@ async fn usage_counters_increment_and_roll_over() {
 
     let day = "2026-09-14";
 
-    let (count1, _cap) = lorehaven_db::economy::bump_counter(
-        harness.db(),
-        "alice",
-        "read_chapter",
-        day,
-        10,
-    )
-    .await
-    .expect("bump 1");
+    let (count1, _cap) =
+        lorehaven_db::economy::bump_counter(harness.db(), "alice", "read_chapter", day, 10)
+            .await
+            .expect("bump 1");
     assert_eq!(count1, 1);
 
-    let (count2, _cap) = lorehaven_db::economy::bump_counter(
-        harness.db(),
-        "alice",
-        "read_chapter",
-        day,
-        10,
-    )
-    .await
-    .expect("bump 2");
+    let (count2, _cap) =
+        lorehaven_db::economy::bump_counter(harness.db(), "alice", "read_chapter", day, 10)
+            .await
+            .expect("bump 2");
     assert_eq!(count2, 2);
 
     // Different day resets
     let day2 = "2026-09-15";
-    let (count3, _cap) = lorehaven_db::economy::bump_counter(
-        harness.db(),
-        "alice",
-        "read_chapter",
-        day2,
-        10,
-    )
-    .await
-    .expect("bump 3");
+    let (count3, _cap) =
+        lorehaven_db::economy::bump_counter(harness.db(), "alice", "read_chapter", day2, 10)
+            .await
+            .expect("bump 3");
     assert_eq!(count3, 1);
 
     // Verify usage retrieval

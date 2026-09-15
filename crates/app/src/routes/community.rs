@@ -233,7 +233,7 @@ async fn post_topic(
     // refuses a dangling topic itself.
     let min_trust = lorehaven_db::community::category_min_trust(state.db(), &category)
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     let Some(min_trust) = min_trust else {
         return Err(ApiError(lorehaven_domain::AppError::NotFound {
             resource: "forum category",
@@ -304,9 +304,8 @@ async fn post_reply(
     let topic = lorehaven_db::community::topic_by_id(state.db(), &id)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
-    let topic = topic.ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound {
-        resource: "topic",
-    }))?;
+    let topic = topic
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
     if topic.locked {
         return Err(ApiError(lorehaven_domain::AppError::field(
             "body",
@@ -315,7 +314,7 @@ async fn post_reply(
     }
     let min_trust = lorehaven_db::community::category_min_trust(state.db(), &topic.category_id)
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     let min_trust = min_trust.unwrap_or(0);
     let trust = lorehaven_db::governance::trust_for(state.db(), &user.account_id.to_string())
         .await
@@ -479,12 +478,10 @@ async fn get_conversations(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let items = lorehaven_db::community::list_conversations(
-        state.db(),
-        &user.account_id.to_string(),
-    )
-    .await
-    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    let items =
+        lorehaven_db::community::list_conversations(state.db(), &user.account_id.to_string())
+            .await
+            .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     Ok(Json(serde_json::json!({ "items": items })))
 }
 
@@ -695,20 +692,14 @@ async fn get_presence_stream(
     // Upsert the viewer's presence record so they appear in the stream.
     let account_id = user.account_id.to_string();
     let now = format_rfc3339(OffsetDateTime::now_utc());
-    lorehaven_db::community::upsert_presence(
-        state.db(),
-        &account_id,
-        &now,
-        None::<&str>,
-        true,
-    )
-    .await
-    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    lorehaven_db::community::upsert_presence(state.db(), &account_id, &now, None::<&str>, true)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
 
     // Fetch all presence records and return as JSON items.
     let rows = lorehaven_db::community::list_presence(state.db())
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
 
     let items: Vec<serde_json::Value> = rows
         .into_iter()
@@ -717,8 +708,8 @@ async fn get_presence_stream(
             serde_json::json!({
                 "account": account,
                 "active_now": active_now,
-                "typing": typing_until.as_ref().map_or(false, |t| {
-                    parse_datetime(t).map_or(false, |dt| dt > OffsetDateTime::now_utc())
+                "typing": typing_until.as_ref().is_some_and(|t| {
+                    parse_datetime(t).is_some_and(|dt| dt > OffsetDateTime::now_utc())
                 }),
                 "last_seen_at": last_seen_at,
                 "enabled": enabled,
@@ -731,11 +722,10 @@ async fn get_presence_stream(
 
 /// Check if a presence record is "active now" (last seen within 5 minutes).
 fn is_active_now(last_seen_at: &str) -> bool {
-    parse_datetime(last_seen_at)
-        .map_or(false, |dt| {
-            let elapsed = OffsetDateTime::now_utc() - dt;
-            elapsed < Duration::minutes(5)
-        })
+    parse_datetime(last_seen_at).is_some_and(|dt| {
+        let elapsed = OffsetDateTime::now_utc() - dt;
+        elapsed < Duration::minutes(5)
+    })
 }
 
 /// Parse an RFC 3339 datetime string.

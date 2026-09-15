@@ -9,16 +9,6 @@ pub enum ListingKind {
 }
 
 impl ListingKind {
-    /// Inverse of [`Self::as_str`]; the tests pin the round trip.
-    pub fn from_str(s: &str) -> Result<Self, String> {
-        match s {
-            "paid_work" => Ok(Self::PaidWork),
-            "commission" => Ok(Self::Commission),
-            "ask" => Ok(Self::Ask),
-            _ => Err(format!("unknown ListingKind: {s}")),
-        }
-    }
-
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::PaidWork => "paid_work",
@@ -122,6 +112,7 @@ pub fn valid_commission_transition(from: &CommissionState, to: &CommissionState)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn listing_kind_round_trip() {

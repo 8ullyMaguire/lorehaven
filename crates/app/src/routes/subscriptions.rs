@@ -52,12 +52,12 @@ pub async fn update_subscription(
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> ApiResult<Json<Value>> {
-    let state_val = body
-        .get("state")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            ApiError(lorehaven_domain::AppError::field("state", "must be 'active' or 'paused'"))
-        })?;
+    let state_val = body.get("state").and_then(|v| v.as_str()).ok_or_else(|| {
+        ApiError(lorehaven_domain::AppError::field(
+            "state",
+            "must be 'active' or 'paused'",
+        ))
+    })?;
     if state_val != "active" && state_val != "paused" {
         return Err(ApiError(lorehaven_domain::AppError::field(
             "state",
@@ -68,7 +68,9 @@ pub async fn update_subscription(
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     if rows == 0 {
-        return Err(ApiError(lorehaven_domain::AppError::NotFound { resource: "subscription" }));
+        return Err(ApiError(lorehaven_domain::AppError::NotFound {
+            resource: "subscription",
+        }));
     }
     Ok(Json(json!({ "updated": rows })))
 }
@@ -100,13 +102,15 @@ pub async fn my_subscriptions(
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     let subs: Vec<Value> = rows
         .into_iter()
-        .map(|r| json!({
-            "id": r.id,
-            "subject_type": r.subject_type,
-            "subject_id": r.subject_id,
-            "state": r.state,
-            "created_at": r.created_at,
-        }))
+        .map(|r| {
+            json!({
+                "id": r.id,
+                "subject_type": r.subject_type,
+                "subject_id": r.subject_id,
+                "state": r.state,
+                "created_at": r.created_at,
+            })
+        })
         .collect();
     Ok(Json(json!({ "subscriptions": subs })))
 }
@@ -151,7 +155,10 @@ pub async fn update_alert(
         .get("frequency")
         .and_then(|v| v.as_str())
         .ok_or_else(|| {
-            ApiError(lorehaven_domain::AppError::field("frequency", "must be 'daily' or 'weekly'"))
+            ApiError(lorehaven_domain::AppError::field(
+                "frequency",
+                "must be 'daily' or 'weekly'",
+            ))
         })?;
     if frequency != "daily" && frequency != "weekly" {
         return Err(ApiError(lorehaven_domain::AppError::field(
@@ -164,7 +171,9 @@ pub async fn update_alert(
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     if rows == 0 {
-        return Err(ApiError(lorehaven_domain::AppError::NotFound { resource: "alert" }));
+        return Err(ApiError(lorehaven_domain::AppError::NotFound {
+            resource: "alert",
+        }));
     }
     let pseud = user.pseud_id.ok_or_else(|| {
         ApiError(lorehaven_domain::AppError::field(
@@ -175,11 +184,13 @@ pub async fn update_alert(
     let new_id = subscriptions::create_alert(
         state.db(),
         &pseud.to_canonical_string(),
-        body
-            .get("saved_search_id")
+        body.get("saved_search_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| {
-                ApiError(lorehaven_domain::AppError::field("saved_search_id", "required"))
+                ApiError(lorehaven_domain::AppError::field(
+                    "saved_search_id",
+                    "required",
+                ))
             })?,
         frequency,
     )
@@ -225,7 +236,10 @@ pub async fn set_ai_training(
         .get("ai_training")
         .and_then(|v| v.as_str())
         .ok_or_else(|| {
-            ApiError(lorehaven_domain::AppError::field("ai_training", "must be 'allow' or 'deny'"))
+            ApiError(lorehaven_domain::AppError::field(
+                "ai_training",
+                "must be 'allow' or 'deny'",
+            ))
         })?;
     let opt_in = match pref {
         "allow" => true,
@@ -250,9 +264,13 @@ pub async fn set_ai_training(
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "author" }))?;
     if opt_in {
-        subscriptions::ai_training_opt_in(state.db(), &work.owner_pseud_id.to_canonical_string(), true)
-            .await
-            .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        subscriptions::ai_training_opt_in(
+            state.db(),
+            &work.owner_pseud_id.to_canonical_string(),
+            true,
+        )
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     } else {
         subscriptions::ai_training_opt_out(state.db(), &work.owner_pseud_id.to_canonical_string())
             .await

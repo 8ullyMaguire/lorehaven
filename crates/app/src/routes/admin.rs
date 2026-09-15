@@ -17,7 +17,9 @@ pub async fn get_stats(
 ) -> ApiResult<Json<Value>> {
     // Anonymous users get basic stats; operators get detailed
     if user.is_none() {
-        return Ok(Json(json!({ "reading": 0, "posting": 0, "engagement": 0, "discovery": 0 })));
+        return Ok(Json(
+            json!({ "reading": 0, "posting": 0, "engagement": 0, "discovery": 0 }),
+        ));
     }
 
     Ok(Json(json!({
@@ -46,7 +48,12 @@ pub async fn record_admin_action(
     let actor = user.account_id.to_string();
 
     let id = lorehaven_db::admin::record_admin_action(
-        state.db(), &actor, &body.action, &body.subject_type, &body.subject_id, &body.document,
+        state.db(),
+        &actor,
+        &body.action,
+        &body.subject_type,
+        &body.subject_id,
+        &body.document,
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
@@ -70,7 +77,7 @@ pub async fn list_privacy_requests(
 /// Create a privacy request (export/delete).
 #[derive(Debug, Deserialize)]
 pub struct PrivacyRequestBody {
-    pub kind: String,  // export | delete | derivative_removal
+    pub kind: String, // export | delete | derivative_removal
 }
 
 pub async fn create_privacy_request(
@@ -80,11 +87,9 @@ pub async fn create_privacy_request(
 ) -> ApiResult<Json<Value>> {
     let account = user.account_id.to_string();
 
-    let id = lorehaven_db::admin::create_privacy_request(
-        state.db(), &account, &body.kind,
-    )
-    .await
-    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let id = lorehaven_db::admin::create_privacy_request(state.db(), &account, &body.kind)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
 
     Ok(Json(json!({ "id": id })))
 }
@@ -102,6 +107,9 @@ pub fn router() -> axum::Router<AppState> {
     axum::Router::new()
         .route("/admin/stats", get(get_stats))
         .route("/admin/actions", post(record_admin_action))
-        .route("/me/privacy-requests", get(list_privacy_requests).post(create_privacy_request))
+        .route(
+            "/me/privacy-requests",
+            get(list_privacy_requests).post(create_privacy_request),
+        )
         .route("/admin/abuse-status/{key}", get(check_abuse_status))
 }

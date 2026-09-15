@@ -4,8 +4,8 @@ use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
 
-use lorehaven_domain::translation::{self, TranslationJobState, TranslationUnitState, ReviewGate};
 use crate::{Backend, Database};
+use lorehaven_domain::translation::{self, ReviewGate, TranslationJobState, TranslationUnitState};
 
 // ---------------------------------------------------------------------------
 // Jobs
@@ -44,7 +44,10 @@ pub async fn create_job(
     Ok(id)
 }
 
-async fn get_job_sqlite(pool: &sqlx::SqlitePool, job_id: &str) -> Result<Option<Value>, sqlx::Error> {
+async fn get_job_sqlite(
+    pool: &sqlx::SqlitePool,
+    job_id: &str,
+) -> Result<Option<Value>, sqlx::Error> {
     let row = sqlx::query("SELECT * FROM translation_jobs WHERE id = ?")
         .bind(job_id)
         .fetch_optional(pool)
@@ -65,7 +68,10 @@ async fn get_job_sqlite(pool: &sqlx::SqlitePool, job_id: &str) -> Result<Option<
     }))
 }
 
-async fn get_job_postgres(pool: &sqlx::postgres::PgPool, job_id: &str) -> Result<Option<Value>, sqlx::Error> {
+async fn get_job_postgres(
+    pool: &sqlx::postgres::PgPool,
+    job_id: &str,
+) -> Result<Option<Value>, sqlx::Error> {
     let row = sqlx::query("SELECT * FROM translation_jobs WHERE id = $1")
         .bind(job_id)
         .fetch_optional(pool)
@@ -100,15 +106,24 @@ pub async fn transition_job(
     to: &TranslationJobState,
 ) -> Result<(), sqlx::Error> {
     if !translation::valid_job_transition(from, to) {
-        return Err(sqlx::Error::Protocol(format!("invalid transition: {:?} -> {:?}", from, to)));
+        return Err(sqlx::Error::Protocol(format!(
+            "invalid transition: {:?} -> {:?}",
+            from, to
+        )));
     }
 
     let now = crate::identity::now_rfc3339();
     match db.backend() {
         Backend::Sqlite => {
-            sqlx::query("UPDATE translation_jobs SET state = ?, updated_at = ? WHERE id = ? AND state = ?")
-                .bind(to.as_str()).bind(&now).bind(job_id).bind(from.as_str())
-                .execute(db.sqlite_pool().expect("sqlite")).await?;
+            sqlx::query(
+                "UPDATE translation_jobs SET state = ?, updated_at = ? WHERE id = ? AND state = ?",
+            )
+            .bind(to.as_str())
+            .bind(&now)
+            .bind(job_id)
+            .bind(from.as_str())
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
         }
         Backend::Postgres => {
             sqlx::query("UPDATE translation_jobs SET state = $1, updated_at = $2 WHERE id = $3 AND state = $4")
@@ -123,6 +138,7 @@ pub async fn transition_job(
 // Units
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 pub async fn upsert_unit(
     db: &Database,
     job_id: &str,
@@ -161,48 +177,66 @@ pub async fn upsert_unit(
     Ok(())
 }
 
-async fn units_for_job_sqlite(pool: &sqlx::SqlitePool, job_id: &str) -> Result<Vec<Value>, sqlx::Error> {
-    let rows = sqlx::query("SELECT * FROM translation_units WHERE job_id = ? ORDER BY chapter_id, paragraph_index")
-        .bind(job_id)
-        .fetch_all(pool)
-        .await?;
-    Ok(rows.iter().map(|r| {
-        serde_json::json!({
-            "id": r.get::<String, _>("id"),
-            "job_id": r.get::<String, _>("job_id"),
-            "chapter_id": r.get::<String, _>("chapter_id"),
-            "paragraph_index": r.get::<i64, _>("paragraph_index"),
-            "source_text": r.get::<String, _>("source_text"),
-            "target_text": r.get::<Option<String>, _>("target_text"),
-            "state": r.get::<String, _>("state"),
-            "memory_hit": r.get::<Option<String>, _>("memory_hit"),
+async fn units_for_job_sqlite(
+    pool: &sqlx::SqlitePool,
+    job_id: &str,
+) -> Result<Vec<Value>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT * FROM translation_units WHERE job_id = ? ORDER BY chapter_id, paragraph_index",
+    )
+    .bind(job_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.get::<String, _>("id"),
+                "job_id": r.get::<String, _>("job_id"),
+                "chapter_id": r.get::<String, _>("chapter_id"),
+                "paragraph_index": r.get::<i64, _>("paragraph_index"),
+                "source_text": r.get::<String, _>("source_text"),
+                "target_text": r.get::<Option<String>, _>("target_text"),
+                "state": r.get::<String, _>("state"),
+                "memory_hit": r.get::<Option<String>, _>("memory_hit"),
+            })
         })
-    }).collect())
+        .collect())
 }
 
-async fn units_for_job_postgres(pool: &sqlx::postgres::PgPool, job_id: &str) -> Result<Vec<Value>, sqlx::Error> {
-    let rows = sqlx::query("SELECT * FROM translation_units WHERE job_id = $1 ORDER BY chapter_id, paragraph_index")
-        .bind(job_id)
-        .fetch_all(pool)
-        .await?;
-    Ok(rows.iter().map(|r| {
-        serde_json::json!({
-            "id": r.get::<String, _>("id"),
-            "job_id": r.get::<String, _>("job_id"),
-            "chapter_id": r.get::<String, _>("chapter_id"),
-            "paragraph_index": r.get::<i64, _>("paragraph_index"),
-            "source_text": r.get::<String, _>("source_text"),
-            "target_text": r.get::<Option<String>, _>("target_text"),
-            "state": r.get::<String, _>("state"),
-            "memory_hit": r.get::<Option<String>, _>("memory_hit"),
+async fn units_for_job_postgres(
+    pool: &sqlx::postgres::PgPool,
+    job_id: &str,
+) -> Result<Vec<Value>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT * FROM translation_units WHERE job_id = $1 ORDER BY chapter_id, paragraph_index",
+    )
+    .bind(job_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.get::<String, _>("id"),
+                "job_id": r.get::<String, _>("job_id"),
+                "chapter_id": r.get::<String, _>("chapter_id"),
+                "paragraph_index": r.get::<i64, _>("paragraph_index"),
+                "source_text": r.get::<String, _>("source_text"),
+                "target_text": r.get::<Option<String>, _>("target_text"),
+                "state": r.get::<String, _>("state"),
+                "memory_hit": r.get::<Option<String>, _>("memory_hit"),
+            })
         })
-    }).collect())
+        .collect())
 }
 
 pub async fn units_for_job(db: &Database, job_id: &str) -> Result<Vec<Value>, sqlx::Error> {
     match db.backend() {
         Backend::Sqlite => units_for_job_sqlite(db.sqlite_pool().expect("sqlite"), job_id).await,
-        Backend::Postgres => units_for_job_postgres(db.postgres_pool().expect("postgres"), job_id).await,
+        Backend::Postgres => {
+            units_for_job_postgres(db.postgres_pool().expect("postgres"), job_id).await
+        }
     }
 }
 
@@ -210,6 +244,7 @@ pub async fn units_for_job(db: &Database, job_id: &str) -> Result<Vec<Value>, sq
 // Memory
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 pub async fn add_memory(
     db: &Database,
     owner: &str,
@@ -245,20 +280,44 @@ pub async fn add_memory(
     Ok(id)
 }
 
-async fn lookup_memory_sqlite(pool: &sqlx::SqlitePool, owner: &str, source_lang: &str, target_lang: &str, source_hash: &str) -> Result<Option<(String, i64, bool)>, sqlx::Error> {
+async fn lookup_memory_sqlite(
+    pool: &sqlx::SqlitePool,
+    owner: &str,
+    source_lang: &str,
+    target_lang: &str,
+    source_hash: &str,
+) -> Result<Option<(String, i64, bool)>, sqlx::Error> {
     let row = sqlx::query("SELECT target_text, quality_bp, shared FROM translation_memory WHERE owner = ? AND source_lang = ? AND target_lang = ? AND source_hash = ?")
         .bind(owner).bind(source_lang).bind(target_lang).bind(source_hash)
         .fetch_optional(pool)
         .await?;
-    Ok(row.map(|r| (r.get::<String, _>("target_text"), r.get::<i64, _>("quality_bp"), r.get::<bool, _>("shared"))))
+    Ok(row.map(|r| {
+        (
+            r.get::<String, _>("target_text"),
+            r.get::<i64, _>("quality_bp"),
+            r.get::<bool, _>("shared"),
+        )
+    }))
 }
 
-async fn lookup_memory_postgres(pool: &sqlx::postgres::PgPool, owner: &str, source_lang: &str, target_lang: &str, source_hash: &str) -> Result<Option<(String, i64, bool)>, sqlx::Error> {
+async fn lookup_memory_postgres(
+    pool: &sqlx::postgres::PgPool,
+    owner: &str,
+    source_lang: &str,
+    target_lang: &str,
+    source_hash: &str,
+) -> Result<Option<(String, i64, bool)>, sqlx::Error> {
     let row = sqlx::query("SELECT target_text, quality_bp, shared FROM translation_memory WHERE owner = $1 AND source_lang = $2 AND target_lang = $3 AND source_hash = $4")
         .bind(owner).bind(source_lang).bind(target_lang).bind(source_hash)
         .fetch_optional(pool)
         .await?;
-    Ok(row.map(|r| (r.get::<String, _>("target_text"), r.get::<i64, _>("quality_bp"), r.get::<bool, _>("shared"))))
+    Ok(row.map(|r| {
+        (
+            r.get::<String, _>("target_text"),
+            r.get::<i64, _>("quality_bp"),
+            r.get::<bool, _>("shared"),
+        )
+    }))
 }
 
 pub async fn lookup_memory(
@@ -269,8 +328,26 @@ pub async fn lookup_memory(
     source_hash: &str,
 ) -> Result<Option<(String, i64, bool)>, sqlx::Error> {
     match db.backend() {
-        Backend::Sqlite => lookup_memory_sqlite(db.sqlite_pool().expect("sqlite"), owner, source_lang, target_lang, source_hash).await,
-        Backend::Postgres => lookup_memory_postgres(db.postgres_pool().expect("postgres"), owner, source_lang, target_lang, source_hash).await,
+        Backend::Sqlite => {
+            lookup_memory_sqlite(
+                db.sqlite_pool().expect("sqlite"),
+                owner,
+                source_lang,
+                target_lang,
+                source_hash,
+            )
+            .await
+        }
+        Backend::Postgres => {
+            lookup_memory_postgres(
+                db.postgres_pool().expect("postgres"),
+                owner,
+                source_lang,
+                target_lang,
+                source_hash,
+            )
+            .await
+        }
     }
 }
 
@@ -278,6 +355,7 @@ pub async fn lookup_memory(
 // Glossaries
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 pub async fn add_glossary_term(
     db: &Database,
     owner: &str,
@@ -329,18 +407,28 @@ pub async fn open_review_gate(
         Backend::Sqlite => {
             sqlx::query(
                 "INSERT INTO translation_reviews (id, job_id, reviewer, gate, state, created_at)
-                 VALUES (?, ?, ?, ?, 'pending', ?)"
+                 VALUES (?, ?, ?, ?, 'pending', ?)",
             )
-            .bind(&id).bind(job_id).bind(reviewer).bind(gate.as_str()).bind(&now)
-            .execute(db.sqlite_pool().expect("sqlite")).await?;
+            .bind(&id)
+            .bind(job_id)
+            .bind(reviewer)
+            .bind(gate.as_str())
+            .bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
         }
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO translation_reviews (id, job_id, reviewer, gate, state, created_at)
-                 VALUES ($1, $2, $3, $4, 'pending', $5)"
+                 VALUES ($1, $2, $3, $4, 'pending', $5)",
             )
-            .bind(&id).bind(job_id).bind(reviewer).bind(gate.as_str()).bind(&now)
-            .execute(db.postgres_pool().expect("postgres")).await?;
+            .bind(&id)
+            .bind(job_id)
+            .bind(reviewer)
+            .bind(gate.as_str())
+            .bind(&now)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?;
         }
     }
     Ok(id)
@@ -355,9 +443,15 @@ pub async fn decide_review_gate(
     let now = crate::identity::now_rfc3339();
     match db.backend() {
         Backend::Sqlite => {
-            sqlx::query("UPDATE translation_reviews SET state = ?, notes = ?, decided_at = ? WHERE id = ?")
-                .bind(state).bind(notes).bind(&now).bind(review_id)
-                .execute(db.sqlite_pool().expect("sqlite")).await?;
+            sqlx::query(
+                "UPDATE translation_reviews SET state = ?, notes = ?, decided_at = ? WHERE id = ?",
+            )
+            .bind(state)
+            .bind(notes)
+            .bind(&now)
+            .bind(review_id)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
         }
         Backend::Postgres => {
             sqlx::query("UPDATE translation_reviews SET state = $1, notes = $2, decided_at = $3 WHERE id = $4")
@@ -384,18 +478,26 @@ pub async fn record_publication(
         Backend::Sqlite => {
             sqlx::query(
                 "INSERT INTO translation_publications (id, job_id, work_id, published_at)
-                 VALUES (?, ?, ?, ?)"
+                 VALUES (?, ?, ?, ?)",
             )
-            .bind(&id).bind(job_id).bind(work_id).bind(&now)
-            .execute(db.sqlite_pool().expect("sqlite")).await?;
+            .bind(&id)
+            .bind(job_id)
+            .bind(work_id)
+            .bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
         }
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO translation_publications (id, job_id, work_id, published_at)
-                 VALUES ($1, $2, $3, $4)"
+                 VALUES ($1, $2, $3, $4)",
             )
-            .bind(&id).bind(job_id).bind(work_id).bind(&now)
-            .execute(db.postgres_pool().expect("postgres")).await?;
+            .bind(&id)
+            .bind(job_id)
+            .bind(work_id)
+            .bind(&now)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?;
         }
     }
     Ok(id)

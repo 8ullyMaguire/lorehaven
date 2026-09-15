@@ -353,7 +353,11 @@ async fn operator_affinity_ranking_is_silent_field_shape_unchanged() {
     // influence-related field may leak.
     for item in items {
         let keys: Vec<String> = item.as_object().unwrap().keys().cloned().collect();
-        assert_eq!(keys, vec!["work_id".to_string()], "unexpected fields: {item}");
+        assert_eq!(
+            keys,
+            vec!["work_id".to_string()],
+            "unexpected fields: {item}"
+        );
     }
     harness.cleanup().await;
 }
@@ -408,7 +412,9 @@ async fn recipe_owner_can_crud_their_recipe() {
     assert_eq!(body["name"], "Updated");
 
     // Delete.
-    let (status, body) = client.post("/api/v1/recipes/my-recipe-1/delete", json!({})).await;
+    let (status, body) = client
+        .post("/api/v1/recipes/my-recipe-1/delete", json!({}))
+        .await;
     assert_eq!(status, StatusCode::OK, "{body}");
 
     // Gone.

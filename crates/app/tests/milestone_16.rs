@@ -57,8 +57,12 @@ impl Client {
     }
     fn capture(&mut self, response: &axum::response::Response) {
         for value in response.headers().get_all(header::SET_COOKIE) {
-            let Ok(text) = value.to_str() else { continue; };
-            let Some((pair, _)) = text.split_once(';') else { continue; };
+            let Ok(text) = value.to_str() else {
+                continue;
+            };
+            let Some((pair, _)) = text.split_once(';') else {
+                continue;
+            };
             if let Some((name, value)) = pair.split_once('=') {
                 let name = name.trim().to_owned();
                 let value = value.trim().to_owned();
@@ -268,12 +272,9 @@ async fn extension_grant_works() {
     assert!(result.is_ok(), "grant extension: {:?}", result);
 
     // Verify grant was stored
-    let result = lorehaven_db::marketplace::revoke_extension(
-        harness.db(),
-        "test-account",
-        "test-extension",
-    )
-    .await;
+    let result =
+        lorehaven_db::marketplace::revoke_extension(harness.db(), "test-account", "test-extension")
+            .await;
     assert!(result.is_ok(), "revoke extension: {:?}", result);
 
     harness.cleanup().await;
@@ -355,12 +356,18 @@ async fn webhook_signing_verifies() {
     let signature = event.sign(secret);
 
     assert!(event.verify(secret, &signature), "signature should verify");
-    assert!(!event.verify("wrong-secret", &signature), "wrong secret should fail");
+    assert!(
+        !event.verify("wrong-secret", &signature),
+        "wrong secret should fail"
+    );
 
     // Test payload bounding
     let large_payload = serde_json::json!({"data": "x".repeat(1000)});
     let bounded = lorehaven_domain::webhook::bound_payload(&large_payload, 100);
-    assert!(bounded["_truncated"].as_bool().unwrap(), "large payload should be truncated");
+    assert!(
+        bounded["_truncated"].as_bool().unwrap(),
+        "large payload should be truncated"
+    );
 
     harness.cleanup().await;
 }

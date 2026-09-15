@@ -10,11 +10,6 @@ pub enum ExtensionState {
 }
 
 impl ExtensionState {
-    /// Inherent form so tests and callers need not import `FromStr`.
-    pub fn from_str(s: &str) -> Result<Self, String> {
-        std::str::FromStr::from_str(s)
-    }
-
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Pending => "pending",
@@ -50,11 +45,6 @@ pub enum Capability {
 }
 
 impl Capability {
-    /// Inherent form so tests and callers need not import `FromStr`.
-    pub fn from_str(s: &str) -> Result<Self, String> {
-        std::str::FromStr::from_str(s)
-    }
-
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::StorageRead => "storage.read",
@@ -106,6 +96,7 @@ pub fn grant_is_subset(manifest_caps: &[Capability], grant_caps: &[Capability]) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn extension_state_round_trip() {

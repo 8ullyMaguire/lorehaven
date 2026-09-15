@@ -116,7 +116,12 @@ pub async fn get_usage(
     }
 
     let now = OffsetDateTime::now_utc();
-    let day = format!("{:04}-{:02}-{:02}", now.year(), now.month() as u8, now.day());
+    let day = format!(
+        "{:04}-{:02}-{:02}",
+        now.year(),
+        now.month() as u8,
+        now.day()
+    );
     let usage = lorehaven_db::economy::usage_for(state.db(), &account, &day)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;

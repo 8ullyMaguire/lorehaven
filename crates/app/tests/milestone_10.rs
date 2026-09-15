@@ -386,10 +386,7 @@ async fn taxonomy_autocomplete_fuzzy_matches_typo() {
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let items = body["items"].as_array().expect("items array");
-    let norms: Vec<&str> = items
-        .iter()
-        .filter_map(|i| i["norm"].as_str())
-        .collect();
+    let norms: Vec<&str> = items.iter().filter_map(|i| i["norm"].as_str()).collect();
     assert!(
         norms.iter().any(|n| n.contains("harry potter")),
         "expected fuzzy match for 'harry poter', got: {norms:?}"

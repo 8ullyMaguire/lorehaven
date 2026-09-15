@@ -5,7 +5,8 @@ use axum::routing::{get, post};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
+use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::auth::MaybeSession;
@@ -74,10 +75,18 @@ pub async fn issue_token(
         .map_err(|e| ApiError(lorehaven_domain::AppError::field("scopes", &e)))?;
 
     let token = Uuid::new_v4().to_string();
-    let token_hash = format!("{:x}", Sha256::new().chain_update(token.as_bytes()).finalize());
+    let token_hash = format!(
+        "{:x}",
+        Sha256::new().chain_update(token.as_bytes()).finalize()
+    );
 
     let id = lorehaven_db::external::issue_token(
-        state.db(), &account, &body.kind, &body.name, &token_hash, &scopes,
+        state.db(),
+        &account,
+        &body.kind,
+        &body.name,
+        &token_hash,
+        &scopes,
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
@@ -131,16 +140,28 @@ pub async fn register_bot(
         .map_err(|e| ApiError(lorehaven_domain::AppError::field("scopes", &e)))?;
 
     let token = Uuid::new_v4().to_string();
-    let token_hash = format!("{:x}", Sha256::new().chain_update(token.as_bytes()).finalize());
+    let token_hash = format!(
+        "{:x}",
+        Sha256::new().chain_update(token.as_bytes()).finalize()
+    );
 
     let token_id = lorehaven_db::external::issue_token(
-        state.db(), &account, "bot", &body.name, &token_hash, &scopes,
+        state.db(),
+        &account,
+        "bot",
+        &body.name,
+        &token_hash,
+        &scopes,
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
 
     let bot_id = lorehaven_db::external::register_bot(
-        state.db(), &token_id, &account, &body.contact, &body.user_agent,
+        state.db(),
+        &token_id,
+        &account,
+        &body.contact,
+        &body.user_agent,
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
@@ -194,7 +215,11 @@ pub async fn subscribe_push(
     }
 
     let id = lorehaven_db::external::register_push_subscription(
-        state.db(), &account, &body.endpoint, &body.keys, body.device_name.as_deref(),
+        state.db(),
+        &account,
+        &body.endpoint,
+        &body.keys,
+        body.device_name.as_deref(),
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
@@ -207,10 +232,10 @@ pub async fn subscribe_push(
 // ---------------------------------------------------------------------------
 
 /// Federation inbox.
-pub async fn federation_inbox(
-    State(_state): State<AppState>,
-) -> ApiResult<Json<Value>> {
-    Ok(Json(json!({ "accepted": false, "reason": "federation not configured" })))
+pub async fn federation_inbox(State(_state): State<AppState>) -> ApiResult<Json<Value>> {
+    Ok(Json(
+        json!({ "accepted": false, "reason": "federation not configured" }),
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -225,7 +250,11 @@ pub async fn get_ai_work(
 ) -> ApiResult<Json<Value>> {
     // Check consent
     let requests = lorehaven_db::external::record_ai_request(
-        state.db(), &work_id, "ai-provider", "analysis", None,
+        state.db(),
+        &work_id,
+        "ai-provider",
+        "analysis",
+        None,
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;

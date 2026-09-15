@@ -82,7 +82,7 @@ pub async fn search_nodes(
             created_at,
         })
         .collect())
-    }
+}
 
 /// Search taxonomy nodes by prefix, then fall back to fuzzy matching.
 ///
@@ -95,7 +95,7 @@ pub async fn search_nodes_fuzzy(
     query: &str,
     limit: i64,
 ) -> Result<Vec<TaxonomyNode>> {
-    use lorehaven_domain::taxonomy::{fuzzy_match, canonical_form};
+    use lorehaven_domain::taxonomy::{canonical_form, fuzzy_match};
     use std::collections::HashMap;
 
     let prefix = query.trim();
@@ -111,16 +111,20 @@ pub async fn search_nodes_fuzzy(
          ORDER BY norm ASC",
     );
     let prefix_rows: Vec<(String, String, String, String, String)> = match db.backend() {
-        Backend::Sqlite => sqlx::query_as(&sql_prefix)
-            .bind(kind)
-            .bind(&normalized)
-            .fetch_all(db.sqlite_pool().expect("sqlite"))
-            .await?,
-        Backend::Postgres => sqlx::query_as(&sql_prefix)
-            .bind(kind)
-            .bind(&normalized)
-            .fetch_all(db.postgres_pool().expect("postgres"))
-            .await?,
+        Backend::Sqlite => {
+            sqlx::query_as(&sql_prefix)
+                .bind(kind)
+                .bind(&normalized)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql_prefix)
+                .bind(kind)
+                .bind(&normalized)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
     };
     let prefix_nodes: Vec<TaxonomyNode> = prefix_rows
         .iter()
@@ -149,16 +153,20 @@ pub async fn search_nodes_fuzzy(
          ORDER BY norm ASC",
     );
     let rest_rows: Vec<(String, String, String, String, String)> = match db.backend() {
-        Backend::Sqlite => sqlx::query_as(&sql_rest)
-            .bind(kind)
-            .bind(&normalized)
-            .fetch_all(db.sqlite_pool().expect("sqlite"))
-            .await?,
-        Backend::Postgres => sqlx::query_as(&sql_rest)
-            .bind(kind)
-            .bind(&normalized)
-            .fetch_all(db.postgres_pool().expect("postgres"))
-            .await?,
+        Backend::Sqlite => {
+            sqlx::query_as(&sql_rest)
+                .bind(kind)
+                .bind(&normalized)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql_rest)
+                .bind(kind)
+                .bind(&normalized)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
     };
 
     let candidates: Vec<(String, String)> = rest_rows
@@ -171,13 +179,16 @@ pub async fn search_nodes_fuzzy(
     let lookup: HashMap<String, TaxonomyNode> = rest_rows
         .into_iter()
         .map(|(id, kind, canonical, norm, created_at)| {
-            (id.clone(), TaxonomyNode {
-                id,
-                kind,
-                canonical,
-                norm,
-                created_at,
-            })
+            (
+                id.clone(),
+                TaxonomyNode {
+                    id,
+                    kind,
+                    canonical,
+                    norm,
+                    created_at,
+                },
+            )
         })
         .collect();
 

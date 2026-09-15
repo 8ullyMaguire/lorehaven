@@ -16,20 +16,6 @@ pub enum TxnType {
 }
 
 impl TxnType {
-    /// Inverse of [`Self::as_str`]; the tests pin the round trip.
-    pub fn from_str(s: &str) -> Result<Self, String> {
-        match s {
-            "earn" => Ok(Self::Earn),
-            "spend" => Ok(Self::Spend),
-            "grant" => Ok(Self::Grant),
-            "purchase" => Ok(Self::Purchase),
-            "hold" => Ok(Self::Hold),
-            "release" => Ok(Self::Release),
-            "capture" => Ok(Self::Capture),
-            _ => Err(format!("unknown TxnType: {s}")),
-        }
-    }
-
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Earn => "earn",
@@ -45,6 +31,7 @@ impl TxnType {
 
 impl std::str::FromStr for TxnType {
     type Err = String;
+    /// Inverse of [`TxnType::as_str`]; the tests pin the round trip.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "earn" => Ok(Self::Earn),
@@ -67,6 +54,7 @@ pub fn entries_balanced(entries: &[(String, i64)]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn balanced_entries_sum_to_zero() {

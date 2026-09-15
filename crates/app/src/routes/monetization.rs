@@ -47,8 +47,12 @@ pub async fn set_pricing(
     let work_id = work_id
         .parse::<lorehaven_domain::WorkId>()
         .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
-    let model = lorehaven_domain::monetization::Model::parse(&body.model)
-        .ok_or_else(|| ApiError(lorehaven_domain::AppError::field("model", "must be tips|early_access|purchase|patronage")))?;
+    let model = lorehaven_domain::monetization::Model::parse(&body.model).ok_or_else(|| {
+        ApiError(lorehaven_domain::AppError::field(
+            "model",
+            "must be tips|early_access|purchase|patronage",
+        ))
+    })?;
     let model_str = match model {
         lorehaven_domain::monetization::Model::Tips => "tips",
         lorehaven_domain::monetization::Model::EarlyAccess => "early_access",
@@ -56,7 +60,7 @@ pub async fn set_pricing(
         lorehaven_domain::monetization::Model::Patronage => "patronage",
     };
     let _ = work_id; // work existence is asserted by foreign key
-    let _ = user;    // author ownership checked via FK on work_pricing
+    let _ = user; // author ownership checked via FK on work_pricing
     let id = monetization::set_pricing(
         state.db(),
         &work_id.to_canonical_string(),
@@ -105,7 +109,11 @@ pub async fn purchase(
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
         .into_iter()
         .next()
-        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "pricing" }))?;
+        .ok_or_else(|| {
+            ApiError(lorehaven_domain::AppError::NotFound {
+                resource: "pricing",
+            })
+        })?;
     if !pricing.enabled {
         return Err(ApiError(lorehaven_domain::AppError::field(
             "work_id",
@@ -113,7 +121,11 @@ pub async fn purchase(
         )));
     }
 
-    let idempotency = format!("purchase:{}:{}", user.account_id, work_id.to_canonical_string());
+    let idempotency = format!(
+        "purchase:{}:{}",
+        user.account_id,
+        work_id.to_canonical_string()
+    );
     // Idempotency: if already entitled, return the existing entitlement id.
     // grant_entitlement uses an idempotency key on work_id+account, so re-calls
     // return the same row. We check via has_entitlement first for a clean response.
@@ -130,8 +142,14 @@ pub async fn purchase(
             .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
             .into_iter()
             .find(|e| e.work_id == work_id.to_canonical_string())
-            .ok_or_else(|| ApiError(lorehaven_domain::AppError::Internal(anyhow::anyhow!("entitlement race"))))?;
-        return Ok(Json(json!({ "entitlement_id": ent.id, "status": "already_granted" })));
+            .ok_or_else(|| {
+                ApiError(lorehaven_domain::AppError::Internal(anyhow::anyhow!(
+                    "entitlement race"
+                )))
+            })?;
+        return Ok(Json(
+            json!({ "entitlement_id": ent.id, "status": "already_granted" }),
+        ));
     }
 
     let entitlement_id = monetization::grant_entitlement(
@@ -191,15 +209,20 @@ pub async fn tip(
     let work = lorehaven_db::content::find_work(state.db(), work_id)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
-    let work = work.ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    let work =
+        work.ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
     let pseud = lorehaven_db::identity::find_pseud(state.db(), work.owner_pseud_id)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
-    let author = pseud.ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "author" }))?;
+    let author = pseud
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "author" }))?;
     let author_account = author.account_id.to_string();
 
     // Refuse self-dealing (tips between pseuds of one account, §20.9.3).
-    if lorehaven_domain::monetization::Rules::self_dealing(&user.account_id.to_string(), &author_account) {
+    if lorehaven_domain::monetization::Rules::self_dealing(
+        &user.account_id.to_string(),
+        &author_account,
+    ) {
         return Err(ApiError(lorehaven_domain::AppError::field(
             "work_id",
             "cannot tip your own work",
@@ -250,8 +273,16 @@ pub async fn tip(
             // Credit tip: a balanced credit transaction moving the tipper's
             // money bucket to the author's money bucket.
             let entries = vec![
-                (user.account_id.to_string(), "money".to_string(), -body.amount_minor),
-                (author_account.clone(), "money".to_string(), body.amount_minor),
+                (
+                    user.account_id.to_string(),
+                    "money".to_string(),
+                    -body.amount_minor,
+                ),
+                (
+                    author_account.clone(),
+                    "money".to_string(),
+                    body.amount_minor,
+                ),
             ];
             let txn_id = lorehaven_db::economy::post_transaction(
                 state.db(),
@@ -283,14 +314,16 @@ pub async fn my_entitlements(
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     let out: Vec<Value> = rows
         .into_iter()
-        .map(|r| json!({
-            "id": r.id,
-            "work_id": r.work_id,
-            "kind": r.kind,
-            "source_payment_id": r.source_payment_id,
-            "granted_at": r.granted_at,
-            "expires_at": r.expires_at,
-        }))
+        .map(|r| {
+            json!({
+                "id": r.id,
+                "work_id": r.work_id,
+                "kind": r.kind,
+                "source_payment_id": r.source_payment_id,
+                "granted_at": r.granted_at,
+                "expires_at": r.expires_at,
+            })
+        })
         .collect();
     Ok(Json(json!({ "entitlements": out })))
 }
@@ -304,15 +337,17 @@ pub async fn my_earnings(
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     let out: Vec<Value> = rows
         .into_iter()
-        .map(|r| json!({
-            "id": r.id,
-            "amount_minor": r.amount_minor,
-            "currency": r.currency,
-            "kind": r.kind,
-            "payment_id": r.payment_id,
-            "idempotency_key": r.idempotency_key,
-            "created_at": r.created_at,
-        }))
+        .map(|r| {
+            json!({
+                "id": r.id,
+                "amount_minor": r.amount_minor,
+                "currency": r.currency,
+                "kind": r.kind,
+                "payment_id": r.payment_id,
+                "idempotency_key": r.idempotency_key,
+                "created_at": r.created_at,
+            })
+        })
         .collect();
     Ok(Json(json!({ "earnings": out })))
 }
@@ -414,14 +449,16 @@ pub async fn list_gifts(
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     let out: Vec<Value> = rows
         .into_iter()
-        .map(|r| json!({
-            "id": r.id,
-            "work_id": r.work_id,
-            "gift_note": r.gift_note,
-            "challenge_fulfillment_id": r.challenge_fulfillment_id,
-            "created_at": r.created_at,
-            "declined_at": r.declined_at,
-        }))
+        .map(|r| {
+            json!({
+                "id": r.id,
+                "work_id": r.work_id,
+                "gift_note": r.gift_note,
+                "challenge_fulfillment_id": r.challenge_fulfillment_id,
+                "created_at": r.created_at,
+                "declined_at": r.declined_at,
+            })
+        })
         .collect();
     Ok(Json(json!({ "gifts": out })))
 }
@@ -443,19 +480,24 @@ pub async fn public_pricing(
     let enabled: Vec<Value> = pricing
         .into_iter()
         .filter(|p| p.enabled)
-        .map(|p| json!({
-            "model": p.model,
-            "price_minor": p.price_minor,
-            "currency": p.currency,
-            "public_at_offset": p.public_at_offset,
-        }))
+        .map(|p| {
+            json!({
+                "model": p.model,
+                "price_minor": p.price_minor,
+                "currency": p.currency,
+                "public_at_offset": p.public_at_offset,
+            })
+        })
         .collect();
     Ok(Json(json!({ "pricing": enabled })))
 }
 
 pub fn router() -> axum::Router<AppState> {
     axum::Router::new()
-        .route("/works/{work_id}/pricing", axum::routing::post(set_pricing).delete(delete_pricing))
+        .route(
+            "/works/{work_id}/pricing",
+            axum::routing::post(set_pricing).delete(delete_pricing),
+        )
         .route("/works/{work_id}/purchase", post(purchase))
         .route("/works/{work_id}/tips", post(tip))
         .route("/me/payouts", post(request_payout))

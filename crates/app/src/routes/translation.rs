@@ -5,6 +5,7 @@ use axum::routing::{get, post};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::str::FromStr;
 
 use crate::auth::MaybeSession;
 use crate::http::{ApiError, ApiResult};
@@ -154,14 +155,10 @@ pub async fn open_review(
     let gate = lorehaven_domain::translation::ReviewGate::from_str(&body.gate)
         .map_err(|e| ApiError(lorehaven_domain::AppError::field("gate", &e)))?;
 
-    let id = lorehaven_db::translation::open_review_gate(
-        state.db(),
-        &job_id,
-        &body.reviewer,
-        &gate,
-    )
-    .await
-    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let id =
+        lorehaven_db::translation::open_review_gate(state.db(), &job_id, &body.reviewer, &gate)
+            .await
+            .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
 
     Ok(Json(json!({ "id": id })))
 }
@@ -195,9 +192,15 @@ pub fn router() -> axum::Router<AppState> {
     axum::Router::new()
         .route("/works/{id}/translations", post(create_translation))
         .route("/translations/{job_id}", get(get_translation))
-        .route("/translations/{job_id}/transition", post(transition_translation))
+        .route(
+            "/translations/{job_id}/transition",
+            post(transition_translation),
+        )
         .route("/me/translation-memory", get(list_memory))
         .route("/me/translation-glossaries", post(add_glossary_term))
         .route("/translations/{job_id}/reviews", post(open_review))
-        .route("/translation-reviews/{review_id}/decide", post(decide_review))
+        .route(
+            "/translation-reviews/{review_id}/decide",
+            post(decide_review),
+        )
 }

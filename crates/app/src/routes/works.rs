@@ -883,14 +883,11 @@ enum Reading {
 /// Check whether the actor holds a valid entitlement for a priced work.
 /// Returns `Ok(true)` if entitled, `Ok(false)` if not entitled (but no
 /// DB error occurred), and `Err` if the DB lookup itself fails.
-async fn check_entitlement(
-    state: &AppState,
-    actor: &Actor,
-    work_id: &WorkId,
-) -> ApiResult<bool> {
-    let pricing = lorehaven_db::monetization::get_pricing(state.db(), &work_id.to_canonical_string())
-        .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+async fn check_entitlement(state: &AppState, actor: &Actor, work_id: &WorkId) -> ApiResult<bool> {
+    let pricing =
+        lorehaven_db::monetization::get_pricing(state.db(), &work_id.to_canonical_string())
+            .await
+            .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     let Some(pricing) = pricing else {
         // Not a priced work — no entitlement needed.
         return Ok(true);

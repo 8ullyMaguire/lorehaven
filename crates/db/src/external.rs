@@ -3,8 +3,8 @@
 use sqlx::Row;
 use uuid::Uuid;
 
-use lorehaven_domain::api_scopes::Scope;
 use crate::{Backend, Database};
+use lorehaven_domain::api_scopes::Scope;
 
 // ---------------------------------------------------------------------------
 // Tokens (uses existing api_tokens table from migration 0001)
@@ -20,34 +20,52 @@ pub async fn issue_token(
 ) -> Result<String, sqlx::Error> {
     let id = Uuid::new_v4().to_string();
     let now = crate::identity::now_rfc3339();
-    let scopes_json = serde_json::to_string(&scopes.iter().map(|c| c.as_str()).collect::<Vec<_>>()).unwrap();
+    let scopes_json =
+        serde_json::to_string(&scopes.iter().map(|c| c.as_str()).collect::<Vec<_>>()).unwrap();
 
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query(
                 "INSERT INTO api_tokens (id, account_id, name, token_hash, scopes, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?)"
+                 VALUES (?, ?, ?, ?, ?, ?)",
             )
-            .bind(&id).bind(account).bind(name).bind(token_hash).bind(&scopes_json).bind(&now)
-            .execute(db.sqlite_pool().expect("sqlite")).await?;
+            .bind(&id)
+            .bind(account)
+            .bind(name)
+            .bind(token_hash)
+            .bind(&scopes_json)
+            .bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
         }
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO api_tokens (id, account_id, name, token_hash, scopes, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6)"
+                 VALUES ($1, $2, $3, $4, $5, $6)",
             )
-            .bind(&id).bind(account).bind(name).bind(token_hash).bind(&scopes_json).bind(&now)
-            .execute(db.postgres_pool().expect("postgres")).await?;
+            .bind(&id)
+            .bind(account)
+            .bind(name)
+            .bind(token_hash)
+            .bind(&scopes_json)
+            .bind(&now)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?;
         }
     }
     Ok(id)
 }
 
-async fn resolve_token_sqlite(pool: &sqlx::SqlitePool, token_hash: &str) -> Result<Option<(String, Vec<String>)>, sqlx::Error> {
-    let row = sqlx::query("SELECT account_id, scopes FROM api_tokens WHERE token_hash = ? AND revoked_at IS NULL")
-        .bind(token_hash)
-        .fetch_optional(pool)
-        .await?;
+async fn resolve_token_sqlite(
+    pool: &sqlx::SqlitePool,
+    token_hash: &str,
+) -> Result<Option<(String, Vec<String>)>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT account_id, scopes FROM api_tokens WHERE token_hash = ? AND revoked_at IS NULL",
+    )
+    .bind(token_hash)
+    .fetch_optional(pool)
+    .await?;
     match row {
         Some(r) => {
             let scopes_json: String = r.get("scopes");
@@ -58,11 +76,16 @@ async fn resolve_token_sqlite(pool: &sqlx::SqlitePool, token_hash: &str) -> Resu
     }
 }
 
-async fn resolve_token_postgres(pool: &sqlx::postgres::PgPool, token_hash: &str) -> Result<Option<(String, Vec<String>)>, sqlx::Error> {
-    let row = sqlx::query("SELECT account_id, scopes FROM api_tokens WHERE token_hash = $1 AND revoked_at IS NULL")
-        .bind(token_hash)
-        .fetch_optional(pool)
-        .await?;
+async fn resolve_token_postgres(
+    pool: &sqlx::postgres::PgPool,
+    token_hash: &str,
+) -> Result<Option<(String, Vec<String>)>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT account_id, scopes FROM api_tokens WHERE token_hash = $1 AND revoked_at IS NULL",
+    )
+    .bind(token_hash)
+    .fetch_optional(pool)
+    .await?;
     match row {
         Some(r) => {
             let scopes_json: String = r.get("scopes");
@@ -73,10 +96,17 @@ async fn resolve_token_postgres(pool: &sqlx::postgres::PgPool, token_hash: &str)
     }
 }
 
-pub async fn resolve_token(db: &Database, token_hash: &str) -> Result<Option<(String, Vec<String>)>, sqlx::Error> {
+pub async fn resolve_token(
+    db: &Database,
+    token_hash: &str,
+) -> Result<Option<(String, Vec<String>)>, sqlx::Error> {
     match db.backend() {
-        Backend::Sqlite => resolve_token_sqlite(db.sqlite_pool().expect("sqlite"), token_hash).await,
-        Backend::Postgres => resolve_token_postgres(db.postgres_pool().expect("postgres"), token_hash).await,
+        Backend::Sqlite => {
+            resolve_token_sqlite(db.sqlite_pool().expect("sqlite"), token_hash).await
+        }
+        Backend::Postgres => {
+            resolve_token_postgres(db.postgres_pool().expect("postgres"), token_hash).await
+        }
     }
 }
 
@@ -85,13 +115,17 @@ pub async fn revoke_token(db: &Database, token_id: &str) -> Result<(), sqlx::Err
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query("UPDATE api_tokens SET revoked_at = ? WHERE id = ?")
-                .bind(&now).bind(token_id)
-                .execute(db.sqlite_pool().expect("sqlite")).await?;
+                .bind(&now)
+                .bind(token_id)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?;
         }
         Backend::Postgres => {
             sqlx::query("UPDATE api_tokens SET revoked_at = $1 WHERE id = $2")
-                .bind(&now).bind(token_id)
-                .execute(db.postgres_pool().expect("postgres")).await?;
+                .bind(&now)
+                .bind(token_id)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?;
         }
     }
     Ok(())
@@ -150,19 +184,29 @@ pub async fn upsert_feed_handle(
             sqlx::query(
                 "INSERT INTO feed_handles (id, kind, subject, handle, created_at)
                  VALUES (?, ?, ?, ?, ?)
-                 ON CONFLICT(handle) DO UPDATE SET subject = excluded.subject"
+                 ON CONFLICT(handle) DO UPDATE SET subject = excluded.subject",
             )
-            .bind(&id).bind(kind).bind(subject).bind(handle).bind(&now)
-            .execute(db.sqlite_pool().expect("sqlite")).await?;
+            .bind(&id)
+            .bind(kind)
+            .bind(subject)
+            .bind(handle)
+            .bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
         }
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO feed_handles (id, kind, subject, handle, created_at)
                  VALUES ($1, $2, $3, $4, $5)
-                 ON CONFLICT(handle) DO UPDATE SET subject = EXCLUDED.subject"
+                 ON CONFLICT(handle) DO UPDATE SET subject = EXCLUDED.subject",
             )
-            .bind(&id).bind(kind).bind(subject).bind(handle).bind(&now)
-            .execute(db.postgres_pool().expect("postgres")).await?;
+            .bind(&id)
+            .bind(kind)
+            .bind(subject)
+            .bind(handle)
+            .bind(&now)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?;
         }
     }
     Ok(id)

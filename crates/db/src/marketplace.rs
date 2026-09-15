@@ -4,9 +4,9 @@ use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
 
-use lorehaven_domain::marketplace::{self, ListingKind, CommissionState};
-use lorehaven_domain::extension::Capability;
 use crate::{Backend, Database};
+use lorehaven_domain::extension::Capability;
+use lorehaven_domain::marketplace::{self, CommissionState, ListingKind};
 
 // ---------------------------------------------------------------------------
 // Listings
@@ -26,18 +26,30 @@ pub async fn create_listing(
         Backend::Sqlite => {
             sqlx::query(
                 "INSERT INTO listings (id, kind, owner, work_id, terms, state, created_at)
-                 VALUES (?, ?, ?, ?, ?, 'draft', ?)"
+                 VALUES (?, ?, ?, ?, ?, 'draft', ?)",
             )
-            .bind(&id).bind(kind.as_str()).bind(owner).bind(work_id).bind(terms).bind(&now)
-            .execute(db.sqlite_pool().expect("sqlite")).await?;
+            .bind(&id)
+            .bind(kind.as_str())
+            .bind(owner)
+            .bind(work_id)
+            .bind(terms)
+            .bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
         }
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO listings (id, kind, owner, work_id, terms, state, created_at)
-                 VALUES ($1, $2, $3, $4, $5, 'draft', $6)"
+                 VALUES ($1, $2, $3, $4, $5, 'draft', $6)",
             )
-            .bind(&id).bind(kind.as_str()).bind(owner).bind(work_id).bind(terms).bind(&now)
-            .execute(db.postgres_pool().expect("postgres")).await?;
+            .bind(&id)
+            .bind(kind.as_str())
+            .bind(owner)
+            .bind(work_id)
+            .bind(terms)
+            .bind(&now)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?;
         }
     }
     Ok(id)
@@ -49,45 +61,71 @@ pub async fn list_listings(
     state: Option<&str>,
     limit: i64,
 ) -> Result<Vec<Value>, sqlx::Error> {
-    let mut query = "SELECT id, kind, owner, work_id, terms, state, created_at FROM listings WHERE 1=1".to_string();
-    if kind.is_some() { query.push_str(" AND kind = ?"); }
-    if state.is_some() { query.push_str(" AND state = ?"); }
+    let mut query =
+        "SELECT id, kind, owner, work_id, terms, state, created_at FROM listings WHERE 1=1"
+            .to_string();
+    if kind.is_some() {
+        query.push_str(" AND kind = ?");
+    }
+    if state.is_some() {
+        query.push_str(" AND state = ?");
+    }
     query.push_str(" ORDER BY created_at LIMIT ?");
 
     match db.backend() {
         Backend::Sqlite => {
             let mut q = sqlx::query(&query);
-            if let Some(k) = kind { q = q.bind(k); }
-            if let Some(s) = state { q = q.bind(s); }
-            let rows = q.bind(limit).fetch_all(db.sqlite_pool().expect("sqlite")).await?;
-            Ok(rows.iter().map(|r| {
-                serde_json::json!({
-                    "id": r.get::<String, _>("id"),
-                    "kind": r.get::<String, _>("kind"),
-                    "owner": r.get::<String, _>("owner"),
-                    "work_id": r.get::<Option<String>, _>("work_id"),
-                    "terms": r.get::<String, _>("terms"),
-                    "state": r.get::<String, _>("state"),
-                    "created_at": r.get::<String, _>("created_at"),
+            if let Some(k) = kind {
+                q = q.bind(k);
+            }
+            if let Some(s) = state {
+                q = q.bind(s);
+            }
+            let rows = q
+                .bind(limit)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?;
+            Ok(rows
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "id": r.get::<String, _>("id"),
+                        "kind": r.get::<String, _>("kind"),
+                        "owner": r.get::<String, _>("owner"),
+                        "work_id": r.get::<Option<String>, _>("work_id"),
+                        "terms": r.get::<String, _>("terms"),
+                        "state": r.get::<String, _>("state"),
+                        "created_at": r.get::<String, _>("created_at"),
+                    })
                 })
-            }).collect())
+                .collect())
         }
         Backend::Postgres => {
             let mut q = sqlx::query(&query);
-            if let Some(k) = kind { q = q.bind(k); }
-            if let Some(s) = state { q = q.bind(s); }
-            let rows = q.bind(limit).fetch_all(db.postgres_pool().expect("postgres")).await?;
-            Ok(rows.iter().map(|r| {
-                serde_json::json!({
-                    "id": r.get::<String, _>("id"),
-                    "kind": r.get::<String, _>("kind"),
-                    "owner": r.get::<String, _>("owner"),
-                    "work_id": r.get::<Option<String>, _>("work_id"),
-                    "terms": r.get::<String, _>("terms"),
-                    "state": r.get::<String, _>("state"),
-                    "created_at": r.get::<String, _>("created_at"),
+            if let Some(k) = kind {
+                q = q.bind(k);
+            }
+            if let Some(s) = state {
+                q = q.bind(s);
+            }
+            let rows = q
+                .bind(limit)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?;
+            Ok(rows
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "id": r.get::<String, _>("id"),
+                        "kind": r.get::<String, _>("kind"),
+                        "owner": r.get::<String, _>("owner"),
+                        "work_id": r.get::<Option<String>, _>("work_id"),
+                        "terms": r.get::<String, _>("terms"),
+                        "state": r.get::<String, _>("state"),
+                        "created_at": r.get::<String, _>("created_at"),
+                    })
                 })
-            }).collect())
+                .collect())
         }
     }
 }
@@ -108,18 +146,28 @@ pub async fn create_commission(
         Backend::Sqlite => {
             sqlx::query(
                 "INSERT INTO commissions (id, listing_id, client, state, created_at, updated_at)
-                 VALUES (?, ?, ?, 'quoted', ?, ?)"
+                 VALUES (?, ?, ?, 'quoted', ?, ?)",
             )
-            .bind(&id).bind(listing_id).bind(client).bind(&now).bind(&now)
-            .execute(db.sqlite_pool().expect("sqlite")).await?;
+            .bind(&id)
+            .bind(listing_id)
+            .bind(client)
+            .bind(&now)
+            .bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
         }
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO commissions (id, listing_id, client, state, created_at, updated_at)
-                 VALUES ($1, $2, $3, 'quoted', $4, $5)"
+                 VALUES ($1, $2, $3, 'quoted', $4, $5)",
             )
-            .bind(&id).bind(listing_id).bind(client).bind(&now).bind(&now)
-            .execute(db.postgres_pool().expect("postgres")).await?;
+            .bind(&id)
+            .bind(listing_id)
+            .bind(client)
+            .bind(&now)
+            .bind(&now)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?;
         }
     }
     Ok(id)
@@ -133,7 +181,10 @@ pub async fn transition_commission(
     ledger_ref: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     if !marketplace::valid_commission_transition(from, to) {
-        return Err(sqlx::Error::Protocol(format!("invalid transition: {:?} -> {:?}", from, to)));
+        return Err(sqlx::Error::Protocol(format!(
+            "invalid transition: {:?} -> {:?}",
+            from, to
+        )));
     }
 
     let now = crate::identity::now_rfc3339();
@@ -144,9 +195,15 @@ pub async fn transition_commission(
                     .bind(to.as_str()).bind(&now).bind(ledger).bind(commission_id).bind(from.as_str())
                     .execute(db.sqlite_pool().expect("sqlite")).await?;
             } else {
-                sqlx::query("UPDATE commissions SET state = ?, updated_at = ? WHERE id = ? AND state = ?")
-                    .bind(to.as_str()).bind(&now).bind(commission_id).bind(from.as_str())
-                    .execute(db.sqlite_pool().expect("sqlite")).await?;
+                sqlx::query(
+                    "UPDATE commissions SET state = ?, updated_at = ? WHERE id = ? AND state = ?",
+                )
+                .bind(to.as_str())
+                .bind(&now)
+                .bind(commission_id)
+                .bind(from.as_str())
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?;
             }
         }
         Backend::Postgres => {
@@ -205,7 +262,9 @@ pub async fn grant_extension(
     capabilities: &[Capability],
 ) -> Result<(), sqlx::Error> {
     let now = crate::identity::now_rfc3339();
-    let caps_json = serde_json::to_string(&capabilities.iter().map(|c| c.as_str()).collect::<Vec<_>>()).unwrap();
+    let caps_json =
+        serde_json::to_string(&capabilities.iter().map(|c| c.as_str()).collect::<Vec<_>>())
+            .unwrap();
 
     match db.backend() {
         Backend::Sqlite => {
@@ -236,9 +295,14 @@ pub async fn revoke_extension(
     let now = crate::identity::now_rfc3339();
     match db.backend() {
         Backend::Sqlite => {
-            sqlx::query("UPDATE extension_grants SET revoked_at = ? WHERE account = ? AND manifest_id = ?")
-                .bind(&now).bind(account).bind(manifest_id)
-                .execute(db.sqlite_pool().expect("sqlite")).await?;
+            sqlx::query(
+                "UPDATE extension_grants SET revoked_at = ? WHERE account = ? AND manifest_id = ?",
+            )
+            .bind(&now)
+            .bind(account)
+            .bind(manifest_id)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
         }
         Backend::Postgres => {
             sqlx::query("UPDATE extension_grants SET revoked_at = $1 WHERE account = $2 AND manifest_id = $3")
@@ -268,18 +332,30 @@ pub async fn create_webhook(
         Backend::Sqlite => {
             sqlx::query(
                 "INSERT INTO webhook_endpoints (id, owner, url, secret, events, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?)"
+                 VALUES (?, ?, ?, ?, ?, ?)",
             )
-            .bind(&id).bind(owner).bind(url).bind(secret).bind(&events_json).bind(&now)
-            .execute(db.sqlite_pool().expect("sqlite")).await?;
+            .bind(&id)
+            .bind(owner)
+            .bind(url)
+            .bind(secret)
+            .bind(&events_json)
+            .bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
         }
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO webhook_endpoints (id, owner, url, secret, events, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6)"
+                 VALUES ($1, $2, $3, $4, $5, $6)",
             )
-            .bind(&id).bind(owner).bind(url).bind(secret).bind(&events_json).bind(&now)
-            .execute(db.postgres_pool().expect("postgres")).await?;
+            .bind(&id)
+            .bind(owner)
+            .bind(url)
+            .bind(secret)
+            .bind(&events_json)
+            .bind(&now)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?;
         }
     }
     Ok(id)
@@ -354,46 +430,49 @@ pub async fn add_gallery_item(
     Ok(id)
 }
 
-pub async fn list_gallery_items(
-    db: &Database,
-    work_id: &str,
-) -> Result<Vec<Value>, sqlx::Error> {
+pub async fn list_gallery_items(db: &Database, work_id: &str) -> Result<Vec<Value>, sqlx::Error> {
     match db.backend() {
         Backend::Sqlite => {
             let rows = sqlx::query("SELECT id, work_id, owner, media_type, storage_key, alt_text, sanitized_document, created_at FROM gallery_items WHERE work_id = ?")
                 .bind(work_id)
                 .fetch_all(db.sqlite_pool().expect("sqlite"))
                 .await?;
-            Ok(rows.iter().map(|r| {
-                serde_json::json!({
-                    "id": r.get::<String, _>("id"),
-                    "work_id": r.get::<String, _>("work_id"),
-                    "owner": r.get::<String, _>("owner"),
-                    "media_type": r.get::<String, _>("media_type"),
-                    "storage_key": r.get::<String, _>("storage_key"),
-                    "alt_text": r.get::<String, _>("alt_text"),
-                    "sanitized_document": r.get::<String, _>("sanitized_document"),
-                    "created_at": r.get::<String, _>("created_at"),
+            Ok(rows
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "id": r.get::<String, _>("id"),
+                        "work_id": r.get::<String, _>("work_id"),
+                        "owner": r.get::<String, _>("owner"),
+                        "media_type": r.get::<String, _>("media_type"),
+                        "storage_key": r.get::<String, _>("storage_key"),
+                        "alt_text": r.get::<String, _>("alt_text"),
+                        "sanitized_document": r.get::<String, _>("sanitized_document"),
+                        "created_at": r.get::<String, _>("created_at"),
+                    })
                 })
-            }).collect())
+                .collect())
         }
         Backend::Postgres => {
             let rows = sqlx::query("SELECT id, work_id, owner, media_type, storage_key, alt_text, sanitized_document, created_at FROM gallery_items WHERE work_id = $1")
                 .bind(work_id)
                 .fetch_all(db.postgres_pool().expect("postgres"))
                 .await?;
-            Ok(rows.iter().map(|r| {
-                serde_json::json!({
-                    "id": r.get::<String, _>("id"),
-                    "work_id": r.get::<String, _>("work_id"),
-                    "owner": r.get::<String, _>("owner"),
-                    "media_type": r.get::<String, _>("media_type"),
-                    "storage_key": r.get::<String, _>("storage_key"),
-                    "alt_text": r.get::<String, _>("alt_text"),
-                    "sanitized_document": r.get::<String, _>("sanitized_document"),
-                    "created_at": r.get::<String, _>("created_at"),
+            Ok(rows
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "id": r.get::<String, _>("id"),
+                        "work_id": r.get::<String, _>("work_id"),
+                        "owner": r.get::<String, _>("owner"),
+                        "media_type": r.get::<String, _>("media_type"),
+                        "storage_key": r.get::<String, _>("storage_key"),
+                        "alt_text": r.get::<String, _>("alt_text"),
+                        "sanitized_document": r.get::<String, _>("sanitized_document"),
+                        "created_at": r.get::<String, _>("created_at"),
+                    })
                 })
-            }).collect())
+                .collect())
         }
     }
 }
