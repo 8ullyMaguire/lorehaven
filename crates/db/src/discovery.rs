@@ -2,10 +2,11 @@
 //!
 //! Spec §16.1–16.8. Both dialects.
 
-use crate::Database;
+use crate::{Backend, Database};
 use anyhow::Result;
 use lorehaven_domain::ids::WorkId;
 use serde::Serialize;
+use sqlx::Row;
 
 /// A taste profile row.
 #[derive(Debug, Clone, Serialize)]
@@ -600,4 +601,57 @@ pub async fn save_dashboard_layout(
         }
     }
     Ok(())
+}
+
+/// Titles and author handles for a batch of work ids, for feeds that show
+/// what a work is instead of the uuid that identifies it. Works that went
+/// missing between candidacy and rendering are simply absent from the map.
+pub async fn work_details_for(
+    db: &Database,
+    ids: &[String],
+) -> Result<std::collections::HashMap<String, (String, String)>, sqlx::Error> {
+    if ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let mut map = std::collections::HashMap::new();
+    match db.backend() {
+        Backend::Sqlite => {
+            let placeholders = std::iter::repeat_n("?", ids.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT w.id AS wid, w.title, COALESCE(p.handle, '') AS handle \
+                 FROM works w LEFT JOIN pseuds p ON p.id = w.owner_pseud_id \
+                 WHERE w.id IN ({placeholders}) AND w.deleted_at IS NULL"
+            );
+            let mut q = sqlx::query(&sql);
+            for id in ids {
+                q = q.bind(id);
+            }
+            let rows = q.fetch_all(db.sqlite_pool().expect("sqlite")).await?;
+            for r in rows {
+                map.insert(
+                    r.get::<String, _>("wid"),
+                    (r.get::<String, _>("title"), r.get::<String, _>("handle")),
+                );
+            }
+        }
+        Backend::Postgres => {
+            let rows = sqlx::query(
+                "SELECT w.id::text AS wid, w.title, COALESCE(p.handle, '') AS handle \
+                 FROM works w LEFT JOIN pseuds p ON p.id = w.owner_pseud_id \
+                 WHERE w.id = ANY($1::uuid[]) AND w.deleted_at IS NULL",
+            )
+            .bind(ids)
+            .fetch_all(db.postgres_pool().expect("postgres"))
+            .await?;
+            for r in rows {
+                map.insert(
+                    r.get::<String, _>("wid"),
+                    (r.get::<String, _>("title"), r.get::<String, _>("handle")),
+                );
+            }
+        }
+    }
+    Ok(map)
 }

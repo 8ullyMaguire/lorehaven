@@ -154,6 +154,24 @@ async fn get_discovery(
         }
     }
 
+    // A feed of bare uuids is useless to a human: attach the title and the
+    // author's handle so the page can show what each recommendation is.
+    let ids: Vec<String> = items
+        .iter()
+        .filter_map(|item| item["work_id"].as_str().map(|s| s.to_string()))
+        .collect();
+    let details = lorehaven_db::discovery::work_details_for(state.db(), &ids)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    for item in &mut items {
+        if let Some(id) = item["work_id"].as_str() {
+            if let Some((title, author)) = details.get(id) {
+                item["title"] = serde_json::Value::String(title.clone());
+                item["author_handle"] = serde_json::Value::String(author.clone());
+            }
+        }
+    }
+
     Ok(Json(serde_json::json!({ "items": items })))
 }
 
