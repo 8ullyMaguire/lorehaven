@@ -63,8 +63,15 @@ async fn mark_read(
     RequireSession(user): RequireSession,
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
+    // The id is a uuid column on both dialects; refusing a malformed id here
+    // keeps the answer identical (404) instead of SQLite 204 / PostgreSQL 500.
+    let id = id.parse::<uuid::Uuid>().map_err(|_| {
+        ApiError(lorehaven_domain::AppError::NotFound {
+            resource: "notification",
+        })
+    })?;
     let account_id = user.account_id.to_string();
-    lorehaven_db::notifications::mark_read(state.db(), &account_id, &id)
+    lorehaven_db::notifications::mark_read(state.db(), &account_id, &id.to_string())
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     Ok(StatusCode::NO_CONTENT)
