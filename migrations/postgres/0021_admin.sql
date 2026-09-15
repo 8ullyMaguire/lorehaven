@@ -14,7 +14,7 @@ CREATE INDEX idx_admin_actions_actor ON admin_actions(actor, created_at);
 CREATE TABLE feature_flags (
     key TEXT PRIMARY KEY,
     state TEXT NOT NULL,
-    rollout_bp INTEGER NOT NULL DEFAULT 0,
+    rollout_bp BIGINT NOT NULL DEFAULT 0,
     note TEXT NOT NULL,
     updated_by TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -51,10 +51,10 @@ CREATE INDEX idx_privacy_requests_account ON privacy_requests(account, state);
 
 CREATE TABLE abuse_counters (
     key TEXT NOT NULL,
-    window TEXT NOT NULL,
-    count INTEGER NOT NULL DEFAULT 0,
+    "window" TEXT NOT NULL,
+    count BIGINT NOT NULL DEFAULT 0,
     blocked_until TEXT,
-    PRIMARY KEY (key, window)
+    PRIMARY KEY (key, "window")
 );
 
 CREATE TABLE ip_policy (

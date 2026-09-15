@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS work_entitlements (
 -- §20.9.3 — author earnings are MONEY, a ledger append-only like credits.
 CREATE TABLE IF NOT EXISTS author_earnings_ledger (
     id              TEXT PRIMARY KEY,
-    author_account_id TEXT NOT NULL REFERENCES accounts (id) ON DELETE RESTRICT,
+    author_account_id TEXT REFERENCES accounts (id) ON DELETE RESTRICT,
     amount_minor    INTEGER NOT NULL,
     currency        TEXT NOT NULL,
     kind            TEXT NOT NULL,              -- tip | sale | patronage_payout | platform_fee
@@ -103,7 +103,7 @@ CREATE INDEX IF NOT EXISTS idx_content_sub_subject ON content_subscriptions(subj
 -- §14.2 — saved-search alerts: scheduled runs of a saved view.
 CREATE TABLE IF NOT EXISTS search_alerts (
     id               TEXT PRIMARY KEY,
-    saved_search_id  TEXT NOT NULL REFERENCES saved_searches (id) ON DELETE CASCADE,
+    saved_search_id  TEXT NOT NULL REFERENCES saved_views (id) ON DELETE CASCADE,
     owner_pseud_id   TEXT NOT NULL REFERENCES pseuds (id) ON DELETE CASCADE,
     frequency        TEXT NOT NULL DEFAULT 'daily',       -- daily | weekly | monthly
     last_run_at      TEXT,

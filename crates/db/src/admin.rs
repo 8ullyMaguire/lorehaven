@@ -52,8 +52,8 @@ pub async fn increment_abuse_counter(
     let count = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_scalar(
-                "INSERT INTO abuse_counters (key, window, count) VALUES (?, ?, 1)
-                 ON CONFLICT(key, window) DO UPDATE SET count = count + 1 RETURNING count",
+                "INSERT INTO abuse_counters (key, \"window\", count) VALUES (?, ?, 1)
+                 ON CONFLICT(key, \"window\") DO UPDATE SET count = count + 1 RETURNING count",
             )
             .bind(key)
             .bind(window)
@@ -62,8 +62,8 @@ pub async fn increment_abuse_counter(
         }
         Backend::Postgres => {
             sqlx::query_scalar(
-                "INSERT INTO abuse_counters (key, window, count) VALUES ($1, $2, 1)
-                 ON CONFLICT(key, window) DO UPDATE SET count = count + 1 RETURNING count",
+                "INSERT INTO abuse_counters (key, \"window\", count) VALUES ($1, $2, 1)
+                 ON CONFLICT(key, \"window\") DO UPDATE SET count = count + 1 RETURNING count",
             )
             .bind(key)
             .bind(window)

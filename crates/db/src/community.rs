@@ -890,7 +890,7 @@ pub async fn create_topic(
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "INSERT INTO forum_topics (id, category_id, author_pseud, title, created_at, last_post_at, locked) VALUES (?, ?, ?, ?, ?, ?, 0)",
-        "INSERT INTO forum_topics (id, category_id, author_pseud, title, created_at, last_post_at, locked) VALUES ($1, $2, $3, $4, $5, $5, 0)",
+        "INSERT INTO forum_topics (id, category_id, author_pseud, title, created_at, last_post_at, locked) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $5, FALSE)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -1524,7 +1524,7 @@ pub async fn list_conversations(db: &Database, viewer_account: &str) -> Result<V
 pub async fn toggle_topic_lock(db: &Database, topic_id: &str) -> Result<bool> {
     let sql = db.sql(
         "UPDATE forum_topics SET locked = CASE WHEN locked = 0 THEN 1 ELSE 0 END WHERE id = ?",
-        "UPDATE forum_topics SET locked = CASE WHEN locked = 0 THEN 1 ELSE 0 END WHERE id = $1",
+        "UPDATE forum_topics SET locked = (NOT locked) WHERE id = $1::uuid",
     );
     let affected = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)

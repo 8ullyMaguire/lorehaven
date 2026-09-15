@@ -53,6 +53,25 @@ pub async fn set_pricing(
             "must be tips|early_access|purchase|patronage",
         ))
     })?;
+    // Ownership: pricing is a money decision, so only the work's owner may
+    // make it. A work the caller does not own is reported as absent — the
+    // same deliberate indistinguishability the works module uses — because
+    // an FK on works(id) only proves the work exists, not who may price it.
+    let work = lorehaven_db::content::find_work(state.db(), work_id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    let pseud = user.pseud_id.ok_or_else(|| {
+        ApiError(lorehaven_domain::AppError::field(
+            "pseud_id",
+            "a pseud must be selected to set pricing",
+        ))
+    })?;
+    if work.owner_pseud_id != pseud {
+        return Err(ApiError(lorehaven_domain::AppError::NotFound {
+            resource: "work",
+        }));
+    }
     let model_str = match model {
         lorehaven_domain::monetization::Model::Tips => "tips",
         lorehaven_domain::monetization::Model::EarlyAccess => "early_access",
@@ -76,12 +95,28 @@ pub async fn set_pricing(
 
 pub async fn delete_pricing(
     State(state): State<AppState>,
-    RequireSession(_user): RequireSession,
+    RequireSession(user): RequireSession,
     Path(work_id): Path<String>,
 ) -> ApiResult<Json<Value>> {
     let work_id = work_id
         .parse::<lorehaven_domain::WorkId>()
         .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    // Same ownership rule as set_pricing: only the owner may unprice a work.
+    let work = lorehaven_db::content::find_work(state.db(), work_id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    let pseud = user.pseud_id.ok_or_else(|| {
+        ApiError(lorehaven_domain::AppError::field(
+            "pseud_id",
+            "a pseud must be selected to change pricing",
+        ))
+    })?;
+    if work.owner_pseud_id != pseud {
+        return Err(ApiError(lorehaven_domain::AppError::NotFound {
+            resource: "work",
+        }));
+    }
     let rows = monetization::disable_pricing(state.db(), &work_id.to_canonical_string())
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
@@ -171,7 +206,7 @@ pub async fn purchase(
     let author_payment_id = format!("purchase:{}:author", entitlement_id);
     let _author_earning = monetization::post_earnings(
         state.db(),
-        &author_pseud.account_id.to_string(),
+        Some(&author_pseud.account_id.to_string()),
         author_amt,
         &pricing.currency,
         "sale",
@@ -254,7 +289,7 @@ pub async fn tip(
                 lorehaven_domain::monetization::Rules::split(body.amount_minor, 1_500);
             let auth_id = monetization::post_earnings(
                 state.db(),
-                &author_account,
+                Some(&author_account),
                 author_amt,
                 &body.currency,
                 "tip",
@@ -263,9 +298,13 @@ pub async fn tip(
             )
             .await
             .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+            // The platform's share is a balanced entry with no account of
+            // its own (the ledger's FK to accounts rules out a synthetic
+            // "platform" account — SQLite used to swallow it, PostgreSQL
+            // rightly refuses it).
             let plat_id = monetization::post_earnings(
                 state.db(),
-                "platform",
+                None,
                 platform_amt,
                 &body.currency,
                 "platform_fee",
