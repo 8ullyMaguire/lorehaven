@@ -7,7 +7,7 @@ use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
-use lorehaven_db::{Database, DatabaseConfig};
+use lorehaven_db::DatabaseConfig;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -123,7 +123,7 @@ impl Client {
 
 struct Harness {
     dir: PathBuf,
-    db: Database,
+    tdb: test_support::TestDb,
 }
 
 impl Harness {
@@ -134,26 +134,17 @@ impl Harness {
             format: lorehaven_app::config::LogFormat::Pretty,
         });
         let dir = scratch_dir(tag);
-        let db = Database::connect(&DatabaseConfig::new(format!(
-            "sqlite://{}/lorehaven.sqlite?mode=rwc",
-            dir.display()
-        )))
-        .await
-        .expect("connect");
-        let _ = db.migrate().await.expect("migrate");
-        Self { dir, db }
-    }
-    fn db(&self) -> &Database {
-        &self.db
+        let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
+        Self { dir, tdb }
     }
     fn client(&self) -> Client {
         Client::new(server::build_router(AppState::new(
             config_for(&self.dir),
-            self.db.clone(),
+            self.tdb.db().clone(),
         )))
     }
     async fn cleanup(self) {
-        self.db.close().await;
+        self.tdb.cleanup().await;
         let _ = std::fs::remove_dir_all(self.dir);
     }
 }
@@ -181,7 +172,7 @@ async fn api_scope_vocabulary_works() {
     // Get the account ID from the database
     let account_id = sqlx::query_scalar::<_, String>("SELECT id FROM accounts WHERE email = ?")
         .bind("token-test@example.com")
-        .fetch_one(harness.db().sqlite_pool().expect("sqlite"))
+        .fetch_one(harness.tdb.db().sqlite_pool().expect("sqlite"))
         .await
         .expect("account exists");
 
@@ -192,7 +183,7 @@ async fn api_scope_vocabulary_works() {
 
     // Issue token
     let id = lorehaven_db::external::issue_token(
-        harness.db(),
+        harness.tdb.db(),
         &account_id,
         "personal",
         "test-token",
@@ -204,7 +195,7 @@ async fn api_scope_vocabulary_works() {
     assert!(!id.is_empty());
 
     // Resolve token
-    let result = lorehaven_db::external::resolve_token(harness.db(), "hash123")
+    let result = lorehaven_db::external::resolve_token(harness.tdb.db(), "hash123")
         .await
         .expect("resolve token");
     assert!(result.is_some());
@@ -214,10 +205,10 @@ async fn api_scope_vocabulary_works() {
     assert!(resolved_scopes.contains(&"content.read".to_string()));
 
     // Revoke token
-    lorehaven_db::external::revoke_token(harness.db(), &id)
+    lorehaven_db::external::revoke_token(harness.tdb.db(), &id)
         .await
         .expect("revoke token");
-    let result = lorehaven_db::external::resolve_token(harness.db(), "hash123")
+    let result = lorehaven_db::external::resolve_token(harness.tdb.db(), "hash123")
         .await
         .expect("resolve after revoke");
     assert!(result.is_none());
@@ -262,7 +253,7 @@ async fn feed_handle_generation() {
     let _client = harness.client();
 
     let id = lorehaven_db::external::upsert_feed_handle(
-        harness.db(),
+        harness.tdb.db(),
         "work",
         "my-story-123",
         "work-my-story-123",
@@ -280,7 +271,7 @@ async fn push_subscription_can_be_registered() {
     let _client = harness.client();
 
     let id = lorehaven_db::external::register_push_subscription(
-        harness.db(),
+        harness.tdb.db(),
         "test-account",
         "https://push.example.com/endpoint",
         "p256dh=abc&auth=def",
@@ -299,7 +290,7 @@ async fn federation_inbound_can_be_recorded() {
     let _client = harness.client();
 
     let id = lorehaven_db::external::record_inbound(
-        harness.db(),
+        harness.tdb.db(),
         "peer.example.com",
         "Create",
         "https://peer.example.com/objects/123",
@@ -317,7 +308,7 @@ async fn ai_request_can_be_recorded() {
     let _client = harness.client();
 
     let id = lorehaven_db::external::record_ai_request(
-        harness.db(),
+        harness.tdb.db(),
         "work-123",
         "ai-provider",
         "analysis",
@@ -341,14 +332,14 @@ async fn bot_can_be_registered() {
     // Get the account ID from the database
     let account_id = sqlx::query_scalar::<_, String>("SELECT id FROM accounts WHERE email = ?")
         .bind("bot-owner@example.com")
-        .fetch_one(harness.db().sqlite_pool().expect("sqlite"))
+        .fetch_one(harness.tdb.db().sqlite_pool().expect("sqlite"))
         .await
         .expect("account exists");
 
     // Issue token for bot
     let scopes = vec![lorehaven_domain::api_scopes::Scope::ContentRead];
     let token_id = lorehaven_db::external::issue_token(
-        harness.db(),
+        harness.tdb.db(),
         &account_id,
         "bot",
         "my-bot",
@@ -360,7 +351,7 @@ async fn bot_can_be_registered() {
 
     // Register bot
     let bot_id = lorehaven_db::external::register_bot(
-        harness.db(),
+        harness.tdb.db(),
         &token_id,
         &account_id,
         "owner@example.com",

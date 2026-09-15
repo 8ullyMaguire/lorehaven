@@ -21,7 +21,7 @@ use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
-use lorehaven_db::{sessions, Database, DatabaseConfig};
+use lorehaven_db::{sessions, DatabaseConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -48,15 +48,6 @@ fn config_for(dir: &Path) -> Config {
         dir.display()
     ));
     config
-}
-
-async fn scratch_database(dir: &Path) -> Database {
-    Database::connect(&DatabaseConfig::new(format!(
-        "sqlite://{}/lorehaven.sqlite?mode=rwc",
-        dir.display()
-    )))
-    .await
-    .expect("connect")
 }
 
 /// A client that keeps cookies and echoes the CSRF token, like a browser would.
@@ -174,7 +165,7 @@ impl Client {
 
 struct Harness {
     dir: PathBuf,
-    db: Database,
+    tdb: test_support::TestDb,
 }
 
 impl Harness {
@@ -191,20 +182,18 @@ impl Harness {
         });
 
         let dir = scratch_dir(tag);
-        let db = scratch_database(&dir).await;
-        db.migrate().await.expect("migrate");
-
-        Self { dir, db }
+        let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
+        Self { dir, tdb }
     }
 
     fn client(&self) -> Client {
         let config = config_for(&self.dir);
-        let app = server::build_router(AppState::new(config, self.db.clone()));
+        let app = server::build_router(AppState::new(config, self.tdb.db().clone()));
         Client::new(app)
     }
 
     async fn cleanup(self) {
-        self.db.close().await;
+        self.tdb.cleanup().await;
         let _ = std::fs::remove_dir_all(self.dir);
     }
 }
@@ -421,7 +410,7 @@ async fn logout_revokes_the_session_and_clears_the_cookies() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     // The session row itself is revoked, not merely forgotten by the client.
-    let live = sessions::live_sessions_for_account(&harness.db, account_id, &sessions::now())
+    let live = sessions::live_sessions_for_account(harness.tdb.db(), account_id, &sessions::now())
         .await
         .expect("list sessions");
     assert!(live.is_empty(), "logout must revoke the row");
@@ -1329,7 +1318,7 @@ async fn the_limiter_refuses_a_route_that_declares_no_class() {
 
     let harness = Harness::new("unclassified").await;
     let config = config_for(&harness.dir);
-    let state = AppState::new(config, harness.db.clone());
+    let state = AppState::new(config, harness.tdb.db().clone());
 
     let unclassified: axum::Router<AppState> =
         axum::Router::new().route("/bare", axum::routing::get(|| async { "ok" }));

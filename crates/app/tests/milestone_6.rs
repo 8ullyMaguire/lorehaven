@@ -33,7 +33,7 @@ use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
 use lorehaven_app::worker::{Worker, WorkerOptions};
 use lorehaven_db::storage::BlobStore;
-use lorehaven_db::{imports, jobs, revisions, Database, DatabaseConfig};
+use lorehaven_db::{imports, jobs, revisions, DatabaseConfig};
 use lorehaven_domain::jobs::{JobKind, RetryPolicy};
 use lorehaven_domain::AccountId;
 use lorehaven_scrapers::async_trait;
@@ -304,7 +304,7 @@ fn config_for(dir: &Path) -> Config {
 
 struct Harness {
     dir: PathBuf,
-    db: Database,
+    tdb: test_support::TestDb,
 }
 
 impl Harness {
@@ -316,19 +316,14 @@ impl Harness {
         });
 
         let dir = scratch_dir(tag);
-        let db = Database::connect(&DatabaseConfig::new(format!(
-            "sqlite://{}/lorehaven.sqlite?mode=rwc",
-            dir.display()
-        )))
-        .await
-        .expect("connect");
-        let report = db.migrate().await.expect("migrate");
+        let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
+        let report: Vec<String> = tdb.applied_migrations().to_vec();
         assert!(
-            report.applied.contains(&"0006_imports".to_owned()),
+            report.contains(&"0006_imports".to_owned()),
             "the imports migration must apply: {report:?}"
         );
 
-        let harness = Self { dir, db };
+        let harness = Self { dir, tdb };
         harness.seed_source(true, None).await;
         harness
     }
@@ -348,35 +343,30 @@ impl Harness {
         });
 
         let dir = scratch_dir(tag);
-        let db = Database::connect(&DatabaseConfig::new(format!(
-            "sqlite://{}/lorehaven.sqlite?mode=rwc",
-            dir.display()
-        )))
-        .await
-        .expect("connect");
-        let report = db.migrate().await.expect("migrate");
+        let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
+        let report: Vec<String> = tdb.applied_migrations().to_vec();
         assert!(
-            report.applied.contains(&"0006_imports".to_owned()),
+            report.contains(&"0006_imports".to_owned()),
             "the imports migration must apply: {report:?}"
         );
 
-        Self { dir, db }
+        Self { dir, tdb }
     }
 
     /// The source row the importer consults before it fetches anything.
     async fn seed_source(&self, enabled: bool, reason: Option<&str>) {
-        imports::upsert_source(&self.db, SOURCE, "Archive of Our Own", "0.1.0", "{}")
+        imports::upsert_source(self.tdb.db(), SOURCE, "Archive of Our Own", "0.1.0", "{}")
             .await
             .expect("seed source");
         if !enabled {
-            imports::set_source_enabled(&self.db, SOURCE, false, reason)
+            imports::set_source_enabled(self.tdb.db(), SOURCE, false, reason)
                 .await
                 .expect("disable source");
         }
     }
 
     fn state(&self) -> AppState {
-        AppState::new(config_for(&self.dir), self.db.clone())
+        AppState::new(config_for(&self.dir), self.tdb.db().clone())
     }
 
     /// State whose registry is the fixture adapter, so an import never reaches
@@ -390,7 +380,7 @@ impl Harness {
     fn state_with_config(&self, adapter: FixtureArchive, config: Config) -> AppState {
         let mut registry = Registry::new();
         registry.register(Box::new(adapter));
-        AppState::new(config, self.db.clone()).with_registry(registry)
+        AppState::new(config, self.tdb.db().clone()).with_registry(registry)
     }
 
     fn store(&self) -> BlobStore {
@@ -419,7 +409,7 @@ impl Harness {
     }
 
     async fn cleanup(self) {
-        self.db.close().await;
+        self.tdb.cleanup().await;
         let _ = std::fs::remove_dir_all(self.dir);
     }
 }
@@ -583,7 +573,7 @@ fn worker() -> Worker {
 async fn queue_import(harness: &Harness, account: AccountId, pseud: &str, dry_run: bool) -> String {
     let import_id = lorehaven_domain::ImportJobId::new().to_string();
     let job_id = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Import,
         &json!({ "import_job_id": import_id }).to_string(),
         None,
@@ -594,7 +584,7 @@ async fn queue_import(harness: &Harness, account: AccountId, pseud: &str, dry_ru
     .await
     .expect("enqueue");
     imports::create_import_job(
-        &harness.db,
+        harness.tdb.db(),
         &import_id,
         &job_id.to_string(),
         &account.to_string(),
@@ -636,7 +626,7 @@ async fn run_import(
 }
 
 async fn import_row(harness: &Harness, id: &str) -> imports::ImportJob {
-    imports::get_import_job(&harness.db, id)
+    imports::get_import_job(harness.tdb.db(), id)
         .await
         .expect("read import")
         .expect("the import exists")
@@ -657,7 +647,7 @@ async fn an_import_stores_a_works_chapters() {
     let row = import_row(&harness, &import_id).await;
     assert_eq!(row.state, "completed", "report: {:?}", row.report_json);
 
-    let item = imports::find_library_item(&harness.db, &account.to_string(), SOURCE, WORK_KEY)
+    let item = imports::find_library_item(harness.tdb.db(), &account.to_string(), SOURCE, WORK_KEY)
         .await
         .expect("find item")
         .expect("the item was created");
@@ -674,7 +664,7 @@ async fn an_import_stores_a_works_chapters() {
         "the library row keeps the address it was imported from"
     );
 
-    let chapters = imports::list_import_chapters(&harness.db, &import_id)
+    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
         .await
         .expect("chapters");
     assert_eq!(chapters.len(), 3, "the fixture holds three chapters");
@@ -687,7 +677,7 @@ async fn an_import_stores_a_works_chapters() {
             .as_ref()
             .expect("a stored chapter names its blob");
         let bytes = store
-            .get(&harness.db, checksum)
+            .get(harness.tdb.db(), checksum)
             .await
             .expect("read blob")
             .expect("the blob exists");
@@ -719,9 +709,10 @@ async fn a_preview_stores_nothing() {
     let harness = Harness::new("preview-readonly").await;
     let (_client, account, _pseud) = signed_in(&harness, "peeker@example.org", "peeker").await;
 
-    let items_before = imports::list_library_items(&harness.db, &account.to_string(), 50, None)
-        .await
-        .expect("items");
+    let items_before =
+        imports::list_library_items(harness.tdb.db(), &account.to_string(), 50, None)
+            .await
+            .expect("items");
 
     // The preview goes through the HTTP surface, on a state whose registry never
     // reaches the network.
@@ -747,7 +738,7 @@ async fn a_preview_stores_nothing() {
 
     // Nothing was written for either account.
     for id in [account, account_for_login] {
-        let items = imports::list_library_items(&harness.db, &id.to_string(), 50, None)
+        let items = imports::list_library_items(harness.tdb.db(), &id.to_string(), 50, None)
             .await
             .expect("items");
         assert!(
@@ -756,7 +747,7 @@ async fn a_preview_stores_nothing() {
             items.len()
         );
     }
-    let items_after = imports::list_library_items(&harness.db, &account.to_string(), 50, None)
+    let items_after = imports::list_library_items(harness.tdb.db(), &account.to_string(), 50, None)
         .await
         .expect("items");
     assert_eq!(items_after.len(), items_before.len());
@@ -790,7 +781,7 @@ async fn a_disabled_source_is_refused_with_its_reason() {
         "the operator's reason reaches the reader: {report}"
     );
 
-    let chapters = imports::list_import_chapters(&harness.db, &import_id)
+    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
         .await
         .expect("chapters");
     assert!(chapters.is_empty(), "nothing should have been stored");
@@ -812,7 +803,7 @@ async fn a_source_this_instance_cannot_reach_is_refused_before_it_is_queued() {
     let calls = adapter.calls();
     let mut http = Client::new(server::build_router(harness.state_with(adapter)));
     let account = register(&mut http, "walled@example.org", "walled").await;
-    let jobs_before = jobs::counts_by_state(&harness.db)
+    let jobs_before = jobs::counts_by_state(harness.tdb.db())
         .await
         .expect("job counts");
 
@@ -846,14 +837,14 @@ async fn a_source_this_instance_cannot_reach_is_refused_before_it_is_queued() {
         .await;
     assert_eq!(status, StatusCode::BAD_GATEWAY, "start: {body}");
 
-    let jobs_after = jobs::counts_by_state(&harness.db)
+    let jobs_after = jobs::counts_by_state(harness.tdb.db())
         .await
         .expect("job counts");
     assert_eq!(
         jobs_before, jobs_after,
         "a refused import must not leave a job behind"
     );
-    let refused = imports::list_import_jobs(&harness.db, &account.to_string(), None, 50, None)
+    let refused = imports::list_import_jobs(harness.tdb.db(), &account.to_string(), None, 50, None)
         .await
         .expect("imports");
     assert!(
@@ -1037,11 +1028,11 @@ async fn a_missing_credential_is_refused_before_any_fetch() {
     );
 
     // Fatal, not transient: retrying would send the same absent credential.
-    let job_id = imports::job_for_import(&harness.db, &import_id)
+    let job_id = imports::job_for_import(harness.tdb.db(), &import_id)
         .await
         .expect("job id")
         .expect("the import names its queue row");
-    let job = jobs::find(&harness.db, job_id.parse().expect("a job id"))
+    let job = jobs::find(harness.tdb.db(), job_id.parse().expect("a job id"))
         .await
         .expect("read job")
         .expect("the job exists");
@@ -1053,7 +1044,7 @@ async fn a_missing_credential_is_refused_before_any_fetch() {
     );
     assert_eq!(job.attempts, 1);
 
-    let chapters = imports::list_import_chapters(&harness.db, &import_id)
+    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
         .await
         .expect("chapters");
     assert!(chapters.is_empty());
@@ -1075,7 +1066,7 @@ async fn a_chapter_already_held_is_not_stored_again() {
 
     // A first import that completes, so there is something to resume from.
     let import_id = run_import(&harness, account, &pseud, FixtureArchive::new(), false).await;
-    let first = imports::list_import_chapters(&harness.db, &import_id)
+    let first = imports::list_import_chapters(harness.tdb.db(), &import_id)
         .await
         .expect("chapters");
     assert_eq!(first.len(), 3);
@@ -1092,7 +1083,7 @@ async fn a_chapter_already_held_is_not_stored_again() {
     // A second import of the same work: the same item, and each chapter's row
     // still pointing at the blob it already had.
     let second = run_import(&harness, account, &pseud, FixtureArchive::new(), false).await;
-    let now = imports::list_import_chapters(&harness.db, &second)
+    let now = imports::list_import_chapters(harness.tdb.db(), &second)
         .await
         .expect("chapters");
     let after: Vec<(String, Option<String>)> = now
@@ -1110,7 +1101,7 @@ async fn a_chapter_already_held_is_not_stored_again() {
     );
 
     // And the work is still one item, not two.
-    let items = imports::list_library_items(&harness.db, &account.to_string(), 50, None)
+    let items = imports::list_library_items(harness.tdb.db(), &account.to_string(), 50, None)
         .await
         .expect("items");
     assert_eq!(items.len(), 1, "two imports of one work are one item");
@@ -1136,11 +1127,11 @@ async fn a_transient_fetch_failure_stays_queued_for_retry() {
         row.report_json
     );
 
-    let job_id = imports::job_for_import(&harness.db, &import_id)
+    let job_id = imports::job_for_import(harness.tdb.db(), &import_id)
         .await
         .expect("job id")
         .expect("the import names its queue row");
-    let job = jobs::find(&harness.db, job_id.parse().expect("a job id"))
+    let job = jobs::find(harness.tdb.db(), job_id.parse().expect("a job id"))
         .await
         .expect("read job")
         .expect("the job exists");
@@ -1161,7 +1152,7 @@ async fn a_transient_fetch_failure_stays_queued_for_retry() {
 
     // Nothing was stored, so a retry starts from nothing and does not have to
     // unpick a half-written item.
-    let chapters = imports::list_import_chapters(&harness.db, &import_id)
+    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
         .await
         .expect("chapters");
     assert!(chapters.is_empty());
@@ -1189,11 +1180,11 @@ async fn a_source_that_withholds_a_work_fails_the_job_instead_of_retrying() {
     let import_id = queue_import(&harness, account, &pseud, false).await;
     run_passes(&state, 1).await;
 
-    let job_id = imports::job_for_import(&harness.db, &import_id)
+    let job_id = imports::job_for_import(harness.tdb.db(), &import_id)
         .await
         .expect("job id")
         .expect("the import names its queue row");
-    let job = jobs::find(&harness.db, job_id.parse().expect("a job id"))
+    let job = jobs::find(harness.tdb.db(), job_id.parse().expect("a job id"))
         .await
         .expect("read job")
         .expect("the job exists");
@@ -1215,7 +1206,7 @@ async fn a_source_that_withholds_a_work_fails_the_job_instead_of_retrying() {
 
     let row = import_row(&harness, &import_id).await;
     assert_ne!(row.state, "completed");
-    let chapters = imports::list_import_chapters(&harness.db, &import_id)
+    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
         .await
         .expect("chapters");
     assert!(chapters.is_empty(), "nothing was stored");
@@ -1238,7 +1229,7 @@ async fn a_dry_run_reports_without_storing_chapters() {
     assert_eq!(report["dry_run"], true);
     assert_eq!(report["plan"], "create");
 
-    let chapters = imports::list_import_chapters(&harness.db, &import_id)
+    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
         .await
         .expect("chapters");
     assert!(
@@ -1308,7 +1299,7 @@ async fn a_credential_round_trips_through_the_encrypted_store() {
     // key, so the value has to exist before the row that names it can.
     let owner_id = format!("{pseud}:{SOURCE}:a label");
     let secret_id = lorehaven_app::secrets::seal_secret(
-        &harness.db,
+        harness.tdb.db(),
         &cipher,
         "source_credential",
         &owner_id,
@@ -1318,13 +1309,19 @@ async fn a_credential_round_trips_through_the_encrypted_store() {
     .await
     .expect("seal");
 
-    let (row, _previous) =
-        imports::upsert_source_credential(&harness.db, &pseud, SOURCE, &secret_id, "a label", None)
-            .await
-            .expect("credential row");
+    let (row, _previous) = imports::upsert_source_credential(
+        harness.tdb.db(),
+        &pseud,
+        SOURCE,
+        &secret_id,
+        "a label",
+        None,
+    )
+    .await
+    .expect("credential row");
 
     // It comes back...
-    let opened = lorehaven_app::secrets::open_secret(&harness.db, &cipher, &secret_id)
+    let opened = lorehaven_app::secrets::open_secret(harness.tdb.db(), &cipher, &secret_id)
         .await
         .expect("open")
         .expect("the secret exists");
@@ -1347,11 +1344,11 @@ async fn a_credential_round_trips_through_the_encrypted_store() {
     );
 
     // Deleting the credential takes the secret with it.
-    let removed = imports::delete_source_credential(&harness.db, &row.id, &pseud)
+    let removed = imports::delete_source_credential(harness.tdb.db(), &row.id, &pseud)
         .await
         .expect("delete");
     assert_eq!(removed.as_deref(), Some(secret_id.as_str()));
-    let gone = lorehaven_app::secrets::open_secret(&harness.db, &cipher, &secret_id)
+    let gone = lorehaven_app::secrets::open_secret(harness.tdb.db(), &cipher, &secret_id)
         .await
         .expect("open after delete");
     assert!(gone.is_none(), "the secret outlived its credential");
@@ -1359,7 +1356,7 @@ async fn a_credential_round_trips_through_the_encrypted_store() {
     // Deleting a credential does not touch what was already imported
     // (spec §11.6). There is nothing imported here, so the assertion is that
     // the delete is scoped to the credential: a second delete finds nothing.
-    let again = imports::delete_source_credential(&harness.db, &row.id, &pseud)
+    let again = imports::delete_source_credential(harness.tdb.db(), &row.id, &pseud)
         .await
         .expect("second delete");
     assert!(again.is_none(), "the credential was already gone");
@@ -1452,14 +1449,14 @@ async fn an_unknown_address_is_refused_before_it_is_queued() {
         );
     }
 
-    let jobs = jobs::all_jobs(&harness.db, None, 50, None)
+    let jobs = jobs::all_jobs(harness.tdb.db(), None, 50, None)
         .await
         .expect("jobs");
     assert!(
         !jobs.iter().any(|job| job.kind == "import"),
         "a refused address must not be queued"
     );
-    let items = imports::list_library_items(&harness.db, &account.to_string(), 50, None)
+    let items = imports::list_library_items(harness.tdb.db(), &account.to_string(), 50, None)
         .await
         .expect("items");
     assert!(items.is_empty());
@@ -1511,7 +1508,7 @@ async fn a_failed_chapter_is_retried_without_refetching_the_rest() {
     // A completed import, to learn the source's own chapter keys and the
     // checksums the good chapters ended up with.
     let done = run_import(&harness, account, &pseud, FixtureArchive::new(), false).await;
-    let stored = imports::list_import_chapters(&harness.db, &done)
+    let stored = imports::list_import_chapters(harness.tdb.db(), &done)
         .await
         .expect("chapters");
     assert_eq!(stored.len(), 3);
@@ -1533,7 +1530,7 @@ async fn a_failed_chapter_is_retried_without_refetching_the_rest() {
     // chapter would leave it: two stored, the middle one failed.
     let retry_id = lorehaven_domain::ImportJobId::new().to_string();
     let job_id = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Import,
         &json!({ "import_job_id": retry_id }).to_string(),
         None,
@@ -1544,7 +1541,7 @@ async fn a_failed_chapter_is_retried_without_refetching_the_rest() {
     .await
     .expect("enqueue");
     imports::create_import_job(
-        &harness.db,
+        harness.tdb.db(),
         &retry_id,
         &job_id.to_string(),
         &account.to_string(),
@@ -1556,7 +1553,7 @@ async fn a_failed_chapter_is_retried_without_refetching_the_rest() {
     )
     .await
     .expect("create import");
-    let item = imports::find_library_item(&harness.db, &account.to_string(), SOURCE, WORK_KEY)
+    let item = imports::find_library_item(harness.tdb.db(), &account.to_string(), SOURCE, WORK_KEY)
         .await
         .expect("find")
         .expect("the item exists");
@@ -1567,7 +1564,7 @@ async fn a_failed_chapter_is_retried_without_refetching_the_rest() {
             ("stored".to_owned(), checksums.get(key).cloned().flatten())
         };
         imports::upsert_import_chapter(
-            &harness.db,
+            harness.tdb.db(),
             &retry_id,
             Some(&item.id),
             &imports::ImportChapterInput {
@@ -1600,7 +1597,7 @@ async fn a_failed_chapter_is_retried_without_refetching_the_rest() {
         "the retry must not re-read the whole work"
     );
 
-    let after = imports::list_import_chapters(&harness.db, &retry_id)
+    let after = imports::list_import_chapters(harness.tdb.db(), &retry_id)
         .await
         .expect("chapters");
     assert_eq!(after.len(), 3);
@@ -1638,7 +1635,7 @@ async fn an_import_is_queued_and_does_not_block_the_request() {
     assert_eq!(body["state"], "queued");
 
     // The queue holds it, and the request did not claim to have done anything.
-    let job = jobs::find(&harness.db, job_id.parse().expect("a job id"))
+    let job = jobs::find(harness.tdb.db(), job_id.parse().expect("a job id"))
         .await
         .expect("read job")
         .expect("the job exists");
@@ -1658,7 +1655,7 @@ async fn an_import_is_queued_and_does_not_block_the_request() {
     assert_eq!(row.state, "queued");
     assert_eq!(row.destination_type, "library");
     assert_eq!(
-        imports::job_for_import(&harness.db, &import_id)
+        imports::job_for_import(harness.tdb.db(), &import_id)
             .await
             .expect("job id")
             .as_deref(),
@@ -1666,11 +1663,11 @@ async fn an_import_is_queued_and_does_not_block_the_request() {
     );
 
     // And nothing has been fetched or stored yet.
-    let chapters = imports::list_import_chapters(&harness.db, &import_id)
+    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
         .await
         .expect("chapters");
     assert!(chapters.is_empty(), "the request must not fetch chapters");
-    let items = imports::list_library_items(&harness.db, &account.to_string(), 50, None)
+    let items = imports::list_library_items(harness.tdb.db(), &account.to_string(), 50, None)
         .await
         .expect("items");
     assert!(items.is_empty(), "the request must not create the item");
@@ -1694,7 +1691,7 @@ async fn an_expired_credential_is_reported_before_the_import_starts() {
     let cipher = lorehaven_app::secrets::load_cipher(&harness.dir.join("storage"), None, false)
         .expect("the development key");
     let secret_id = lorehaven_app::secrets::seal_secret(
-        &harness.db,
+        harness.tdb.db(),
         &cipher,
         "source_credential",
         &format!("{pseud}:{SOURCE}:an old login"),
@@ -1705,7 +1702,7 @@ async fn an_expired_credential_is_reported_before_the_import_starts() {
     .expect("seed secret");
 
     let (row, _previous) = imports::upsert_source_credential(
-        &harness.db,
+        harness.tdb.db(),
         &pseud,
         SOURCE,
         &secret_id,
@@ -1740,7 +1737,7 @@ async fn an_expired_credential_is_reported_before_the_import_starts() {
     );
 
     // And the credential itself is marked, so the reader can see why.
-    let listed = imports::list_source_credentials(&harness.db, &pseud, Some(SOURCE))
+    let listed = imports::list_source_credentials(harness.tdb.db(), &pseud, Some(SOURCE))
         .await
         .expect("credentials");
     assert_eq!(listed.len(), 1);
@@ -1773,7 +1770,7 @@ async fn the_retry_route_queues_only_when_something_failed() {
     );
 
     // Now record a failure, as an abandoned attempt would.
-    let chapters = imports::list_import_chapters(&harness.db, &import_id)
+    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
         .await
         .expect("chapters");
     let second = chapters
@@ -1781,7 +1778,7 @@ async fn the_retry_route_queues_only_when_something_failed() {
         .find(|chapter| chapter.ordinal == 2)
         .expect("chapter two");
     imports::upsert_import_chapter(
-        &harness.db,
+        harness.tdb.db(),
         &import_id,
         None,
         &imports::ImportChapterInput {
@@ -1830,14 +1827,14 @@ async fn finished_import(
     state: &str,
 ) -> String {
     let id = queue_import(harness, account, pseud, false).await;
-    imports::set_import_state(&harness.db, &id, state, None, None)
+    imports::set_import_state(harness.tdb.db(), &id, state, None, None)
         .await
         .expect("finish the import");
     id
 }
 
 async fn source_health(harness: &Harness) -> String {
-    imports::find_source(&harness.db, SOURCE)
+    imports::find_source(harness.tdb.db(), SOURCE)
         .await
         .expect("find the source")
         .expect("the source has a row")
@@ -1855,7 +1852,7 @@ async fn repeated_failures_make_a_source_unavailable_and_imports_are_refused() {
         finished_import(&harness, account, &pseud, "failed").await;
     }
 
-    let changes = imports::recompute_source_health(&harness.db, imports::HEALTH_WINDOW_DAYS)
+    let changes = imports::recompute_source_health(harness.tdb.db(), imports::HEALTH_WINDOW_DAYS)
         .await
         .expect("sweep");
     let change = changes
@@ -1908,7 +1905,7 @@ async fn one_success_among_failures_is_degraded_not_unavailable() {
         finished_import(&harness, account, &pseud, "failed").await;
     }
 
-    imports::recompute_source_health(&harness.db, imports::HEALTH_WINDOW_DAYS)
+    imports::recompute_source_health(harness.tdb.db(), imports::HEALTH_WINDOW_DAYS)
         .await
         .expect("sweep");
     assert_eq!(
@@ -1930,7 +1927,7 @@ async fn a_cancelled_import_is_neither_a_success_nor_a_failure() {
         finished_import(&harness, account, &pseud, "cancelled").await;
     }
 
-    let changes = imports::recompute_source_health(&harness.db, imports::HEALTH_WINDOW_DAYS)
+    let changes = imports::recompute_source_health(harness.tdb.db(), imports::HEALTH_WINDOW_DAYS)
         .await
         .expect("sweep");
     assert!(
@@ -1947,7 +1944,7 @@ async fn a_cancelled_import_is_neither_a_success_nor_a_failure() {
 async fn a_source_with_no_finished_imports_is_left_alone() {
     let harness = Harness::new("health-untried").await;
 
-    let changes = imports::recompute_source_health(&harness.db, imports::HEALTH_WINDOW_DAYS)
+    let changes = imports::recompute_source_health(harness.tdb.db(), imports::HEALTH_WINDOW_DAYS)
         .await
         .expect("sweep");
     assert!(changes.is_empty(), "nothing to report: {changes:?}");
@@ -1967,14 +1964,14 @@ async fn a_sweep_never_clears_an_operators_pause() {
     let harness = Harness::new("health-paused").await;
     let (_client, account, pseud) = signed_in(&harness, "paused@example.org", "paused").await;
 
-    imports::set_source_health(&harness.db, SOURCE, "paused")
+    imports::set_source_health(harness.tdb.db(), SOURCE, "paused")
         .await
         .expect("pause the source");
     for _ in 0..5 {
         finished_import(&harness, account, &pseud, "completed").await;
     }
 
-    let changes = imports::recompute_source_health(&harness.db, imports::HEALTH_WINDOW_DAYS)
+    let changes = imports::recompute_source_health(harness.tdb.db(), imports::HEALTH_WINDOW_DAYS)
         .await
         .expect("sweep");
     assert!(
@@ -2029,7 +2026,7 @@ async fn operator_client(harness: &Harness, account: AccountId, email: &str) -> 
     config.administration.operator_account_id = Some(account);
     let mut client = Client::new(server::build_router(AppState::new(
         config,
-        harness.db.clone(),
+        harness.tdb.db().clone(),
     )));
     let (status, body) = client
         .post(
@@ -2085,7 +2082,7 @@ async fn clearing_the_revision_cache_does_not_delete_stored_bytes() {
     // A chapter's bytes, stored the way an import stores them.
     let store = harness.store();
     let (checksum, _key) = store
-        .put(&harness.db, b"<html>a chapter</html>", "text/html")
+        .put(harness.tdb.db(), b"<html>a chapter</html>", "text/html")
         .await
         .expect("store the snapshot");
 
@@ -2097,7 +2094,7 @@ async fn clearing_the_revision_cache_does_not_delete_stored_bytes() {
         expires_at: lorehaven_db::identity::in_seconds(3600),
     };
     revisions::upsert(
-        &harness.db,
+        harness.tdb.db(),
         &revisions::RevisionKey {
             source_key: SOURCE,
             revision_key: WORK_URL,
@@ -2108,19 +2105,19 @@ async fn clearing_the_revision_cache_does_not_delete_stored_bytes() {
     )
     .await
     .expect("record the revision");
-    assert_eq!(revisions::count(&harness.db).await.expect("count"), 1);
+    assert_eq!(revisions::count(harness.tdb.db()).await.expect("count"), 1);
 
     let mut operator = operator_client(&harness, account, "keeper@example.org").await;
     let (status, body) = operator.delete("/api/v1/admin/sources/revisions").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["cleared"], 1, "{body}");
-    assert_eq!(revisions::count(&harness.db).await.expect("count"), 0);
+    assert_eq!(revisions::count(harness.tdb.db()).await.expect("count"), 0);
 
     // The bytes are still there. A cache is an optimisation; losing it costs
     // requests, and losing a snapshot costs a reader their chapter.
     assert!(
         store
-            .get(&harness.db, &checksum)
+            .get(harness.tdb.db(), &checksum)
             .await
             .expect("read the blob")
             .is_some(),
@@ -2147,7 +2144,7 @@ async fn clearing_the_revision_cache_does_not_delete_stored_bytes() {
 async fn the_catalogue_lists_the_builds_sources_before_any_row_exists() {
     let harness = Harness::empty("catalogue-fresh").await;
     assert!(
-        imports::list_sources(&harness.db)
+        imports::list_sources(harness.tdb.db())
             .await
             .expect("list sources")
             .is_empty(),
@@ -2201,13 +2198,13 @@ async fn the_library_reports_how_many_chapters_are_stored() {
     // The count is read before the import, when there is no item at all: a
     // library that reported a count only after a second visit would be reporting
     // on the wrong thing.
-    let before = imports::list_library_items(&harness.db, &account.to_string(), 50, None)
+    let before = imports::list_library_items(harness.tdb.db(), &account.to_string(), 50, None)
         .await
         .expect("list the empty library");
     assert!(before.is_empty(), "nothing is imported yet");
 
     let import_id = run_import(&harness, account, &pseud, FixtureArchive::new(), false).await;
-    let stored = imports::list_import_chapters(&harness.db, &import_id)
+    let stored = imports::list_import_chapters(harness.tdb.db(), &import_id)
         .await
         .expect("the import's chapters")
         .iter()
@@ -2215,7 +2212,7 @@ async fn the_library_reports_how_many_chapters_are_stored() {
         .count();
     assert_eq!(stored, 3, "the fixture holds three chapters");
 
-    let items = imports::list_library_items(&harness.db, &account.to_string(), 50, None)
+    let items = imports::list_library_items(harness.tdb.db(), &account.to_string(), 50, None)
         .await
         .expect("list the library");
     let item = items.first().expect("the imported item");

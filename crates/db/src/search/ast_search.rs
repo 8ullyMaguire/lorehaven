@@ -58,7 +58,7 @@ pub async fn search_works_ast(
             let limit_pg = 2 + user_binds.len();
             let pg = format!(
                 "SELECT works.id::text, works.title, pseuds.handle AS author_handle, \
-                        (SELECT COALESCE(SUM(cr.word_count), 0) FROM chapters c \
+                        (SELECT COALESCE(SUM(cr.word_count), 0)::bigint FROM chapters c \
                          JOIN chapter_revisions cr ON cr.id = c.current_revision_id \
                          WHERE c.work_id = works.id AND c.deleted_at IS NULL) AS word_count, \
                         COUNT(works_index_terms.term) AS score \
@@ -67,11 +67,11 @@ pub async fn search_works_ast(
                  LEFT JOIN works_index ON works_index.work_id = works.id \
                  JOIN pseuds ON pseuds.id = works.owner_pseud_id \
                  WHERE ((works.lifecycle = 'published' AND works.visibility != 'restricted') \
-                        OR works.owner_pseud_id IN (SELECT id FROM pseuds WHERE account_id = $1)) \
+                        OR works.owner_pseud_id IN (SELECT id FROM pseuds WHERE account_id = $1::uuid)) \
                    AND ({user_where_pg}) \
                    AND NOT EXISTS (SELECT 1 FROM blocks \
                                    WHERE blocks.blocker = $1 \
-                                     AND blocks.blocked = pseuds.account_id \
+                                     AND blocks.blocked = pseuds.account_id::text \
                                      AND blocks.scope = 'all') \
                  GROUP BY works.id, works.updated_at, pseuds.handle \
                  ORDER BY score DESC, works.updated_at DESC \
@@ -100,7 +100,7 @@ pub async fn search_works_ast(
             let limit_pg = 1 + user_binds.len();
             let pg = format!(
                 "SELECT works.id::text, works.title, pseuds.handle AS author_handle, \
-                        (SELECT COALESCE(SUM(cr.word_count), 0) FROM chapters c \
+                        (SELECT COALESCE(SUM(cr.word_count), 0)::bigint FROM chapters c \
                          JOIN chapter_revisions cr ON cr.id = c.current_revision_id \
                          WHERE c.work_id = works.id AND c.deleted_at IS NULL) AS word_count, \
                         COUNT(works_index_terms.term) AS score \

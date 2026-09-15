@@ -35,10 +35,10 @@ CREATE TABLE sanctions (
     account TEXT NOT NULL,
     kind TEXT NOT NULL,
     reason_ref TEXT NOT NULL,
-    starts_at TIMESTAMPTZ NOT NULL,
-    ends_at TIMESTAMPTZ,
+    starts_at TEXT NOT NULL,
+    ends_at TEXT,
     issued_by TEXT NOT NULL,
-    lifted_at TIMESTAMPTZ,
+    lifted_at TEXT,
     lifted_by TEXT
 );
 CREATE INDEX idx_sanctions_account_starts ON sanctions(account, starts_at);
@@ -48,9 +48,9 @@ CREATE TABLE appeals (
     sanction_id TEXT NOT NULL,
     appellant TEXT NOT NULL,
     statement TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at TEXT NOT NULL,
     state TEXT NOT NULL,
-    decided_at TIMESTAMPTZ,
+    decided_at TEXT,
     decision TEXT NOT NULL,
     decided_by TEXT NOT NULL
 );
@@ -62,14 +62,14 @@ CREATE TABLE audit_log (
     subject_type TEXT NOT NULL,
     subject_id TEXT NOT NULL,
     document JSONB NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TEXT NOT NULL
 );
 CREATE INDEX idx_audit_subject ON audit_log(subject_type, subject_id, created_at);
 
 CREATE TABLE operator_role (
     account TEXT PRIMARY KEY,
     role TEXT NOT NULL,
-    granted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    granted_at TEXT NOT NULL
 );
 
 CREATE TABLE preservation_batches (
@@ -80,6 +80,6 @@ CREATE TABLE preservation_batches (
     dry_run BOOLEAN NOT NULL,
     approval_basis TEXT NOT NULL,
     approved_by TEXT NOT NULL,
-    ran_at TIMESTAMPTZ,
+    ran_at TEXT,
     summary JSONB
 );

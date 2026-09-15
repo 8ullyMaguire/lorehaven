@@ -25,7 +25,7 @@ use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
-use lorehaven_db::{positivity, Database, DatabaseConfig};
+use lorehaven_db::{positivity, DatabaseConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -143,7 +143,7 @@ impl Client {
 
 struct Harness {
     dir: PathBuf,
-    db: Database,
+    tdb: test_support::TestDb,
 }
 
 impl Harness {
@@ -154,27 +154,22 @@ impl Harness {
             format: lorehaven_app::config::LogFormat::Pretty,
         });
         let dir = scratch_dir(tag);
-        let db = Database::connect(&DatabaseConfig::new(format!(
-            "sqlite://{}/lorehaven.sqlite?mode=rwc",
-            dir.display()
-        )))
-        .await
-        .expect("connect");
-        let report = db.migrate().await.expect("migrate");
+        let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
+        let report: Vec<String> = tdb.applied_migrations().to_vec();
         assert!(
-            report.applied.contains(&"0010_positivity".to_owned()),
+            report.contains(&"0010_positivity".to_owned()),
             "positivity migration must apply: {report:?}"
         );
-        Self { dir, db }
+        Self { dir, tdb }
     }
     fn client(&self) -> Client {
         Client::new(server::build_router(AppState::new(
             config_for(&self.dir),
-            self.db.clone(),
+            self.tdb.db().clone(),
         )))
     }
     async fn cleanup(self) {
-        self.db.close().await;
+        self.tdb.cleanup().await;
         let _ = std::fs::remove_dir_all(self.dir);
     }
 }
@@ -257,7 +252,7 @@ async fn positive_text_is_stored_and_delivered_by_default() {
         1,
         "delivered text is public"
     );
-    let stored = positivity::classification_for(&harness.db, &review_id)
+    let stored = positivity::classification_for(harness.tdb.db(), &review_id)
         .await
         .expect("read")
         .expect("classified");
@@ -429,7 +424,7 @@ async fn withdrawal_removes_the_review_but_keeps_the_audit_row() {
         "withdrawn leaves the list"
     );
     assert!(
-        positivity::classification_for(&harness.db, &review_id)
+        positivity::classification_for(harness.tdb.db(), &review_id)
             .await
             .expect("read")
             .is_some(),
@@ -462,7 +457,7 @@ async fn neutral_text_is_deterministic_and_never_double_classified() {
         assert_eq!(status, StatusCode::OK, "{body}");
     }
     let count: i64 = {
-        let pool = harness.db.sqlite_pool().expect("sqlite");
+        let pool = harness.tdb.db().sqlite_pool().expect("sqlite");
         sqlx::query_scalar("SELECT COUNT(*) FROM review_classifications")
             .fetch_one(pool)
             .await

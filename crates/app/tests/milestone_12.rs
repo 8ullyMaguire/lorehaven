@@ -17,7 +17,7 @@ use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
-use lorehaven_db::{Backend, Database, DatabaseConfig};
+use lorehaven_db::{Backend, DatabaseConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -132,7 +132,7 @@ impl Client {
 
 struct Harness {
     dir: PathBuf,
-    db: Database,
+    tdb: test_support::TestDb,
 }
 
 impl Harness {
@@ -143,23 +143,17 @@ impl Harness {
             format: lorehaven_app::config::LogFormat::Pretty,
         });
         let dir = scratch_dir(tag);
-        let db = Database::connect(&DatabaseConfig::new(format!(
-            "sqlite://{}/lorehaven.sqlite?mode=rwc",
-            dir.display()
-        )))
-        .await
-        .expect("connect");
-        let _ = db.migrate().await.expect("migrate");
-        Self { dir, db }
+        let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
+        Self { dir, tdb }
     }
     fn client(&self) -> Client {
         Client::new(server::build_router(AppState::new(
             config_for(&self.dir),
-            self.db.clone(),
+            self.tdb.db().clone(),
         )))
     }
     async fn cleanup(self) {
-        self.db.close().await;
+        self.tdb.cleanup().await;
         let _ = std::fs::remove_dir_all(self.dir);
     }
 }
@@ -597,18 +591,18 @@ async fn a_forum_topic_can_be_created_replied_to_and_locked() {
     // Seed a category directly (test DBs don't run the dev seed).
     let cat_id = "11111111-1111-1111-1111-111111111111";
     let sql = "INSERT INTO forum_categories (id, name, position, min_trust) VALUES (?, 'Test Category', 0, 0)";
-    match harness.db.backend() {
+    match harness.tdb.db().backend() {
         Backend::Sqlite => {
             sqlx::query(sql)
                 .bind(cat_id)
-                .execute(harness.db.sqlite_pool().expect("sqlite"))
+                .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
                 .await
                 .expect("seed category");
         }
         Backend::Postgres => {
             sqlx::query(sql)
                 .bind(cat_id)
-                .execute(harness.db.postgres_pool().expect("postgres"))
+                .execute(harness.tdb.db().postgres_pool().expect("postgres"))
                 .await
                 .expect("seed category");
         }
@@ -702,18 +696,18 @@ async fn a_trust_gate_rejects_underleveled_posters() {
     // Category that requires editor-level trust (5).
     let cat_id = "22222222-2222-2222-2222-222222222222";
     let sql = "INSERT INTO forum_categories (id, name, position, min_trust) VALUES (?, 'Editors Only', 0, 5)";
-    match harness.db.backend() {
+    match harness.tdb.db().backend() {
         Backend::Sqlite => {
             sqlx::query(sql)
                 .bind(cat_id)
-                .execute(harness.db.sqlite_pool().expect("sqlite"))
+                .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
                 .await
                 .unwrap();
         }
         Backend::Postgres => {
             sqlx::query(sql)
                 .bind(cat_id)
-                .execute(harness.db.postgres_pool().expect("postgres"))
+                .execute(harness.tdb.db().postgres_pool().expect("postgres"))
                 .await
                 .unwrap();
         }
@@ -731,18 +725,18 @@ async fn a_trust_gate_rejects_underleveled_posters() {
 
     // Promote the user to editor level.
     let sql = "INSERT INTO trust_levels (account, level, computed_at, basis) VALUES (?, 5, datetime('now'), 'test')";
-    match harness.db.backend() {
+    match harness.tdb.db().backend() {
         Backend::Sqlite => {
             sqlx::query(sql)
                 .bind(&account_id)
-                .execute(harness.db.sqlite_pool().expect("sqlite"))
+                .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
                 .await
                 .unwrap();
         }
         Backend::Postgres => {
             sqlx::query(sql)
                 .bind(&account_id)
-                .execute(harness.db.postgres_pool().expect("postgres"))
+                .execute(harness.tdb.db().postgres_pool().expect("postgres"))
                 .await
                 .unwrap();
         }
@@ -818,18 +812,18 @@ async fn a_reply_notifies_the_topic_author_and_the_inbox_settles() {
     // Seed a category with min_trust 0 (test DBs don't run the dev seed).
     let cat_id = "22222222-2222-2222-2222-222222222222";
     let sql = "INSERT INTO forum_categories (id, name, position, min_trust) VALUES (?, 'Notify Category', 0, 0)";
-    match harness.db.backend() {
+    match harness.tdb.db().backend() {
         Backend::Sqlite => {
             sqlx::query(sql)
                 .bind(cat_id)
-                .execute(harness.db.sqlite_pool().expect("sqlite"))
+                .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
                 .await
                 .expect("seed category");
         }
         Backend::Postgres => {
             sqlx::query(sql)
                 .bind(cat_id)
-                .execute(harness.db.postgres_pool().expect("postgres"))
+                .execute(harness.tdb.db().postgres_pool().expect("postgres"))
                 .await
                 .expect("seed category");
         }

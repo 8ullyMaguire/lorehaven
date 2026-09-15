@@ -17,7 +17,7 @@ CREATE TABLE recipes (
     owner TEXT NOT NULL,
     name TEXT NOT NULL,
     document TEXT NOT NULL,
-    is_public INTEGER NOT NULL DEFAULT 0,
+    is_public BIGINT NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
 

@@ -12,7 +12,7 @@ use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
-use lorehaven_db::{reading, Database, DatabaseConfig};
+use lorehaven_db::{reading, DatabaseConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -147,7 +147,7 @@ impl Client {
 
 struct Harness {
     dir: PathBuf,
-    db: Database,
+    tdb: test_support::TestDb,
 }
 
 impl Harness {
@@ -159,30 +159,25 @@ impl Harness {
         });
 
         let dir = scratch_dir(tag);
-        let db = Database::connect(&DatabaseConfig::new(format!(
-            "sqlite://{}/lorehaven.sqlite?mode=rwc",
-            dir.display()
-        )))
-        .await
-        .expect("connect");
-        let report = db.migrate().await.expect("migrate");
+        let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
+        let report: Vec<String> = tdb.applied_migrations().to_vec();
         assert!(
-            report.applied.contains(&"0004_reading".to_owned()),
+            report.contains(&"0004_reading".to_owned()),
             "the reading migration must apply: {report:?}"
         );
 
-        Self { dir, db }
+        Self { dir, tdb }
     }
 
     fn client(&self) -> Client {
         Client::new(server::build_router(AppState::new(
             config_for(&self.dir),
-            self.db.clone(),
+            self.tdb.db().clone(),
         )))
     }
 
     async fn cleanup(self) {
-        self.db.close().await;
+        self.tdb.cleanup().await;
         let _ = std::fs::remove_dir_all(self.dir);
     }
 }
@@ -390,7 +385,7 @@ async fn progress_saved_by_one_device_does_not_overwrite_another() {
         .unwrap()
         .parse()
         .unwrap();
-    let positions = reading::progress_for(&harness.db, account_id, "work", &work_id)
+    let positions = reading::progress_for(harness.tdb.db(), account_id, "work", &work_id)
         .await
         .expect("progress");
     assert_eq!(positions.len(), 2, "expected one position per device");
@@ -427,9 +422,10 @@ async fn a_private_rating_changes_no_public_number() {
     assert_eq!(status, StatusCode::OK);
 
     // The public aggregate is still absent.
-    let summary = reading::public_rating_summary(&harness.db, work_id.parse().expect("work id"))
-        .await
-        .expect("summary");
+    let summary =
+        reading::public_rating_summary(harness.tdb.db(), work_id.parse().expect("work id"))
+            .await
+            .expect("summary");
     assert!(
         summary.is_none(),
         "a private rating must not move the aggregate"
@@ -463,7 +459,7 @@ async fn the_public_aggregate_is_absent_below_the_minimum_count() {
         .await;
         let pseud = active_pseud(&mut rater).await;
         reading::upsert_rating(
-            &harness.db,
+            harness.tdb.db(),
             rater.get("/api/v1/auth/me").await.1["account"]["id"]
                 .as_str()
                 .unwrap()
@@ -478,7 +474,7 @@ async fn the_public_aggregate_is_absent_below_the_minimum_count() {
         .expect("upsert");
     }
 
-    let summary = reading::public_rating_summary(&harness.db, work_uuid)
+    let summary = reading::public_rating_summary(harness.tdb.db(), work_uuid)
         .await
         .expect("summary");
     assert!(
@@ -514,7 +510,7 @@ async fn the_aggregate_reports_its_count_and_method() {
         .await;
         let pseud = active_pseud(&mut rater).await;
         reading::upsert_rating(
-            &harness.db,
+            harness.tdb.db(),
             rater.get("/api/v1/auth/me").await.1["account"]["id"]
                 .as_str()
                 .unwrap()
@@ -529,7 +525,7 @@ async fn the_aggregate_reports_its_count_and_method() {
         .expect("upsert");
     }
 
-    let summary = reading::public_rating_summary(&harness.db, work_uuid)
+    let summary = reading::public_rating_summary(harness.tdb.db(), work_uuid)
         .await
         .expect("summary");
     let summary = summary.expect("aggregate should be present at five ratings");
@@ -575,7 +571,7 @@ async fn switching_pseud_shows_a_different_history() {
 
     let pseud_id: lorehaven_domain::PseudId = second.parse().expect("pseud");
     reading::touch_history(
-        &harness.db,
+        harness.tdb.db(),
         reader.get("/api/v1/auth/me").await.1["account"]["id"]
             .as_str()
             .unwrap()
@@ -702,7 +698,7 @@ async fn clearing_history_removes_only_the_callers_rows() {
 
     // Both touch history for the same subject.
     reading::touch_history(
-        &harness.db,
+        harness.tdb.db(),
         account_a,
         active_pseud(&mut reader_a).await.parse().expect("pseud"),
         "work",
@@ -712,7 +708,7 @@ async fn clearing_history_removes_only_the_callers_rows() {
     .await
     .expect("touch a");
     reading::touch_history(
-        &harness.db,
+        harness.tdb.db(),
         account_b,
         active_pseud(&mut reader_b).await.parse().expect("pseud"),
         "work",
@@ -730,7 +726,7 @@ async fn clearing_history_removes_only_the_callers_rows() {
 
     // A's history is empty; B's still has its row.
     let a_history = reading::history_for(
-        &harness.db,
+        harness.tdb.db(),
         account_a,
         active_pseud(&mut reader_a).await.parse().expect("pseud"),
         50,
@@ -738,7 +734,7 @@ async fn clearing_history_removes_only_the_callers_rows() {
     .await
     .expect("history a");
     let b_history = reading::history_for(
-        &harness.db,
+        harness.tdb.db(),
         account_b,
         active_pseud(&mut reader_b).await.parse().expect("pseud"),
         50,
@@ -938,7 +934,7 @@ async fn resuming_after_an_edit_uses_the_anchor_not_the_offset() {
         .expect("account id")
         .parse()
         .expect("account id");
-    let positions = reading::progress_for(&harness.db, account_id, "work", &work_id)
+    let positions = reading::progress_for(harness.tdb.db(), account_id, "work", &work_id)
         .await
         .expect("progress");
     assert_eq!(
@@ -999,13 +995,13 @@ async fn a_rating_is_invisible_to_the_accounts_other_pseud() {
     assert_eq!(status, StatusCode::OK, "{body}");
 
     assert!(
-        reading::rating_for(&harness.db, first, work)
+        reading::rating_for(harness.tdb.db(), first, work)
             .await
             .expect("rating")
             .is_none(),
         "the first pseud gave no rating and must see none"
     );
-    let rated = reading::rating_for(&harness.db, second, work)
+    let rated = reading::rating_for(harness.tdb.db(), second, work)
         .await
         .expect("rating")
         .expect("the rating the second face gave");

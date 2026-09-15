@@ -126,7 +126,7 @@ impl Client {
 
 struct Harness {
     dir: PathBuf,
-    db: Database,
+    tdb: test_support::TestDb,
 }
 
 impl Harness {
@@ -137,26 +137,20 @@ impl Harness {
             format: lorehaven_app::config::LogFormat::Pretty,
         });
         let dir = scratch_dir(tag);
-        let db = Database::connect(&DatabaseConfig::new(format!(
-            "sqlite://{}/lorehaven.sqlite?mode=rwc",
-            dir.display()
-        )))
-        .await
-        .expect("connect");
-        let _ = db.migrate().await.expect("migrate");
-        Self { dir, db }
+        let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
+        Self { dir, tdb }
     }
     fn db(&self) -> &Database {
-        &self.db
+        self.tdb.db()
     }
     fn client(&self) -> Client {
         Client::new(server::build_router(AppState::new(
             config_for(&self.dir),
-            self.db.clone(),
+            self.tdb.db().clone(),
         )))
     }
     async fn cleanup(self) {
-        self.db.close().await;
+        self.tdb.cleanup().await;
         let _ = std::fs::remove_dir_all(self.dir);
     }
 }

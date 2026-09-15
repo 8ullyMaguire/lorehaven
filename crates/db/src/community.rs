@@ -1398,7 +1398,7 @@ pub async fn presence_for(
 pub async fn list_presence(db: &Database) -> Result<Vec<(String, String, Option<String>, bool)>> {
     let sql = db.sql(
         "SELECT account, last_seen_at, typing_until, enabled FROM presence ORDER BY account",
-        "SELECT account, last_seen_at, typing_until, enabled::int::bigint AS enabled FROM presence ORDER BY account",
+        "SELECT account, last_seen_at, typing_until, enabled FROM presence ORDER BY account",
     );
     let rows = match db.backend() {
         Backend::Sqlite => {
@@ -1406,11 +1406,11 @@ pub async fn list_presence(db: &Database) -> Result<Vec<(String, String, Option<
                 .fetch_all(db.sqlite_pool().expect("sqlite"))
                 .await?
         }
-        Backend::Postgres => sqlx::query_as::<_, (String, String, Option<String>, i64)>(&sql)
+        Backend::Postgres => sqlx::query_as::<_, (String, String, Option<String>, bool)>(&sql)
             .fetch_all(db.postgres_pool().expect("postgres"))
             .await?
             .into_iter()
-            .map(|(a, l, t, e)| (a, l, t, e != 0))
+            .map(|(a, l, t, e)| (a, l, t, e))
             .collect(),
     };
     Ok(rows)

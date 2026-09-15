@@ -24,7 +24,7 @@ use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
 use lorehaven_app::worker::{Worker, WorkerOptions};
-use lorehaven_db::{Database, DatabaseConfig};
+use lorehaven_db::DatabaseConfig;
 use lorehaven_domain::exports::{epub, ExportFormat};
 use lorehaven_domain::jobs::{JobKind, RetryPolicy};
 use serde_json::{json, Value};
@@ -186,7 +186,7 @@ impl Client {
 
 struct Harness {
     dir: PathBuf,
-    db: Database,
+    tdb: test_support::TestDb,
 }
 
 impl Harness {
@@ -198,23 +198,18 @@ impl Harness {
         });
 
         let dir = scratch_dir(tag);
-        let db = Database::connect(&DatabaseConfig::new(format!(
-            "sqlite://{}/lorehaven.sqlite?mode=rwc",
-            dir.display()
-        )))
-        .await
-        .expect("connect");
-        let report = db.migrate().await.expect("migrate");
+        let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
+        let report: Vec<String> = tdb.applied_migrations().to_vec();
         assert!(
-            report.applied.contains(&"0008_exports".to_owned()),
+            report.contains(&"0008_exports".to_owned()),
             "the exports migration must apply: {report:?}"
         );
 
-        Self { dir, db }
+        Self { dir, tdb }
     }
 
     fn state(&self) -> AppState {
-        AppState::new(config_for(&self.dir), self.db.clone())
+        AppState::new(config_for(&self.dir), self.tdb.db().clone())
     }
 
     fn client(&self) -> Client {
@@ -227,7 +222,7 @@ impl Harness {
     }
 
     async fn cleanup(self) {
-        self.db.close().await;
+        self.tdb.cleanup().await;
         let _ = std::fs::remove_dir_all(self.dir);
     }
 }
@@ -672,7 +667,7 @@ async fn the_retention_sweep_removes_the_export_and_its_output() {
     drain(&state, 8).await;
 
     // Where the output is on disk, before anything removes it.
-    let row = lorehaven_db::exports::find_export(&harness.db, &export_id)
+    let row = lorehaven_db::exports::find_export(harness.tdb.db(), &export_id)
         .await
         .expect("find")
         .expect("the export exists");
@@ -688,7 +683,7 @@ async fn the_retention_sweep_removes_the_export_and_its_output() {
     // across the whole instance, so the sweep must not be able to delete a
     // reader's reading copy on its way past.
     store
-        .reference(&harness.db, &checksum, "test_other_owner", "elsewhere")
+        .reference(harness.tdb.db(), &checksum, "test_other_owner", "elsewhere")
         .await
         .expect("a second reference");
 
@@ -696,14 +691,14 @@ async fn the_retention_sweep_removes_the_export_and_its_output() {
     // not going to wait, so the row's own clock is moved.
     sqlx::query("UPDATE export_jobs SET created_at = '2020-01-01T00:00:00Z' WHERE id = ?")
         .bind(&export_id)
-        .execute(harness.db.sqlite_pool().expect("sqlite"))
+        .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
         .await
         .expect("age the export");
 
     // Queued through the queue itself, as the CLI does, so this asserts the
     // worker's own behaviour rather than the operator route's permissions.
     lorehaven_db::jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Maintenance,
         &json!({ "task": "purge_exports" }).to_string(),
         None,
@@ -716,7 +711,7 @@ async fn the_retention_sweep_removes_the_export_and_its_output() {
     drain(&state, 8).await;
 
     assert!(
-        lorehaven_db::exports::find_export(&harness.db, &export_id)
+        lorehaven_db::exports::find_export(harness.tdb.db(), &export_id)
             .await
             .expect("find")
             .is_none(),
@@ -730,12 +725,12 @@ async fn the_retention_sweep_removes_the_export_and_its_output() {
     // With the other reference gone too, the collector is entitled to remove it —
     // and this is the only place that deletion happens.
     store
-        .unreference(&harness.db, &checksum, "test_other_owner", "elsewhere")
+        .unreference(harness.tdb.db(), &checksum, "test_other_owner", "elsewhere")
         .await
         .expect("drop the second reference");
     assert!(
         store
-            .delete_if_unreferenced(&harness.db, &checksum)
+            .delete_if_unreferenced(harness.tdb.db(), &checksum)
             .await
             .expect("collect"),
         "an unreferenced blob is deleted"

@@ -7,7 +7,7 @@ use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
-use lorehaven_db::{Database, DatabaseConfig};
+use lorehaven_db::DatabaseConfig;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -122,7 +122,7 @@ impl Client {
 
 struct Harness {
     dir: PathBuf,
-    db: Database,
+    tdb: test_support::TestDb,
 }
 
 impl Harness {
@@ -133,23 +133,17 @@ impl Harness {
             format: lorehaven_app::config::LogFormat::Pretty,
         });
         let dir = scratch_dir(tag);
-        let db = Database::connect(&DatabaseConfig::new(format!(
-            "sqlite://{}/lorehaven.sqlite?mode=rwc",
-            dir.display()
-        )))
-        .await
-        .expect("connect");
-        let _ = db.migrate().await.expect("migrate");
-        Self { dir, db }
+        let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
+        Self { dir, tdb }
     }
     fn client(&self) -> Client {
         Client::new(server::build_router(AppState::new(
             config_for(&self.dir),
-            self.db.clone(),
+            self.tdb.db().clone(),
         )))
     }
     async fn cleanup(self) {
-        self.db.close().await;
+        self.tdb.cleanup().await;
         let _ = std::fs::remove_dir_all(self.dir);
     }
 }
@@ -345,7 +339,7 @@ async fn a_steward_can_issue_a_sanction() {
     let (s_account, _) = register(&mut steward, "steward@example.com", "Steward").await;
 
     // Promote the steward to TL 4 so they can issue sanctions.
-    lorehaven_db::governance::set_trust(&harness.db, &s_account, 4, "steward-test")
+    lorehaven_db::governance::set_trust(harness.tdb.db(), &s_account, 4, "steward-test")
         .await
         .expect("promote steward");
 

@@ -3,7 +3,6 @@
 use std::path::PathBuf;
 
 use lorehaven_app::server::set_trust_proxy;
-use lorehaven_db::{Database, DatabaseConfig};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -23,7 +22,7 @@ fn scratch_dir(tag: &str) -> PathBuf {
 
 struct Harness {
     dir: PathBuf,
-    db: Database,
+    tdb: test_support::TestDb,
 }
 
 impl Harness {
@@ -34,20 +33,11 @@ impl Harness {
             format: lorehaven_app::config::LogFormat::Pretty,
         });
         let dir = scratch_dir(tag);
-        let db = Database::connect(&DatabaseConfig::new(format!(
-            "sqlite://{}/lorehaven.sqlite?mode=rwc",
-            dir.display()
-        )))
-        .await
-        .expect("connect");
-        let _ = db.migrate().await.expect("migrate");
-        Self { dir, db }
-    }
-    fn db(&self) -> &Database {
-        &self.db
+        let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
+        Self { dir, tdb }
     }
     async fn cleanup(self) {
-        self.db.close().await;
+        self.tdb.cleanup().await;
         let _ = std::fs::remove_dir_all(self.dir);
     }
 }
@@ -61,7 +51,7 @@ async fn a_translation_job_can_be_created_and_transitioned() {
     let harness = Harness::new("job-create").await;
 
     let job_id = lorehaven_db::translation::create_job(
-        harness.db(),
+        harness.tdb.db(),
         "work-123",
         "en",
         "es",
@@ -75,7 +65,7 @@ async fn a_translation_job_can_be_created_and_transitioned() {
     assert!(!job_id.is_empty());
 
     // Verify initial state is "quoted"
-    let job = lorehaven_db::translation::get_job(harness.db(), &job_id)
+    let job = lorehaven_db::translation::get_job(harness.tdb.db(), &job_id)
         .await
         .expect("get job")
         .expect("job exists");
@@ -83,7 +73,7 @@ async fn a_translation_job_can_be_created_and_transitioned() {
 
     // Transition: quoted -> reserved
     lorehaven_db::translation::transition_job(
-        harness.db(),
+        harness.tdb.db(),
         &job_id,
         &lorehaven_domain::translation::TranslationJobState::Quoted,
         &lorehaven_domain::translation::TranslationJobState::Reserved,
@@ -91,7 +81,7 @@ async fn a_translation_job_can_be_created_and_transitioned() {
     .await
     .expect("transition to reserved");
 
-    let job = lorehaven_db::translation::get_job(harness.db(), &job_id)
+    let job = lorehaven_db::translation::get_job(harness.tdb.db(), &job_id)
         .await
         .expect("get job")
         .expect("job exists");
@@ -105,7 +95,7 @@ async fn translation_units_can_be_upserted_and_listed() {
     let harness = Harness::new("units").await;
 
     let job_id = lorehaven_db::translation::create_job(
-        harness.db(),
+        harness.tdb.db(),
         "work-456",
         "en",
         "fr",
@@ -118,7 +108,7 @@ async fn translation_units_can_be_upserted_and_listed() {
 
     // Upsert a unit
     lorehaven_db::translation::upsert_unit(
-        harness.db(),
+        harness.tdb.db(),
         &job_id,
         "ch-1",
         0,
@@ -132,7 +122,7 @@ async fn translation_units_can_be_upserted_and_listed() {
 
     // Upsert another unit
     lorehaven_db::translation::upsert_unit(
-        harness.db(),
+        harness.tdb.db(),
         &job_id,
         "ch-1",
         1,
@@ -144,7 +134,7 @@ async fn translation_units_can_be_upserted_and_listed() {
     .await
     .expect("upsert unit 2");
 
-    let units = lorehaven_db::translation::units_for_job(harness.db(), &job_id)
+    let units = lorehaven_db::translation::units_for_job(harness.tdb.db(), &job_id)
         .await
         .expect("units");
     assert_eq!(units.len(), 2);
@@ -161,7 +151,7 @@ async fn translation_memory_can_be_added_and_looked_up() {
     let hash = lorehaven_domain::translation::paragraph_hash("The quick brown fox");
 
     lorehaven_db::translation::add_memory(
-        harness.db(),
+        harness.tdb.db(),
         "author-1",
         "en",
         "es",
@@ -175,7 +165,7 @@ async fn translation_memory_can_be_added_and_looked_up() {
     .expect("add memory");
 
     let result =
-        lorehaven_db::translation::lookup_memory(harness.db(), "author-1", "en", "es", &hash)
+        lorehaven_db::translation::lookup_memory(harness.tdb.db(), "author-1", "en", "es", &hash)
             .await
             .expect("lookup memory");
 
@@ -193,7 +183,7 @@ async fn glossary_term_can_be_added() {
     let harness = Harness::new("glossary").await;
 
     let id = lorehaven_db::translation::add_glossary_term(
-        harness.db(),
+        harness.tdb.db(),
         "author-1",
         None,
         "en",
@@ -221,7 +211,7 @@ async fn review_gate_can_be_opened_and_decided() {
     let harness = Harness::new("review").await;
 
     let job_id = lorehaven_db::translation::create_job(
-        harness.db(),
+        harness.tdb.db(),
         "work-789",
         "en",
         "de",
@@ -233,7 +223,7 @@ async fn review_gate_can_be_opened_and_decided() {
     .expect("create job");
 
     let review_id = lorehaven_db::translation::open_review_gate(
-        harness.db(),
+        harness.tdb.db(),
         &job_id,
         "reviewer-1",
         &lorehaven_domain::translation::ReviewGate::Linguistic,
@@ -245,7 +235,7 @@ async fn review_gate_can_be_opened_and_decided() {
 
     // Decide the review
     lorehaven_db::translation::decide_review_gate(
-        harness.db(),
+        harness.tdb.db(),
         &review_id,
         "approved",
         Some("Looks good!"),
@@ -261,7 +251,7 @@ async fn publication_can_be_recorded() {
     let harness = Harness::new("publication").await;
 
     let job_id = lorehaven_db::translation::create_job(
-        harness.db(),
+        harness.tdb.db(),
         "work-abc",
         "en",
         "ja",
@@ -273,7 +263,7 @@ async fn publication_can_be_recorded() {
     .expect("create job");
 
     let pub_id =
-        lorehaven_db::translation::record_publication(harness.db(), &job_id, "work-abc-ja")
+        lorehaven_db::translation::record_publication(harness.tdb.db(), &job_id, "work-abc-ja")
             .await
             .expect("record publication");
 

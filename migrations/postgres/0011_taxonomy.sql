@@ -22,23 +22,23 @@ CREATE INDEX taxonomy_aliases_norm ON taxonomy_aliases (norm);
 CREATE INDEX taxonomy_aliases_node ON taxonomy_aliases (node_id);
 
 CREATE TABLE work_tags (
-    work_id TEXT NOT NULL,
+    work_id UUID NOT NULL REFERENCES works (id) ON DELETE CASCADE,
     node_id TEXT NOT NULL,
-    weight INTEGER NOT NULL DEFAULT 0,
+    weight BIGINT NOT NULL DEFAULT 0,
     added_at TEXT NOT NULL,
     PRIMARY KEY (work_id, node_id)
 );
 CREATE INDEX work_tags_node ON work_tags (node_id);
 
 CREATE TABLE works_index (
-    work_id TEXT PRIMARY KEY,
+    work_id UUID PRIMARY KEY REFERENCES works (id) ON DELETE CASCADE,
     body_text TEXT NOT NULL
 );
 
 CREATE TABLE works_index_terms (
-    work_id TEXT NOT NULL,
+    work_id UUID NOT NULL REFERENCES works (id) ON DELETE CASCADE,
     term TEXT NOT NULL,
-    pos INTEGER NOT NULL
+    pos BIGINT NOT NULL
 );
 CREATE INDEX works_index_terms_term ON works_index_terms (term, work_id);
 CREATE INDEX works_index_terms_work_pos ON works_index_terms (work_id, pos);

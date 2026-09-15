@@ -233,7 +233,7 @@ pub async fn search_in_work(
                 .collect())
         }
         Backend::Postgres => {
-            let sql = "SELECT pos, term FROM works_index_terms                        WHERE work_id = ?::uuid AND term LIKE $1 || '%'                        ORDER BY pos ASC LIMIT 100";
+            let sql = "SELECT pos, term FROM works_index_terms                        WHERE work_id = $1::uuid AND term LIKE $2 || '%'                        ORDER BY pos ASC LIMIT 100";
             let rows = sqlx::query_as::<_, (i64, String)>(sql)
                 .bind(work_id.to_string())
                 .bind(&needle)

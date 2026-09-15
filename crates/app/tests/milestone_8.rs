@@ -21,7 +21,7 @@ use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
 use lorehaven_db::storage::BlobStore;
-use lorehaven_db::{imports, Database, DatabaseConfig};
+use lorehaven_db::{imports, DatabaseConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -156,7 +156,7 @@ impl Client {
 
 struct Harness {
     dir: PathBuf,
-    db: Database,
+    tdb: test_support::TestDb,
 }
 
 impl Harness {
@@ -168,23 +168,18 @@ impl Harness {
         });
 
         let dir = scratch_dir(tag);
-        let db = Database::connect(&DatabaseConfig::new(format!(
-            "sqlite://{}/lorehaven.sqlite?mode=rwc",
-            dir.display()
-        )))
-        .await
-        .expect("connect");
-        let report = db.migrate().await.expect("migrate");
+        let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
+        let report: Vec<String> = tdb.applied_migrations().to_vec();
         assert!(
-            report.applied.contains(&"0009_library".to_owned()),
+            report.contains(&"0009_library".to_owned()),
             "the library migration must apply: {report:?}"
         );
 
-        Self { dir, db }
+        Self { dir, tdb }
     }
 
     fn state(&self) -> AppState {
-        AppState::new(config_for(&self.dir), self.db.clone())
+        AppState::new(config_for(&self.dir), self.tdb.db().clone())
     }
 
     fn client(&self) -> Client {
@@ -196,7 +191,7 @@ impl Harness {
     }
 
     async fn cleanup(self) {
-        self.db.close().await;
+        self.tdb.cleanup().await;
         let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
@@ -226,7 +221,7 @@ async fn register(client: &mut Client, email: &str, handle: &str) -> String {
 /// Seed a library item the way an import would.
 async fn seed_item(harness: &Harness, account: &str, slug: &str, title: &str) -> String {
     let item = imports::upsert_library_item(
-        &harness.db,
+        harness.tdb.db(),
         account,
         "royalroad",
         slug,
@@ -570,11 +565,11 @@ async fn removing_an_item_and_deleting_its_copy_are_different_operations() {
         (&deleted, b"deleted now".as_slice()),
     ] {
         let (checksum, _key) = store
-            .put(&harness.db, body, "text/plain")
+            .put(harness.tdb.db(), body, "text/plain")
             .await
             .expect("put");
         store
-            .reference(&harness.db, &checksum, "library_item", item)
+            .reference(harness.tdb.db(), &checksum, "library_item", item)
             .await
             .expect("reference");
         sizes.push(i64::try_from(body.len()).expect("size"));
@@ -606,7 +601,7 @@ async fn removing_an_item_and_deleting_its_copy_are_different_operations() {
     // collects.
     assert_eq!(
         store
-            .stat(&harness.db, &checksums[0])
+            .stat(harness.tdb.db(), &checksums[0])
             .await
             .expect("stat")
             .map(|stat| stat.byte_size),
@@ -614,7 +609,7 @@ async fn removing_an_item_and_deleting_its_copy_are_different_operations() {
         "a reference-only removal must leave the stored copy in place"
     );
     let collectable = store
-        .unreferenced(&harness.db, 50)
+        .unreferenced(harness.tdb.db(), 50)
         .await
         .expect("unreferenced");
     assert!(
@@ -880,26 +875,26 @@ async fn storage_usage_matches_the_sum_of_the_items() {
     let mut checksums = Vec::new();
     for body in bodies {
         let (checksum, _key) = store
-            .put(&harness.db, body, "text/plain")
+            .put(harness.tdb.db(), body, "text/plain")
             .await
             .expect("put");
         checksums.push(checksum);
     }
     // The first two belong to one item each; the third is shared by both.
     store
-        .reference(&harness.db, &checksums[0], "library_item", &first)
+        .reference(harness.tdb.db(), &checksums[0], "library_item", &first)
         .await
         .expect("reference");
     store
-        .reference(&harness.db, &checksums[1], "library_item", &second)
+        .reference(harness.tdb.db(), &checksums[1], "library_item", &second)
         .await
         .expect("reference");
     store
-        .reference(&harness.db, &checksums[2], "library_item", &first)
+        .reference(harness.tdb.db(), &checksums[2], "library_item", &first)
         .await
         .expect("reference");
     store
-        .reference(&harness.db, &checksums[2], "library_item", &second)
+        .reference(harness.tdb.db(), &checksums[2], "library_item", &second)
         .await
         .expect("reference");
 

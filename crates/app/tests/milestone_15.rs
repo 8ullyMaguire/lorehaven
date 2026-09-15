@@ -7,7 +7,7 @@ use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
-use lorehaven_db::{Database, DatabaseConfig};
+use lorehaven_db::DatabaseConfig;
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -123,7 +123,7 @@ impl Client {
 
 struct Harness {
     dir: PathBuf,
-    db: Database,
+    tdb: test_support::TestDb,
 }
 
 impl Harness {
@@ -134,26 +134,17 @@ impl Harness {
             format: lorehaven_app::config::LogFormat::Pretty,
         });
         let dir = scratch_dir(tag);
-        let db = Database::connect(&DatabaseConfig::new(format!(
-            "sqlite://{}/lorehaven.sqlite?mode=rwc",
-            dir.display()
-        )))
-        .await
-        .expect("connect");
-        let _ = db.migrate().await.expect("migrate");
-        Self { dir, db }
-    }
-    fn db(&self) -> &Database {
-        &self.db
+        let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
+        Self { dir, tdb }
     }
     fn client(&self) -> Client {
         Client::new(server::build_router(AppState::new(
             config_for(&self.dir),
-            self.db.clone(),
+            self.tdb.db().clone(),
         )))
     }
     async fn cleanup(self) {
-        self.db.close().await;
+        self.tdb.cleanup().await;
         let _ = std::fs::remove_dir_all(self.dir);
     }
 }
@@ -187,7 +178,7 @@ async fn a_credit_transaction_can_be_posted_and_is_balanced() {
         ("bob".to_string(), "earned".to_string(), -100),
     ];
     let txn_id = lorehaven_db::economy::post_transaction(
-        harness.db(),
+        harness.tdb.db(),
         lorehaven_domain::economy::TxnType::Earn,
         "test-txn-1",
         "test-ref",
@@ -199,10 +190,10 @@ async fn a_credit_transaction_can_be_posted_and_is_balanced() {
     assert!(!txn_id.is_empty());
 
     // Verify balances
-    let alice_balances = lorehaven_db::economy::balances(harness.db(), "alice")
+    let alice_balances = lorehaven_db::economy::balances(harness.tdb.db(), "alice")
         .await
         .expect("alice balances");
-    let bob_balances = lorehaven_db::economy::balances(harness.db(), "bob")
+    let bob_balances = lorehaven_db::economy::balances(harness.tdb.db(), "bob")
         .await
         .expect("bob balances");
 
@@ -228,7 +219,7 @@ async fn idempotency_key_replay_returns_same_txn_id() {
     ];
 
     let id1 = lorehaven_db::economy::post_transaction(
-        harness.db(),
+        harness.tdb.db(),
         lorehaven_domain::economy::TxnType::Earn,
         "idem-key-1",
         "ref-1",
@@ -238,7 +229,7 @@ async fn idempotency_key_replay_returns_same_txn_id() {
     .expect("first post");
 
     let id2 = lorehaven_db::economy::post_transaction(
-        harness.db(),
+        harness.tdb.db(),
         lorehaven_domain::economy::TxnType::Earn,
         "idem-key-1",
         "ref-1",
@@ -257,17 +248,18 @@ async fn a_hold_can_be_reserved_released_and_captured() {
     let harness = Harness::new("holds").await;
     let _client = harness.client();
 
-    let hold_id = lorehaven_db::economy::reserve_hold(harness.db(), "alice", "job-123", 100, 3600)
-        .await
-        .expect("reserve hold");
+    let hold_id =
+        lorehaven_db::economy::reserve_hold(harness.tdb.db(), "alice", "job-123", 100, 3600)
+            .await
+            .expect("reserve hold");
 
     // Release the hold
-    lorehaven_db::economy::release_hold(harness.db(), &hold_id)
+    lorehaven_db::economy::release_hold(harness.tdb.db(), &hold_id)
         .await
         .expect("release hold");
 
     // Capture the hold (actual charge = 80)
-    lorehaven_db::economy::capture_hold(harness.db(), &hold_id, 80)
+    lorehaven_db::economy::capture_hold(harness.tdb.db(), &hold_id, 80)
         .await
         .expect("capture hold");
 
@@ -279,13 +271,13 @@ async fn fair_queue_preserves_order_within_class() {
     let harness = Harness::new("fair-queue").await;
     let _client = harness.client();
 
-    let pos1 = lorehaven_db::economy::enqueue_job(harness.db(), "job-a", "free")
+    let pos1 = lorehaven_db::economy::enqueue_job(harness.tdb.db(), "job-a", "free")
         .await
         .expect("enqueue a");
-    let pos2 = lorehaven_db::economy::enqueue_job(harness.db(), "job-b", "free")
+    let pos2 = lorehaven_db::economy::enqueue_job(harness.tdb.db(), "job-b", "free")
         .await
         .expect("enqueue b");
-    let pos3 = lorehaven_db::economy::enqueue_job(harness.db(), "job-c", "free")
+    let pos3 = lorehaven_db::economy::enqueue_job(harness.tdb.db(), "job-c", "free")
         .await
         .expect("enqueue c");
 
@@ -294,13 +286,13 @@ async fn fair_queue_preserves_order_within_class() {
     assert_eq!(pos3, 3);
 
     // Priority class gets its own position 1
-    let pos_pri = lorehaven_db::economy::enqueue_job(harness.db(), "job-pri", "priority")
+    let pos_pri = lorehaven_db::economy::enqueue_job(harness.tdb.db(), "job-pri", "priority")
         .await
         .expect("enqueue priority");
     assert_eq!(pos_pri, 1);
 
     // Verify positions are observable
-    let q1 = lorehaven_db::economy::queue_position(harness.db(), "job-a")
+    let q1 = lorehaven_db::economy::queue_position(harness.tdb.db(), "job-a")
         .await
         .expect("queue position a");
     assert_eq!(q1, Some(("free".to_string(), 1)));
@@ -316,13 +308,13 @@ async fn usage_counters_increment_and_roll_over() {
     let day = "2026-09-14";
 
     let (count1, _cap) =
-        lorehaven_db::economy::bump_counter(harness.db(), "alice", "read_chapter", day, 10)
+        lorehaven_db::economy::bump_counter(harness.tdb.db(), "alice", "read_chapter", day, 10)
             .await
             .expect("bump 1");
     assert_eq!(count1, 1);
 
     let (count2, _cap) =
-        lorehaven_db::economy::bump_counter(harness.db(), "alice", "read_chapter", day, 10)
+        lorehaven_db::economy::bump_counter(harness.tdb.db(), "alice", "read_chapter", day, 10)
             .await
             .expect("bump 2");
     assert_eq!(count2, 2);
@@ -330,13 +322,13 @@ async fn usage_counters_increment_and_roll_over() {
     // Different day resets
     let day2 = "2026-09-15";
     let (count3, _cap) =
-        lorehaven_db::economy::bump_counter(harness.db(), "alice", "read_chapter", day2, 10)
+        lorehaven_db::economy::bump_counter(harness.tdb.db(), "alice", "read_chapter", day2, 10)
             .await
             .expect("bump 3");
     assert_eq!(count3, 1);
 
     // Verify usage retrieval
-    let usage = lorehaven_db::economy::usage_for(harness.db(), "alice", day)
+    let usage = lorehaven_db::economy::usage_for(harness.tdb.db(), "alice", day)
         .await
         .expect("usage");
     assert_eq!(usage.len(), 1);

@@ -16,7 +16,7 @@ use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
 use lorehaven_app::worker::{PassReport, TopicHandler, Worker, WorkerOptions};
 use lorehaven_db::storage::BlobStore;
-use lorehaven_db::{jobs, outbox, Database, DatabaseConfig};
+use lorehaven_db::{jobs, outbox, DatabaseConfig};
 use lorehaven_domain::jobs::{JobKind, JobState, RetryPolicy};
 use lorehaven_domain::{AccountId, JobId, OutboxEventId};
 use serde_json::{json, Value};
@@ -49,7 +49,7 @@ fn config_for(dir: &Path) -> Config {
 
 struct Harness {
     dir: PathBuf,
-    db: Database,
+    tdb: test_support::TestDb,
     state: AppState,
 }
 
@@ -62,26 +62,21 @@ impl Harness {
         });
 
         let dir = scratch_dir(tag);
-        let db = Database::connect(&DatabaseConfig::new(format!(
-            "sqlite://{}/lorehaven.sqlite?mode=rwc",
-            dir.display()
-        )))
-        .await
-        .expect("connect");
-        let report = db.migrate().await.expect("migrate");
+        let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
+        let report: Vec<String> = tdb.applied_migrations().to_vec();
         assert!(
-            report.applied.contains(&"0005_jobs_and_storage".to_owned()),
+            report.contains(&"0005_jobs_and_storage".to_owned()),
             "the jobs migration must apply: {report:?}"
         );
 
-        let state = AppState::new(config_for(&dir), db.clone());
-        Self { dir, db, state }
+        let state = AppState::new(config_for(&dir), tdb.db().clone());
+        Self { dir, tdb, state }
     }
 
     fn client(&self) -> Client {
         Client::new(server::build_router(AppState::new(
             config_for(&self.dir),
-            self.db.clone(),
+            self.tdb.db().clone(),
         )))
     }
 
@@ -90,7 +85,7 @@ impl Harness {
     }
 
     async fn cleanup(self) {
-        self.db.close().await;
+        self.tdb.cleanup().await;
         let _ = std::fs::remove_dir_all(self.dir);
     }
 }
@@ -240,7 +235,7 @@ async fn a_claimed_job_is_not_claimed_twice() {
     let _ = &store;
     for _ in 0..8 {
         jobs::enqueue(
-            &harness.db,
+            harness.tdb.db(),
             JobKind::Maintenance,
             r#"{"task":"probe","steps":1}"#,
             None,
@@ -257,7 +252,7 @@ async fn a_claimed_job_is_not_claimed_twice() {
     // Eight claims by two workers, interleaved the way two processes would.
     for round in 0..4 {
         for name in ["worker-a", "worker-b"] {
-            let claimed = jobs::claim_next(&harness.db, name, Duration::from_secs(60), now)
+            let claimed = jobs::claim_next(harness.tdb.db(), name, Duration::from_secs(60), now)
                 .await
                 .expect("claim")
                 .expect("a job is waiting");
@@ -280,7 +275,7 @@ async fn a_claimed_job_is_not_claimed_twice() {
 async fn a_lease_that_expires_is_requeued() {
     let harness = Harness::new("lease-expiry").await;
     let job = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Maintenance,
         r#"{"task":"probe"}"#,
         None,
@@ -292,36 +287,45 @@ async fn a_lease_that_expires_is_requeued() {
     .expect("enqueue");
 
     let start = time::OffsetDateTime::now_utc();
-    let claimed = jobs::claim_next(&harness.db, "doomed-worker", Duration::from_secs(30), start)
-        .await
-        .expect("claim")
-        .expect("a job is waiting");
+    let claimed = jobs::claim_next(
+        harness.tdb.db(),
+        "doomed-worker",
+        Duration::from_secs(30),
+        start,
+    )
+    .await
+    .expect("claim")
+    .expect("a job is waiting");
     assert_eq!(claimed.id, job.to_string());
     assert_eq!(claimed.state, "leased");
     assert!(claimed.lease_expires_at.is_some());
 
     // Long before the lease ends, nothing is reclaimed.
-    let requeued = jobs::requeue_expired_leases(&harness.db, start + Duration::from_secs(1))
+    let requeued = jobs::requeue_expired_leases(harness.tdb.db(), start + Duration::from_secs(1))
         .await
         .expect("sweep");
     assert_eq!(requeued, 0, "a live lease must not be stolen");
     assert_eq!(
-        jobs::find(&harness.db, job).await.unwrap().unwrap().state,
+        jobs::find(harness.tdb.db(), job)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
         "leased"
     );
 
     // After it expires, the job is available again — and the worker that held it
     // can no longer finish it.
-    let requeued = jobs::requeue_expired_leases(&harness.db, start + Duration::from_secs(31))
+    let requeued = jobs::requeue_expired_leases(harness.tdb.db(), start + Duration::from_secs(31))
         .await
         .expect("sweep");
     assert_eq!(requeued, 1);
-    let row = jobs::find(&harness.db, job).await.unwrap().unwrap();
+    let row = jobs::find(harness.tdb.db(), job).await.unwrap().unwrap();
     assert_eq!(row.state, "queued");
     assert!(row.lease_owner.is_none());
 
     let reclaimed = jobs::claim_next(
-        &harness.db,
+        harness.tdb.db(),
         "second-worker",
         Duration::from_secs(30),
         start + Duration::from_secs(32),
@@ -331,7 +335,7 @@ async fn a_lease_that_expires_is_requeued() {
     .expect("the job is claimable again");
     assert_eq!(reclaimed.id, job.to_string());
     assert!(
-        !jobs::complete(&harness.db, job, "doomed-worker")
+        !jobs::complete(harness.tdb.db(), job, "doomed-worker")
             .await
             .expect("complete"),
         "the worker that lost its lease must not be able to finish the job"
@@ -347,7 +351,7 @@ async fn a_cancelled_job_stops_at_the_next_checkpoint() {
     let harness = Harness::new("cancel-checkpoint").await;
     // Twelve steps of 40ms: long enough that the cancel lands in the middle.
     let job = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Maintenance,
         r#"{"task":"probe","steps":12,"delay_ms":40}"#,
         None,
@@ -364,7 +368,7 @@ async fn a_cancelled_job_stops_at_the_next_checkpoint() {
     // Let a couple of steps happen, then cancel it.
     tokio::time::sleep(Duration::from_millis(120)).await;
     assert!(
-        jobs::cancel(&harness.db, job).await.expect("cancel"),
+        jobs::cancel(harness.tdb.db(), job).await.expect("cancel"),
         "a queued or running job is cancellable"
     );
     let report = running.await.expect("join").expect("pass");
@@ -373,7 +377,7 @@ async fn a_cancelled_job_stops_at_the_next_checkpoint() {
     assert_eq!(finished, job);
     assert_eq!(job_state, JobState::Cancelled);
 
-    let row = jobs::find(&harness.db, job).await.unwrap().unwrap();
+    let row = jobs::find(harness.tdb.db(), job).await.unwrap().unwrap();
     assert_eq!(row.state, "cancelled");
     assert!(
         row.progress_permille < 1000,
@@ -383,7 +387,7 @@ async fn a_cancelled_job_stops_at_the_next_checkpoint() {
         row.checkpoint.is_some(),
         "a cancelled job leaves the checkpoint it stopped at: {row:?}"
     );
-    let attempts = jobs::attempts_for(&harness.db, job)
+    let attempts = jobs::attempts_for(harness.tdb.db(), job)
         .await
         .expect("attempts");
     assert_eq!(attempts.len(), 1);
@@ -404,7 +408,7 @@ async fn a_retry_uses_the_backoff() {
         jitter_permille: 0,
     };
     let job = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Maintenance,
         r#"{"task":"probe","steps":3,"fail":"the far end hung up"}"#,
         None,
@@ -423,7 +427,7 @@ async fn a_retry_uses_the_backoff() {
         "the first failure is retried"
     );
 
-    let row = jobs::find(&harness.db, job).await.unwrap().unwrap();
+    let row = jobs::find(harness.tdb.db(), job).await.unwrap().unwrap();
     assert_eq!(row.attempts, 1);
     assert!(row.last_error.is_some(), "the reason is recorded");
     let available = time::OffsetDateTime::parse(
@@ -439,7 +443,7 @@ async fn a_retry_uses_the_backoff() {
 
     // Not claimable yet: the queue must not hand it to a worker before then.
     let claimed = jobs::claim_next(
-        &harness.db,
+        harness.tdb.db(),
         "eager-worker",
         Duration::from_secs(30),
         time::OffsetDateTime::now_utc(),
@@ -453,7 +457,7 @@ async fn a_retry_uses_the_backoff() {
 
     // Run out the budget: the second failure is terminal.
     let claimed = jobs::claim_next(
-        &harness.db,
+        harness.tdb.db(),
         "eager-worker",
         Duration::from_secs(30),
         available + Duration::from_secs(1),
@@ -467,11 +471,11 @@ async fn a_retry_uses_the_backoff() {
     );
     // What the worker does immediately after a claim, so the counter and the
     // retry decision see the same number the handler does.
-    jobs::attempt_started(&harness.db, job, claimed.attempts + 1, "eager-worker")
+    jobs::attempt_started(harness.tdb.db(), job, claimed.attempts + 1, "eager-worker")
         .await
         .expect("attempt started");
     assert_eq!(
-        jobs::find(&harness.db, job)
+        jobs::find(harness.tdb.db(), job)
             .await
             .unwrap()
             .unwrap()
@@ -480,7 +484,7 @@ async fn a_retry_uses_the_backoff() {
         "the attempt just made is the second one"
     );
     let next = jobs::fail(
-        &harness.db,
+        harness.tdb.db(),
         job,
         "eager-worker",
         "still broken",
@@ -496,7 +500,11 @@ async fn a_retry_uses_the_backoff() {
         "the second attempt exhausts the policy"
     );
     assert_eq!(
-        jobs::find(&harness.db, job).await.unwrap().unwrap().state,
+        jobs::find(harness.tdb.db(), job)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
         "failed"
     );
 
@@ -512,7 +520,7 @@ async fn replaying_one_idempotency_key_enqueues_one_job() {
     let payload = r#"{"task":"probe"}"#;
 
     let first = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Maintenance,
         payload,
         Some("request-42"),
@@ -523,7 +531,7 @@ async fn replaying_one_idempotency_key_enqueues_one_job() {
     .await
     .expect("enqueue");
     let second = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Maintenance,
         payload,
         Some("request-42"),
@@ -536,7 +544,7 @@ async fn replaying_one_idempotency_key_enqueues_one_job() {
     assert_eq!(first, second, "the same key is the same job");
 
     let third = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Maintenance,
         payload,
         Some("request-43"),
@@ -548,14 +556,14 @@ async fn replaying_one_idempotency_key_enqueues_one_job() {
     .expect("enqueue");
     assert_ne!(first, third, "a different key is a different job");
 
-    let all = jobs::all_jobs(&harness.db, None, 50, None)
+    let all = jobs::all_jobs(harness.tdb.db(), None, 50, None)
         .await
         .expect("list");
     assert_eq!(all.len(), 2);
 
     // A job with no key is never deduplicated against another.
     let unkeyed_a = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Maintenance,
         payload,
         None,
@@ -566,7 +574,7 @@ async fn replaying_one_idempotency_key_enqueues_one_job() {
     .await
     .expect("enqueue");
     let unkeyed_b = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Maintenance,
         payload,
         None,
@@ -587,7 +595,7 @@ async fn replaying_one_idempotency_key_enqueues_one_job() {
 async fn a_job_with_no_handler_fails_loudly() {
     let harness = Harness::new("no-handler").await;
     let job = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Reindex,
         "{}",
         None,
@@ -605,7 +613,7 @@ async fn a_job_with_no_handler_fails_loudly() {
     let report = worker().run_once(&state).await.expect("pass");
     assert_eq!(report.job.expect("ran").1, JobState::Failed);
 
-    let row = jobs::find(&harness.db, job).await.unwrap().unwrap();
+    let row = jobs::find(harness.tdb.db(), job).await.unwrap().unwrap();
     assert_eq!(row.state, "failed");
     let error = row.last_error.expect("a reason");
     assert!(error.contains("reindex"), "{error}");
@@ -625,11 +633,11 @@ async fn the_same_bytes_stored_twice_share_one_blob() {
     let store = harness.store();
 
     let (first, key) = store
-        .put(&harness.db, b"the same chapter text", "text/plain")
+        .put(harness.tdb.db(), b"the same chapter text", "text/plain")
         .await
         .expect("put");
     let before = store
-        .stat(&harness.db, &first)
+        .stat(harness.tdb.db(), &first)
         .await
         .expect("stat")
         .expect("a row");
@@ -637,14 +645,14 @@ async fn the_same_bytes_stored_twice_share_one_blob() {
     // A second put of the same bytes, a moment later.
     tokio::time::sleep(Duration::from_millis(5)).await;
     let (second, second_key) = store
-        .put(&harness.db, b"the same chapter text", "text/plain")
+        .put(harness.tdb.db(), b"the same chapter text", "text/plain")
         .await
         .expect("put");
     assert_eq!(first, second);
     assert_eq!(key, second_key);
 
     let after = store
-        .stat(&harness.db, &first)
+        .stat(harness.tdb.db(), &first)
         .await
         .expect("stat")
         .expect("a row");
@@ -661,7 +669,7 @@ async fn the_same_bytes_stored_twice_share_one_blob() {
         tokio::fs::read(&path).await.expect("read"),
         b"the same chapter text"
     );
-    let (blobs, bytes) = store.usage(&harness.db).await.expect("usage");
+    let (blobs, bytes) = store.usage(harness.tdb.db()).await.expect("usage");
     assert_eq!(blobs, 1);
     assert_eq!(bytes, 21, "the byte count is the file's, not an estimate");
 
@@ -675,33 +683,33 @@ async fn deleting_one_reference_keeps_the_blob() {
     let harness = Harness::new("ref-count").await;
     let store = harness.store();
     let (checksum, _) = store
-        .put(&harness.db, b"shared bytes", "text/plain")
+        .put(harness.tdb.db(), b"shared bytes", "text/plain")
         .await
         .expect("put");
 
     store
-        .reference(&harness.db, &checksum, "work", "work-a")
+        .reference(harness.tdb.db(), &checksum, "work", "work-a")
         .await
         .expect("reference");
     store
-        .reference(&harness.db, &checksum, "work", "work-b")
+        .reference(harness.tdb.db(), &checksum, "work", "work-b")
         .await
         .expect("reference");
 
     assert!(
         !store
-            .delete_if_unreferenced(&harness.db, &checksum)
+            .delete_if_unreferenced(harness.tdb.db(), &checksum)
             .await
             .expect("delete"),
         "a referenced blob is not deleted"
     );
     assert!(store
-        .unreference(&harness.db, &checksum, "work", "work-a")
+        .unreference(harness.tdb.db(), &checksum, "work", "work-a")
         .await
         .expect("unreference"));
     assert!(
         !store
-            .delete_if_unreferenced(&harness.db, &checksum)
+            .delete_if_unreferenced(harness.tdb.db(), &checksum)
             .await
             .expect("delete"),
         "one reference remains, so the bytes stay"
@@ -709,7 +717,7 @@ async fn deleting_one_reference_keeps_the_blob() {
 
     // And a stranger can still read them: the delete did not half-happen.
     let bytes = store
-        .get(&harness.db, &checksum)
+        .get(harness.tdb.db(), &checksum)
         .await
         .expect("get")
         .expect("the blob is still there");
@@ -724,42 +732,42 @@ async fn deleting_the_last_reference_removes_the_blob() {
     let harness = Harness::new("last-reference").await;
     let store = harness.store();
     let (checksum, _) = store
-        .put(&harness.db, b"temporary bytes", "text/plain")
+        .put(harness.tdb.db(), b"temporary bytes", "text/plain")
         .await
         .expect("put");
     store
-        .reference(&harness.db, &checksum, "export", "export-1")
+        .reference(harness.tdb.db(), &checksum, "export", "export-1")
         .await
         .expect("reference");
     let path = store.path_for(&checksum);
     assert!(path.exists());
 
     store
-        .unreference(&harness.db, &checksum, "export", "export-1")
+        .unreference(harness.tdb.db(), &checksum, "export", "export-1")
         .await
         .expect("unreference");
     assert!(
         store
-            .delete_if_unreferenced(&harness.db, &checksum)
+            .delete_if_unreferenced(harness.tdb.db(), &checksum)
             .await
             .expect("delete"),
         "the last reference is gone, so the blob goes"
     );
     assert!(!path.exists(), "the file went with the row");
     assert!(store
-        .stat(&harness.db, &checksum)
+        .stat(harness.tdb.db(), &checksum)
         .await
         .expect("stat")
         .is_none());
     assert!(store
-        .get(&harness.db, &checksum)
+        .get(harness.tdb.db(), &checksum)
         .await
         .expect("get")
         .is_none());
 
     // Deleting again is not an error: the caller asked for the end state.
     assert!(!store
-        .delete_if_unreferenced(&harness.db, &checksum)
+        .delete_if_unreferenced(harness.tdb.db(), &checksum)
         .await
         .expect("delete again"));
 
@@ -778,7 +786,7 @@ async fn an_outbox_event_is_deleted_only_after_its_handler_succeeds() {
 
     // Two topics: one with a handler, one that arrives in a later milestone.
     let handled = outbox::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         "test.deliverable",
         r#"{"hello":"world"}"#,
         Some("dedupe-1"),
@@ -786,7 +794,7 @@ async fn an_outbox_event_is_deleted_only_after_its_handler_succeeds() {
     .await
     .expect("enqueue");
     let unhandled = outbox::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         "publish.index",
         r#"{"work":"x"}"#,
         Some("dedupe-2"),
@@ -816,7 +824,9 @@ async fn an_outbox_event_is_deleted_only_after_its_handler_succeeds() {
     );
     assert_eq!(seen.lock().expect("lock").as_slice(), ["test.deliverable"]);
 
-    let pending = outbox::pending(&harness.db, 50).await.expect("pending");
+    let pending = outbox::pending(harness.tdb.db(), 50)
+        .await
+        .expect("pending");
     let topics: Vec<&str> = pending.iter().map(|event| event.topic.as_str()).collect();
     assert_eq!(
         topics,
@@ -824,7 +834,9 @@ async fn an_outbox_event_is_deleted_only_after_its_handler_succeeds() {
         "the handled event is gone and the unhandled one is still waiting"
     );
     assert_eq!(
-        outbox::undelivered_count(&harness.db).await.expect("count"),
+        outbox::undelivered_count(harness.tdb.db())
+            .await
+            .expect("count"),
         1
     );
 
@@ -837,7 +849,7 @@ async fn an_outbox_event_is_deleted_only_after_its_handler_succeeds() {
 #[tokio::test]
 async fn a_failing_outbox_handler_retries_with_a_reason() {
     let harness = Harness::new("outbox-failure").await;
-    outbox::enqueue(&harness.db, "test.broken", "{}", Some("dedupe-3"))
+    outbox::enqueue(harness.tdb.db(), "test.broken", "{}", Some("dedupe-3"))
         .await
         .expect("enqueue");
 
@@ -850,7 +862,9 @@ async fn a_failing_outbox_handler_retries_with_a_reason() {
 
     assert_eq!(report.outbox_failed, 1);
     assert_eq!(report.outbox_delivered, 0);
-    let pending = outbox::pending(&harness.db, 50).await.expect("pending");
+    let pending = outbox::pending(harness.tdb.db(), 50)
+        .await
+        .expect("pending");
     assert!(
         pending.is_empty(),
         "a failed event is not offered again immediately"
@@ -859,7 +873,7 @@ async fn a_failing_outbox_handler_retries_with_a_reason() {
     let row: (i64, Option<String>) = sqlx::query_as(
         "SELECT attempts, last_error FROM outbox_events WHERE topic = 'test.broken'",
     )
-    .fetch_one(harness.db.sqlite_pool().expect("handle"))
+    .fetch_one(harness.tdb.db().sqlite_pool().expect("handle"))
     .await
     .expect("row");
     assert_eq!(row.0, 1);
@@ -886,7 +900,7 @@ async fn the_job_list_shows_only_the_callers_own_jobs() {
 
     let policy = RetryPolicy::default();
     let my_job = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Maintenance,
         r#"{"task":"probe"}"#,
         None,
@@ -897,7 +911,7 @@ async fn the_job_list_shows_only_the_callers_own_jobs() {
     .await
     .expect("enqueue");
     let their_job = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Maintenance,
         r#"{"task":"probe"}"#,
         None,
@@ -932,7 +946,7 @@ async fn the_job_list_shows_only_the_callers_own_jobs() {
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(
-        jobs::find(&harness.db, my_job)
+        jobs::find(harness.tdb.db(), my_job)
             .await
             .unwrap()
             .unwrap()
@@ -949,7 +963,7 @@ async fn the_job_list_shows_only_the_callers_own_jobs() {
     assert_eq!(body["state"], "cancelled");
     assert_eq!(body["cancellable"], false);
     assert_eq!(
-        jobs::find(&harness.db, my_job)
+        jobs::find(harness.tdb.db(), my_job)
             .await
             .unwrap()
             .unwrap()
@@ -970,7 +984,7 @@ async fn the_admin_surface_is_gated_on_the_operator_account() {
     let reader_account = register(&mut reader, "reader@example.com", "Reader").await;
 
     jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Maintenance,
         r#"{"task":"probe"}"#,
         None,
@@ -991,7 +1005,7 @@ async fn the_admin_surface_is_gated_on_the_operator_account() {
     config.administration.operator_account_id = Some(reader_account);
     let operator_client = Client::new(server::build_router(AppState::new(
         config,
-        harness.db.clone(),
+        harness.tdb.db().clone(),
     )));
     // A fresh client has no cookies; sign in through it.
     let mut operator_client = operator_client;
@@ -1049,7 +1063,7 @@ async fn an_operator_can_retry_a_failed_job() {
     let account = register(&mut client, "ops@example.com", "Ops").await;
 
     let job = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Thumbnail,
         "{}",
         None,
@@ -1065,7 +1079,11 @@ async fn an_operator_can_retry_a_failed_job() {
     let state = harness.state.clone();
     worker().run_once(&state).await.expect("run");
     assert_eq!(
-        jobs::find(&harness.db, job).await.unwrap().unwrap().state,
+        jobs::find(harness.tdb.db(), job)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
         "failed"
     );
 
@@ -1073,7 +1091,7 @@ async fn an_operator_can_retry_a_failed_job() {
     config.administration.operator_account_id = Some(account);
     let mut operator = Client::new(server::build_router(AppState::new(
         config,
-        harness.db.clone(),
+        harness.tdb.db().clone(),
     )));
     let (status, body) = operator
         .post(
@@ -1108,7 +1126,7 @@ async fn an_operator_can_retry_a_failed_job() {
 async fn one_pass_runs_one_job_and_says_so() {
     let harness = Harness::new("worker-once").await;
     let job = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Maintenance,
         r#"{"task":"probe","steps":3}"#,
         None,
@@ -1124,14 +1142,14 @@ async fn one_pass_runs_one_job_and_says_so() {
     assert_eq!(report.job.expect("a job ran").0, job);
     assert!(report.did_something());
 
-    let row = jobs::find(&harness.db, job).await.unwrap().unwrap();
+    let row = jobs::find(harness.tdb.db(), job).await.unwrap().unwrap();
     assert_eq!(row.state, "succeeded");
     assert_eq!(row.progress_permille, 1000);
     assert_eq!(
         row.checkpoint, None,
         "a finished job has no checkpoint to resume"
     );
-    let attempts = jobs::attempts_for(&harness.db, job)
+    let attempts = jobs::attempts_for(harness.tdb.db(), job)
         .await
         .expect("attempts");
     assert_eq!(attempts.len(), 1);
@@ -1152,7 +1170,7 @@ async fn one_pass_runs_one_job_and_says_so() {
 async fn an_unknown_maintenance_task_is_a_fatal_failure() {
     let harness = Harness::new("unknown-task").await;
     let job = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Maintenance,
         r#"{"task":"make-coffee"}"#,
         None,
@@ -1170,7 +1188,7 @@ async fn an_unknown_maintenance_task_is_a_fatal_failure() {
     let report = worker().run_once(&state).await.expect("pass");
     assert_eq!(report.job.expect("ran").1, JobState::Failed);
 
-    let row = jobs::find(&harness.db, job).await.unwrap().unwrap();
+    let row = jobs::find(harness.tdb.db(), job).await.unwrap().unwrap();
     assert_eq!(row.state, "failed");
     assert_eq!(
         row.attempts, 1,
@@ -1191,7 +1209,7 @@ async fn the_sweep_deletes_only_old_terminal_jobs() {
     let harness = Harness::new("sweep").await;
     let policy = RetryPolicy::default();
     let queued = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Maintenance,
         r#"{"task":"probe"}"#,
         None,
@@ -1202,7 +1220,7 @@ async fn the_sweep_deletes_only_old_terminal_jobs() {
     .await
     .expect("enqueue");
     let done = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Maintenance,
         r#"{"task":"probe","steps":1}"#,
         None,
@@ -1228,7 +1246,7 @@ async fn the_sweep_deletes_only_old_terminal_jobs() {
     // A sweep with nothing old deletes nothing.
     assert_eq!(
         jobs::purge_terminal_jobs(
-            &harness.db,
+            harness.tdb.db(),
             time::OffsetDateTime::now_utc() - Duration::from_secs(30 * 24 * 60 * 60)
         )
         .await
@@ -1239,16 +1257,16 @@ async fn the_sweep_deletes_only_old_terminal_jobs() {
     // With a cutoff in the future, the terminal job goes and the row history
     // with it; the other job was terminal too, and goes the same way — but the
     // point is that the sweep is the only path that deletes jobs at all.
-    let purged = jobs::purge_terminal_jobs(&harness.db, time::OffsetDateTime::now_utc())
+    let purged = jobs::purge_terminal_jobs(harness.tdb.db(), time::OffsetDateTime::now_utc())
         .await
         .expect("sweep");
     assert_eq!(purged, 2);
-    assert!(jobs::find(&harness.db, queued)
+    assert!(jobs::find(harness.tdb.db(), queued)
         .await
         .expect("find")
         .is_none());
     let attempts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM job_attempts")
-        .fetch_one(harness.db.sqlite_pool().expect("handle"))
+        .fetch_one(harness.tdb.db().sqlite_pool().expect("handle"))
         .await
         .expect("count");
     assert_eq!(attempts, 0, "attempts cascade with their job");
@@ -1263,7 +1281,7 @@ async fn the_worker_can_be_pointed_at_a_queue_that_is_already_waiting() {
     let harness = Harness::new("waiting-queue").await;
     for index in 0..5 {
         jobs::enqueue(
-            &harness.db,
+            harness.tdb.db(),
             JobKind::Maintenance,
             r#"{"task":"probe","steps":1}"#,
             None,
@@ -1285,7 +1303,9 @@ async fn the_worker_can_be_pointed_at_a_queue_that_is_already_waiting() {
     }
     assert_eq!(succeeded, 5);
 
-    let counts = jobs::counts_by_state(&harness.db).await.expect("counts");
+    let counts = jobs::counts_by_state(harness.tdb.db())
+        .await
+        .expect("counts");
     assert_eq!(
         counts,
         vec![("succeeded".to_owned(), 5)],
@@ -1304,7 +1324,7 @@ async fn job_progress_and_errors_reach_the_owner() {
     let account = register(&mut client, "owner@example.com", "Owner").await;
 
     let failing = jobs::enqueue(
-        &harness.db,
+        harness.tdb.db(),
         JobKind::Thumbnail,
         "{}",
         None,
@@ -1360,7 +1380,7 @@ async fn a_request_that_starts_a_job_gets_a_202_and_an_id() {
     let id = body["id"].as_str().expect("a job id").to_owned();
 
     // The request did not do the work: nothing has run yet.
-    let row = jobs::find(&harness.db, id.parse().expect("uuid"))
+    let row = jobs::find(harness.tdb.db(), id.parse().expect("uuid"))
         .await
         .expect("find")
         .expect("the row is there");
@@ -1417,7 +1437,7 @@ async fn the_self_service_enqueue_refuses_anything_but_the_probe() {
     }
     // Nothing was enqueued by a refused request.
     assert_eq!(
-        jobs::all_jobs(&harness.db, None, 50, None)
+        jobs::all_jobs(harness.tdb.db(), None, 50, None)
             .await
             .expect("list")
             .len(),
@@ -1429,7 +1449,7 @@ async fn the_self_service_enqueue_refuses_anything_but_the_probe() {
     config.environment = lorehaven_app::config::Environment::Production;
     let mut production = Client::new(server::build_router(AppState::new(
         config,
-        harness.db.clone(),
+        harness.tdb.db().clone(),
     )));
     let (status, _) = production
         .post(
@@ -1469,7 +1489,7 @@ async fn a_page_of_jobs_carries_a_cursor_that_resumes_it() {
     let mut ids: Vec<String> = Vec::new();
     for index in 0..51 {
         let id = jobs::enqueue(
-            &harness.db,
+            harness.tdb.db(),
             JobKind::Maintenance,
             r#"{"task":"probe"}"#,
             None,

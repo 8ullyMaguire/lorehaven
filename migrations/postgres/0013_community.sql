@@ -115,5 +115,5 @@ CREATE TABLE presence (
     account TEXT PRIMARY KEY,
     last_seen_at TEXT NOT NULL,
     typing_until TEXT,
-    enabled INTEGER NOT NULL DEFAULT 0
+    enabled BOOLEAN NOT NULL DEFAULT false
 );

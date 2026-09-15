@@ -1516,6 +1516,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "sqlx",
+ "test-support",
  "time",
  "tokio",
  "toml",
@@ -3166,6 +3167,15 @@ checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "test-support"
+version = "0.1.0"
+dependencies = [
+ "lorehaven-db",
+ "sqlx",
+ "tokio",
 ]
 
 [[package]]

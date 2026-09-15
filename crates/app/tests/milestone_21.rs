@@ -12,7 +12,7 @@ use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
-use lorehaven_db::{Database, DatabaseConfig};
+use lorehaven_db::DatabaseConfig;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -132,7 +132,7 @@ impl Client {
 
 struct Fixture {
     dir: PathBuf,
-    db: Database,
+    tdb: test_support::TestDb,
 }
 
 impl Fixture {
@@ -143,27 +143,23 @@ impl Fixture {
             format: lorehaven_app::config::LogFormat::Pretty,
         });
         let dir = scratch_dir(tag);
-        let db = Database::connect(&DatabaseConfig::new(format!(
-            "sqlite://{}/lorehaven.sqlite?mode=rwc",
-            dir.display()
-        )))
-        .await
-        .expect("connect");
-        let report = db.migrate().await.expect("migrate");
+        let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
         assert!(
-            report.applied.iter().any(|id| id.contains("spec_revision")),
-            "the 0022 spec-revision migration must be part of the catalogue: {report:?}"
+            tdb.applied_migrations()
+                .iter()
+                .any(|id| id.contains("spec_revision")),
+            "the 0022 spec-revision migration must be part of the catalogue"
         );
-        Self { dir, db }
+        Self { dir, tdb }
     }
     fn client(&self) -> Client {
         Client::new(server::build_router(AppState::new(
             config_for(&self.dir),
-            self.db.clone(),
+            self.tdb.db().clone(),
         )))
     }
     async fn cleanup(self) {
-        self.db.close().await;
+        self.tdb.cleanup().await;
         let _ = std::fs::remove_dir_all(self.dir);
     }
 }
@@ -194,7 +190,7 @@ async fn register(client: &mut Client, email: &str, handle: &str) {
 async fn migration_0022_creates_the_revision_tables() {
     let fx = Fixture::new("tables").await;
     {
-        let pool = fx.db.sqlite_pool().expect("sqlite pool");
+        let pool = fx.tdb.db().sqlite_pool().expect("sqlite pool");
         for table in [
             "work_pricing",
             "work_entitlements",

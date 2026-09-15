@@ -24,9 +24,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use lorehaven_app::revisions::{CachingFetcher, PUBLIC_SCOPE};
+use lorehaven_db::revisions;
 use lorehaven_db::storage::BlobStore;
-use lorehaven_db::DatabaseConfig;
-use lorehaven_db::{revisions, Database};
 use lorehaven_scrapers::{
     ConditionalFetch, Fetched, Fetcher, Provenance, RevisionValidators, SourceError, SourceResult,
 };
@@ -185,7 +184,7 @@ impl Fetcher for Scripted {
 
 struct Harness {
     dir: PathBuf,
-    db: Database,
+    tdb: test_support::TestDb,
 }
 
 impl Harness {
@@ -195,18 +194,13 @@ impl Harness {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("scratch dir");
 
-        let db = Database::connect(&DatabaseConfig::new(format!(
-            "sqlite://{}/lorehaven.sqlite?mode=rwc",
-            dir.display()
-        )))
-        .await
-        .expect("connect");
-        let report = db.migrate().await.expect("migrate");
+        let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
+        let report: Vec<String> = tdb.applied_migrations().to_vec();
         assert!(
-            report.applied.contains(&"0007_revision_cache".to_owned()),
+            report.contains(&"0007_revision_cache".to_owned()),
             "the revision cache migration must apply: {report:?}"
         );
-        Self { dir, db }
+        Self { dir, tdb }
     }
 
     /// The cache under test, wrapping `inner` under the given scope.
@@ -218,7 +212,7 @@ impl Harness {
     ) -> CachingFetcher<'a, Scripted> {
         CachingFetcher::new(
             inner,
-            &self.db,
+            self.tdb.db(),
             self.dir.join("storage"),
             SOURCE,
             adapter,
@@ -295,7 +289,7 @@ async fn a_changed_page_replaces_the_cached_one() {
     // replaced rather than accumulated.
     let third = cache.get(URL).await.expect("third");
     assert_eq!(third.body, "<html>new</html>");
-    assert_eq!(revisions::count(&harness.db).await.expect("count"), 1);
+    assert_eq!(revisions::count(harness.tdb.db()).await.expect("count"), 1);
 
     harness.cleanup();
 }
@@ -467,7 +461,7 @@ async fn a_page_with_no_validators_is_not_stored() {
     cache.get(URL).await.expect("second");
 
     assert_eq!(
-        revisions::count(&harness.db).await.expect("count"),
+        revisions::count(harness.tdb.db()).await.expect("count"),
         0,
         "a page with nothing to ask about should not fill the cache"
     );
@@ -499,17 +493,17 @@ async fn an_expired_entry_is_not_offered() {
         adapter_version: ADAPTER,
         security_scope: PUBLIC_SCOPE,
     };
-    let mut entry = revisions::find_fresh(&harness.db, &key)
+    let mut entry = revisions::find_fresh(harness.tdb.db(), &key)
         .await
         .expect("read")
         .expect("the entry exists");
     entry.expires_at = "2000-01-01T00:00:00Z".to_owned();
-    revisions::upsert(&harness.db, &key, &entry)
+    revisions::upsert(harness.tdb.db(), &key, &entry)
         .await
         .expect("age");
 
     assert!(
-        revisions::find_fresh(&harness.db, &key)
+        revisions::find_fresh(harness.tdb.db(), &key)
             .await
             .expect("read")
             .is_none(),
@@ -553,21 +547,23 @@ async fn purging_removes_only_the_expired_entries() {
         adapter_version: ADAPTER,
         security_scope: PUBLIC_SCOPE,
     };
-    let mut entry = revisions::find_fresh(&harness.db, &key)
+    let mut entry = revisions::find_fresh(harness.tdb.db(), &key)
         .await
         .expect("read")
         .expect("the entry exists");
     entry.expires_at = "2000-01-01T00:00:00Z".to_owned();
-    revisions::upsert(&harness.db, &key, &entry)
+    revisions::upsert(harness.tdb.db(), &key, &entry)
         .await
         .expect("age");
 
-    let purged = revisions::purge_expired(&harness.db).await.expect("purge");
+    let purged = revisions::purge_expired(harness.tdb.db())
+        .await
+        .expect("purge");
     assert_eq!(purged, 1, "only the expired entry should go");
-    assert_eq!(revisions::count(&harness.db).await.expect("count"), 1);
+    assert_eq!(revisions::count(harness.tdb.db()).await.expect("count"), 1);
     assert!(
         revisions::find_fresh(
-            &harness.db,
+            harness.tdb.db(),
             &revisions::RevisionKey {
                 source_key: SOURCE,
                 revision_key: URL,
@@ -613,7 +609,7 @@ async fn a_cache_whose_bytes_have_gone_falls_back_to_reading_the_page() {
         adapter_version: ADAPTER,
         security_scope: PUBLIC_SCOPE,
     };
-    let entry = revisions::find_fresh(&harness.db, &key)
+    let entry = revisions::find_fresh(harness.tdb.db(), &key)
         .await
         .expect("read")
         .expect("the entry exists");

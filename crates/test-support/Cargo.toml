@@ -1,0 +1,10 @@
+[package]
+name = "test-support"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+lorehaven-db = { path = "../db" }
+sqlx = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }

@@ -28,7 +28,7 @@ use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
-use lorehaven_db::{outbox, Database, DatabaseConfig};
+use lorehaven_db::{outbox, DatabaseConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -155,7 +155,7 @@ impl Client {
 
 struct Harness {
     dir: PathBuf,
-    db: Database,
+    tdb: test_support::TestDb,
 }
 
 impl Harness {
@@ -167,25 +167,20 @@ impl Harness {
         });
 
         let dir = scratch_dir(tag);
-        let db = Database::connect(&DatabaseConfig::new(format!(
-            "sqlite://{}/lorehaven.sqlite?mode=rwc",
-            dir.display()
-        )))
-        .await
-        .expect("connect");
-        let report = db.migrate().await.expect("migrate");
+        let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
+        let report: Vec<String> = tdb.applied_migrations().to_vec();
         assert!(
-            report.applied.contains(&"0003_works".to_owned()),
+            report.contains(&"0003_works".to_owned()),
             "the works migration must apply: {report:?}"
         );
 
-        Self { dir, db }
+        Self { dir, tdb }
     }
 
     fn client(&self) -> Client {
         Client::new(server::build_router(AppState::new(
             config_for(&self.dir),
-            self.db.clone(),
+            self.tdb.db().clone(),
         )))
     }
 
@@ -195,7 +190,7 @@ impl Harness {
     }
 
     async fn cleanup(self) {
-        self.db.close().await;
+        self.tdb.cleanup().await;
         let _ = std::fs::remove_dir_all(self.dir);
     }
 }
@@ -453,7 +448,7 @@ async fn an_anonymous_reader_never_receives_a_draft_revision() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     // And a de-indexing side effect was queued in the same transaction.
-    let topics = outbox::topics_for_work(&harness.db, work_id.parse().expect("work id"))
+    let topics = outbox::topics_for_work(harness.tdb.db(), work_id.parse().expect("work id"))
         .await
         .expect("topics");
     assert!(
@@ -614,7 +609,7 @@ async fn replaying_one_idempotency_key_does_not_publish_or_notify_twice() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["lifecycle"], "published");
 
-    let topics_after_first = outbox::topics_for_work(&harness.db, work_id.parse().unwrap())
+    let topics_after_first = outbox::topics_for_work(harness.tdb.db(), work_id.parse().unwrap())
         .await
         .expect("topics");
     assert_eq!(
@@ -630,7 +625,7 @@ async fn replaying_one_idempotency_key_does_not_publish_or_notify_twice() {
     let (status, body) = publish(&mut author, &work_id, 2, Some("publish-attempt-1")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
 
-    let topics_after_replay = outbox::topics_for_work(&harness.db, work_id.parse().unwrap())
+    let topics_after_replay = outbox::topics_for_work(harness.tdb.db(), work_id.parse().unwrap())
         .await
         .expect("topics");
     assert_eq!(
