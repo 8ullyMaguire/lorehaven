@@ -15,6 +15,28 @@ describe('routing', () => {
     expect(matchRoute('/notifications').id).toBe('notifications');
   });
 
+
+  it('resolves the forum category and topic pages the community hub links to', () => {
+    // The hub linked to `/community/forums/<id>` before any view existed, so
+    // every category click dead-ended at the 404 page. These matches are what
+    // makes the link honest.
+    const category = matchRoute('/community/forums/11111111-1111-1111-1111-111111111111');
+    expect(category.id).toBe('forum-category');
+    expect(category.params).toEqual({
+      categoryId: '11111111-1111-1111-1111-111111111111',
+    });
+
+    const topic = matchRoute('/community/topics/22222222-2222-2222-2222-222222222222');
+    expect(topic.id).toBe('forum-topic');
+    expect(topic.params).toEqual({
+      topicId: '22222222-2222-2222-2222-222222222222',
+    });
+
+    // Near-misses stay unmatched.
+    expect(matchRoute('/community/forums').id).toBe('not-found');
+    expect(matchRoute('/community/forums/extra/segments').id).toBe('not-found');
+  });
+
   it('maps a linked-but-unbuilt destination to an honest placeholder', () => {
     // The mechanism stays for the next destination a milestone has not built
     // yet; nothing links to an unbuilt page right now, so drive the branch
