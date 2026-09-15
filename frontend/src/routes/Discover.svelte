@@ -11,11 +11,10 @@
   import {
     clearTasteProfile,
     fetchDiscoveryFeed,
-    fetchMe,
     recomputeTasteProfile,
     type DiscoveryItem,
   } from '../lib/api';
-  import { handleLinkClick, navigate } from '../lib/router';
+  import { handleLinkClick } from '../lib/router';
   import { session } from '../lib/session.svelte';
   import Button from '../lib/components/Button.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
@@ -78,12 +77,12 @@
     <ErrorSummary {error} onretry={load} />
   {/if}
 
-  {#if session.value}
+  {#if session.isSignedIn}
     <div class="taste-controls">
       <Button variant="secondary" onclick={recompute} disabled={recomputing}>
         {recomputing ? 'Recomputing…' : 'Recompute taste profile'}
       </Button>
-      <Button variant="ghost" onclick={clear}>Clear profile</Button>
+      <Button variant="quiet" onclick={clear}>Clear profile</Button>
     </div>
   {/if}
 
