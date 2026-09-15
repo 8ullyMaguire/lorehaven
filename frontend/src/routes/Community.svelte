@@ -82,7 +82,7 @@
     <p class="lede">Forums, groups, and direct messages between readers.</p>
   </header>
 
-  <nav class="tabs" role="tablist">
+  <div class="tabs" role="tablist">
     <button
       role="tab"
       aria-selected={activeTab === 'forums'}
@@ -117,7 +117,7 @@
     >
       Blocks
     </button>
-  </nav>
+  </div>
 
   {#if error}
     <ErrorSummary {error} />
