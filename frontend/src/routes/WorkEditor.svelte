@@ -37,6 +37,7 @@
     describeRole,
     describeVisibility,
   } from '../lib/labels';
+  import { deleteWorkPricing, fetchWorkPricing, setWorkPricing } from '../lib/api';
   import { handleLinkClick } from '../lib/router';
   import Button from '../lib/components/Button.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
@@ -79,6 +80,14 @@
   // Publication.
   let publishing = $state(false);
   let publishError = $state<unknown>(null);
+
+  // Pricing (money decisions belong to the owner — spec §20.9).
+  let pricingModel = $state('free');
+  let pricingPrice = $state('');
+  let pricingCurrency = $state('EUR');
+  let savingPricing = $state(false);
+  let pricingError = $state<unknown>(null);
+  let pricingMessage = $state<string | null>(null);
 
   // Contributors.
   let inviteHandle = $state('');
@@ -126,6 +135,7 @@
         return;
       }
       apply(response);
+      void loadPricing();
     } catch (failure) {
       error = failure;
     } finally {
@@ -175,6 +185,58 @@
       }
     } finally {
       savingMeta = false;
+    }
+  }
+
+  /** Read the work's current pricing into the form, if any. */
+  async function loadPricing() {
+    const current = work;
+    if (!current) return;
+    try {
+      const response = await fetchWorkPricing(current.id);
+      const purchase = response.pricing?.find((p) => p.model === 'purchase');
+      if (purchase) {
+        pricingModel = 'purchase';
+        pricingPrice = String(purchase.price_minor);
+        pricingCurrency = purchase.currency;
+      } else {
+        pricingModel = 'free';
+      }
+    } catch {
+      // No pricing row yet — the form's defaults already say "free".
+      pricingModel = 'free';
+    }
+  }
+
+  async function savePricing(event: SubmitEvent) {
+    event.preventDefault();
+    const current = work;
+    if (!current) return;
+    savingPricing = true;
+    pricingError = null;
+    pricingMessage = null;
+    try {
+      if (pricingModel === 'free') {
+        await deleteWorkPricing(current.id);
+        pricingMessage = 'The work reads free.';
+      } else {
+        const price = Number.parseInt(pricingPrice, 10);
+        if (!Number.isFinite(price) || price <= 0) {
+          pricingError = new Error('A purchase price must be a positive number of minor units.');
+          return;
+        }
+        await setWorkPricing(current.id, {
+          model: 'purchase',
+          price_minor: price,
+          currency: pricingCurrency.trim() || 'EUR',
+          public_at_offset: null,
+        });
+        pricingMessage = 'Pricing saved.';
+      }
+    } catch (failure) {
+      pricingError = failure;
+    } finally {
+      savingPricing = false;
     }
   }
 
@@ -385,6 +447,29 @@
       </div>
     </form>
     {#if metaError}<ErrorSummary error={metaError} />{/if}
+  </section>
+
+  <section aria-labelledby="pricing-heading">
+    <h2 id="pricing-heading">Pricing</h2>
+    <p class="note">Set a purchase price, or leave it off and the work reads free.</p>
+    <form class="pricing" onsubmit={savePricing}>
+      <Select
+        label="Model"
+        value={pricingModel}
+        options={['free', 'purchase'].map((value) => ({ value, label: value }))}
+        onchange={(event) => (pricingModel = event.currentTarget.value)}
+        disabled={!canEdit}
+      />
+      {#if pricingModel === 'purchase'}
+        <TextField label="Price (minor units, 500 = 5.00)" bind:value={pricingPrice} disabled={!canEdit} />
+        <TextField label="Currency" bind:value={pricingCurrency} disabled={!canEdit} />
+      {/if}
+      <div class="actions">
+        <Button type="submit" disabled={savingPricing || !canEdit}>Save pricing</Button>
+        {#if pricingMessage}<span class="note">{pricingMessage}</span>{/if}
+      </div>
+    </form>
+    {#if pricingError}<ErrorSummary error={pricingError} />{/if}
   </section>
 
   <section aria-labelledby="publish-heading">
