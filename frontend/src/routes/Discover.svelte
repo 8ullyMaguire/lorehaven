@@ -101,7 +101,7 @@
             href={`/works/${encodeURIComponent(item.work_id)}`}
             onclick={(event) => handleLinkClick(event, `/works/${encodeURIComponent(item.work_id)}`)}
           >
-            <span class="feed-work">{item.work_id}</span>
+            <span class="feed-work">{item.title ?? item.work_id}{#if item.author_handle}{#if item.title} ·{/if} by {item.author_handle}{/if}</span>
             {#if item.title}<span class="feed-title">{item.title}</span>{/if}
           </a>
         </li>

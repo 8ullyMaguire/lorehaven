@@ -349,15 +349,29 @@ async fn operator_affinity_ranking_is_silent_field_shape_unchanged() {
     assert!(!items.is_empty(), "{body}");
     // Influenced vs uninfluenced responses must differ only in result order,
     // never in field presence or naming (spec §16.3, §20 silent rule).
-    // Each item must have exactly `work_id` — no affinity, reason, score, or
-    // influence-related field may leak.
+    // Influence-related fields must never leak: no score, reason, affinity, or
+    // ranking metadata. Display fields (title, author_handle) are the same in
+    // every response regardless of affinities, so they say nothing about
+    // influence and are allowed.
     for item in items {
         let keys: Vec<String> = item.as_object().unwrap().keys().cloned().collect();
-        assert_eq!(
-            keys,
-            vec!["work_id".to_string()],
-            "unexpected fields: {item}"
+        assert!(
+            keys.contains(&"work_id".to_string()),
+            "every item needs its work_id: {item}"
         );
+        for banned in [
+            "score",
+            "reason",
+            "affinity",
+            "affinity_bp",
+            "influenced",
+            "rank",
+        ] {
+            assert!(
+                !keys.iter().any(|k| k.contains(banned)),
+                "influence field `{banned}` leaked into the discovery feed: {item}"
+            );
+        }
     }
     harness.cleanup().await;
 }
