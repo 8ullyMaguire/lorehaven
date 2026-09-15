@@ -194,7 +194,7 @@ async fn units_for_job_sqlite(
                 "id": r.get::<String, _>("id"),
                 "job_id": r.get::<String, _>("job_id"),
                 "chapter_id": r.get::<String, _>("chapter_id"),
-                "paragraph_index": r.get::<i64, _>("paragraph_index"),
+                "paragraph_index": r.get::<i32, _>("paragraph_index"),
                 "source_text": r.get::<String, _>("source_text"),
                 "target_text": r.get::<Option<String>, _>("target_text"),
                 "state": r.get::<String, _>("state"),
@@ -221,7 +221,7 @@ async fn units_for_job_postgres(
                 "id": r.get::<String, _>("id"),
                 "job_id": r.get::<String, _>("job_id"),
                 "chapter_id": r.get::<String, _>("chapter_id"),
-                "paragraph_index": r.get::<i64, _>("paragraph_index"),
+                "paragraph_index": r.get::<i32, _>("paragraph_index"),
                 "source_text": r.get::<String, _>("source_text"),
                 "target_text": r.get::<Option<String>, _>("target_text"),
                 "state": r.get::<String, _>("state"),
@@ -265,7 +265,7 @@ pub async fn add_memory(
                 "INSERT INTO translation_memory (id, owner, source_lang, target_lang, source_hash, source_text, target_text, quality_bp, shared, created_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             )
-            .bind(&id).bind(owner).bind(source_lang).bind(target_lang).bind(source_hash).bind(source_text).bind(target_text).bind(quality_bp).bind(shared).bind(&now)
+            .bind(&id).bind(owner).bind(source_lang).bind(target_lang).bind(source_hash).bind(source_text).bind(target_text).bind(quality_bp).bind(if shared { 1i32 } else { 0i32 }).bind(&now)
             .execute(db.sqlite_pool().expect("sqlite")).await?;
         }
         Backend::Postgres => {
@@ -273,7 +273,7 @@ pub async fn add_memory(
                 "INSERT INTO translation_memory (id, owner, source_lang, target_lang, source_hash, source_text, target_text, quality_bp, shared, created_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
             )
-            .bind(&id).bind(owner).bind(source_lang).bind(target_lang).bind(source_hash).bind(source_text).bind(target_text).bind(quality_bp).bind(shared).bind(&now)
+            .bind(&id).bind(owner).bind(source_lang).bind(target_lang).bind(source_hash).bind(source_text).bind(target_text).bind(quality_bp).bind(if shared { 1i32 } else { 0i32 }).bind(&now)
             .execute(db.postgres_pool().expect("postgres")).await?;
         }
     }
@@ -294,8 +294,8 @@ async fn lookup_memory_sqlite(
     Ok(row.map(|r| {
         (
             r.get::<String, _>("target_text"),
-            r.get::<i64, _>("quality_bp"),
-            r.get::<bool, _>("shared"),
+            r.get::<i32, _>("quality_bp") as i64,
+            r.get::<i32, _>("shared") != 0,
         )
     }))
 }
@@ -314,8 +314,8 @@ async fn lookup_memory_postgres(
     Ok(row.map(|r| {
         (
             r.get::<String, _>("target_text"),
-            r.get::<i64, _>("quality_bp"),
-            r.get::<bool, _>("shared"),
+            r.get::<i32, _>("quality_bp") as i64,
+            r.get::<i32, _>("shared") != 0,
         )
     }))
 }
@@ -375,7 +375,7 @@ pub async fn add_glossary_term(
                 "INSERT INTO translation_glossaries (id, owner, work_id, source_lang, target_lang, term, translation, case_sensitive, created_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
             )
-            .bind(&id).bind(owner).bind(work_id).bind(source_lang).bind(target_lang).bind(term).bind(translation).bind(case_sensitive).bind(&now)
+            .bind(&id).bind(owner).bind(work_id).bind(source_lang).bind(target_lang).bind(term).bind(translation).bind(if case_sensitive { 1i32 } else { 0i32 }).bind(&now)
             .execute(db.sqlite_pool().expect("sqlite")).await?;
         }
         Backend::Postgres => {
@@ -383,7 +383,7 @@ pub async fn add_glossary_term(
                 "INSERT INTO translation_glossaries (id, owner, work_id, source_lang, target_lang, term, translation, case_sensitive, created_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
             )
-            .bind(&id).bind(owner).bind(work_id).bind(source_lang).bind(target_lang).bind(term).bind(translation).bind(case_sensitive).bind(&now)
+            .bind(&id).bind(owner).bind(work_id).bind(source_lang).bind(target_lang).bind(term).bind(translation).bind(if case_sensitive { 1i32 } else { 0i32 }).bind(&now)
             .execute(db.postgres_pool().expect("postgres")).await?;
         }
     }

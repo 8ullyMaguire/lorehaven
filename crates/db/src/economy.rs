@@ -370,7 +370,7 @@ pub async fn bump_counter(
             sqlx::query_scalar(
                 "INSERT INTO usage_counters (account, action, day, count)
                  VALUES (?, ?, ?, 1)
-                 ON CONFLICT(account, action, day) DO UPDATE SET count = count + 1
+                 ON CONFLICT(account, action, day) SET usage_counters.count = usage_counters.count + 1
                  RETURNING count",
             )
             .bind(account)
@@ -383,8 +383,8 @@ pub async fn bump_counter(
             sqlx::query_scalar(
                 "INSERT INTO usage_counters (account, action, day, count)
                  VALUES ($1, $2, $3, 1)
-                 ON CONFLICT(account, action, day) DO UPDATE SET count = count + 1
-                 RETURNING count",
+                 ON CONFLICT(account, action, day) DO UPDATE SET usage_counters.count = usage_counters.count + 1
+                 RETURNING count::bigint",
             )
             .bind(account)
             .bind(action)

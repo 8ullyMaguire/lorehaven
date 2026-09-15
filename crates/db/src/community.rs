@@ -153,8 +153,8 @@ pub async fn list_comments(
              JOIN pseuds pa ON pa.id::text = c.author_pseud
              LEFT JOIN comment_classifications cc ON cc.comment_id = c.id
              WHERE c.subject_type = $1 AND c.subject_id = $2 AND c.deleted_at IS NULL AND c.created_at < $3
-               AND pa.account_id NOT IN (SELECT blocked FROM blocks WHERE blocker = $4 AND (scope = 'all' OR scope = 'comments'))
-               AND pa.account_id NOT IN (SELECT blocker FROM blocks WHERE blocked = $4 AND (scope = 'all' OR scope = 'comments'))
+               AND pa.account_id::text NOT IN (SELECT blocked FROM blocks WHERE blocker = $4 AND (scope = 'all' OR scope = 'comments'))
+               AND pa.account_id::text NOT IN (SELECT blocker FROM blocks WHERE blocked = $4 AND (scope = 'all' OR scope = 'comments'))
                AND (cc.outcome IS NULL OR cc.outcome = 'delivered')
              ORDER BY c.created_at DESC LIMIT $5",
         )
@@ -174,8 +174,8 @@ pub async fn list_comments(
              JOIN pseuds pa ON pa.id::text = c.author_pseud
              LEFT JOIN comment_classifications cc ON cc.comment_id = c.id
              WHERE c.subject_type = $1 AND c.subject_id = $2 AND c.deleted_at IS NULL
-               AND pa.account_id NOT IN (SELECT blocked FROM blocks WHERE blocker = $3 AND (scope = 'all' OR scope = 'comments'))
-               AND pa.account_id NOT IN (SELECT blocker FROM blocks WHERE blocked = $3 AND (scope = 'all' OR scope = 'comments'))
+               AND pa.account_id::text NOT IN (SELECT blocked FROM blocks WHERE blocker = $3 AND (scope = 'all' OR scope = 'comments'))
+               AND pa.account_id::text NOT IN (SELECT blocker FROM blocks WHERE blocked = $3 AND (scope = 'all' OR scope = 'comments'))
                AND (cc.outcome IS NULL OR cc.outcome = 'delivered')
              ORDER BY c.created_at DESC LIMIT $4",
         )
@@ -260,7 +260,7 @@ pub async fn is_blocked(
         "SELECT 1 FROM blocks WHERE blocker = ? AND blocked = ? AND (scope = 'all' OR scope = ?)",
         "SELECT 1 FROM blocks WHERE blocker = $1 AND blocked = $2 AND (scope = 'all' OR scope = $3)",
     );
-    let row: Option<(i64,)> = match db.backend() {
+    let row: Option<(i32,)> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
                 .bind(blocker)
@@ -287,7 +287,7 @@ pub async fn is_muted(db: &Database, muter: &str, muted: &str) -> Result<bool> {
         "SELECT 1 FROM mutes WHERE muter = ? AND muted = ?",
         "SELECT 1 FROM mutes WHERE muter = $1 AND muted = $2",
     );
-    let row: Option<(i64,)> = match db.backend() {
+    let row: Option<(i32,)> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
                 .bind(muter)
@@ -1163,7 +1163,7 @@ pub async fn is_participant(db: &Database, conversation_id: &str, account: &str)
         "SELECT 1 FROM conversation_participants WHERE conversation_id = ? AND account = ?",
         "SELECT 1 FROM conversation_participants WHERE conversation_id = $1 AND account = $2",
     );
-    let row: Option<(i64,)> = match db.backend() {
+    let row: Option<(i32,)> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
                 .bind(conversation_id)
@@ -1486,7 +1486,9 @@ pub async fn list_conversations(db: &Database, viewer_account: &str) -> Result<V
          FROM conversations c
          JOIN conversation_participants cp ON cp.conversation_id = c.id
          WHERE cp.account = ?1
-         ORDER BY COALESCE(updated_at, c.created_at) DESC",
+         ORDER BY COALESCE((SELECT sent_at FROM messages
+                 WHERE conversation_id = c.id AND deleted_at IS NULL
+                 ORDER BY sent_at DESC LIMIT 1), c.created_at) DESC",
         "SELECT c.id,
                 (SELECT account FROM conversation_participants
                  WHERE conversation_id = c.id AND account != $1 LIMIT 1) as other_handle,
@@ -1499,7 +1501,9 @@ pub async fn list_conversations(db: &Database, viewer_account: &str) -> Result<V
          FROM conversations c
          JOIN conversation_participants cp ON cp.conversation_id = c.id
          WHERE cp.account = $1
-         ORDER BY COALESCE(updated_at, c.created_at) DESC",
+         ORDER BY COALESCE((SELECT sent_at FROM messages
+                 WHERE conversation_id = c.id AND deleted_at IS NULL
+                 ORDER BY sent_at DESC LIMIT 1), c.created_at) DESC",
     );
     let rows: Vec<ConversationRow> = match db.backend() {
         Backend::Sqlite => {
@@ -1523,7 +1527,7 @@ pub async fn list_conversations(db: &Database, viewer_account: &str) -> Result<V
 pub async fn toggle_topic_lock(db: &Database, topic_id: &str) -> Result<bool> {
     let sql = db.sql(
         "UPDATE forum_topics SET locked = CASE WHEN locked = 0 THEN 1 ELSE 0 END WHERE id = ?",
-        "UPDATE forum_topics SET locked = (NOT locked) WHERE id = $1::uuid",
+        "UPDATE forum_topics SET locked = (NOT locked) WHERE id = $1",
     );
     let affected = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
