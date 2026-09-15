@@ -206,6 +206,36 @@ async fn get_forums(
     Ok(Json(serde_json::json!({ "items": categories })))
 }
 
+/// Attach the author handle to every topic/post serialized here: the tables
+/// store authors as pseud id strings, and a reader reads a handle. Ids that
+/// resolve to nothing fall back to the stored string.
+async fn with_author_handles<T: serde::Serialize>(
+    state: &AppState,
+    items: Vec<T>,
+    pseud_id: impl Fn(&T) -> &String,
+) -> Result<Vec<serde_json::Value>, lorehaven_domain::AppError> {
+    let ids: Vec<String> = items.iter().map(pseud_id).cloned().collect();
+    let handles = lorehaven_db::identity::handles_for_pseud_ids(state.db(), &ids)
+        .await
+        .map_err(|e| lorehaven_domain::AppError::Internal(e.into()))?;
+    Ok(items
+        .into_iter()
+        .map(|item| {
+            let mut v = serde_json::to_value(&item).unwrap_or_else(|_| serde_json::json!({}));
+            if let Some(id) = v
+                .get("author_pseud")
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_string())
+            {
+                if let Some(handle) = handles.get(&id) {
+                    v["author_handle"] = serde_json::Value::String(handle.clone());
+                }
+            }
+            v
+        })
+        .collect())
+}
+
 async fn get_forums_topics(
     State(state): State<AppState>,
     RequireSession(_): RequireSession,
@@ -220,7 +250,10 @@ async fn get_forums_topics(
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
-    Ok(Json(serde_json::json!({ "items": topics })))
+    let items = with_author_handles(&state, topics, |t| &t.author_pseud)
+        .await
+        .map_err(ApiError)?;
+    Ok(Json(serde_json::json!({ "items": items })))
 }
 
 async fn post_topic(
@@ -265,7 +298,12 @@ async fn get_topic(
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     match topic {
-        Some(t) => Ok(Json(serde_json::json!({ "topic": t }))),
+        Some(t) => {
+            let items = with_author_handles(&state, vec![t], |t| &t.author_pseud)
+                .await
+                .map_err(ApiError)?;
+            Ok(Json(serde_json::json!({ "topic": items[0] })))
+        }
         None => Err(ApiError(lorehaven_domain::AppError::NotFound {
             resource: "topic",
         })),
@@ -278,7 +316,7 @@ async fn get_topic_replies(
     Path(id): Path<String>,
     Query(params): Query<CursorQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let items = lorehaven_db::community::list_posts(
+    let posts = lorehaven_db::community::list_posts(
         state.db(),
         &id,
         params.cursor.as_deref(),
@@ -286,6 +324,9 @@ async fn get_topic_replies(
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    let items = with_author_handles(&state, posts, |p| &p.author_pseud)
+        .await
+        .map_err(ApiError)?;
     Ok(Json(serde_json::json!({ "items": items })))
 }
 

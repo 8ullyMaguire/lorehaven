@@ -74,7 +74,7 @@
               onclick={(event) =>
                 handleLinkClick(event, `/community/topics/${encodeURIComponent(topic.id)}`)}
             >{topic.title}</a>
-            <span class="meta">started by {topic.author_pseud}</span>
+            <span class="meta">started by {topic.author_handle ?? topic.author_pseud}</span>
           </li>
         {/each}
       </ul>

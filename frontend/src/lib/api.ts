@@ -2078,6 +2078,8 @@ export interface ForumTopic {
   category_id: string;
   title: string;
   author_pseud: string;
+  /** The author's handle, resolved server-side; falls back to author_pseud. */
+  author_handle?: string;
   created_at: string;
   locked: boolean;
 }
@@ -2087,6 +2089,8 @@ export interface ForumPost {
   id: string;
   topic_id: string;
   author_pseud: string;
+  /** The author's handle, resolved server-side; falls back to author_pseud. */
+  author_handle?: string;
   body: string;
   created_at: string;
 }
@@ -2110,7 +2114,10 @@ export async function createTopic(
 }
 
 export async function fetchTopic(topicId: string, signal?: AbortSignal): Promise<ForumTopic> {
-  return apiFetch<ForumTopic>(`/topics/${encodeURIComponent(topicId)}`, { signal });
+  const page = await apiFetch<{ topic: ForumTopic }>(`/topics/${encodeURIComponent(topicId)}`, {
+    signal,
+  });
+  return page.topic;
 }
 
 export async function fetchPosts(topicId: string, signal?: AbortSignal): Promise<ForumPost[]> {

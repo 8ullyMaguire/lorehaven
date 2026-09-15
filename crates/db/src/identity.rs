@@ -14,10 +14,11 @@
 use anyhow::{Context, Result};
 use lorehaven_domain::policy::AgeState;
 use lorehaven_domain::{AccountId, PseudId, SessionId};
+use sqlx::Row;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::Database;
+use crate::{Backend, Database};
 
 /// Current UTC time as RFC 3339 text — the storage format for every timestamp.
 #[must_use]
@@ -949,6 +950,46 @@ fn decode_pseud(row: PseudRow) -> Pseud {
         created_at,
         version,
     }
+}
+
+/// Handles for a batch of pseud id strings — the forum surfaces store authors
+/// as pseud id strings and readers read handles. Ids that resolve to nothing
+/// (deleted pseud) are simply absent; callers fall back to the stored string.
+pub async fn handles_for_pseud_ids(
+    db: &Database,
+    ids: &[String],
+) -> Result<std::collections::HashMap<String, String>, sqlx::Error> {
+    let mut map = std::collections::HashMap::new();
+    if ids.is_empty() {
+        return Ok(map);
+    }
+    match db.backend() {
+        Backend::Sqlite => {
+            let placeholders = std::iter::repeat_n("?", ids.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!("SELECT id, handle FROM pseuds WHERE id IN ({placeholders})");
+            let mut q = sqlx::query(&sql);
+            for id in ids {
+                q = q.bind(id);
+            }
+            let rows = q.fetch_all(db.sqlite_pool().expect("sqlite")).await?;
+            for r in rows {
+                map.insert(r.get::<String, _>("id"), r.get::<String, _>("handle"));
+            }
+        }
+        Backend::Postgres => {
+            let rows =
+                sqlx::query("SELECT id::text AS id, handle FROM pseuds WHERE id = ANY($1::uuid[])")
+                    .bind(ids)
+                    .fetch_all(db.postgres_pool().expect("postgres"))
+                    .await?;
+            for r in rows {
+                map.insert(r.get::<String, _>("id"), r.get::<String, _>("handle"));
+            }
+        }
+    }
+    Ok(map)
 }
 
 #[cfg(test)]

@@ -64,7 +64,7 @@
 
     <h1>{topic.title}</h1>
     <p class="meta">
-      started by {topic.author_pseud}
+      started by {topic.author_handle ?? topic.author_pseud}
       {#if topic.locked}
         · locked
       {/if}
@@ -76,7 +76,7 @@
       <ol class="posts">
         {#each posts as post (post.id)}
           <li>
-            <span class="author">{post.author_pseud}</span>
+            <span class="author">{post.author_handle ?? post.author_pseud}</span>
             <span class="when">{new Date(post.created_at).toLocaleString()}</span>
             <p>{post.body}</p>
           </li>
