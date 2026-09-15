@@ -33,6 +33,8 @@ export type RouteId =
   | 'admin-jobs'
   | 'discover'
   | 'community'
+  | 'forum-category'
+  | 'forum-topic'
   | 'notifications'
   | 'planned'
   | 'not-found';
@@ -141,6 +143,29 @@ export function matchRoute(path: string): RouteMatch {
   if (normalised.startsWith('/write/')) {
     const workId = decodeURIComponent(normalised.slice('/write/'.length));
     if (workId) return { id: 'work-editor', path: normalised, params: { workId } };
+  }
+
+  /*
+   * `/community/forums/<id>`: one category's topics, and
+   * `/community/topics/<id>`: one topic's thread. The Community hub links to
+   * both; the ids are uuids, so an exact-segment match is the right shape.
+   */
+  const categoryMatch = normalised.match(/^\/community\/forums\/([^/]+)$/);
+  if (categoryMatch) {
+    return {
+      id: 'forum-category',
+      path: normalised,
+      params: { categoryId: decodeURIComponent(categoryMatch[1]) },
+    };
+  }
+
+  const topicMatch = normalised.match(/^\/community\/topics\/([^/]+)$/);
+  if (topicMatch) {
+    return {
+      id: 'forum-topic',
+      path: normalised,
+      params: { topicId: decodeURIComponent(topicMatch[1]) },
+    };
   }
 
   const planned = PLANNED_ROUTES[normalised];

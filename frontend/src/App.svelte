@@ -6,6 +6,8 @@
   import Account from './routes/Account.svelte';
   import AdminJobs from './routes/AdminJobs.svelte';
   import Community from './routes/Community.svelte';
+  import ForumCategory from './routes/ForumCategory.svelte';
+  import ForumTopic from './routes/ForumTopic.svelte';
   import Discover from './routes/Discover.svelte';
   import Exports from './routes/Exports.svelte';
   import History from './routes/History.svelte';
@@ -270,6 +272,10 @@
     <Discover />
   {:else if route.id === 'community'}
     <Community />
+  {:else if route.id === 'forum-category'}
+    <ForumCategory categoryId={route.params?.categoryId ?? ''} />
+  {:else if route.id === 'forum-topic'}
+    <ForumTopic topicId={route.params?.topicId ?? ''} />
   {:else if route.id === 'notifications'}
     <Notifications />
   {:else if route.id === 'planned' && route.planned}

@@ -2072,6 +2072,62 @@ export async function fetchForums(signal?: AbortSignal): Promise<Forum[]> {
   return page.items;
 }
 
+/** A topic inside a forum category. */
+export interface ForumTopic {
+  id: string;
+  category_id: string;
+  title: string;
+  author_pseud: string;
+  created_at: string;
+  locked: boolean;
+}
+
+/** One reply inside a topic thread. */
+export interface ForumPost {
+  id: string;
+  topic_id: string;
+  author_pseud: string;
+  body: string;
+  created_at: string;
+}
+
+export async function fetchTopics(categoryId: string, signal?: AbortSignal): Promise<ForumTopic[]> {
+  const page = await apiFetch<{ items: ForumTopic[] }>(
+    `/forums/${encodeURIComponent(categoryId)}/topics`,
+    { signal },
+  );
+  return page.items;
+}
+
+export async function createTopic(
+  categoryId: string,
+  title: string,
+): Promise<ForumTopic> {
+  return apiFetch<ForumTopic>(`/forums/${encodeURIComponent(categoryId)}/topics`, {
+    method: 'POST',
+    body: JSON.stringify({ title }),
+  });
+}
+
+export async function fetchTopic(topicId: string, signal?: AbortSignal): Promise<ForumTopic> {
+  return apiFetch<ForumTopic>(`/topics/${encodeURIComponent(topicId)}`, { signal });
+}
+
+export async function fetchPosts(topicId: string, signal?: AbortSignal): Promise<ForumPost[]> {
+  const page = await apiFetch<{ items: ForumPost[] }>(
+    `/topics/${encodeURIComponent(topicId)}/replies`,
+    { signal },
+  );
+  return page.items;
+}
+
+export async function createReply(topicId: string, body: string): Promise<ForumPost> {
+  return apiFetch<ForumPost>(`/topics/${encodeURIComponent(topicId)}/replies`, {
+    method: 'POST',
+    body: JSON.stringify({ body }),
+  });
+}
+
 export async function fetchGroups(signal?: AbortSignal): Promise<Group[]> {
   const page = await apiFetch<{ items: Group[] }>('/groups', { signal });
   return page.items;
