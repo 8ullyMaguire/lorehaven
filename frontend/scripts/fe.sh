@@ -25,6 +25,12 @@ case "${1:-build}" in
   check)
     exec node ./node_modules/svelte-check/bin/svelte-check --tsconfig ./tsconfig.json
     ;;
+  e2e)
+    # Journeys in a real browser against the built release binary.
+    # Requires: npx playwright install chromium (once) and a built binary
+    # (LOREHAVEN_BIN overrides the default release path).
+    exec node ./node_modules/@playwright/test/cli.js test "${@:2}"
+    ;;
   *)
     echo "usage: $0 build|dev|test|check" >&2
     exit 2

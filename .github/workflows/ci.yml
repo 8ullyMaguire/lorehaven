@@ -167,3 +167,50 @@ jobs:
           DATABASE_URL: postgres://lorehaven:***@localhost:5432/lorehaven
           PSQL: psql postgres://lorehaven:***@127.0.0.1:5432/lorehaven
         run: bash scripts/postgres-journey.sh
+
+  browser-journeys:
+    name: Browser journeys (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release -p lorehaven-app
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      # The suite spawns the built binary itself against a scratch SQLite
+      # database (frontend/e2e/serve-scratch.sh) and drives the same golden
+      # paths the dogfood pass walked.
+      - name: Run browser journeys
+        working-directory: frontend
+        env:
+          LOREHAVEN_BIN: ${{ github.workspace }}/target/release/lorehaven
+        run: ./scripts/fe.sh e2e
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: frontend/test-results/
+          retention-days: 7
