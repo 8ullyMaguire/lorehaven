@@ -137,3 +137,27 @@ describe('apiFetch', () => {
     expect(assign).not.toHaveBeenCalled();
   });
 });
+
+describe('community list fetchers', () => {
+  it('unwrap the server { items } envelope for the community page', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({ items: [{ id: 'c1', name: 'General', position: 0, min_trust: 0 }] }),
+    );
+    const { fetchForums } = await import('./api');
+    const forums = await fetchForums();
+    expect(forums).toHaveLength(1);
+    expect(forums[0].name).toBe('General');
+  });
+
+  it('unwrap the { items } envelope for blocks', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({
+        items: [{ blocked: 'acc-2', scope: 'all', note: null, created_at: '2026-09-15T00:00:00Z' }],
+      }),
+    );
+    const { fetchBlocks } = await import('./api');
+    const blocks = await fetchBlocks();
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].blocked).toBe('acc-2');
+  });
+});
