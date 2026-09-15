@@ -19,9 +19,8 @@
     type Conversation,
     type Block,
   } from '../lib/api';
-  import { handleLinkClick, navigate } from '../lib/router';
+  import { handleLinkClick } from '../lib/router';
   import { session } from '../lib/session.svelte';
-  import Button from '../lib/components/Button.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
@@ -105,7 +104,7 @@
       aria-selected={activeTab === 'messages'}
       class:active={activeTab === 'messages'}
       onclick={() => activeTab = 'messages'}
-      disabled={!session.value}
+      disabled={!session.isSignedIn}
     >
       Messages
     </button>
@@ -114,7 +113,7 @@
       aria-selected={activeTab === 'blocks'}
       class:active={activeTab === 'blocks'}
       onclick={() => activeTab = 'blocks'}
-      disabled={!session.value}
+      disabled={!session.isSignedIn}
     >
       Blocks
     </button>

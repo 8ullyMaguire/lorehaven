@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     fetchContentSettings,
-    fetchEarnings,
+    fetchMyEarnings,
     fetchFeedbackInbox,
     fetchFeedbackPreferences,
     fetchPrivacy,
@@ -87,7 +87,7 @@
           fetchContentSettings(),
           fetchFeedbackPreferences(),
           fetchFeedbackInbox(),
-          fetchEarnings(),
+          fetchMyEarnings(),
         ]);
       sessions = sessionList;
       privacy = privacySettings;
@@ -337,23 +337,6 @@
               {/if}
             {/if}
           </div>
-        {:else}
-          <div class="panel">
-            {#if loading && !privacy}
-              <Skeleton lines={4} label="Loading your privacy settings" />
-            {:else if privacy}
-              <PrivacySettings
-                legend="Who can see what"
-                note="These apply to the account as a whole. Settings that belong to one pseud are edited on that pseud's page."
-                keys={accountKeys}
-                values={privacy.account}
-                onsave={async (changes) => {
-                  privacy = await patchPrivacy(changes);
-                  say('Privacy settings saved.', 'success');
-                }}
-              />
-            {/if}
-          </div>
         {:else if id === 'earnings'}
           <div class="panel">
             {#if loading && !earnings}
@@ -384,6 +367,23 @@
               {#if earnings.length === 0}
                 <p class="note">No earnings yet. Publish a work and set a price to start earning.</p>
               {/if}
+            {/if}
+          </div>
+        {:else}
+          <div class="panel">
+            {#if loading && !privacy}
+              <Skeleton lines={4} label="Loading your privacy settings" />
+            {:else if privacy}
+              <PrivacySettings
+                legend="Who can see what"
+                note="These apply to the account as a whole. Settings that belong to one pseud are edited on that pseud's page."
+                keys={accountKeys}
+                values={privacy.account}
+                onsave={async (changes) => {
+                  privacy = await patchPrivacy(changes);
+                  say('Privacy settings saved.', 'success');
+                }}
+              />
             {/if}
           </div>
         {/if}

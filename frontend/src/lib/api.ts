@@ -2068,19 +2068,23 @@ export interface Block {
 }
 
 export async function fetchForums(signal?: AbortSignal): Promise<Forum[]> {
-  return apiFetch<Forum[]>('/forums', { signal });
+  const page = await apiFetch<{ items: Forum[] }>('/forums', { signal });
+  return page.items;
 }
 
 export async function fetchGroups(signal?: AbortSignal): Promise<Group[]> {
-  return apiFetch<Group[]>('/groups', { signal });
+  const page = await apiFetch<{ items: Group[] }>('/groups', { signal });
+  return page.items;
 }
 
 export async function fetchConversations(signal?: AbortSignal): Promise<Conversation[]> {
-  return apiFetch<Conversation[]>('/conversations', { signal });
+  const page = await apiFetch<{ items: Conversation[] }>('/conversations', { signal });
+  return page.items;
 }
 
 export async function fetchBlocks(signal?: AbortSignal): Promise<Block[]> {
-  return apiFetch<Block[]>('/me/blocks', { signal });
+  const page = await apiFetch<{ items: Block[] }>('/me/blocks', { signal });
+  return page.items;
 }
 
 // ---------------------------------------------------------------------------
@@ -2181,10 +2185,14 @@ export function deleteWorkPricing(workId: string): Promise<void> {
 
 /** Fetch the acting account's entitlements. */
 export function fetchMyEntitlements(signal?: AbortSignal): Promise<EntitlementRow[]> {
-  return apiFetch<EntitlementRow[]>('/me/entitlements', { signal });
+  return apiFetch<{ entitlements: EntitlementRow[] }>('/me/entitlements', { signal }).then(
+    (page) => page.entitlements,
+  );
 }
 
 /** Fetch the acting account's earnings. */
 export function fetchMyEarnings(signal?: AbortSignal): Promise<EarningsRow[]> {
-  return apiFetch<EarningsRow[]>('/me/earnings', { signal });
+  return apiFetch<{ earnings: EarningsRow[] }>('/me/earnings', { signal }).then(
+    (page) => page.earnings,
+  );
 }
