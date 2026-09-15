@@ -29,8 +29,8 @@ REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 BIN=${BIN:-"$REPO_ROOT/target/debug/lorehaven"}
 [ -x "$BIN" ] || BIN="$HOME/.cargo-target/debug/lorehaven"
 
-DATABASE_URL=${DATABASE_URL:-'postgres://lorehaven:devpassword@127.0.0.1:55432/lorehaven'}
-PSQL=${PSQL:-'sudo docker exec -i lh-m8-pg psql -U lorehaven -d lorehaven'}
+DATABASE_URL=${DATABASE_URL:?'set DATABASE_URL to a scratch PostgreSQL URL — this script drops the public schema of the database it targets'}
+PSQL=${PSQL:?'set PSQL to a psql command that reaches the same database (e.g. sudo docker exec -i <container> psql -U <user> -d <db>)'}
 PORT=${PORT:-8140}
 ROOT=${ROOT:-/tmp/lh-postgres-journey}
 LOG=${LOG:-/tmp/lh-postgres-journey.log}
