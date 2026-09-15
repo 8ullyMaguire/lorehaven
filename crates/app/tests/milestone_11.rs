@@ -357,3 +357,198 @@ async fn operator_affinity_ranking_is_silent_field_shape_unchanged() {
     }
     harness.cleanup().await;
 }
+
+// ---------------------------------------------------------------------------
+// M11-05: Recipes
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn recipe_owner_can_crud_their_recipe() {
+    let harness = Harness::new("recipe-crud").await;
+    let mut client = harness.client();
+    register(&mut client, "recipe@example.com", "Chef").await;
+
+    // Create a private recipe.
+    let (status, body) = client
+        .post(
+            "/api/v1/recipes",
+            json!({
+                "id": "my-recipe-1",
+                "name": "My Recipe",
+                "document": { "tags": ["fantasy"] },
+                "is_public": false
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["id"], "my-recipe-1");
+
+    // List returns it.
+    let (status, body) = client.get("/api/v1/recipes/list").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let recipes = body["recipes"].as_array().expect("recipes");
+    assert!(recipes.iter().any(|r| r["id"] == "my-recipe-1"), "{body}");
+
+    // Get by ID works for owner.
+    let (status, body) = client.get("/api/v1/recipes/my-recipe-1").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["name"], "My Recipe");
+
+    // Update.
+    let (status, body) = client
+        .post(
+            "/api/v1/recipes/my-recipe-1",
+            json!({ "name": "Updated", "document": { "tags": ["scifi"] } }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) = client.get("/api/v1/recipes/my-recipe-1").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["name"], "Updated");
+
+    // Delete.
+    let (status, body) = client.post("/api/v1/recipes/my-recipe-1/delete", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Gone.
+    let (status, _body) = client.get("/api/v1/recipes/my-recipe-1").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn private_recipe_is_inaccessible_to_other_viewers() {
+    let harness = Harness::new("recipe-private").await;
+    // Account A creates a private recipe.
+    let mut alice = harness.client();
+    register(&mut alice, "alice@example.com", "Alice").await;
+    let (status, body) = alice
+        .post(
+            "/api/v1/recipes",
+            json!({
+                "id": "secret-recipe",
+                "name": "Secret",
+                "document": { "tags": ["hidden"] },
+                "is_public": false
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Account B cannot read it.
+    let mut bob = harness.client();
+    register(&mut bob, "bob@example.com", "Bob").await;
+    let (status, _body) = bob.get("/api/v1/recipes/secret-recipe").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Account B cannot update it.
+    let (status, _body) = bob
+        .post(
+            "/api/v1/recipes/secret-recipe",
+            json!({ "name": "Hacked", "document": {} }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Account B cannot delete it.
+    let (status, _body) = bob
+        .post("/api/v1/recipes/secret-recipe/delete", json!({}))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn public_recipe_is_visible_to_other_viewers() {
+    let harness = Harness::new("recipe-public").await;
+    let mut alice = harness.client();
+    register(&mut alice, "alice2@example.com", "Alice").await;
+    let (status, body) = alice
+        .post(
+            "/api/v1/recipes",
+            json!({
+                "id": "shared-recipe",
+                "name": "Shared",
+                "document": { "tags": ["fantasy"] },
+                "is_public": true
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let mut bob = harness.client();
+    register(&mut bob, "bob2@example.com", "Bob").await;
+    let (status, body) = bob.get("/api/v1/recipes/shared-recipe").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["name"], "Shared");
+
+    // Bob can see it in list too.
+    let (status, body) = bob.get("/api/v1/recipes/list").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let recipes = body["recipes"].as_array().expect("recipes");
+    assert!(recipes.iter().any(|r| r["id"] == "shared-recipe"), "{body}");
+
+    harness.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// M11-06: Dashboards
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn dashboard_save_and_retrieve() {
+    let harness = Harness::new("dashboard-crud").await;
+    let mut client = harness.client();
+    register(&mut client, "dash@example.com", "Dash").await;
+
+    // Empty dashboard returns empty slots.
+    let (status, body) = client.get("/api/v1/dashboard").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["slots"], json!([]));
+
+    // Save a layout with a widget.
+    let (status, body) = client
+        .post(
+            "/api/v1/dashboard",
+            json!({ "slots": [
+                { "id": "my-feed", "widget": "discovery-feed" },
+                { "id": "unknown-1", "widget": "not-a-real-widget" }
+            ] }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Retrieve it.
+    let (status, body) = client.get("/api/v1/dashboard").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let slots = body["slots"].as_array().expect("slots");
+    assert_eq!(slots.len(), 2, "{body}");
+    assert_eq!(slots[0]["widget"], "discovery-feed");
+    assert_eq!(slots[1]["widget"], "not-a-real-widget");
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn dashboard_unknown_widget_ids_do_not_error() {
+    let harness = Harness::new("dashboard-unknown-widget").await;
+    let mut client = harness.client();
+    register(&mut client, "dw@example.com", "Dash").await;
+    let (status, body) = client
+        .post(
+            "/api/v1/dashboard",
+            json!({ "slots": [{ "id": "x", "widget": "totally-unknown" }] }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = client.get("/api/v1/dashboard").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let slots = body["slots"].as_array().expect("slots");
+    assert_eq!(slots.len(), 1, "{body}");
+    // Unknown widget ids must be preserved, not crash.
+    assert_eq!(slots[0]["widget"], "totally-unknown");
+    harness.cleanup().await;
+}
