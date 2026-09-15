@@ -1393,3 +1393,47 @@ The 2026-09-14 spec revision (monetization, subscriptions, saved-search alerts, 
 - Domain functions — signatures in `crates/domain/src/monetization.rs` and `crates/domain/src/subscriptions.rs` with stub bodies returning `Todo`.
 - Everything else in the revision — `unsupported` until the agent implements it; the routes returning 501 is the honest state, not a claim of behavior.
 - Repository 2026-09-14 review fixes committed: `620d89e` (runtime bombs + domain rules) and `d404bf0` (phantom IDs + gifts entitlement + reads classified).
+
+## 2026-09-15 — real-browser E2E verification (this goal)
+
+Method: the built release binary (embedded production frontend) driven by a
+real Chromium over every common user journey — register → pseud → publish →
+read → search/discover → library/rating/review/note → purchase/paywall →
+notifications → earnings → forum topic/reply — with the JS console watched
+after every navigation. Full report with evidence:
+`docs/dogfood-2026-09-15.md`.
+
+What was verified (counted, from the runs themselves):
+
+- 9 findings, 8 fixed with tests inside this goal, 1 (service-worker
+  staleness after an upgrade) documented for operators.
+- `scripts/postgres-journey.sh` extended from library-only to 67 steps
+  (auth sanity, authoring, pricing + paywall, purchase/entitlements,
+  reviews, tips, forum topics/replies, notifications inbox, ownership
+  refusals): **67 passed, 0 failed** on live PostgreSQL 17.
+- 5 new/changed test files pin the fixes: notifications reply test
+  (`milestone_12`), sale-notification + pricing-ownership tests
+  (`milestone_21`, now 23 tests), silent-rule rework (`milestone_11`).
+- Full workspace: `cargo test --workspace` green (no failed tests) after
+  the dialect batch; `cargo fmt --all -- --check` clean;
+  `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+  clean (0 errors). Frontend: 147 vitest tests passed, svelte-check
+  0 errors, production bundle builds.
+- Browser passes: SQLite (two passes: 8150, 8151) and PostgreSQL
+  (lorehaven_smoke on the scratch container, port 8152) — every journey
+  above driven with zero console errors after the fixes.
+
+New work this goal made real (was linked but unreachable or absent):
+
+- Notifications inbox backend (table, writers, three endpoints) — the
+  frontend had been calling it since Milestone 1.
+- Forum category and topic browser pages (start topic, reply, lock) —
+  the hub linked to a 404.
+- Author pricing UI in the work editor — the purchase path was
+  curl-only.
+- Discovery feed items carry title + author handle instead of bare uuids.
+
+Repos passed through: `999fe4c` (notifications backend), `4592587`
+(PostgreSQL dialect drift + pricing ownership), `a3e9d6d` (journey in CI),
+`674f7a2` (forum pages), `fd710a9` (discovery titles), `f02ac6a` (forum
+handles), `16f7125` + `da75978` (discovery separator, pricing UI).
