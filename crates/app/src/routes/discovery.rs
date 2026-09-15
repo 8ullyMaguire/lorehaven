@@ -20,6 +20,7 @@ pub fn router() -> Router<AppState> {
             post(recompute_taste_profile),
         )
         .route("/discovery/taste-profile/clear", post(clear_taste_profile))
+        .route("/operator/affinities", post(set_operator_affinity))
 }
 
 async fn get_discovery(
@@ -37,10 +38,40 @@ async fn get_discovery(
     }
     .map_err(|e| ApiError(AppError::Internal(e)))?;
 
-    let items: Vec<serde_json::Value> = work_ids
+    let mut items: Vec<serde_json::Value> = work_ids
         .into_iter()
         .map(|id| serde_json::json!({ "work_id": id.to_string() }))
         .collect();
+
+    // Apply operator affinity ranking (silent reordering, no field changes).
+    let affinities = lorehaven_db::discovery::list_operator_affinities(state.db())
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+    let affinity_map: std::collections::HashMap<String, i64> = affinities
+        .into_iter()
+        .map(|a| (a.work_id, a.affinity_bp))
+        .collect();
+
+    if !affinity_map.is_empty() {
+        let candidates: Vec<lorehaven_domain::discovery::Candidate> = items
+            .iter()
+            .enumerate()
+            .map(|(idx, item)| lorehaven_domain::discovery::Candidate {
+                work_id: item["work_id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .parse()
+                    .unwrap_or_default(),
+                score: (items.len() - idx) as i64,
+                reason: "discovery".into(),
+            })
+            .collect();
+        let ranked = lorehaven_domain::discovery::apply_affinity_ranking(candidates, &affinity_map);
+        items = ranked
+            .into_iter()
+            .map(|c| serde_json::json!({ "work_id": c.work_id.to_string() }))
+            .collect();
+    }
 
     Ok(Json(serde_json::json!({ "items": items })))
 }
@@ -79,4 +110,56 @@ async fn clear_taste_profile(
         .await
         .map_err(|e| ApiError(AppError::Internal(e)))?;
     Ok(Json(serde_json::json!({ "status": "cleared" })))
+}
+
+/// Whether this account may use the operator surface.
+fn require_operator(state: &AppState, user: &crate::auth::SessionUser) -> ApiResult<()> {
+    let configured = state.config().administration.operator_account_id;
+    if configured == Some(user.account_id) {
+        return Ok(());
+    }
+    tracing::debug!(
+        operator_configured = configured.is_some(),
+        "an operator route was reached by an account that is not the operator"
+    );
+    Err(ApiError(AppError::NotFound {
+        resource: "page",
+    }))
+}
+
+/// Set an operator affinity on a work. Audit-logged; never surfaced publicly.
+async fn set_operator_affinity(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Json(body): Json<serde_json::Value>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_operator(&state, &user)?;
+
+    let work_id = body
+        .get("work_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ApiError(AppError::field("work_id", "work_id is required")))?
+        .to_string();
+    let affinity_bp = body
+        .get("affinity_bp")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| ApiError(AppError::field("affinity_bp", "affinity_bp is required")))?;
+    let rationale = body
+        .get("rationale")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ApiError(AppError::field("rationale", "rationale is required")))?
+        .to_string();
+
+    let operator = user.account_id.to_string();
+    lorehaven_db::discovery::set_operator_affinity(
+        state.db(),
+        &work_id,
+        affinity_bp,
+        &operator,
+        &rationale,
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
+
+    Ok(Json(serde_json::json!({ "status": "set" })))
 }

@@ -311,3 +311,49 @@ async fn discovery_returns_work_ids() {
     assert_eq!(items[0]["work_id"], work_id, "{body}");
     harness.cleanup().await;
 }
+
+// ---------------------------------------------------------------------------
+// M11-03: Operator taste influence
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn operator_affinity_endpoint_returns_404_to_non_operator() {
+    let harness = Harness::new("affinity-non-op").await;
+    let _ = published_work(&harness, "a@example.com", "AuthorA", "Some Work").await;
+    let mut client = harness.client();
+    register(&mut client, "reader@example.com", "Reader").await;
+    let (status, _) = client
+        .post(
+            "/api/v1/operator/affinities",
+            json!({
+                "work_id": "some-work-id",
+                "affinity_bp": 10000,
+                "rationale": "good work"
+            }),
+        )
+        .await;
+    // Router built without operator_account_id → require_operator triggers 404.
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn operator_affinity_ranking_is_silent_field_shape_unchanged() {
+    // Without any affinity set, discovery returns work items with work_id.
+    let harness = Harness::new("affinity-silent").await;
+    let _ = published_work(&harness, "a@example.com", "AuthorA", "Silent Work").await;
+    let mut anon = harness.client();
+    let (status, body) = anon.get("/api/v1/discovery").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body["items"].as_array().expect("items");
+    assert!(!items.is_empty(), "{body}");
+    // Influenced vs uninfluenced responses must differ only in result order,
+    // never in field presence or naming (spec §16.3, §20 silent rule).
+    // Each item must have exactly `work_id` — no affinity, reason, score, or
+    // influence-related field may leak.
+    for item in items {
+        let keys: Vec<String> = item.as_object().unwrap().keys().cloned().collect();
+        assert_eq!(keys, vec!["work_id".to_string()], "unexpected fields: {item}");
+    }
+    harness.cleanup().await;
+}
