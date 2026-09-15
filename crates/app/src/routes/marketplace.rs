@@ -5,8 +5,8 @@ use axum::routing::{get, post};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use uuid::Uuid;
 use std::str::FromStr;
+use uuid::Uuid;
 
 use crate::auth::MaybeSession;
 use crate::http::{ApiError, ApiResult};
@@ -309,5 +309,8 @@ pub fn router() -> axum::Router<AppState> {
         .route("/extensions/{slug}/revoke", post(revoke_extension))
         .route("/me/extension-grants", get(list_my_grants))
         .route("/me/webhooks", get(list_webhooks).post(create_webhook))
-        .route("/works/{id}/gallery", get(list_gallery).post(add_gallery_item))
+        .route(
+            "/works/{id}/gallery",
+            get(list_gallery).post(add_gallery_item),
+        )
 }

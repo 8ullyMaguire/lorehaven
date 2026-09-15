@@ -406,14 +406,12 @@ pub async fn get_recipe(db: &Database, id: &str, viewer: &str) -> Result<Option<
             .fetch_optional(db.sqlite_pool().expect("sqlite"))
             .await?
         }
-        crate::Backend::Postgres => {
-            sqlx::query_as(
-                "SELECT id, owner, name, document, is_public, created_at FROM recipes WHERE id = $1",
-            )
-            .bind(id)
-            .fetch_optional(db.postgres_pool().expect("postgres"))
-            .await?
-        }
+        crate::Backend::Postgres => sqlx::query_as(
+            "SELECT id, owner, name, document, is_public, created_at FROM recipes WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(db.postgres_pool().expect("postgres"))
+        .await?,
     };
     match row {
         Some((id, owner, name, document, is_public, created_at)) => {
@@ -455,14 +453,16 @@ pub async fn list_recipes(db: &Database, viewer: &str) -> Result<Vec<RecipeRow>>
     };
     Ok(rows
         .into_iter()
-        .map(|(id, owner, name, document, is_public, created_at)| RecipeRow {
-            id,
-            owner,
-            name,
-            document: serde_json::from_str(&document).unwrap_or_default(),
-            is_public: is_public != 0,
-            created_at,
-        })
+        .map(
+            |(id, owner, name, document, is_public, created_at)| RecipeRow {
+                id,
+                owner,
+                name,
+                document: serde_json::from_str(&document).unwrap_or_default(),
+                is_public: is_public != 0,
+                created_at,
+            },
+        )
         .collect())
 }
 
@@ -476,28 +476,24 @@ pub async fn update_recipe(
 ) -> Result<bool> {
     let updated = match db.backend() {
         crate::Backend::Sqlite => {
-            sqlx::query(
-                "UPDATE recipes SET name = ?, document = ? WHERE id = ? AND owner = ?",
-            )
-            .bind(name)
-            .bind(document.to_string())
-            .bind(id)
-            .bind(owner)
-            .execute(db.sqlite_pool().expect("sqlite"))
-            .await?
-            .rows_affected()
+            sqlx::query("UPDATE recipes SET name = ?, document = ? WHERE id = ? AND owner = ?")
+                .bind(name)
+                .bind(document.to_string())
+                .bind(id)
+                .bind(owner)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?
+                .rows_affected()
         }
         crate::Backend::Postgres => {
-            sqlx::query(
-                "UPDATE recipes SET name = $1, document = $2 WHERE id = $3 AND owner = $4",
-            )
-            .bind(name)
-            .bind(document.to_string())
-            .bind(id)
-            .bind(owner)
-            .execute(db.postgres_pool().expect("postgres"))
-            .await?
-            .rows_affected()
+            sqlx::query("UPDATE recipes SET name = $1, document = $2 WHERE id = $3 AND owner = $4")
+                .bind(name)
+                .bind(document.to_string())
+                .bind(id)
+                .bind(owner)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?
+                .rows_affected()
         }
     };
     Ok(updated > 0)
@@ -506,22 +502,18 @@ pub async fn update_recipe(
 /// Delete a recipe (owner-only).
 pub async fn delete_recipe(db: &Database, id: &str, owner: &str) -> Result<bool> {
     let deleted = match db.backend() {
-        crate::Backend::Sqlite => {
-            sqlx::query("DELETE FROM recipes WHERE id = ? AND owner = ?")
-                .bind(id)
-                .bind(owner)
-                .execute(db.sqlite_pool().expect("sqlite"))
-                .await?
-                .rows_affected()
-        }
-        crate::Backend::Postgres => {
-            sqlx::query("DELETE FROM recipes WHERE id = $1 AND owner = $2")
-                .bind(id)
-                .bind(owner)
-                .execute(db.postgres_pool().expect("postgres"))
-                .await?
-                .rows_affected()
-        }
+        crate::Backend::Sqlite => sqlx::query("DELETE FROM recipes WHERE id = ? AND owner = ?")
+            .bind(id)
+            .bind(owner)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?
+            .rows_affected(),
+        crate::Backend::Postgres => sqlx::query("DELETE FROM recipes WHERE id = $1 AND owner = $2")
+            .bind(id)
+            .bind(owner)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?
+            .rows_affected(),
     };
     Ok(deleted > 0)
 }
@@ -573,7 +565,11 @@ pub async fn get_dashboard_layout(db: &Database, account: &str) -> Result<Option
 }
 
 /// Save a dashboard layout for an account.
-pub async fn save_dashboard_layout(db: &Database, account: &str, slots: &serde_json::Value) -> Result<()> {
+pub async fn save_dashboard_layout(
+    db: &Database,
+    account: &str,
+    slots: &serde_json::Value,
+) -> Result<()> {
     let now = crate::identity::now_rfc3339();
     let slots_str = slots.to_string();
     match db.backend() {

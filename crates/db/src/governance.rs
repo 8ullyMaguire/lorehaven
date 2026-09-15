@@ -418,7 +418,9 @@ pub async fn decide_appeal(
         }
     };
     if appellant.as_deref() == Some(decided_by) {
-        return Err(sqlx::Error::Protocol("appeal decision must be made by a different account than the appellant".into()));
+        return Err(sqlx::Error::Protocol(
+            "appeal decision must be made by a different account than the appellant".into(),
+        ));
     }
     let now = crate::identity::now_rfc3339();
     match db.backend() {

@@ -578,13 +578,15 @@ async fn presence_stream_returns_active_viewer() {
     let (status, body) = user.get("/api/v1/presence/stream").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let items = body["items"].as_array().expect("items");
-    assert!(items.len() >= 1, "expected at least the caller's item: {body}");
+    assert!(
+        !items.is_empty(),
+        "expected at least the caller's item: {body}"
+    );
     let first = &items[0];
     assert!(first["active_now"].as_bool().unwrap_or(false), "{body}");
     assert!(first["enabled"].as_bool().unwrap_or(false), "{body}");
     harness.cleanup().await;
 }
-
 
 #[tokio::test]
 async fn a_forum_topic_can_be_created_replied_to_and_locked() {
@@ -626,11 +628,17 @@ async fn a_forum_topic_can_be_created_replied_to_and_locked() {
     let (status, body) = user.get(&format!("/api/v1/forums/{cat_id}/topics")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let items = body["items"].as_array().expect("items");
-    assert!(items.iter().any(|t| t["id"] == topic_id), "topic should appear in listing");
+    assert!(
+        items.iter().any(|t| t["id"] == topic_id),
+        "topic should appear in listing"
+    );
 
     // Reply to the topic.
     let (status, body) = user
-        .post(&format!("/api/v1/topics/{topic_id}/replies"), json!({ "body": "First!" }))
+        .post(
+            &format!("/api/v1/topics/{topic_id}/replies"),
+            json!({ "body": "First!" }),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["id"].as_str().is_some(), "reply has id");
@@ -638,30 +646,48 @@ async fn a_forum_topic_can_be_created_replied_to_and_locked() {
     // Topic page shows unlocked state initially.
     let (status, body) = user.get(&format!("/api/v1/topics/{topic_id}")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(!body["topic"]["locked"].as_bool().unwrap(), "fresh topic is unlocked");
+    assert!(
+        !body["topic"]["locked"].as_bool().unwrap(),
+        "fresh topic is unlocked"
+    );
 
     // Lock the topic.
-    let (status, _) = user.post(&format!("/api/v1/topics/{topic_id}/lock"), json!({})).await;
+    let (status, _) = user
+        .post(&format!("/api/v1/topics/{topic_id}/lock"), json!({}))
+        .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (status, body) = user.get(&format!("/api/v1/topics/{topic_id}")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(body["topic"]["locked"].as_bool().unwrap(), "topic is locked after toggle");
+    assert!(
+        body["topic"]["locked"].as_bool().unwrap(),
+        "topic is locked after toggle"
+    );
 
     // Replying to a locked topic is rejected (422).
     let (status, body) = user
-        .post(&format!("/api/v1/topics/{topic_id}/replies"), json!({ "body": "nope" }))
+        .post(
+            &format!("/api/v1/topics/{topic_id}/replies"),
+            json!({ "body": "nope" }),
+        )
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
 
     // Toggle again unlocks it.
-    let (status, _) = user.post(&format!("/api/v1/topics/{topic_id}/lock"), json!({})).await;
+    let (status, _) = user
+        .post(&format!("/api/v1/topics/{topic_id}/lock"), json!({}))
+        .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (status, body) = user.get(&format!("/api/v1/topics/{topic_id}")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(!body["topic"]["locked"].as_bool().unwrap(), "topic is unlocked after second toggle");
+    assert!(
+        !body["topic"]["locked"].as_bool().unwrap(),
+        "topic is unlocked after second toggle"
+    );
 
     // Locking a nonexistent topic returns 404.
-    let (status, _) = user.post("/api/v1/topics/nonexistent/lock", json!({})).await;
+    let (status, _) = user
+        .post("/api/v1/topics/nonexistent/lock", json!({}))
+        .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     harness.cleanup().await;
@@ -678,10 +704,18 @@ async fn a_trust_gate_rejects_underleveled_posters() {
     let sql = "INSERT INTO forum_categories (id, name, position, min_trust) VALUES (?, 'Editors Only', 0, 5)";
     match harness.db.backend() {
         Backend::Sqlite => {
-            sqlx::query(sql).bind(cat_id).execute(harness.db.sqlite_pool().expect("sqlite")).await.unwrap();
+            sqlx::query(sql)
+                .bind(cat_id)
+                .execute(harness.db.sqlite_pool().expect("sqlite"))
+                .await
+                .unwrap();
         }
         Backend::Postgres => {
-            sqlx::query(sql).bind(cat_id).execute(harness.db.postgres_pool().expect("postgres")).await.unwrap();
+            sqlx::query(sql)
+                .bind(cat_id)
+                .execute(harness.db.postgres_pool().expect("postgres"))
+                .await
+                .unwrap();
         }
     }
 
@@ -699,10 +733,18 @@ async fn a_trust_gate_rejects_underleveled_posters() {
     let sql = "INSERT INTO trust_levels (account, level, computed_at, basis) VALUES (?, 5, datetime('now'), 'test')";
     match harness.db.backend() {
         Backend::Sqlite => {
-            sqlx::query(sql).bind(&account_id).execute(harness.db.sqlite_pool().expect("sqlite")).await.unwrap();
+            sqlx::query(sql)
+                .bind(&account_id)
+                .execute(harness.db.sqlite_pool().expect("sqlite"))
+                .await
+                .unwrap();
         }
         Backend::Postgres => {
-            sqlx::query(sql).bind(&account_id).execute(harness.db.postgres_pool().expect("postgres")).await.unwrap();
+            sqlx::query(sql)
+                .bind(&account_id)
+                .execute(harness.db.postgres_pool().expect("postgres"))
+                .await
+                .unwrap();
         }
     }
 
@@ -734,7 +776,10 @@ async fn conversations_are_listed_with_a_preview() {
     assert_eq!(status, StatusCode::OK, "{body}");
     let conv_id = body["id"].as_str().expect("id").to_owned();
     let (status, _) = a
-        .post(&format!("/api/v1/conversations/{conv_id}/messages"), json!({ "body": "hello there" }))
+        .post(
+            &format!("/api/v1/conversations/{conv_id}/messages"),
+            json!({ "body": "hello there" }),
+        )
         .await;
     assert_eq!(status, StatusCode::OK);
 
@@ -745,7 +790,10 @@ async fn conversations_are_listed_with_a_preview() {
     assert_eq!(items.len(), 1, "A sees 1 conversation");
     let entry = &items[0];
     assert_eq!(entry["id"], conv_id);
-    assert_eq!(entry["other_handle"], b_account, "A sees B as other handle in listing");
+    assert_eq!(
+        entry["other_handle"], b_account,
+        "A sees B as other handle in listing"
+    );
     assert_eq!(entry["last_message"], "hello there");
     assert!(entry["updated_at"].as_str().is_some(), "updated_at present");
 

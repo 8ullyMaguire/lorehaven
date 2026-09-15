@@ -49,20 +49,32 @@ struct Client {
 
 impl Client {
     fn new(app: axum::Router) -> Self {
-        Self { app, cookies: Vec::new() }
+        Self {
+            app,
+            cookies: Vec::new(),
+        }
     }
     fn cookie(&self, name: &str) -> Option<&str> {
-        self.cookies.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
+        self.cookies
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
     }
     fn capture(&mut self, response: &axum::response::Response) {
         for value in response.headers().get_all(header::SET_COOKIE) {
-            let Ok(text) = value.to_str() else { continue; };
-            let Some((pair, _)) = text.split_once(';') else { continue; };
+            let Ok(text) = value.to_str() else {
+                continue;
+            };
+            let Some((pair, _)) = text.split_once(';') else {
+                continue;
+            };
             if let Some((name, value)) = pair.split_once('=') {
                 let name = name.trim().to_owned();
                 let value = value.trim().to_owned();
                 self.cookies.retain(|(k, _)| k != &name);
-                if !value.is_empty() { self.cookies.push((name, value)); }
+                if !value.is_empty() {
+                    self.cookies.push((name, value));
+                }
             }
         }
     }
@@ -136,10 +148,7 @@ impl Fixture {
         .expect("connect");
         let report = db.migrate().await.expect("migrate");
         assert!(
-            report
-                .applied
-                .iter()
-                .any(|id| id.contains("spec_revision")),
+            report.applied.iter().any(|id| id.contains("spec_revision")),
             "the 0022 spec-revision migration must be part of the catalogue: {report:?}"
         );
         Self { dir, db }
@@ -228,9 +237,15 @@ fn credits_and_money_are_separate_ledgers() {
 
 #[test]
 fn imported_works_are_never_monetizable_in_original_mode() {
-    assert!(!MoneyRules::imported_work_monetizable(Eligibility::Original));
-    assert!(!MoneyRules::imported_work_monetizable(Eligibility::Disabled));
-    assert!(MoneyRules::imported_work_monetizable(Eligibility::AnyWithAssertion));
+    assert!(!MoneyRules::imported_work_monetizable(
+        Eligibility::Original
+    ));
+    assert!(!MoneyRules::imported_work_monetizable(
+        Eligibility::Disabled
+    ));
+    assert!(MoneyRules::imported_work_monetizable(
+        Eligibility::AnyWithAssertion
+    ));
     assert!(!MoneyRules::assertion_required(Eligibility::Disabled));
 }
 
@@ -297,7 +312,10 @@ async fn monetization_routes_refuse_anonymous_callers() {
     let mut client = fx.client();
 
     let (status, _) = client
-        .post("/api/v1/works/w1/pricing", json!({"model": "purchase", "price_minor": 500, "currency": "EUR"}))
+        .post(
+            "/api/v1/works/w1/pricing",
+            json!({"model": "purchase", "price_minor": 500, "currency": "EUR"}),
+        )
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
@@ -326,18 +344,27 @@ async fn a_signed_in_caller_reaches_the_monetization_contracts() {
     assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
 
     let (status, _) = client
-        .post("/api/v1/works/w1/tips", json!({"amount_minor": 300, "currency": "EUR", "channel": "money"}))
+        .post(
+            "/api/v1/works/w1/tips",
+            json!({"amount_minor": 300, "currency": "EUR", "channel": "money"}),
+        )
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     // POST /works/{work_id}/gifts and POST /me/payouts are now implemented.
     let (status, _) = client
-        .post("/api/v1/works/0189dc5a-4c81-7120-8200-4758243e9e6a/gifts", json!({"gift_note": "thanks"}))
+        .post(
+            "/api/v1/works/0189dc5a-4c81-7120-8200-4758243e9e6a/gifts",
+            json!({"gift_note": "thanks"}),
+        )
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "gifts to unknown work → 404");
 
     let (status, _) = client
-        .post("/api/v1/me/payouts", json!({"amount_minor": 1000, "currency": "EUR", "processor_reference": "ref1"}))
+        .post(
+            "/api/v1/me/payouts",
+            json!({"amount_minor": 1000, "currency": "EUR", "processor_reference": "ref1"}),
+        )
         .await;
     assert_eq!(status, StatusCode::OK);
 
@@ -386,12 +413,16 @@ async fn monetization_purchase_endpoint_is_implemented() {
     register(&mut client, "m21-buyer@example.com", "m21buyer").await;
 
     // Purchasing a non-existent work returns NotFound.
-    let (status, _) = client.post("/api/v1/works/0189dc5a-4c81-7120-8200-4758243e9e6a/purchase", json!({})).await;
+    let (status, _) = client
+        .post(
+            "/api/v1/works/0189dc5a-4c81-7120-8200-4758243e9e6a/purchase",
+            json!({}),
+        )
+        .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     fx.cleanup().await;
 }
-
 
 #[tokio::test]
 async fn subscription_and_alert_routes_refuse_anonymous_callers() {
@@ -399,17 +430,26 @@ async fn subscription_and_alert_routes_refuse_anonymous_callers() {
     let mut client = fx.client();
 
     let (status, _) = client
-        .post("/api/v1/subscriptions", json!({"subject_type": "work", "subject_id": "w1"}))
+        .post(
+            "/api/v1/subscriptions",
+            json!({"subject_type": "work", "subject_id": "w1"}),
+        )
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     let (status, _) = client
-        .post("/api/v1/search-alerts", json!({"saved_search_id": "s1", "frequency": "daily"}))
+        .post(
+            "/api/v1/search-alerts",
+            json!({"saved_search_id": "s1", "frequency": "daily"}),
+        )
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     let (status, _) = client
-        .put("/api/v1/works/w1/ai-training", json!({"ai_training": "deny"}))
+        .put(
+            "/api/v1/works/w1/ai-training",
+            json!({"ai_training": "deny"}),
+        )
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
@@ -424,18 +464,27 @@ async fn a_signed_in_caller_reaches_the_subscription_contracts() {
 
     // Subscription routes are now implemented (no longer 501 stubs).
     let (status, _) = client
-        .post("/api/v1/subscriptions", json!({"subject_type": "work", "subject_id": "w1"}))
+        .post(
+            "/api/v1/subscriptions",
+            json!({"subject_type": "work", "subject_id": "w1"}),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "subscribe to a work succeeds");
 
     // create_alert hits the DB; a nonexistent saved_search violates the FK → 500.
     let (status, _) = client
-        .post("/api/v1/search-alerts", json!({"saved_search_id": "s1", "frequency": "daily"}))
+        .post(
+            "/api/v1/search-alerts",
+            json!({"saved_search_id": "s1", "frequency": "daily"}),
+        )
         .await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
 
     let (status, _) = client
-        .put("/api/v1/works/0189dc5a-4c81-7120-8200-4758243e9e6a/ai-training", json!({"ai_training": "deny"}))
+        .put(
+            "/api/v1/works/0189dc5a-4c81-7120-8200-4758243e9e6a/ai-training",
+            json!({"ai_training": "deny"}),
+        )
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
@@ -471,7 +520,11 @@ async fn add_chapter(client: &mut Client, work_id: &str, title: &str, text: &str
         "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}]
     });
     let (status, _) = client
-        .send("PATCH", &format!("/api/v1/chapters/{chapter_id}"), Some(json!({ "expected_version": version, "document": doc })))
+        .send(
+            "PATCH",
+            &format!("/api/v1/chapters/{chapter_id}"),
+            Some(json!({ "expected_version": version, "document": doc })),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "save chapter text");
     chapter_id
@@ -617,4 +670,3 @@ async fn public_pricing_returns_price_for_purchased_work() {
 
     fx.cleanup().await;
 }
-

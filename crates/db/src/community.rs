@@ -841,36 +841,40 @@ pub async fn list_topics_in_category(
         ),
     };
     let rows: Vec<ForumTopicRow> = match db.backend() {
-        Backend::Sqlite => {
-            match cursor {
-                Some(c) => sqlx::query_as::<_, ForumTopicRow>(&sql)
+        Backend::Sqlite => match cursor {
+            Some(c) => {
+                sqlx::query_as::<_, ForumTopicRow>(&sql)
                     .bind(category_id)
                     .bind(c)
                     .bind(limit)
                     .fetch_all(db.sqlite_pool().expect("sqlite"))
-                    .await?,
-                None => sqlx::query_as::<_, ForumTopicRow>(&sql)
+                    .await?
+            }
+            None => {
+                sqlx::query_as::<_, ForumTopicRow>(&sql)
                     .bind(category_id)
                     .bind(limit)
                     .fetch_all(db.sqlite_pool().expect("sqlite"))
-                    .await?,
+                    .await?
             }
-        }
-        Backend::Postgres => {
-            match cursor {
-                Some(c) => sqlx::query_as::<_, ForumTopicRow>(&sql)
+        },
+        Backend::Postgres => match cursor {
+            Some(c) => {
+                sqlx::query_as::<_, ForumTopicRow>(&sql)
                     .bind(category_id)
                     .bind(c)
                     .bind(limit)
                     .fetch_all(db.postgres_pool().expect("postgres"))
-                    .await?,
-                None => sqlx::query_as::<_, ForumTopicRow>(&sql)
+                    .await?
+            }
+            None => {
+                sqlx::query_as::<_, ForumTopicRow>(&sql)
                     .bind(category_id)
                     .bind(limit)
                     .fetch_all(db.postgres_pool().expect("postgres"))
-                    .await?,
+                    .await?
             }
-        }
+        },
     };
     Ok(rows.into_iter().map(ForumTopic::from).collect())
 }
@@ -1391,9 +1395,7 @@ pub async fn presence_for(
 /// List all presence records (for the presence stream).
 ///
 /// Returns `(account, last_seen_at, typing_until, enabled)` for every row.
-pub async fn list_presence(
-    db: &Database,
-) -> Result<Vec<(String, String, Option<String>, bool)>> {
+pub async fn list_presence(db: &Database) -> Result<Vec<(String, String, Option<String>, bool)>> {
     let sql = db.sql(
         "SELECT account, last_seen_at, typing_until, enabled FROM presence ORDER BY account",
         "SELECT account, last_seen_at, typing_until, enabled::int::bigint AS enabled FROM presence ORDER BY account",
@@ -1404,14 +1406,12 @@ pub async fn list_presence(
                 .fetch_all(db.sqlite_pool().expect("sqlite"))
                 .await?
         }
-        Backend::Postgres => {
-            sqlx::query_as::<_, (String, String, Option<String>, i64)>(&sql)
-                .fetch_all(db.postgres_pool().expect("postgres"))
-                .await?
-                .into_iter()
-                .map(|(a, l, t, e)| (a, l, t, e != 0))
-                .collect()
-        }
+        Backend::Postgres => sqlx::query_as::<_, (String, String, Option<String>, i64)>(&sql)
+            .fetch_all(db.postgres_pool().expect("postgres"))
+            .await?
+            .into_iter()
+            .map(|(a, l, t, e)| (a, l, t, e != 0))
+            .collect(),
     };
     Ok(rows)
 }
@@ -1473,10 +1473,7 @@ impl From<ConversationRow> for Conversation {
 /// List conversations for a participant, ordered by most recent activity.
 /// Each conversation shows the other participant's handle and the latest
 /// message preview (if any).
-pub async fn list_conversations(
-    db: &Database,
-    viewer_account: &str,
-) -> Result<Vec<Conversation>> {
+pub async fn list_conversations(db: &Database, viewer_account: &str) -> Result<Vec<Conversation>> {
     let sql = db.sql(
         "SELECT c.id,
                 (SELECT account FROM conversation_participants
@@ -1530,20 +1527,16 @@ pub async fn toggle_topic_lock(db: &Database, topic_id: &str) -> Result<bool> {
         "UPDATE forum_topics SET locked = CASE WHEN locked = 0 THEN 1 ELSE 0 END WHERE id = $1",
     );
     let affected = match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query(&sql)
-                .bind(topic_id)
-                .execute(db.sqlite_pool().expect("sqlite"))
-                .await?
-                .rows_affected()
-        }
-        Backend::Postgres => {
-            sqlx::query(&sql)
-                .bind(topic_id)
-                .execute(db.postgres_pool().expect("postgres"))
-                .await?
-                .rows_affected()
-        }
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(topic_id)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(topic_id)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?
+            .rows_affected(),
     };
     Ok(affected > 0)
 }

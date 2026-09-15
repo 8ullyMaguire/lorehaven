@@ -1,5 +1,6 @@
 //! HTTP routes.
 
+pub mod admin;
 pub mod auth;
 pub mod collaborators;
 pub mod community;
@@ -17,12 +18,11 @@ pub mod library;
 pub mod marketplace;
 pub mod meta;
 pub mod monetization;
-pub mod subscriptions;
 pub mod pseuds;
 pub mod reading;
 pub mod search;
 pub mod settings;
+pub mod subscriptions;
 pub mod taxonomy;
 pub mod translation;
 pub mod works;
-pub mod admin;

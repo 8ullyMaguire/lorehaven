@@ -112,7 +112,7 @@ pub fn apply_diversity(
                     *fandom_counts.entry(f.clone()).or_insert(0) += 1;
                 }
                 if kept.len() < keep_main {
-                    kept.push(work.clone());
+                    kept.push(work);
                 } else {
                     exploration_pool.push(work);
                 }
@@ -245,14 +245,7 @@ mod tests {
         let fandom = "fandom:x".to_string();
         let fandoms_of = |_w: &WorkId| vec![fandom.clone()];
         let known: std::collections::HashSet<String> = [fandom.clone()].into_iter().collect();
-        let result = apply_diversity(
-            vec![w1.clone(), w2.clone(), w3.clone()],
-            &known,
-            2,
-            0.0,
-            10,
-            &fandoms_of,
-        );
+        let result = apply_diversity(vec![w1, w2, w3], &known, 2, 0.0, 10, &fandoms_of);
         assert_eq!(result.len(), 2);
         assert_eq!(result, vec![w1, w2]);
     }
@@ -265,14 +258,7 @@ mod tests {
         let w2 = WorkId::new();
         let known: std::collections::HashSet<String> = std::collections::HashSet::new();
         let fandoms_of = |_w: &WorkId| Vec::new();
-        let result = apply_diversity(
-            vec![w1.clone(), w2.clone()],
-            &known,
-            0,
-            0.0,
-            10,
-            &fandoms_of,
-        );
+        let result = apply_diversity(vec![w1, w2], &known, 0, 0.0, 10, &fandoms_of);
         assert_eq!(result, vec![w1, w2]);
     }
 }

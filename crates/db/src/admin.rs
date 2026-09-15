@@ -53,18 +53,22 @@ pub async fn increment_abuse_counter(
         Backend::Sqlite => {
             sqlx::query_scalar(
                 "INSERT INTO abuse_counters (key, window, count) VALUES (?, ?, 1)
-                 ON CONFLICT(key, window) DO UPDATE SET count = count + 1 RETURNING count"
+                 ON CONFLICT(key, window) DO UPDATE SET count = count + 1 RETURNING count",
             )
-            .bind(key).bind(window)
-            .fetch_one(db.sqlite_pool().expect("sqlite")).await?
+            .bind(key)
+            .bind(window)
+            .fetch_one(db.sqlite_pool().expect("sqlite"))
+            .await?
         }
         Backend::Postgres => {
             sqlx::query_scalar(
                 "INSERT INTO abuse_counters (key, window, count) VALUES ($1, $2, 1)
-                 ON CONFLICT(key, window) DO UPDATE SET count = count + 1 RETURNING count"
+                 ON CONFLICT(key, window) DO UPDATE SET count = count + 1 RETURNING count",
             )
-            .bind(key).bind(window)
-            .fetch_one(db.postgres_pool().expect("postgres")).await?
+            .bind(key)
+            .bind(window)
+            .fetch_one(db.postgres_pool().expect("postgres"))
+            .await?
         }
     };
     Ok(count)
@@ -86,18 +90,26 @@ pub async fn create_privacy_request(
         Backend::Sqlite => {
             sqlx::query(
                 "INSERT INTO privacy_requests (id, account, kind, state, requested_at)
-                 VALUES (?, ?, ?, 'pending', ?)"
+                 VALUES (?, ?, ?, 'pending', ?)",
             )
-            .bind(&id).bind(account).bind(kind).bind(&now)
-            .execute(db.sqlite_pool().expect("sqlite")).await?;
+            .bind(&id)
+            .bind(account)
+            .bind(kind)
+            .bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
         }
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO privacy_requests (id, account, kind, state, requested_at)
-                 VALUES ($1, $2, $3, 'pending', $4)"
+                 VALUES ($1, $2, $3, 'pending', $4)",
             )
-            .bind(&id).bind(account).bind(kind).bind(&now)
-            .execute(db.postgres_pool().expect("postgres")).await?;
+            .bind(&id)
+            .bind(account)
+            .bind(kind)
+            .bind(&now)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?;
         }
     }
     Ok(id)

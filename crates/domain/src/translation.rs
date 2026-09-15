@@ -14,21 +14,6 @@ pub enum TranslationJobState {
 }
 
 impl TranslationJobState {
-    /// Inverse of [`Self::as_str`]; the tests pin the round trip.
-    pub fn from_str(s: &str) -> Result<Self, String> {
-        match s {
-            "quoted" => Ok(Self::Quoted),
-            "reserved" => Ok(Self::Reserved),
-            "in_progress" => Ok(Self::InProgress),
-            "in_review" => Ok(Self::InReview),
-            "approved" => Ok(Self::Approved),
-            "published" => Ok(Self::Published),
-            "failed" => Ok(Self::Failed),
-            "cancelled" => Ok(Self::Cancelled),
-            _ => Err(format!("unknown TranslationJobState: {s}")),
-        }
-    }
-
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Quoted => "quoted",
@@ -45,6 +30,7 @@ impl TranslationJobState {
 
 impl std::str::FromStr for TranslationJobState {
     type Err = String;
+    /// Inverse of [`TranslationJobState::as_str`]; the tests pin the round trip.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "quoted" => Ok(Self::Quoted),
@@ -102,16 +88,6 @@ pub enum ReviewGate {
 }
 
 impl ReviewGate {
-    /// Inverse of [`Self::as_str`]; the tests pin the round trip.
-    pub fn from_str(s: &str) -> Result<Self, String> {
-        match s {
-            "linguistic" => Ok(Self::Linguistic),
-            "cultural" => Ok(Self::Cultural),
-            "final" => Ok(Self::Final),
-            _ => Err(format!("unknown ReviewGate: {s}")),
-        }
-    }
-
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Linguistic => "linguistic",
@@ -175,7 +151,7 @@ pub fn apply_glossary(text: &str, glossary: &[(String, String)], case_sensitive:
 
     // Sort by term length descending (longest match first)
     let mut sorted_glossary: Vec<_> = glossary.iter().collect();
-    sorted_glossary.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    sorted_glossary.sort_by_key(|(term, _)| std::cmp::Reverse(term.len()));
 
     for (term, translation) in sorted_glossary {
         if case_sensitive && result.contains(term.as_str()) {
@@ -215,6 +191,7 @@ fn replace_case_insensitive(hay: &str, term: &str, repl: &str) -> Option<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn job_state_round_trip() {

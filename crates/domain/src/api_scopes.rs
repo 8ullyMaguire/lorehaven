@@ -14,21 +14,6 @@ pub enum Scope {
 }
 
 impl Scope {
-    /// Inverse of [`Self::as_str`]; the tests pin the round trip.
-    pub fn from_str(s: &str) -> Result<Self, String> {
-        match s {
-            "content.read" => Ok(Self::ContentRead),
-            "content.write" => Ok(Self::ContentWrite),
-            "library.read" => Ok(Self::LibraryRead),
-            "comments.write" => Ok(Self::CommentsWrite),
-            "translation.read" => Ok(Self::TranslationRead),
-            "translation.write" => Ok(Self::TranslationWrite),
-            "admin.read" => Ok(Self::AdminRead),
-            "admin.write" => Ok(Self::AdminWrite),
-            _ => Err(format!("unknown Scope: {s}")),
-        }
-    }
-
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::ContentRead => "content.read",
@@ -45,6 +30,7 @@ impl Scope {
 
 impl std::str::FromStr for Scope {
     type Err = String;
+    /// Inverse of [`Scope::as_str`]; the tests pin the round trip.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "content.read" => Ok(Self::ContentRead),
@@ -73,6 +59,7 @@ pub fn has_scope(scopes: &[Scope], required: &Scope) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn scope_round_trip() {
