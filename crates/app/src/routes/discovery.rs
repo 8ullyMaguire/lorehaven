@@ -29,21 +29,51 @@ async fn get_discovery(
 ) -> ApiResult<Json<serde_json::Value>> {
     let limit = 20;
     let account_id: Option<String> = session.as_ref().map(|s| s.account_id.to_string());
-    let work_ids = match session {
-        Some(s) => lorehaven_db::discovery::personalized_recommendations(
+
+    // Build candidate lists from each recommendation engine, then blend.
+    let mut engines: Vec<Vec<lorehaven_domain::discovery::Candidate>> = Vec::new();
+
+    if let Some(ref account_id) = account_id {
+        // Engine 1: tag-based personalization (from taste profile).
+        let personalized = lorehaven_db::discovery::personalized_recommendations(
             state.db(),
-            &s.account_id.to_string(),
+            account_id,
             limit,
         )
-        .await,
-        None => lorehaven_db::discovery::public_recommendations(state.db(), limit).await,
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+        engines.push(
+            personalized
+                .into_iter()
+                .enumerate()
+                .map(|(idx, id)| lorehaven_domain::discovery::Candidate {
+                    work_id: id,
+                    score: (limit as i64 - idx as i64),
+                    reason: "tags".into(),
+                })
+                .collect(),
+        );
     }
-    .map_err(|e| ApiError(AppError::Internal(e)))?;
 
-    let mut items: Vec<serde_json::Value> = work_ids
-        .into_iter()
-        .map(|id| serde_json::json!({ "work_id": id.to_string() }))
-        .collect();
+    // Engine 2: popularity-based (public engine).
+    let popular = lorehaven_db::discovery::public_recommendations(state.db(), limit)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+    engines.push(
+        popular
+            .into_iter()
+            .enumerate()
+            .map(|(idx, id)| lorehaven_domain::discovery::Candidate {
+                work_id: id,
+                score: (limit as i64 - idx as i64),
+                reason: "popular".into(),
+            })
+            .collect(),
+    );
+
+    // Merge candidates from all engines deterministically.
+    let blended = lorehaven_domain::discovery::blend(&engines);
+    let blended = blended.into_iter().take(limit as usize).collect::<Vec<_>>();
 
     // Apply operator affinity ranking (silent reordering, no field changes).
     let affinities = lorehaven_db::discovery::list_operator_affinities(state.db())
@@ -54,26 +84,19 @@ async fn get_discovery(
         .map(|a| (a.work_id, a.affinity_bp))
         .collect();
 
-    if !affinity_map.is_empty() {
-        let candidates: Vec<lorehaven_domain::discovery::Candidate> = items
-            .iter()
-            .enumerate()
-            .map(|(idx, item)| lorehaven_domain::discovery::Candidate {
-                work_id: item["work_id"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .parse()
-                    .unwrap_or_default(),
-                score: (items.len() - idx) as i64,
-                reason: "discovery".into(),
-            })
-            .collect();
-        let ranked = lorehaven_domain::discovery::apply_affinity_ranking(candidates, &affinity_map);
-        items = ranked
-            .into_iter()
-            .map(|c| serde_json::json!({ "work_id": c.work_id.to_string() }))
-            .collect();
-    }
+    let ranked = if !affinity_map.is_empty() {
+        lorehaven_domain::discovery::apply_affinity_ranking(blended, &affinity_map)
+    } else {
+        // Sort by descending score when no affinities are set.
+        let mut r: Vec<lorehaven_domain::discovery::Candidate> = blended.clone();
+        r.sort_by_key(|c| -c.score);
+        r
+    };
+
+    let mut items: Vec<serde_json::Value> = ranked
+        .into_iter()
+        .map(|c| serde_json::json!({ "work_id": c.work_id.to_string() }))
+        .collect();
 
     // Apply diversity: per-fandom caps and exploration slots for signed-in
     // readers (configuration-driven). Anonymous readers pass through as-is.
