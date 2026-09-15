@@ -235,3 +235,111 @@ pub async fn personalized_recommendations(
         None => public_recommendations(db, limit).await,
     }
 }
+
+/// An operator-set work affinity (private, never rendered publicly).
+#[derive(Debug, Clone, Serialize)]
+pub struct OperatorAffinity {
+    pub work_id: String,
+    pub affinity_bp: i64,
+    pub operator: String,
+    pub rationale: String,
+    pub set_at: String,
+}
+
+/// Set or replace the operator affinity for a work. Audit-logged.
+///
+/// affinity_bp is clamped to -5000..=10000 (base-point range).
+pub async fn set_operator_affinity(
+    db: &Database,
+    work_id: &str,
+    affinity_bp: i64,
+    operator: &str,
+    rationale: &str,
+) -> Result<()> {
+    let clamped = affinity_bp.clamp(-5000, 10000);
+    let now = crate::identity::now_rfc3339();
+    match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query(
+                "INSERT OR REPLACE INTO operator_affinities (work_id, affinity_bp, operator, rationale, set_at)
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(work_id)
+            .bind(clamped)
+            .bind(operator)
+            .bind(rationale)
+            .bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
+        }
+        crate::Backend::Postgres => {
+            sqlx::query(
+                "INSERT INTO operator_affinities (work_id, affinity_bp, operator, rationale, set_at)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (work_id) DO UPDATE SET
+                    affinity_bp = EXCLUDED.affinity_bp,
+                    operator = EXCLUDED.operator,
+                    rationale = EXCLUDED.rationale,
+                    set_at = EXCLUDED.set_at",
+            )
+            .bind(work_id)
+            .bind(clamped)
+            .bind(operator)
+            .bind(rationale)
+            .bind(&now)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?;
+        }
+    }
+
+    // Audit trail: operator action recorded server-side.
+    let audit_doc = serde_json::json!({
+        "work_id": work_id,
+        "affinity_bp": clamped,
+        "rationale": rationale,
+    });
+    crate::governance::audit_append(
+        db,
+        operator,
+        "operator.set_affinity",
+        "work",
+        work_id,
+        &audit_doc.to_string(),
+    )
+    .await?;
+    Ok(())
+}
+
+/// List all operator affinities. Used internally to apply ranking multipliers.
+pub async fn list_operator_affinities(db: &Database) -> Result<Vec<OperatorAffinity>> {
+    let rows: Vec<(String, i64, String, String, String)> = match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query_as(
+                "SELECT work_id, affinity_bp, operator, rationale, set_at
+                 FROM operator_affinities ORDER BY set_at DESC",
+            )
+            .fetch_all(db.sqlite_pool().expect("sqlite"))
+            .await?
+        }
+        crate::Backend::Postgres => {
+            sqlx::query_as(
+                "SELECT work_id, affinity_bp::bigint, operator, rationale, set_at
+                 FROM operator_affinities ORDER BY set_at DESC",
+            )
+            .fetch_all(db.postgres_pool().expect("postgres"))
+            .await?
+        }
+    };
+    Ok(rows
+        .into_iter()
+        .map(
+            |(work_id, affinity_bp, operator, rationale, set_at)| OperatorAffinity {
+                work_id,
+                affinity_bp,
+                operator,
+                rationale,
+                set_at,
+            },
+        )
+        .collect())
+}
