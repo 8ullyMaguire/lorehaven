@@ -45,27 +45,20 @@ export interface PlannedRoute {
   summary: string;
 }
 
-export const PLANNED_ROUTES: Record<string, PlannedRoute> = {
-  '/discover': {
-    title: 'Discover',
-    milestone: 'Milestone 11',
-    summary:
-      'Recommendation engines, blind date, and the private taste-influence controls that are off by default per instance.',
-  },
-  '/community': {
-    title: 'Community',
-    milestone: 'Milestone 12',
-    summary: 'Comments, forums, groups and messages, with blocks enforced everywhere.',
-  },
-  '/notifications': {
-    title: 'Notifications',
-    milestone: 'Milestone 16',
-    summary: 'Outbox-driven in-app, email and push delivery, with lock-screen text kept generic.',
-  },
-};
+/**
+ * Routes that are linked from the shell but not yet built resolve to `planned`
+ * instead of pretending a page exists. Entries graduate out of here (and into
+ * `FIXED_ROUTES` below) when the milestone that owns them ships their page —
+ * `/discover`, `/community` and `/notifications` were the last three, and
+ * Milestones 11, 12 and 16 built them.
+ */
+export const PLANNED_ROUTES: Record<string, PlannedRoute> = {};
 
 /**
- * Fixed paths that resolve to a view.
+ * Fixed paths that resolve to a view. Destinations graduate out of
+ * `PLANNED_ROUTES` when the milestone that owns them ships their page —
+ * `/discover`, `/community` and `/notifications` were placeholders until
+ * Milestones 11, 12 and 16 built them.
  *
  * `/pseud` is the owner's own pseuds; `/pseud/<handle>` is somebody's public
  * profile, and is matched separately below.

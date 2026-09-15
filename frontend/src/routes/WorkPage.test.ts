@@ -1,22 +1,27 @@
 import { render, screen, waitFor } from '@testing-library/svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import WorkPage from './WorkPage.svelte';
 import { session } from '../lib/session.svelte';
 import { ApiError } from '../lib/api';
 
-// Mock the API module
-vi.mock('../lib/api', () => ({
-  fetchWork: vi.fn(),
-  fetchWorkPricing: vi.fn(),
-  fetchReviews: vi.fn().mockResolvedValue({ items: [] }),
-  purchaseWork: vi.fn(),
-  getProgress: vi.fn().mockResolvedValue(null),
-  upsertReview: vi.fn(),
-  isAuthorWork: vi.fn().mockReturnValue(false),
-}));
+// Mock the API module, keeping every real export (ApiError included) and
+// overriding only the fetchers this page calls.
+vi.mock('../lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/api')>();
+  return {
+    ...actual,
+    fetchWork: vi.fn(),
+    fetchWorkPricing: vi.fn(),
+    fetchReviews: vi.fn().mockResolvedValue({ items: [] }),
+    purchaseWork: vi.fn(),
+    getProgress: vi.fn().mockResolvedValue(null),
+    upsertReview: vi.fn(),
+    isAuthorWork: vi.fn().mockReturnValue(false),
+  };
+});
 
-import { fetchWork, fetchWorkPricing } from '../lib/api';
+import { fetchWork, fetchWorkPricing, fetchReviews } from '../lib/api';
 
 describe('WorkPage paywall', () => {
   beforeEach(() => {
@@ -113,32 +118,10 @@ describe('WorkPage spoiler reveal', () => {
     session.me = null as any;
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it('wraps a spoiler review in a closed <details> element', async () => {
     const spoilerReview = review({ contains_spoilers: true, body: 'The butler did it.' });
-    (globalThis as any).fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => WORK,
-      headers: new Headers({ 'content-type': 'application/json' }),
-    });
-    // Mock the reviews fetch
-    (globalThis as any).fetch = vi.fn().mockImplementation((url: string) => {
-      if (url.includes('/reviews')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ items: [spoilerReview] }),
-          headers: new Headers({ 'content-type': 'application/json' }),
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: async () => WORK,
-        headers: new Headers({ 'content-type': 'application/json' }),
-      });
-    });
+    (fetchWork as any).mockResolvedValue(WORK);
+    (fetchReviews as any).mockResolvedValue({ items: [spoilerReview] });
 
     render(WorkPage, { props: { workId: 'work-1' } });
 
@@ -151,20 +134,8 @@ describe('WorkPage spoiler reveal', () => {
 
   it('does not wrap a non-spoiler review in <details>', async () => {
     const normalReview = review({ contains_spoilers: false });
-    (globalThis as any).fetch = vi.fn().mockImplementation((url: string) => {
-      if (url.includes('/reviews')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ items: [normalReview] }),
-          headers: new Headers({ 'content-type': 'application/json' }),
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: async () => WORK,
-        headers: new Headers({ 'content-type': 'application/json' }),
-      });
-    });
+    (fetchWork as any).mockResolvedValue(WORK);
+    (fetchReviews as any).mockResolvedValue({ items: [normalReview] });
 
     render(WorkPage, { props: { workId: 'work-1' } });
 

@@ -104,9 +104,10 @@
       {#each items as item}
         <li class:read={item.read}>
           {#if item.work_id}
+            {@const workId = item.work_id}
             <a
-              href={`/works/${encodeURIComponent(item.work_id)}`}
-              onclick={(event) => handleLinkClick(event, `/works/${encodeURIComponent(item.work_id)}`)}
+              href={`/works/${encodeURIComponent(workId)}`}
+              onclick={(event) => handleLinkClick(event, `/works/${encodeURIComponent(workId)}`)}
             >
               <span class="kind">{item.kind}</span>
               <span class="title">{item.title}</span>
