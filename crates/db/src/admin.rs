@@ -53,7 +53,7 @@ pub async fn increment_abuse_counter(
         Backend::Sqlite => {
             sqlx::query_scalar(
                 "INSERT INTO abuse_counters (key, \"window\", count) VALUES (?, ?, 1)
-                 ON CONFLICT(key, \"window\") DO UPDATE SET count = count + 1 RETURNING count",
+                 ON CONFLICT(key, \"window\") SET abuse_counters.count = abuse_counters.count + 1 RETURNING count",
             )
             .bind(key)
             .bind(window)
@@ -63,7 +63,7 @@ pub async fn increment_abuse_counter(
         Backend::Postgres => {
             sqlx::query_scalar(
                 "INSERT INTO abuse_counters (key, \"window\", count) VALUES ($1, $2, 1)
-                 ON CONFLICT(key, \"window\") DO UPDATE SET count = count + 1 RETURNING count",
+                 ON CONFLICT(key, \"window\") DO UPDATE SET abuse_counters.count = abuse_counters.count + 1 RETURNING count::bigint",
             )
             .bind(key)
             .bind(window)

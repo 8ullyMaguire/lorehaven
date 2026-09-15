@@ -590,17 +590,17 @@ async fn a_forum_topic_can_be_created_replied_to_and_locked() {
 
     // Seed a category directly (test DBs don't run the dev seed).
     let cat_id = "11111111-1111-1111-1111-111111111111";
-    let sql = "INSERT INTO forum_categories (id, name, position, min_trust) VALUES (?, 'Test Category', 0, 0)";
+    let sql = harness.tdb.db().sql("INSERT INTO forum_categories (id, name, position, min_trust) VALUES (?, 'Test Category', 0, 0)", "INSERT INTO forum_categories (id, name, position, min_trust) VALUES ($1, 'Test Category', 0, 0)");
     match harness.tdb.db().backend() {
         Backend::Sqlite => {
-            sqlx::query(sql)
+            sqlx::query(sql.as_ref())
                 .bind(cat_id)
                 .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
                 .await
                 .expect("seed category");
         }
         Backend::Postgres => {
-            sqlx::query(sql)
+            sqlx::query(sql.as_ref())
                 .bind(cat_id)
                 .execute(harness.tdb.db().postgres_pool().expect("postgres"))
                 .await
@@ -695,17 +695,17 @@ async fn a_trust_gate_rejects_underleveled_posters() {
 
     // Category that requires editor-level trust (5).
     let cat_id = "22222222-2222-2222-2222-222222222222";
-    let sql = "INSERT INTO forum_categories (id, name, position, min_trust) VALUES (?, 'Editors Only', 0, 5)";
+    let sql = harness.tdb.db().sql("INSERT INTO forum_categories (id, name, position, min_trust) VALUES (?, 'Editors Only', 0, 5)", "INSERT INTO forum_categories (id, name, position, min_trust) VALUES ($1, 'Editors Only', 0, 5)");
     match harness.tdb.db().backend() {
         Backend::Sqlite => {
-            sqlx::query(sql)
+            sqlx::query(sql.as_ref())
                 .bind(cat_id)
                 .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
                 .await
                 .unwrap();
         }
         Backend::Postgres => {
-            sqlx::query(sql)
+            sqlx::query(sql.as_ref())
                 .bind(cat_id)
                 .execute(harness.tdb.db().postgres_pool().expect("postgres"))
                 .await
@@ -724,17 +724,17 @@ async fn a_trust_gate_rejects_underleveled_posters() {
     assert_eq!(body["error"]["code"], "ACCESS_DENIED", "{body}");
 
     // Promote the user to editor level.
-    let sql = "INSERT INTO trust_levels (account, level, computed_at, basis) VALUES (?, 5, datetime('now'), 'test')";
+    let sql = harness.tdb.db().sql("INSERT INTO trust_levels (account, level, computed_at, basis) VALUES (?, 5, datetime('now'), 'test')", "INSERT INTO trust_levels (account, level, computed_at, basis) VALUES ($1::uuid, 5, now(), 'test')");
     match harness.tdb.db().backend() {
         Backend::Sqlite => {
-            sqlx::query(sql)
+            sqlx::query(sql.as_ref())
                 .bind(&account_id)
                 .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
                 .await
                 .unwrap();
         }
         Backend::Postgres => {
-            sqlx::query(sql)
+            sqlx::query(sql.as_ref())
                 .bind(&account_id)
                 .execute(harness.tdb.db().postgres_pool().expect("postgres"))
                 .await
@@ -811,17 +811,17 @@ async fn a_reply_notifies_the_topic_author_and_the_inbox_settles() {
 
     // Seed a category with min_trust 0 (test DBs don't run the dev seed).
     let cat_id = "22222222-2222-2222-2222-222222222222";
-    let sql = "INSERT INTO forum_categories (id, name, position, min_trust) VALUES (?, 'Notify Category', 0, 0)";
+    let sql = harness.tdb.db().sql("INSERT INTO forum_categories (id, name, position, min_trust) VALUES (?, 'Notify Category', 0, 0)", "INSERT INTO forum_categories (id, name, position, min_trust) VALUES ($1, 'Notify Category', 0, 0)");
     match harness.tdb.db().backend() {
         Backend::Sqlite => {
-            sqlx::query(sql)
+            sqlx::query(sql.as_ref())
                 .bind(cat_id)
                 .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
                 .await
                 .expect("seed category");
         }
         Backend::Postgres => {
-            sqlx::query(sql)
+            sqlx::query(sql.as_ref())
                 .bind(cat_id)
                 .execute(harness.tdb.db().postgres_pool().expect("postgres"))
                 .await
