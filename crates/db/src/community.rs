@@ -1410,7 +1410,6 @@ pub async fn list_presence(db: &Database) -> Result<Vec<(String, String, Option<
             .fetch_all(db.postgres_pool().expect("postgres"))
             .await?
             .into_iter()
-            .map(|(a, l, t, e)| (a, l, t, e))
             .collect(),
     };
     Ok(rows)

@@ -7,7 +7,7 @@ use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
-use lorehaven_db::{Database, DatabaseConfig};
+use lorehaven_db::DatabaseConfig;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -140,9 +140,6 @@ impl Harness {
         let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
         Self { dir, tdb }
     }
-    fn db(&self) -> &Database {
-        self.tdb.db()
-    }
     fn client(&self) -> Client {
         Client::new(server::build_router(AppState::new(
             config_for(&self.dir),
@@ -256,7 +253,7 @@ async fn extension_grant_works() {
         lorehaven_domain::extension::Capability::WorkRead,
     ];
     let result = lorehaven_db::marketplace::grant_extension(
-        harness.db(),
+        harness.tdb.db(),
         "test-account",
         "test-extension",
         "1.0.0",
@@ -266,9 +263,12 @@ async fn extension_grant_works() {
     assert!(result.is_ok(), "grant extension: {:?}", result);
 
     // Verify grant was stored
-    let result =
-        lorehaven_db::marketplace::revoke_extension(harness.db(), "test-account", "test-extension")
-            .await;
+    let result = lorehaven_db::marketplace::revoke_extension(
+        harness.tdb.db(),
+        "test-account",
+        "test-extension",
+    )
+    .await;
     assert!(result.is_ok(), "revoke extension: {:?}", result);
 
     harness.cleanup().await;
@@ -280,7 +280,7 @@ async fn webhook_creation_works() {
     let _client = harness.client();
 
     let id = lorehaven_db::marketplace::create_webhook(
-        harness.db(),
+        harness.tdb.db(),
         "test-account",
         "https://example.com/hook",
         "whsec_test_secret_123",
@@ -293,7 +293,7 @@ async fn webhook_creation_works() {
 
     // Record a delivery
     let result = lorehaven_db::marketplace::record_delivery(
-        harness.db(),
+        harness.tdb.db(),
         &id,
         "evt-123",
         "{\"test\": true}",
@@ -312,7 +312,7 @@ async fn gallery_item_can_be_added() {
     let _client = harness.client();
 
     let id = lorehaven_db::marketplace::add_gallery_item(
-        harness.db(),
+        harness.tdb.db(),
         "work-123",
         "test-account",
         "image/png",
@@ -326,7 +326,7 @@ async fn gallery_item_can_be_added() {
     assert!(!id.is_empty());
 
     // List gallery items
-    let items = lorehaven_db::marketplace::list_gallery_items(harness.db(), "work-123")
+    let items = lorehaven_db::marketplace::list_gallery_items(harness.tdb.db(), "work-123")
         .await
         .expect("list gallery");
     assert_eq!(items.len(), 1);

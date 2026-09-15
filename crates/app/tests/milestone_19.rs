@@ -7,7 +7,7 @@ use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
-use lorehaven_db::{Database, DatabaseConfig};
+use lorehaven_db::DatabaseConfig;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -140,9 +140,6 @@ impl Harness {
         let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
         Self { dir, tdb }
     }
-    fn db(&self) -> &Database {
-        self.tdb.db()
-    }
     fn client(&self) -> Client {
         Client::new(server::build_router(AppState::new(
             config_for(&self.dir),
@@ -186,7 +183,7 @@ async fn admin_action_can_be_recorded() {
     let harness = Harness::new("admin-action").await;
 
     let id = lorehaven_db::admin::record_admin_action(
-        harness.db(),
+        harness.tdb.db(),
         "operator-1",
         "ban_user",
         "account",
@@ -210,18 +207,18 @@ async fn privacy_request_can_be_created_and_completed() {
 
     let account_id = sqlx::query_scalar::<_, String>("SELECT id FROM accounts WHERE email = ?")
         .bind("privacy@example.com")
-        .fetch_one(harness.db().sqlite_pool().expect("sqlite"))
+        .fetch_one(harness.tdb.db().sqlite_pool().expect("sqlite"))
         .await
         .expect("account exists");
 
-    let id = lorehaven_db::admin::create_privacy_request(harness.db(), &account_id, "export")
+    let id = lorehaven_db::admin::create_privacy_request(harness.tdb.db(), &account_id, "export")
         .await
         .expect("create privacy request");
 
     assert!(!id.is_empty());
 
     lorehaven_db::admin::complete_privacy_request(
-        harness.db(),
+        harness.tdb.db(),
         &id,
         Some("storage/key/export.zip"),
     )
@@ -236,13 +233,13 @@ async fn abuse_counter_can_be_incremented() {
     let harness = Harness::new("abuse").await;
 
     let count1 =
-        lorehaven_db::admin::increment_abuse_counter(harness.db(), "ip:1.2.3.4", "2026-09-14")
+        lorehaven_db::admin::increment_abuse_counter(harness.tdb.db(), "ip:1.2.3.4", "2026-09-14")
             .await
             .expect("increment counter");
     assert_eq!(count1, 1);
 
     let count2 =
-        lorehaven_db::admin::increment_abuse_counter(harness.db(), "ip:1.2.3.4", "2026-09-14")
+        lorehaven_db::admin::increment_abuse_counter(harness.tdb.db(), "ip:1.2.3.4", "2026-09-14")
             .await
             .expect("increment counter again");
     assert_eq!(count2, 2);

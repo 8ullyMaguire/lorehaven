@@ -13,9 +13,9 @@
 - **m2 rate-limit test** — remains flaky under parallel load (shared loopback + global limiter); passes in isolation on both backends.
 
 ### Gates
-- `cargo fmt --all` ✅
-- `cargo clippy --workspace --all-targets --all-features -- -D warnings` — 0 errors
-- `cargo test -p lorehaven-app` (SQLite) — **all green** (0 failures, 110+ tests)
+- `cargo fmt --all` ✅ (rustfmt clean)
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` — **0 errors** (after removing 197 needless-borrow double-refs + 11 unused imports + 2 dead methods)
+- `cargo test -p lorehaven-app` (SQLite) — **all green, 381 passed, 0 failures**
 - Core PG modules verified green: **M2 (auth)**, **M10 (search)**, **M11 (discovery)**, **M21 (monetization)**.
 
 ### Workstreams status
