@@ -70,19 +70,13 @@ mod tests {
 
     #[test]
     fn balanced_entries_sum_to_zero() {
-        let entries = vec![
-            ("alice".to_string(), 100),
-            ("bob".to_string(), -100),
-        ];
+        let entries = vec![("alice".to_string(), 100), ("bob".to_string(), -100)];
         assert!(entries_balanced(&entries));
     }
 
     #[test]
     fn unbalanced_entries_fail() {
-        let entries = vec![
-            ("alice".to_string(), 100),
-            ("bob".to_string(), -90),
-        ];
+        let entries = vec![("alice".to_string(), 100), ("bob".to_string(), -90)];
         assert!(!entries_balanced(&entries));
     }
 

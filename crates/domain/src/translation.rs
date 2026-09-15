@@ -139,13 +139,22 @@ pub fn valid_job_transition(from: &TranslationJobState, to: &TranslationJobState
         (from, to),
         (TranslationJobState::Quoted, TranslationJobState::Reserved)
             | (TranslationJobState::Quoted, TranslationJobState::Cancelled)
-            | (TranslationJobState::Reserved, TranslationJobState::InProgress)
+            | (
+                TranslationJobState::Reserved,
+                TranslationJobState::InProgress
+            )
             | (TranslationJobState::Reserved, TranslationJobState::Failed)
-            | (TranslationJobState::InProgress, TranslationJobState::InReview)
+            | (
+                TranslationJobState::InProgress,
+                TranslationJobState::InReview
+            )
             | (TranslationJobState::InProgress, TranslationJobState::Failed)
             | (TranslationJobState::InReview, TranslationJobState::Approved)
             | (TranslationJobState::InReview, TranslationJobState::Failed)
-            | (TranslationJobState::Approved, TranslationJobState::Published)
+            | (
+                TranslationJobState::Approved,
+                TranslationJobState::Published
+            )
             | (TranslationJobState::Approved, TranslationJobState::Failed)
     )
 }
@@ -288,7 +297,11 @@ mod tests {
 
     #[test]
     fn review_gate_round_trip() {
-        for g in [ReviewGate::Linguistic, ReviewGate::Cultural, ReviewGate::Final] {
+        for g in [
+            ReviewGate::Linguistic,
+            ReviewGate::Cultural,
+            ReviewGate::Final,
+        ] {
             assert_eq!(ReviewGate::from_str(g.as_str()).unwrap(), g);
         }
     }

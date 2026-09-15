@@ -125,7 +125,11 @@ mod tests {
 
     #[test]
     fn listing_kind_round_trip() {
-        for k in [ListingKind::PaidWork, ListingKind::Commission, ListingKind::Ask] {
+        for k in [
+            ListingKind::PaidWork,
+            ListingKind::Commission,
+            ListingKind::Ask,
+        ] {
             assert_eq!(ListingKind::from_str(k.as_str()).unwrap(), k);
         }
     }

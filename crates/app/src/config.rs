@@ -128,6 +128,8 @@ pub struct Config {
     pub rate_limits: crate::limiter::Limits,
     /// What the importer may do about a source that refuses a plain request.
     pub imports: ImportsConfig,
+    /// Discovery feed diversity settings.
+    pub discovery: DiscoveryConfig,
     /// Where the configuration file was read from, if any.
     pub config_path: Option<PathBuf>,
 }
@@ -155,6 +157,15 @@ pub struct AccountsConfig {
     /// initial cohort; making that a configuration value rather than a code
     /// change keeps it an operational decision.
     pub registration_open: bool,
+}
+
+/// Discovery feed diversity settings.
+#[derive(Debug, Clone, Default)]
+pub struct DiscoveryConfig {
+    /// Maximum works from the same fandom in one feed response (0 = unlimited).
+    pub per_fandom_cap: usize,
+    /// Fraction of the feed reserved for exploration (new fandoms).
+    pub exploration_rate: f64,
 }
 
 /// What the importer may do about a source that refuses a plain request.
@@ -664,6 +675,7 @@ impl Config {
             age,
             rate_limits,
             imports,
+            discovery: DiscoveryConfig::default(),
             config_path,
         };
 
@@ -720,6 +732,7 @@ impl Config {
             // drove a solver by default would make every test that fetches a page
             // depend on which escalations happened to be configured.
             imports: ImportsConfig::default(),
+            discovery: DiscoveryConfig::default(),
             config_path: None,
         }
     }
