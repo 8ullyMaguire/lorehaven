@@ -55,7 +55,7 @@ async fn fetch_subs_postgres(
     pool: &sqlx::postgres::PgPool,
     pseud_id: &str,
 ) -> Result<Vec<SubscriptionRow>, sqlx::Error> {
-    let rows = sqlx::query("SELECT id, subject_type, subject_id, state, created_at FROM content_subscriptions WHERE subscriber_pseud_id = $1 ORDER BY created_at DESC")
+    let rows = sqlx::query("SELECT id::text, subject_type, subject_id, state, created_at FROM content_subscriptions WHERE subscriber_pseud_id = $1::uuid ORDER BY created_at DESC")
         .bind(pseud_id)
         .fetch_all(pool)
         .await?;
@@ -88,7 +88,7 @@ async fn fetch_active_sub_owner_postgres(
     subject_type: &str,
     subject_id: &str,
 ) -> Result<Option<String>, sqlx::Error> {
-    let r: Option<String> = sqlx::query_scalar("SELECT subscriber_pseud_id FROM content_subscriptions WHERE subject_type = $1 AND subject_id = $2 AND state = 'active'")
+    let r: Option<String> = sqlx::query_scalar("SELECT subscriber_pseud_id::text FROM content_subscriptions WHERE subject_type = $1 AND subject_id = $2 AND state = 'active'")
         .bind(subject_type).bind(subject_id)
         .fetch_optional(pool)
         .await?;
@@ -119,7 +119,7 @@ async fn fetch_alerts_postgres(
     pool: &sqlx::postgres::PgPool,
     owner_pseud_id: &str,
 ) -> Result<Vec<AlertRow>, sqlx::Error> {
-    let rows = sqlx::query("SELECT id, saved_search_id, frequency, last_run_at, created_at FROM search_alerts WHERE owner_pseud_id = $1 ORDER BY created_at DESC")
+    let rows = sqlx::query("SELECT id::text, saved_search_id::text, frequency, last_run_at, created_at FROM search_alerts WHERE owner_pseud_id = $1::uuid ORDER BY created_at DESC")
         .bind(owner_pseud_id)
         .fetch_all(pool)
         .await?;
@@ -161,8 +161,7 @@ pub async fn subscribe_work(
         }
         Backend::Postgres => {
             sqlx::query(
-                "INSERT INTO content_subscriptions (id, subscriber_pseud_id, subject_type, subject_id, state, created_at)
-                 VALUES ($1, $2, $3, $4, 'active', $5)
+                "INSERT INTO content_subscriptions (id, subscriber_pseud_id, subject_type, subject_id, state, created_at) VALUES ($1::uuid, $2::uuid, $3, $4, 'active', $5)
                  ON CONFLICT(subscriber_pseud_id, subject_type, subject_id) DO UPDATE SET state = 'active'"
             )
             .bind(&id).bind(subscriber_pseud_id).bind(subject_type).bind(subject_id).bind(&now)
@@ -213,7 +212,7 @@ pub async fn unsubscribe_work(
             Ok(r.rows_affected())
         }
         Backend::Postgres => {
-            let r = sqlx::query("DELETE FROM content_subscriptions WHERE subscriber_pseud_id = $1 AND subject_type = $2 AND subject_id = $3")
+            let r = sqlx::query("DELETE FROM content_subscriptions WHERE subscriber_pseud_id = $1::uuid AND subject_type = $2 AND subject_id = $3")
                 .bind(subscriber_pseud_id).bind(subject_type).bind(subject_id)
                 .execute(db.postgres_pool().expect("postgres")).await?;
             Ok(r.rows_affected())
@@ -330,8 +329,7 @@ pub async fn create_alert(
         }
         Backend::Postgres => {
             sqlx::query(
-                "INSERT INTO search_alerts (id, owner_pseud_id, saved_search_id, frequency, last_run_at, created_at)
-                 VALUES ($1, $2, $3, $4, NULL, $5)
+                "INSERT INTO search_alerts (id, owner_pseud_id, saved_search_id, frequency, last_run_at, created_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, NULL, $5)
                  ON CONFLICT(owner_pseud_id, saved_search_id) DO UPDATE SET frequency = excluded.frequency"
             )
             .bind(&id).bind(owner_pseud_id).bind(saved_search_id).bind(frequency).bind(&now)

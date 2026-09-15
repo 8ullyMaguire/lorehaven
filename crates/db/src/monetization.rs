@@ -97,7 +97,7 @@ async fn fetch_pricing_postgres(
     pool: &sqlx::postgres::PgPool,
     work_id: &str,
 ) -> Result<Vec<PricingRow>, sqlx::Error> {
-    let rows = sqlx::query("SELECT id, model, price_minor, currency, public_at_offset, enabled, created_at, updated_at, version FROM work_pricing WHERE work_id = $1")
+    let rows = sqlx::query("SELECT id::text, model, price_minor, currency, public_at_offset, enabled, created_at, updated_at, version FROM work_pricing WHERE work_id = $1::uuid")
         .bind(work_id)
         .fetch_all(pool)
         .await?;
@@ -109,7 +109,7 @@ async fn fetch_pricing_postgres(
             price_minor: r.get::<i64, _>("price_minor"),
             currency: r.get::<String, _>("currency"),
             public_at_offset: r.get::<Option<i64>, _>("public_at_offset"),
-            enabled: r.get::<i64, _>("enabled") != 0,
+            enabled: r.get::<bool, _>("enabled"),
             created_at: r.get::<String, _>("created_at"),
             updated_at: r.get::<String, _>("updated_at"),
             version: r.get::<i64, _>("version"),
@@ -142,7 +142,7 @@ async fn fetch_entitlements_postgres(
     pool: &sqlx::postgres::PgPool,
     account_id: &str,
 ) -> Result<Vec<EntitlementRow>, sqlx::Error> {
-    let rows = sqlx::query("SELECT id, work_id, kind, source_payment_id, granted_at, expires_at FROM work_entitlements WHERE account_id = $1")
+    let rows = sqlx::query("SELECT id::text, work_id::text, kind, source_payment_id, granted_at, expires_at FROM work_entitlements WHERE account_id = $1::uuid")
         .bind(account_id)
         .fetch_all(pool)
         .await?;
@@ -185,7 +185,7 @@ async fn fetch_earnings_postgres(
     pool: &sqlx::postgres::PgPool,
     account_id: &str,
 ) -> Result<Vec<EarningsRow>, sqlx::Error> {
-    let rows = sqlx::query("SELECT id, amount_minor, currency, kind, payment_id, idempotency_key, created_at FROM author_earnings_ledger WHERE author_account_id = $1 ORDER BY created_at DESC")
+    let rows = sqlx::query("SELECT id::text, amount_minor, currency, kind, payment_id, idempotency_key, created_at FROM author_earnings_ledger WHERE author_account_id = $1::uuid ORDER BY created_at DESC")
         .bind(account_id)
         .fetch_all(pool)
         .await?;
@@ -226,7 +226,7 @@ async fn fetch_assertion_postgres(
     work_id: &str,
     kind: &str,
 ) -> Result<Option<AssertionRow>, sqlx::Error> {
-    let opt = sqlx::query("SELECT id, assertion_kind, policy_version, accepted_at, revoked_at FROM monetization_assertions WHERE work_id = $1 AND assertion_kind = $2 ORDER BY accepted_at DESC LIMIT 1")
+    let opt = sqlx::query("SELECT id::text, assertion_kind, policy_version, accepted_at, revoked_at FROM monetization_assertions WHERE work_id = $1::uuid AND assertion_kind = $2 ORDER BY accepted_at DESC LIMIT 1")
         .bind(work_id).bind(kind)
         .fetch_optional(pool)
         .await?;
@@ -264,7 +264,7 @@ async fn fetch_gifts_postgres(
     pool: &sqlx::postgres::PgPool,
     recipient_pseud_id: &str,
 ) -> Result<Vec<GiftRow>, sqlx::Error> {
-    let rows = sqlx::query("SELECT id, work_id, gift_note, challenge_fulfillment_id, created_at, declined_at FROM work_gifts WHERE recipient_pseud_id = $1 ORDER BY created_at DESC")
+    let rows = sqlx::query("SELECT id::text, work_id::text, gift_note, challenge_fulfillment_id, created_at, declined_at FROM work_gifts WHERE recipient_pseud_id = $1::uuid ORDER BY created_at DESC")
         .bind(recipient_pseud_id)
         .fetch_all(pool)
         .await?;
@@ -305,7 +305,7 @@ pub async fn set_pricing(
                 .await?
         }
         Backend::Postgres => {
-            sqlx::query_scalar("SELECT id FROM work_pricing WHERE work_id = $1")
+            sqlx::query_scalar("SELECT id::text FROM work_pricing WHERE work_id = $1::uuid")
                 .bind(work_id)
                 .fetch_optional(db.postgres_pool().expect("postgres"))
                 .await?
@@ -324,7 +324,7 @@ pub async fn set_pricing(
             }
             Backend::Postgres => {
                 sqlx::query(
-                    "UPDATE work_pricing SET model = $1, price_minor = $2, currency = $3, public_at_offset = $4, updated_at = $5, version = version + 1 WHERE work_id = $6"
+                    "UPDATE work_pricing SET model = $1, price_minor = $2, currency = $3, public_at_offset = $4, updated_at = $5, version = version + 1 WHERE work_id = $6::uuid"
                 )
                 .bind(model).bind(price_minor).bind(currency)
                 .bind(public_at_offset).bind(&now).bind(work_id)
@@ -348,8 +348,7 @@ pub async fn set_pricing(
         }
         Backend::Postgres => {
             sqlx::query(
-                "INSERT INTO work_pricing (id, work_id, model, price_minor, currency, public_at_offset, enabled, created_at, updated_at, version)
-                 VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8, 1)"
+                "INSERT INTO work_pricing (id, work_id, model, price_minor, currency, public_at_offset, enabled, created_at, updated_at, version) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, TRUE, $7, $8, 1)"
             )
             .bind(&id).bind(work_id).bind(model).bind(price_minor).bind(currency)
             .bind(public_at_offset).bind(&now).bind(&now)
@@ -386,7 +385,7 @@ pub async fn disable_pricing(db: &Database, work_id: &str) -> Result<u64, sqlx::
         }
         Backend::Postgres => {
             let r = sqlx::query(
-                "UPDATE work_pricing SET enabled = 0, updated_at = $1 WHERE work_id = $2",
+                "UPDATE work_pricing SET enabled = FALSE, updated_at = $1 WHERE work_id = $2::uuid",
             )
             .bind(&now)
             .bind(work_id)
@@ -419,7 +418,7 @@ pub async fn grant_entitlement(
         .fetch_optional(db.sqlite_pool().expect("sqlite"))
         .await?,
         Backend::Postgres => sqlx::query_scalar(
-            "SELECT id FROM work_entitlements WHERE account_id = $1 AND work_id = $2 AND kind = $3",
+            "SELECT id::text FROM work_entitlements WHERE account_id = $1::uuid AND work_id = $2::uuid AND kind = $3",
         )
         .bind(account_id)
         .bind(work_id)
@@ -453,7 +452,7 @@ pub async fn grant_entitlement(
             .execute(db.sqlite_pool().expect("sqlite")).await?;
         }
         Backend::Postgres => {
-            sqlx::query("INSERT INTO work_entitlements (id, account_id, work_id, kind, source_payment_id, granted_at, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7)")
+            sqlx::query("INSERT INTO work_entitlements (id, account_id, work_id, kind, source_payment_id, granted_at, expires_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7)")
             .bind(&id).bind(account_id).bind(work_id).bind(kind).bind(source_payment_id).bind(&now).bind(expires_at)
             .execute(db.postgres_pool().expect("postgres")).await?;
         }
@@ -482,7 +481,7 @@ pub async fn has_entitlement(
         }
         Backend::Postgres => {
             sqlx::query_scalar(
-                "SELECT COUNT(*) FROM work_entitlements WHERE account_id = $1 AND work_id = $2 AND (expires_at IS NULL OR expires_at > $3)"
+                "SELECT COUNT(*) FROM work_entitlements WHERE account_id = $1::uuid AND work_id = $2::uuid AND (expires_at IS NULL OR expires_at > $3)"
             )
             .bind(account_id).bind(work_id).bind(&now)
             .fetch_one(db.postgres_pool().expect("postgres")).await?
@@ -504,7 +503,7 @@ pub async fn has_entitlement(
                 .await?
             }
             Backend::Postgres => sqlx::query_scalar(
-                "SELECT COUNT(*) FROM work_gifts WHERE recipient_pseud_id = $1 AND work_id = $2",
+                "SELECT COUNT(*) FROM work_gifts WHERE recipient_pseud_id = $1::uuid AND work_id = $2::uuid",
             )
             .bind(account_id)
             .bind(work_id)
@@ -532,7 +531,7 @@ pub async fn get_entitlements(
 /// Post an earnings entry. Replay-safe via idempotency key. Returns the row id.
 pub async fn post_earnings(
     db: &Database,
-    author_account_id: &str,
+    author_account_id: Option<&str>,
     amount_minor: i64,
     currency: &str,
     kind: &str,
@@ -570,7 +569,7 @@ pub async fn post_earnings(
             let mut tx = db.postgres_pool().expect("postgres").begin().await?;
             if let Some(key) = idempotency_key {
                 let existing: Option<String> = sqlx::query_scalar(
-                    "SELECT id FROM author_earnings_ledger WHERE idempotency_key = $1",
+                    "SELECT id::text FROM author_earnings_ledger WHERE idempotency_key = $1",
                 )
                 .bind(key)
                 .fetch_optional(&mut *tx)
@@ -581,8 +580,7 @@ pub async fn post_earnings(
                 }
             }
             sqlx::query(
-                "INSERT INTO author_earnings_ledger (id, author_account_id, amount_minor, currency, kind, payment_id, idempotency_key, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+                "INSERT INTO author_earnings_ledger (id, author_account_id, amount_minor, currency, kind, payment_id, idempotency_key, created_at) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8)"
             )
             .bind(&id).bind(author_account_id).bind(amount_minor).bind(currency).bind(kind)
             .bind(payment_id).bind(idempotency_key).bind(&now)
@@ -630,8 +628,7 @@ pub async fn create_payout(
         }
         Backend::Postgres => {
             sqlx::query(
-                "INSERT INTO payouts (id, author_account_id, amount_minor, currency, processor_reference, status, initiated_at)
-                 VALUES ($1, $2, $3, $4, $5, 'initiated', $6)"
+                "INSERT INTO payouts (id, author_account_id, amount_minor, currency, processor_reference, status, initiated_at) VALUES ($1::uuid, $2::uuid, $3, $4, $5, 'initiated', $6)"
             )
             .bind(&id).bind(author_account_id).bind(amount_minor).bind(currency).bind(processor_reference).bind(&now)
             .execute(db.postgres_pool().expect("postgres")).await?;
@@ -661,8 +658,7 @@ pub async fn record_assertion(
         }
         Backend::Postgres => {
             sqlx::query(
-                "INSERT INTO monetization_assertions (id, work_id, assertion_kind, policy_version, accepted_at)
-                 VALUES ($1, $2, $3, $4, $5)"
+                "INSERT INTO monetization_assertions (id, work_id, assertion_kind, policy_version, accepted_at) VALUES ($1::uuid, $2::uuid, $3, $4, $5)"
             )
             .bind(&id).bind(work_id).bind(assertion_kind).bind(policy_version).bind(&now)
             .execute(db.postgres_pool().expect("postgres")).await?;
@@ -711,8 +707,7 @@ pub async fn create_gift(
         }
         Backend::Postgres => {
             sqlx::query(
-                "INSERT INTO work_gifts (id, work_id, recipient_pseud_id, gift_note, challenge_fulfillment_id, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6)"
+                "INSERT INTO work_gifts (id, work_id, recipient_pseud_id, gift_note, challenge_fulfillment_id, created_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6)"
             )
             .bind(&id).bind(work_id).bind(recipient_pseud_id).bind(gift_note).bind(challenge_fulfillment_id).bind(&now)
             .execute(db.postgres_pool().expect("postgres")).await?;
@@ -739,7 +734,7 @@ pub async fn get_gifts_for_recipient(
 /// Total platform revenue (sum of `amount_minor` across all earnings rows),
 /// or 0 when the ledger is empty. ADR 0004: balanced ledger, idempotency keys.
 pub async fn total_platform_revenue(db: &Database) -> Result<i64, sqlx::Error> {
-    let sql = "SELECT COALESCE(SUM(amount_minor), 0) FROM monetization_earnings";
+    let sql = "SELECT COALESCE(SUM(amount_minor), 0) FROM author_earnings_ledger WHERE kind = 'platform_fee'";
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query_scalar(sql)
@@ -774,7 +769,7 @@ pub async fn pending_payout_total(db: &Database) -> Result<i64, sqlx::Error> {
 
 /// Count of distinct author accounts with earnings in the ledger.
 pub async fn active_earning_authors(db: &Database) -> Result<i64, sqlx::Error> {
-    let sql = "SELECT COUNT(DISTINCT author_account_id) FROM monetization_earnings";
+    let sql = "SELECT COUNT(DISTINCT author_account_id) FROM author_earnings_ledger WHERE kind = 'platform_fee'";
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query_scalar(sql)
@@ -814,7 +809,7 @@ pub async fn is_work_priced(db: &Database, work_id: &str) -> Result<bool, sqlx::
             sqlx::query_scalar(sql).bind(work_id).fetch_one(db.sqlite_pool().expect("sqlite")).await
         }
         Backend::Postgres => {
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM work_pricing WHERE work_id = $1 AND model = 'purchase' AND enabled)")
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM work_pricing WHERE work_id = $1::uuid AND model = 'purchase' AND enabled)")
                 .bind(work_id).fetch_one(db.postgres_pool().expect("postgres")).await
         }
     }

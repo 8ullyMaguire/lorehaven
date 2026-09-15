@@ -13,11 +13,11 @@
 
 CREATE TABLE IF NOT EXISTS notifications (
     id          TEXT PRIMARY KEY,
-    account_id  TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+    account_id  UUID NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
     kind        TEXT NOT NULL,             -- reply | sale | gift | mention | system
     title       TEXT NOT NULL,
     body        TEXT NOT NULL,
-    work_id     TEXT,
+    work_id     UUID,
     read_at     TEXT,
     created_at  TEXT NOT NULL
 );

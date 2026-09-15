@@ -24,14 +24,14 @@ CREATE TABLE comment_threads (
     subject_type TEXT NOT NULL,
     subject_id TEXT NOT NULL,
     root_comment TEXT NOT NULL,
-    reply_count INTEGER NOT NULL DEFAULT 0
+    reply_count BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE forum_categories (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    position INTEGER NOT NULL,
-    min_trust INTEGER NOT NULL DEFAULT 0
+    position BIGINT NOT NULL,
+    min_trust BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE forum_topics (
@@ -41,7 +41,7 @@ CREATE TABLE forum_topics (
     title TEXT NOT NULL,
     created_at TEXT NOT NULL,
     last_post_at TEXT,
-    locked INTEGER NOT NULL DEFAULT 0
+    locked BOOLEAN NOT NULL DEFAULT FALSE
 );
 CREATE INDEX forum_topics_category ON forum_topics (category_id, last_post_at);
 

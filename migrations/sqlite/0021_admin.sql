@@ -51,10 +51,10 @@ CREATE INDEX idx_privacy_requests_account ON privacy_requests(account, state);
 
 CREATE TABLE abuse_counters (
     key TEXT NOT NULL,               -- 'ip:1.2.3.4' | 'account:x' | 'global:x'
-    window TEXT NOT NULL,
+    "window" TEXT NOT NULL,
     count INTEGER NOT NULL DEFAULT 0,
     blocked_until TEXT,
-    PRIMARY KEY (key, window)
+    PRIMARY KEY (key, "window")
 );
 
 CREATE TABLE ip_policy (
