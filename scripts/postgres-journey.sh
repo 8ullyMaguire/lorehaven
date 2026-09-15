@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #
-# Drive every library endpoint against a live PostgreSQL server.
+# Drive every golden-path endpoint against a live PostgreSQL server:
+# library, auth, authoring, monetization, community and the notifications
+# inbox.
 #
 # Why this exists: this tree's tests run on SQLite. SQLite accepts `?` for a
 # placeholder, casts a bigint straight to a boolean, compares a uuid to a text

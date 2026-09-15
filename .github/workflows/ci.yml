@@ -157,3 +157,13 @@ jobs:
           # `checks.database.detail`, so this is the line that proves the server
           # opened PostgreSQL rather than a SQLite file.
           grep -q 'postgres reachable at' /tmp/ready.json
+
+      # The full golden-path journey: registration, authoring, pricing and
+      # paywalls, purchase and entitlements, reviews, tips, forum topics and
+      # replies, and the notifications inbox — the same paths the browser
+      # smoke pass walks, asserted at the HTTP layer on every run.
+      - name: Golden-path journey against PostgreSQL
+        env:
+          DATABASE_URL: postgres://lorehaven:***@localhost:5432/lorehaven
+          PSQL: psql postgres://lorehaven:***@127.0.0.1:5432/lorehaven
+        run: bash scripts/postgres-journey.sh
