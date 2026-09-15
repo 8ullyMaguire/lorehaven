@@ -118,7 +118,8 @@ impl Client {
     }
     async fn get(&mut self, uri: &str) -> (StatusCode, Value) {
         self.request("GET", uri, None).await
-    }}
+    }
+}
 
 struct Harness {
     dir: PathBuf,
