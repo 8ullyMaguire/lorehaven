@@ -226,17 +226,40 @@ async fn unimplemented_read_doors_still_return_501() {
 }
 
 // ---------------------------------------------------------------------------
-// The write doors: 501 on the Write rate class; sessions and scopes arrive
-// with the bodies, and the 501 assertions move then.
+// The write doors: sessions are required; API-scope enforcement is the
+// M23 remainder.
 // ---------------------------------------------------------------------------
 
+// The write doors all require a session (RequireSession). No write door
+// has API-scope enforcement yet — that is the M23 remainder.
 #[tokio::test]
-async fn unimplemented_write_doors_still_return_501() {
-    let fx = Fixture::new("write-doors").await;
+async fn write_doors_require_a_session() {
+    let fx = Fixture::new("write-auth").await;
     let mut client = fx.client();
     let empty = json!({});
-    // Implemented write doors now have behavior tests below.
-    // These remain as 501 contract stubs:
-    // patch_creator and put_media_collection are now implemented.
-    // Remaining unimplemented write doors: none.
+    // POST /api/v1/media/query is a read (complex-query listing) and is
+    // anonymous-allowed, so it is not in this list.
+    let doors: &[(&str, &str)] = &[
+        ("POST", "/api/v1/creators"),
+        (
+            "PATCH",
+            "/api/v1/creators/00000000-0000-0000-0000-000000000002",
+        ),
+        ("POST", "/api/v1/distributors"),
+        ("POST", "/api/v1/media-collections"),
+        (
+            "PUT",
+            "/api/v1/media-collections/00000000-0000-0000-0000-000000000004",
+        ),
+    ];
+    for (method, door) in doors {
+        let (status, body) = match *method {
+            "POST" => client.post(door, empty.clone()).await,
+            "PATCH" => client.patch(door, empty.clone()).await,
+            "PUT" => client.put(door, empty.clone()).await,
+            _ => unreachable!("table only carries POST, PATCH and PUT"),
+        };
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {door}: {body}");
+    }
+    fx.cleanup().await;
 }

@@ -619,46 +619,78 @@ pub struct NewCollection<'a> {
     pub visibility: &'a str,
 }
 
-/// Update an existing creator.
-pub async fn patch_creator(
-    db: &Database,
-    id: &str,
-    name: Option<&str>,
-    role: Option<&str>,
-) -> Result<bool> {
+/// Update an existing creator's display name. The route layer gates who
+/// may call this (curators per §19); this function only owns the SQL.
+pub async fn patch_creator(db: &Database, id: &str, display_name: Option<&str>) -> Result<bool> {
     let now = crate::identity::now_rfc3339();
-    let sqlite = "UPDATE creators SET name = COALESCE(?, name), role = COALESCE(?, role), updated_at = ? WHERE id = ?".to_string();
-    let postgres = "UPDATE creators SET name = COALESCE(?, name), role = COALESCE(?, role), updated_at = ? WHERE id = ?".to_string();
+    let sqlite = "UPDATE creators SET display_name = COALESCE(?, display_name), \
+                  updated_at = ? WHERE id = ?"
+        .to_string();
+    let postgres = "UPDATE creators SET display_name = COALESCE(?, display_name), \
+                    updated_at = ? WHERE id = ?::uuid"
+        .to_string();
     let sql = db.sql(&sqlite, &postgres);
-    sqlx::query(sql.as_ref())
-        .bind(name.unwrap_or(""))
-        .bind(role.unwrap_or(""))
-        .bind(&now)
-        .bind(id)
-        .execute(db.sqlite_pool().expect("sqlite"))
-        .await?;
-    Ok(true)
+    let updated = match db.backend() {
+        Backend::Sqlite => sqlx::query(sql.as_ref())
+            .bind(display_name)
+            .bind(&now)
+            .bind(id)
+            .execute(db.sqlite_pool().expect("sqlite handle"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(sql.as_ref())
+            .bind(display_name)
+            .bind(&now)
+            .bind(id)
+            .execute(db.postgres_pool().expect("postgres handle"))
+            .await?
+            .rows_affected(),
+    };
+    Ok(updated > 0)
 }
 
-/// Update an existing collection.
+/// Update an existing collection, scoped to its owning account: a caller
+/// can only rename or re-describe a collection they own.
 pub async fn put_collection(
     db: &Database,
     id: &str,
+    owning_account_id: &str,
     title: Option<&str>,
     description: Option<&str>,
 ) -> Result<bool> {
     let now = crate::identity::now_rfc3339();
-    let sqlite = "UPDATE media_collections SET title = COALESCE(?, title), description = COALESCE(?, description), updated_at = ? WHERE id = ?".to_string();
-    let postgres = "UPDATE media_collections SET title = COALESCE(?, title), description = COALESCE(?, description), updated_at = ? WHERE id = ?".to_string();
+    let sqlite = "UPDATE media_collections \
+                  SET title = COALESCE(?, title), description = COALESCE(?, description), \
+                      updated_at = ? \
+                  WHERE id = ? AND owning_account_id = ?"
+        .to_string();
+    let postgres = "UPDATE media_collections \
+                    SET title = COALESCE(?, title), description = COALESCE(?, description), \
+                        updated_at = ? \
+                    WHERE id = ?::uuid AND owning_account_id = ?::uuid"
+        .to_string();
     let sql = db.sql(&sqlite, &postgres);
-    sqlx::query(sql.as_ref())
-        .bind(title.unwrap_or(""))
-        .bind(description.unwrap_or(""))
-        .bind(&now)
-        .bind(id)
-        .execute(db.sqlite_pool().expect("sqlite"))
-        .await?;
-    Ok(true)
+    let updated = match db.backend() {
+        Backend::Sqlite => sqlx::query(sql.as_ref())
+            .bind(title)
+            .bind(description)
+            .bind(&now)
+            .bind(id)
+            .bind(owning_account_id)
+            .execute(db.sqlite_pool().expect("sqlite handle"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(sql.as_ref())
+            .bind(title)
+            .bind(description)
+            .bind(&now)
+            .bind(id)
+            .bind(owning_account_id)
+            .execute(db.postgres_pool().expect("postgres handle"))
+            .await?
+            .rows_affected(),
+    };
+    Ok(updated > 0)
 }
 
 #[cfg(test)]

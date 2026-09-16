@@ -13,9 +13,8 @@
 //! merging (ADR 0019).
 
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
-use axum::response::Response as AxumResponse;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use lorehaven_domain::media::{CollectionKind, CreatorKind, DistributorKind};
@@ -38,7 +37,6 @@ use crate::state::AppState;
 #[derive(Deserialize)]
 pub struct PatchCreatorRequest {
     pub name: Option<String>,
-    pub role: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -366,21 +364,56 @@ async fn get_media_collection(
 
 async fn post_media_query(
     State(state): State<AppState>,
+    MaybeSession(session): MaybeSession,
     Json(body): Json<MediaQuery>,
 ) -> impl IntoResponse {
-    // Same as GET but POST body for complex queries
-    list_media(State(state), Query(body), MaybeSession(None)).await
+    // Same as GET but POST body for complex queries. It is a READ, not a
+    // write: anonymous callers are allowed and eligibility is applied
+    // inside; it sits in the Write rate class only because complex queries
+    // are expensive. The caller's session is honored, never stripped.
+    list_media(State(state), Query(body), MaybeSession(session)).await
 }
 
 async fn post_creator(
     State(state): State<AppState>,
-    RequireSession(user): RequireSession,
+    RequireSession(_user): RequireSession,
     Json(body): Json<CreateCreatorRequest>,
 ) -> impl IntoResponse {
     let db = state.db();
-    let _ = user; // TODO: use user.account_id for owning_account_id
+    let Ok(kind) = CreatorKind::from_str(&body.kind) else {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": {
+                    "code": "VALIDATION_FAILED",
+                    "message": format!("unknown creator kind: {}", body.kind),
+                }
+            })),
+        )
+            .into_response();
+    };
+    // A creator record must be internally consistent (spec §32.1): a local
+    // pseud points at a pseud, an external creator at its source. Refused
+    // at the edge, not stored and ignored later.
+    if !lorehaven_domain::media::creator_record_is_consistent(
+        kind,
+        body.pseud_id.is_some(),
+        body.source_key.as_deref(),
+        body.source_creator_id.as_deref(),
+    ) {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": {
+                    "code": "VALIDATION_FAILED",
+                    "message": "creator record is neither properly local nor properly external",
+                }
+            })),
+        )
+            .into_response();
+    }
     let creator = lorehaven_db::media::NewCreator {
-        kind: CreatorKind::from_str(&body.kind).unwrap_or(CreatorKind::External),
+        kind,
         pseud_id: body.pseud_id,
         display_name: &body.display_name,
         source_key: body.source_key.as_deref(),
@@ -400,13 +433,12 @@ async fn post_creator(
 
 async fn patch_creator(
     State(state): State<AppState>,
+    RequireSession(_user): RequireSession,
     Path(id): Path<String>,
     Json(body): Json<PatchCreatorRequest>,
 ) -> impl IntoResponse {
     let db = state.db();
-    match lorehaven_db::media::patch_creator(db, &id, body.name.as_deref(), body.role.as_deref())
-        .await
-    {
+    match lorehaven_db::media::patch_creator(db, &id, body.name.as_deref()).await {
         Ok(true) => (StatusCode::OK, Json(json!({ "status": "updated" }))).into_response(),
         Ok(false) => (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" }))).into_response(),
         Err(e) => (
@@ -423,9 +455,21 @@ async fn post_distributor(
     Json(body): Json<CreateDistributorRequest>,
 ) -> impl IntoResponse {
     let db = state.db();
+    let Ok(kind) = DistributorKind::from_str(&body.kind) else {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": {
+                    "code": "VALIDATION_FAILED",
+                    "message": format!("unknown distributor kind: {}", body.kind),
+                }
+            })),
+        )
+            .into_response();
+    };
     let distributor = lorehaven_db::media::NewDistributor {
         name: &body.name,
-        kind: DistributorKind::from_str(&body.kind).unwrap_or(DistributorKind::Self_),
+        kind,
         source_key: body.source_key.as_deref(),
         canonical_url: body.canonical_url.as_deref(),
     };
@@ -441,13 +485,28 @@ async fn post_distributor(
 
 async fn post_media_collection(
     State(state): State<AppState>,
-    RequireSession(_user): RequireSession,
+    RequireSession(user): RequireSession,
     Json(body): Json<CreateCollectionRequest>,
 ) -> impl IntoResponse {
     let db = state.db();
+    let Ok(kind) = CollectionKind::from_str(&body.kind) else {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": {
+                    "code": "VALIDATION_FAILED",
+                    "message": format!("unknown collection kind: {}", body.kind),
+                }
+            })),
+        )
+            .into_response();
+    };
+    // The owning account is the SESSION's account, never a client-chosen
+    // id: no caller may mint a collection owned by somebody else.
+    let owner = user.account_id.to_string();
     let collection = lorehaven_db::media::NewCollection {
-        kind: CollectionKind::from_str(&body.kind).unwrap_or(CollectionKind::Series),
-        owning_account_id: body.owning_account_id.as_deref(),
+        kind,
+        owning_account_id: Some(&owner),
         title: &body.title,
         description: body.description.as_deref(),
         visibility: &body.visibility,
@@ -464,13 +523,16 @@ async fn post_media_collection(
 
 async fn put_media_collection(
     State(state): State<AppState>,
+    RequireSession(user): RequireSession,
     Path(id): Path<String>,
     Json(body): Json<PutCollectionRequest>,
 ) -> impl IntoResponse {
     let db = state.db();
+    let owner = user.account_id.to_string();
     match lorehaven_db::media::put_collection(
         db,
         &id,
+        &owner,
         body.title.as_deref(),
         body.description.as_deref(),
     )
@@ -486,6 +548,18 @@ async fn put_media_collection(
     }
 }
 
+/// Escape user-provided text for embedding in Atom/XML. Titles and
+/// summaries are author-controlled; an unescaped title is stored XSS in
+/// every feed reader.
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
 /// Atom/RSS feed for media listings.
 async fn media_feed(
     State(state): State<AppState>,
@@ -497,13 +571,22 @@ async fn media_feed(
     let account_id = session.as_ref().map(|u| u.account_id.to_string());
     let limit = params.limit.unwrap_or(50).min(200);
 
-    match lorehaven_db::media::list_media_filtered(db, &query, account_id.as_deref(), limit, None).await {
+    match lorehaven_db::media::list_media_filtered(db, &query, account_id.as_deref(), limit, None)
+        .await
+    {
         Ok((items, total, _next_cursor)) => {
             // Build simple Atom feed
-            let entries: Vec<String> = items.iter().map(|m| {
-                format!(r#"<entry><title>{}</title><id>{}</id><updated>{}</updated></entry>"#,
-                    m.title, m.id, m.updated_at)
-            }).collect();
+            let entries: Vec<String> = items
+                .iter()
+                .map(|m| {
+                    format!(
+                        r#"<entry><title>{}</title><id>{}</id><updated>{}</updated></entry>"#,
+                        xml_escape(&m.title),
+                        xml_escape(&m.id),
+                        xml_escape(&m.updated_at)
+                    )
+                })
+                .collect();
             let xml = format!(
                 r#"<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
@@ -512,11 +595,15 @@ async fn media_feed(
 <totalResults>{}</totalResults>
 {}
 </feed>"#,
-                total, entries.join("")
+                total,
+                entries.join("")
             );
             ([("content-type", "application/atom+xml")], xml).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
             .into_response(),
     }
 }
