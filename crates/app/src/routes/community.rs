@@ -8,6 +8,7 @@ use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use lorehaven_domain::blocking::BlockScope;
 use serde::Deserialize;
+use std::str::FromStr;
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
 
@@ -77,6 +78,12 @@ fn default_limit() -> i64 {
 #[derive(Debug, Deserialize)]
 pub struct CreateCommentBody {
     body: String,
+    /// Optional anchor kind: "paragraph" or "timestamp".
+    anchor_kind: Option<String>,
+    /// Anchor value (paragraph index or timestamp).
+    anchor_value: Option<String>,
+    /// Chapter id for paragraph anchors.
+    anchor_chapter_id: Option<String>,
 }
 
 async fn get_work_comments(
@@ -133,6 +140,24 @@ async fn post_comment(
             lorehaven_domain::positivity::FeedbackPreferences::default(),
         ),
     };
+    // Validate anchor fields if provided.
+    let (anchor_kind, anchor_value, anchor_chapter_id) = match (&body.anchor_kind, &body.anchor_value, &body.anchor_chapter_id) {
+        (Some(kind_str), Some(value), chapter_id) => {
+            let kind = lorehaven_domain::anchor::AnchorKind::from_str(kind_str)
+                .map_err(|e| ApiError(lorehaven_domain::AppError::field("anchor_kind", &e)))?;
+            lorehaven_domain::anchor::validate_anchor(kind, value, chapter_id.as_deref())
+                .map_err(|e| ApiError(lorehaven_domain::AppError::field("anchor", &e)))?;
+            (Some(kind_str.clone()), Some(value.clone()), chapter_id.clone())
+        }
+        (None, None, _) => (None, None, None),
+        _ => {
+            return Err(ApiError(lorehaven_domain::AppError::field(
+                "anchor",
+                "anchor_kind and anchor_value must be provided together",
+            )));
+        }
+    };
+
     let id = lorehaven_db::community::insert_comment(
         state.db(),
         "work",
@@ -140,6 +165,9 @@ async fn post_comment(
         &pseud_id.to_string(),
         &body.body,
         None,
+        anchor_kind.as_deref(),
+        anchor_value.as_deref(),
+        anchor_chapter_id.as_deref(),
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;

@@ -1,6 +1,7 @@
 //! Lorehaven domain primitives.
 
 pub mod api_scopes;
+pub mod anchor;
 pub mod blocking;
 pub mod caps;
 pub mod charging;
