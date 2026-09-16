@@ -21,6 +21,7 @@ pub mod ids;
 pub mod imports;
 pub mod jobs;
 pub mod library;
+pub mod lending;
 pub mod marketplace;
 pub mod media;
 pub mod monetization;
