@@ -125,5 +125,5 @@ M23-04,security,Write-door ownership and scope enforcement,M23,partially-impleme
 M24-01,community,Anchored comments - paragraph offsets and media timestamps,M24,implemented-locally-tested,crates/domain/src/anchor.rs + crates/app/tests/milestone_24.rs,Through the positivity filter
 M24-02,content,Orphaning and creator dashboard,M24,partially-implemented,crates/domain/src/orphaning.rs + migrations/0028,Orphaning pairs with succession 24.15; dashboard privacy-preserving per 24.3 — dashboard not yet built
 M24-03,interop,Shelf and works import adapters - Goodreads/StoryGraph CSV Wattpad AO3,M24,partially-implemented,crates/scrapers/src/csv/{goodreads,storygraph}.rs,Ingestion only per 11.1 — Goodreads/StoryGraph CSV live; Wattpad/AO3 adapters pending
-M25-01,content,Archive mode - derivatives OCR public-domain collections lending,M25,planned,docs/spec.md 32.4,Lending default off operator decision
+M25-01,content,Archive mode - derivatives OCR public-domain collections lending,M25,partially-implemented,"crates/domain/src/lending.rs; crates/db/src/lending.rs; crates/app/src/routes/lending.rs; migrations/0029_lending.sql",Lending domain + DB + routes complete; derivatives and OCR remain for M25-02
 M26-01,content,Adult taxonomy behind gates + TTS narration editions,M26,planned,docs/spec.md 32.5,Never leaks past 7.3/7.6; machine audio labeled per 22.6
