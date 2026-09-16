@@ -123,10 +123,7 @@ mod tests {
 
     #[test]
     fn split_csv_line_quoted() {
-        assert_eq!(
-            split_csv_line(r#""a,b","c d""#),
-            vec!["a,b", "c d"]
-        );
+        assert_eq!(split_csv_line(r#""a,b","c d""#), vec!["a,b", "c d"]);
     }
 
     #[test]

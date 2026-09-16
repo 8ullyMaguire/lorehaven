@@ -37,6 +37,7 @@ pub struct Comment {
 /// (route layer) before this insert, and the classification_id is stored
 /// on the comment row. Anchor fields (kind, value, chapter_id) are stored
 /// for anchored comments and NULL for whole-work comments.
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_comment(
     db: &Database,
     subject_type: &str,
