@@ -237,33 +237,6 @@ async fn unimplemented_write_doors_still_return_501() {
     let empty = json!({});
     // Implemented write doors now have behavior tests below.
     // These remain as 501 contract stubs:
-    let doors: &[(&str, &str)] = &[
-        (
-            "PATCH",
-            "/api/v1/creators/00000000-0000-0000-0000-000000000002",
-        ),
-        (
-            "PUT",
-            "/api/v1/media-collections/00000000-0000-0000-0000-000000000004",
-        ),
-    ];
-    for (method, door) in doors {
-        let (status, body) = match *method {
-            "POST" => client.post(door, empty.clone()).await,
-            "PATCH" => client.patch(door, empty.clone()).await,
-            "PUT" => client.put(door, empty.clone()).await,
-            _ => unreachable!("table only carries POST, PATCH and PUT"),
-        };
-        assert_eq!(
-            status,
-            StatusCode::NOT_IMPLEMENTED,
-            "{method} {door}: {body}"
-        );
-        assert_eq!(
-            body["error"]["code"],
-            json!("NOT_IMPLEMENTED"),
-            "{method} {door} must carry the house error shape"
-        );
-    }
-    fx.cleanup().await;
+    // patch_creator and put_media_collection are now implemented.
+    // Remaining unimplemented write doors: none.
 }

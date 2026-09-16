@@ -148,6 +148,7 @@ pub struct MediaRecord {
     pub summary: Option<String>,
     pub format: String,
     pub visibility: String,
+    pub owning_account_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub version: i64,
@@ -254,10 +255,10 @@ macro_rules! run {
 /// Look up a single media record by id.
 pub async fn find_media(db: &Database, id: &str) -> Result<Option<MediaRecord>> {
     let sqlite = "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
-                  w.created_at, w.updated_at, w.version \
+                  w.owning_account_id, w.created_at, w.updated_at, w.version \
                   FROM works w WHERE w.id = ?";
     let postgres = "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
-                     w.created_at, w.updated_at, w.version \
+                     w.owning_account_id, w.created_at, w.updated_at, w.version \
                      FROM works w WHERE w.id = ?";
     let row: Option<MediaRecord> = sqlx::query_as::<_, MediaRecord>(&crate::sql_owned(
         db,
@@ -274,14 +275,25 @@ pub async fn find_media(db: &Database, id: &str) -> Result<Option<MediaRecord>> 
 pub async fn list_media_filtered(
     db: &Database,
     query: &QueryAst,
-    _account_id: Option<&str>,
+    account_id: Option<&str>,
     limit: i64,
-) -> Result<(Vec<MediaRecord>, i64)> {
-    let (where_sql, where_pg, values) = media_filter(query, _account_id);
+    cursor: Option<&str>,
+) -> Result<(Vec<MediaRecord>, i64, Option<String>)> {
+    let (where_sql, where_pg, values) = media_filter(query, account_id);
+    let mut where_sql = where_sql;
+    let mut where_pg = where_pg;
+    let mut bound: Vec<String> = values.clone();
+
+    // cursor is a work ID to start after (cursor-based pagination)
+    if let Some(cursor_id) = cursor {
+        where_sql.push_str(" AND w.id > ?");
+        where_pg.push_str(" AND w.id > ?");
+        bound.push(cursor_id.to_string());
+    }
 
     let sqlite = format!(
         "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
-                w.created_at, w.updated_at, w.version \
+                w.owning_account_id, w.created_at, w.updated_at, w.version \
          FROM works w \
          WHERE {where_sql} \
          ORDER BY w.created_at DESC \
@@ -289,7 +301,7 @@ pub async fn list_media_filtered(
     );
     let postgres = format!(
         "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
-                w.created_at, w.updated_at, w.version \
+                w.owning_account_id, w.created_at, w.updated_at, w.version \
          FROM works w \
          WHERE {where_pg} \
          ORDER BY w.created_at DESC \
@@ -303,25 +315,27 @@ pub async fn list_media_filtered(
         .fetch_one(db.sqlite_pool().expect("sqlite handle"))
         .await?;
 
-    let mut bound: Vec<String> = vec![limit.to_string()];
-    bound.extend(values);
+    bound.push(limit.to_string());
 
-    let rows: Vec<MediaRecord> = sqlx::query_as::<_, MediaRecord>(&db.sql(&sqlite, &postgres))
-        .bind(limit)
+    let sql = db.sql(&sqlite, &postgres);
+    let mut query = sqlx::query_as::<_, MediaRecord>(&sql);
+    for val in &bound {
+        query = query.bind(val.as_str());
+    }
+    let rows: Vec<MediaRecord> = query
         .fetch_all(db.sqlite_pool().expect("sqlite handle"))
         .await?;
 
-    Ok((rows, count.0))
+    Ok((rows, count.0, cursor.map(|c| c.to_string())))
 }
 
-/// List works by a single creator (spec §32.3.2).
 pub async fn creator_media(
     db: &Database,
     creator_id: &str,
     _account_id: Option<&str>,
 ) -> Result<Vec<MediaRecord>> {
     let sql = "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
-               w.created_at, w.updated_at, w.version \
+               w.owning_account_id, w.created_at, w.updated_at, w.version \
                FROM works w \
                JOIN media_creators mc ON mc.work_id = w.id \
                WHERE mc.creator_id = ?";
@@ -605,6 +619,48 @@ pub struct NewCollection<'a> {
     pub visibility: &'a str,
 }
 
+/// Update an existing creator.
+pub async fn patch_creator(
+    db: &Database,
+    id: &str,
+    name: Option<&str>,
+    role: Option<&str>,
+) -> Result<bool> {
+    let now = crate::identity::now_rfc3339();
+    let sqlite = "UPDATE creators SET name = COALESCE(?, name), role = COALESCE(?, role), updated_at = ? WHERE id = ?".to_string();
+    let postgres = "UPDATE creators SET name = COALESCE(?, name), role = COALESCE(?, role), updated_at = ? WHERE id = ?".to_string();
+    let sql = db.sql(&sqlite, &postgres);
+    sqlx::query(sql.as_ref())
+        .bind(name.unwrap_or(""))
+        .bind(role.unwrap_or(""))
+        .bind(&now)
+        .bind(id)
+        .execute(db.sqlite_pool().expect("sqlite"))
+        .await?;
+    Ok(true)
+}
+
+/// Update an existing collection.
+pub async fn put_collection(
+    db: &Database,
+    id: &str,
+    title: Option<&str>,
+    description: Option<&str>,
+) -> Result<bool> {
+    let now = crate::identity::now_rfc3339();
+    let sqlite = "UPDATE media_collections SET title = COALESCE(?, title), description = COALESCE(?, description), updated_at = ? WHERE id = ?".to_string();
+    let postgres = "UPDATE media_collections SET title = COALESCE(?, title), description = COALESCE(?, description), updated_at = ? WHERE id = ?".to_string();
+    let sql = db.sql(&sqlite, &postgres);
+    sqlx::query(sql.as_ref())
+        .bind(title.unwrap_or(""))
+        .bind(description.unwrap_or(""))
+        .bind(&now)
+        .bind(id)
+        .execute(db.sqlite_pool().expect("sqlite"))
+        .await?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -617,6 +673,7 @@ mod tests {
             summary: None,
             format: "prose".to_string(),
             visibility: "public".to_string(),
+            owning_account_id: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
             version: 1,

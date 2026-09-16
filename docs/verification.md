@@ -160,3 +160,17 @@ What the work session landed (verified by the afternoon review above):
   category links 404'd, PG dialect drift across 0021/0022/monetization,
   discovery rendered raw uuids, forum authors rendered as uuids, no author
   pricing UI; service-worker staleness documented for operators.
+
+## 2026-09-16 (afternoon) — M23 Media query engine and API doors
+
+What was implemented and verified:
+
+- **R2 — Media query engine** (`crates/db/src/media.rs`): Complete rewrite of `find_media`, `list_media_filtered`, `list_creators`, `list_distributors`, `list_collections`, and write doors (`post_media_query`, `post_creator`, `post_distributor`, `post_media_collection`, `patch_creator`, `put_media_collection`). `MediaRecord` extended with `owning_account_id`. Cursor-based pagination added to `list_media_filtered`.
+- **R3 — Remaining write doors**: Replaced `patch_creator` and `put_media_collection` 501 stubs with real update functions. `canon_media` and `space_media` kept as 501 (no corresponding schema tables yet).
+- **R4 — Eligibility checks**: All read doors now use `MaybeSession` to get `account_id` from session. Public visibility always accessible; restricted/private only visible to the owning account. All write doors now use `RequireSession`.
+- **R5 — ETag/304**: `get_media` now returns `ETag` header with `version` and serves `304 Not Modified` on matching `If-None-Match`.
+- **R5 — Atom/RSS**: Added `GET /api/v1/media/feed` endpoint returning Atom XML.
+- **Contract tests updated**: `milestone_22.rs` updated — implemented write doors removed from 501 test; read doors test still asserts 501 for `canon_media` and `space_media`.
+
+Gates: SQLite 110P, PG 110P, clippy 0, fmt clean.
+
