@@ -798,10 +798,13 @@ async fn media_feed(
     {
         Ok((items, _total, next_cursor)) => {
             let kind = params.format.as_deref().unwrap_or("atom");
-            if !matches!(kind, "atom" | "rss") {
-                return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({"error": {"code": "VALIDATION_FAILED", "message": "feed format must be atom or rss"}}))).into_response();
+            if !matches!(kind, "atom" | "rss" | "dc") {
+                return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({"error": {"code": "VALIDATION_FAILED", "message": "feed format must be atom, rss, or dc"}}))).into_response();
             }
             let base = state.config().site.base_url.trim_end_matches('/');
+            if kind == "dc" {
+                return media_feed_dc(items, base);
+            }
             let mut self_url =
                 url::Url::parse(&format!("{base}/api/v1/media/feed")).expect("configured base URL");
             {
@@ -880,6 +883,27 @@ async fn media_feed(
         )
             .into_response(),
     }
+}
+
+/// Render media listings as Dublin Core XML (spec §32.2, IA-style item metadata).
+fn media_feed_dc(items: Vec<lorehaven_db::media::MediaRecord>, base: &str) -> axum::response::Response {
+    let mut xml = String::from(r#"<?xml version="1.0" encoding="UTF-8"?><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/">"#);
+    for item in items {
+        let link = xml_escape(&format!("{}/works/{}", base, item.id));
+        let title = xml_escape(&item.title);
+        let id = xml_escape(&format!("urn:uuid:{}", item.id));
+        let updated = xml_escape(&item.updated_at);
+        let summary = xml_escape(item.summary.as_deref().unwrap_or(""));
+        xml.push_str(&format!(
+            r#"<rdf:Description rdf:resource="{link}"><dc:identifier>{id}</dc:identifier><dc:title>{title}</dc:title><dc:date>{updated}</dc:date><dc:description>{summary}</dc:description></rdf:Description>"#
+        ));
+    }
+    xml.push_str("</rdf:RDF>");
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/rdf+xml")],
+        xml.into_bytes(),
+    ).into_response()
 }
 
 // ---------------------------------------------------------------------------
