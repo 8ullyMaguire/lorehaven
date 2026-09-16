@@ -1059,3 +1059,161 @@ pub async fn list_media_files(db: &Database, work_id: &str) -> Result<Vec<MediaF
     };
     Ok(rows)
 }
+
+/// List media in a canon, with the same eligibility filter as list_media_filtered.
+/// Returns (items, canon_name) or error. 404 if canon doesn't exist.
+pub async fn canon_media(
+    db: &Database,
+    canon_id: &str,
+    account_id: Option<&str>,
+) -> Result<(Vec<MediaRecord>, String)> {
+    // First: check canon exists and get its name.
+    let name = {
+        let sqlite = "SELECT name FROM canons WHERE id = ?".to_string();
+        let postgres = "SELECT name FROM canons WHERE id = ?::uuid".to_string();
+        let sql = &db.sql(&sqlite, &postgres);
+        match db.backend() {
+            Backend::Sqlite => {
+                sqlx::query_scalar::<_, String>(sql)
+                    .bind(canon_id)
+                    .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                    .await?
+            }
+            Backend::Postgres => {
+                sqlx::query_scalar::<_, String>(sql)
+                    .bind(canon_id)
+                    .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                    .await?
+            }
+        }
+    };
+    let name = name.ok_or_else(|| anyhow::anyhow!("canon not found"))?;
+
+    // Second: list works in the canon, with eligibility filter.
+    let bound_owner = account_id.unwrap_or("");
+
+    let sqlite = "SELECT w.id, w.title, w.summary, w.format, w.visibility, w.lifecycle, \
+              p.account_id AS owning_account_id, w.created_at, w.updated_at, w.version \
+         FROM canon_works cw \
+         JOIN works w ON w.id = cw.work_id \
+         JOIN pseuds p ON p.id = w.owner_pseud_id \
+         WHERE cw.canon_id = ? \
+         AND w.lifecycle = 'published' \
+         AND (w.visibility = 'public' OR w.visibility = 'unlisted' \
+             OR (w.visibility = 'restricted' AND EXISTS (SELECT 1 FROM pseuds p2 \
+                 WHERE p2.id = w.owner_pseud_id AND p2.account_id = ?))) \
+         ORDER BY cw.position, w.created_at DESC \
+         LIMIT 50"
+        .to_string();
+    let postgres =
+        "SELECT w.id::text AS id, w.title, w.summary, w.format, w.visibility, w.lifecycle, \
+              p.account_id::text AS owning_account_id, w.created_at, w.updated_at, w.version::bigint \
+         FROM canon_works cw \
+         JOIN works w ON w.id = cw.work_id \
+         JOIN pseuds p ON p.id = w.owner_pseud_id \
+         WHERE cw.canon_id = ?::uuid \
+         AND w.lifecycle = 'published' \
+         AND (w.visibility = 'public' OR w.visibility = 'unlisted' \
+             OR (w.visibility = 'restricted' AND EXISTS (SELECT 1 FROM pseuds p2 \
+                 WHERE p2.id = w.owner_pseud_id AND p2.account_id = ?::text))) \
+         ORDER BY cw.position, w.created_at DESC \
+         LIMIT 50"
+            .to_string();
+
+    let sql = &db.sql(&sqlite, &postgres);
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, MediaRecord>(sql)
+                .bind(canon_id)
+                .bind(bound_owner)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, MediaRecord>(sql)
+                .bind(canon_id)
+                .bind(bound_owner)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok((rows, name))
+}
+
+/// List media in a space, with the same eligibility filter as list_media_filtered.
+/// Returns (items, space_name) or error. 404 if space doesn't exist.
+pub async fn space_media(
+    db: &Database,
+    space_id: &str,
+    account_id: Option<&str>,
+) -> Result<(Vec<MediaRecord>, String)> {
+    let name = {
+        let sqlite = "SELECT name FROM spaces WHERE id = ?".to_string();
+        let postgres = "SELECT name FROM spaces WHERE id = ?::uuid".to_string();
+        let sql = &db.sql(&sqlite, &postgres);
+        match db.backend() {
+            Backend::Sqlite => {
+                sqlx::query_scalar::<_, String>(sql)
+                    .bind(space_id)
+                    .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                    .await?
+            }
+            Backend::Postgres => {
+                sqlx::query_scalar::<_, String>(sql)
+                    .bind(space_id)
+                    .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                    .await?
+            }
+        }
+    };
+    let name = name.ok_or_else(|| anyhow::anyhow!("space not found"))?;
+
+    let bound_owner = account_id.unwrap_or("");
+
+    let sqlite = "SELECT w.id, w.title, w.summary, w.format, w.visibility, w.lifecycle, \
+              p.account_id AS owning_account_id, w.created_at, w.updated_at, w.version \
+         FROM space_works sw \
+         JOIN works w ON w.id = sw.work_id \
+         JOIN pseuds p ON p.id = w.owner_pseud_id \
+         WHERE sw.space_id = ? \
+         AND w.lifecycle = 'published' \
+         AND (w.visibility = 'public' OR w.visibility = 'unlisted' \
+             OR (w.visibility = 'restricted' AND EXISTS (SELECT 1 FROM pseuds p2 \
+                 WHERE p2.id = w.owner_pseud_id AND p2.account_id = ?))) \
+         ORDER BY sw.position, w.created_at DESC \
+         LIMIT 50"
+        .to_string();
+    let postgres =
+        "SELECT w.id::text AS id, w.title, w.summary, w.format, w.visibility, w.lifecycle, \
+              p.account_id::text AS owning_account_id, w.created_at, w.updated_at, w.version::bigint \
+         FROM space_works sw \
+         JOIN works w ON w.id = sw.work_id \
+         JOIN pseuds p ON p.id = w.owner_pseud_id \
+         WHERE sw.space_id = ?::uuid \
+         AND w.lifecycle = 'published' \
+         AND (w.visibility = 'public' OR w.visibility = 'unlisted' \
+             OR (w.visibility = 'restricted' AND EXISTS (SELECT 1 FROM pseuds p2 \
+                 WHERE p2.id = w.owner_pseud_id AND p2.account_id = ?::text))) \
+         ORDER BY sw.position, w.created_at DESC \
+         LIMIT 50"
+            .to_string();
+
+    let sql = &db.sql(&sqlite, &postgres);
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, MediaRecord>(sql)
+                .bind(space_id)
+                .bind(bound_owner)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, MediaRecord>(sql)
+                .bind(space_id)
+                .bind(bound_owner)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok((rows, name))
+}

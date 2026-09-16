@@ -249,33 +249,58 @@ async fn media_collection_media(
     }
 }
 
-async fn canon_media(State(_state): State<AppState>, Path(_id): Path<String>) -> impl IntoResponse {
-    // TODO: canon-scoped media needs the §30 canon/reference tables; a
-    // global list relabeled with the path id would be a fabrication.
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(json!({
-            "error": {
-                "code": "NOT_IMPLEMENTED",
-                "message": "canon media is a contract stub; it is implemented by spec §32 R2+ once the §30 canon tables exist"
+async fn canon_media(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    MaybeSession(session): MaybeSession,
+) -> impl IntoResponse {
+    let db = state.db();
+    let account_id = session.as_ref().map(|u| u.account_id.to_string());
+
+    match lorehaven_db::media::canon_media(db, &id, account_id.as_deref()).await {
+        Ok((items, canon_name)) => {
+            Json(json!({"items": items, "canon": id, "name": canon_name})).into_response()
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("not found") {
+                (StatusCode::NOT_FOUND, Json(json!({"error": msg}))).into_response()
+            } else {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": msg})),
+                )
+                    .into_response()
             }
-        })),
-    )
-        .into_response()
+        }
+    }
 }
 
-async fn space_media(State(_state): State<AppState>, Path(_id): Path<String>) -> impl IntoResponse {
-    // TODO: space-scoped media needs the §30 space tables; see canon_media.
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(json!({
-            "error": {
-                "code": "NOT_IMPLEMENTED",
-                "message": "space media is a contract stub; it is implemented by spec §32 R2+ once the §30 space tables exist"
+async fn space_media(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    MaybeSession(session): MaybeSession,
+) -> impl IntoResponse {
+    let db = state.db();
+    let account_id = session.as_ref().map(|u| u.account_id.to_string());
+
+    match lorehaven_db::media::space_media(db, &id, account_id.as_deref()).await {
+        Ok((items, space_name)) => {
+            Json(json!({"items": items, "space": id, "name": space_name})).into_response()
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("not found") {
+                (StatusCode::NOT_FOUND, Json(json!({"error": msg}))).into_response()
+            } else {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": msg})),
+                )
+                    .into_response()
             }
-        })),
-    )
-        .into_response()
+        }
+    }
 }
 
 async fn list_creators(
