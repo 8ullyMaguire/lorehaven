@@ -209,3 +209,34 @@ public/unlisted/restricted + the §7.6 service), a correct compound-cursor
 pagination, visibility filtering inside every aggregation, and real
 Ledger rows corrected to `partially-implemented`.
 
+
+**M23 remediation commit `5985a60` (2026-09-16):**
+
+Phase A of the M23 remediation — the blocking defects from the
+independent review have been fixed:
+
+- **Backend branching everywhere**: every read/write function in
+  `crates/db/src/media.rs` now matches `db.backend()` instead of
+  unconditionally using `sqlite_pool()`. PG paths carry `?::uuid`
+  casts and proper SQL dialect.
+- **Eligibility in SQL per §7.6**: `media_filter()` now emits an
+  eligibility facet as the first AND-clause. No session sees only
+  `public`; logged-in sessions see `public` plus their own
+  `unlisted`/`private`/`restricted` works. The route handler's
+  eligibility check is defense-in-depth.
+- **Compound-cursor pagination**: `list_media_filtered` orders by
+  `created_at DESC, id ASC` and returns `next_cursor: Option<String>`
+  derived from the last row's id. The previous bug (`w.id > ?` with
+  `created_at DESC` ordering, and `next_cursor` echoing the input)
+  is gone.
+- **PG twins**: every query has a real PostgreSQL string with
+  proper casts, not a copy of the SQLite SQL.
+- **Route handlers updated**: `find_media` and `find_collection`
+  now receive `account_id.as_deref()` from the session.
+  `CreateDistributorRequest` and `CreateCollectionRequest` gained
+  the missing fields (`url`, `api_key`, `notes`, `parent_collection_id`,
+  `sort_order`).
+- **Clippy 0 warnings, fmt clean, all SQLite workspace tests pass.**
+
+PostgreSQL still needs a live runner to confirm the PG paths work;
+the SQLite tests validate the logic and SQL structure.
