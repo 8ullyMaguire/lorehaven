@@ -202,29 +202,18 @@ async fn migration_0024_creates_the_media_entity_tables() {
 // The read doors: every one answers 501 with the house error shape.
 // ---------------------------------------------------------------------------
 
-const READ_DOORS: &[&str] = &[
-    "/api/v1/media",
-    "/api/v1/media/00000000-0000-0000-0000-000000000001",
-    "/api/v1/media/00000000-0000-0000-0000-000000000001/files",
-    "/api/v1/media/00000000-0000-0000-0000-000000000001/editions",
-    "/api/v1/creators",
-    "/api/v1/creators/00000000-0000-0000-0000-000000000002",
-    "/api/v1/creators/00000000-0000-0000-0000-000000000002/media",
-    "/api/v1/distributors",
-    "/api/v1/distributors/00000000-0000-0000-0000-000000000003",
-    "/api/v1/distributors/00000000-0000-0000-0000-000000000003/media",
-    "/api/v1/media-collections",
-    "/api/v1/media-collections/00000000-0000-0000-0000-000000000004",
-    "/api/v1/media-collections/00000000-0000-0000-0000-000000000004/media",
+// Implemented read doors now have behavior tests below.
+// These remain as 501 contract stubs:
+const READ_DOORS_STILL_501: &[&str] = &[
     "/api/v1/canons/00000000-0000-0000-0000-000000000005/media",
     "/api/v1/spaces/00000000-0000-0000-0000-000000000006/media",
 ];
 
 #[tokio::test]
-async fn every_media_read_door_is_a_contract_stub() {
+async fn unimplemented_read_doors_still_return_501() {
     let fx = Fixture::new("read-doors").await;
     let mut client = fx.client();
-    for door in READ_DOORS {
+    for door in READ_DOORS_STILL_501 {
         let (status, body) = client.get(door).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "GET {door}: {body}");
         assert_eq!(
@@ -242,19 +231,17 @@ async fn every_media_read_door_is_a_contract_stub() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn every_media_write_door_is_a_contract_stub() {
+async fn unimplemented_write_doors_still_return_501() {
     let fx = Fixture::new("write-doors").await;
     let mut client = fx.client();
     let empty = json!({});
+    // Implemented write doors now have behavior tests below.
+    // These remain as 501 contract stubs:
     let doors: &[(&str, &str)] = &[
-        ("POST", "/api/v1/media/query"),
-        ("POST", "/api/v1/creators"),
         (
             "PATCH",
             "/api/v1/creators/00000000-0000-0000-0000-000000000002",
         ),
-        ("POST", "/api/v1/distributors"),
-        ("POST", "/api/v1/media-collections"),
         (
             "PUT",
             "/api/v1/media-collections/00000000-0000-0000-0000-000000000004",
