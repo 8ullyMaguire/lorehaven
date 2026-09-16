@@ -52,14 +52,57 @@ fn config_for(dir: &Path) -> Config {
 
 struct Client {
     app: axum::Router,
+    cookies: Vec<(String, String)>,
 }
 
 impl Client {
     fn new(app: axum::Router) -> Self {
-        Self { app }
+        Self {
+            app,
+            cookies: Vec::new(),
+        }
+    }
+    fn cookie(&self, name: &str) -> Option<&str> {
+        self.cookies
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
+    }
+    fn capture(&mut self, response: &axum::response::Response) {
+        for value in response.headers().get_all(header::SET_COOKIE) {
+            let Ok(text) = value.to_str() else {
+                continue;
+            };
+            let Some((pair, _)) = text.split_once(';') else {
+                continue;
+            };
+            if let Some((name, value)) = pair.split_once('=') {
+                let name = name.trim().to_owned();
+                let value = value.trim().to_owned();
+                self.cookies.retain(|(k, _)| k != &name);
+                if !value.is_empty() {
+                    self.cookies.push((name, value));
+                }
+            }
+        }
     }
     async fn send(&mut self, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
-        let builder = Request::builder().method(method).uri(uri);
+        let mut builder = Request::builder().method(method).uri(uri);
+        if !self.cookies.is_empty() {
+            builder = builder.header(
+                header::COOKIE,
+                self.cookies
+                    .iter()
+                    .map(|(n, v)| format!("{n}={v}"))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            );
+        }
+        if !matches!(method, "GET" | "HEAD" | "OPTIONS") {
+            if let Some(token) = self.cookie("lorehaven_csrf").map(str::to_owned) {
+                builder = builder.header("x-csrf-token", token);
+            }
+        }
         let request = match body {
             Some(v) => builder
                 .header(header::CONTENT_TYPE, "application/json")
@@ -68,6 +111,7 @@ impl Client {
             None => builder.body(Body::empty()).expect("request"),
         };
         let response = self.app.clone().oneshot(request).await.expect("response");
+        self.capture(&response);
         let status = response.status();
         let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
             .await
@@ -78,6 +122,20 @@ impl Client {
             serde_json::from_slice(&bytes).unwrap_or(Value::Null)
         };
         (status, value)
+    }
+    /// Raw-body GET for non-JSON doors (the Atom feed).
+    async fn get_raw(&mut self, uri: &str) -> (StatusCode, String) {
+        let request = Request::builder()
+            .method("GET")
+            .uri(uri)
+            .body(Body::empty())
+            .expect("request");
+        let response = self.app.clone().oneshot(request).await.expect("response");
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
+            .await
+            .expect("body");
+        (status, String::from_utf8_lossy(&bytes).into_owned())
     }
     async fn get(&mut self, uri: &str) -> (StatusCode, Value) {
         self.send("GET", uri, None).await
@@ -261,5 +319,294 @@ async fn write_doors_require_a_session() {
         };
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {door}: {body}");
     }
+    fx.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// Behavior: eligibility, pagination, and feed escaping, exercised through
+// the doors with seeded works (ADR 0002 vocabulary, ADR 0003 ownership).
+// ---------------------------------------------------------------------------
+
+const PASSWORD: &str = "a-long-enough-passphrase";
+
+async fn register(client: &mut Client, email: &str, handle: &str) {
+    let (status, body) = client
+        .post(
+            "/api/v1/auth/register",
+            json!({
+                "email": email,
+                "password": PASSWORD,
+                "handle": handle,
+                "display_name": handle,
+                "age_band": "adult"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "register {handle}: {body}");
+}
+
+/// One scalar (first row, first column) for test seeding/lookups.
+async fn scalar(fx: &Fixture, sql: &str, bind: &str) -> String {
+    let sql = fx.tdb.sql(sql);
+    let db = fx.tdb.db();
+    match db.backend() {
+        Backend::Sqlite => sqlx::query_scalar(&sql)
+            .bind(bind)
+            .fetch_one(db.sqlite_pool().expect("sqlite pool"))
+            .await
+            .expect("scalar"),
+        Backend::Postgres => sqlx::query_scalar(&sql)
+            .bind(bind)
+            .fetch_one(db.postgres_pool().expect("postgres pool"))
+            .await
+            .expect("scalar"),
+    }
+}
+
+async fn author_pseud_id(fx: &Fixture, email: &str) -> String {
+    scalar(
+        fx,
+        "SELECT CAST(p.id AS TEXT) FROM pseuds p \
+         JOIN accounts a ON a.id = p.account_id WHERE a.email = ?",
+        email,
+    )
+    .await
+}
+
+/// Seed one work row directly. Deterministic ids; RFC3339 with a Z offset
+/// so a cursor never carries a character that URL-decoding would mangle.
+async fn seed_work(
+    fx: &Fixture,
+    n: u32,
+    pseud_id: &str,
+    title: &str,
+    visibility: &str,
+    lifecycle: &str,
+    created_at: &str,
+) -> String {
+    let id = format!("00000000-0000-0000-0000-{n:012}");
+    let cast = if fx.tdb.is_postgres() { "::uuid" } else { "" };
+    let sql = fx.tdb.sql(&format!(
+        "INSERT INTO works (id, owner_pseud_id, title, summary, visibility, lifecycle, \
+         created_at, updated_at, version) VALUES (?{cast}, ?{cast}, ?, '', ?, ?, ?, ?, 1)"
+    ));
+    let db = fx.tdb.db();
+    let result = match db.backend() {
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(&id)
+            .bind(pseud_id)
+            .bind(title)
+            .bind(visibility)
+            .bind(lifecycle)
+            .bind(created_at)
+            .bind(created_at)
+            .execute(db.sqlite_pool().expect("sqlite pool"))
+            .await
+            .map(|_| ()),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(&id)
+            .bind(pseud_id)
+            .bind(title)
+            .bind(visibility)
+            .bind(lifecycle)
+            .bind(created_at)
+            .bind(created_at)
+            .execute(db.postgres_pool().expect("postgres pool"))
+            .await
+            .map(|_| ()),
+    };
+    result.expect("seed work");
+    id
+}
+
+#[tokio::test]
+async fn media_listings_and_direct_doors_apply_the_visibility_matrix() {
+    let fx = Fixture::new("media-visibility").await;
+    let mut anon = fx.client();
+    let mut owner = fx.client();
+    register(&mut owner, "m22-author@example.com", "m22author").await;
+    let pseud_id = author_pseud_id(&fx, "m22-author@example.com").await;
+
+    let public1 = seed_work(
+        &fx,
+        1,
+        &pseud_id,
+        "Public one",
+        "public",
+        "published",
+        "2026-09-01T00:01:00Z",
+    )
+    .await;
+    seed_work(
+        &fx,
+        2,
+        &pseud_id,
+        "Public two",
+        "public",
+        "published",
+        "2026-09-01T00:02:00Z",
+    )
+    .await;
+    let unlisted = seed_work(
+        &fx,
+        3,
+        &pseud_id,
+        "Unlisted one",
+        "unlisted",
+        "published",
+        "2026-09-01T00:03:00Z",
+    )
+    .await;
+    let restricted = seed_work(
+        &fx,
+        4,
+        &pseud_id,
+        "Restricted one",
+        "restricted",
+        "published",
+        "2026-09-01T00:04:00Z",
+    )
+    .await;
+    let draft = seed_work(
+        &fx,
+        5,
+        &pseud_id,
+        "Draft one",
+        "public",
+        "draft",
+        "2026-09-01T00:05:00Z",
+    )
+    .await;
+
+    // Anonymous listing: public published works only, newest first.
+    let (status, body) = anon.get("/api/v1/media").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let titles: Vec<&str> = body["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .map(|i| i["title"].as_str().expect("title"))
+        .collect();
+    assert_eq!(titles, vec!["Public two", "Public one"]);
+    assert_eq!(body["total"], 2);
+
+    // The author's listing adds restricted and their own unlisted, but
+    // drafts still never list.
+    let (status, body) = owner.get("/api/v1/media").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let titles: Vec<&str> = body["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .map(|i| i["title"].as_str().expect("title"))
+        .collect();
+    assert_eq!(
+        titles,
+        vec!["Restricted one", "Unlisted one", "Public two", "Public one"]
+    );
+    assert_eq!(body["total"], 4);
+
+    // Direct doors: unlisted is link-reachable by anyone; restricted needs
+    // a session; drafts stay owner-only. Ineligible callers get 404, not
+    // 403 — existence is not revealed.
+    let (status, _) = anon.get(&format!("/api/v1/media/{public1}")).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = anon.get(&format!("/api/v1/media/{unlisted}")).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = anon.get(&format!("/api/v1/media/{restricted}")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = owner.get(&format!("/api/v1/media/{restricted}")).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = anon.get(&format!("/api/v1/media/{draft}")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = owner.get(&format!("/api/v1/media/{draft}")).await;
+    assert_eq!(status, StatusCode::OK);
+
+    fx.cleanup().await;
+}
+
+#[tokio::test]
+async fn media_pagination_walks_every_row_exactly_once() {
+    let fx = Fixture::new("media-cursor").await;
+    let mut client = fx.client();
+    register(&mut client, "m22-cursor@example.com", "m22cursor").await;
+    let pseud_id = author_pseud_id(&fx, "m22-cursor@example.com").await;
+
+    // Five public works; rows 3 and 4 SHARE a created_at so the id
+    // tiebreak inside the compound cursor is exercised.
+    let mut seeded = Vec::new();
+    for n in 1..=5u32 {
+        let minute = match n {
+            1 => 1,
+            2 => 2,
+            3 | 4 => 3,
+            _ => 4,
+        };
+        let ts = format!("2026-09-01T00:{minute:02}:00Z");
+        seeded.push(
+            seed_work(
+                &fx,
+                n,
+                &pseud_id,
+                &format!("Work {n}"),
+                "public",
+                "published",
+                &ts,
+            )
+            .await,
+        );
+    }
+
+    let mut seen: Vec<String> = Vec::new();
+    let mut uri = "/api/v1/media?limit=2".to_string();
+    let mut pages = 0;
+    loop {
+        let (status, body) = client.get(&uri).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        for item in body["items"].as_array().expect("items") {
+            let id = item["id"].as_str().expect("id").to_string();
+            assert!(!seen.contains(&id), "row repeated across pages: {id}");
+            seen.push(id);
+        }
+        pages += 1;
+        match body["next_cursor"].as_str() {
+            Some(cursor) => uri = format!("/api/v1/media?limit=2&cursor={cursor}"),
+            None => break,
+        }
+    }
+    assert_eq!(pages, 3, "5 rows at limit 2 must walk in 3 pages");
+    seen.sort();
+    seeded.sort();
+    assert_eq!(seen, seeded, "the walk missed or invented rows");
+
+    fx.cleanup().await;
+}
+
+#[tokio::test]
+async fn the_media_feed_escapes_user_text() {
+    let fx = Fixture::new("media-feed-escape").await;
+    let mut client = fx.client();
+    register(&mut client, "m22-feed@example.com", "m22feed").await;
+    let pseud_id = author_pseud_id(&fx, "m22-feed@example.com").await;
+    seed_work(
+        &fx,
+        1,
+        &pseud_id,
+        "<script>alert(\"x\")</script> & more",
+        "public",
+        "published",
+        "2026-09-01T00:01:00Z",
+    )
+    .await;
+
+    let (status, xml) = client.get_raw("/api/v1/media/feed").await;
+    assert_eq!(status, StatusCode::OK, "{xml}");
+    assert!(xml.contains("&lt;script&gt;"), "title not escaped: {xml}");
+    assert!(xml.contains("&amp;"), "ampersand not escaped: {xml}");
+    assert!(
+        !xml.contains("<script>"),
+        "raw script tag leaked into the feed: {xml}"
+    );
+
     fx.cleanup().await;
 }

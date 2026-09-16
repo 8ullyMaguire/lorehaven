@@ -55,13 +55,18 @@ async fn list_media(
     MaybeSession(session): MaybeSession,
 ) -> impl IntoResponse {
     let db = state.db();
-    let query = QueryAst::Text(params.q.clone());
+    // Empty/absent q means match-all: no text facet is built, so the
+    // query never touches works_index.
+    let query = match params.q.as_deref() {
+        Some(q) if !q.trim().is_empty() => Some(QueryAst::Text(q.trim().to_string())),
+        _ => None,
+    };
     let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
     let limit = params.limit.unwrap_or(50).min(200);
-    let (items, total, _next_cursor) = match lorehaven_db::media::list_media_filtered(
+    let (items, total, next_cursor) = match lorehaven_db::media::list_media_filtered(
         db,
-        &query,
+        query.as_ref(),
         account_id.as_deref(),
         limit,
         params.cursor.as_deref(),
@@ -82,8 +87,32 @@ async fn list_media(
         "items": items,
         "total": total,
         "limit": limit,
+        "next_cursor": next_cursor,
     }))
     .into_response()
+}
+
+/// The direct-door rule (ADR 0002): public and unlisted are reachable by
+/// anyone with the link; restricted requires a session (skeleton §7.6 —
+/// the shared eligibility service replaces this when wired); drafts and
+/// unknown states only for the owner. Ineligible callers get 404, not
+/// 403 — do not reveal that a hidden work exists.
+fn direct_door_eligible(
+    media: &lorehaven_db::media::MediaRecord,
+    account_id: Option<&str>,
+) -> bool {
+    let is_owner = account_id == Some(media.owning_account_id.as_str());
+    is_owner
+        || match (media.lifecycle.as_str(), media.visibility.as_str()) {
+            // Published: public and unlisted are link-reachable by anyone.
+            ("published", "public" | "unlisted") => true,
+            // Published restricted needs a session (skeleton §7.6 — the
+            // shared eligibility service replaces this when wired).
+            ("published", "restricted") => account_id.is_some(),
+            // Everything else (drafts, scheduled, withdrawn, unknown
+            // states) stays owner-only.
+            _ => false,
+        }
 }
 
 async fn get_media(
@@ -94,18 +123,11 @@ async fn get_media(
     let db = state.db();
     let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
-    match lorehaven_db::media::find_media(db, &id, account_id.as_deref()).await {
-        Ok(Some(media))
-            if media.visibility == "public"
-                || account_id.as_deref() == Some(media.owning_account_id.as_str()) =>
-        {
+    match lorehaven_db::media::find_media(db, &id).await {
+        Ok(Some(media)) if direct_door_eligible(&media, account_id.as_deref()) => {
             Json(media).into_response()
         }
-        Ok(Some(_)) => (
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "not eligible"})),
-        )
-            .into_response(),
+        Ok(Some(_)) => (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -123,19 +145,12 @@ async fn list_media_files(
     let db = state.db();
     let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
-    match lorehaven_db::media::find_media(db, &id, account_id.as_deref()).await {
-        Ok(Some(media))
-            if media.visibility == "public"
-                || account_id.as_deref() == Some(media.owning_account_id.as_str()) =>
-        {
-            // TODO: actual files query
+    match lorehaven_db::media::find_media(db, &id).await {
+        Ok(Some(media)) if direct_door_eligible(&media, account_id.as_deref()) => {
+            // TODO: actual files query (needs the §30 unit/reference tables)
             Json(json!({"files": []})).into_response()
         }
-        Ok(Some(_)) => (
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "not eligible"})),
-        )
-            .into_response(),
+        Ok(Some(_)) => (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -153,19 +168,12 @@ async fn list_media_editions(
     let db = state.db();
     let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
-    match lorehaven_db::media::find_media(db, &id, account_id.as_deref()).await {
-        Ok(Some(media))
-            if media.visibility == "public"
-                || account_id.as_deref() == Some(media.owning_account_id.as_str()) =>
-        {
+    match lorehaven_db::media::find_media(db, &id).await {
+        Ok(Some(media)) if direct_door_eligible(&media, account_id.as_deref()) => {
             let editions: Vec<lorehaven_db::media::MediaEdition> = Vec::new();
             Json(json!({"editions": editions})).into_response()
         }
-        Ok(Some(_)) => (
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "not eligible"})),
-        )
-            .into_response(),
+        Ok(Some(_)) => (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -573,12 +581,23 @@ async fn media_feed(
     MaybeSession(session): MaybeSession,
 ) -> impl IntoResponse {
     let db = state.db();
-    let query = QueryAst::Text(params.q.clone());
+    // Same match-all rule as the list door: empty/absent q builds no text
+    // facet, so the feed never touches works_index.
+    let query = match params.q.as_deref() {
+        Some(q) if !q.trim().is_empty() => Some(QueryAst::Text(q.trim().to_string())),
+        _ => None,
+    };
     let account_id = session.as_ref().map(|u| u.account_id.to_string());
     let limit = params.limit.unwrap_or(50).min(200);
 
-    match lorehaven_db::media::list_media_filtered(db, &query, account_id.as_deref(), limit, None)
-        .await
+    match lorehaven_db::media::list_media_filtered(
+        db,
+        query.as_ref(),
+        account_id.as_deref(),
+        limit,
+        None,
+    )
+    .await
     {
         Ok((items, total, _next_cursor)) => {
             // Build simple Atom feed
@@ -656,7 +675,8 @@ pub fn write_router() -> Router<AppState> {
 
 #[derive(Debug, Deserialize)]
 pub struct MediaQuery {
-    pub q: String,
+    /// Free-text query. Empty/absent = match-all (no text facet).
+    pub q: Option<String>,
     pub limit: Option<i64>,
     pub cursor: Option<String>,
 }
