@@ -272,12 +272,13 @@ pub async fn find_media(db: &Database, id: &str) -> Result<Option<MediaRecord>> 
          JOIN pseuds p ON p.id = w.owner_pseud_id \
          WHERE w.id = ?"
         .to_string();
-    let postgres = "SELECT w.id, w.title, w.summary, w.format, w.visibility, w.lifecycle, \
+    let postgres =
+        "SELECT w.id::text AS id, w.title, w.summary, w.format, w.visibility, w.lifecycle, \
                 p.account_id::text AS owning_account_id, w.created_at, w.updated_at, w.version \
          FROM works w \
          JOIN pseuds p ON p.id = w.owner_pseud_id \
          WHERE w.id = ?::uuid"
-        .to_string();
+            .to_string();
     let sql = &db.sql(&sqlite, &postgres);
     let row = match db.backend() {
         Backend::Sqlite => {
@@ -344,7 +345,7 @@ pub async fn list_media_filtered(
          LIMIT ?"
     );
     let postgres = format!(
-        "SELECT w.id, w.title, w.summary, w.format, w.visibility, w.lifecycle, \
+        "SELECT w.id::text AS id, w.title, w.summary, w.format, w.visibility, w.lifecycle, \
                 p.account_id::text AS owning_account_id, w.created_at, w.updated_at, w.version \
          FROM works w \
          LEFT JOIN works_index wi ON wi.work_id = w.id \
