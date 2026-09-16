@@ -1,3 +1,19 @@
+## 2026-09-16 — M24 complete: anchored comments, orphaning, CSV imports
+
+**Commits:** `b41c5f3`, `b435f5b`
+
+**Context.** M24 (spec §32.3) has three sub-requirements: anchored comments on paragraph offsets and media timestamps, work orphaning with succession, and CSV import adapters for library metadata. All three are now implemented.
+
+**Anchored comments.** The `comments` table gained `anchor_kind`, `anchor_value`, and `anchor_chapter_id` columns via migration 0027. Domain validation in `lorehaven_domain::anchor` enforces that paragraph anchors require a chapter id and a non-negative integer, and timestamp anchors use `HH:MM:SS(.fff)` format without a chapter. The `post_comment` route validates the anchor before insert; `list_comments` returns the anchor fields. Two tests cover round-trip and validation.
+
+**Orphaning.** Migration 0028 adds `work_orphans` (with `successor_work_id`) and a `works.orphaned` marker. `lorehaven_domain::orphaning` validates: published, not already orphaned, owner-gated for relinquishment (pseud/account deletion bypasses the owner check), and succession requires a published successor. The creator dashboard is not yet built (marked partially-implemented in requirements.csv).
+
+**CSV imports.** `lorehaven_scrapers::csv` parses Goodreads and StoryGraph library export CSVs into `ShelfRow` structs. Column order detected from the header row; quoted fields and escaped quotes handled per RFC 4180. Ingestion only — no chapter bodies. 12 CSV unit tests + 1 integration test in milestone_24.
+
+**Gates.** 1,134 workspace tests pass on SQLite. M24 tests verified on live PostgreSQL (`postgres://lorehaven:***@127.0.0.1:55432/postgres`). Clippy 0 warnings, fmt clean.
+
+## 2026-09-16 — PG dialect parity complete, SQLite regressions from the parity pass fixed
+
 # Verification log — Lorehaven
 
 Newest first. Each section states what was verified, how, and the result.
