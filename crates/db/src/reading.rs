@@ -217,7 +217,7 @@ pub async fn progress_for(
           ORDER BY updated_at DESC",
         "SELECT content_revision::text AS content_revision, paragraph_anchor AS anchor, position_permille, device_id
            FROM reading_progress
-          WHERE account_id = ?::uuid AND subject_type = ? AND subject_id = ?::uuid
+          WHERE account_id::text = ? AND subject_type = ? AND subject_id::text = ?
           ORDER BY updated_at DESC",
     );
 
@@ -256,7 +256,7 @@ pub async fn delete_progress(
           WHERE account_id = ? AND subject_type = ? AND subject_id = ?
             AND device_id IS ?",
         "DELETE FROM reading_progress
-          WHERE account_id = ?::uuid AND subject_type = ? AND subject_id = ?::uuid
+          WHERE account_id::text = ? AND subject_type = ? AND subject_id::text = ?
             AND device_id IS NOT DISTINCT FROM ?",
     );
 
@@ -405,7 +405,7 @@ pub async fn history_for(
                     ) AS author_handles
                FROM reading_history_entry h
                LEFT JOIN works w ON w.id = h.subject_id AND h.subject_type = 'work'
-              WHERE h.account_id = ?::uuid AND h.pseud_id = ?::uuid
+              WHERE h.account_id::text = ? AND h.pseud_id::text = ?
               ORDER BY h.last_read_at DESC
               LIMIT ?"
             .to_string(),
@@ -441,7 +441,7 @@ pub async fn delete_history_entry(
 ) -> Result<bool> {
     let sql = db.sql(
         "DELETE FROM reading_history_entry WHERE id = ? AND account_id = ?",
-        "DELETE FROM reading_history_entry WHERE id = ?::uuid AND account_id = ?::uuid",
+        "DELETE FROM reading_history_entry WHERE id::text = ? AND account_id::text = ?",
     );
     let affected = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
@@ -464,7 +464,7 @@ pub async fn delete_history_entry(
 pub async fn clear_history(db: &Database, account: AccountId) -> Result<u64> {
     let sql = db.sql(
         "DELETE FROM reading_history_entry WHERE account_id = ?",
-        "DELETE FROM reading_history_entry WHERE account_id = ?::uuid",
+        "DELETE FROM reading_history_entry WHERE account_id::text = ?",
     );
     let affected = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
@@ -614,7 +614,7 @@ pub async fn rating_for(db: &Database, pseud: PseudId, work: WorkId) -> Result<O
         "SELECT stars, is_public, version, deleted_at FROM rating
           WHERE pseud_id = ? AND work_id = ? AND deleted_at IS NULL",
         "SELECT stars, is_public::int::bigint, version, deleted_at FROM rating
-          WHERE pseud_id = ?::uuid AND work_id = ?::uuid AND deleted_at IS NULL",
+          WHERE pseud_id::text = ? AND work_id::text = ? AND deleted_at IS NULL",
     );
     let row: Option<(i64, i64, i64, Option<String>)> = match db.backend() {
         Backend::Sqlite => {
@@ -648,7 +648,7 @@ pub async fn public_rating_summary(db: &Database, work: WorkId) -> Result<Option
           HAVING COUNT(*) >= ?",
         "SELECT COUNT(*) AS count, COALESCE(SUM(stars), 0)::bigint AS sum
            FROM rating
-          WHERE work_id = ?::uuid AND is_public = TRUE AND deleted_at IS NULL
+          WHERE work_id::text = ? AND is_public = TRUE AND deleted_at IS NULL
           HAVING COUNT(*) >= ?",
     );
     let row: Option<(i64, i64)> = match db.backend() {
@@ -679,7 +679,7 @@ pub async fn delete_rating(db: &Database, pseud: PseudId, work: WorkId) -> Resul
         "UPDATE rating SET deleted_at = ?, updated_at = ?
           WHERE pseud_id = ? AND work_id = ? AND deleted_at IS NULL",
         "UPDATE rating SET deleted_at = ?, updated_at = ?
-          WHERE pseud_id = ?::uuid AND work_id = ?::uuid AND deleted_at IS NULL",
+          WHERE pseud_id::text = ? AND work_id::text = ? AND deleted_at IS NULL",
     );
     let now = now_rfc3339();
     let affected = match db.backend() {
@@ -874,7 +874,7 @@ pub async fn review_for(db: &Database, pseud: PseudId, work: WorkId) -> Result<O
                 r.created_at, r.updated_at, r.version
            FROM review r
            JOIN pseuds p ON p.id = r.pseud_id
-          WHERE r.pseud_id = ?::uuid AND r.work_id = ?::uuid AND r.deleted_at IS NULL",
+          WHERE r.pseud_id::text = ? AND r.work_id::text = ? AND r.deleted_at IS NULL",
     );
     let row: Option<ReviewRow> = match db.backend() {
         Backend::Sqlite => {
@@ -917,7 +917,7 @@ pub async fn public_reviews(db: &Database, work: WorkId) -> Result<Vec<Review>> 
                 r.created_at, r.updated_at, r.version
            FROM review r
            JOIN pseuds p ON p.id = r.pseud_id
-          WHERE r.work_id = ?::uuid
+          WHERE r.work_id::text = ?
             AND r.is_public = TRUE
             AND r.published_at IS NOT NULL
             AND r.deleted_at IS NULL
@@ -949,7 +949,7 @@ pub async fn delete_review(db: &Database, pseud: PseudId, work: WorkId) -> Resul
         "UPDATE review SET deleted_at = ?, updated_at = ?
           WHERE pseud_id = ? AND work_id = ? AND deleted_at IS NULL",
         "UPDATE review SET deleted_at = ?, updated_at = ?
-          WHERE pseud_id = ?::uuid AND work_id = ?::uuid AND deleted_at IS NULL",
+          WHERE pseud_id::text = ? AND work_id::text = ? AND deleted_at IS NULL",
     );
     let now = now_rfc3339();
     let affected = match db.backend() {
@@ -1005,7 +1005,7 @@ pub async fn notes_for(
         "SELECT id::text AS id, subject_type, subject_id::text AS subject_id, anchor,
                 body, created_at, updated_at, version
            FROM reader_note
-          WHERE pseud_id = ?::uuid AND subject_type = ? AND subject_id = ?::uuid AND deleted_at IS NULL
+          WHERE pseud_id::text = ? AND subject_type = ? AND subject_id::text = ? AND deleted_at IS NULL
           ORDER BY created_at ASC",
     );
     let rows: Vec<Note> = match db.backend() {
@@ -1055,7 +1055,7 @@ pub async fn save_note(
           WHERE pseud_id = ? AND subject_type = ? AND subject_id = ?
             AND COALESCE(anchor, '') = COALESCE(?, '') AND deleted_at IS NULL",
         "SELECT id::text AS id FROM reader_note
-          WHERE pseud_id = ?::uuid AND subject_type = ? AND subject_id = ?::uuid
+          WHERE pseud_id::text = ? AND subject_type = ? AND subject_id::text = ?
             AND COALESCE(anchor, '') = COALESCE(?, '') AND deleted_at IS NULL",
     );
     let update = db.sql(
@@ -1064,7 +1064,7 @@ pub async fn save_note(
           WHERE id = ? AND deleted_at IS NULL",
         "UPDATE reader_note
             SET body = ?, updated_at = ?, version = version + 1
-          WHERE id = ?::uuid AND deleted_at IS NULL",
+          WHERE id::text = ? AND deleted_at IS NULL",
     );
     let insert = db.sql(
         "INSERT INTO reader_note
@@ -1160,7 +1160,7 @@ pub async fn delete_note(db: &Database, pseud: PseudId, note_id: &str) -> Result
         "UPDATE reader_note SET deleted_at = ?, updated_at = ?
           WHERE id = ? AND pseud_id = ? AND deleted_at IS NULL",
         "UPDATE reader_note SET deleted_at = ?, updated_at = ?
-          WHERE id = ?::uuid AND pseud_id = ?::uuid AND deleted_at IS NULL",
+          WHERE id::text = ? AND pseud_id::text = ? AND deleted_at IS NULL",
     );
     let now = now_rfc3339();
     let affected = match db.backend() {
@@ -1219,7 +1219,7 @@ pub async fn typography_for(db: &Database, account: AccountId) -> Result<Typogra
            FROM typography_preference WHERE account_id = ?",
         "SELECT font_scale::double precision, line_height::double precision, measure,
                 reader_theme, distraction_free::int::bigint, version
-           FROM typography_preference WHERE account_id = ?::uuid",
+           FROM typography_preference WHERE account_id::text = ?",
     );
     let row: Option<(f64, f64, i64, String, i64, i64)> = match db.backend() {
         Backend::Sqlite => {
@@ -1283,7 +1283,7 @@ pub async fn save_typography(db: &Database, input: TypographyInput<'_>) -> Resul
     let existing_version: Option<i64> = {
         let sql_check = db.sql(
             "SELECT version FROM typography_preference WHERE account_id = ?",
-            "SELECT version FROM typography_preference WHERE account_id = ?::uuid",
+            "SELECT version FROM typography_preference WHERE account_id::text = ?",
         );
         match db.backend() {
             Backend::Sqlite => {

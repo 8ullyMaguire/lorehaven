@@ -148,7 +148,7 @@ pub async fn upsert(db: &Database, key: &RevisionKey<'_>, entry: &RevisionEntry)
         "INSERT INTO source_revision_cache_entries
              (id, source_key, revision_key, adapter_version, security_scope,
               checksum, etag, last_modified, expires_at, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (source_key, revision_key, adapter_version, security_scope)
          DO UPDATE SET checksum = excluded.checksum,
                        etag = excluded.etag,

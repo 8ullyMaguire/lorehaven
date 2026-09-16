@@ -203,7 +203,7 @@ pub async fn live_sessions_for_account(
         "SELECT id::text, account_id::text, active_pseud_id::text, csrf_token_hash, user_agent,
                 created_at, last_seen_at, expires_at
            FROM sessions
-          WHERE account_id = ?::uuid AND revoked_at IS NULL AND expires_at > ?
+          WHERE account_id::text = ? AND revoked_at IS NULL AND expires_at > ?
           ORDER BY last_seen_at DESC",
     );
 
@@ -242,7 +242,7 @@ pub async fn revoke_session(
         "UPDATE sessions SET revoked_at = ?
           WHERE id = ? AND account_id = ? AND revoked_at IS NULL",
         "UPDATE sessions SET revoked_at = ?
-          WHERE id = ?::uuid AND account_id = ?::uuid AND revoked_at IS NULL",
+          WHERE id::text = ? AND account_id::text = ? AND revoked_at IS NULL",
     );
 
     let affected = match db.backend() {
@@ -269,7 +269,7 @@ pub async fn revoke_session(
 pub async fn revoke_all_sessions(db: &Database, account_id: AccountId, now: &str) -> Result<u64> {
     let sql = db.sql(
         "UPDATE sessions SET revoked_at = ? WHERE account_id = ? AND revoked_at IS NULL",
-        "UPDATE sessions SET revoked_at = ? WHERE account_id = ?::uuid AND revoked_at IS NULL",
+        "UPDATE sessions SET revoked_at = ? WHERE account_id::text = ? AND revoked_at IS NULL",
     );
 
     let affected = match db.backend() {
@@ -298,7 +298,7 @@ pub async fn set_active_pseud(
 ) -> Result<()> {
     let sql = db.sql(
         "UPDATE sessions SET active_pseud_id = ? WHERE id = ?",
-        "UPDATE sessions SET active_pseud_id = ?::uuid WHERE id = ?::uuid",
+        "UPDATE sessions SET active_pseud_id = ?::uuid WHERE id::text = ?",
     );
 
     match db.backend() {
@@ -329,7 +329,7 @@ pub async fn set_active_pseud(
 pub async fn touch_session(db: &Database, session_id: SessionId, now: &str) -> Result<()> {
     let sql = db.sql(
         "UPDATE sessions SET last_seen_at = ? WHERE id = ?",
-        "UPDATE sessions SET last_seen_at = ? WHERE id = ?::uuid",
+        "UPDATE sessions SET last_seen_at = ? WHERE id::text = ?",
     );
 
     match db.backend() {
@@ -360,7 +360,7 @@ pub async fn update_password_hash(
 ) -> Result<()> {
     let sql = db.sql(
         "UPDATE password_credentials SET password_hash = ?, updated_at = ? WHERE account_id = ?",
-        "UPDATE password_credentials SET password_hash = ?, updated_at = ? WHERE account_id = ?::uuid",
+        "UPDATE password_credentials SET password_hash = ?, updated_at = ? WHERE account_id::text = ?",
     );
 
     match db.backend() {
@@ -390,7 +390,7 @@ pub async fn mark_email_verified(db: &Database, account_id: AccountId, now: &str
         "UPDATE accounts SET email_verified_at = ?, updated_at = ?, version = version + 1
           WHERE id = ?",
         "UPDATE accounts SET email_verified_at = ?, updated_at = ?, version = version + 1
-          WHERE id = ?::uuid",
+          WHERE id::text = ?",
     );
 
     match db.backend() {
@@ -515,7 +515,7 @@ pub async fn invalidate_recovery_tokens(
         "UPDATE recovery_tokens SET used_at = ?
           WHERE account_id = ? AND purpose = ? AND used_at IS NULL",
         "UPDATE recovery_tokens SET used_at = ?
-          WHERE account_id = ?::uuid AND purpose = ? AND used_at IS NULL",
+          WHERE account_id::text = ? AND purpose = ? AND used_at IS NULL",
     );
 
     let affected = match db.backend() {
@@ -569,7 +569,7 @@ impl Default for ContentSettings {
 pub async fn content_settings(db: &Database, account_id: AccountId) -> Result<ContentSettings> {
     let sql = db.sql(
         "SELECT max_rating, excluded_warnings, version FROM content_settings WHERE account_id = ?",
-        "SELECT max_rating, excluded_warnings, version FROM content_settings WHERE account_id = ?::uuid",
+        "SELECT max_rating, excluded_warnings, version FROM content_settings WHERE account_id::text = ?",
     );
 
     let row: Option<(String, String, i64)> = match db.backend() {

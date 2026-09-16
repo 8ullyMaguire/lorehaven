@@ -273,7 +273,7 @@ pub async fn find_account(db: &Database, id: AccountId) -> Result<Option<Account
         "SELECT id, email, status, age_state, email_verified_at, created_at, version
            FROM accounts WHERE id = ?",
         "SELECT id::text, email, status, age_state, email_verified_at, created_at, version
-           FROM accounts WHERE id = ?::uuid",
+           FROM accounts WHERE id::text = ?",
     );
 
     let row: Option<AccountRow> = match db.backend() {
@@ -297,7 +297,7 @@ pub async fn set_password_hash(db: &Database, account_id: AccountId, phc: &str) 
     let now = now_rfc3339();
     let exists_sql = db.sql(
         "SELECT COUNT(*) FROM password_credentials WHERE account_id = ?",
-        "SELECT COUNT(*) FROM password_credentials WHERE account_id = ?::uuid",
+        "SELECT COUNT(*) FROM password_credentials WHERE account_id::text = ?",
     );
     let existing: i64 = match db.backend() {
         crate::Backend::Sqlite => {
@@ -329,7 +329,7 @@ pub async fn set_password_hash(db: &Database, account_id: AccountId, phc: &str) 
     if existing > 0 {
         let sql = db.sql(
             "UPDATE password_credentials SET password_hash = ?, updated_at = ? WHERE account_id = ?",
-            "UPDATE password_credentials SET password_hash = ?, updated_at = ? WHERE account_id = ?::uuid",
+            "UPDATE password_credentials SET password_hash = ?, updated_at = ? WHERE account_id::text = ?",
         );
 
         match db.backend() {
@@ -392,7 +392,7 @@ pub async fn set_password_hash(db: &Database, account_id: AccountId, phc: &str) 
 pub async fn password_hash(db: &Database, account_id: AccountId) -> Result<Option<String>> {
     let sql = db.sql(
         "SELECT password_hash FROM password_credentials WHERE account_id = ?",
-        "SELECT password_hash FROM password_credentials WHERE account_id = ?::uuid",
+        "SELECT password_hash FROM password_credentials WHERE account_id::text = ?",
     );
     let row: Option<(String,)> = match db.backend() {
         crate::Backend::Sqlite => {
@@ -491,7 +491,7 @@ pub async fn pseuds_for_account(db: &Database, account_id: AccountId) -> Result<
         "SELECT id, account_id, handle, display_name, bio, discoverability, created_at, version
            FROM pseuds WHERE account_id = ? AND deleted_at IS NULL ORDER BY created_at ASC",
         "SELECT id::text, account_id::text, handle, display_name, bio, discoverability, created_at, version
-           FROM pseuds WHERE account_id = ?::uuid AND deleted_at IS NULL ORDER BY created_at ASC",
+           FROM pseuds WHERE account_id::text = ? AND deleted_at IS NULL ORDER BY created_at ASC",
     );
 
     let rows: Vec<PseudRow> = match db.backend() {
@@ -602,14 +602,14 @@ pub async fn privacy_value(
         PrivacyScope::Account(id) => (
             db.sql(
                 "SELECT value FROM privacy_settings WHERE account_id = ? AND key = ?",
-                "SELECT value FROM privacy_settings WHERE account_id = ?::uuid AND key = ?",
+                "SELECT value FROM privacy_settings WHERE account_id::text = ? AND key = ?",
             ),
             id.to_string(),
         ),
         PrivacyScope::Pseud(id) => (
             db.sql(
                 "SELECT value FROM privacy_settings WHERE pseud_id = ? AND key = ?",
-                "SELECT value FROM privacy_settings WHERE pseud_id = ?::uuid AND key = ?",
+                "SELECT value FROM privacy_settings WHERE pseud_id::text = ? AND key = ?",
             ),
             id.to_string(),
         ),
@@ -696,7 +696,7 @@ pub async fn find_pseud(db: &Database, id: PseudId) -> Result<Option<Pseud>> {
         "SELECT id, account_id, handle, display_name, bio, discoverability, created_at, version
            FROM pseuds WHERE id = ? AND deleted_at IS NULL",
         "SELECT id::text, account_id::text, handle, display_name, bio, discoverability, created_at, version
-           FROM pseuds WHERE id = ?::uuid AND deleted_at IS NULL",
+           FROM pseuds WHERE id::text = ? AND deleted_at IS NULL",
     );
 
     let row: Option<PseudRow> = match db.backend() {
@@ -751,7 +751,7 @@ pub async fn update_pseud(
             SET display_name = COALESCE(?, display_name),
                 bio = COALESCE(?, bio),
                 updated_at = ?, version = version + 1
-          WHERE id = ?::uuid AND account_id = ?::uuid AND version = ? AND deleted_at IS NULL",
+          WHERE id::text = ? AND account_id::text = ? AND version = ? AND deleted_at IS NULL",
     );
 
     let affected = match db.backend() {
@@ -787,7 +787,7 @@ pub async fn set_pseud_bio(db: &Database, pseud_id: PseudId, bio: Option<&str>) 
     let now = now_rfc3339();
     let sql = db.sql(
         "UPDATE pseuds SET bio = ?, updated_at = ? WHERE id = ?",
-        "UPDATE pseuds SET bio = ?, updated_at = ? WHERE id = ?::uuid",
+        "UPDATE pseuds SET bio = ?, updated_at = ? WHERE id::text = ?",
     );
 
     match db.backend() {
@@ -820,7 +820,7 @@ pub async fn set_pseud_discoverability(
     let now = now_rfc3339();
     let sql = db.sql(
         "UPDATE pseuds SET discoverability = ?, updated_at = ? WHERE id = ?",
-        "UPDATE pseuds SET discoverability = ?, updated_at = ? WHERE id = ?::uuid",
+        "UPDATE pseuds SET discoverability = ?, updated_at = ? WHERE id::text = ?",
     );
 
     match db.backend() {

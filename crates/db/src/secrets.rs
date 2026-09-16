@@ -48,6 +48,11 @@ pub struct SecretRow {
 const COLUMNS: &str = "id, owner_type, owner_id, name, key_id, nonce, ciphertext,
                        created_at, updated_at, version";
 
+/// The PostgreSQL twin of [`COLUMNS`]: the UUID `id` is cast to text so the
+/// row decodes into the same `String` fields on both dialects.
+const COLUMNS_PG: &str = "id::text AS id, owner_type, owner_id, name, key_id,
+                          nonce, ciphertext, created_at, updated_at, version";
+
 #[derive(Debug, FromRow)]
 struct SecretRowRecord {
     id: String,
@@ -238,7 +243,9 @@ pub async fn get_secret(
     let sql = sql_owned(
         db,
         format!("SELECT {COLUMNS} FROM secrets WHERE owner_type = ? AND owner_id = ? AND name = ?"),
-        format!("SELECT {COLUMNS} FROM secrets WHERE owner_type = ? AND owner_id = ? AND name = ?"),
+        format!(
+            "SELECT {COLUMNS_PG} FROM secrets WHERE owner_type = ? AND owner_id = ? AND name = ?"
+        ),
     );
     let row: Option<SecretRowRecord> = match db.backend() {
         Backend::Sqlite => {
@@ -266,7 +273,7 @@ pub async fn get_secret_by_id(db: &Database, id: &str) -> Result<Option<SecretRo
     let sql = sql_owned(
         db,
         format!("SELECT {COLUMNS} FROM secrets WHERE id = ?"),
-        format!("SELECT {COLUMNS} FROM secrets WHERE id = ?::uuid"),
+        format!("SELECT {COLUMNS_PG} FROM secrets WHERE id::text = ?"),
     );
     let row: Option<SecretRowRecord> = match db.backend() {
         Backend::Sqlite => {
@@ -289,7 +296,7 @@ pub async fn get_secret_by_id(db: &Database, id: &str) -> Result<Option<SecretRo
 pub async fn delete_secret(db: &Database, id: &str) -> Result<bool> {
     let sql = db.sql(
         "DELETE FROM secrets WHERE id = ?",
-        "DELETE FROM secrets WHERE id = ?::uuid",
+        "DELETE FROM secrets WHERE id::text = ?",
     );
     let affected = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)

@@ -278,7 +278,7 @@ pub async fn create_challenge(
 pub async fn get_challenge(db: &Database, challenge_id: &str) -> Result<Option<Challenge>> {
     let sql = db.sql(
         "SELECT id, name, rules, schedule, created_by, created_at FROM challenges WHERE id = ?",
-        "SELECT id, name, rules, schedule, created_by, created_at FROM challenges WHERE id = $1",
+        "SELECT id::text, name, rules, schedule, created_by, created_at FROM challenges WHERE id = $1",
     );
     let row: Option<ChallengeRow> = match db.backend() {
         Backend::Sqlite => {
@@ -1051,7 +1051,7 @@ pub async fn list_events(db: &Database, limit: i64) -> Result<Vec<Event>> {
 pub async fn work_word_count(db: &Database, work_id: &str) -> Result<i64> {
     let sql = db.sql(
         "SELECT COALESCE(SUM(r.word_count), 0) FROM chapters c JOIN chapter_revisions r ON r.id = c.current_revision_id WHERE c.work_id = ? AND c.deleted_at IS NULL",
-        "SELECT COALESCE(SUM(r.word_count), 0)::bigint FROM chapters c JOIN chapter_revisions r ON r.id = c.current_revision_id WHERE c.work_id = $1 AND c.deleted_at IS NULL",
+        "SELECT COALESCE(SUM(r.word_count), 0)::bigint FROM chapters c JOIN chapter_revisions r ON r.id = c.current_revision_id WHERE c.work_id = $1::uuid AND c.deleted_at IS NULL",
     );
     let n: i64 = match db.backend() {
         Backend::Sqlite => {

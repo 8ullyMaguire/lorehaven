@@ -512,7 +512,7 @@ pub async fn find_work(db: &Database, id: WorkId) -> ContentResult<Option<Work>>
     let sql = sql_owned(
         db,
         format!("SELECT {WORK_COLUMNS} FROM works WHERE id = ? AND deleted_at IS NULL"),
-        format!("SELECT {WORK_COLUMNS_PG} FROM works WHERE id = ?::uuid AND deleted_at IS NULL"),
+        format!("SELECT {WORK_COLUMNS_PG} FROM works WHERE id::text = ? AND deleted_at IS NULL"),
     );
 
     let row: Option<WorkRow> = match db.backend() {
@@ -561,7 +561,7 @@ pub async fn works_for_pseud(db: &Database, pseud: PseudId) -> Result<Vec<OwnedW
                   WHERE c.work_id = w.id AND c.deleted_at IS NULL) AS word_count,
                 wc.role AS role
            FROM works w
-           JOIN work_contributors wc ON wc.work_id = w.id AND wc.pseud_id = ?::uuid
+           JOIN work_contributors wc ON wc.work_id = w.id AND wc.pseud_id::text = ?
           WHERE w.deleted_at IS NULL
           ORDER BY w.updated_at DESC",
     );
@@ -618,7 +618,7 @@ pub async fn update_work(
                 completion = COALESCE(?, completion),
                 show_public_ratings = COALESCE(?, show_public_ratings),
                 updated_at = ?, version = version + 1
-          WHERE id = ?::uuid AND version = ? AND deleted_at IS NULL",
+          WHERE id::text = ? AND version = ? AND deleted_at IS NULL",
     );
 
     let affected = match db.backend() {
@@ -685,7 +685,7 @@ pub async fn chapters_for_work(db: &Database, work: WorkId) -> ContentResult<Vec
             "SELECT {CHAPTER_COLUMNS_PG}
                FROM chapters c
                LEFT JOIN chapter_revisions r ON r.id = c.current_revision_id
-              WHERE c.work_id = ?::uuid AND c.deleted_at IS NULL
+              WHERE c.work_id::text = ? AND c.deleted_at IS NULL
               ORDER BY c.order_key ASC"
         ),
     );
@@ -722,7 +722,7 @@ pub async fn find_chapter(db: &Database, id: ChapterId) -> ContentResult<Option<
             "SELECT {CHAPTER_COLUMNS_PG}
                FROM chapters c
                LEFT JOIN chapter_revisions r ON r.id = c.current_revision_id
-              WHERE c.id = ?::uuid AND c.deleted_at IS NULL"
+              WHERE c.id::text = ? AND c.deleted_at IS NULL"
         ),
     );
 
@@ -754,7 +754,7 @@ pub async fn create_chapter(db: &Database, work: WorkId, title: &str) -> Result<
 
     let next_sql = db.sql(
         "SELECT COALESCE(MAX(order_key), 0) + 10 FROM chapters WHERE work_id = ?",
-        "SELECT COALESCE(MAX(order_key), 0) + 10 FROM chapters WHERE work_id = ?::uuid",
+        "SELECT COALESCE(MAX(order_key), 0) + 10 FROM chapters WHERE work_id::text = ?",
     );
     let insert_sql = db.sql(
         "INSERT INTO chapters (id, work_id, order_key, title, created_at, updated_at, version)
@@ -821,7 +821,7 @@ pub async fn update_chapter(
           WHERE id = ? AND version = ? AND deleted_at IS NULL",
         "UPDATE chapters
             SET title = COALESCE(?, title), updated_at = ?, version = version + 1
-          WHERE id = ?::uuid AND version = ? AND deleted_at IS NULL",
+          WHERE id::text = ? AND version = ? AND deleted_at IS NULL",
     );
 
     let affected = match db.backend() {
@@ -857,7 +857,7 @@ pub async fn delete_chapter(db: &Database, id: ChapterId) -> Result<bool> {
         "UPDATE chapters SET deleted_at = ?, updated_at = ?, version = version + 1
           WHERE id = ? AND deleted_at IS NULL",
         "UPDATE chapters SET deleted_at = ?, updated_at = ?, version = version + 1
-          WHERE id = ?::uuid AND deleted_at IS NULL",
+          WHERE id::text = ? AND deleted_at IS NULL",
     );
 
     let affected = match db.backend() {
@@ -903,7 +903,7 @@ pub async fn reorder_chapters(
     let now = now_rfc3339();
     let sql = db.sql(
         "UPDATE chapters SET order_key = ?, updated_at = ? WHERE id = ?",
-        "UPDATE chapters SET order_key = ?, updated_at = ? WHERE id = ?::uuid",
+        "UPDATE chapters SET order_key = ?, updated_at = ? WHERE id::text = ?",
     );
 
     match db.backend() {
@@ -969,7 +969,7 @@ pub async fn append_revision(
 
     let next_number_sql = db.sql(
         "SELECT COALESCE(MAX(revision_number), 0) + 1 FROM chapter_revisions WHERE chapter_id = ?",
-        "SELECT COALESCE(MAX(revision_number), 0) + 1 FROM chapter_revisions WHERE chapter_id = ?::uuid",
+        "SELECT COALESCE(MAX(revision_number), 0) + 1 FROM chapter_revisions WHERE chapter_id::text = ?",
     );
     let insert_sql = db.sql(
         "INSERT INTO chapter_revisions
@@ -987,7 +987,7 @@ pub async fn append_revision(
           WHERE id = ? AND version = ? AND deleted_at IS NULL",
         "UPDATE chapters
             SET current_revision_id = ?::uuid, updated_at = ?, version = version + 1
-          WHERE id = ?::uuid AND version = ? AND deleted_at IS NULL",
+          WHERE id::text = ? AND version = ? AND deleted_at IS NULL",
     );
     let move_pointer_unchecked_sql = db.sql(
         "UPDATE chapters
@@ -995,11 +995,11 @@ pub async fn append_revision(
           WHERE id = ? AND deleted_at IS NULL",
         "UPDATE chapters
             SET current_revision_id = ?::uuid, updated_at = ?, version = version + 1
-          WHERE id = ?::uuid AND deleted_at IS NULL",
+          WHERE id::text = ? AND deleted_at IS NULL",
     );
     let touch_work_sql = db.sql(
         "UPDATE works SET updated_at = ? WHERE id = ?",
-        "UPDATE works SET updated_at = ? WHERE id = ?::uuid",
+        "UPDATE works SET updated_at = ? WHERE id::text = ?",
     );
     let outbox_sql = db.sql(
         "INSERT INTO outbox_events (id, topic, payload, dedupe_key, created_at, available_at, attempts)
@@ -1009,7 +1009,7 @@ pub async fn append_revision(
     );
     let version_sql = db.sql(
         "SELECT version FROM chapters WHERE id = ?",
-        "SELECT version FROM chapters WHERE id = ?::uuid",
+        "SELECT version FROM chapters WHERE id::text = ?",
     );
 
     let payload = serde_json::json!({ "chapter_id": chapter, "revision_id": id, "work_id": work })
@@ -1118,7 +1118,7 @@ pub async fn find_revision(db: &Database, id: RevisionId) -> ContentResult<Optio
                 sanitized_html, plain_text, word_count, note,
                 created_by_pseud_id::text AS created_by_pseud_id,
                 restored_from_id::text AS restored_from_id, created_at
-           FROM chapter_revisions WHERE id = ?::uuid",
+           FROM chapter_revisions WHERE id::text = ?",
     );
 
     let row: Option<RevisionRow> = match db.backend() {
@@ -1156,7 +1156,7 @@ pub async fn revisions_for_chapter(
                 r.restored_from_id::text AS restored_from_id, p.handle AS author_handle
            FROM chapter_revisions r
            JOIN pseuds p ON p.id = r.created_by_pseud_id
-          WHERE r.chapter_id = ?::uuid
+          WHERE r.chapter_id::text = ?
           ORDER BY r.revision_number DESC",
     );
 
@@ -1283,7 +1283,7 @@ pub async fn publish_work(
         "UPDATE works
             SET lifecycle = 'published', published_at = COALESCE(published_at, ?),
                 withdrawn_at = NULL, updated_at = ?, version = version + 1
-          WHERE id = ?::uuid AND version = ? AND deleted_at IS NULL",
+          WHERE id::text = ? AND version = ? AND deleted_at IS NULL",
     );
     let event_sql = db.sql(
         "INSERT INTO publication_events (id, work_id, chapter_id, action, actor_pseud_id,
@@ -1416,7 +1416,7 @@ pub async fn withdraw_work(
           WHERE id = ? AND version = ? AND deleted_at IS NULL",
         "UPDATE works
             SET lifecycle = 'withdrawn', withdrawn_at = ?, updated_at = ?, version = version + 1
-          WHERE id = ?::uuid AND version = ? AND deleted_at IS NULL",
+          WHERE id::text = ? AND version = ? AND deleted_at IS NULL",
     );
     let event_sql = db.sql(
         "INSERT INTO publication_events (id, work_id, chapter_id, action, actor_pseud_id,
@@ -1517,7 +1517,7 @@ pub async fn withdraw_work(
 pub async fn current_work_version(db: &Database, work: WorkId) -> Result<i64> {
     let sql = db.sql(
         "SELECT version FROM works WHERE id = ?",
-        "SELECT version FROM works WHERE id = ?::uuid",
+        "SELECT version FROM works WHERE id::text = ?",
     );
     let version: Option<i64> = match db.backend() {
         Backend::Sqlite => {
@@ -1569,7 +1569,7 @@ pub async fn publication_events(
         "SELECT id, action, occurred_at FROM publication_events
           WHERE work_id = ? ORDER BY occurred_at DESC LIMIT ?",
         "SELECT id::text AS id, action, occurred_at FROM publication_events
-          WHERE work_id = ?::uuid ORDER BY occurred_at DESC LIMIT ?",
+          WHERE work_id::text = ? ORDER BY occurred_at DESC LIMIT ?",
     );
     let rows: Vec<(String, String, String)> = match db.backend() {
         Backend::Sqlite => {

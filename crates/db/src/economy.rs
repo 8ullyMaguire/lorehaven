@@ -58,10 +58,12 @@ async fn fetch_queue_postgres(
     pool: &sqlx::postgres::PgPool,
     job_id: &str,
 ) -> Result<Option<(String, i64)>, sqlx::Error> {
-    let row = sqlx::query("SELECT priority_class, position FROM queue_slots WHERE job_id = $1")
-        .bind(job_id)
-        .fetch_optional(pool)
-        .await?;
+    let row = sqlx::query(
+        "SELECT priority_class, position::bigint AS position FROM queue_slots WHERE job_id = $1",
+    )
+    .bind(job_id)
+    .fetch_optional(pool)
+    .await?;
     Ok(row.map(|r| {
         (
             r.get::<String, _>("priority_class"),
@@ -83,7 +85,12 @@ async fn fetch_usage_sqlite(
             .await?;
     Ok(rows
         .iter()
-        .map(|r| (r.get::<String, _>("action"), r.get::<i64, _>("count")))
+        .map(|r| {
+            (
+                r.get::<String, _>("action"),
+                r.get::<i32, _>("count") as i64,
+            )
+        })
         .collect())
 }
 
@@ -100,7 +107,12 @@ async fn fetch_usage_postgres(
             .await?;
     Ok(rows
         .iter()
-        .map(|r| (r.get::<String, _>("action"), r.get::<i64, _>("count")))
+        .map(|r| {
+            (
+                r.get::<String, _>("action"),
+                r.get::<i32, _>("count") as i64,
+            )
+        })
         .collect())
 }
 
@@ -301,16 +313,20 @@ pub async fn enqueue_job(
     let now = crate::identity::now_rfc3339();
     let max_pos: Option<i64> = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_scalar("SELECT MAX(position) FROM queue_slots WHERE priority_class = ?")
-                .bind(priority_class)
-                .fetch_optional(db.sqlite_pool().expect("sqlite"))
-                .await?
+            let val: Option<i64> = sqlx::query_scalar::<_, i64>(
+                "SELECT COALESCE(MAX(position), 0) FROM queue_slots WHERE priority_class = ?",
+            )
+            .bind(priority_class)
+            .fetch_optional(db.sqlite_pool().expect("sqlite"))
+            .await?;
+            val
         }
         Backend::Postgres => {
-            sqlx::query_scalar("SELECT MAX(position) FROM queue_slots WHERE priority_class = $1")
+            let val: Option<i64> = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(position), 0)::bigint FROM queue_slots WHERE priority_class = $1")
                 .bind(priority_class)
                 .fetch_optional(db.postgres_pool().expect("postgres"))
-                .await?
+                .await?;
+            val
         }
     };
 
@@ -370,7 +386,7 @@ pub async fn bump_counter(
             sqlx::query_scalar(
                 "INSERT INTO usage_counters (account, action, day, count)
                  VALUES (?, ?, ?, 1)
-                 ON CONFLICT(account, action, day) SET usage_counters.count = usage_counters.count + 1
+                 ON CONFLICT(account, action, day) DO UPDATE SET count = count + 1
                  RETURNING count",
             )
             .bind(account)
@@ -383,7 +399,7 @@ pub async fn bump_counter(
             sqlx::query_scalar(
                 "INSERT INTO usage_counters (account, action, day, count)
                  VALUES ($1, $2, $3, 1)
-                 ON CONFLICT(account, action, day) DO UPDATE SET usage_counters.count = usage_counters.count + 1
+                 ON CONFLICT(account, action, day) DO UPDATE SET count = usage_counters.count + 1
                  RETURNING count::bigint",
             )
             .bind(account)
