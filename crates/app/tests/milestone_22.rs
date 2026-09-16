@@ -171,6 +171,12 @@ impl Fixture {
                 .any(|id| id.contains("media_generalization")),
             "the 0024 media-generalization migration must be part of the catalogue"
         );
+        assert!(
+            tdb.applied_migrations()
+                .iter()
+                .any(|id| id.contains("canon_space")),
+            "the 0026 canon_space migration must be part of the catalogue"
+        );
         Self { dir, tdb }
     }
     fn client(&self) -> Client {
@@ -262,10 +268,7 @@ async fn migration_0024_creates_the_media_entity_tables() {
 
 // Implemented read doors now have behavior tests below.
 // These remain as 501 contract stubs:
-const READ_DOORS_STILL_501: &[&str] = &[
-    "/api/v1/canons/00000000-0000-0000-0000-000000000005/media",
-    "/api/v1/spaces/00000000-0000-0000-0000-000000000006/media",
-];
+const READ_DOORS_STILL_501: &[&str] = &[];
 
 #[tokio::test]
 async fn unimplemented_read_doors_still_return_501() {
@@ -728,6 +731,185 @@ async fn media_files_and_editions_doors_return_data() {
     // rule hides drafts; existence is not leaked.
     let mut anon = fx.client();
     let (status, _) = anon.get(&format!("/api/v1/media/{draft_id}/files")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    fx.cleanup().await;
+}
+
+/// Seed one canon row (migration 0026).
+async fn seed_canon(fx: &Fixture, n: u32, name: &str) -> String {
+    let id = format!("00000000-0000-0000-0000-{n:012}");
+    let cast = if fx.tdb.is_postgres() { "::uuid" } else { "" };
+    let sql = fx.tdb.sql(&format!(
+        "INSERT INTO canons (id, name, created_at, updated_at, version) \
+         VALUES (?{cast}, ?, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', 1)"
+    ));
+    let db = fx.tdb.db();
+    let result = match db.backend() {
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(&id)
+            .bind(name)
+            .execute(db.sqlite_pool().expect("sqlite pool"))
+            .await
+            .map(|_| ()),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(&id)
+            .bind(name)
+            .execute(db.postgres_pool().expect("pg pool"))
+            .await
+            .map(|_| ()),
+    };
+    result.expect("seed canon");
+    id
+}
+
+/// Seed a canon_works association row (migration 0026).
+async fn seed_canon_work(fx: &Fixture, canon_id: &str, work_id: &str, position: i32) {
+    let cast = if fx.tdb.is_postgres() { "::uuid" } else { "" };
+    let sql = fx.tdb.sql(&format!(
+        "INSERT INTO canon_works (canon_id, work_id, position, created_at) \
+         VALUES (?{cast}, ?{cast}, ?, '2026-09-01T00:00:00Z')"
+    ));
+    let db = fx.tdb.db();
+    let result = match db.backend() {
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(canon_id)
+            .bind(work_id)
+            .bind(position)
+            .execute(db.sqlite_pool().expect("sqlite pool"))
+            .await
+            .map(|_| ()),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(canon_id)
+            .bind(work_id)
+            .bind(position)
+            .execute(db.postgres_pool().expect("pg pool"))
+            .await
+            .map(|_| ()),
+    };
+    result.expect("seed canon_work");
+}
+
+/// Seed one space row (migration 0026).
+async fn seed_space(fx: &Fixture, n: u32, name: &str) -> String {
+    let id = format!("00000000-0000-0000-0000-{n:012}");
+    let cast = if fx.tdb.is_postgres() { "::uuid" } else { "" };
+    let sql = fx.tdb.sql(&format!(
+        "INSERT INTO spaces (id, name, created_at, updated_at, version) \
+         VALUES (?{cast}, ?, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', 1)"
+    ));
+    let db = fx.tdb.db();
+    let result = match db.backend() {
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(&id)
+            .bind(name)
+            .execute(db.sqlite_pool().expect("sqlite pool"))
+            .await
+            .map(|_| ()),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(&id)
+            .bind(name)
+            .execute(db.postgres_pool().expect("pg pool"))
+            .await
+            .map(|_| ()),
+    };
+    result.expect("seed space");
+    id
+}
+
+/// Seed a space_works association row (migration 0026).
+async fn seed_space_work(fx: &Fixture, space_id: &str, work_id: &str, position: i32) {
+    let cast = if fx.tdb.is_postgres() { "::uuid" } else { "" };
+    let sql = fx.tdb.sql(&format!(
+        "INSERT INTO space_works (space_id, work_id, position, created_at) \
+         VALUES (?{cast}, ?{cast}, ?, '2026-09-01T00:00:00Z')"
+    ));
+    let db = fx.tdb.db();
+    let result = match db.backend() {
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(space_id)
+            .bind(work_id)
+            .bind(position)
+            .execute(db.sqlite_pool().expect("sqlite pool"))
+            .await
+            .map(|_| ()),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(space_id)
+            .bind(work_id)
+            .bind(position)
+            .execute(db.postgres_pool().expect("pg pool"))
+            .await
+            .map(|_| ()),
+    };
+    result.expect("seed space_work");
+}
+
+#[tokio::test]
+async fn canon_and_space_doors_return_scoped_media() {
+    let fx = Fixture::new("canon-space").await;
+    let mut owner = fx.client();
+    register(&mut owner, "canon@example.com", "canon-handle").await;
+    let pseud_id = author_pseud_id(&fx, "canon@example.com").await;
+
+    // Seed a published public work.
+    let work_id = seed_work(
+        &fx,
+        1,
+        &pseud_id,
+        "Canon Work",
+        "public",
+        "published",
+        "2026-09-01T00:01:00Z",
+    )
+    .await;
+
+    // Seed a draft work (should NOT appear for anonymous callers).
+    let draft_id = seed_work(
+        &fx,
+        2,
+        &pseud_id,
+        "Draft Work",
+        "public",
+        "draft",
+        "2026-09-01T00:02:00Z",
+    )
+    .await;
+
+    // Seed canon and associate the published work.
+    let canon_id = seed_canon(&fx, 100, "Mainline Canon").await;
+    seed_canon_work(&fx, &canon_id, &work_id, 1).await;
+    seed_canon_work(&fx, &canon_id, &draft_id, 2).await;
+
+    // Anonymous: only the published work appears.
+    let mut anon = fx.client();
+    let canon_uri = format!("/api/v1/canons/{canon_id}/media");
+    let (status, body) = anon.get(&canon_uri).await;
+    assert_eq!(status, StatusCode::OK, "canon door failed: {body}");
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 1, "only published work expected: {body}");
+    assert_eq!(items[0]["id"], work_id);
+    assert_eq!(body["name"], "Mainline Canon");
+
+    // Seed space and associate the published work.
+    let space_id = seed_space(&fx, 200, "Fandom Space").await;
+    seed_space_work(&fx, &space_id, &work_id, 1).await;
+
+    let space_uri = format!("/api/v1/spaces/{space_id}/media");
+    let (status, body) = anon.get(&space_uri).await;
+    assert_eq!(status, StatusCode::OK, "space door failed: {body}");
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 1, "only published work expected: {body}");
+    assert_eq!(items[0]["id"], work_id);
+    assert_eq!(body["name"], "Fandom Space");
+
+    // 404 for non-existent canon.
+    let bad_canon = format!("/api/v1/canons/00000000-0000-0000-0000-999999999999/media");
+    let (status, _) = anon.get(&bad_canon).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // 404 for non-existent space.
+    let bad_space = format!("/api/v1/spaces/00000000-0000-0000-0000-999999999999/media");
+    let (status, _) = anon.get(&bad_space).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     fx.cleanup().await;
