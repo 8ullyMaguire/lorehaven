@@ -16,6 +16,7 @@ pub mod imports;
 pub mod jobs;
 pub mod library;
 pub mod marketplace;
+pub mod media;
 pub mod meta;
 pub mod monetization;
 pub mod notifications;

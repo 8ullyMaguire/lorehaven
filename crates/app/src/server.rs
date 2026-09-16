@@ -462,6 +462,19 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // Generalized media — M22 (spec §32). Query doors are public reads;
+        // eligibility is applied inside the bodies. Actor and collection
+        // mutations are writer-class; sessions and scopes arrive with bodies.
+        .merge(classified(
+            routes::media::router(),
+            RouteClass::Default,
+            &state,
+        ))
+        .merge(classified(
+            routes::media::write_router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Notifications inbox — §5.5. Session-scoped reads plus idempotent
         // mark-read writes; rows are produced by replies, sales and gifts.
         .merge(classified(
