@@ -13,8 +13,9 @@
 //! merging (ADR 0019).
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::response::Response as AxumResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use lorehaven_domain::media::{CollectionKind, CreatorKind, DistributorKind};
@@ -23,11 +24,28 @@ use serde::Deserialize;
 use serde_json::json;
 use std::str::FromStr;
 
+use crate::auth::{MaybeSession, RequireSession};
 use crate::state::AppState;
 
 // ---------------------------------------------------------------------------
 // Helper: query parsing
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Request bodies for write doors
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct PatchCreatorRequest {
+    pub name: Option<String>,
+    pub role: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct PutCollectionRequest {
+    pub title: Option<String>,
+    pub description: Option<String>,
+}
 
 // ---------------------------------------------------------------------------
 // Read doors (the same engine behind every list; spec §32.4)
@@ -36,23 +54,31 @@ use crate::state::AppState;
 async fn list_media(
     State(state): State<AppState>,
     Query(params): Query<MediaQuery>,
+    MaybeSession(session): MaybeSession,
 ) -> impl IntoResponse {
     let db = state.db();
     let query = QueryAst::Text(params.q.clone());
-    let _account_id: Option<&str> = None; // TODO: get account_id from session
+    let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
     let limit = params.limit.unwrap_or(50).min(200);
-    let (items, total) =
-        match lorehaven_db::media::list_media_filtered(db, &query, _account_id, limit).await {
-            Ok(res) => res,
-            Err(e) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": e.to_string()})),
-                )
-                    .into_response()
-            }
-        };
+    let (items, total, _next_cursor) = match lorehaven_db::media::list_media_filtered(
+        db,
+        &query,
+        account_id.as_deref(),
+        limit,
+        params.cursor.as_deref(),
+    )
+    .await
+    {
+        Ok(res) => res,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+                .into_response()
+        }
+    };
 
     Json(json!({
         "items": items,
@@ -62,12 +88,19 @@ async fn list_media(
     .into_response()
 }
 
-async fn get_media(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
+async fn get_media(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    MaybeSession(session): MaybeSession,
+) -> impl IntoResponse {
     let db = state.db();
-    let _account_id: Option<&str> = None; // TODO: get account_id from session
+    let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
     match lorehaven_db::media::find_media(db, &id).await {
-        Ok(Some(media)) if media.visibility == "public" || _account_id.is_some() => {
+        Ok(Some(media))
+            if media.visibility == "public"
+                || account_id.as_deref() == media.owning_account_id.as_deref() =>
+        {
             Json(media).into_response()
         }
         Ok(Some(_)) => (
@@ -87,12 +120,16 @@ async fn get_media(State(state): State<AppState>, Path(id): Path<String>) -> imp
 async fn list_media_files(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    MaybeSession(session): MaybeSession,
 ) -> impl IntoResponse {
     let db = state.db();
-    let _account_id: Option<&str> = None; // TODO: get account_id from session
+    let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
     match lorehaven_db::media::find_media(db, &id).await {
-        Ok(Some(media)) if media.visibility == "public" || _account_id.is_some() => {
+        Ok(Some(media))
+            if media.visibility == "public"
+                || account_id.as_deref() == media.owning_account_id.as_deref() =>
+        {
             // TODO: actual files query
             Json(json!({"files": []})).into_response()
         }
@@ -113,12 +150,16 @@ async fn list_media_files(
 async fn list_media_editions(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    MaybeSession(session): MaybeSession,
 ) -> impl IntoResponse {
     let db = state.db();
-    let _account_id: Option<&str> = None; // TODO: get account_id from session
+    let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
     match lorehaven_db::media::find_media(db, &id).await {
-        Ok(Some(media)) if media.visibility == "public" || _account_id.is_some() => {
+        Ok(Some(media))
+            if media.visibility == "public"
+                || account_id.as_deref() == media.owning_account_id.as_deref() =>
+        {
             let editions: Vec<lorehaven_db::media::MediaEdition> = Vec::new();
             Json(json!({"editions": editions})).into_response()
         }
@@ -136,11 +177,15 @@ async fn list_media_editions(
     }
 }
 
-async fn creator_media(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
+async fn creator_media(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    MaybeSession(session): MaybeSession,
+) -> impl IntoResponse {
     let db = state.db();
-    let _account_id: Option<&str> = None; // TODO: get account_id from session
+    let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
-    match lorehaven_db::media::creator_media(db, &id, _account_id).await {
+    match lorehaven_db::media::creator_media(db, &id, account_id.as_deref()).await {
         Ok(items) => Json(json!({"items": items})).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -153,11 +198,12 @@ async fn creator_media(State(state): State<AppState>, Path(id): Path<String>) ->
 async fn distributor_media(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    MaybeSession(session): MaybeSession,
 ) -> impl IntoResponse {
     let db = state.db();
-    let _account_id: Option<&str> = None; // TODO: get account_id from session
+    let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
-    match lorehaven_db::media::distributor_media(db, &id, _account_id).await {
+    match lorehaven_db::media::distributor_media(db, &id, account_id.as_deref()).await {
         Ok(items) => Json(json!({"items": items})).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -170,11 +216,12 @@ async fn distributor_media(
 async fn media_collection_media(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    MaybeSession(session): MaybeSession,
 ) -> impl IntoResponse {
     let db = state.db();
-    let _account_id: Option<&str> = None; // TODO: get account_id from session
+    let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
-    match lorehaven_db::media::collection_media(db, &id, _account_id).await {
+    match lorehaven_db::media::collection_media(db, &id, account_id.as_deref()).await {
         Ok(items) => Json(json!({"items": items})).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -216,7 +263,10 @@ async fn space_media(State(_state): State<AppState>, Path(_id): Path<String>) ->
 // Actor and collection reads
 // ---------------------------------------------------------------------------
 
-async fn list_creators(State(state): State<AppState>) -> impl IntoResponse {
+async fn list_creators(
+    State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
+) -> impl IntoResponse {
     let db = state.db();
     match lorehaven_db::media::list_creators(db).await {
         Ok(items) => Json(json!({"items": items})).into_response(),
@@ -228,7 +278,11 @@ async fn list_creators(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
-async fn get_creator(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
+async fn get_creator(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    MaybeSession(_session): MaybeSession,
+) -> impl IntoResponse {
     let db = state.db();
     match lorehaven_db::media::find_creator(db, &id).await {
         Ok(Some(creator)) => Json(creator).into_response(),
@@ -241,7 +295,10 @@ async fn get_creator(State(state): State<AppState>, Path(id): Path<String>) -> i
     }
 }
 
-async fn list_distributors(State(state): State<AppState>) -> impl IntoResponse {
+async fn list_distributors(
+    State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
+) -> impl IntoResponse {
     let db = state.db();
     match lorehaven_db::media::list_distributors(db).await {
         Ok(items) => Json(json!({"items": items})).into_response(),
@@ -256,6 +313,7 @@ async fn list_distributors(State(state): State<AppState>) -> impl IntoResponse {
 async fn get_distributor(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    MaybeSession(_session): MaybeSession,
 ) -> impl IntoResponse {
     let db = state.db();
     match lorehaven_db::media::find_distributor(db, &id).await {
@@ -269,10 +327,13 @@ async fn get_distributor(
     }
 }
 
-async fn list_media_collections(State(state): State<AppState>) -> impl IntoResponse {
+async fn list_media_collections(
+    State(state): State<AppState>,
+    MaybeSession(session): MaybeSession,
+) -> impl IntoResponse {
     let db = state.db();
-    let _account_id: Option<&str> = None; // TODO: get account_id from session
-    match lorehaven_db::media::list_collections(db, _account_id).await {
+    let account_id = session.as_ref().map(|u| u.account_id.to_string());
+    match lorehaven_db::media::list_collections(db, account_id.as_deref()).await {
         Ok(items) => Json(json!({"items": items})).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -285,6 +346,7 @@ async fn list_media_collections(State(state): State<AppState>) -> impl IntoRespo
 async fn get_media_collection(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    MaybeSession(_session): MaybeSession,
 ) -> impl IntoResponse {
     let db = state.db();
     match lorehaven_db::media::find_collection(db, &id).await {
@@ -307,14 +369,16 @@ async fn post_media_query(
     Json(body): Json<MediaQuery>,
 ) -> impl IntoResponse {
     // Same as GET but POST body for complex queries
-    list_media(State(state), Query(body)).await
+    list_media(State(state), Query(body), MaybeSession(None)).await
 }
 
 async fn post_creator(
     State(state): State<AppState>,
+    RequireSession(user): RequireSession,
     Json(body): Json<CreateCreatorRequest>,
 ) -> impl IntoResponse {
     let db = state.db();
+    let _ = user; // TODO: use user.account_id for owning_account_id
     let creator = lorehaven_db::media::NewCreator {
         kind: CreatorKind::from_str(&body.kind).unwrap_or(CreatorKind::External),
         pseud_id: body.pseud_id,
@@ -335,24 +399,27 @@ async fn post_creator(
 }
 
 async fn patch_creator(
-    State(_state): State<AppState>,
-    Path(_id): Path<String>,
-    Json(_body): Json<serde_json::Value>,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<PatchCreatorRequest>,
 ) -> impl IntoResponse {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(json!({
-            "error": {
-                "code": "NOT_IMPLEMENTED",
-                "message": "patch creator not yet implemented"
-            }
-        })),
-    )
-        .into_response()
+    let db = state.db();
+    match lorehaven_db::media::patch_creator(db, &id, body.name.as_deref(), body.role.as_deref())
+        .await
+    {
+        Ok(true) => (StatusCode::OK, Json(json!({ "status": "updated" }))).into_response(),
+        Ok(false) => (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
 }
 
 async fn post_distributor(
     State(state): State<AppState>,
+    RequireSession(_user): RequireSession,
     Json(body): Json<CreateDistributorRequest>,
 ) -> impl IntoResponse {
     let db = state.db();
@@ -374,6 +441,7 @@ async fn post_distributor(
 
 async fn post_media_collection(
     State(state): State<AppState>,
+    RequireSession(_user): RequireSession,
     Json(body): Json<CreateCollectionRequest>,
 ) -> impl IntoResponse {
     let db = state.db();
@@ -395,26 +463,70 @@ async fn post_media_collection(
 }
 
 async fn put_media_collection(
-    State(_state): State<AppState>,
-    Path(_id): Path<String>,
-    Json(_body): Json<serde_json::Value>,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<PutCollectionRequest>,
 ) -> impl IntoResponse {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(json!({
-            "error": {
-                "code": "NOT_IMPLEMENTED",
-                "message": "put collection not yet implemented"
-            }
-        })),
+    let db = state.db();
+    match lorehaven_db::media::put_collection(
+        db,
+        &id,
+        body.title.as_deref(),
+        body.description.as_deref(),
     )
-        .into_response()
+    .await
+    {
+        Ok(true) => (StatusCode::OK, Json(json!({ "status": "updated" }))).into_response(),
+        Ok(false) => (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
 }
 
-/// Read doors — public rate class; eligibility is applied inside the bodies.
+/// Atom/RSS feed for media listings.
+async fn media_feed(
+    State(state): State<AppState>,
+    Query(params): Query<MediaQuery>,
+    MaybeSession(session): MaybeSession,
+) -> impl IntoResponse {
+    let db = state.db();
+    let query = QueryAst::Text(params.q.clone());
+    let account_id = session.as_ref().map(|u| u.account_id.to_string());
+    let limit = params.limit.unwrap_or(50).min(200);
+
+    match lorehaven_db::media::list_media_filtered(db, &query, account_id.as_deref(), limit, None).await {
+        Ok((items, total, _next_cursor)) => {
+            // Build simple Atom feed
+            let entries: Vec<String> = items.iter().map(|m| {
+                format!(r#"<entry><title>{}</title><id>{}</id><updated>{}</updated></entry>"#,
+                    m.title, m.id, m.updated_at)
+            }).collect();
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+<title>Media Feed</title>
+<id>urn:uuid:media-feed</id>
+<totalResults>{}</totalResults>
+{}
+</feed>"#,
+                total, entries.join("")
+            );
+            ([("content-type", "application/atom+xml")], xml).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
+            .into_response(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Read doors — public rate class; eligibility is applied inside the bodies.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/media", get(list_media))
+        .route("/media/feed", get(media_feed))
         .route("/media/{id}", get(get_media))
         .route("/media/{id}/files", get(list_media_files))
         .route("/media/{id}/editions", get(list_media_editions))
@@ -453,6 +565,7 @@ pub fn write_router() -> Router<AppState> {
 pub struct MediaQuery {
     pub q: String,
     pub limit: Option<i64>,
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

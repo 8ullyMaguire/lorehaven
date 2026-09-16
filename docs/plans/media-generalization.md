@@ -9,7 +9,7 @@ Design rationale: `secondbrain: 10-projects-lorehaven-platform-redesign-spec.md`
 | Phase | Milestone | Content | Status |
 |---|---|---|---|
 | R1 | M22 | Migration 0024 (creators, media_creators, distributors, distributorships, media_collections, media_collection_items, media_editions, media_rights, quality_signals, works.format) + domain `media` module + 501 contract routes + milestone_22 contract tests | **skeleton landed** (this session) |
-| R2 | M23 | Media query engine + `/api/v1` doors with filters (quality, dates, everything), cursors, ETag/304, Atom/RSS, OPDS, webhooks, grant-gated bulk export, JSON-LD/Dublin Core | owed |
+| R2 | M23 | Media query engine + `/api/v1` doors with filters (quality, dates, everything), cursors, ETag/304, Atom/RSS, OPDS, webhooks, grant-gated bulk export, JSON-LD/Dublin Core | **implemented** (cursor + ETag/304 + Atom done; OPDS/webhooks/bulk export/JSON-LD remain) |
 | R3 | M24 | Anchored comments (paragraph/timestamp), orphaning, creator dashboard, half-star setting, shelf/works import adapters (Goodreads/StoryGraph CSV, Wattpad, AO3), bulk manuscript import, per-format goals | owed |
 | R4 | M25 | Derivative pipeline (EPUB/PDF/text/OCR/transcode), full-text over transcripts+OCR, public-domain collections, optional lending (default off), vanished-source marking for derivatives | owed |
 | R5 | M26 | Adult taxonomy behind §7.3/§7.6 gates, TTS narration editions, gallery mechanics for illustrated works | owed |

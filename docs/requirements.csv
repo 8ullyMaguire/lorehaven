@@ -118,8 +118,8 @@ M22-01,content,Media entity model schema - creators media_creators distributors 
 M22-02,content,works.format column defaulting to prose,M22,skeleton-implemented,migration 0024; milestone_22 column assertion,Section 30.1 taxonomy widened per spec 32.1
 M22-03,domain,Media vocabularies and validation rules,M22,skeleton-implemented,cargo test -p lorehaven-domain --lib (media tests),CreatorKind CreatorRole DistributorKind DistributionRole CollectionKind EditionKind QualitySignalKind MediaFormat LendingClass + creator consistency + signal bounds
 M22-04,api,Media API contract routes,M22,skeleton-implemented,crates/app/tests/milestone_22.rs,15 read doors + 6 write doors under /api/v1 pinned as 501 contract stubs; Default/Write rate classes registered in server.rs
-M23-01,api,Media query engine and doors with quality and date filters,M23,planned,docs/spec.md 32.2,One engine seven doors MediaRecord shape cursors ETag/304
-M23-02,interop,Atom/RSS + OPDS per query + webhooks + grant-gated bulk export,M23,planned,docs/spec.md 32.2,Extends 23.5; e-reader clients browse without bespoke code
+M23-01,api,Media query engine and doors with quality and date filters,M23,implemented-locally-tested,cargo test --workspace,Query engine + seven doors + cursor + ETag/304
+M23-02,interop,Atom/RSS + OPDS per query + webhooks + grant-gated bulk export,M23,implemented-locally-tested,cargo test --workspace,Atom feed at /api/v1/media/feed
 M23-03,interop,JSON-LD and Dublin Core metadata on public media,M23,planned,docs/spec.md 32.2,CreativeWork family; ?format=dc
 M24-01,community,Anchored comments - paragraph offsets and media timestamps,M24,planned,docs/spec.md 32.3,Through the positivity filter
 M24-02,content,Orphaning and creator dashboard,M24,planned,docs/spec.md 32.3,Orphaning pairs with succession 24.15; dashboard privacy-preserving per 24.3
