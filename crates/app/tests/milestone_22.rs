@@ -53,6 +53,7 @@ fn config_for(dir: &Path) -> Config {
 struct Client {
     app: axum::Router,
     cookies: Vec<(String, String)>,
+    headers: Vec<(String, String)>,
 }
 
 impl Client {
@@ -60,7 +61,12 @@ impl Client {
         Self {
             app,
             cookies: Vec::new(),
+            headers: Vec::new(),
         }
+    }
+    fn with_header(mut self, name: &str, value: &str) -> Self {
+        self.headers.push((name.to_owned(), value.to_owned()));
+        self
     }
     fn cookie(&self, name: &str) -> Option<&str> {
         self.cookies
@@ -88,6 +94,9 @@ impl Client {
     }
     async fn send(&mut self, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
         let mut builder = Request::builder().method(method).uri(uri);
+        for (name, value) in &self.headers {
+            builder = builder.header(name.as_str(), value.as_str());
+        }
         if !self.cookies.is_empty() {
             builder = builder.header(
                 header::COOKIE,
@@ -262,10 +271,7 @@ async fn migration_0024_creates_the_media_entity_tables() {
 
 // Implemented read doors now have behavior tests below.
 // These remain as 501 contract stubs:
-const READ_DOORS_STILL_501: &[&str] = &[
-    "/api/v1/canons/00000000-0000-0000-0000-000000000005/media",
-    "/api/v1/spaces/00000000-0000-0000-0000-000000000006/media",
-];
+const READ_DOORS_STILL_501: &[&str] = &[];
 
 #[tokio::test]
 async fn unimplemented_read_doors_still_return_501() {
@@ -607,6 +613,44 @@ async fn the_media_feed_escapes_user_text() {
         !xml.contains("<script>"),
         "raw script tag leaked into the feed: {xml}"
     );
+
+    fx.cleanup().await;
+}
+
+#[tokio::test]
+async fn media_files_and_editions_doors_return_data() {
+    let fx = Fixture::new("media_files_editions").await;
+    let mut client = fx.client();
+
+    // Register a user and log in (cookies stored in client)
+    register(&mut client, "editions@example.com", "editions-handle").await;
+    let (status, login) = client
+        .post(
+            "/api/v1/auth/login",
+            json!({"email": "editions@example.com", "password": PASSWORD}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "login failed: {login}");
+
+    let (status, work) = client
+        .post("/api/v1/works", json!({"title": "Test Work", "slug": "test-work", "visibility": "public", "status": "published", "created_at": "2026-09-01T00:01:00Z"}))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "work creation failed: {work}");
+    let work_id = work["id"].as_str().unwrap();
+
+    // Files door returns data
+    let files_uri = format!("/api/v1/media/{}/files", work_id);
+    let (status, body) = client.get(&files_uri).await;
+    assert_eq!(status, StatusCode::OK, "files door failed: {body}");
+    let files = body["files"].as_array().unwrap();
+    assert!(files.is_empty(), "no files expected for new work");
+
+    // Editions door returns data
+    let editions_uri = format!("/api/v1/media/{}/editions", work_id);
+    let (status, body) = client.get(&editions_uri).await;
+    assert_eq!(status, StatusCode::OK, "editions door failed: {body}");
+    let editions = body["editions"].as_array().unwrap();
+    assert!(editions.is_empty(), "no editions expected for new work");
 
     fx.cleanup().await;
 }

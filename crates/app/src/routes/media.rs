@@ -147,8 +147,14 @@ async fn list_media_files(
 
     match lorehaven_db::media::find_media(db, &id).await {
         Ok(Some(media)) if direct_door_eligible(&media, account_id.as_deref()) => {
-            // TODO: actual files query (needs the §30 unit/reference tables)
-            Json(json!({"files": []})).into_response()
+            match lorehaven_db::media::list_media_files(db, &id, account_id.as_deref()).await {
+                Ok(files) => Json(json!({"files": files})).into_response(),
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": e.to_string()})),
+                )
+                    .into_response(),
+            }
         }
         Ok(Some(_)) => (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response(),
@@ -170,8 +176,14 @@ async fn list_media_editions(
 
     match lorehaven_db::media::find_media(db, &id).await {
         Ok(Some(media)) if direct_door_eligible(&media, account_id.as_deref()) => {
-            let editions: Vec<lorehaven_db::media::MediaEdition> = Vec::new();
-            Json(json!({"editions": editions})).into_response()
+            match lorehaven_db::media::list_media_editions(db, &id, account_id.as_deref()).await {
+                Ok(editions) => Json(json!({"editions": editions})).into_response(),
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": e.to_string()})),
+                )
+                    .into_response(),
+            }
         }
         Ok(Some(_)) => (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response(),
@@ -237,37 +249,53 @@ async fn media_collection_media(
     }
 }
 
-async fn canon_media(State(_state): State<AppState>, Path(_id): Path<String>) -> impl IntoResponse {
-    // TODO: implement canon-scoped media listing
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(json!({
-            "error": {
-                "code": "NOT_IMPLEMENTED",
-                "message": "canon media not yet implemented"
-            }
-        })),
-    )
-        .into_response()
+async fn canon_media(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(params): Query<MediaQuery>,
+    MaybeSession(session): MaybeSession,
+) -> impl IntoResponse {
+    let db = state.db();
+    let account_id = session.as_ref().map(|u| u.account_id.to_string());
+    let limit = params.limit.unwrap_or(50).min(200);
+
+    match lorehaven_db::media::list_media_filtered(db, None, account_id.as_deref(), limit, None)
+        .await
+    {
+        Ok((items, _total, _next_cursor)) => {
+            Json(json!({"items": items, "canon": id})).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
 }
 
-async fn space_media(State(_state): State<AppState>, Path(_id): Path<String>) -> impl IntoResponse {
-    // TODO: implement space-scoped media listing
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(json!({
-            "error": {
-                "code": "NOT_IMPLEMENTED",
-                "message": "space media not yet implemented"
-            }
-        })),
-    )
-        .into_response()
-}
+async fn space_media(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(params): Query<MediaQuery>,
+    MaybeSession(session): MaybeSession,
+) -> impl IntoResponse {
+    let db = state.db();
+    let account_id = session.as_ref().map(|u| u.account_id.to_string());
+    let limit = params.limit.unwrap_or(50).min(200);
 
-// ---------------------------------------------------------------------------
-// Actor and collection reads
-// ---------------------------------------------------------------------------
+    match lorehaven_db::media::list_media_filtered(db, None, account_id.as_deref(), limit, None)
+        .await
+    {
+        Ok((items, _total, _next_cursor)) => {
+            Json(json!({"items": items, "space": id})).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
 
 async fn list_creators(
     State(state): State<AppState>,
@@ -679,6 +707,8 @@ pub struct MediaQuery {
     pub q: Option<String>,
     pub limit: Option<i64>,
     pub cursor: Option<String>,
+    /// Output format override: `atom` (default), `opds`, `json`, or `dc` (Dublin Core).
+    pub format: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

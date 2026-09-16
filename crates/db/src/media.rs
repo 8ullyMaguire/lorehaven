@@ -106,11 +106,10 @@ pub struct MediaRecord {
 pub struct MediaEdition {
     pub id: String,
     pub work_id: String,
-    pub format: String,
-    pub url: Option<String>,
-    pub size_bytes: Option<i64>,
-    pub mime_type: Option<String>,
-    pub checksum: Option<String>,
+    pub edition_kind: String,
+    pub label: Option<String>,
+    pub parent_edition_id: Option<String>,
+    pub published_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub version: i64,
@@ -983,4 +982,71 @@ mod tests {
         assert!(postgres.contains("p.account_id = ?::uuid"));
         assert_eq!(values, vec!["me".to_string()]);
     }
+}
+
+/// A file of a work (e.g. a PDF, EPUB, or text file).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct MediaFile {
+    pub id: String,
+    pub work_id: String,
+    pub edition_kind: String,
+    pub url: Option<String>,
+    pub size_bytes: Option<i64>,
+    pub mime_type: Option<String>,
+    pub checksum: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: i64,
+}
+
+/// List editions for a work.
+pub async fn list_media_editions(
+    db: &Database,
+    work_id: &str,
+    _account_id: Option<&str>,
+) -> Result<Vec<MediaEdition>> {
+    let sqlite = "SELECT id, work_id, edition_kind, label, parent_edition_id, published_at, created_at, updated_at, version FROM media_editions WHERE work_id = ? ORDER BY created_at DESC";
+    let postgres = "SELECT id, work_id, edition_kind, label, parent_edition_id, published_at, created_at, updated_at, version FROM media_editions WHERE work_id = ? ORDER BY created_at DESC";
+    let sql = &db.sql(sqlite, postgres);
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, MediaEdition>(sql)
+                .bind(work_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, MediaEdition>(sql)
+                .bind(work_id)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(rows)
+}
+
+/// List files for a work.
+pub async fn list_media_files(
+    db: &Database,
+    work_id: &str,
+    _account_id: Option<&str>,
+) -> Result<Vec<MediaFile>> {
+    let sqlite = "SELECT id, work_id, edition_kind, url, size_bytes, mime_type, checksum, created_at FROM media_files WHERE work_id = ? ORDER BY created_at";
+    let postgres = "SELECT id, work_id, edition_kind, url, size_bytes, mime_type, checksum, created_at FROM media_files WHERE work_id = ? ORDER BY created_at";
+    let sql = &db.sql(sqlite, postgres);
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, MediaFile>(sql)
+                .bind(work_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, MediaFile>(sql)
+                .bind(work_id)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(rows)
 }
