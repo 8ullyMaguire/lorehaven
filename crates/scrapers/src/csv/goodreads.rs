@@ -10,7 +10,9 @@ use crate::csv::{opt_float, opt_int, split_csv_line, split_tags, ImportShelf, Sh
 /// Parse a Goodreads library export CSV into shelf rows.
 pub fn parse(csv: &str) -> Result<ImportShelf, crate::csv::CsvError> {
     let mut lines = csv.lines();
-    let header_line = lines.next().ok_or(crate::csv::CsvError::Invalid("empty CSV".to_owned()))?;
+    let header_line = lines
+        .next()
+        .ok_or(crate::csv::CsvError::Invalid("empty CSV".to_owned()))?;
     let binding = split_csv_line(header_line);
     let header: Vec<&str> = binding.iter().map(|s| s.as_str()).collect();
 
@@ -28,7 +30,7 @@ pub fn parse(csv: &str) -> Result<ImportShelf, crate::csv::CsvError> {
 
     let mut rows = Vec::new();
     let mut skipped = 0;
-    for (_line_no, line) in lines.enumerate() {
+    for line in lines {
         let line = line.trim();
         if line.is_empty() {
             continue;
