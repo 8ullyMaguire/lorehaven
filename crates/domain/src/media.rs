@@ -133,14 +133,14 @@ vocabulary!(LendingClass, as_str, {
 /// only by quorum (§19) and never by import.
 pub fn creator_record_is_consistent(
     kind: CreatorKind,
-    pseud_id: Option<()>,
+    pseud_id_is_set: bool,
     source_key: Option<&str>,
     source_creator_id: Option<&str>,
 ) -> bool {
     match kind {
-        CreatorKind::LocalPseud => pseud_id.is_some() && source_key.is_none(),
+        CreatorKind::LocalPseud => pseud_id_is_set && source_key.is_none(),
         CreatorKind::External => {
-            pseud_id.is_none() && source_key.is_some() && source_creator_id.is_some()
+            !pseud_id_is_set && source_key.is_some() && source_creator_id.is_some()
         }
     }
 }
@@ -198,37 +198,37 @@ mod tests {
     fn creator_records_must_be_internally_consistent() {
         assert!(creator_record_is_consistent(
             CreatorKind::LocalPseud,
-            Some(()),
+            true,
             None,
             None
         ));
         assert!(!creator_record_is_consistent(
             CreatorKind::LocalPseud,
-            None,
+            false,
             None,
             None
         ));
         assert!(!creator_record_is_consistent(
             CreatorKind::LocalPseud,
-            Some(()),
+            true,
             Some("ao3"),
             Some("123")
         ));
         assert!(creator_record_is_consistent(
             CreatorKind::External,
-            None,
+            false,
             Some("ao3"),
             Some("123456")
         ));
         assert!(!creator_record_is_consistent(
             CreatorKind::External,
-            Some(()),
+            true,
             Some("ao3"),
             Some("123456")
         ));
         assert!(!creator_record_is_consistent(
             CreatorKind::External,
-            None,
+            false,
             Some("ao3"),
             None
         ));
