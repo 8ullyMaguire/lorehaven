@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { isPlainLeftClick, matchRoute, PLANNED_ROUTES } from './router';
 
 describe('routing', () => {
+  it('resolves the media catalogue', () => {
+    expect(matchRoute('/media').id).toBe('media');
+  });
   it('maps the root to the home view', () => {
     expect(matchRoute('/').id).toBe('home');
     expect(matchRoute('').id).toBe('home');

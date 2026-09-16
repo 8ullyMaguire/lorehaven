@@ -24,6 +24,7 @@
   import Reader from './routes/Reader.svelte';
   import Register from './routes/Register.svelte';
   import Search from './routes/Search.svelte';
+  import Media from './routes/Media.svelte';
   import SignIn from './routes/SignIn.svelte';
   import WorkEditor from './routes/WorkEditor.svelte';
   import WorkPage from './routes/WorkPage.svelte';
@@ -43,6 +44,7 @@
   const NAV = [
     { href: '/discover', label: 'Discover', primary: true },
     { href: '/search', label: 'Search', primary: true },
+    { href: '/media', label: 'Media', primary: false },
     { href: '/library', label: 'Library', primary: true },
     { href: '/import', label: 'Import', primary: true },
     { href: '/exports', label: 'Exports', primary: false },
@@ -258,6 +260,8 @@
     <History />
   {:else if route.id === 'import'}
     <Import />
+  {:else if route.id === 'media'}
+    <Media />
   {:else if route.id === 'search'}
     <Search />
   {:else if route.id === 'exports'}
