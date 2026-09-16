@@ -91,9 +91,18 @@ fn is_valid_timestamp(s: &str) -> bool {
 fn parse_secs(s: &str) -> Option<(u8, Option<u16>)> {
     let parts: Vec<&str> = s.split('.').collect();
     match parts.as_slice() {
-        [secs] => secs.parse::<u8>().ok().map(|s| (s, None)),
+        [secs] => {
+            let secs = secs.parse::<u8>().ok()?;
+            if secs >= 60 {
+                return None;
+            }
+            Some((secs, None))
+        }
         [secs, frac] => {
             let secs = secs.parse::<u8>().ok()?;
+            if secs >= 60 {
+                return None;
+            }
             let frac = frac.parse::<u16>().ok()?;
             Some((secs, Some(frac)))
         }
@@ -104,6 +113,7 @@ fn parse_secs(s: &str) -> Option<(u8, Option<u16>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn paragraph_anchor_requires_chapter() {
