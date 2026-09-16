@@ -999,15 +999,20 @@ pub struct MediaFile {
     pub version: i64,
 }
 
-/// List editions for a work.
-pub async fn list_media_editions(
-    db: &Database,
-    work_id: &str,
-    _account_id: Option<&str>,
-) -> Result<Vec<MediaEdition>> {
-    let sqlite = "SELECT id, work_id, edition_kind, label, parent_edition_id, published_at, created_at, updated_at, version FROM media_editions WHERE work_id = ? ORDER BY created_at DESC";
-    let postgres = "SELECT id, work_id, edition_kind, label, parent_edition_id, published_at, created_at, updated_at, version FROM media_editions WHERE work_id = ? ORDER BY created_at DESC";
-    let sql = &db.sql(sqlite, postgres);
+/// List editions for a work. The route has already applied the direct-door
+/// eligibility rule via `find_media`; this returns every edition row of the
+/// work. PG twin: UUID ids decode as text, the bind casts to uuid.
+pub async fn list_media_editions(db: &Database, work_id: &str) -> Result<Vec<MediaEdition>> {
+    let sqlite = "SELECT id, work_id, edition_kind, label, parent_edition_id, \
+                  published_at, created_at, updated_at, version \
+                  FROM media_editions WHERE work_id = ? ORDER BY created_at DESC"
+        .to_string();
+    let postgres = "SELECT id::text AS id, work_id::text AS work_id, edition_kind, label, \
+                    parent_edition_id::text AS parent_edition_id, published_at, \
+                    created_at, updated_at, version::bigint \
+                    FROM media_editions WHERE work_id = ?::uuid ORDER BY created_at DESC"
+        .to_string();
+    let sql = &db.sql(&sqlite, &postgres);
     let rows = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as::<_, MediaEdition>(sql)
@@ -1025,15 +1030,19 @@ pub async fn list_media_editions(
     Ok(rows)
 }
 
-/// List files for a work.
-pub async fn list_media_files(
-    db: &Database,
-    work_id: &str,
-    _account_id: Option<&str>,
-) -> Result<Vec<MediaFile>> {
-    let sqlite = "SELECT id, work_id, edition_kind, url, size_bytes, mime_type, checksum, created_at FROM media_files WHERE work_id = ? ORDER BY created_at";
-    let postgres = "SELECT id, work_id, edition_kind, url, size_bytes, mime_type, checksum, created_at FROM media_files WHERE work_id = ? ORDER BY created_at";
-    let sql = &db.sql(sqlite, postgres);
+/// List files for a work. The route has already applied the direct-door
+/// eligibility rule via `find_media`; this returns every file row of the
+/// work. PG twin: UUID ids decode as text, the bind casts to uuid.
+pub async fn list_media_files(db: &Database, work_id: &str) -> Result<Vec<MediaFile>> {
+    let sqlite = "SELECT id, work_id, edition_kind, url, size_bytes, mime_type, checksum, \
+                  created_at, updated_at, version \
+                  FROM media_files WHERE work_id = ? ORDER BY created_at"
+        .to_string();
+    let postgres = "SELECT id::text AS id, work_id::text AS work_id, edition_kind, url, \
+                    size_bytes, mime_type, checksum, created_at, updated_at, version::bigint \
+                    FROM media_files WHERE work_id = ?::uuid ORDER BY created_at"
+        .to_string();
+    let sql = &db.sql(&sqlite, &postgres);
     let rows = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as::<_, MediaFile>(sql)

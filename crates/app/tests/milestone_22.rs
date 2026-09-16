@@ -53,7 +53,6 @@ fn config_for(dir: &Path) -> Config {
 struct Client {
     app: axum::Router,
     cookies: Vec<(String, String)>,
-    headers: Vec<(String, String)>,
 }
 
 impl Client {
@@ -61,12 +60,7 @@ impl Client {
         Self {
             app,
             cookies: Vec::new(),
-            headers: Vec::new(),
         }
-    }
-    fn with_header(mut self, name: &str, value: &str) -> Self {
-        self.headers.push((name.to_owned(), value.to_owned()));
-        self
     }
     fn cookie(&self, name: &str) -> Option<&str> {
         self.cookies
@@ -94,9 +88,6 @@ impl Client {
     }
     async fn send(&mut self, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
         let mut builder = Request::builder().method(method).uri(uri);
-        for (name, value) in &self.headers {
-            builder = builder.header(name.as_str(), value.as_str());
-        }
         if !self.cookies.is_empty() {
             builder = builder.header(
                 header::COOKIE,
@@ -271,7 +262,10 @@ async fn migration_0024_creates_the_media_entity_tables() {
 
 // Implemented read doors now have behavior tests below.
 // These remain as 501 contract stubs:
-const READ_DOORS_STILL_501: &[&str] = &[];
+const READ_DOORS_STILL_501: &[&str] = &[
+    "/api/v1/canons/00000000-0000-0000-0000-000000000005/media",
+    "/api/v1/spaces/00000000-0000-0000-0000-000000000006/media",
+];
 
 #[tokio::test]
 async fn unimplemented_read_doors_still_return_501() {
@@ -423,6 +417,67 @@ async fn seed_work(
     };
     result.expect("seed work");
     id
+}
+
+/// Seed one media_files row for a work (migration 0025).
+async fn seed_file(fx: &Fixture, work_id: &str, mime_type: &str) {
+    let cast = if fx.tdb.is_postgres() { "::uuid" } else { "" };
+    let sql = fx.tdb.sql(&format!(
+        "INSERT INTO media_files (id, work_id, edition_kind, url, mime_type, created_at, updated_at, version) \
+         VALUES (?{cast}, ?{cast}, 'prose', 'https://files.example.test/a.epub', ?, \
+                 '2026-09-01T00:03:00Z', '2026-09-01T00:03:00Z', 1)"
+    ));
+    let db = fx.tdb.db();
+    let result = match db.backend() {
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(derived_id(work_id, "10000000"))
+            .bind(work_id)
+            .bind(mime_type)
+            .execute(db.sqlite_pool().expect("sqlite pool"))
+            .await
+            .map(|_| ()),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(derived_id(work_id, "10000000"))
+            .bind(work_id)
+            .bind(mime_type)
+            .execute(db.postgres_pool().expect("postgres pool"))
+            .await
+            .map(|_| ()),
+    };
+    result.expect("seed media file");
+}
+
+/// Seed one media_editions row for a work (migration 0024).
+async fn seed_edition(fx: &Fixture, work_id: &str) {
+    let cast = if fx.tdb.is_postgres() { "::uuid" } else { "" };
+    let sql = fx.tdb.sql(&format!(
+        "INSERT INTO media_editions (id, work_id, edition_kind, label, created_at, updated_at, version) \
+         VALUES (?{cast}, ?{cast}, 'revised', 'Second edition', \
+                 '2026-09-01T00:04:00Z', '2026-09-01T00:04:00Z', 1)"
+    ));
+    let db = fx.tdb.db();
+    let result = match db.backend() {
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(derived_id(work_id, "20000000"))
+            .bind(work_id)
+            .execute(db.sqlite_pool().expect("sqlite pool"))
+            .await
+            .map(|_| ()),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(derived_id(work_id, "20000000"))
+            .bind(work_id)
+            .execute(db.postgres_pool().expect("postgres pool"))
+            .await
+            .map(|_| ()),
+    };
+    result.expect("seed media edition");
+}
+
+/// Deterministic file/edition ids derived from the seeded work id: swap
+/// the work uuid's first group for `10…`/`20…`, keeping valid uuid shape
+/// on both dialects and avoiding collisions.
+fn derived_id(work_id: &str, group: &str) -> String {
+    format!("{group}-{}", &work_id[9..])
 }
 
 #[tokio::test]
@@ -620,37 +675,60 @@ async fn the_media_feed_escapes_user_text() {
 #[tokio::test]
 async fn media_files_and_editions_doors_return_data() {
     let fx = Fixture::new("media_files_editions").await;
-    let mut client = fx.client();
+    let mut owner = fx.client();
+    register(&mut owner, "editions@example.com", "editions-handle").await;
+    let pseud_id = author_pseud_id(&fx, "editions@example.com").await;
 
-    // Register a user and log in (cookies stored in client)
-    register(&mut client, "editions@example.com", "editions-handle").await;
-    let (status, login) = client
-        .post(
-            "/api/v1/auth/login",
-            json!({"email": "editions@example.com", "password": PASSWORD}),
-        )
+    // A published public work with one file and one edition seeded
+    // directly — the doors must decode real rows, not empty vectors.
+    let work_id = seed_work(
+        &fx,
+        1,
+        &pseud_id,
+        "Work with files",
+        "public",
+        "published",
+        "2026-09-01T00:01:00Z",
+    )
+    .await;
+    seed_file(&fx, &work_id, "application/epub+zip").await;
+    seed_edition(&fx, &work_id).await;
+
+    // A draft work with a file: its files door must 404 for anonymous
+    // callers (the direct-door rule hides drafts) even though rows exist.
+    let draft_id = seed_work(
+        &fx,
+        2,
+        &pseud_id,
+        "Draft with files",
+        "public",
+        "draft",
+        "2026-09-01T00:02:00Z",
+    )
+    .await;
+    seed_file(&fx, &draft_id, "text/plain").await;
+
+    // Owner sees the file and the edition, fully decoded.
+    let (status, body) = owner.get(&format!("/api/v1/media/{work_id}/files")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let files = body["files"].as_array().expect("files array");
+    assert_eq!(files.len(), 1, "expected the seeded file: {body}");
+    assert_eq!(files[0]["mime_type"], "application/epub+zip");
+    assert_eq!(files[0]["version"], 1);
+
+    let (status, body) = owner
+        .get(&format!("/api/v1/media/{work_id}/editions"))
         .await;
-    assert_eq!(status, StatusCode::OK, "login failed: {login}");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let editions = body["editions"].as_array().expect("editions array");
+    assert_eq!(editions.len(), 1, "expected the seeded edition: {body}");
+    assert_eq!(editions[0]["edition_kind"], "revised");
 
-    let (status, work) = client
-        .post("/api/v1/works", json!({"title": "Test Work", "slug": "test-work", "visibility": "public", "status": "published", "created_at": "2026-09-01T00:01:00Z"}))
-        .await;
-    assert_eq!(status, StatusCode::CREATED, "work creation failed: {work}");
-    let work_id = work["id"].as_str().unwrap();
-
-    // Files door returns data
-    let files_uri = format!("/api/v1/media/{}/files", work_id);
-    let (status, body) = client.get(&files_uri).await;
-    assert_eq!(status, StatusCode::OK, "files door failed: {body}");
-    let files = body["files"].as_array().unwrap();
-    assert!(files.is_empty(), "no files expected for new work");
-
-    // Editions door returns data
-    let editions_uri = format!("/api/v1/media/{}/editions", work_id);
-    let (status, body) = client.get(&editions_uri).await;
-    assert_eq!(status, StatusCode::OK, "editions door failed: {body}");
-    let editions = body["editions"].as_array().unwrap();
-    assert!(editions.is_empty(), "no editions expected for new work");
+    // Anonymous callers get 404 for the draft's files — the direct-door
+    // rule hides drafts; existence is not leaked.
+    let mut anon = fx.client();
+    let (status, _) = anon.get(&format!("/api/v1/media/{draft_id}/files")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 
     fx.cleanup().await;
 }
