@@ -90,8 +90,101 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
     }
 }
 
+fn quality_threshold(value: &str) -> Result<String, QueryError> {
+    let value = value
+        .parse::<i64>()
+        .map_err(|_| QueryError::new("quality must be an integer from 0 to 1000", 0))?;
+    if !(0..=1000).contains(&value) {
+        return Err(QueryError::new("quality must be from 0 to 1000", 0));
+    }
+    Ok(value.to_string())
+}
+
 fn render_fielded(field: &QueryField, value: &str) -> Result<SqlFragment, QueryError> {
     match field {
+        QueryField::MinQuality => {
+            let threshold = quality_threshold(value)?;
+            // Stored weights are instance-controlled; missing signals do not qualify.
+            Ok(SqlFragment::new("((SELECT SUM(CAST(qs.value AS DOUBLE PRECISION) * qs.weight) / NULLIF(SUM(qs.weight), 0) FROM quality_signals qs WHERE qs.work_id = works.id AND qs.weight > 0) >= CAST(? AS DOUBLE PRECISION))").with_bind(threshold))
+        }
+        QueryField::Quality => {
+            let (kind, threshold) = value
+                .split_once(':')
+                .ok_or_else(|| QueryError::new("quality requires signal:minimum", 0))?;
+            kind.parse::<crate::media::QualitySignalKind>()
+                .map_err(|_| QueryError::new("unknown quality signal", 0))?;
+            Ok(SqlFragment::new("EXISTS (SELECT 1 FROM quality_signals qs WHERE qs.work_id = works.id AND qs.signal_kind = ? AND qs.value >= CAST(? AS BIGINT))")
+                .with_bind(kind).with_bind(quality_threshold(threshold)?))
+        }
+        QueryField::Completion => {
+            if !matches!(value, "complete" | "in_progress" | "abandoned" | "on_hold") {
+                return Err(QueryError::new("unknown completion status", 0));
+            }
+            Ok(SqlFragment::new("works.completion = ?").with_bind(value))
+        }
+        QueryField::Published => {
+            let (start, end) = value
+                .split_once("..")
+                .ok_or_else(|| QueryError::new("published requires YYYY-MM-DD..YYYY-MM-DD", 0))?;
+            let parse = |s: &str| {
+                time::Date::parse(
+                    s,
+                    &time::macros::format_description!("[year]-[month]-[day]"),
+                )
+                .map_err(|_| QueryError::new("invalid date", 0))
+            };
+            let start = parse(start)?;
+            let end = parse(end)?;
+            if start > end {
+                return Err(QueryError::new("date range is reversed", 0));
+            }
+            Ok(SqlFragment::new(
+                "(SUBSTR(works.published_at, 1, 10) >= ? AND SUBSTR(works.published_at, 1, 10) <= ?)",
+            )
+            .with_bind(start.to_string())
+            .with_bind(end.to_string()))
+        }
+        QueryField::Rating => {
+            if !matches!(value, "general" | "teen" | "mature" | "explicit") {
+                return Err(QueryError::new("unknown rating", 0));
+            }
+            Ok(SqlFragment::new("works.rating = ?").with_bind(value))
+        }
+        QueryField::Format => {
+            value
+                .parse::<crate::media::MediaFormat>()
+                .map_err(|_| QueryError::new("unknown media format", 0))?;
+            Ok(SqlFragment::new("(works.format = ?)").with_bind(value))
+        }
+        QueryField::Edition => {
+            value
+                .parse::<crate::media::EditionKind>()
+                .map_err(|_| QueryError::new("unknown edition kind", 0))?;
+            Ok(SqlFragment::new("EXISTS (SELECT 1 FROM media_editions me WHERE me.work_id = works.id AND me.edition_kind = ?)").with_bind(value))
+        }
+        QueryField::Updated => {
+            let (start, end) = value
+                .split_once("..")
+                .ok_or_else(|| QueryError::new("updated requires YYYY-MM-DD..YYYY-MM-DD", 0))?;
+            let parse = |s: &str| {
+                time::Date::parse(
+                    s,
+                    &time::macros::format_description!("[year]-[month]-[day]"),
+                )
+                .map_err(|_| QueryError::new("invalid date", 0))
+            };
+            let start = parse(start)?;
+            let end = parse(end)?;
+            if start > end {
+                return Err(QueryError::new("date range is reversed", 0));
+            }
+            // Inclusive date bounds; timestamps are canonical TEXT in both dialects.
+            Ok(SqlFragment::new(
+                "(SUBSTR(works.updated_at, 1, 10) >= ? AND SUBSTR(works.updated_at, 1, 10) <= ?)",
+            )
+            .with_bind(start.to_string())
+            .with_bind(end.to_string()))
+        }
         QueryField::Title => {
             let sql = "(LOWER(works.title) LIKE LOWER(?))";
             Ok(SqlFragment::new(sql).with_bind(format!("%{}%", value)))

@@ -16,6 +16,14 @@ pub enum QueryField {
     Body,
     Language,
     Status,
+    Format,
+    Edition,
+    Rating,
+    Completion,
+    Published,
+    Updated,
+    MinQuality,
+    Quality,
 }
 
 impl QueryField {
@@ -32,6 +40,14 @@ impl QueryField {
             Self::Body => "body",
             Self::Language => "language",
             Self::Status => "status",
+            Self::Format => "format",
+            Self::Edition => "edition",
+            Self::Rating => "rating",
+            Self::Completion => "completion",
+            Self::Published => "published",
+            Self::Updated => "updated",
+            Self::MinQuality => "min_quality",
+            Self::Quality => "quality",
         }
     }
 
@@ -48,6 +64,14 @@ impl QueryField {
             "body" => Self::Body,
             "language" => Self::Language,
             "status" => Self::Status,
+            "format" => Self::Format,
+            "edition" => Self::Edition,
+            "rating" => Self::Rating,
+            "completion" => Self::Completion,
+            "published" => Self::Published,
+            "updated" => Self::Updated,
+            "min_quality" => Self::MinQuality,
+            "quality" => Self::Quality,
             _ => return None,
         })
     }
@@ -209,7 +233,7 @@ impl<'a> Parser<'a> {
         let start = self.pos;
         self.pos += 1; // skip opening quote
         while self.pos < self.input.len() && !self.input[self.pos..].starts_with('"') {
-            self.pos += 1;
+            self.pos += self.input[self.pos..].chars().next().unwrap().len_utf8();
         }
         if self.pos >= self.input.len() {
             return Err(QueryError::new("unterminated phrase".to_owned(), start));
@@ -223,7 +247,7 @@ impl<'a> Parser<'a> {
         let start = self.pos;
         while self.pos < self.input.len() {
             let c = self.input[self.pos..].chars().next().unwrap();
-            if c.is_whitespace() || c == '(' || c == ')' || c == '"' || c == '-' {
+            if c.is_whitespace() || c == '(' || c == ')' || c == '"' {
                 break;
             }
             self.pos += c.len_utf8();
@@ -236,6 +260,15 @@ impl<'a> Parser<'a> {
         // Check for fielded search: field:value
         if let Some((field, value)) = term.split_once(':') {
             if let Some(f) = QueryField::parse(field) {
+                if value.is_empty() {
+                    if self.input[self.pos..].starts_with('"') {
+                        let QueryAst::Phrase(value) = self.parse_phrase()? else {
+                            unreachable!()
+                        };
+                        return Ok(QueryAst::Fielded(f, value));
+                    }
+                    return Err(QueryError::new("expected a field value", self.pos));
+                }
                 return Ok(QueryAst::Fielded(f, value.to_owned()));
             }
         }
@@ -274,6 +307,18 @@ impl<'a> Parser<'a> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn quoted_unicode_and_fielded_phrases_parse() {
+        let fielded = super::parse_query(concat!("title:", '"', "été bleu", '"')).unwrap();
+        assert_eq!(
+            fielded,
+            super::QueryAst::Fielded(super::QueryField::Title, "été bleu".into())
+        );
+        let phrase = super::parse_query(concat!('"', "été bleu", '"')).unwrap();
+        assert_eq!(phrase, super::QueryAst::Phrase("été bleu".into()));
+        assert!(super::parse_query("title:").is_err());
+    }
+
     use super::*;
 
     #[test]

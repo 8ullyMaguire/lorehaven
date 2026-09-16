@@ -26,6 +26,7 @@ use lorehaven_db::identity::Account;
 use lorehaven_db::sessions::{self, Session};
 use lorehaven_domain::policy::AgeState;
 use lorehaven_domain::{AccountId, AppError, PseudId, SessionId};
+use std::str::FromStr;
 
 use crate::crypto;
 use crate::http::ApiError;
@@ -278,6 +279,69 @@ impl axum::extract::FromRequestParts<AppState> for RequirePseud {
             .ok_or_else(|| ApiError(AppError::AccessDenied))?;
 
         Ok(Self { user, pseud_id })
+    }
+}
+use lorehaven_domain::api_scopes::Scope;
+
+/// Identity resolved from a Bearer API token.
+#[derive(Debug, Clone)]
+pub struct TokenUser {
+    pub account_id: AccountId,
+    pub scopes: Vec<Scope>,
+}
+
+/// Resolve a Bearer token when present, without rejecting the request.
+pub struct MaybeToken(pub Option<TokenUser>);
+
+impl axum::extract::FromRequestParts<AppState> for MaybeToken {
+    type Rejection = std::convert::Infallible;
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let Some(header) = parts
+            .headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+        else {
+            return Ok(Self(None));
+        };
+        let hash = crate::crypto::hash_token(header);
+        match lorehaven_db::external::resolve_token(state.db(), &hash).await {
+            Ok(Some((account_id, scope_strs))) => {
+                let scopes = scope_strs
+                    .iter()
+                    .filter_map(|s| Scope::from_str(s).ok())
+                    .collect::<Vec<_>>();
+                match AccountId::from_str(&account_id) {
+                    Ok(account_id) => Ok(Self(Some(TokenUser { account_id, scopes }))),
+                    Err(_) => Ok(Self(None)),
+                }
+            }
+            Ok(None) | Err(_) => Ok(Self(None)),
+        }
+    }
+}
+
+/// Reject requests without a valid token holding the required scope.
+pub struct RequireToken {
+    pub token: TokenUser,
+}
+
+impl axum::extract::FromRequestParts<AppState> for RequireToken {
+    type Rejection = ApiError;
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let maybe = MaybeToken::from_request_parts(parts, state)
+            .await
+            .map_err(|_| ApiError(AppError::AuthRequired))?;
+        match maybe.0 {
+            Some(token) => Ok(Self { token }),
+            None => Err(ApiError(AppError::AuthRequired)),
+        }
     }
 }
 

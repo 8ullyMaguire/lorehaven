@@ -13,17 +13,17 @@
 //! merging (ADR 0019).
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use lorehaven_domain::media::{CollectionKind, CreatorKind, DistributorKind};
-use lorehaven_domain::query::QueryAst;
 use serde::Deserialize;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::str::FromStr;
 
-use crate::auth::{MaybeSession, RequireSession};
+use crate::auth::{MaybeSession, MaybeToken, RequireSession, SessionUser, TokenUser};
 use crate::state::AppState;
 
 // ---------------------------------------------------------------------------
@@ -49,21 +49,75 @@ pub struct PutCollectionRequest {
 // Read doors (the same engine behind every list; spec §32.4)
 // ---------------------------------------------------------------------------
 
+/// Hash the eligible representation, not global change timestamps. Private
+/// revalidation prevents a shared cache from reusing a signed-in response.
+fn conditional_response(
+    headers: &HeaderMap,
+    body: Vec<u8>,
+    content_type: &'static str,
+) -> axum::response::Response {
+    let tag = format!("\"{:x}\"", Sha256::digest(&body));
+    let unchanged = headers
+        .get_all(header::IF_NONE_MATCH)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(|value| {
+            value.trim() == "*" || value.trim().strip_prefix("W/").unwrap_or(value.trim()) == tag
+        });
+    let mut response = if unchanged {
+        StatusCode::NOT_MODIFIED.into_response()
+    } else {
+        ([(header::CONTENT_TYPE, content_type)], body).into_response()
+    };
+    response
+        .headers_mut()
+        .insert(header::ETAG, HeaderValue::from_str(&tag).expect("hex ETag"));
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, no-cache"),
+    );
+    response.headers_mut().insert(
+        header::VARY,
+        HeaderValue::from_static("Cookie, Authorization"),
+    );
+    response
+}
+
 async fn list_media(
     State(state): State<AppState>,
     Query(params): Query<MediaQuery>,
     MaybeSession(session): MaybeSession,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
     let db = state.db();
     // Empty/absent q means match-all: no text facet is built, so the
     // query never touches works_index.
-    let query = match params.q.as_deref() {
-        Some(q) if !q.trim().is_empty() => Some(QueryAst::Text(q.trim().to_string())),
-        _ => None,
+    let query = match params.q.as_deref().filter(|q| !q.trim().is_empty()) {
+        Some(q) => match lorehaven_domain::query::parse_query(q).and_then(|ast| {
+            lorehaven_domain::query_sql::render_query(&ast)?;
+            Ok(ast)
+        }) {
+            Ok(ast) => Some(ast),
+            Err(error) => return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({"error": {"code": "VALIDATION_FAILED", "message": error.message, "offset": error.offset}})),
+            ).into_response(),
+        },
+        None => None,
     };
     let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
-    let limit = params.limit.unwrap_or(50).min(200);
+    let limit = match params.validate_pagination() {
+        Ok(limit) => limit,
+        Err(message) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({"error": {"code": "VALIDATION_FAILED", "message": message}})),
+            )
+                .into_response()
+        }
+    };
     let (items, total, next_cursor) = match lorehaven_db::media::list_media_filtered(
         db,
         query.as_ref(),
@@ -83,13 +137,17 @@ async fn list_media(
         }
     };
 
-    Json(json!({
-        "items": items,
-        "total": total,
-        "limit": limit,
-        "next_cursor": next_cursor,
-    }))
-    .into_response()
+    conditional_response(
+        &headers,
+        serde_json::to_vec(&json!({
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "next_cursor": next_cursor,
+        }))
+        .expect("media JSON"),
+        "application/json",
+    )
 }
 
 /// The direct-door rule (ADR 0002): public and unlisted are reachable by
@@ -97,35 +155,103 @@ async fn list_media(
 /// the shared eligibility service replaces this when wired); drafts and
 /// unknown states only for the owner. Ineligible callers get 404, not
 /// 403 — do not reveal that a hidden work exists.
-fn direct_door_eligible(
+async fn direct_door_eligible(
+    state: &AppState,
     media: &lorehaven_db::media::MediaRecord,
-    account_id: Option<&str>,
+    session: Option<&SessionUser>,
+    token: Option<&TokenUser>,
 ) -> bool {
-    let is_owner = account_id == Some(media.owning_account_id.as_str());
-    is_owner
-        || match (media.lifecycle.as_str(), media.visibility.as_str()) {
-            // Published: public and unlisted are link-reachable by anyone.
-            ("published", "public" | "unlisted") => true,
-            // Published restricted needs a session (skeleton §7.6 — the
-            // shared eligibility service replaces this when wired).
-            ("published", "restricted") => account_id.is_some(),
-            // Everything else (drafts, scheduled, withdrawn, unknown
-            // states) stays owner-only.
-            _ => false,
-        }
+    use lorehaven_domain::policy::{can_access_content, AccessPolicy, ContentFacts};
+    // Token-authenticated callers contribute as their account; session callers
+    // contribute as their pseud. Either identity can satisfy contributor checks.
+    let token_contributor =
+        token.is_some_and(|t| t.account_id.to_string() == media.owning_account_id);
+    let session_contributor =
+        session.is_some_and(|user| user.account_id.to_string() == media.owning_account_id);
+    if token_contributor || session_contributor {
+        // Short-circuit: the caller owns this media. Build an actor from whichever
+        // identity is available so the shared eligibility service still applies.
+        let actor = session.and_then(|user| user.pseud_id.map(|pseud| user.actor(pseud)));
+        return lorehaven_domain::policy::can_access_content(
+            actor.as_ref(),
+            &lorehaven_domain::policy::ContentFacts {
+                lifecycle: {
+                    let parse = |value: &str| serde_json::Value::String(value.to_owned());
+                    serde_json::from_value(parse(&media.lifecycle))
+                        .unwrap_or(lorehaven_domain::policy::Lifecycle::Draft)
+                },
+                visibility: {
+                    let parse = |value: &str| serde_json::Value::String(value.to_owned());
+                    serde_json::from_value(parse(&media.visibility))
+                        .unwrap_or(lorehaven_domain::policy::Visibility::Public)
+                },
+                rating: {
+                    let parse = |value: &str| serde_json::Value::String(value.to_owned());
+                    serde_json::from_value(parse(&media.rating))
+                        .unwrap_or(lorehaven_domain::policy::ContentRating::General)
+                },
+                actor_is_contributor: true,
+                author_blocked_actor: false,
+                via_deep_link: true,
+            },
+            &lorehaven_domain::policy::AccessPolicy::default(),
+        )
+        .is_allowed();
+    }
+    let actor = session.and_then(|user| user.pseud_id.map(|pseud| user.actor(pseud)));
+    let parse = |value: &str| serde_json::Value::String(value.to_owned());
+    let (Ok(lifecycle), Ok(visibility), Ok(rating)) = (
+        serde_json::from_value(parse(&media.lifecycle)),
+        serde_json::from_value(parse(&media.visibility)),
+        serde_json::from_value(parse(&media.rating)),
+    ) else {
+        return false;
+    };
+    let mut policy = AccessPolicy::default();
+    if let Some(user) = session {
+        let Ok(settings) =
+            lorehaven_db::sessions::content_settings(state.db(), user.account_id).await
+        else {
+            return false;
+        };
+        policy.adult_max_rating = policy.adult_max_rating.min(settings.max_rating);
+        policy.minor_max_rating = policy.minor_max_rating.min(settings.max_rating);
+        policy.unknown_age_max_rating = policy.unknown_age_max_rating.min(settings.max_rating);
+    }
+    can_access_content(
+        actor.as_ref(),
+        &ContentFacts {
+            lifecycle,
+            visibility,
+            rating,
+            actor_is_contributor: session
+                .is_some_and(|user| user.account_id.to_string() == media.owning_account_id),
+            author_blocked_actor: false,
+            via_deep_link: true,
+        },
+        &policy,
+    )
+    .is_allowed()
 }
 
 async fn get_media(
     State(state): State<AppState>,
     Path(id): Path<String>,
     MaybeSession(session): MaybeSession,
+    MaybeToken(token): MaybeToken,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
     let db = state.db();
-    let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
     match lorehaven_db::media::find_media(db, &id).await {
-        Ok(Some(media)) if direct_door_eligible(&media, account_id.as_deref()) => {
-            Json(media).into_response()
+        Ok(Some(media))
+            if direct_door_eligible(&state, &media, session.as_ref(), token.as_ref()).await =>
+        {
+            conditional_response(
+                &headers,
+                serde_json::to_vec(&media).expect("media JSON"),
+                "application/json",
+            )
         }
         Ok(Some(_)) => (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response(),
@@ -141,12 +267,14 @@ async fn list_media_files(
     State(state): State<AppState>,
     Path(id): Path<String>,
     MaybeSession(session): MaybeSession,
+    MaybeToken(token): MaybeToken,
 ) -> impl IntoResponse {
     let db = state.db();
-    let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
     match lorehaven_db::media::find_media(db, &id).await {
-        Ok(Some(media)) if direct_door_eligible(&media, account_id.as_deref()) => {
+        Ok(Some(media))
+            if direct_door_eligible(&state, &media, session.as_ref(), token.as_ref()).await =>
+        {
             match lorehaven_db::media::list_media_files(db, &id).await {
                 Ok(files) => Json(json!({"files": files})).into_response(),
                 Err(e) => (
@@ -170,12 +298,14 @@ async fn list_media_editions(
     State(state): State<AppState>,
     Path(id): Path<String>,
     MaybeSession(session): MaybeSession,
+    MaybeToken(token): MaybeToken,
 ) -> impl IntoResponse {
     let db = state.db();
-    let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
     match lorehaven_db::media::find_media(db, &id).await {
-        Ok(Some(media)) if direct_door_eligible(&media, account_id.as_deref()) => {
+        Ok(Some(media))
+            if direct_door_eligible(&state, &media, session.as_ref(), token.as_ref()).await =>
+        {
             match lorehaven_db::media::list_media_editions(db, &id).await {
                 Ok(editions) => Json(json!({"editions": editions})).into_response(),
                 Err(e) => (
@@ -414,7 +544,13 @@ async fn post_media_query(
     // write: anonymous callers are allowed and eligibility is applied
     // inside; it sits in the Write rate class only because complex queries
     // are expensive. The caller's session is honored, never stripped.
-    list_media(State(state), Query(body), MaybeSession(session)).await
+    list_media(
+        State(state),
+        Query(body),
+        MaybeSession(session),
+        HeaderMap::new(),
+    )
+    .await
 }
 
 async fn post_creator(
@@ -476,11 +612,19 @@ async fn post_creator(
 
 async fn patch_creator(
     State(state): State<AppState>,
-    RequireSession(_user): RequireSession,
+    RequireSession(user): RequireSession,
     Path(id): Path<String>,
     Json(body): Json<PatchCreatorRequest>,
 ) -> impl IntoResponse {
     let db = state.db();
+    match lorehaven_db::governance::trust_for(db, &user.account_id.to_string()).await {
+        Ok(level) if level > 5 => {}
+        Ok(_) => return (StatusCode::FORBIDDEN, Json(json!({"error": {"code":"FORBIDDEN", "message":"Shared attribution changes require curator authority."}}))).into_response(),
+        Err(error) => {
+            tracing::error!(?error, "could not check creator curation authority");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    }
     match lorehaven_db::media::patch_creator(db, &id, body.name.as_deref()).await {
         Ok(true) => (StatusCode::OK, Json(json!({ "status": "updated" }))).into_response(),
         Ok(false) => (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" }))).into_response(),
@@ -613,51 +757,122 @@ async fn media_feed(
     State(state): State<AppState>,
     Query(params): Query<MediaQuery>,
     MaybeSession(session): MaybeSession,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
     let db = state.db();
     // Same match-all rule as the list door: empty/absent q builds no text
     // facet, so the feed never touches works_index.
-    let query = match params.q.as_deref() {
-        Some(q) if !q.trim().is_empty() => Some(QueryAst::Text(q.trim().to_string())),
-        _ => None,
+    let query = match params.q.as_deref().filter(|q| !q.trim().is_empty()) {
+        Some(q) => match lorehaven_domain::query::parse_query(q).and_then(|ast| {
+            lorehaven_domain::query_sql::render_query(&ast)?;
+            Ok(ast)
+        }) {
+            Ok(ast) => Some(ast),
+            Err(error) => return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({"error": {"code": "VALIDATION_FAILED", "message": error.message, "offset": error.offset}})),
+            ).into_response(),
+        },
+        None => None,
     };
     let account_id = session.as_ref().map(|u| u.account_id.to_string());
-    let limit = params.limit.unwrap_or(50).min(200);
+    let limit = match params.validate_pagination() {
+        Ok(limit) => limit,
+        Err(message) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({"error": {"code": "VALIDATION_FAILED", "message": message}})),
+            )
+                .into_response()
+        }
+    };
 
     match lorehaven_db::media::list_media_filtered(
         db,
         query.as_ref(),
         account_id.as_deref(),
         limit,
-        None,
+        params.cursor.as_deref(),
     )
     .await
     {
-        Ok((items, total, _next_cursor)) => {
-            // Build simple Atom feed
-            let entries: Vec<String> = items
+        Ok((items, _total, next_cursor)) => {
+            let kind = params.format.as_deref().unwrap_or("atom");
+            if !matches!(kind, "atom" | "rss") {
+                return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({"error": {"code": "VALIDATION_FAILED", "message": "feed format must be atom or rss"}}))).into_response();
+            }
+            let base = state.config().site.base_url.trim_end_matches('/');
+            let mut self_url =
+                url::Url::parse(&format!("{base}/api/v1/media/feed")).expect("configured base URL");
+            {
+                let mut pairs = self_url.query_pairs_mut();
+                pairs
+                    .append_pair("format", kind)
+                    .append_pair("limit", &limit.to_string());
+                if let Some(q) = params.q.as_deref().filter(|q| !q.trim().is_empty()) {
+                    pairs.append_pair("q", q.trim());
+                }
+                if let Some(cursor) = &params.cursor {
+                    pairs.append_pair("cursor", cursor);
+                }
+            }
+            let updated = items
                 .iter()
-                .map(|m| {
-                    format!(
-                        r#"<entry><title>{}</title><id>{}</id><updated>{}</updated></entry>"#,
-                        xml_escape(&m.title),
-                        xml_escape(&m.id),
-                        xml_escape(&m.updated_at)
-                    )
-                })
-                .collect();
-            let xml = format!(
-                r#"<?xml version="1.0" encoding="UTF-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom">
-<title>Media Feed</title>
-<id>urn:uuid:media-feed</id>
-<totalResults>{}</totalResults>
-{}
-</feed>"#,
-                total,
-                entries.join("")
-            );
-            ([("content-type", "application/atom+xml")], xml).into_response()
+                .map(|m| m.updated_at.as_str())
+                .max()
+                .unwrap_or("1970-01-01T00:00:00Z");
+            let mut xml = if kind == "rss" {
+                format!(
+                    r#"<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Media Feed</title><link>{}</link><description>Eligible media matching this query</description><atom:link rel="self" href="{}" type="application/rss+xml"/>"#,
+                    xml_escape(base),
+                    xml_escape(self_url.as_str())
+                )
+            } else {
+                format!(
+                    r#"<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Media Feed</title><id>{}</id><updated>{}</updated><author><name>Lorehaven</name></author><link rel="self" href="{}" type="application/atom+xml"/>"#,
+                    xml_escape(self_url.as_str()),
+                    xml_escape(updated),
+                    xml_escape(self_url.as_str())
+                )
+            };
+            if let Some(cursor) = next_cursor {
+                let mut next = self_url.clone();
+                next.set_query(None);
+                for (key, value) in self_url.query_pairs().filter(|(key, _)| key != "cursor") {
+                    next.query_pairs_mut().append_pair(&key, &value);
+                }
+                next.query_pairs_mut().append_pair("cursor", &cursor);
+                let prefix = if kind == "rss" { "atom:" } else { "" };
+                xml.push_str(&format!(
+                    r#"<{prefix}link rel="next" href="{}"/>"#,
+                    xml_escape(next.as_str())
+                ));
+            }
+            for item in items {
+                let link = xml_escape(&format!("{base}/works/{}", item.id));
+                let title = xml_escape(&item.title);
+                let summary = xml_escape(item.summary.as_deref().unwrap_or(""));
+                let id = xml_escape(&format!("urn:uuid:{}", item.id));
+                if kind == "rss" {
+                    xml.push_str(&format!(r#"<item><title>{title}</title><link>{link}</link><guid isPermaLink="false">{id}</guid><description>{summary}</description></item>"#));
+                } else {
+                    xml.push_str(&format!(r#"<entry><title>{title}</title><id>{id}</id><updated>{}</updated><link href="{link}"/><summary>{summary}</summary></entry>"#, xml_escape(&item.updated_at)));
+                }
+            }
+            xml.push_str(if kind == "rss" {
+                "</channel></rss>"
+            } else {
+                "</feed>"
+            });
+            conditional_response(
+                &headers,
+                xml.into_bytes(),
+                if kind == "rss" {
+                    "application/rss+xml"
+                } else {
+                    "application/atom+xml"
+                },
+            )
         }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -715,6 +930,22 @@ pub struct MediaQuery {
     pub cursor: Option<String>,
     /// Output format override: `atom` (default), `opds`, `json`, or `dc` (Dublin Core).
     pub format: Option<String>,
+}
+
+impl MediaQuery {
+    fn validate_pagination(&self) -> Result<i64, &'static str> {
+        let limit = self.limit.unwrap_or(50);
+        if limit < 1 {
+            return Err("limit must be positive");
+        }
+        if let Some(cursor) = &self.cursor {
+            let (date, id) = cursor.rsplit_once('|').ok_or("invalid cursor")?;
+            time::OffsetDateTime::parse(date, &time::format_description::well_known::Rfc3339)
+                .map_err(|_| "invalid cursor timestamp")?;
+            uuid::Uuid::parse_str(id).map_err(|_| "invalid cursor id")?;
+        }
+        Ok(limit.min(200))
+    }
 }
 
 #[derive(Debug, Deserialize)]
