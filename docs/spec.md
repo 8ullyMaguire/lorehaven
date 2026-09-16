@@ -4581,6 +4581,177 @@ PATCH /api/v1/admin/sharing
 
 ---
 
+# 32. Generalized Media Platform: Creators, Distributors, Collections, and the Media Query API
+
+Lorehaven generalizes from "a fanfiction platform that also hosts media" to a
+platform for written and recorded media of any kind — fiction, poetry, essays,
+books, translations, audio, video, comics, scans, and preserved archive items —
+such that it can stand in for AO3, FanFiction.net, Wattpad, StoryGraph,
+Goodreads, the Internet Archive, Literotica and their peers. Every
+differentiator in §0 is a default, never a casualty: positivity-first
+feedback, trust-level governance, reader content controls, privacy,
+quality-first curation, self-hosting. Design rationale lives in the review
+note (`secondbrain: 10-projects-lorehaven-platform-redesign-spec.md`) and
+ADR 0019; this section is normative.
+
+"Drop-in replacement" means three guarantees, never protocol emulation of
+another site's private API:
+
+1. **Data in.** Content migrates from peer sites through adapters (§11.1)
+   and site APIs where they exist.
+2. **Feature parity.** Every user-facing behavior a person relies on at
+   those sites exists here in generalized form.
+3. **Data out.** Everything the UI can show, the API can return: filtered,
+   paginated, subscribed, and exportable. Scraping this instance is
+   impossible by construction; scraping exists only in the ingestion
+   direction, toward other sites.
+
+## 32.1 Milestone 22 — media entity model
+
+**Implement.** Migration 0024 (both dialects, per ADR 0004): `creators`
+(local pseuds and external records; an external creator is never merged
+into a local account by name or handle, §11.11; verification is quorum,
+§19), `media_creators` attribution edges, `distributors` and
+`distributorships` (who made it available, and how: published, hosted,
+mirrored, preserved, narrated, translated, reprinted), `media_collections`
+and `media_collection_items` (one typed-membership model for series,
+anthologies, reading lists, archive collections, challenge anthologies,
+preserved batches — M13 event collections keep their own tables),
+`media_editions` (publication history; revisions stay the editing history),
+`media_rights` (license, rights statement, lending class — `ai_training`
+stays on works, §24.14), `quality_signals` (typed, sourced, recomputable,
+0..=1000), and `works.format` defaulting to `prose` (§30.1's taxonomy,
+widened: prose, poetry, essay, article, book, fanwork, translation, podfic,
+audiobook, fan_film, video, fan_comic, comic, zine_scan, image,
+interactive, dataset, other).
+
+Domain rules in `lorehaven-domain::media`: the vocabularies above with
+`FromStr` round trips, creator-record consistency, quality-signal bounds.
+
+**Acceptance.**
+- 0024 applies on SQLite and PostgreSQL and the parity check passes.
+- A creator record that is neither properly local nor properly external is
+  refused at the edge.
+- Pre-M22 works read as `format = prose` everywhere format is displayed.
+
+## 32.2 Milestone 23 — the media query engine and API
+
+**Implement.** One query engine behind seven doors, all returning the same
+`MediaRecord` shape (id, format, title, creators, distributorships,
+collections, canon, rating, warnings, dates, quality, language, status,
+length/runtime, transcript availability, rights, files, canonical URL):
+
+```text
+GET  /api/v1/media                      GET  /api/v1/media/{id}
+GET  /api/v1/media/{id}/files           GET  /api/v1/media/{id}/editions
+GET  /api/v1/creators[/{id}][/media]    GET  /api/v1/distributors[/{id}][/media]
+GET  /api/v1/media-collections[/{id}][/media]
+GET  /api/v1/canons/{id}/media          GET  /api/v1/spaces/{id}/media
+POST /api/v1/media/query                (complex queries as JSON)
+```
+
+Filter dimensions: quality (`min_quality`, individual signals,
+`min_creator_trust`), dates (published/updated/ingested), format and media
+type, rating, warnings and content notes (§15.16), completion status,
+language, length or runtime, canon(s) and crossover, namespaced tags, mood
+(§15), license, transcript availability (§30.8), preservation status; and
+for authenticated callers, library-local filters (§14). Cursor-paginated,
+stable-sorted, ETag/304 per query. Every query renders as Atom/RSS (§23.5)
+and as an OPDS acquisition feed; every query can be watched by a webhook
+(§21) and exported as a grant-gated bundle (§13, fair-queued §20). Public
+media pages embed JSON-LD (`CreativeWork` family); `?format=dc` returns
+Dublin Core.
+
+**The ranking philosophy is filters, not scores.** A composite quality
+score is instance configuration (weights documented, never purchasable,
+§0.3); it powers filters and sorts but is not displayed as a public
+leaderboard unless the operator chooses.
+
+**Acceptance.**
+- "All media by creator X", "all media in collection Y", and "all media in
+  canon Z" are single authenticated-or-public calls, filtered by quality
+  and date, cursor-stable.
+- A query's ETag answers 304 when nothing eligible changed.
+- A query renders as OPDS and downloads into an e-reader client without a
+  bespoke client implementation.
+- No response leaks media the caller is not eligible for (§7.6 on every
+  door, including collection and canon scopes).
+- Bulk export of a large query completes through the job queue, is rate
+  limited and fair-queued, and never bypasses download grants.
+
+## 32.3 Milestone 24 — site parity features
+
+**Implement.** Anchored comments on any unit position — paragraph offsets
+for text, timestamps for media (§12, §30.4); orphaning (a creator detaches
+and the media persists under its provenance, pairing with succession
+§24.15); a creator dashboard of aggregate, privacy-preserving, positivity-
+framed statistics (§24.3 rules; no public shaming numbers); half-star
+rating granularity as a reader setting (§9); shelf import from
+Goodreads/StoryGraph CSV and works import from the Wattpad and AO3 APIs as
+adapters (§11.1, ingestion only); bulk manuscript import (doc/epub/txt)
+into the editor (§8); per-format reading goals (words, minutes, items).
+
+**Acceptance.**
+- An orphaned work keeps its comments, stats and editions and loses no
+  eligibility; the orphaning is reversible only by quorum.
+- A StoryGraph CSV import produces library states and reviews that respect
+  the reader's existing ratings and dates, and refuses rows it cannot map,
+  naming them.
+- Anchored comments on a media unit address a timestamp, and on a text
+  unit a paragraph, and both flow through the positivity filter (§12).
+
+## 32.4 Milestone 25 — archive mode
+
+**Implement.** Derivative pipeline over `content_blobs` (EPUB/PDF/text
+renditions, OCR for scans, transcode for uploaded media) as jobs (§10.4);
+full-text search joining transcripts and OCR text (§15, §30.8);
+public-domain collections driven by the rights field; optional controlled
+digital lending — **operator decision, default off** — with copy caps, loan
+expiry, and revocation; IA-style item metadata export (Dublin Core,
+§32.2); vanished-source marking (§30.10) extended to derivatives.
+
+**Acceptance.**
+- An instance with lending off serves rights metadata and refuses loan
+  requests naming the policy.
+- A loan grants one reader a bounded window, expires, revocates, and never
+  multiplies copies beyond the configured cap.
+- A scanned item with OCR text is full-text searchable and the OCR is
+  labeled as machine-produced (§22.6).
+- Every derivative records its parent blob checksum and re-verifies on a
+  schedule.
+
+## 32.5 Milestone 26 — adult content and audio parity
+
+**Implement.** Adult category taxonomy as ordinary canon/tag data behind
+the existing age and content-eligibility gates (§7.3, §7.6) — never
+leaking into unauthenticated surfaces or feeds; author-approved TTS
+narration as an edition (`narration`), machine audio labeled per §22.6/§30.8;
+timestamp-anchored comments already covered by M24; gallery mechanics
+(§21) applied to illustrated works.
+
+**Acceptance.**
+- An anonymous, underage, or opted-out reader meets zero adult items in
+  any door, feed, OPDS catalog or search result.
+- A narration edition is a first-class edition: it appears in editions
+  lists, downloads as audio, and credits its narrator via
+  `media_creators`.
+- A TTS-generated narration is labeled machine-produced and is replaceable
+  by an author recording without destroying the machine edition.
+
+## 32.6 What this section deliberately does not do
+
+- It does not emulate other sites' API shapes; interop is via OPDS,
+  Dublin Core, JSON-LD, Atom and ActivityPub announcements (§23.6).
+- It does not merge M13 event collections into `media_collections`; the
+  event model stays, and a challenge anthology links across via
+  `media_collections.challenge_anthology`.
+- It does not display composite quality scores publicly by default, and no
+  credit, payment or trust level can move any ranking signal (§0.3).
+- It does not federate queries (§23.6 stays announce/notify); remote
+  queries would be a scraping vector wearing a protocol.
+
+---
+
 The resulting project should be judged by these working behaviors—not by the number of screens, lines of code, imported feature names, or claims in a README.
 
 
