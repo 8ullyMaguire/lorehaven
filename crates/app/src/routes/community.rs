@@ -6,6 +6,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
+use lorehaven_domain::anchor;
 use lorehaven_domain::blocking::BlockScope;
 use serde::Deserialize;
 use std::str::FromStr;

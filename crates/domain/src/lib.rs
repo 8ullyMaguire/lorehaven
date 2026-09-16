@@ -1,7 +1,7 @@
 //! Lorehaven domain primitives.
 
-pub mod api_scopes;
 pub mod anchor;
+pub mod api_scopes;
 pub mod blocking;
 pub mod caps;
 pub mod charging;
@@ -24,6 +24,7 @@ pub mod library;
 pub mod marketplace;
 pub mod media;
 pub mod monetization;
+pub mod orphaning;
 pub mod policy;
 pub mod positivity;
 pub mod query;
