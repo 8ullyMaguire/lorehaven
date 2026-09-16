@@ -2,6 +2,61 @@
 
 Newest first. Each section states what was verified, how, and the result.
 
+## 2026-09-16 — PG dialect parity complete, SQLite regressions from the parity pass fixed
+
+**Commit:** `69ee2d8` — "db: finish PG dialect parity and fix the SQLite
+regressions it introduced" (30 files: 21 db modules, 9 test suites).
+
+**Context.** The parity session's handoff claimed both gates green. An
+independent re-run of every gate on the working tree disproved the SQLite
+claim (1076 passed / 11 failed) and found clippy non-clean; the PG claim
+held (381 passed / 0 failed). All 11 failures were regressions introduced
+by the parity pass itself, in three classes:
+
+1. **PG syntax in SQLite arms** — `exports::find_export` /
+   `find_export_for` had `EXPORT_COLUMNS_PG` in the SQLite arm and
+   `imports::job_for_import` carried `job_id::text` there; SQLite rejected
+   each with `unrecognized token: ":"` (m6 ×4, m7 ×6 minus one overlap).
+   Found by a balanced-paren scan over every `db.sql()` / `sql_owned()`
+   call flagging `::` or a `_PG` constant in the SQLite argument.
+2. **`\`-continuation glue** — the rewritten SQLite counter upsert glued
+   `1` + `RETURNING` into `1RETURNING` (m15 `usage_counters…`); the PG
+   twin survived only via hand-added trailing spaces. Both counter
+   upserts (economy + admin) rewritten as honest multi-line literals on
+   both dialects.
+3. **clippy** — two `useless use of format!` warnings in `secrets.rs`;
+   fixed by introducing `COLUMNS_PG` (matching the exports.rs
+   convention) instead of `.to_string()`.
+
+Also restored the live `?::uuid` case to the `rewrite_placeholders` unit
+test that the sweep had overwritten (`cargo test -p lorehaven-db --lib` →
+27 passed).
+
+**Final gate evidence, run on the committed tree:**
+
+| Gate | Command | Result |
+|---|---|---|
+| PG | `LOREHAVEN_TEST_PG_URL=… cargo test -p lorehaven-app --no-fail-fast -- --test-threads=4` | **381 passed / 0 failed** (24 binaries) |
+| SQLite | `unset LOREHAVEN_TEST_PG_URL && CARGO_TARGET_DIR=~/.cargo-target/lorehaven cargo test --workspace --no-fail-fast` | **1087 passed / 0 failed** (42 binaries) |
+| db lib | `cargo test -p lorehaven-db --lib` | 27 passed / 0 failed |
+| fmt | `cargo fmt --all -- --check` | clean |
+| clippy | `cargo clippy -p lorehaven-db --all-targets` | 0 warnings |
+| FE | `fe.sh check` + `fe.sh test` | svelte-check 0/0, vitest 147/147 |
+
+**Environment notes.** 149 orphaned `lh_test_*` scratch databases were
+dropped before the PG run (panicking tests never reach `cleanup()`; the
+harness sweep is still owed). Scratch PG: container `lh-review-pg` on
+55432, URL from `~/.config/lorehaven/pg-env` via
+`~/.hermes/plans/lhpg-env.sh`.
+
+**Known limitations, on record.** The `col::text = ?` read conversion
+defeats PG index usage on UUID PK lookups (correct, not fast); accepted
+for now — there is no production deployment (verified: no service, unit,
+container, cron or config on the ThinkCentre), so the inversion decision
+is deferred to deployment planning. Follow-up plan:
+`~/.hermes/plans/2026-09-16-lorehaven-pg-parity-followup.md` (consistency
+stragglers, standing checks, ADR).
+
 ## 2026-09-15 (afternoon) — review pass over the 08:45–13:43 work
 
 Scope: the 14 commits `999fe4c..01a6bcf` (notifications backend, PG dialect
