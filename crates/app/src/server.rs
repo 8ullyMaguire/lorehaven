@@ -475,6 +475,13 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // Controlled digital lending (M25 / spec §32.4). All endpoints require
+        // a session: borrower identity is needed to grant or revoke a loan.
+        .merge(classified(
+            routes::lending::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Notifications inbox — §5.5. Session-scoped reads plus idempotent
         // mark-read writes; rows are produced by replies, sales and gifts.
         .merge(classified(
