@@ -28,6 +28,7 @@ pub mod governance;
 pub mod identity;
 pub mod imports;
 pub mod jobs;
+pub mod lending;
 pub mod library;
 pub mod marketplace;
 pub mod media;
