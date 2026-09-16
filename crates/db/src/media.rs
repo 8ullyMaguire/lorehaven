@@ -94,6 +94,7 @@ pub struct MediaRecord {
     pub summary: Option<String>,
     pub format: String,
     pub visibility: String,
+    pub lifecycle: String,
     pub owning_account_id: String,
     pub created_at: String,
     pub updated_at: String,
@@ -134,22 +135,34 @@ pub struct QualitySignal {
 /// Returns the WHERE clause fragment and bound values that enforce
 /// §7.6 eligibility.
 ///
-/// - No session: only `public` works.
-/// - Session present: `public` always, plus `unlisted`, `private`,
-///   and `restricted` only when `owning_account_id = ?`.
+/// The eligibility facet for LIST queries (spec §32.2, ADR 0002's
+/// visibility vocabulary, ADR 0003 ownership). Media is published work:
+/// drafts never appear in listings. Anonymous callers see public only. A
+/// session also sees restricted works (skeleton §7.6: any authenticated
+/// session is eligible; the shared service replaces this when wired) and
+/// their own published works of any visibility. Unlisted never lists — it
+/// is link-reachable through the direct doors, which decide per ADR 0002.
+/// Ownership goes through the pseud: works.owner_pseud_id →
+/// pseuds.account_id.
 fn eligibility_filter(account_id: Option<&str>) -> (String, String, Vec<String>) {
-    if let Some(account) = account_id {
-        (
-            "(works.visibility = \'public\' OR works.owning_account_id = ?)".to_string(),
-            "(works.visibility = \'public\' OR works.owning_account_id = ?)".to_string(),
+    // The facet is consumed by queries whose FROM aliases works as `w` —
+    // once a table is aliased, the bare table name is no longer a valid
+    // qualifier in either dialect.
+    match account_id {
+        Some(account) => (
+            "(w.lifecycle = 'published' AND (w.visibility IN ('public', 'restricted') \
+             OR w.owner_pseud_id IN (SELECT p.id FROM pseuds p WHERE p.account_id = ?)))"
+                .to_string(),
+            "(w.lifecycle = 'published' AND (w.visibility IN ('public', 'restricted') \
+             OR w.owner_pseud_id IN (SELECT p.id FROM pseuds p WHERE p.account_id = ?::uuid)))"
+                .to_string(),
             vec![account.to_string()],
-        )
-    } else {
-        (
-            "works.visibility = \'public\'".to_string(),
-            "works.visibility = \'public\'".to_string(),
+        ),
+        None => (
+            "(w.lifecycle = 'published' AND w.visibility = 'public')".to_string(),
+            "(w.lifecycle = 'published' AND w.visibility = 'public')".to_string(),
             Vec::new(),
-        )
+        ),
     }
 }
 
@@ -166,7 +179,10 @@ struct MediaFacet {
     values: Vec<String>,
 }
 
-fn media_filter(query: &QueryAst, account_id: Option<&str>) -> (String, String, Vec<String>) {
+fn media_filter(
+    query: Option<&QueryAst>,
+    account_id: Option<&str>,
+) -> (String, String, Vec<String>) {
     let mut facets: Vec<MediaFacet> = Vec::new();
 
     // Eligibility is the first facet so it can be combined with AND.
@@ -177,16 +193,18 @@ fn media_filter(query: &QueryAst, account_id: Option<&str>) -> (String, String, 
         values: elig_values,
     });
 
-    let rendered = match render_query(query) {
-        Ok(r) if !r.sql.is_empty() => Some(r),
-        _ => None,
-    };
-    if let Some(rendered) = rendered {
-        facets.push(MediaFacet {
-            sqlite: rendered.sql.clone(),
-            postgres: rendered.sql,
-            values: rendered.binds,
-        });
+    // None (or an AST that renders nothing) means match-all: no text
+    // facet, so no works_index reference and no LIKE binds.
+    if let Some(ast) = query {
+        if let Ok(r) = render_query(ast) {
+            if !r.sql.is_empty() {
+                facets.push(MediaFacet {
+                    sqlite: r.sql.clone(),
+                    postgres: r.sql,
+                    values: r.binds,
+                });
+            }
+        }
     }
 
     let sqlite_where = facets
@@ -242,35 +260,35 @@ macro_rules! run {
 // ---------------------------------------------------------------------------
 
 /// Look up a single media record by id (public or own).
-pub async fn find_media(
-    db: &Database,
-    id: &str,
-    account_id: Option<&str>,
-) -> Result<Option<MediaRecord>> {
-    let (elig_sqlite, elig_postgres, elig_values) = eligibility_filter(account_id);
-    let sqlite = format!(
-        "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
-                w.owning_account_id, w.created_at, w.updated_at, w.version \
-         FROM works w WHERE w.id = ? AND {elig_sqlite}"
-    );
-    let postgres = format!(
-        "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
-                w.owning_account_id, w.created_at, w.updated_at, w.version \
-         FROM works w WHERE w.id = ?::uuid AND {elig_postgres}"
-    );
+/// Fetch one work for the direct doors. Deliberately NO eligibility here:
+/// the direct-door rule (ADR 0002 — public and unlisted are link-reachable,
+/// restricted needs a session, drafts only for the owner) belongs to the
+/// route, which answers 404 to hide existence. The list facet decides what
+/// *listings* show; this decides nothing.
+pub async fn find_media(db: &Database, id: &str) -> Result<Option<MediaRecord>> {
+    let sqlite = "SELECT w.id, w.title, w.summary, w.format, w.visibility, w.lifecycle, \
+                p.account_id AS owning_account_id, w.created_at, w.updated_at, w.version \
+         FROM works w \
+         JOIN pseuds p ON p.id = w.owner_pseud_id \
+         WHERE w.id = ?"
+        .to_string();
+    let postgres = "SELECT w.id, w.title, w.summary, w.format, w.visibility, w.lifecycle, \
+                p.account_id::text AS owning_account_id, w.created_at, w.updated_at, w.version \
+         FROM works w \
+         JOIN pseuds p ON p.id = w.owner_pseud_id \
+         WHERE w.id = ?::uuid"
+        .to_string();
     let sql = &db.sql(&sqlite, &postgres);
     let row = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, MediaRecord>(&sql)
+            sqlx::query_as::<_, MediaRecord>(sql)
                 .bind(id)
-                .bind(&elig_values[0])
                 .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, MediaRecord>(&sql)
+            sqlx::query_as::<_, MediaRecord>(sql)
                 .bind(id)
-                .bind(&elig_values[0])
                 .fetch_optional(db.postgres_pool().expect("postgres handle"))
                 .await?
         }
@@ -281,7 +299,7 @@ pub async fn find_media(
 /// List media with filtering, pagination, and eligibility.
 pub async fn list_media_filtered(
     db: &Database,
-    query: &QueryAst,
+    query: Option<&QueryAst>,
     account_id: Option<&str>,
     limit: i64,
     cursor: Option<&str>,
@@ -289,81 +307,117 @@ pub async fn list_media_filtered(
     let (where_sql, where_pg, values) = media_filter(query, account_id);
     let mut bound: Vec<String> = values.clone();
 
-    // Compound cursor: last row's created_at + id.
-    // Order by created_at DESC, then id ASC for stable pagination.
-    let cursor_clause = if let Some(cursor_id) = cursor {
-        // Cursor is the last row's id from the previous page.
-        // We need created_at too, but since we order by created_at DESC, id ASC,
-        // we use a compound condition. For simplicity, we derive the cursor
-        // from the last row's id and fetch after it.
-        // The cursor string is actually the last row's id.
-        bound.push(cursor_id.to_string());
-        " AND w.id > ?"
-    } else {
-        ""
-    };
+    // Compound cursor: "created_at|id" of the previous page's last row,
+    // matching the ORDER BY (created_at DESC, id ASC). An id-only cursor
+    // cannot paginate this order — it skips and repeats rows.
+    let (cursor_sqlite, cursor_pg);
+    match cursor {
+        Some(cursor) => {
+            let Some((created_at, id)) = cursor.rsplit_once('|') else {
+                anyhow::bail!("malformed media cursor");
+            };
+            cursor_sqlite =
+                " AND (w.created_at < ? OR (w.created_at = ? AND w.id > ?))".to_string();
+            cursor_pg =
+                " AND (w.created_at < ?::text OR (w.created_at = ?::text AND w.id > ?::uuid))"
+                    .to_string();
+            bound.push(created_at.to_string());
+            bound.push(created_at.to_string());
+            bound.push(id.to_string());
+        }
+        None => {
+            cursor_sqlite = String::new();
+            cursor_pg = String::new();
+        }
+    }
 
+    // works_index backs the text facet; the LEFT JOIN is harmless when the
+    // facet is absent. pseuds supplies the owning account (ADR 0003).
     let sqlite = format!(
-        "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
-                w.owning_account_id, w.created_at, w.updated_at, w.version \
+        "SELECT w.id, w.title, w.summary, w.format, w.visibility, w.lifecycle, \
+                p.account_id AS owning_account_id, w.created_at, w.updated_at, w.version \
          FROM works w \
-         WHERE {where_sql} {cursor_clause} \
+         LEFT JOIN works_index wi ON wi.work_id = w.id \
+         JOIN pseuds p ON p.id = w.owner_pseud_id \
+         WHERE {where_sql}{cursor_sqlite} \
          ORDER BY w.created_at DESC, w.id ASC \
          LIMIT ?"
     );
     let postgres = format!(
-        "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
-                w.owning_account_id, w.created_at, w.updated_at, w.version \
+        "SELECT w.id, w.title, w.summary, w.format, w.visibility, w.lifecycle, \
+                p.account_id::text AS owning_account_id, w.created_at, w.updated_at, w.version \
          FROM works w \
-         WHERE {where_pg} {cursor_clause} \
+         LEFT JOIN works_index wi ON wi.work_id = w.id \
+         JOIN pseuds p ON p.id = w.owner_pseud_id \
+         WHERE {where_pg}{cursor_pg} \
          ORDER BY w.created_at DESC, w.id ASC \
          LIMIT ?"
     );
 
-    let count_sql = format!("SELECT COUNT(*) FROM works w WHERE {where_sql}");
-    let count_pg = format!("SELECT COUNT(*) FROM works w WHERE {where_pg}");
+    let count_sql = format!(
+        "SELECT COUNT(*) FROM works w \
+         LEFT JOIN works_index wi ON wi.work_id = w.id \
+         WHERE {where_sql}"
+    );
+    let count_pg = format!(
+        "SELECT COUNT(*) FROM works w \
+         LEFT JOIN works_index wi ON wi.work_id = w.id \
+         WHERE {where_pg}"
+    );
 
+    // The count MUST carry the facet binds too — an unbound parameter
+    // silently becomes NULL on SQLite and undercounts.
+    let count_sql_final = db.sql(&count_sql, &count_pg);
     let count: (i64,) = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, (i64,)>(&db.sql(&count_sql, &count_pg))
-                .fetch_one(db.sqlite_pool().expect("sqlite handle"))
+            let mut q = sqlx::query_as::<_, (i64,)>(&count_sql_final);
+            for val in &values {
+                q = q.bind(val.as_str());
+            }
+            q.fetch_one(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, (i64,)>(&db.sql(&count_sql, &count_pg))
-                .fetch_one(db.postgres_pool().expect("postgres handle"))
+            let mut q = sqlx::query_as::<_, (i64,)>(&count_sql_final);
+            for val in &values {
+                q = q.bind(val.as_str());
+            }
+            q.fetch_one(db.postgres_pool().expect("postgres handle"))
                 .await?
         }
     };
 
-    bound.push(limit.to_string());
-
-    // Build and execute separately per backend.
-    // SQLite uses text binds; PG uses text binds but the query
-    // string has $N placeholders (set by db.sql()).
+    // LIMIT takes an integer bind, not text: PG rejects a text LIMIT.
     let rows = match db.backend() {
         Backend::Sqlite => {
             let sql = &db.sql(&sqlite, &postgres);
-            let mut q = sqlx::query_as::<_, MediaRecord>(&sql);
+            let mut q = sqlx::query_as::<_, MediaRecord>(sql);
             for val in &bound {
                 q = q.bind(val.as_str());
             }
-            q.fetch_all(db.sqlite_pool().expect("sqlite handle"))
+            q.bind(limit)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
             let sql = &db.sql(&sqlite, &postgres);
-            let mut q = sqlx::query_as::<_, MediaRecord>(&sql);
+            let mut q = sqlx::query_as::<_, MediaRecord>(sql);
             for val in &bound {
                 q = q.bind(val.as_str());
             }
-            q.fetch_all(db.postgres_pool().expect("postgres handle"))
+            q.bind(limit)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
                 .await?
         }
     };
 
-    // Derive next_cursor from the last row's id.
-    let next_cursor = rows.last().map(|r| r.id.clone());
+    // A cursor is only emitted when the page was full: the last page of a
+    // walk answers without one, so clients stop naturally.
+    let next_cursor = if rows.len() as i64 == limit {
+        rows.last().map(|r| format!("{}|{}", r.created_at, r.id))
+    } else {
+        None
+    };
 
     Ok((rows, count.0, next_cursor))
 }
@@ -396,14 +450,14 @@ pub async fn creator_media(
     let sql = &db.sql(&sqlite, &postgres);
     let rows = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, MediaRecord>(&sql)
+            sqlx::query_as::<_, MediaRecord>(sql)
                 .bind(creator_id)
                 .bind(&elig_values[0])
                 .fetch_all(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, MediaRecord>(&sql)
+            sqlx::query_as::<_, MediaRecord>(sql)
                 .bind(creator_id)
                 .bind(&elig_values[0])
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
@@ -437,14 +491,14 @@ pub async fn distributor_media(
     let sql = &db.sql(&sqlite, &postgres);
     let rows = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, MediaRecord>(&sql)
+            sqlx::query_as::<_, MediaRecord>(sql)
                 .bind(distributor_id)
                 .bind(&elig_values[0])
                 .fetch_all(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, MediaRecord>(&sql)
+            sqlx::query_as::<_, MediaRecord>(sql)
                 .bind(distributor_id)
                 .bind(&elig_values[0])
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
@@ -478,14 +532,14 @@ pub async fn collection_media(
     let sql = &db.sql(&sqlite, &postgres);
     let rows = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, MediaRecord>(&sql)
+            sqlx::query_as::<_, MediaRecord>(sql)
                 .bind(collection_id)
                 .bind(&elig_values[0])
                 .fetch_all(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, MediaRecord>(&sql)
+            sqlx::query_as::<_, MediaRecord>(sql)
                 .bind(collection_id)
                 .bind(&elig_values[0])
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
@@ -503,12 +557,12 @@ pub async fn list_creators(db: &Database) -> Result<Vec<Creator>> {
     let postgres = sqlite;
     let rows = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, Creator>(&db.sql(&sqlite, &postgres))
+            sqlx::query_as::<_, Creator>(&db.sql(sqlite, postgres))
                 .fetch_all(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, Creator>(&db.sql(&sqlite, &postgres))
+            sqlx::query_as::<_, Creator>(&db.sql(sqlite, postgres))
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
                 .await?
         }
@@ -526,13 +580,13 @@ pub async fn find_creator(db: &Database, id: &str) -> Result<Option<Creator>> {
                     created_at, updated_at, version FROM creators WHERE id = ?::uuid";
     let row = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, Creator>(&db.sql(&sqlite, &postgres))
+            sqlx::query_as::<_, Creator>(&db.sql(sqlite, postgres))
                 .bind(id)
                 .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, Creator>(&db.sql(&sqlite, &postgres))
+            sqlx::query_as::<_, Creator>(&db.sql(sqlite, postgres))
                 .bind(id)
                 .fetch_optional(db.postgres_pool().expect("postgres handle"))
                 .await?
@@ -548,12 +602,12 @@ pub async fn list_distributors(db: &Database) -> Result<Vec<Distributor>> {
     let postgres = sqlite;
     let rows = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, Distributor>(&db.sql(&sqlite, &postgres))
+            sqlx::query_as::<_, Distributor>(&db.sql(sqlite, postgres))
                 .fetch_all(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, Distributor>(&db.sql(&sqlite, &postgres))
+            sqlx::query_as::<_, Distributor>(&db.sql(sqlite, postgres))
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
                 .await?
         }
@@ -569,13 +623,13 @@ pub async fn find_distributor(db: &Database, id: &str) -> Result<Option<Distribu
                     created_at, updated_at, version FROM distributors WHERE id = ?::uuid";
     let row = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, Distributor>(&db.sql(&sqlite, &postgres))
+            sqlx::query_as::<_, Distributor>(&db.sql(sqlite, postgres))
                 .bind(id)
                 .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, Distributor>(&db.sql(&sqlite, &postgres))
+            sqlx::query_as::<_, Distributor>(&db.sql(sqlite, postgres))
                 .bind(id)
                 .fetch_optional(db.postgres_pool().expect("postgres handle"))
                 .await?
@@ -665,13 +719,13 @@ pub async fn work_quality_signals(db: &Database, work_id: &str) -> Result<Vec<Qu
                     source, computed_at FROM quality_signals WHERE work_id = ?";
     let rows = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, QualitySignal>(&db.sql(&sqlite, &postgres))
+            sqlx::query_as::<_, QualitySignal>(&db.sql(sqlite, postgres))
                 .bind(work_id)
                 .fetch_all(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, QualitySignal>(&db.sql(&sqlite, &postgres))
+            sqlx::query_as::<_, QualitySignal>(&db.sql(sqlite, postgres))
                 .bind(work_id)
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
                 .await?
@@ -760,9 +814,9 @@ pub async fn create_distributor(db: &Database, distributor: &NewDistributor<'_>)
         q.bind(&id)
             .bind(distributor.kind.as_str())
             .bind(distributor.name)
-            .bind(distributor.url.as_deref())
-            .bind(distributor.api_key.as_deref())
-            .bind(distributor.notes.as_deref())
+            .bind(distributor.url)
+            .bind(distributor.api_key)
+            .bind(distributor.notes)
             .bind(&now)
             .bind(&now)
     })
@@ -787,7 +841,7 @@ pub async fn create_collection(db: &Database, collection: &NewCollection<'_>) ->
             .bind(collection.title)
             .bind(collection.description)
             .bind(collection.owning_account_id)
-            .bind(collection.parent_collection_id.as_deref())
+            .bind(collection.parent_collection_id)
             .bind(collection.sort_order)
             .bind(collection.visibility)
             .bind(&now)
@@ -804,7 +858,7 @@ pub async fn patch_creator(db: &Database, id: &str, display_name: Option<&str>) 
                   updated_at = ? WHERE id = ?";
     let postgres = "UPDATE creators SET display_name = COALESCE(?, display_name), \
                     updated_at = ? WHERE id = ?::uuid";
-    let sql = &db.sql(&sqlite, &postgres);
+    let sql = &db.sql(sqlite, postgres);
     let updated = match db.backend() {
         Backend::Sqlite => sqlx::query(sql.as_ref())
             .bind(display_name)
@@ -841,7 +895,7 @@ pub async fn put_collection(
                     SET title = COALESCE(?, title), description = COALESCE(?, description), \
                         updated_at = ? \
                     WHERE id = ?::uuid AND owning_account_id = ?::uuid";
-    let sql = &db.sql(&sqlite, &postgres);
+    let sql = &db.sql(sqlite, postgres);
     let updated = match db.backend() {
         Backend::Sqlite => sqlx::query(sql.as_ref())
             .bind(title)
@@ -872,7 +926,7 @@ pub async fn post_media_query(
     account_id: Option<&str>,
     limit: i64,
 ) -> Result<(Vec<MediaRecord>, i64)> {
-    let (rows, total, _) = list_media_filtered(db, query, account_id, limit, None).await?;
+    let (rows, total, _) = list_media_filtered(db, Some(query), account_id, limit, None).await?;
     Ok((rows, total))
 }
 
@@ -888,6 +942,7 @@ mod tests {
             summary: None,
             format: "prose".to_string(),
             visibility: "public".to_string(),
+            lifecycle: "published".to_string(),
             owning_account_id: "owner-1".to_string(),
             created_at: "2024-01-01T00:00:00Z".to_string(),
             updated_at: "2024-01-01T00:00:00Z".to_string(),
@@ -899,19 +954,32 @@ mod tests {
     }
 
     #[test]
-    fn eligibility_filter_no_session_public_only() {
+    fn eligibility_filter_no_session_public_published_only() {
         let (sqlite, postgres, values) = eligibility_filter(None);
-        assert_eq!(sqlite, "works.visibility = 'public'");
-        assert_eq!(postgres, "works.visibility = 'public'");
+        assert_eq!(
+            sqlite,
+            "(w.lifecycle = 'published' AND w.visibility = 'public')"
+        );
+        assert_eq!(
+            postgres,
+            "(w.lifecycle = 'published' AND w.visibility = 'public')"
+        );
         assert!(values.is_empty());
     }
 
     #[test]
-    fn eligibility_filter_with_session_owner_access() {
+    fn eligibility_filter_with_session_adds_restricted_and_own_works() {
         let (sqlite, postgres, values) = eligibility_filter(Some("me"));
-        assert!(sqlite.contains("public"));
-        assert!(sqlite.contains("owning_account_id"));
-        assert_eq!(values.len(), 1);
-        assert_eq!(values[0], "me");
+        // A session sees public and restricted, but never unlisted — that
+        // is link-reachable only. Ownership goes through the pseud, and
+        // the PG twin casts the account bind to uuid. Drafts never list.
+        // The facet qualifies columns with the `w` alias because the
+        // consuming FROM aliases works as `w`.
+        assert!(sqlite.contains("w.lifecycle = 'published'"));
+        assert!(sqlite.contains("w.visibility IN ('public', 'restricted')"));
+        assert!(!sqlite.contains("unlisted"));
+        assert!(sqlite.contains("w.owner_pseud_id IN (SELECT p.id FROM pseuds p"));
+        assert!(postgres.contains("p.account_id = ?::uuid"));
+        assert_eq!(values, vec!["me".to_string()]);
     }
 }
