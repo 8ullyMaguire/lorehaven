@@ -266,7 +266,7 @@ pub async fn claim_next(
                 attempts, max_attempts, available_at, lease_owner,
                 lease_expires_at, progress_permille, checkpoint, last_error,
                 requested_by::text AS requested_by, created_at, updated_at, version
-           FROM jobs WHERE id = ?::uuid",
+           FROM jobs WHERE id::text = ?",
     );
 
     match db.backend() {
@@ -323,7 +323,7 @@ pub async fn heartbeat(
         "UPDATE jobs SET lease_expires_at = ?, updated_at = ?, version = version + 1
           WHERE id = ? AND lease_owner = ? AND state IN ('leased', 'running')",
         "UPDATE jobs SET lease_expires_at = ?, updated_at = ?, version = version + 1
-          WHERE id = ?::uuid AND lease_owner = ? AND state IN ('leased', 'running')",
+          WHERE id::text = ? AND lease_owner = ? AND state IN ('leased', 'running')",
     );
     let expires = crate::identity::format_rfc3339(now + lease);
     let now_text = crate::identity::format_rfc3339(now);
@@ -365,7 +365,7 @@ pub async fn attempt_started(
     let now = now_rfc3339();
     let count = db.sql(
         "UPDATE jobs SET attempts = ?, updated_at = ?, version = version + 1 WHERE id = ?",
-        "UPDATE jobs SET attempts = ?, updated_at = ?, version = version + 1 WHERE id = ?::uuid",
+        "UPDATE jobs SET attempts = ?, updated_at = ?, version = version + 1 WHERE id::text = ?",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -433,7 +433,7 @@ pub async fn close_attempt(
           WHERE job_id = ? AND worker = ? AND finished_at IS NULL",
         "UPDATE job_attempts
             SET finished_at = ?, outcome = ?, error = ?
-          WHERE job_id = ?::uuid AND worker = ? AND finished_at IS NULL",
+          WHERE job_id::text = ? AND worker = ? AND finished_at IS NULL",
     );
     let now = now_rfc3339();
     match db.backend() {
@@ -477,7 +477,7 @@ pub async fn complete(db: &Database, job: JobId, worker: &str) -> Result<bool> {
             SET state = 'succeeded', progress_permille = 1000, checkpoint = NULL,
                 lease_owner = NULL, lease_expires_at = NULL, last_error = NULL,
                 updated_at = ?, version = version + 1
-          WHERE id = ?::uuid AND lease_owner = ? AND state IN ('leased', 'running')",
+          WHERE id::text = ? AND lease_owner = ? AND state IN ('leased', 'running')",
     );
     let now = now_rfc3339();
     let affected = match db.backend() {
@@ -524,7 +524,7 @@ pub async fn fail(
     // decide.
     let find = db.sql(
         "SELECT attempts, max_attempts FROM jobs WHERE id = ? AND lease_owner = ?",
-        "SELECT attempts, max_attempts FROM jobs WHERE id = ?::uuid AND lease_owner = ?",
+        "SELECT attempts, max_attempts FROM jobs WHERE id::text = ? AND lease_owner = ?",
     );
     let attempts: Option<(i64, i64)> = match db.backend() {
         Backend::Sqlite => {
@@ -584,7 +584,7 @@ pub async fn fail(
             SET state = ?, attempts = ?, available_at = ?, last_error = ?,
                 lease_owner = NULL, lease_expires_at = NULL, updated_at = ?,
                 version = version + 1
-          WHERE id = ?::uuid AND lease_owner = ?",
+          WHERE id::text = ? AND lease_owner = ?",
     );
     let available_at = if will_retry {
         crate::identity::format_rfc3339(next_at)
@@ -635,7 +635,7 @@ pub async fn cancel(db: &Database, job: JobId) -> Result<bool> {
         "UPDATE jobs
             SET state = 'cancelled', lease_owner = NULL, lease_expires_at = NULL,
                 updated_at = ?, version = version + 1
-          WHERE id = ?::uuid AND state IN ('queued', 'leased', 'running')",
+          WHERE id::text = ? AND state IN ('queued', 'leased', 'running')",
     );
     let now = now_rfc3339();
     let affected = match db.backend() {
@@ -709,7 +709,7 @@ pub async fn progress(
             SET progress_permille = ?, checkpoint = COALESCE(?, checkpoint),
                 state = CASE WHEN state = 'leased' THEN 'running' ELSE state END,
                 updated_at = ?, version = version + 1
-          WHERE id = ?::uuid AND state IN ('leased', 'running')",
+          WHERE id::text = ? AND state IN ('leased', 'running')",
     );
     let permille = permille.clamp(0, 1000);
     let now = now_rfc3339();
@@ -741,7 +741,7 @@ pub async fn progress(
 pub async fn is_cancelled(db: &Database, job: JobId) -> Result<bool> {
     let sql = db.sql(
         "SELECT state FROM jobs WHERE id = ?",
-        "SELECT state FROM jobs WHERE id = ?::uuid",
+        "SELECT state FROM jobs WHERE id::text = ?",
     );
     let state: Option<(String,)> = match db.backend() {
         Backend::Sqlite => {
@@ -772,7 +772,7 @@ pub async fn find(db: &Database, job: JobId) -> Result<Option<Job>> {
                 attempts, max_attempts, available_at, lease_owner,
                 lease_expires_at, progress_permille, checkpoint, last_error,
                 requested_by::text AS requested_by, created_at, updated_at, version
-           FROM jobs WHERE id = ?::uuid",
+           FROM jobs WHERE id::text = ?",
     );
     Ok(match db.backend() {
         Backend::Sqlite => {
@@ -816,7 +816,7 @@ pub async fn jobs_for(
                     attempts, max_attempts, available_at, lease_owner,
                     lease_expires_at, progress_permille, checkpoint, last_error,
                     requested_by::text AS requested_by, created_at, updated_at, version
-               FROM jobs WHERE requested_by = ?::uuid
+               FROM jobs WHERE requested_by::text = ?
                  AND (created_at < ? OR (created_at = ? AND id::text < ?))
               ORDER BY created_at DESC, id DESC LIMIT ?",
         ),
@@ -831,7 +831,7 @@ pub async fn jobs_for(
                     attempts, max_attempts, available_at, lease_owner,
                     lease_expires_at, progress_permille, checkpoint, last_error,
                     requested_by::text AS requested_by, created_at, updated_at, version
-               FROM jobs WHERE requested_by = ?::uuid
+               FROM jobs WHERE requested_by::text = ?
               ORDER BY created_at DESC, id DESC LIMIT ?",
         ),
     };
@@ -983,7 +983,7 @@ pub async fn attempts_for(db: &Database, job: JobId) -> Result<Vec<JobAttempt>> 
            FROM job_attempts WHERE job_id = ? ORDER BY attempt ASC",
         "SELECT id::text AS id, job_id::text AS job_id, attempt, started_at,
                 finished_at, outcome, error, worker
-           FROM job_attempts WHERE job_id = ?::uuid ORDER BY attempt ASC",
+           FROM job_attempts WHERE job_id::text = ? ORDER BY attempt ASC",
     );
     Ok(match db.backend() {
         Backend::Sqlite => {
@@ -1046,7 +1046,7 @@ pub async fn requeue(db: &Database, job: JobId) -> Result<bool> {
             SET state = 'queued', attempts = 0, available_at = ?, last_error = NULL,
                 progress_permille = 0, checkpoint = NULL, lease_owner = NULL,
                 lease_expires_at = NULL, updated_at = ?, version = version + 1
-          WHERE id = ?::uuid AND state IN ('succeeded', 'failed', 'cancelled')",
+          WHERE id::text = ? AND state IN ('succeeded', 'failed', 'cancelled')",
     );
     let now = now_rfc3339();
     let affected = match db.backend() {

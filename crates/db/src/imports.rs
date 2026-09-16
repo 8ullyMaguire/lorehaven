@@ -728,7 +728,7 @@ pub async fn find_library_item(
         ),
         format!(
             "SELECT {LIBRARY_COLUMNS_PG}, {LIBRARY_CHAPTER_COUNT} FROM library_items
-             WHERE account_id = ?::uuid AND source_key = ? AND source_work_key = ?"
+             WHERE account_id::text = ? AND source_key = ? AND source_work_key = ?"
         ),
     );
     fetch_optional_library_item(db, &sql, account_id, source_key, source_work_key).await
@@ -749,7 +749,7 @@ pub async fn get_library_item(
         ),
         format!(
             "SELECT {LIBRARY_COLUMNS_PG}, {LIBRARY_CHAPTER_COUNT} FROM library_items \
-             WHERE id = ?::uuid AND account_id = ?::uuid"
+             WHERE id::text = ? AND account_id::text = ?"
         ),
     );
     let row: Option<LibraryItemRow> = match db.backend() {
@@ -794,7 +794,7 @@ pub async fn list_library_items(
         ),
         format!(
             "SELECT {LIBRARY_COLUMNS_PG}, {LIBRARY_CHAPTER_COUNT} FROM library_items
-             WHERE account_id = ?::uuid
+             WHERE account_id::text = ?
                AND (?::text IS NULL OR (updated_at, id::text) < (?::text, ?::text))
              ORDER BY updated_at DESC, id DESC
              LIMIT ?"
@@ -836,7 +836,7 @@ pub async fn touch_library_item_synced(db: &Database, item_id: &str) -> Result<(
     let now = now_rfc3339();
     let sql = db.sql(
         "UPDATE library_items SET last_synced_at = ?, updated_at = ? WHERE id = ?",
-        "UPDATE library_items SET last_synced_at = ?, updated_at = ? WHERE id = ?::uuid",
+        "UPDATE library_items SET last_synced_at = ?, updated_at = ? WHERE id::text = ?",
     );
     run!(db, &sql, |query| {
         query.bind(&now).bind(&now).bind(item_id)
@@ -905,7 +905,7 @@ pub async fn get_import_job(db: &Database, id: &str) -> Result<Option<ImportJob>
     let sql = sql_owned(
         db,
         format!("SELECT {IMPORT_JOB_COLUMNS} FROM import_jobs WHERE id = ?"),
-        format!("SELECT {IMPORT_JOB_COLUMNS_PG} FROM import_jobs WHERE id = ?::uuid"),
+        format!("SELECT {IMPORT_JOB_COLUMNS_PG} FROM import_jobs WHERE id::text = ?"),
     );
     let row: Option<ImportJobRow> = match db.backend() {
         Backend::Sqlite => {
@@ -937,7 +937,7 @@ pub async fn get_import_job_for(
             "SELECT {IMPORT_JOB_COLUMNS} FROM import_jobs WHERE id = ? AND account_id = ?"
         ),
         format!(
-            "SELECT {IMPORT_JOB_COLUMNS_PG} FROM import_jobs WHERE id = ?::uuid AND account_id = ?::uuid"
+            "SELECT {IMPORT_JOB_COLUMNS_PG} FROM import_jobs WHERE id::text = ? AND account_id::text = ?"
         ),
     );
     let row: Option<ImportJobRow> = match db.backend() {
@@ -986,7 +986,7 @@ pub async fn list_import_jobs(
         ),
         format!(
             "SELECT {IMPORT_JOB_COLUMNS_PG} FROM import_jobs
-             WHERE account_id = ?::uuid
+             WHERE account_id::text = ?
                AND (?::text IS NULL OR state = ?::text)
                AND (?::text IS NULL OR (created_at, id) < (?::text, ?::uuid))
              ORDER BY created_at DESC, id DESC LIMIT ?"
@@ -1025,7 +1025,7 @@ pub async fn list_import_jobs(
 pub async fn job_for_import(db: &Database, import_id: &str) -> Result<Option<String>> {
     let sql = db.sql(
         "SELECT job_id FROM import_jobs WHERE id = ?",
-        "SELECT job_id FROM import_jobs WHERE id = ?::uuid",
+        "SELECT job_id::text FROM import_jobs WHERE id::text = ?",
     );
     let row: Option<(Option<String>,)> = match db.backend() {
         Backend::Sqlite => {
@@ -1049,7 +1049,7 @@ pub async fn get_source_credential(db: &Database, id: &str) -> Result<Option<Sou
     let sql = sql_owned(
         db,
         format!("SELECT {CREDENTIAL_COLUMNS} FROM source_credentials WHERE id = ?"),
-        format!("SELECT {CREDENTIAL_COLUMNS_PG} FROM source_credentials WHERE id = ?::uuid"),
+        format!("SELECT {CREDENTIAL_COLUMNS_PG} FROM source_credentials WHERE id::text = ?"),
     );
     let row: Option<SourceCredentialRow> = match db.backend() {
         Backend::Sqlite => {
@@ -1089,7 +1089,7 @@ pub async fn set_import_state(
                                 library_item_id = COALESCE(?::uuid, library_item_id),
                                 report_json = COALESCE(?, report_json),
                                 updated_at = ?, version = version + 1
-         WHERE id = ?::uuid",
+         WHERE id::text = ?",
     );
     run!(db, &sql, |query| {
         query
@@ -1206,7 +1206,7 @@ pub async fn list_import_chapters(
         ),
         format!(
             "SELECT {IMPORT_CHAPTER_COLUMNS_PG} FROM import_chapters
-             WHERE import_job_id = ?::uuid ORDER BY ordinal"
+             WHERE import_job_id::text = ? ORDER BY ordinal"
         ),
     );
     let rows: Vec<ImportChapterRow> = match db.backend() {
@@ -1263,7 +1263,7 @@ pub async fn previous_chapters_for(
             "SELECT {IMPORT_CHAPTER_COLUMNS} FROM import_chapters
              WHERE import_job_id = (
                  SELECT id FROM import_jobs
-                 WHERE library_item_id = ?::uuid AND account_id = ?::uuid
+                 WHERE library_item_id::text = ? AND account_id::text = ?
                  ORDER BY created_at DESC, id DESC LIMIT 1
              )
              ORDER BY ordinal"
@@ -1309,10 +1309,10 @@ pub async fn latest_chapters_for_item(
         ),
         format!(
             "SELECT {IMPORT_CHAPTER_COLUMNS_PG} FROM import_chapters
-             WHERE library_item_id = ?::uuid
+             WHERE library_item_id::text = ?
                AND import_job_id = (
                    SELECT import_job_id FROM import_chapters
-                   WHERE library_item_id = ?::uuid
+                   WHERE library_item_id::text = ?
                    ORDER BY updated_at DESC, id DESC LIMIT 1
                )
              ORDER BY ordinal"
@@ -1422,7 +1422,7 @@ pub async fn find_credential_by_label(
         ),
         format!(
             "SELECT {CREDENTIAL_COLUMNS_PG} FROM source_credentials
-             WHERE pseud_id = ?::uuid AND source_key = ? AND label = ?"
+             WHERE pseud_id::text = ? AND source_key = ? AND label = ?"
         ),
     );
     let row: Option<SourceCredentialRow> = match db.backend() {
@@ -1465,7 +1465,7 @@ pub async fn list_source_credentials(
         ),
         format!(
             "SELECT {CREDENTIAL_COLUMNS_PG} FROM source_credentials
-             WHERE pseud_id = ?::uuid AND (?::text IS NULL OR source_key = ?)
+             WHERE pseud_id::text = ? AND (?::text IS NULL OR source_key = ?)
              ORDER BY source_key, label"
         ),
     );
@@ -1508,7 +1508,7 @@ pub async fn set_credential_status(
         "UPDATE source_credentials
          SET status = ?, last_checked_at = CASE WHEN ? = 1 THEN ? ELSE last_checked_at END,
              updated_at = ?, version = version + 1
-         WHERE id = ?::uuid",
+         WHERE id::text = ?",
     );
     run!(db, &sql, |query| {
         query
@@ -1552,7 +1552,7 @@ pub async fn delete_source_credential(
     // not fight it.
     let sql = db.sql(
         "DELETE FROM secrets WHERE id = ?",
-        "DELETE FROM secrets WHERE id = ?::uuid",
+        "DELETE FROM secrets WHERE id::text = ?",
     );
     run!(db, &sql, |query| query.bind(&existing.secret_id)).await?;
     Ok(Some(existing.secret_id))

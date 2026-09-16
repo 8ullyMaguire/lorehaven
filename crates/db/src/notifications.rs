@@ -162,7 +162,7 @@ pub async fn mark_read(
         "UPDATE notifications SET read_at = ?1
           WHERE id = ?2 AND account_id = ?3 AND read_at IS NULL",
         "UPDATE notifications SET read_at = $1
-          WHERE id = $2::uuid AND account_id = $3::uuid AND read_at IS NULL",
+          WHERE id = $2 AND account_id = $3::uuid AND read_at IS NULL",
     );
     let affected = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)

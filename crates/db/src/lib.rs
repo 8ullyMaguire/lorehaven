@@ -400,6 +400,12 @@ mod tests {
             "INSERT INTO t (a, b) VALUES ($1, $2)"
         );
         assert_eq!(
+            rewrite_placeholders("SELECT 1 FROM t WHERE id::text = ? AND n > ?"),
+            "SELECT 1 FROM t WHERE id::text = $1 AND n > $2"
+        );
+        // The write path still carries explicit casts, which must survive the
+        // rewrite attached to the renumbered placeholder.
+        assert_eq!(
             rewrite_placeholders("SELECT 1 FROM t WHERE id = ?::uuid AND n > ?"),
             "SELECT 1 FROM t WHERE id = $1::uuid AND n > $2"
         );

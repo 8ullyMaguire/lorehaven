@@ -204,7 +204,7 @@ pub async fn shelves_for(db: &Database, account_id: &str) -> Result<Vec<Shelf>> 
                  ORDER BY position ASC, name ASC"
         ),
         format!(
-            "SELECT {SHELF_COLUMNS_PG} FROM shelves WHERE account_id = ?::uuid \
+            "SELECT {SHELF_COLUMNS_PG} FROM shelves WHERE account_id::text = ? \
                  ORDER BY position ASC, name ASC"
         ),
     );
@@ -231,7 +231,7 @@ pub async fn find_shelf(db: &Database, account_id: &str, id: &str) -> Result<Opt
         db,
         format!("SELECT {SHELF_COLUMNS} FROM shelves WHERE id = ? AND account_id = ?"),
         format!(
-            "SELECT {SHELF_COLUMNS_PG} FROM shelves WHERE id = ?::uuid AND account_id = ?::uuid"
+            "SELECT {SHELF_COLUMNS_PG} FROM shelves WHERE id::text = ? AND account_id::text = ?"
         ),
     );
     let row: Option<ShelfRow> = match db.backend() {
@@ -293,7 +293,7 @@ pub async fn update_shelf(
         "UPDATE shelves SET name = COALESCE(?, name), description = COALESCE(?, description), \
          is_public = COALESCE(?::int::boolean, is_public), position = COALESCE(?, position), \
          updated_at = ?, version = version + 1 \
-         WHERE id = ?::uuid AND account_id = ?::uuid AND version = ?",
+         WHERE id::text = ? AND account_id::text = ? AND version = ?",
     );
     let affected = run!(db, sql, |q| q
         .bind(patch.name)
@@ -315,7 +315,7 @@ pub async fn update_shelf(
 pub async fn delete_shelf(db: &Database, account_id: &str, id: &str) -> Result<bool> {
     let sql = db.sql(
         "DELETE FROM shelves WHERE id = ? AND account_id = ?",
-        "DELETE FROM shelves WHERE id = ?::uuid AND account_id = ?::uuid",
+        "DELETE FROM shelves WHERE id::text = ? AND account_id::text = ?",
     );
     let affected = run!(db, sql, |q| q.bind(id).bind(account_id)).await?;
     Ok(affected > 0)
@@ -354,8 +354,8 @@ pub async fn add_shelf_item(
         "INSERT INTO shelf_items (id, shelf_id, library_item_id, position, created_at) \
          SELECT ?::uuid, s.id, l.id, ?, ? \
            FROM shelves s, library_items l \
-          WHERE s.id = ?::uuid AND s.account_id = ?::uuid AND l.id = ?::uuid \
-            AND l.account_id = ?::uuid \
+          WHERE s.id::text = ? AND s.account_id::text = ? AND l.id::text = ? \
+            AND l.account_id::text = ? \
          ON CONFLICT (shelf_id, library_item_id) DO UPDATE SET position = excluded.position",
     );
     let affected = run!(db, sql, |q| q
@@ -383,7 +383,7 @@ pub async fn remove_shelf_item(
         "DELETE FROM shelf_items WHERE shelf_id IN (SELECT id FROM shelves \
          WHERE id = ? AND account_id = ?) AND library_item_id = ?",
         "DELETE FROM shelf_items WHERE shelf_id IN (SELECT id FROM shelves \
-         WHERE id = ?::uuid AND account_id = ?::uuid) AND library_item_id = ?::uuid",
+         WHERE id::text = ? AND account_id::text = ?) AND library_item_id::text = ?",
     );
     let affected = run!(db, sql, |q| q
         .bind(shelf_id)
@@ -403,7 +403,7 @@ pub async fn shelf_item_ids(
         "SELECT si.library_item_id FROM shelf_items si JOIN shelves s ON s.id = si.shelf_id \
          WHERE s.id = ? AND s.account_id = ? ORDER BY si.position ASC, si.created_at ASC",
         "SELECT si.library_item_id::text FROM shelf_items si JOIN shelves s ON s.id = si.shelf_id \
-         WHERE s.id = ?::uuid AND s.account_id = ?::uuid \
+         WHERE s.id::text = ? AND s.account_id::text = ? \
          ORDER BY si.position ASC, si.created_at ASC",
     );
     let rows: Vec<String> = match db.backend() {
@@ -435,7 +435,7 @@ pub async fn shelves_holding(
         "SELECT s.name FROM shelf_items si JOIN shelves s ON s.id = si.shelf_id \
          WHERE s.account_id = ? AND si.library_item_id = ? ORDER BY s.position ASC",
         "SELECT s.name FROM shelf_items si JOIN shelves s ON s.id = si.shelf_id \
-         WHERE s.account_id = ?::uuid AND si.library_item_id = ?::uuid ORDER BY s.position ASC",
+         WHERE s.account_id::text = ? AND si.library_item_id::text = ? ORDER BY s.position ASC",
     );
     let rows: Vec<String> = match db.backend() {
         Backend::Sqlite => {
@@ -624,8 +624,8 @@ pub async fn bookmarks_for(
         ),
         format!(
             "SELECT {BOOKMARK_COLUMNS_PG} FROM bookmarks \
-             WHERE account_id = ?::uuid AND (?::text IS NULL OR subject_type = ?) \
-               AND (?::text IS NULL OR subject_id = ?::uuid) \
+             WHERE account_id::text = ? AND (?::text IS NULL OR subject_type = ?) \
+               AND (?::text IS NULL OR subject_id::text = ?) \
              ORDER BY created_at DESC, id DESC"
         ),
     );
@@ -660,7 +660,7 @@ pub async fn find_bookmark(db: &Database, account_id: &str, id: &str) -> Result<
         db,
         format!("SELECT {BOOKMARK_COLUMNS} FROM bookmarks WHERE id = ? AND account_id = ?"),
         format!(
-            "SELECT {BOOKMARK_COLUMNS_PG} FROM bookmarks WHERE id = ?::uuid AND account_id = ?::uuid"
+            "SELECT {BOOKMARK_COLUMNS_PG} FROM bookmarks WHERE id::text = ? AND account_id::text = ?"
         ),
     );
     let row: Option<BookmarkRow> = match db.backend() {
@@ -718,7 +718,7 @@ pub async fn update_bookmark(
          position_permille = COALESCE(?, position_permille), \
          is_public = COALESCE(?::int::boolean, is_public), updated_at = ?, \
          version = version + 1 \
-         WHERE id = ?::uuid AND account_id = ?::uuid AND version = ?",
+         WHERE id::text = ? AND account_id::text = ? AND version = ?",
     );
     let affected = run!(db, sql, |q| q
         .bind(patch.note)
@@ -736,7 +736,7 @@ pub async fn update_bookmark(
 pub async fn delete_bookmark(db: &Database, account_id: &str, id: &str) -> Result<bool> {
     let sql = db.sql(
         "DELETE FROM bookmarks WHERE id = ? AND account_id = ?",
-        "DELETE FROM bookmarks WHERE id = ?::uuid AND account_id = ?::uuid",
+        "DELETE FROM bookmarks WHERE id::text = ? AND account_id::text = ?",
     );
     let affected = run!(db, sql, |q| q.bind(id).bind(account_id)).await?;
     Ok(affected > 0)
@@ -763,7 +763,7 @@ pub async fn public_bookmarks_for(
         ),
         format!(
             "SELECT {BOOKMARK_COLUMNS_PG} FROM bookmarks \
-             WHERE subject_type = ? AND subject_id = ?::uuid AND is_public \
+             WHERE subject_type = ? AND subject_id::text = ? AND is_public \
              ORDER BY created_at DESC, id DESC"
         ),
     );
@@ -790,7 +790,7 @@ pub async fn public_bookmarks_for(
 pub async fn bookmark_count(db: &Database, account_id: &str) -> Result<i64> {
     let sql = db.sql(
         "SELECT COUNT(*) FROM bookmarks WHERE account_id = ?",
-        "SELECT COUNT(*) FROM bookmarks WHERE account_id = ?::uuid",
+        "SELECT COUNT(*) FROM bookmarks WHERE account_id::text = ?",
     );
     let count: i64 = match db.backend() {
         Backend::Sqlite => {
@@ -863,8 +863,8 @@ pub async fn remove_private_tag(
     let sql = db.sql(
         "DELETE FROM private_tags WHERE account_id = ? AND subject_type = ? \
          AND subject_id = ? AND tag = ?",
-        "DELETE FROM private_tags WHERE account_id = ?::uuid AND subject_type = ? \
-         AND subject_id = ?::uuid AND tag = ?",
+        "DELETE FROM private_tags WHERE account_id::text = ? AND subject_type = ? \
+         AND subject_id::text = ? AND tag = ?",
     );
     let affected = run!(db, sql, |q| q
         .bind(account_id)
@@ -885,8 +885,8 @@ pub async fn tags_for(
     let sql = db.sql(
         "SELECT tag FROM private_tags WHERE account_id = ? AND subject_type = ? \
          AND subject_id = ? ORDER BY tag ASC",
-        "SELECT tag FROM private_tags WHERE account_id = ?::uuid AND subject_type = ? \
-         AND subject_id = ?::uuid ORDER BY tag ASC",
+        "SELECT tag FROM private_tags WHERE account_id::text = ? AND subject_type = ? \
+         AND subject_id::text = ? ORDER BY tag ASC",
     );
     let rows: Vec<String> = match db.backend() {
         Backend::Sqlite => {
@@ -917,7 +917,7 @@ pub async fn tags_for_account(db: &Database, account_id: &str) -> Result<Vec<(St
     let sql = db.sql(
         "SELECT tag, COUNT(*) FROM private_tags WHERE account_id = ? \
          GROUP BY tag ORDER BY tag ASC",
-        "SELECT tag, COUNT(*) FROM private_tags WHERE account_id = ?::uuid \
+        "SELECT tag, COUNT(*) FROM private_tags WHERE account_id::text = ? \
          GROUP BY tag ORDER BY tag ASC",
     );
     let rows: Vec<(String, i64)> = match db.backend() {
@@ -1081,7 +1081,7 @@ pub async fn reading_status_for(
         ),
         format!(
             "SELECT {READING_STATUS_COLUMNS_PG} FROM reading_status \
-             WHERE account_id = ?::uuid AND subject_type = ? AND subject_id = ?::uuid"
+             WHERE account_id::text = ? AND subject_type = ? AND subject_id::text = ?"
         ),
     );
     let row: Option<ReadingStatusRow> = match db.backend() {
@@ -1114,8 +1114,8 @@ pub async fn clear_reading_status(
 ) -> Result<bool> {
     let sql = db.sql(
         "DELETE FROM reading_status WHERE account_id = ? AND subject_type = ? AND subject_id = ?",
-        "DELETE FROM reading_status WHERE account_id = ?::uuid AND subject_type = ? \
-         AND subject_id = ?::uuid",
+        "DELETE FROM reading_status WHERE account_id::text = ? AND subject_type = ? \
+         AND subject_id::text = ?",
     );
     let affected = run!(db, sql, |q| q
         .bind(account_id)
@@ -1133,7 +1133,7 @@ pub async fn reading_status_counts(
     let sql = db.sql(
         "SELECT status, COUNT(*) FROM reading_status WHERE account_id = ? \
          GROUP BY status ORDER BY status ASC",
-        "SELECT status, COUNT(*) FROM reading_status WHERE account_id = ?::uuid \
+        "SELECT status, COUNT(*) FROM reading_status WHERE account_id::text = ? \
          GROUP BY status ORDER BY status ASC",
     );
     let rows: Vec<(String, i64)> = match db.backend() {
@@ -1343,7 +1343,7 @@ pub async fn saved_views_for(db: &Database, account_id: &str) -> Result<Vec<Save
              ORDER BY pinned DESC, name ASC"
         ),
         format!(
-            "SELECT {SAVED_VIEW_COLUMNS_PG} FROM saved_views WHERE account_id = ?::uuid \
+            "SELECT {SAVED_VIEW_COLUMNS_PG} FROM saved_views WHERE account_id::text = ? \
              ORDER BY pinned DESC, name ASC"
         ),
     );
@@ -1375,7 +1375,7 @@ pub async fn find_saved_view(
         format!("SELECT {SAVED_VIEW_COLUMNS} FROM saved_views WHERE id = ? AND account_id = ?"),
         format!(
             "SELECT {SAVED_VIEW_COLUMNS_PG} FROM saved_views \
-             WHERE id = ?::uuid AND account_id = ?::uuid"
+             WHERE id::text = ? AND account_id::text = ?"
         ),
     );
     let row: Option<SavedViewRow> = match db.backend() {
@@ -1418,7 +1418,7 @@ pub async fn update_saved_view(
          WHERE id = ? AND account_id = ? AND version = ?",
         "UPDATE saved_views SET name = COALESCE(?, name), \
          pinned = COALESCE(?::int::boolean, pinned), updated_at = ?, version = version + 1 \
-         WHERE id = ?::uuid AND account_id = ?::uuid AND version = ?",
+         WHERE id::text = ? AND account_id::text = ? AND version = ?",
     );
     let affected = run!(db, sql, |q| q
         .bind(name)
@@ -1435,7 +1435,7 @@ pub async fn update_saved_view(
 pub async fn delete_saved_view(db: &Database, account_id: &str, id: &str) -> Result<bool> {
     let sql = db.sql(
         "DELETE FROM saved_views WHERE id = ? AND account_id = ?",
-        "DELETE FROM saved_views WHERE id = ?::uuid AND account_id = ?::uuid",
+        "DELETE FROM saved_views WHERE id::text = ? AND account_id::text = ?",
     );
     let affected = run!(db, sql, |q| q.bind(id).bind(account_id)).await?;
     Ok(affected > 0)
@@ -1490,7 +1490,7 @@ fn library_filter(query: &LibraryQuery, shelf_ids: &[String]) -> (String, String
             postgres: format!(
                 "EXISTS (SELECT 1 FROM shelf_items si WHERE si.library_item_id = library_items.id \
                  AND si.shelf_id IN ({}))",
-                placeholders(shelf_ids.len(), true)
+                placeholders(shelf_ids.len(), false)
             ),
             values: shelf_ids.to_vec(),
         });
@@ -1643,7 +1643,7 @@ pub async fn query_library(
     let where_sqlite =
         format!("FROM library_items WHERE library_items.account_id = ?{connector}{facet_sqlite}");
     let where_postgres = format!(
-        "FROM library_items WHERE library_items.account_id = ?::uuid{connector}{facet_postgres}"
+        "FROM library_items WHERE library_items.account_id::text = ?{connector}{facet_postgres}"
     );
 
     let count_sql = sql_owned(
@@ -1739,7 +1739,7 @@ pub async fn all_library_items(
         ),
         format!(
             "SELECT {LIBRARY_COLUMNS_PG}, {LIBRARY_CHAPTER_COUNT} FROM library_items \
-             WHERE library_items.account_id = ?::uuid \
+             WHERE library_items.account_id::text = ? \
              ORDER BY library_items.created_at ASC, library_items.id ASC LIMIT ?"
         ),
     );
@@ -1954,17 +1954,17 @@ pub async fn storage_usage(db: &Database, account_id: &str) -> Result<StorageUsa
         "SELECT COALESCE(SUM(b.byte_size), 0)::bigint, COUNT(*) FROM content_blobs b \
          WHERE b.checksum IN (SELECT cr.checksum FROM content_references cr \
              JOIN library_items li ON li.id::text = cr.owner_id \
-             WHERE cr.owner_type = 'library_item' AND li.account_id = ?::uuid)",
+             WHERE cr.owner_type = 'library_item' AND li.account_id::text = ?)",
     );
     let export_sql = db.sql(
         "SELECT COALESCE(SUM(output_bytes), 0) FROM export_jobs \
          WHERE account_id = ? AND output_bytes IS NOT NULL",
         "SELECT COALESCE(SUM(output_bytes), 0)::bigint FROM export_jobs \
-         WHERE account_id = ?::uuid AND output_bytes IS NOT NULL",
+         WHERE account_id::text = ? AND output_bytes IS NOT NULL",
     );
     let items_sql = db.sql(
         "SELECT COUNT(*) FROM library_items WHERE account_id = ?",
-        "SELECT COUNT(*) FROM library_items WHERE account_id = ?::uuid",
+        "SELECT COUNT(*) FROM library_items WHERE account_id::text = ?",
     );
 
     let (imported_bytes, blob_count) = match db.backend() {
@@ -2160,7 +2160,7 @@ pub async fn latest_update_check(
         ),
         format!(
             "SELECT {UPDATE_CHECK_COLUMNS_PG} FROM update_checks \
-             WHERE account_id = ?::uuid AND library_item_id = ?::uuid \
+             WHERE account_id::text = ? AND library_item_id::text = ? \
              ORDER BY checked_at DESC, id DESC LIMIT 1"
         ),
     );
@@ -2197,7 +2197,7 @@ pub async fn update_checks_since(
         ),
         format!(
             "SELECT {UPDATE_CHECK_COLUMNS_PG} FROM update_checks \
-             WHERE account_id = ?::uuid AND checked_at >= ? ORDER BY checked_at DESC, id DESC"
+             WHERE account_id::text = ? AND checked_at >= ? ORDER BY checked_at DESC, id DESC"
         ),
     );
     let rows: Vec<UpdateCheckRow> = match db.backend() {
@@ -2295,8 +2295,8 @@ pub async fn remove_library_items(
         placeholders(ids.len(), false)
     );
     let owned_postgres = format!(
-        "SELECT id::text FROM library_items WHERE account_id = ?::uuid AND id IN ({})",
-        placeholders(ids.len(), true)
+        "SELECT id::text FROM library_items WHERE account_id::text = ? AND id::text IN ({})",
+        placeholders(ids.len(), false)
     );
     let owned_sql = db.sql(&owned_sqlite, &owned_postgres);
     let owned: Vec<String> = match db.backend() {
@@ -2396,8 +2396,8 @@ pub async fn remove_library_items(
         placeholders(owned.len(), false)
     );
     let delete_postgres = format!(
-        "DELETE FROM library_items WHERE account_id = ?::uuid AND id IN ({})",
-        placeholders(owned.len(), true)
+        "DELETE FROM library_items WHERE account_id::text = ? AND id::text IN ({})",
+        placeholders(owned.len(), false)
     );
     let delete_sql = db.sql(&delete_sqlite, &delete_postgres);
     match db.backend() {
@@ -2426,11 +2426,10 @@ pub async fn remove_library_items(
     if delete_copy && !touched_checksums.is_empty() {
         touched_checksums.sort();
         touched_checksums.dedup();
-        let remaining_query = format!(
-            "SELECT COUNT(*) FROM content_references WHERE checksum IN ({})",
-            vec!["?"; touched_checksums.len()].join(", ")
+        let remaining_sql = db.sql(
+            "SELECT COUNT(*) FROM content_references WHERE checksum = ?",
+            "SELECT COUNT(*) FROM content_references WHERE checksum = ?",
         );
-        let remaining_sql = db.sql(&remaining_query, &remaining_query);
         for checksum in &touched_checksums {
             let remaining: i64 = match db.backend() {
                 Backend::Sqlite => {

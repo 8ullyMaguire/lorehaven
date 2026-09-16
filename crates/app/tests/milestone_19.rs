@@ -7,7 +7,7 @@ use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
-use lorehaven_db::DatabaseConfig;
+use lorehaven_db::{Backend, DatabaseConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -205,11 +205,22 @@ async fn privacy_request_can_be_created_and_completed() {
 
     register(&mut client, "privacy@example.com", "PrivacyUser").await;
 
-    let account_id = sqlx::query_scalar::<_, String>("SELECT id FROM accounts WHERE email = ?")
-        .bind("privacy@example.com")
-        .fetch_one(harness.tdb.db().sqlite_pool().expect("sqlite"))
-        .await
-        .expect("account exists");
+    let sql = harness.tdb.db().sql(
+        "SELECT id FROM accounts WHERE email = ?",
+        "SELECT id::text FROM accounts WHERE email = $1",
+    );
+    let account_id = match harness.tdb.db().backend() {
+        Backend::Sqlite => sqlx::query_scalar::<_, String>(&sql)
+            .bind("privacy@example.com")
+            .fetch_one(harness.tdb.db().sqlite_pool().expect("sqlite"))
+            .await
+            .expect("account exists"),
+        Backend::Postgres => sqlx::query_scalar::<_, String>(&sql)
+            .bind("privacy@example.com")
+            .fetch_one(harness.tdb.db().postgres_pool().expect("postgres"))
+            .await
+            .expect("account exists"),
+    };
 
     let id = lorehaven_db::admin::create_privacy_request(harness.tdb.db(), &account_id, "export")
         .await

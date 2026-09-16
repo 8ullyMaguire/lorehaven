@@ -7,7 +7,7 @@ use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
-use lorehaven_db::DatabaseConfig;
+use lorehaven_db::{Backend, DatabaseConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -170,11 +170,24 @@ async fn api_scope_vocabulary_works() {
     register(&mut client, "token-test@example.com", "TokenUser").await;
 
     // Get the account ID from the database
-    let account_id = sqlx::query_scalar::<_, String>("SELECT id FROM accounts WHERE email = ?")
-        .bind("token-test@example.com")
-        .fetch_one(harness.tdb.db().sqlite_pool().expect("sqlite"))
-        .await
-        .expect("account exists");
+    let account_id = {
+        let sql = harness.tdb.db().sql(
+            "SELECT id FROM accounts WHERE email = ?",
+            "SELECT id::text FROM accounts WHERE email = $1",
+        );
+        match harness.tdb.db().backend() {
+            Backend::Sqlite => sqlx::query_scalar::<_, String>(&sql)
+                .bind("token-test@example.com")
+                .fetch_one(harness.tdb.db().sqlite_pool().expect("sqlite"))
+                .await
+                .expect("account exists"),
+            Backend::Postgres => sqlx::query_scalar::<_, String>(&sql)
+                .bind("token-test@example.com")
+                .fetch_one(harness.tdb.db().postgres_pool().expect("postgres"))
+                .await
+                .expect("account exists"),
+        }
+    };
 
     let scopes = vec![
         lorehaven_domain::api_scopes::Scope::ContentRead,
@@ -330,11 +343,24 @@ async fn bot_can_be_registered() {
     register(&mut client, "bot-owner@example.com", "BotOwner").await;
 
     // Get the account ID from the database
-    let account_id = sqlx::query_scalar::<_, String>("SELECT id FROM accounts WHERE email = ?")
-        .bind("bot-owner@example.com")
-        .fetch_one(harness.tdb.db().sqlite_pool().expect("sqlite"))
-        .await
-        .expect("account exists");
+    let account_id = {
+        let sql = harness.tdb.db().sql(
+            "SELECT id FROM accounts WHERE email = ?",
+            "SELECT id::text FROM accounts WHERE email = $1",
+        );
+        match harness.tdb.db().backend() {
+            Backend::Sqlite => sqlx::query_scalar::<_, String>(&sql)
+                .bind("bot-owner@example.com")
+                .fetch_one(harness.tdb.db().sqlite_pool().expect("sqlite"))
+                .await
+                .expect("account exists"),
+            Backend::Postgres => sqlx::query_scalar::<_, String>(&sql)
+                .bind("bot-owner@example.com")
+                .fetch_one(harness.tdb.db().postgres_pool().expect("postgres"))
+                .await
+                .expect("account exists"),
+        }
+    };
 
     // Issue token for bot
     let scopes = vec![lorehaven_domain::api_scopes::Scope::ContentRead];

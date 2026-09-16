@@ -228,6 +228,12 @@ const EXPORT_COLUMNS: &str =
 const GRANT_COLUMNS: &str =
     "id, export_job_id, token_hash, expires_at, used_at, single_use, created_at";
 
+const EXPORT_COLUMNS_PG: &str =
+    "id::text AS id, job_id::text AS job_id, account_id::text AS account_id,      subject_id::text AS subject_id, subject_type, format, options_json, privacy_acknowledged_at,      state, output_blob_checksum, output_bytes, converter_version, error_message,      created_at, updated_at, version";
+
+const GRANT_COLUMNS_PG: &str =
+    "id::text AS id, export_job_id::text AS export_job_id, token_hash, expires_at,      used_at, single_use, created_at";
+
 // ---------------------------------------------------------------------------
 // Export jobs
 // ---------------------------------------------------------------------------
@@ -295,7 +301,7 @@ pub async fn find_export(db: &Database, id: &str) -> Result<Option<ExportJob>> {
     let sql = sql_owned(
         db,
         format!("SELECT {EXPORT_COLUMNS} FROM export_jobs WHERE id = ?"),
-        format!("SELECT {EXPORT_COLUMNS} FROM export_jobs WHERE id = ?::uuid"),
+        format!("SELECT {EXPORT_COLUMNS_PG} FROM export_jobs WHERE id::text = ?"),
     );
     let row: Option<ExportRow> = match db.backend() {
         Backend::Sqlite => {
@@ -324,7 +330,7 @@ pub async fn find_export_for(
         db,
         format!("SELECT {EXPORT_COLUMNS} FROM export_jobs WHERE id = ? AND account_id = ?"),
         format!(
-            "SELECT {EXPORT_COLUMNS} FROM export_jobs WHERE id = ?::uuid AND account_id = ?::uuid"
+            "SELECT {EXPORT_COLUMNS_PG} FROM export_jobs WHERE id::text = ? AND account_id::text = ?"
         ),
     );
     let row: Option<ExportRow> = match db.backend() {
@@ -364,8 +370,8 @@ pub async fn list_exports(
              ORDER BY created_at DESC, id DESC LIMIT ?"
         ),
         format!(
-            "SELECT {EXPORT_COLUMNS} FROM export_jobs \
-             WHERE account_id = ?::uuid AND (? IS NULL OR state = ?) \
+            "SELECT {EXPORT_COLUMNS_PG} FROM export_jobs \
+             WHERE account_id::text = ? AND (? IS NULL OR state = ?) \
                AND (?::text IS NULL OR (created_at, id) < (?::text, ?::uuid)) \
              ORDER BY created_at DESC, id DESC LIMIT ?"
         ),
@@ -421,8 +427,8 @@ pub async fn find_open_export(
              ORDER BY created_at DESC LIMIT 1"
         ),
         format!(
-            "SELECT {EXPORT_COLUMNS} FROM export_jobs \
-             WHERE account_id = ?::uuid AND subject_type = ? AND subject_id = ?::uuid AND format = ? \
+            "SELECT {EXPORT_COLUMNS_PG} FROM export_jobs \
+             WHERE account_id::text = ? AND subject_type = ? AND subject_id::text = ? AND format = ? \
                AND state IN ('queued', 'running') \
              ORDER BY created_at DESC LIMIT 1"
         ),
@@ -455,7 +461,7 @@ pub async fn set_export_state(db: &Database, id: &str, state: &str) -> Result<()
     let now = now_rfc3339();
     let sql = db.sql(
         "UPDATE export_jobs SET state = ?, updated_at = ?, version = version + 1 WHERE id = ?",
-        "UPDATE export_jobs SET state = ?, updated_at = ?, version = version + 1 WHERE id = ?::uuid",
+        "UPDATE export_jobs SET state = ?, updated_at = ?, version = version + 1 WHERE id::text = ?",
     );
     run!(db, &sql, |query| { query.bind(state).bind(&now).bind(id) })
         .await
@@ -483,7 +489,7 @@ pub async fn record_output(
          WHERE id = ?",
         "UPDATE export_jobs SET state = 'ready', output_blob_checksum = ?, output_bytes = ?, \
          converter_version = ?, error_message = NULL, updated_at = ?, version = version + 1 \
-         WHERE id = ?::uuid",
+         WHERE id::text = ?",
     );
     run!(db, &sql, |query| {
         query
@@ -505,7 +511,7 @@ pub async fn fail_export(db: &Database, id: &str, message: &str) -> Result<()> {
         "UPDATE export_jobs SET state = 'failed', error_message = ?, updated_at = ?, \
          version = version + 1 WHERE id = ?",
         "UPDATE export_jobs SET state = 'failed', error_message = ?, updated_at = ?, \
-         version = version + 1 WHERE id = ?::uuid",
+         version = version + 1 WHERE id::text = ?",
     );
     run!(db, &sql, |query| {
         query.bind(message).bind(&now).bind(id)
@@ -522,7 +528,7 @@ pub async fn acknowledge_privacy(db: &Database, id: &str) -> Result<()> {
         "UPDATE export_jobs SET privacy_acknowledged_at = ?, updated_at = ?, version = version + 1 \
          WHERE id = ? AND privacy_acknowledged_at IS NULL",
         "UPDATE export_jobs SET privacy_acknowledged_at = ?, updated_at = ?, version = version + 1 \
-         WHERE id = ?::uuid AND privacy_acknowledged_at IS NULL",
+         WHERE id::text = ? AND privacy_acknowledged_at IS NULL",
     );
     run!(db, &sql, |query| { query.bind(&now).bind(&now).bind(id) })
         .await
@@ -558,7 +564,7 @@ pub async fn purge_expired(
              ORDER BY created_at LIMIT ?"
         ),
         format!(
-            "SELECT {EXPORT_COLUMNS} FROM export_jobs WHERE created_at < ? \
+            "SELECT {EXPORT_COLUMNS_PG} FROM export_jobs WHERE created_at < ? \
              ORDER BY created_at LIMIT ?"
         ),
     );
@@ -595,7 +601,7 @@ pub async fn purge_expired(
     for export in &purged {
         let sql = db.sql(
             "DELETE FROM export_jobs WHERE id = ?",
-            "DELETE FROM export_jobs WHERE id = ?::uuid",
+            "DELETE FROM export_jobs WHERE id::text = ?",
         );
         run!(db, &sql, |query| query.bind(&export.id))
             .await
@@ -662,7 +668,7 @@ pub async fn redeem_grant(db: &Database, token_hash: &str, now: &str) -> Result<
          RETURNING export_job_id",
         "UPDATE download_grants SET used_at = ? \
          WHERE token_hash = ? AND expires_at > ? AND used_at IS NULL \
-         RETURNING export_job_id",
+         RETURNING export_job_id::text AS export_job_id",
     );
     let row: Option<(String,)> = match db.backend() {
         Backend::Sqlite => {
@@ -700,7 +706,7 @@ pub async fn grants_for_export(db: &Database, export_job_id: &str) -> Result<Vec
              ORDER BY created_at DESC"
         ),
         format!(
-            "SELECT {GRANT_COLUMNS} FROM download_grants WHERE export_job_id = ?::uuid \
+            "SELECT {GRANT_COLUMNS_PG} FROM download_grants WHERE export_job_id::text = ? \
              ORDER BY created_at DESC"
         ),
     );
@@ -732,13 +738,13 @@ pub async fn grants_for_export(db: &Database, export_job_id: &str) -> Result<Vec
 pub async fn delete_export(db: &Database, id: &str) -> Result<bool> {
     let grants = db.sql(
         "DELETE FROM download_grants WHERE export_job_id = ?",
-        "DELETE FROM download_grants WHERE export_job_id = ?::uuid",
+        "DELETE FROM download_grants WHERE export_job_id::text = ?",
     );
     run!(db, &grants, |query| query.bind(id)).await?;
 
     let sql = db.sql(
         "DELETE FROM export_jobs WHERE id = ?",
-        "DELETE FROM export_jobs WHERE id = ?::uuid",
+        "DELETE FROM export_jobs WHERE id::text = ?",
     );
     let affected = run!(db, &sql, |query| query.bind(id)).await?;
     Ok(affected > 0)
@@ -828,7 +834,7 @@ pub async fn list_devices(db: &Database, account_id: &str) -> Result<Vec<UserDev
         "SELECT id, account_id, label, push_subscription_json, last_seen_at, created_at, updated_at \
          FROM user_devices WHERE account_id = ? ORDER BY updated_at DESC",
         "SELECT id, account_id, label, push_subscription_json, last_seen_at, created_at, updated_at \
-         FROM user_devices WHERE account_id = ?::uuid ORDER BY updated_at DESC",
+         FROM user_devices WHERE account_id::text = ? ORDER BY updated_at DESC",
     );
     let rows: Vec<DeviceRow> = match db.backend() {
         Backend::Sqlite => {
@@ -862,7 +868,7 @@ pub async fn list_devices(db: &Database, account_id: &str) -> Result<Vec<UserDev
 pub async fn delete_device(db: &Database, id: &str, account_id: &str) -> Result<bool> {
     let sql = db.sql(
         "DELETE FROM user_devices WHERE id = ? AND account_id = ?",
-        "DELETE FROM user_devices WHERE id = ?::uuid AND account_id = ?::uuid",
+        "DELETE FROM user_devices WHERE id::text = ? AND account_id::text = ?",
     );
     let affected = run!(db, &sql, |query| query.bind(id).bind(account_id))
         .await

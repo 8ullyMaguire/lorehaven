@@ -25,7 +25,7 @@ use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
-use lorehaven_db::{positivity, DatabaseConfig};
+use lorehaven_db::{positivity, Backend, DatabaseConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -456,12 +456,19 @@ async fn neutral_text_is_deterministic_and_never_double_classified() {
             .await;
         assert_eq!(status, StatusCode::OK, "{body}");
     }
-    let count: i64 = {
-        let pool = harness.tdb.db().sqlite_pool().expect("sqlite");
-        sqlx::query_scalar("SELECT COUNT(*) FROM review_classifications")
-            .fetch_one(pool)
+    let count_sql = harness.tdb.db().sql(
+        "SELECT COUNT(*) FROM review_classifications",
+        "SELECT COUNT(*)::bigint FROM review_classifications",
+    );
+    let count: i64 = match harness.tdb.db().backend() {
+        Backend::Sqlite => sqlx::query_scalar(count_sql.as_ref())
+            .fetch_one(harness.tdb.db().sqlite_pool().expect("sqlite"))
             .await
-            .expect("count")
+            .expect("count"),
+        Backend::Postgres => sqlx::query_scalar(count_sql.as_ref())
+            .fetch_one(harness.tdb.db().postgres_pool().expect("postgres"))
+            .await
+            .expect("count"),
     };
     assert_eq!(count, 1, "one review, one classification row");
     harness.cleanup().await;

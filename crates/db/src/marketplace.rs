@@ -61,20 +61,27 @@ pub async fn list_listings(
     state: Option<&str>,
     limit: i64,
 ) -> Result<Vec<Value>, sqlx::Error> {
-    let mut query =
+    let mut sqlite_sql =
         "SELECT id, kind, owner, work_id, terms, state, created_at FROM listings WHERE 1=1"
             .to_string();
+    let mut pg_sql = "SELECT id::text, kind, owner, work_id::text, terms, state, created_at FROM listings WHERE 1=1".to_string();
+    let mut param_idx = 1;
     if kind.is_some() {
-        query.push_str(" AND kind = ?");
+        sqlite_sql.push_str(" AND kind = ?");
+        pg_sql.push_str(&format!(" AND kind = ${}", param_idx));
+        param_idx += 1;
     }
     if state.is_some() {
-        query.push_str(" AND state = ?");
+        sqlite_sql.push_str(" AND state = ?");
+        pg_sql.push_str(&format!(" AND state = ${}", param_idx));
+        param_idx += 1;
     }
-    query.push_str(" ORDER BY created_at LIMIT ?");
+    sqlite_sql.push_str(" ORDER BY created_at LIMIT ?");
+    pg_sql.push_str(&format!(" ORDER BY created_at LIMIT ${}", param_idx));
 
     match db.backend() {
         Backend::Sqlite => {
-            let mut q = sqlx::query(&query);
+            let mut q = sqlx::query(&sqlite_sql);
             if let Some(k) = kind {
                 q = q.bind(k);
             }
@@ -101,7 +108,7 @@ pub async fn list_listings(
                 .collect())
         }
         Backend::Postgres => {
-            let mut q = sqlx::query(&query);
+            let mut q = sqlx::query(&pg_sql);
             if let Some(k) = kind {
                 q = q.bind(k);
             }

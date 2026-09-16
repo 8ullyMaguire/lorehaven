@@ -16,7 +16,7 @@ use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
 use lorehaven_app::worker::{PassReport, TopicHandler, Worker, WorkerOptions};
 use lorehaven_db::storage::BlobStore;
-use lorehaven_db::{jobs, outbox, DatabaseConfig};
+use lorehaven_db::{jobs, outbox, Backend, DatabaseConfig};
 use lorehaven_domain::jobs::{JobKind, JobState, RetryPolicy};
 use lorehaven_domain::{AccountId, JobId, OutboxEventId};
 use serde_json::{json, Value};
@@ -870,12 +870,20 @@ async fn a_failing_outbox_handler_retries_with_a_reason() {
         "a failed event is not offered again immediately"
     );
 
-    let row: (i64, Option<String>) = sqlx::query_as(
+    let sql = harness.tdb.db().sql(
         "SELECT attempts, last_error FROM outbox_events WHERE topic = 'test.broken'",
-    )
-    .fetch_one(harness.tdb.db().sqlite_pool().expect("handle"))
-    .await
-    .expect("row");
+        "SELECT attempts, last_error FROM outbox_events WHERE topic = 'test.broken'",
+    );
+    let row: (i64, Option<String>) = match harness.tdb.db().backend() {
+        Backend::Sqlite => sqlx::query_as(sql.as_ref())
+            .fetch_one(harness.tdb.db().sqlite_pool().expect("sqlite"))
+            .await
+            .expect("fetch outbox row"),
+        Backend::Postgres => sqlx::query_as(sql.as_ref())
+            .fetch_one(harness.tdb.db().postgres_pool().expect("postgres"))
+            .await
+            .expect("fetch outbox row"),
+    };
     assert_eq!(row.0, 1);
     assert!(
         row.1.as_deref().unwrap_or_default().contains("refused"),
@@ -1265,10 +1273,20 @@ async fn the_sweep_deletes_only_old_terminal_jobs() {
         .await
         .expect("find")
         .is_none());
-    let attempts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM job_attempts")
-        .fetch_one(harness.tdb.db().sqlite_pool().expect("handle"))
-        .await
-        .expect("count");
+    let attempts_sql = harness.tdb.db().sql(
+        "SELECT COUNT(*) FROM job_attempts",
+        "SELECT COUNT(*) FROM job_attempts",
+    );
+    let attempts: i64 = match harness.tdb.db().backend() {
+        Backend::Sqlite => sqlx::query_scalar(attempts_sql.as_ref())
+            .fetch_one(harness.tdb.db().sqlite_pool().expect("sqlite"))
+            .await
+            .expect("count attempts"),
+        Backend::Postgres => sqlx::query_scalar(attempts_sql.as_ref())
+            .fetch_one(harness.tdb.db().postgres_pool().expect("postgres"))
+            .await
+            .expect("count attempts"),
+    };
     assert_eq!(attempts, 0, "attempts cascade with their job");
 
     harness.cleanup().await;

@@ -87,7 +87,7 @@ fn decode_override(row: Option<OverrideRow>) -> WorkFeedbackOverride {
 pub async fn preferences_for(db: &Database, account: AccountId) -> Result<FeedbackPreferences> {
     let sql = db.sql(
         "SELECT accept_constructive, ambiguous_auto_deliver AS ambiguous_auto, comments_enabled FROM feedback_preferences WHERE account_id = ?",
-        "SELECT accept_constructive::int::bigint AS accept_constructive, ambiguous_auto_deliver::int::bigint AS ambiguous_auto, comments_enabled::int::bigint AS comments_enabled FROM feedback_preferences WHERE account_id = ?::uuid",
+        "SELECT accept_constructive::int::bigint AS accept_constructive, ambiguous_auto_deliver::int::bigint AS ambiguous_auto, comments_enabled::int::bigint AS comments_enabled FROM feedback_preferences WHERE account_id::text = ?",
     );
     let row: Option<PrefsRow> = match db.backend() {
         Backend::Sqlite => {
@@ -110,7 +110,7 @@ pub async fn preferences_for(db: &Database, account: AccountId) -> Result<Feedba
 pub async fn override_for(db: &Database, work: WorkId) -> Result<WorkFeedbackOverride> {
     let sql = db.sql(
         "SELECT accept_constructive, ambiguous_auto_deliver AS ambiguous_auto, comments_enabled FROM work_feedback_preferences WHERE work_id = ?",
-        "SELECT accept_constructive::int::bigint AS accept_constructive, ambiguous_auto_deliver::int::bigint AS ambiguous_auto, comments_enabled::int::bigint AS comments_enabled FROM work_feedback_preferences WHERE work_id = ?::uuid",
+        "SELECT accept_constructive::int::bigint AS accept_constructive, ambiguous_auto_deliver::int::bigint AS ambiguous_auto, comments_enabled::int::bigint AS comments_enabled FROM work_feedback_preferences WHERE work_id::text = ?",
     );
     let row: Option<OverrideRow> = match db.backend() {
         Backend::Sqlite => {
@@ -133,7 +133,7 @@ pub async fn override_for(db: &Database, work: WorkId) -> Result<WorkFeedbackOve
 pub async fn preferences_version(db: &Database, account: AccountId) -> Result<i64> {
     let sql = db.sql(
         "SELECT version FROM feedback_preferences WHERE account_id = ?",
-        "SELECT version FROM feedback_preferences WHERE account_id = ?::uuid",
+        "SELECT version FROM feedback_preferences WHERE account_id::text = ?",
     );
     let v: Option<i64> = match db.backend() {
         Backend::Sqlite => {
@@ -272,11 +272,11 @@ pub async fn list_membership(
 ) -> Result<(bool, bool)> {
     let allow_sql = db.sql(
         "SELECT 1 FROM feedback_allowlist WHERE author_account_id = ? AND trusted_pseud_id = ?",
-        "SELECT 1 FROM feedback_allowlist WHERE author_account_id = ?::uuid AND trusted_pseud_id = ?::uuid",
+        "SELECT 1::bigint FROM feedback_allowlist WHERE author_account_id::text = ? AND trusted_pseud_id::text = ?",
     );
     let deny_sql = db.sql(
         "SELECT 1 FROM feedback_denylist WHERE author_account_id = ? AND refused_pseud_id = ?",
-        "SELECT 1 FROM feedback_denylist WHERE author_account_id = ?::uuid AND refused_pseud_id = ?::uuid",
+        "SELECT 1::bigint FROM feedback_denylist WHERE author_account_id::text = ? AND refused_pseud_id::text = ?",
     );
     let (allow, deny): (Option<i64>, Option<i64>) = match db.backend() {
         Backend::Sqlite => {
@@ -363,7 +363,7 @@ pub async fn classification_for(
 ) -> Result<Option<StoredClassification>> {
     let sql = db.sql(
         "SELECT class, confidence_bp, signals, outcome, classified_at FROM review_classifications WHERE review_id = ?",
-        "SELECT class, confidence_bp, signals, outcome, classified_at FROM review_classifications WHERE review_id = ?::uuid",
+        "SELECT class, confidence_bp, signals, outcome, classified_at FROM review_classifications WHERE review_id::text = ?",
     );
     let row: Option<ClassificationRow> = match db.backend() {
         Backend::Sqlite => {
@@ -442,7 +442,7 @@ pub async fn deny_pseud(db: &Database, author: AccountId, refused: PseudId) -> R
 pub async fn author_account_for_work(db: &Database, work: WorkId) -> Result<Option<AccountId>> {
     let sql = db.sql(
         "SELECT p.account_id FROM works w JOIN pseuds p ON p.id = w.owner_pseud_id WHERE w.id = ? AND w.deleted_at IS NULL",
-        "SELECT p.account_id::text AS account_id FROM works w JOIN pseuds p ON p.id = w.owner_pseud_id WHERE w.id = ?::uuid AND w.deleted_at IS NULL",
+        "SELECT p.account_id::text AS account_id FROM works w JOIN pseuds p ON p.id = w.owner_pseud_id WHERE w.id::text = ? AND w.deleted_at IS NULL",
     );
     let row: Option<(String,)> = match db.backend() {
         Backend::Sqlite => {
@@ -481,7 +481,7 @@ pub async fn visible_reviews(db: &Database, work: WorkId) -> Result<Vec<crate::r
         "SELECT r.id::text AS id, p.handle AS author_handle, r.body, r.contains_spoilers::int::bigint, r.is_public::int::bigint, r.published_at, r.created_at, r.updated_at, r.version
            FROM review r JOIN pseuds p ON p.id = r.pseud_id
            LEFT JOIN review_classifications c ON c.review_id = r.id
-          WHERE r.work_id = ?::uuid AND r.is_public = TRUE AND r.published_at IS NOT NULL AND r.deleted_at IS NULL
+          WHERE r.work_id::text = ? AND r.is_public = TRUE AND r.published_at IS NOT NULL AND r.deleted_at IS NULL
             AND (c.outcome IS NULL OR c.outcome = 'delivered')
           ORDER BY r.published_at DESC, r.id ASC",
     );
@@ -557,7 +557,7 @@ pub async fn inbox_for(db: &Database, author: AccountId) -> Result<Vec<InboxItem
            JOIN pseuds owner ON owner.id = w.owner_pseud_id
            JOIN pseuds p ON p.id = r.pseud_id
            LEFT JOIN review_classifications c ON c.review_id = r.id
-          WHERE owner.account_id = ?::uuid AND w.deleted_at IS NULL AND r.is_public = TRUE AND r.published_at IS NOT NULL AND r.deleted_at IS NULL
+          WHERE owner.account_id::text = ? AND w.deleted_at IS NULL AND r.is_public = TRUE AND r.published_at IS NOT NULL AND r.deleted_at IS NULL
             AND (c.outcome IS NULL OR c.outcome = 'delivered')
           ORDER BY r.published_at DESC, r.id ASC LIMIT 100",
     );
@@ -611,7 +611,7 @@ pub async fn held_count_for(db: &Database, author: AccountId) -> Result<i64> {
            JOIN works w ON w.id = r.work_id
            JOIN pseuds owner ON owner.id = w.owner_pseud_id
            JOIN review_classifications c ON c.review_id = r.id
-          WHERE owner.account_id = ?::uuid AND w.deleted_at IS NULL AND r.deleted_at IS NULL AND c.outcome = 'held'",
+          WHERE owner.account_id::text = ? AND w.deleted_at IS NULL AND r.deleted_at IS NULL AND c.outcome = 'held'",
     );
     let n: i64 = match db.backend() {
         Backend::Sqlite => {

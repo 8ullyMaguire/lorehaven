@@ -24,7 +24,7 @@ use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
 use lorehaven_app::worker::{Worker, WorkerOptions};
-use lorehaven_db::DatabaseConfig;
+use lorehaven_db::{Backend, DatabaseConfig};
 use lorehaven_domain::exports::{epub, ExportFormat};
 use lorehaven_domain::jobs::{JobKind, RetryPolicy};
 use serde_json::{json, Value};
@@ -689,11 +689,26 @@ async fn the_retention_sweep_removes_the_export_and_its_output() {
 
     // Age the export past its window. The window is seven days and this test is
     // not going to wait, so the row's own clock is moved.
-    sqlx::query("UPDATE export_jobs SET created_at = '2020-01-01T00:00:00Z' WHERE id = ?")
-        .bind(&export_id)
-        .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
-        .await
-        .expect("age the export");
+    let sql = harness.tdb.db().sql(
+        "UPDATE export_jobs SET created_at = '2020-01-01T00:00:00Z' WHERE id = ?",
+        "UPDATE export_jobs SET created_at = '2020-01-01T00:00:00Z' WHERE id::text = $1",
+    );
+    match harness.tdb.db().backend() {
+        Backend::Sqlite => {
+            sqlx::query(sql.as_ref())
+                .bind(&export_id)
+                .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
+                .await
+                .expect("age the export");
+        }
+        Backend::Postgres => {
+            sqlx::query(sql.as_ref())
+                .bind(&export_id)
+                .execute(harness.tdb.db().postgres_pool().expect("postgres"))
+                .await
+                .expect("age the export");
+        }
+    }
 
     // Queued through the queue itself, as the CLI does, so this asserts the
     // worker's own behaviour rather than the operator route's permissions.

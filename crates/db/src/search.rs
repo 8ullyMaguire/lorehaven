@@ -95,13 +95,13 @@ async fn rebuild_work_index_postgres(
     let pool = db.postgres_pool().expect("postgres");
     let mut tx = pool.begin().await.context("begin transaction")?;
 
-    sqlx::query("DELETE FROM works_index_terms WHERE work_id = ?::uuid")
+    sqlx::query("DELETE FROM works_index_terms WHERE work_id::text = ?")
         .bind(work_id.to_string())
         .execute(&mut *tx)
         .await
         .context("delete old index terms")?;
 
-    sqlx::query("DELETE FROM works_index WHERE work_id = ?::uuid")
+    sqlx::query("DELETE FROM works_index WHERE work_id::text = ?")
         .bind(work_id.to_string())
         .execute(&mut *tx)
         .await

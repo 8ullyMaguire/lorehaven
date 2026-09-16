@@ -697,12 +697,13 @@ async fn clearing_history_removes_only_the_callers_rows() {
         .unwrap();
 
     // Both touch history for the same subject.
+    let work_id = "550e8400-e29b-41d4-a716-446655440000";
     reading::touch_history(
         harness.tdb.db(),
         account_a,
         active_pseud(&mut reader_a).await.parse().expect("pseud"),
         "work",
-        "work-1",
+        work_id,
         None,
     )
     .await
@@ -712,7 +713,7 @@ async fn clearing_history_removes_only_the_callers_rows() {
         account_b,
         active_pseud(&mut reader_b).await.parse().expect("pseud"),
         "work",
-        "work-1",
+        work_id,
         None,
     )
     .await

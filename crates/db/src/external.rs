@@ -41,7 +41,7 @@ pub async fn issue_token(
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO api_tokens (id, account_id, name, token_hash, scopes, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6)",
+                 VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)",
             )
             .bind(&id)
             .bind(account)
@@ -52,7 +52,7 @@ pub async fn issue_token(
             .execute(db.postgres_pool().expect("postgres"))
             .await?;
         }
-    }
+    };
     Ok(id)
 }
 
@@ -81,7 +81,7 @@ async fn resolve_token_postgres(
     token_hash: &str,
 ) -> Result<Option<(String, Vec<String>)>, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT account_id, scopes FROM api_tokens WHERE token_hash = $1 AND revoked_at IS NULL",
+        "SELECT account_id::text, scopes FROM api_tokens WHERE token_hash = $1 AND revoked_at IS NULL",
     )
     .bind(token_hash)
     .fetch_optional(pool)
@@ -121,13 +121,13 @@ pub async fn revoke_token(db: &Database, token_id: &str) -> Result<(), sqlx::Err
                 .await?;
         }
         Backend::Postgres => {
-            sqlx::query("UPDATE api_tokens SET revoked_at = $1 WHERE id = $2")
+            sqlx::query("UPDATE api_tokens SET revoked_at = $1 WHERE id = $2::uuid")
                 .bind(&now)
                 .bind(token_id)
                 .execute(db.postgres_pool().expect("postgres"))
                 .await?;
         }
-    }
+    };
     Ok(())
 }
 

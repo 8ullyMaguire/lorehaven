@@ -120,7 +120,7 @@ pub async fn mark_delivered(db: &Database, id: OutboxEventId) -> Result<()> {
         "UPDATE outbox_events SET delivered_at = ?, claimed_at = NULL, attempts = attempts + 1
           WHERE id = ?",
         "UPDATE outbox_events SET delivered_at = ?, claimed_at = NULL, attempts = attempts + 1
-          WHERE id = ?::uuid",
+          WHERE id::text = ?",
     );
     let now = now_rfc3339();
     match db.backend() {
@@ -155,7 +155,7 @@ pub async fn mark_failed(
           WHERE id = ?",
         "UPDATE outbox_events
             SET attempts = attempts + 1, claimed_at = NULL, available_at = ?, last_error = ?
-          WHERE id = ?::uuid",
+          WHERE id::text = ?",
     );
     match db.backend() {
         Backend::Sqlite => {

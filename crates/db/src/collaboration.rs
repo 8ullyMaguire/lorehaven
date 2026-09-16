@@ -39,7 +39,7 @@ pub async fn contributors_for_work(db: &Database, work: WorkId) -> Result<Vec<Co
           ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'coauthor' THEN 1
                              WHEN 'editor' THEN 2 ELSE 3 END, created_at ASC",
         "SELECT pseud_id::text AS pseud_id, role, public_attribution FROM work_contributors
-          WHERE work_id = ?::uuid
+          WHERE work_id::text = ?
           ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'coauthor' THEN 1
                              WHEN 'editor' THEN 2 ELSE 3 END, created_at ASC",
     );
@@ -78,7 +78,7 @@ pub async fn owner_of(db: &Database, work: WorkId) -> Result<Option<PseudId>> {
     let sql = db.sql(
         "SELECT pseud_id FROM work_contributors WHERE work_id = ? AND role = 'owner'",
         "SELECT pseud_id::text AS pseud_id FROM work_contributors
-          WHERE work_id = ?::uuid AND role = 'owner'",
+          WHERE work_id::text = ? AND role = 'owner'",
     );
     let row: Option<(String,)> = match db.backend() {
         Backend::Sqlite => {
@@ -115,7 +115,7 @@ pub async fn public_contributors(
         "SELECT p.handle, p.display_name, wc.role
            FROM work_contributors wc
            JOIN pseuds p ON p.id = wc.pseud_id
-          WHERE wc.work_id = ?::uuid AND wc.public_attribution = 1 AND p.deleted_at IS NULL
+          WHERE wc.work_id::text = ? AND wc.public_attribution = 1 AND p.deleted_at IS NULL
           ORDER BY CASE wc.role WHEN 'owner' THEN 0 WHEN 'coauthor' THEN 1
                                 WHEN 'editor' THEN 2 ELSE 3 END, wc.created_at ASC",
     );
@@ -209,7 +209,7 @@ pub async fn update_contributor(
         "UPDATE work_contributors
             SET role = COALESCE(?, role),
                 public_attribution = COALESCE(?, public_attribution)
-          WHERE work_id = ?::uuid AND pseud_id = ?::uuid",
+          WHERE work_id::text = ? AND pseud_id::text = ?",
     );
     let flags = public_attribution.map(i64::from);
 
@@ -244,7 +244,7 @@ pub async fn remove_contributor(db: &Database, work: WorkId, pseud: PseudId) -> 
 
     let sql = db.sql(
         "DELETE FROM work_contributors WHERE work_id = ? AND pseud_id = ?",
-        "DELETE FROM work_contributors WHERE work_id = ?::uuid AND pseud_id = ?::uuid",
+        "DELETE FROM work_contributors WHERE work_id::text = ? AND pseud_id::text = ?",
     );
 
     let affected = match db.backend() {
@@ -410,7 +410,7 @@ pub async fn invites_for_work(db: &Database, work: WorkId) -> Result<Vec<Invite>
         db,
         format!("SELECT {INVITE_COLUMNS} {INVITE_JOINS} WHERE i.work_id = ? ORDER BY i.created_at DESC"),
         format!(
-            "SELECT {INVITE_COLUMNS_PG} {INVITE_JOINS} WHERE i.work_id = ?::uuid ORDER BY i.created_at DESC"
+            "SELECT {INVITE_COLUMNS_PG} {INVITE_JOINS} WHERE i.work_id::text = ? ORDER BY i.created_at DESC"
         ),
     );
 
@@ -442,7 +442,7 @@ pub async fn pending_invites_for_pseud(db: &Database, pseud: PseudId) -> Result<
         ),
         format!(
             "SELECT {INVITE_COLUMNS_PG} {INVITE_JOINS}
-              WHERE i.invited_pseud_id = ?::uuid AND i.status = 'pending' ORDER BY i.created_at DESC"
+              WHERE i.invited_pseud_id::text = ? AND i.status = 'pending' ORDER BY i.created_at DESC"
         ),
     );
 
@@ -469,7 +469,7 @@ pub async fn find_invite(db: &Database, id: CollaborationInviteId) -> Result<Opt
     let sql = sql_owned(
         db,
         format!("SELECT {INVITE_COLUMNS} {INVITE_JOINS} WHERE i.id = ?"),
-        format!("SELECT {INVITE_COLUMNS_PG} {INVITE_JOINS} WHERE i.id = ?::uuid"),
+        format!("SELECT {INVITE_COLUMNS_PG} {INVITE_JOINS} WHERE i.id::text = ?"),
     );
 
     let row: Option<InviteRow> = match db.backend() {
@@ -506,7 +506,7 @@ pub async fn respond_to_invite(db: &Database, invite: &Invite, accept: bool) -> 
           WHERE id = ? AND status = 'pending'",
         "UPDATE collaboration_invites
             SET status = ?, responded_at = ?, updated_at = ?, version = version + 1
-          WHERE id = ?::uuid AND status = 'pending'",
+          WHERE id::text = ? AND status = 'pending'",
     );
     let grant_sql = db.sql(
         "INSERT INTO work_contributors (work_id, pseud_id, role, public_attribution, created_at)
@@ -582,7 +582,7 @@ pub async fn revoke_invite(db: &Database, id: CollaborationInviteId) -> Result<b
           WHERE id = ? AND status = 'pending'",
         "UPDATE collaboration_invites
             SET status = 'revoked', updated_at = ?, version = version + 1
-          WHERE id = ?::uuid AND status = 'pending'",
+          WHERE id::text = ? AND status = 'pending'",
     );
 
     let affected = match db.backend() {

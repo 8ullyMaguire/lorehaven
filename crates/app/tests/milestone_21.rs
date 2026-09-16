@@ -12,7 +12,7 @@ use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
-use lorehaven_db::DatabaseConfig;
+use lorehaven_db::{Backend, DatabaseConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -190,8 +190,8 @@ async fn register(client: &mut Client, email: &str, handle: &str) {
 async fn migration_0022_creates_the_revision_tables() {
     let fx = Fixture::new("tables").await;
     {
-        let pool = fx.tdb.db().sqlite_pool().expect("sqlite pool");
-        for table in [
+        let db = fx.tdb.db();
+        let table_list: &[&str] = &[
             "work_pricing",
             "work_entitlements",
             "author_earnings_ledger",
@@ -200,19 +200,48 @@ async fn migration_0022_creates_the_revision_tables() {
             "work_gifts",
             "content_subscriptions",
             "search_alerts",
-        ] {
-            let n: i64 = sqlx::query_scalar(&format!(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='{table}'"
-            ))
-            .fetch_one(pool)
-            .await
-            .expect("sqlite_master query");
+        ];
+        let table_exists_sql = db.sql(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
+            "SELECT COUNT(*) FROM pg_tables WHERE tablename = ?",
+        );
+        for &table in table_list {
+            let n: i64 = match db.backend() {
+                Backend::Sqlite => sqlx::query_scalar(table_exists_sql.as_ref())
+                    .bind(table)
+                    .fetch_one(db.sqlite_pool().expect("sqlite"))
+                    .await
+                    .expect("table existence query"),
+                Backend::Postgres => sqlx::query_scalar(table_exists_sql.as_ref())
+                    .bind(table)
+                    .fetch_one(db.postgres_pool().expect("pg"))
+                    .await
+                    .expect("table existence query"),
+            };
             assert_eq!(n, 1, "table {table} must exist after 0022");
         }
-        let cols: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info('works')")
-            .fetch_all(pool)
+        let cols: Vec<String> = match db.backend() {
+            Backend::Sqlite => sqlx::query_scalar(
+                db.sql(
+                    "SELECT name FROM pragma_table_info('works')",
+                    "SELECT column_name FROM information_schema.columns WHERE table_name = 'works' ORDER BY ordinal_position",
+                )
+                .as_ref(),
+            )
+            .fetch_all(db.sqlite_pool().expect("sqlite"))
             .await
-            .expect("pragma_table_info");
+            .expect("pragma_table_info"),
+            Backend::Postgres => sqlx::query_scalar(
+                db.sql(
+                    "SELECT name FROM pragma_table_info('works')",
+                    "SELECT column_name FROM information_schema.columns WHERE table_name = 'works' ORDER BY ordinal_position",
+                )
+                .as_ref(),
+            )
+            .fetch_all(db.postgres_pool().expect("pg"))
+            .await
+            .expect("columns query"),
+        };
         assert!(
             cols.iter().any(|c| c == "ai_training"),
             "works.ai_training must exist after 0022"
@@ -439,7 +468,7 @@ async fn subscription_and_alert_routes_refuse_anonymous_callers() {
     let (status, _) = client
         .post(
             "/api/v1/search-alerts",
-            json!({"saved_search_id": "s1", "frequency": "daily"}),
+            json!({"saved_search_id": "550e8400-e29b-41d4-a716-446655440001", "frequency": "daily"}),
         )
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
