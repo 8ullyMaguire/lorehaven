@@ -77,8 +77,12 @@ fn is_valid_timestamp(s: &str) -> bool {
     match parts.as_slice() {
         [secs] => parse_secs(secs).is_some(),
         [hh, mm, ss] => {
-            let Ok(h) = hh.parse::<u32>() else { return false; };
-            let Ok(m) = mm.parse::<u8>() else { return false };
+            let Ok(h) = hh.parse::<u32>() else {
+                return false;
+            };
+            let Ok(m) = mm.parse::<u8>() else {
+                return false;
+            };
             if m >= 60 {
                 return false;
             }
@@ -117,9 +121,19 @@ mod tests {
 
     #[test]
     fn paragraph_anchor_requires_chapter() {
-        assert!(validate_anchor(AnchorKind::Paragraph, "3", Some("00000000-0000-0000-0000-000000000001")).is_ok());
+        assert!(validate_anchor(
+            AnchorKind::Paragraph,
+            "3",
+            Some("00000000-0000-0000-0000-000000000001")
+        )
+        .is_ok());
         assert!(validate_anchor(AnchorKind::Paragraph, "3", None).is_err());
-        assert!(validate_anchor(AnchorKind::Paragraph, "abc", Some("00000000-0000-0000-0000-000000000001")).is_err());
+        assert!(validate_anchor(
+            AnchorKind::Paragraph,
+            "abc",
+            Some("00000000-0000-0000-0000-000000000001")
+        )
+        .is_err());
     }
 
     #[test]

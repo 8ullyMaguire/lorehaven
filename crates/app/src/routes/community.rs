@@ -6,6 +6,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
+use darkhold_domain::anchor;
 use darkhold_domain::blocking::BlockScope;
 use serde::Deserialize;
 use std::str::FromStr;

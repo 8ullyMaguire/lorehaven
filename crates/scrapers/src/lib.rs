@@ -37,6 +37,7 @@
 //! timestamps to the moment of the fetch. See the milestone record for the rest.
 
 pub mod archive;
+pub mod csv;
 pub mod engine;
 pub mod registry;
 pub mod robots;
