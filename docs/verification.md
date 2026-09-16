@@ -253,9 +253,20 @@ and db. PG `milestone_22` run against the `lh-review-pg` container and
 the full SQLite workspace run: see the round-3 note appended below once
 they land.
 
-Postscript (same day, after the runs): PG `milestone_22` 6/6 and the
-full SQLite workspace green — Phase A of the remediation is complete
-and verified on both backends. Remaining work lives in
+Postscript (same day, after the runs): the full SQLite workspace is
+green (1099 passed / 0 failed). The first "PG" milestone_22 run of this
+round, however, silently ran SQLite: it sourced `scripts/lhpg-env.sh`,
+a file that does not exist, and the suite fell back without complaint —
+the fake-gate pattern again, this time in the reviewer's own workflow.
+Corrected procedure: an explicit `LOREHAVEN_TEST_PG_URL` admin URL with
+per-run `lh_test_*` database counts as proof of backend. That run first
+FAILED on real PG (`w.id` is UUID there; `MediaRecord` decodes String)
+— a defect invisible to every earlier "PG" run — fixed with
+`w.id::text AS id` on the PG twins, after which PG milestone_22 is
+genuinely 6/6 (1.49s runtime vs 0.68s SQLite, password-authenticated
+connection, per-test databases created and dropped on the container).
+Phase A of the remediation is complete and verified on both backends.
+Remaining work lives in
 `~/.hermes/plans/2026-09-16-media-generalization-m23-remediation-plan.md`
-(aggregation doors, files/editions real queries, filter matrix, per-query
-feeds, scopes/trust gates, ETag/304, webhooks, bulk export).
+(aggregation doors, files/editions real queries, filter matrix,
+per-query feeds, scopes/trust gates, ETag/304, webhooks, bulk export).
