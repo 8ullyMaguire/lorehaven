@@ -94,10 +94,10 @@ async fn get_media(
     let db = state.db();
     let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
-    match lorehaven_db::media::find_media(db, &id).await {
+    match lorehaven_db::media::find_media(db, &id, account_id.as_deref()).await {
         Ok(Some(media))
             if media.visibility == "public"
-                || account_id.as_deref() == media.owning_account_id.as_deref() =>
+                || account_id.as_deref() == Some(media.owning_account_id.as_str()) =>
         {
             Json(media).into_response()
         }
@@ -123,10 +123,10 @@ async fn list_media_files(
     let db = state.db();
     let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
-    match lorehaven_db::media::find_media(db, &id).await {
+    match lorehaven_db::media::find_media(db, &id, account_id.as_deref()).await {
         Ok(Some(media))
             if media.visibility == "public"
-                || account_id.as_deref() == media.owning_account_id.as_deref() =>
+                || account_id.as_deref() == Some(media.owning_account_id.as_str()) =>
         {
             // TODO: actual files query
             Json(json!({"files": []})).into_response()
@@ -153,10 +153,10 @@ async fn list_media_editions(
     let db = state.db();
     let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
-    match lorehaven_db::media::find_media(db, &id).await {
+    match lorehaven_db::media::find_media(db, &id, account_id.as_deref()).await {
         Ok(Some(media))
             if media.visibility == "public"
-                || account_id.as_deref() == media.owning_account_id.as_deref() =>
+                || account_id.as_deref() == Some(media.owning_account_id.as_str()) =>
         {
             let editions: Vec<lorehaven_db::media::MediaEdition> = Vec::new();
             Json(json!({"editions": editions})).into_response()
@@ -344,10 +344,11 @@ async fn list_media_collections(
 async fn get_media_collection(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    MaybeSession(_session): MaybeSession,
+    MaybeSession(session): MaybeSession,
 ) -> impl IntoResponse {
     let db = state.db();
-    match lorehaven_db::media::find_collection(db, &id).await {
+    let account_id = session.as_ref().map(|u| u.account_id.to_string());
+    match lorehaven_db::media::find_collection(db, &id, account_id.as_deref()).await {
         Ok(Some(coll)) => Json(coll).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response(),
         Err(e) => (
@@ -469,9 +470,12 @@ async fn post_distributor(
     };
     let distributor = lorehaven_db::media::NewDistributor {
         name: &body.name,
-        kind,
+        kind: kind.to_string(),
         source_key: body.source_key.as_deref(),
         canonical_url: body.canonical_url.as_deref(),
+        url: body.url.as_deref(),
+        api_key: body.api_key.as_deref(),
+        notes: body.notes.as_deref(),
     };
     match lorehaven_db::media::create_distributor(db, &distributor).await {
         Ok(id) => (StatusCode::CREATED, Json(json!({"id": id}))).into_response(),
@@ -503,13 +507,15 @@ async fn post_media_collection(
     };
     // The owning account is the SESSION's account, never a client-chosen
     // id: no caller may mint a collection owned by somebody else.
-    let owner = user.account_id.to_string();
+    let _owner = user.account_id.to_string();
     let collection = lorehaven_db::media::NewCollection {
-        kind,
-        owning_account_id: Some(&owner),
+        kind: kind.to_string(),
+        owning_account_id: Some(&user.account_id.to_string()),
         title: &body.title,
         description: body.description.as_deref(),
-        visibility: &body.visibility,
+        visibility: body.visibility.as_str(),
+        parent_collection_id: body.parent_collection_id.as_deref(),
+        sort_order: body.sort_order,
     };
     match lorehaven_db::media::create_collection(db, &collection).await {
         Ok(id) => (StatusCode::CREATED, Json(json!({"id": id}))).into_response(),
@@ -671,6 +677,9 @@ pub struct CreateDistributorRequest {
     pub kind: String, // DistributorKind
     pub source_key: Option<String>,
     pub canonical_url: Option<String>,
+    pub url: Option<String>,
+    pub api_key: Option<String>,
+    pub notes: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -680,4 +689,6 @@ pub struct CreateCollectionRequest {
     pub title: String,
     pub description: Option<String>,
     pub visibility: String,
+    pub parent_collection_id: Option<String>,
+    pub sort_order: Option<i64>,
 }

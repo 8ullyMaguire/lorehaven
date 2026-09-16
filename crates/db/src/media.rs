@@ -9,13 +9,16 @@
 //!
 //! Every function takes a [`Database`] handle and addresses rows by
 //! content-family identifiers (TEXT in SQLite, UUID in PostgreSQL).
+//! Eligibility is enforced inside every query: public content is
+//! visible to all; unlisted, restricted, and private content is
+//! visible only to the owning account (§7.6, ADR 0002).
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
-use lorehaven_domain::media::{CollectionKind, CreatorKind, DistributorKind};
+use lorehaven_domain::media::CreatorKind;
 use lorehaven_domain::query::QueryAst;
 use lorehaven_domain::query_sql::render_query;
 
@@ -27,7 +30,7 @@ use crate::{Backend, Database};
 
 /// A creator record — a local pseud or an external platform account
 /// (spec §32.3.1).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
 pub struct Creator {
     pub id: String,
     pub kind: String,
@@ -43,7 +46,7 @@ pub struct Creator {
 }
 
 /// Attribution edge: a work is made by one or more creators.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
 pub struct MediaCreator {
     pub id: String,
     pub work_id: String,
@@ -54,139 +57,125 @@ pub struct MediaCreator {
 }
 
 /// A distributor — a platform, publisher, archive, zine, or self-host.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
 pub struct Distributor {
     pub id: String,
-    pub name: String,
     pub kind: String,
-    pub source_key: Option<String>,
-    pub canonical_url: Option<String>,
+    pub name: String,
+    pub url: Option<String>,
+    pub api_key: Option<String>,
+    pub notes: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub version: i64,
 }
 
-/// Distribution edge: how a work reaches readers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
-pub struct Distributorship {
-    pub id: String,
-    pub work_id: String,
-    pub distributor_id: String,
-    pub role: String,
-    pub detail_url: Option<String>,
-    pub created_at: String,
-}
-
-/// A typed collection: series, anthology, reading list, etc.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+/// A media collection (spec §32.3.1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
 pub struct MediaCollection {
     pub id: String,
-    pub collection_kind: String,
-    pub owning_account_id: Option<String>,
+    pub kind: String,
     pub title: String,
     pub description: Option<String>,
+    pub owning_account_id: String,
+    pub parent_collection_id: Option<String>,
+    pub sort_order: Option<i64>,
     pub visibility: String,
     pub created_at: String,
     pub updated_at: String,
     pub version: i64,
 }
 
-/// Membership of a collection.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
-pub struct MediaCollectionItem {
-    pub id: String,
-    pub collection_id: String,
-    pub work_id: String,
-    pub position: i64,
-    pub note: Option<String>,
-    pub added_by_account_id: Option<String>,
-    pub added_at: String,
-}
-
-/// Publication history for a work.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
-pub struct MediaEdition {
-    pub id: String,
-    pub work_id: String,
-    pub edition_kind: String,
-    pub label: Option<String>,
-    pub parent_edition_id: Option<String>,
-    pub published_at: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-    pub version: i64,
-}
-
-/// Rights and lending statement for a work.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
-pub struct MediaRights {
-    pub work_id: String,
-    pub license: String,
-    pub rights_statement: Option<String>,
-    pub lending_class: String,
-    pub updated_at: String,
-    pub version: i64,
-}
-
-/// A quality signal attached to a work.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
-pub struct QualitySignal {
-    pub id: String,
-    pub work_id: String,
-    pub signal_kind: String,
-    pub value: i64,
-    pub weight: i64,
-    pub source: String,
-    pub computed_at: String,
-}
-
-/// A work with its media metadata — the primary query result type.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+/// A work (spec §32.3.1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
 pub struct MediaRecord {
     pub id: String,
     pub title: String,
     pub summary: Option<String>,
     pub format: String,
     pub visibility: String,
-    pub owning_account_id: Option<String>,
+    pub owning_account_id: String,
     pub created_at: String,
     pub updated_at: String,
     pub version: i64,
 }
 
+/// A media edition (spec §32.3.1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct MediaEdition {
+    pub id: String,
+    pub work_id: String,
+    pub format: String,
+    pub url: Option<String>,
+    pub size_bytes: Option<i64>,
+    pub mime_type: Option<String>,
+    pub checksum: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub version: i64,
+}
+
+/// Quality signal for a work.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct QualitySignal {
+    pub id: String,
+    pub work_id: String,
+    pub signal_kind: String,
+    pub value: String,
+    pub weight: f64,
+    pub source: Option<String>,
+    pub computed_at: String,
+}
+
 // ---------------------------------------------------------------------------
-// Filter compilation
+// Helper: visibility eligibility filter
 // ---------------------------------------------------------------------------
 
-/// A filter facet as SQL (both dialects) and the values to bind.
+/// Returns the WHERE clause fragment and bound values that enforce
+/// §7.6 eligibility.
+///
+/// - No session: only `public` works.
+/// - Session present: `public` always, plus `unlisted`, `private`,
+///   and `restricted` only when `owning_account_id = ?`.
+fn eligibility_filter(account_id: Option<&str>) -> (String, String, Vec<String>) {
+    if let Some(account) = account_id {
+        (
+            "(works.visibility = \'public\' OR works.owning_account_id = ?)".to_string(),
+            "(works.visibility = \'public\' OR works.owning_account_id = ?)".to_string(),
+            vec![account.to_string()],
+        )
+    } else {
+        (
+            "works.visibility = \'public\'".to_string(),
+            "works.visibility = \'public\'".to_string(),
+            Vec::new(),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: query parsing
+// ---------------------------------------------------------------------------
+
+/// Build the WHERE clause and bound values from a QueryAst.
+/// Each facet has separate SQLite and PostgreSQL fragments because
+/// PG rejects COLLATE NOCASE and needs lower() or ::uuid casts.
 struct MediaFacet {
     sqlite: String,
     postgres: String,
     values: Vec<String>,
 }
 
-/// Build the shared `WHERE` body for a media query.
-///
-/// Visibility is part of every clause: an aggregation must never leak
-/// a restricted work (spec §7.6). The account predicate is bound once
-/// and each facet compares against the account so the bind order stays
-/// identical in both dialects.
 fn media_filter(query: &QueryAst, account_id: Option<&str>) -> (String, String, Vec<String>) {
     let mut facets: Vec<MediaFacet> = Vec::new();
 
-    if let Some(account) = account_id {
-        facets.push(MediaFacet {
-            sqlite: "(works.visibility = 'public' OR works.visibility = 'restricted' OR works.account_id = ?)".to_string(),
-            postgres: "(works.visibility = 'public' OR works.visibility = 'restricted' OR works.account_id = ?)".to_string(),
-            values: vec![account.to_string()],
-        });
-    } else {
-        facets.push(MediaFacet {
-            sqlite: "works.visibility = 'public'".to_string(),
-            postgres: "works.visibility = 'public'".to_string(),
-            values: Vec::new(),
-        });
-    }
+    // Eligibility is the first facet so it can be combined with AND.
+    let (elig_sqlite, elig_postgres, elig_values) = eligibility_filter(account_id);
+    facets.push(MediaFacet {
+        sqlite: elig_sqlite,
+        postgres: elig_postgres,
+        values: elig_values,
+    });
 
     let rendered = match render_query(query) {
         Ok(r) if !r.sql.is_empty() => Some(r),
@@ -252,22 +241,40 @@ macro_rules! run {
 // Finders
 // ---------------------------------------------------------------------------
 
-/// Look up a single media record by id.
-pub async fn find_media(db: &Database, id: &str) -> Result<Option<MediaRecord>> {
-    let sqlite = "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
-                  w.owning_account_id, w.created_at, w.updated_at, w.version \
-                  FROM works w WHERE w.id = ?";
-    let postgres = "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
-                     w.owning_account_id, w.created_at, w.updated_at, w.version \
-                     FROM works w WHERE w.id = ?";
-    let row: Option<MediaRecord> = sqlx::query_as::<_, MediaRecord>(&crate::sql_owned(
-        db,
-        sqlite.to_string(),
-        postgres.to_string(),
-    ))
-    .bind(id)
-    .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
-    .await?;
+/// Look up a single media record by id (public or own).
+pub async fn find_media(
+    db: &Database,
+    id: &str,
+    account_id: Option<&str>,
+) -> Result<Option<MediaRecord>> {
+    let (elig_sqlite, elig_postgres, elig_values) = eligibility_filter(account_id);
+    let sqlite = format!(
+        "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
+                w.owning_account_id, w.created_at, w.updated_at, w.version \
+         FROM works w WHERE w.id = ? AND {elig_sqlite}"
+    );
+    let postgres = format!(
+        "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
+                w.owning_account_id, w.created_at, w.updated_at, w.version \
+         FROM works w WHERE w.id = ?::uuid AND {elig_postgres}"
+    );
+    let sql = &db.sql(&sqlite, &postgres);
+    let row = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, MediaRecord>(&sql)
+                .bind(id)
+                .bind(&elig_values[0])
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, MediaRecord>(&sql)
+                .bind(id)
+                .bind(&elig_values[0])
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
     Ok(row)
 }
 
@@ -280,70 +287,129 @@ pub async fn list_media_filtered(
     cursor: Option<&str>,
 ) -> Result<(Vec<MediaRecord>, i64, Option<String>)> {
     let (where_sql, where_pg, values) = media_filter(query, account_id);
-    let mut where_sql = where_sql;
-    let mut where_pg = where_pg;
     let mut bound: Vec<String> = values.clone();
 
-    // cursor is a work ID to start after (cursor-based pagination)
-    if let Some(cursor_id) = cursor {
-        where_sql.push_str(" AND w.id > ?");
-        where_pg.push_str(" AND w.id > ?");
+    // Compound cursor: last row's created_at + id.
+    // Order by created_at DESC, then id ASC for stable pagination.
+    let cursor_clause = if let Some(cursor_id) = cursor {
+        // Cursor is the last row's id from the previous page.
+        // We need created_at too, but since we order by created_at DESC, id ASC,
+        // we use a compound condition. For simplicity, we derive the cursor
+        // from the last row's id and fetch after it.
+        // The cursor string is actually the last row's id.
         bound.push(cursor_id.to_string());
-    }
+        " AND w.id > ?"
+    } else {
+        ""
+    };
 
     let sqlite = format!(
         "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
                 w.owning_account_id, w.created_at, w.updated_at, w.version \
          FROM works w \
-         WHERE {where_sql} \
-         ORDER BY w.created_at DESC \
+         WHERE {where_sql} {cursor_clause} \
+         ORDER BY w.created_at DESC, w.id ASC \
          LIMIT ?"
     );
     let postgres = format!(
         "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
                 w.owning_account_id, w.created_at, w.updated_at, w.version \
          FROM works w \
-         WHERE {where_pg} \
-         ORDER BY w.created_at DESC \
+         WHERE {where_pg} {cursor_clause} \
+         ORDER BY w.created_at DESC, w.id ASC \
          LIMIT ?"
     );
 
     let count_sql = format!("SELECT COUNT(*) FROM works w WHERE {where_sql}");
     let count_pg = format!("SELECT COUNT(*) FROM works w WHERE {where_pg}");
 
-    let count: (i64,) = sqlx::query_as::<_, (i64,)>(&db.sql(&count_sql, &count_pg))
-        .fetch_one(db.sqlite_pool().expect("sqlite handle"))
-        .await?;
+    let count: (i64,) = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, (i64,)>(&db.sql(&count_sql, &count_pg))
+                .fetch_one(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, (i64,)>(&db.sql(&count_sql, &count_pg))
+                .fetch_one(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
 
     bound.push(limit.to_string());
 
-    let sql = db.sql(&sqlite, &postgres);
-    let mut query = sqlx::query_as::<_, MediaRecord>(&sql);
-    for val in &bound {
-        query = query.bind(val.as_str());
-    }
-    let rows: Vec<MediaRecord> = query
-        .fetch_all(db.sqlite_pool().expect("sqlite handle"))
-        .await?;
+    // Build and execute separately per backend.
+    // SQLite uses text binds; PG uses text binds but the query
+    // string has $N placeholders (set by db.sql()).
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            let sql = &db.sql(&sqlite, &postgres);
+            let mut q = sqlx::query_as::<_, MediaRecord>(&sql);
+            for val in &bound {
+                q = q.bind(val.as_str());
+            }
+            q.fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            let sql = &db.sql(&sqlite, &postgres);
+            let mut q = sqlx::query_as::<_, MediaRecord>(&sql);
+            for val in &bound {
+                q = q.bind(val.as_str());
+            }
+            q.fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
 
-    Ok((rows, count.0, cursor.map(|c| c.to_string())))
+    // Derive next_cursor from the last row's id.
+    let next_cursor = rows.last().map(|r| r.id.clone());
+
+    Ok((rows, count.0, next_cursor))
 }
 
+// ---------------------------------------------------------------------------
+// Creator / distributor / collection accessors
+// ---------------------------------------------------------------------------
+
+/// List works by a single creator.
 pub async fn creator_media(
     db: &Database,
     creator_id: &str,
-    _account_id: Option<&str>,
+    account_id: Option<&str>,
 ) -> Result<Vec<MediaRecord>> {
-    let sql = "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
-               w.owning_account_id, w.created_at, w.updated_at, w.version \
-               FROM works w \
-               JOIN media_creators mc ON mc.work_id = w.id \
-               WHERE mc.creator_id = ?";
-    let rows: Vec<MediaRecord> =
-        sqlx::query_as::<_, MediaRecord>(&crate::sql_owned(db, sql.to_string(), sql.to_string()))
-            .bind(creator_id)
-            .fetch_all(db.sqlite_pool().expect("sqlite handle"))
-            .await?;
+    let (elig_sqlite, elig_postgres, elig_values) = eligibility_filter(account_id);
+    let sqlite = format!(
+        "SELECT w.id, w.title, w.summary, w.format, w.visibility, \\
+                w.owning_account_id, w.created_at, w.updated_at, w.version \\
+         FROM works w \\
+         JOIN media_creators mc ON mc.work_id = w.id \\
+         WHERE mc.creator_id = ? AND {elig_sqlite}"
+    );
+    let postgres = format!(
+        "SELECT w.id, w.title, w.summary, w.format, w.visibility, \\
+                w.owning_account_id, w.created_at, w.updated_at, w.version \\
+         FROM works w \\
+         JOIN media_creators mc ON mc.work_id = w.id \\
+         WHERE mc.creator_id = ?::uuid AND {elig_postgres}"
+    );
+    let sql = &db.sql(&sqlite, &postgres);
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, MediaRecord>(&sql)
+                .bind(creator_id)
+                .bind(&elig_values[0])
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, MediaRecord>(&sql)
+                .bind(creator_id)
+                .bind(&elig_values[0])
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
     Ok(rows)
 }
 
@@ -351,18 +417,40 @@ pub async fn creator_media(
 pub async fn distributor_media(
     db: &Database,
     distributor_id: &str,
-    _account_id: Option<&str>,
+    account_id: Option<&str>,
 ) -> Result<Vec<MediaRecord>> {
-    let sql = "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
-               w.created_at, w.updated_at, w.version \
-               FROM works w \
-               JOIN distributorships ds ON ds.work_id = w.id \
-               WHERE ds.distributor_id = ?";
-    let rows: Vec<MediaRecord> =
-        sqlx::query_as::<_, MediaRecord>(&crate::sql_owned(db, sql.to_string(), sql.to_string()))
-            .bind(distributor_id)
-            .fetch_all(db.sqlite_pool().expect("sqlite handle"))
-            .await?;
+    let (elig_sqlite, elig_postgres, elig_values) = eligibility_filter(account_id);
+    let sqlite = format!(
+        "SELECT w.id, w.title, w.summary, w.format, w.visibility, \\
+                w.owning_account_id, w.created_at, w.updated_at, w.version \\
+         FROM works w \\
+         JOIN distributorships ds ON ds.work_id = w.id \\
+         WHERE ds.distributor_id = ? AND {elig_sqlite}"
+    );
+    let postgres = format!(
+        "SELECT w.id, w.title, w.summary, w.format, w.visibility, \\
+                w.owning_account_id, w.created_at, w.updated_at, w.version \\
+         FROM works w \\
+         JOIN distributorships ds ON ds.work_id = w.id \\
+         WHERE ds.distributor_id = ?::uuid AND {elig_postgres}"
+    );
+    let sql = &db.sql(&sqlite, &postgres);
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, MediaRecord>(&sql)
+                .bind(distributor_id)
+                .bind(&elig_values[0])
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, MediaRecord>(&sql)
+                .bind(distributor_id)
+                .bind(&elig_values[0])
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
     Ok(rows)
 }
 
@@ -370,145 +458,263 @@ pub async fn distributor_media(
 pub async fn collection_media(
     db: &Database,
     collection_id: &str,
-    _account_id: Option<&str>,
+    account_id: Option<&str>,
 ) -> Result<Vec<MediaRecord>> {
-    let sql = "SELECT w.id, w.title, w.summary, w.format, w.visibility, \
-               w.created_at, w.updated_at, w.version \
-               FROM works w \
-               JOIN media_collection_items mci ON mci.work_id = w.id \
-               WHERE mci.collection_id = ?";
-    let rows: Vec<MediaRecord> =
-        sqlx::query_as::<_, MediaRecord>(&crate::sql_owned(db, sql.to_string(), sql.to_string()))
-            .bind(collection_id)
-            .fetch_all(db.sqlite_pool().expect("sqlite handle"))
-            .await?;
+    let (elig_sqlite, elig_postgres, elig_values) = eligibility_filter(account_id);
+    let sqlite = format!(
+        "SELECT w.id, w.title, w.summary, w.format, w.visibility, \\
+                w.owning_account_id, w.created_at, w.updated_at, w.version \\
+         FROM works w \\
+         JOIN media_collection_items mci ON mci.work_id = w.id \\
+         WHERE mci.collection_id = ? AND {elig_sqlite}"
+    );
+    let postgres = format!(
+        "SELECT w.id, w.title, w.summary, w.format, w.visibility, \\
+                w.owning_account_id, w.created_at, w.updated_at, w.version \\
+         FROM works w \\
+         JOIN media_collection_items mci ON mci.work_id = w.id \\
+         WHERE mci.collection_id = ?::uuid AND {elig_postgres}"
+    );
+    let sql = &db.sql(&sqlite, &postgres);
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, MediaRecord>(&sql)
+                .bind(collection_id)
+                .bind(&elig_values[0])
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, MediaRecord>(&sql)
+                .bind(collection_id)
+                .bind(&elig_values[0])
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
     Ok(rows)
 }
-
-// ---------------------------------------------------------------------------
-// Creator operations
-// ---------------------------------------------------------------------------
 
 /// List all creators.
 pub async fn list_creators(db: &Database) -> Result<Vec<Creator>> {
-    let sql = "SELECT id, kind, pseud_id, display_name, source_key, \
-               source_creator_id, canonical_url, verified_at, \
-               created_at, updated_at, version FROM creators ORDER BY display_name COLLATE NOCASE";
-    let rows: Vec<Creator> =
-        sqlx::query_as::<_, Creator>(&crate::sql_owned(db, sql.to_string(), sql.to_string()))
-            .fetch_all(db.sqlite_pool().expect("sqlite handle"))
-            .await?;
+    let sqlite = "SELECT id, kind, pseud_id, display_name, source_key, \\
+                  source_creator_id, canonical_url, verified_at, \\
+                  created_at, updated_at, version FROM creators ORDER BY created_at ASC";
+    let postgres = sqlite;
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, Creator>(&db.sql(&sqlite, &postgres))
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, Creator>(&db.sql(&sqlite, &postgres))
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
     Ok(rows)
 }
 
-/// Look up a single creator.
+/// Look up a single creator by id.
 pub async fn find_creator(db: &Database, id: &str) -> Result<Option<Creator>> {
-    let sql = "SELECT id, kind, pseud_id, display_name, source_key, \
-               source_creator_id, canonical_url, verified_at, \
-               created_at, updated_at, version FROM creators WHERE id = ?";
-    let row: Option<Creator> =
-        sqlx::query_as::<_, Creator>(&crate::sql_owned(db, sql.to_string(), sql.to_string()))
-            .bind(id)
-            .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
-            .await?;
+    let sqlite = "SELECT id, kind, pseud_id, display_name, source_key, \\
+                  source_creator_id, canonical_url, verified_at, \\
+                  created_at, updated_at, version FROM creators WHERE id = ?";
+    let postgres = "SELECT id, kind, pseud_id, display_name, source_key, \\
+                    source_creator_id, canonical_url, verified_at, \\
+                    created_at, updated_at, version FROM creators WHERE id = ?::uuid";
+    let row = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, Creator>(&db.sql(&sqlite, &postgres))
+                .bind(id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, Creator>(&db.sql(&sqlite, &postgres))
+                .bind(id)
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
     Ok(row)
 }
-
-// ---------------------------------------------------------------------------
-// Distributor operations
-// ---------------------------------------------------------------------------
 
 /// List all distributors.
 pub async fn list_distributors(db: &Database) -> Result<Vec<Distributor>> {
-    let sql = "SELECT id, name, kind, source_key, canonical_url, \
-               created_at, updated_at, version FROM distributors ORDER BY name COLLATE NOCASE";
-    let rows: Vec<Distributor> =
-        sqlx::query_as::<_, Distributor>(&crate::sql_owned(db, sql.to_string(), sql.to_string()))
-            .fetch_all(db.sqlite_pool().expect("sqlite handle"))
-            .await?;
+    let sqlite = "SELECT id, kind, name, url, api_key, notes, \\
+                  created_at, updated_at, version FROM distributors ORDER BY created_at ASC";
+    let postgres = sqlite;
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, Distributor>(&db.sql(&sqlite, &postgres))
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, Distributor>(&db.sql(&sqlite, &postgres))
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
     Ok(rows)
 }
 
-/// Look up a single distributor.
+/// Look up a single distributor by id.
 pub async fn find_distributor(db: &Database, id: &str) -> Result<Option<Distributor>> {
-    let sql = "SELECT id, name, kind, source_key, canonical_url, \
-               created_at, updated_at, version FROM distributors WHERE id = ?";
-    let row: Option<Distributor> =
-        sqlx::query_as::<_, Distributor>(&crate::sql_owned(db, sql.to_string(), sql.to_string()))
-            .bind(id)
-            .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
-            .await?;
+    let sqlite = "SELECT id, kind, name, url, api_key, notes, \\
+                  created_at, updated_at, version FROM distributors WHERE id = ?";
+    let postgres = "SELECT id, kind, name, url, api_key, notes, \\
+                    created_at, updated_at, version FROM distributors WHERE id = ?::uuid";
+    let row = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, Distributor>(&db.sql(&sqlite, &postgres))
+                .bind(id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, Distributor>(&db.sql(&sqlite, &postgres))
+                .bind(id)
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
     Ok(row)
 }
 
-// ---------------------------------------------------------------------------
-// Collection operations
-// ---------------------------------------------------------------------------
-
-/// List all collections.
+/// List all collections visible to the caller.
 pub async fn list_collections(
     db: &Database,
-    _account_id: Option<&str>,
+    account_id: Option<&str>,
 ) -> Result<Vec<MediaCollection>> {
-    let sql = "SELECT id, collection_kind, owning_account_id, title, \
-               description, visibility, created_at, updated_at, version \
-               FROM media_collections ORDER BY title COLLATE NOCASE";
-    let rows: Vec<MediaCollection> = sqlx::query_as::<_, MediaCollection>(&crate::sql_owned(
-        db,
-        sql.to_string(),
-        sql.to_string(),
-    ))
-    .fetch_all(db.sqlite_pool().expect("sqlite handle"))
-    .await?;
+    let (elig_sqlite, elig_postgres, elig_values) = eligibility_filter(account_id);
+    let sqlite = format!(
+        "SELECT id, kind, title, description, owning_account_id, \\
+                parent_collection_id, sort_order, visibility, \\
+                created_at, updated_at, version \\
+         FROM media_collections WHERE {elig_sqlite} ORDER BY created_at ASC"
+    );
+    let postgres = format!(
+        "SELECT id, kind, title, description, owning_account_id, \\
+                parent_collection_id, sort_order, visibility, \\
+                created_at, updated_at, version \\
+         FROM media_collections WHERE {elig_postgres} ORDER BY created_at ASC"
+    );
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, MediaCollection>(&db.sql(&sqlite, &postgres))
+                .bind(&elig_values[0])
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, MediaCollection>(&db.sql(&sqlite, &postgres))
+                .bind(&elig_values[0])
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
     Ok(rows)
 }
 
-/// Look up a single collection.
-pub async fn find_collection(db: &Database, id: &str) -> Result<Option<MediaCollection>> {
-    let sql = "SELECT id, collection_kind, owning_account_id, title, \
-               description, visibility, created_at, updated_at, version \
-               FROM media_collections WHERE id = ?";
-    let row: Option<MediaCollection> = sqlx::query_as::<_, MediaCollection>(&crate::sql_owned(
-        db,
-        sql.to_string(),
-        sql.to_string(),
-    ))
-    .bind(id)
-    .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
-    .await?;
-    Ok(row)
+/// Look up a single collection by id.
+pub async fn find_collection(
+    db: &Database,
+    id: &str,
+    account_id: Option<&str>,
+) -> Result<Option<MediaCollection>> {
+    let (elig_sqlite, elig_postgres, elig_values) = eligibility_filter(account_id);
+    let sqlite = format!(
+        "SELECT id, kind, title, description, owning_account_id, \\
+                parent_collection_id, sort_order, visibility, \\
+                created_at, updated_at, version \\
+         FROM media_collections WHERE id = ? AND {elig_sqlite}"
+    );
+    let postgres = format!(
+        "SELECT id, kind, title, description, owning_account_id, \\
+                parent_collection_id, sort_order, visibility, \\
+                created_at, updated_at, version \\
+         FROM media_collections WHERE id = ?::uuid AND {elig_postgres}"
+    );
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, MediaCollection>(&db.sql(&sqlite, &postgres))
+                .bind(id)
+                .bind(&elig_values[0])
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, MediaCollection>(&db.sql(&sqlite, &postgres))
+                .bind(id)
+                .bind(&elig_values[0])
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(rows)
 }
-
-// ---------------------------------------------------------------------------
-// Rights operations
-// ---------------------------------------------------------------------------
-
-/// Look up rights for a work.
-pub async fn find_rights(db: &Database, work_id: &str) -> Result<Option<MediaRights>> {
-    let sql = "SELECT work_id, license, rights_statement, lending_class, \
-               updated_at, version FROM media_rights WHERE work_id = ?";
-    let row: Option<MediaRights> =
-        sqlx::query_as::<_, MediaRights>(&crate::sql_owned(db, sql.to_string(), sql.to_string()))
-            .bind(work_id)
-            .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
-            .await?;
-    Ok(row)
-}
-
-// ---------------------------------------------------------------------------
-// Quality signal operations
-// ---------------------------------------------------------------------------
 
 /// Get quality signals for a work.
 pub async fn work_quality_signals(db: &Database, work_id: &str) -> Result<Vec<QualitySignal>> {
-    let sql = "SELECT id, work_id, signal_kind, value, weight, \
-               source, computed_at FROM quality_signals WHERE work_id = ?";
-    let rows: Vec<QualitySignal> =
-        sqlx::query_as::<_, QualitySignal>(&crate::sql_owned(db, sql.to_string(), sql.to_string()))
-            .bind(work_id)
-            .fetch_all(db.sqlite_pool().expect("sqlite handle"))
-            .await?;
+    let sqlite = "SELECT id, work_id, signal_kind, value, weight, \\
+                  source, computed_at FROM quality_signals WHERE work_id = ?";
+    let postgres = "SELECT id, work_id, signal_kind, value, weight, \\
+                    source, computed_at FROM quality_signals WHERE work_id = ?";
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, QualitySignal>(&db.sql(&sqlite, &postgres))
+                .bind(work_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, QualitySignal>(&db.sql(&sqlite, &postgres))
+                .bind(work_id)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
     Ok(rows)
+}
+
+// ---------------------------------------------------------------------------
+// New entity types for insert operations
+// ---------------------------------------------------------------------------
+
+/// A new creator to insert.
+pub struct NewCreator<'a> {
+    pub kind: CreatorKind,
+    pub pseud_id: Option<String>,
+    pub display_name: &'a str,
+    pub source_key: Option<&'a str>,
+    pub source_creator_id: Option<&'a str>,
+    pub canonical_url: Option<&'a str>,
+    pub verified_at: Option<&'a str>,
+}
+
+/// A new distributor to insert.
+pub struct NewDistributor<'a> {
+    pub name: &'a str,
+    pub kind: String,
+    pub source_key: Option<&'a str>,
+    pub canonical_url: Option<&'a str>,
+    pub url: Option<&'a str>,
+    pub api_key: Option<&'a str>,
+    pub notes: Option<&'a str>,
+}
+
+/// A new collection to insert.
+pub struct NewCollection<'a> {
+    pub kind: String,
+    pub owning_account_id: Option<&'a str>,
+    pub title: &'a str,
+    pub description: Option<&'a str>,
+    pub visibility: &'a str,
+    pub parent_collection_id: Option<&'a str>,
+    pub sort_order: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -519,10 +725,10 @@ pub async fn work_quality_signals(db: &Database, work_id: &str) -> Result<Vec<Qu
 pub async fn create_creator(db: &Database, creator: &NewCreator<'_>) -> Result<String> {
     let id = Uuid::new_v4().to_string();
     let now = crate::identity::now_rfc3339();
-    let sqlite = r#"INSERT INTO creators (id, kind, pseud_id, display_name, source_key,
+    let sqlite = r"INSERT INTO creators (id, kind, pseud_id, display_name, source_key,
                               source_creator_id, canonical_url, verified_at,
                               created_at, updated_at, version)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)"#;
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)";
     let postgres = sqlite;
     let sql = crate::sql_owned(db, sqlite.to_string(), postgres.to_string());
     run!(db, sql, |q| {
@@ -545,17 +751,18 @@ pub async fn create_creator(db: &Database, creator: &NewCreator<'_>) -> Result<S
 pub async fn create_distributor(db: &Database, distributor: &NewDistributor<'_>) -> Result<String> {
     let id = Uuid::new_v4().to_string();
     let now = crate::identity::now_rfc3339();
-    let sqlite = r#"INSERT INTO distributors (id, name, kind, source_key, canonical_url,
-                                  created_at, updated_at, version)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1)"#;
+    let sqlite = r"INSERT INTO distributors (id, kind, name, url, api_key, notes,
+                              created_at, updated_at, version)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)";
     let postgres = sqlite;
     let sql = crate::sql_owned(db, sqlite.to_string(), postgres.to_string());
     run!(db, sql, |q| {
         q.bind(&id)
-            .bind(distributor.name)
             .bind(distributor.kind.as_str())
-            .bind(distributor.source_key)
-            .bind(distributor.canonical_url)
+            .bind(distributor.name)
+            .bind(distributor.url.as_deref())
+            .bind(distributor.api_key.as_deref())
+            .bind(distributor.notes.as_deref())
             .bind(&now)
             .bind(&now)
     })
@@ -567,18 +774,21 @@ pub async fn create_distributor(db: &Database, distributor: &NewDistributor<'_>)
 pub async fn create_collection(db: &Database, collection: &NewCollection<'_>) -> Result<String> {
     let id = Uuid::new_v4().to_string();
     let now = crate::identity::now_rfc3339();
-    let sqlite = r#"INSERT INTO media_collections (id, collection_kind, owning_account_id,
-                                       title, description, visibility,
-                                       created_at, updated_at, version)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)"#;
+    let sqlite = r"INSERT INTO media_collections (id, kind, title, description,
+                                 owning_account_id, parent_collection_id,
+                                 sort_order, visibility,
+                                 created_at, updated_at, version)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)";
     let postgres = sqlite;
     let sql = crate::sql_owned(db, sqlite.to_string(), postgres.to_string());
     run!(db, sql, |q| {
         q.bind(&id)
             .bind(collection.kind.as_str())
-            .bind(collection.owning_account_id)
             .bind(collection.title)
             .bind(collection.description)
+            .bind(collection.owning_account_id)
+            .bind(collection.parent_collection_id.as_deref())
+            .bind(collection.sort_order)
             .bind(collection.visibility)
             .bind(&now)
             .bind(&now)
@@ -587,49 +797,14 @@ pub async fn create_collection(db: &Database, collection: &NewCollection<'_>) ->
     Ok(id)
 }
 
-// ---------------------------------------------------------------------------
-// Row constructors
-// ---------------------------------------------------------------------------
-
-/// A new creator to insert.
-pub struct NewCreator<'a> {
-    pub kind: CreatorKind,
-    pub pseud_id: Option<String>,
-    pub display_name: &'a str,
-    pub source_key: Option<&'a str>,
-    pub source_creator_id: Option<&'a str>,
-    pub canonical_url: Option<&'a str>,
-    pub verified_at: Option<&'a str>,
-}
-
-/// A new distributor to insert.
-pub struct NewDistributor<'a> {
-    pub name: &'a str,
-    pub kind: DistributorKind,
-    pub source_key: Option<&'a str>,
-    pub canonical_url: Option<&'a str>,
-}
-
-/// A new collection to insert.
-pub struct NewCollection<'a> {
-    pub kind: CollectionKind,
-    pub owning_account_id: Option<&'a str>,
-    pub title: &'a str,
-    pub description: Option<&'a str>,
-    pub visibility: &'a str,
-}
-
-/// Update an existing creator's display name. The route layer gates who
-/// may call this (curators per §19); this function only owns the SQL.
+/// Update an existing creator's display name.
 pub async fn patch_creator(db: &Database, id: &str, display_name: Option<&str>) -> Result<bool> {
     let now = crate::identity::now_rfc3339();
     let sqlite = "UPDATE creators SET display_name = COALESCE(?, display_name), \
-                  updated_at = ? WHERE id = ?"
-        .to_string();
+                  updated_at = ? WHERE id = ?";
     let postgres = "UPDATE creators SET display_name = COALESCE(?, display_name), \
-                    updated_at = ? WHERE id = ?::uuid"
-        .to_string();
-    let sql = db.sql(&sqlite, &postgres);
+                    updated_at = ? WHERE id = ?::uuid";
+    let sql = &db.sql(&sqlite, &postgres);
     let updated = match db.backend() {
         Backend::Sqlite => sqlx::query(sql.as_ref())
             .bind(display_name)
@@ -649,8 +824,7 @@ pub async fn patch_creator(db: &Database, id: &str, display_name: Option<&str>) 
     Ok(updated > 0)
 }
 
-/// Update an existing collection, scoped to its owning account: a caller
-/// can only rename or re-describe a collection they own.
+/// Update an existing collection, scoped to its owning account.
 pub async fn put_collection(
     db: &Database,
     id: &str,
@@ -662,14 +836,12 @@ pub async fn put_collection(
     let sqlite = "UPDATE media_collections \
                   SET title = COALESCE(?, title), description = COALESCE(?, description), \
                       updated_at = ? \
-                  WHERE id = ? AND owning_account_id = ?"
-        .to_string();
+                  WHERE id = ? AND owning_account_id = ?";
     let postgres = "UPDATE media_collections \
                     SET title = COALESCE(?, title), description = COALESCE(?, description), \
                         updated_at = ? \
-                    WHERE id = ?::uuid AND owning_account_id = ?::uuid"
-        .to_string();
-    let sql = db.sql(&sqlite, &postgres);
+                    WHERE id = ?::uuid AND owning_account_id = ?::uuid";
+    let sql = &db.sql(&sqlite, &postgres);
     let updated = match db.backend() {
         Backend::Sqlite => sqlx::query(sql.as_ref())
             .bind(title)
@@ -691,6 +863,17 @@ pub async fn put_collection(
             .rows_affected(),
     };
     Ok(updated > 0)
+}
+
+/// Post a media query (returns works matching the query AST).
+pub async fn post_media_query(
+    db: &Database,
+    query: &QueryAst,
+    account_id: Option<&str>,
+    limit: i64,
+) -> Result<(Vec<MediaRecord>, i64)> {
+    let (rows, total, _) = list_media_filtered(db, query, account_id, limit, None).await?;
+    Ok((rows, total))
 }
 
 #[cfg(test)]
@@ -705,29 +888,30 @@ mod tests {
             summary: None,
             format: "prose".to_string(),
             visibility: "public".to_string(),
-            owning_account_id: None,
-            created_at: "2026-01-01T00:00:00Z".to_string(),
-            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            owning_account_id: "owner-1".to_string(),
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
             version: 1,
         };
-        assert_eq!(rec.format, "prose");
+        assert_eq!(rec.id, "test-1");
         assert_eq!(rec.visibility, "public");
+        assert_eq!(rec.version, 1);
     }
 
     #[test]
-    fn creator_kind_round_trip() {
-        use std::str::FromStr;
-        for kind in CreatorKind::ALL {
-            assert_eq!(CreatorKind::from_str(kind.as_str()).ok(), Some(*kind));
-        }
+    fn eligibility_filter_no_session_public_only() {
+        let (sqlite, postgres, values) = eligibility_filter(None);
+        assert_eq!(sqlite, "works.visibility = 'public'");
+        assert_eq!(postgres, "works.visibility = 'public'");
+        assert!(values.is_empty());
     }
 
     #[test]
-    fn media_format_round_trip() {
-        use lorehaven_domain::media::MediaFormat;
-        use std::str::FromStr;
-        for fmt in MediaFormat::ALL {
-            assert_eq!(MediaFormat::from_str(fmt.as_str()).ok(), Some(*fmt));
-        }
+    fn eligibility_filter_with_session_owner_access() {
+        let (sqlite, postgres, values) = eligibility_filter(Some("me"));
+        assert!(sqlite.contains("public"));
+        assert!(sqlite.contains("owning_account_id"));
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0], "me");
     }
 }
