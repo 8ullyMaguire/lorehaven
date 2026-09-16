@@ -141,3 +141,18 @@ CREATE INDEX IF NOT EXISTS idx_quality_signals_kind ON quality_signals(signal_ki
 -- §30.1 / §32.3.8 — format is a first-class property of a work; every row
 -- that existed before M22 is prose.
 ALTER TABLE works ADD COLUMN format TEXT NOT NULL DEFAULT 'prose';
+
+-- §30.2 — media files for a work (downloadable artifacts).
+CREATE TABLE IF NOT EXISTS media_files (
+    id              TEXT PRIMARY KEY,
+    work_id         TEXT NOT NULL REFERENCES works (id) ON DELETE CASCADE,
+    edition_kind    TEXT NOT NULL,              -- prose | poetry | anthology | translation | narration
+    url             TEXT,
+    size_bytes      INTEGER,
+    mime_type       TEXT,
+    checksum        TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    version         INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_media_files_work ON media_files(work_id);

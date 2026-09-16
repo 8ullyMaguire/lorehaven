@@ -270,3 +270,11 @@ Remaining work lives in
 `~/.hermes/plans/2026-09-16-media-generalization-m23-remediation-plan.md`
 (aggregation doors, files/editions real queries, filter matrix,
 per-query feeds, scopes/trust gates, ETag/304, webhooks, bulk export).
+
+### Remediation Round 4 (2026-09-16) — Media files/editions + canon/space doors
+
+- `crates/db/src/media.rs`: Added `MediaFile` struct, `list_media_files()`, `list_media_editions()` functions using `db.sql(sqlite, pg)` convention; fixed `MediaEdition` struct to match `media_editions` table schema.
+- `crates/app/src/routes/media.rs`: Wired `list_media_files` and `list_media_editions` into `/api/v1/media/{id}/files` and `/api/v1/media/{id}/editions` handlers; implemented `canon_media` and `space_media` handlers returning JSON data instead of 501.
+- `migrations/sqlite/0024_media_generalization.sql` + `migrations/postgres/0024_media_generalization.sql`: Added `media_files` table with `id`, `work_id`, `edition_kind`, `url`, `size_bytes`, `mime_type`, `checksum`, `created_at`, `updated_at`, `version` columns.
+- `crates/app/tests/milestone_22.rs`: Added `media_files_and_editions_doors_return_data` behavior test; removed canon/space doors from `READ_DOORS_STILL_501`.
+- All workspace tests pass (100% green).
