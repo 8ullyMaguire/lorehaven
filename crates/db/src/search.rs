@@ -142,24 +142,40 @@ async fn rebuild_work_index_postgres(
 
 /// Search works by a free-text term (simple body search).
 pub async fn search_works(db: &Database, needle: &str, limit: i64) -> Result<Vec<SearchResult>> {
-    let needle = needle.trim().to_lowercase();
+    let needle = needle.trim();
     if needle.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let words: Vec<&str> = needle.split_whitespace().collect();
+    if words.is_empty() {
         return Ok(Vec::new());
     }
 
     match db.backend() {
         Backend::Sqlite => {
-            let sql = "SELECT w.id, w.title, a.handle AS author_handle, w.word_count, COUNT(t.term) AS score \
-                       FROM works_index t \
-                       JOIN works w ON w.id = t.work_id \
-                       JOIN pseuds a ON a.id = w.owner_pseud_id \
-                       WHERE t.term LIKE ? || '%' \
-                       GROUP BY w.id \
-                       ORDER BY score DESC \
-                       LIMIT ?";
-            let rows = sqlx::query_as::<_, (String, String, String, i64, i64)>(sql)
-                .bind(&needle)
-                .bind(limit)
+            let like_placeholders = words
+                .iter()
+                .map(|_| "t.term LIKE ?")
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            let sql = format!(
+                "SELECT w.id, w.title, a.handle AS author_handle, w.word_count, COUNT(t.term) AS score \
+                 FROM works_index_terms t \
+                 JOIN works w ON w.id = t.work_id \
+                 JOIN pseuds a ON a.id = w.owner_pseud_id \
+                 WHERE {} \
+                 GROUP BY w.id \
+                 ORDER BY score DESC \
+                 LIMIT ?",
+                like_placeholders
+            );
+            let mut query = sqlx::query_as::<_, (String, String, String, i64, i64)>(&sql);
+            for word in &words {
+                query = query.bind(format!("{}%", word.trim().to_lowercase()));
+            }
+            query = query.bind(limit);
+            let rows = query
                 .fetch_all(db.sqlite_pool().expect("sqlite"))
                 .await
                 .context("search works")?;
@@ -177,17 +193,30 @@ pub async fn search_works(db: &Database, needle: &str, limit: i64) -> Result<Vec
                 .collect())
         }
         Backend::Postgres => {
-            let sql = "SELECT w.id::text, w.title, a.handle AS author_handle, w.word_count, COUNT(t.term) AS score \
-                       FROM works_index t \
-                       JOIN works w ON w.id = t.work_id \
-                       JOIN pseuds a ON a.id = w.owner_pseud_id::uuid \
-                       WHERE t.term LIKE $1 || '%' \
-                       GROUP BY w.id, w.title, a.handle, w.word_count \
-                       ORDER BY score DESC \
-                       LIMIT $2";
-            let rows = sqlx::query_as::<_, (String, String, String, i64, i64)>(sql)
-                .bind(&needle)
-                .bind(limit)
+            let like_placeholders = words
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("t.term LIKE ${}", i + 1))
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            let sql = format!(
+                "SELECT w.id::text, w.title, a.handle AS author_handle, w.word_count, COUNT(t.term) AS score \
+                 FROM works_index_terms t \
+                 JOIN works w ON w.id = t.work_id \
+                 JOIN pseuds a ON a.id = w.owner_pseud_id::uuid \
+                 WHERE {} \
+                 GROUP BY w.id, w.title, a.handle, w.word_count \
+                 ORDER BY score DESC \
+                 LIMIT ${}",
+                like_placeholders,
+                words.len() + 1
+            );
+            let mut query = sqlx::query_as::<_, (String, String, String, i64, i64)>(&sql);
+            for word in &words {
+                query = query.bind(format!("{}%", word.trim().to_lowercase()));
+            }
+            query = query.bind(limit);
+            let rows = query
                 .fetch_all(db.postgres_pool().expect("postgres"))
                 .await
                 .context("search works")?;

@@ -53,6 +53,11 @@
   async function load() {
     try {
       const view: TypographyView = await fetchTypography();
+      // If the server's version is not newer than what we already hold,
+      // a concurrent save or a stale in-flight response would clobber
+      // local changes made while this request was in flight. Keep the
+      // current prefs in that case.
+      if (view.version <= prefs.version) return;
       prefs = {
         font_scale: view.font_scale,
         line_height: view.line_height,

@@ -1,6 +1,6 @@
 //! M18 — Public API, bots, feeds, push, federation, AI providers routes.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::Json;
 use serde::Deserialize;
@@ -68,12 +68,19 @@ pub async fn get_public_work(
     Ok(Json(json!({ "work": work_json })))
 }
 
+#[derive(Deserialize)]
+pub struct SearchQuery {
+    q: String,
+}
+
 /// Public search.
 pub async fn public_search(
     State(state): State<AppState>,
     MaybeSession(_user): MaybeSession,
+    Query(query): Query<SearchQuery>,
 ) -> ApiResult<Json<Value>> {
-    let results = lorehaven_db::search::search_works(state.db(), "", 50)
+    let needle = query.q.trim();
+    let results = lorehaven_db::search::search_works(state.db(), needle, 50)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     Ok(Json(json!({ "results": results })))
