@@ -603,3 +603,63 @@ Gates (literal results):
 - clippy --workspace 0 warnings; fmt clean.
 - Frontend vitest: 150/150 (23 files). Playwright e2e (3 journeys) NOT
   re-verified this round — needs the release binary + browser stack.
+
+## 2026-09-17 (evening) — the twenty ordinary use cases, in a browser
+
+`frontend/e2e/use-cases.spec.ts` (new, 27 tests): one ordinary thing per
+test, against the release binary with the interface embedded, driven by
+Playwright — landing, registering, signing in and out, resetting a
+password, drafting, writing a chapter, publishing, reading signed out,
+resuming, rating, reviewing, noting, being notified, keeping
+preferences, choosing an identity, posting to the forum, searching,
+exporting, shelving, and a missing address.
+
+Method note: each test makes its own account and finds its own way to
+the content rather than trusting a variable set by an earlier test.
+Three earlier runs were needed to get there — the first because the
+suite's own assumptions were wrong (sign-in lands on `/`, not
+`/account`; the pseud page is `/pseud`; a review is private until its
+writer publishes it; content preferences live behind a tab), the second
+because a `pkill` for the local demo instance matched and killed the e2e
+scratch server mid-run (28 connection refusals), the third because
+`#my-exports` is the id of a heading, not of the list it labels.
+
+Gates (literal results, fifth run, clean scratch database):
+- Playwright: **26 passed, 1 failed, 0 skipped** (3.8 m, chromium,
+  worker serialised, release binary at `8bf4b38` + fresh `frontend/dist`).
+- `svelte-check --tsconfig ./tsconfig.json`: 0 errors, 0 warnings.
+- The one failure is not a test defect: see below. Two more tests are
+  marked `test.fail()` and fail on purpose, documenting gaps 2 and 3.
+
+Findings, with the evidence that produced each:
+
+1. **A reader's typography choice can be silently discarded.** Open a
+   chapter, open Reading settings, change the theme and press Save
+   before `GET /settings/typography` has answered: the request that
+   leaves carries the *old* theme. The run-5 trace shows the body
+   `{"expected_version":0,...,"reader_theme":"sepia"}` while the panel
+   had shown Dark, and the row afterwards reads `reader_theme: "sepia"`
+   with `version: 1` — the write is recorded and the choice is gone.
+   The controls render before the load lands (with 700 ms of injected
+   latency the select exists 250 ms after the panel opens), and two
+   loads fire per panel (mount, and again when the session settles).
+   Proposed fix: ignore a load response that lands after the reader has
+   edited, or keep the controls disabled until the first response.
+2. **A public review tells the author nothing.** Only purchases, sales
+   and forum replies call `notifications::notify`; test 16b holds the
+   expectation and fails until they do.
+3. **Reading history has no door on a desktop.** `/library/history`
+   works, but its only link is inside the mobile "More" drawer: at
+   1280 px there are zero `a[href="/library/history"]` elements in the
+   DOM, signed in or out. Test 12b documents it.
+4. `IdentitySwitcher.svelte` is imported nowhere; the switcher readers
+   use is "Act as this" on each pseud card.
+5. `POST /api/v1/exports` answers `privacy_acknowledged: false` even
+   when the caller acknowledged — the response is built before the
+   acknowledgement is written, and the listing afterwards says `true`.
+
+The e2e scratch server runs `serve` without `worker`, so a queued export
+stays `queued` there; that is why test 22 asserts the export is *listed*
+rather than that the file exists. The worker was exercised separately on
+the local instance at `http://localhost:8180`, where the same export
+reached `ready` with a 3.3 KB EPUB in under a second.
