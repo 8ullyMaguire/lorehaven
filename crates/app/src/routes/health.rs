@@ -10,6 +10,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::auth::MaybeSession;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::get;
@@ -36,7 +37,10 @@ struct LiveResponse {
 }
 
 /// Liveness: the process is running and can answer.
-async fn live(State(state): State<AppState>) -> Json<LiveResponse> {
+async fn live(
+    State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
+) -> Json<LiveResponse> {
     Json(LiveResponse {
         status: "ok",
         version: version::VERSION,
@@ -80,7 +84,10 @@ impl Check {
 }
 
 /// Readiness: every essential dependency is usable.
-async fn ready(State(state): State<AppState>) -> (StatusCode, Json<ReadyResponse>) {
+async fn ready(
+    State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
+) -> (StatusCode, Json<ReadyResponse>) {
     let config = state.config();
     let db = state.db();
     let mut checks = BTreeMap::new();

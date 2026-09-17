@@ -410,3 +410,103 @@ async fn search_with_no_query_returns_cursor_envelope() {
     assert!(body.get("items").is_some(), "expected items field: {body}");
     harness.cleanup().await;
 }
+
+// ---------------------------------------------------------------------------
+// P1-A regression: /api/v1/public/works/{id} must not leak draft content
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn public_work_draft_returns_404_to_anonymous() {
+    let harness = Harness::new("public-draft-anon").await;
+    let mut author = harness.client();
+    let _ = register(&mut author, "a@example.com", "AuthorA").await;
+
+    // Create a draft (unpublished) work.
+    let (status, body) = author
+        .post("/api/v1/works", json!({ "title": "Secret Draft" }))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "create draft: {body}");
+    let draft_id = body["id"].as_str().expect("id");
+
+    // Anonymous must get 404, not 200 with the title.
+    let mut anon = harness.client();
+    let (status, body) = anon.get(&format!("/api/v1/public/works/{draft_id}")).await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "anonymous must not read draft: {body}"
+    );
+    assert!(
+        body.get("title").is_none(),
+        "draft title must not leak: {body}"
+    );
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn public_work_draft_returns_404_to_other_account() {
+    let harness = Harness::new("public-draft-other").await;
+    let mut author = harness.client();
+    let _ = register(&mut author, "a@example.com", "AuthorA").await;
+
+    let (status, body) = author
+        .post("/api/v1/works", json!({ "title": "Secret Draft" }))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "create draft: {body}");
+    let draft_id = body["id"].as_str().expect("id");
+
+    // A different account must also get 404.
+    let mut other = harness.client();
+    let _ = register(&mut other, "b@example.com", "OtherB").await;
+    let (status, body) = other.get(&format!("/api/v1/public/works/{draft_id}")).await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "other account must not read draft: {body}"
+    );
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn public_work_draft_returns_200_to_author() {
+    let harness = Harness::new("public-draft-author").await;
+    let mut author = harness.client();
+    let _ = register(&mut author, "a@example.com", "AuthorA").await;
+
+    let (status, body) = author
+        .post("/api/v1/works", json!({ "title": "My Draft" }))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "create draft: {body}");
+    let draft_id = body["id"].as_str().expect("id");
+
+    // The author (contributor) must be able to read their own draft.
+    let (status, body) = author
+        .get(&format!("/api/v1/public/works/{draft_id}"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "author must read own draft: {body}");
+    assert_eq!(body["work"]["title"], "My Draft");
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn public_work_published_returns_200_to_anonymous() {
+    let harness = Harness::new("public-published-anon").await;
+    let work_id = published_work(&harness, "a@example.com", "AuthorA", "Public Work").await;
+
+    let mut anon = harness.client();
+    let (status, body) = anon.get(&format!("/api/v1/public/works/{work_id}")).await;
+    assert_eq!(status, StatusCode::OK, "anon read published: {body}");
+    assert_eq!(body["work"]["title"], "Public Work");
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn public_work_unknown_id_returns_404() {
+    let harness = Harness::new("public-unknown").await;
+    let mut anon = harness.client();
+    let (status, body) = anon
+        .get("/api/v1/public/works/00000000-0000-0000-0000-000000000000")
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "unknown id must 404: {body}");
+    harness.cleanup().await;
+}
