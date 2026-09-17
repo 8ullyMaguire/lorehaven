@@ -16,6 +16,7 @@
 //!    a literal `?` inside a DML statement.
 
 pub mod admin;
+pub mod analytics;
 pub mod collaboration;
 pub mod community;
 pub mod content;

@@ -297,3 +297,105 @@ The Left Hand of Darkness,Ursula K. Le Guin,9780060500249,5,3.94,sci-fi;classic,
 
     println!("PASS: goodreads_csv_parses");
 }
+
+// ---------------------------------------------------------------------------
+// Creator dashboard (spec §32.3, §24.3)
+// ---------------------------------------------------------------------------
+
+/// The dashboard reports the caller's own works, and every small count arrives
+/// as a band rather than as a number.
+#[tokio::test]
+async fn the_creator_dashboard_reports_banded_aggregates() {
+    let dir = scratch_dir("dashboard");
+    let tdb = test_support::TestDb::connect_with_dir("dashboard", &dir).await;
+    let app = server::build_router(AppState::new(config_for(&dir), tdb.db().clone()));
+
+    let mut author = Client::new(app.clone());
+    register(&mut author, "author@example.com", "author").await;
+    let (work_id, _) = create_work_with_chapter(&mut author, "Dashboarded Work").await;
+
+    // A second work, left as a draft, so the published/unpublished split is
+    // visible rather than inferred.
+    let (status, body) = author
+        .post("/api/v1/works", json!({ "title": "Unfinished" }))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "draft work: {body}");
+
+    // One comment the positivity filter delivered.
+    let (status, body) = author
+        .post(
+            &format!("/api/v1/works/{work_id}/comments"),
+            json!({ "body": "A comment on my own work" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "comment: {body}");
+
+    let (status, body) = author.get("/api/v1/me/dashboard").await;
+    assert_eq!(status, StatusCode::OK, "dashboard: {body}");
+
+    let floor = body["floor"].as_i64().expect("floor");
+    assert!(floor >= 1, "the dashboard must state its floor: {body}");
+
+    // Works and words are the author's own facts about their own text, so they
+    // are exact: banding a chapter count would make the dashboard useless.
+    assert_eq!(body["works"]["total"].as_i64(), Some(2), "{body}");
+    assert_eq!(body["works"]["published"].as_i64(), Some(1), "{body}");
+    assert_eq!(body["works"]["unpublished"].as_i64(), Some(1), "{body}");
+    assert!(
+        body["works"]["chapters"].as_i64().unwrap_or(0) >= 1,
+        "{body}"
+    );
+    assert!(body["works"]["words"].as_i64().unwrap_or(0) > 0, "{body}");
+
+    // Reader-facing counts are below the floor here, so they are bands — a
+    // string, not a number, because a number is what a client would render as
+    // an exact figure.
+    let band = format!("fewer_than_{floor}");
+    assert_eq!(
+        body["readers"]["bookmarks"].as_str(),
+        Some(band.as_str()),
+        "{body}"
+    );
+    assert_eq!(
+        body["readers"]["reviews"].as_str(),
+        Some(band.as_str()),
+        "{body}"
+    );
+    assert_eq!(
+        body["readers"]["ratings"].as_str(),
+        Some(band.as_str()),
+        "{body}"
+    );
+    // A mean is only present when its count is.
+    assert!(body["readers"]["mean_stars"].is_null(), "{body}");
+    assert_eq!(
+        body["positivity"]["comments_delivered"].as_str(),
+        Some(band.as_str()),
+        "one delivered comment is a band, not a number: {body}"
+    );
+
+    // No reader, pseud or account is named anywhere in the payload.
+    let rendered = body.to_string();
+    for forbidden in ["reader@", "pseud_id", "account_id", "author@"] {
+        assert!(
+            !rendered.contains(forbidden),
+            "the dashboard leaked {forbidden}: {rendered}"
+        );
+    }
+
+    // Another account's works are not in this dashboard.
+    let mut stranger = Client::new(app.clone());
+    register(&mut stranger, "stranger@example.com", "stranger").await;
+    let (status, body) = stranger.get("/api/v1/me/dashboard").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["works"]["total"].as_i64(), Some(0), "{body}");
+    assert_eq!(body["works"]["published"].as_i64(), Some(0), "{body}");
+
+    // And a signed-out caller is refused rather than shown zeros that could be
+    // mistaken for another account's.
+    let mut anonymous = Client::new(app.clone());
+    let (status, _) = anonymous.get("/api/v1/me/dashboard").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    println!("PASS: the_creator_dashboard_reports_banded_aggregates");
+}

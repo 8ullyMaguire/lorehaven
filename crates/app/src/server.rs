@@ -482,6 +482,14 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // Creator dashboard (M24 / spec §32.3, §24.3). Session-scoped: the
+        // aggregates are about the acting pseud's own works, banded so a small
+        // count cannot name a reader.
+        .merge(classified(
+            routes::dashboard::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // Controlled digital lending (M25 / spec §32.4). All endpoints require
         // a session: borrower identity is needed to grant or revoke a loan.
         .merge(classified(

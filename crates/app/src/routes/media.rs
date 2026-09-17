@@ -383,14 +383,34 @@ async fn canon_media(
     State(state): State<AppState>,
     Path(id): Path<String>,
     MaybeSession(session): MaybeSession,
+    Query(params): Query<MediaQuery>,
 ) -> impl IntoResponse {
     let db = state.db();
     let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
-    match lorehaven_db::media::canon_media(db, &id, account_id.as_deref()).await {
-        Ok((items, canon_name)) => {
-            Json(json!({"items": items, "canon": id, "name": canon_name})).into_response()
+    // The scoped doors page the same way the list door does: a validated limit,
+    // a cursor carrying the ordering key, and a `next_cursor` only when the page
+    // was full. Before this they answered with a silent 50-row ceiling.
+    let limit = match scoped_limit(&params) {
+        Ok(limit) => limit,
+        Err(message) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({"error": {"code": "VALIDATION_FAILED", "message": message}})),
+            )
+                .into_response()
         }
+    };
+    let cursor = params.cursor.as_deref();
+
+    match lorehaven_db::media::canon_media(db, &id, account_id.as_deref(), limit, cursor).await {
+        Ok((items, canon_name, next_cursor)) => Json(json!({
+            "items": items,
+            "canon": id,
+            "name": canon_name,
+            "next_cursor": next_cursor,
+        }))
+        .into_response(),
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("not found") {
@@ -410,14 +430,31 @@ async fn space_media(
     State(state): State<AppState>,
     Path(id): Path<String>,
     MaybeSession(session): MaybeSession,
+    Query(params): Query<MediaQuery>,
 ) -> impl IntoResponse {
     let db = state.db();
     let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
-    match lorehaven_db::media::space_media(db, &id, account_id.as_deref()).await {
-        Ok((items, space_name)) => {
-            Json(json!({"items": items, "space": id, "name": space_name})).into_response()
+    let limit = match scoped_limit(&params) {
+        Ok(limit) => limit,
+        Err(message) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({"error": {"code": "VALIDATION_FAILED", "message": message}})),
+            )
+                .into_response()
         }
+    };
+    let cursor = params.cursor.as_deref();
+
+    match lorehaven_db::media::space_media(db, &id, account_id.as_deref(), limit, cursor).await {
+        Ok((items, space_name, next_cursor)) => Json(json!({
+            "items": items,
+            "space": id,
+            "name": space_name,
+            "next_cursor": next_cursor,
+        }))
+        .into_response(),
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("not found") {
@@ -960,6 +997,33 @@ pub struct MediaQuery {
     pub cursor: Option<String>,
     /// Output format override: `atom` (default), `opds`, `json`, or `dc` (Dublin Core).
     pub format: Option<String>,
+}
+
+/// The limit and cursor for a scoped (canon/space) page.
+///
+/// The cursor is `<position>|<created_at>|<id>`: the whole ordering key. A
+/// cursor that carried only the id could not advance this ordering, and one
+/// that carried only the position would repeat a whole position block.
+fn scoped_limit(params: &MediaQuery) -> Result<i64, &'static str> {
+    let limit = params.limit.unwrap_or(50);
+    if limit < 1 {
+        return Err("limit must be positive");
+    }
+    if let Some(cursor) = &params.cursor {
+        let mut parts = cursor.rsplitn(3, '|');
+        let (Some(id), Some(created_at), Some(position)) =
+            (parts.next(), parts.next(), parts.next())
+        else {
+            return Err("invalid cursor");
+        };
+        position
+            .parse::<i64>()
+            .map_err(|_| "invalid cursor position")?;
+        time::OffsetDateTime::parse(created_at, &time::format_description::well_known::Rfc3339)
+            .map_err(|_| "invalid cursor timestamp")?;
+        uuid::Uuid::parse_str(id).map_err(|_| "invalid cursor id")?;
+    }
+    Ok(limit.min(200))
 }
 
 impl MediaQuery {

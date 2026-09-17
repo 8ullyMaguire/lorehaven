@@ -18,6 +18,78 @@
 
 Newest first. Each section states what was verified, how, and the result.
 
+## 2026-09-17 — M25 residuals, M24-02 dashboard, scoped-door pagination, leak sweep
+
+**Context.** The remediation plan's N3 and N4 items, worked in the order the
+plan lists them. The first finding is that M25 had no test file at all: the
+ledger's "milestone tests 21/21" were milestone_16/22/26, and nothing in the
+repository ever executed the derivative pipeline, lending or the Dublin Core
+feed. Every M25 defect below was found by writing that file.
+
+**Derivatives could not run.** The request door created a row, answered
+`queued`, and enqueued nothing — a TODO in `routes/derivative.rs`. The worker's
+OCR and transcode arms refused at build time. Now: the door enqueues
+`JobKind::Derivative` with the derivative id, records the job on the row, refuses
+a kind whose program is absent with the spec's `CONVERTER_UNAVAILABLE` (a new
+`AppError`/`ErrorCode` pair from §3.3's list, 422) naming what to install, and
+refuses a parent checksum no blob holds. OCR runs Tesseract and transcode runs
+ffmpeg to a streaming MP4; both go through the same `which` discovery the
+document converters use, with the program, remedy and output media type declared
+on `DerivativeKind` so the door, the worker and doctor cannot disagree. Temp
+directories became a Drop guard (the old cleanup ran only on success), and a
+failed build is recorded on the row and classified fatal or transient instead of
+leaving it reading `queued` forever.
+
+**Lending.** Migration 0033 adds `work_loans.expired_at` (both dialects) and the
+maintenance pass stamps loans whose window has closed. Two real bugs fell out:
+`grant_loan` inserted unconditionally, so a reader whose loan had expired hit
+`UNIQUE (work_id, borrower_account_id)` and got a 500 on every re-borrow; and
+`Loan::is_active()` ignored expiry entirely and called an expired loan live. The
+grant is now an upsert that re-grants the row, and `GET /api/v1/me/loans`
+reports the caller's own loans with `active|expired|revoked`.
+
+**Derivative doors** now use the app's one visibility rule (the same helper the
+narration doors use since the previous commit): contributor-only to request,
+404 for a work the caller cannot read.
+
+**Creator dashboard (M24-02).** `GET /api/v1/me/dashboard` aggregates the acting
+pseud's own works: totals and text for the author's own inventory (exact), and
+reader-facing counts (bookmarks, ratings, reviews, delivered comments) banded at
+the floor — a count below it is a string (`fewer_than_5`), never a number a
+client would render as an exact figure. No reader, pseud, account or per-reader
+row appears in the payload, and there is no "held by the filter" counter: §12
+frames the author's view as what arrived. The test asserts the absence of those
+strings in the rendered payload, not just their absence by construction.
+
+**Scoped doors paginate.** `/api/v1/canons/{id}/media` and
+`/api/v1/spaces/{id}/media` answered with a silent `LIMIT 50`. They now take a
+validated `limit` and a cursor carrying the whole ordering key
+(`position|created_at|id`, exactly what the ORDER BY compares) and return
+`next_cursor` only for a full page. A two-page walk test seeds five works at
+`limit=2` and asserts three pages, each item once, in canon order, plus the
+refusals for `limit=0` and a malformed cursor.
+
+**Leaked scratch databases.** `test_support` now sweeps `lh_test_*` databases at
+the first PostgreSQL connect in a process. The criterion is liveness rather than
+age — `pg_database` has no creation timestamp, and a database nobody is attached
+to is one no run will ever drop — so a live run's databases are left alone.
+
+**Evidence (literal).**
+
+```
+cargo test -p lorehaven-app --test milestone_25
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.89s
+
+cargo test -p lorehaven-app --test milestone_22
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.43s
+
+cargo test -p lorehaven-app --test milestone_24
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.05s
+```
+
+`cargo clippy --workspace --all-targets`: 0 warnings. `cargo fmt` clean. The
+workspace run is in the session handoff.
+
 ## 2026-09-17 — M26 TTS narration pipeline (spec §32.5) + adult gates restored to every door
 
 **Context.** The M26 narration half was draft-CRUD with no audio: a
