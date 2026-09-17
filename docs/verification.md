@@ -645,13 +645,12 @@ Findings, with the evidence that produced each:
    loads fire per panel (mount, and again when the session settles).
    Proposed fix: ignore a load response that lands after the reader has
    edited, or keep the controls disabled until the first response.
-2. **A public review tells the author nothing.** Only purchases, sales
-   and forum replies call `notifications::notify`; test 16b holds the
-   expectation and fails until they do.
-3. **Reading history has no door on a desktop.** `/library/history`
-   works, but its only link is inside the mobile "More" drawer: at
-   1280 px there are zero `a[href="/library/history"]` elements in the
-   DOM, signed in or out. Test 12b documents it.
+2. **A public review tells the author nothing.** Fixed — `reading::upsert_review`
+   now calls `notifications::notify` when a public review passes the
+   positivity gate. Test 16b now passes.
+3. **Reading history has no door on a desktop.** Fixed — `{ href: '/library/history', label: 'History' }`
+   added to the `NAV` array in `App.svelte`, rendering the link in the
+   desktop nav bar. Test 12b now passes.
 4. `IdentitySwitcher.svelte` is imported nowhere; the switcher readers
    use is "Act as this" on each pseud card.
 5. `POST /api/v1/exports` answers `privacy_acknowledged: false` even
