@@ -34,7 +34,8 @@ use lorehaven_domain::{AccountId, AppError, PseudId, SessionId};
 use serde::{Deserialize, Serialize};
 
 use crate::auth::{
-    self, CookiePolicy, RequireSession, SessionUser, CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE,
+    self, CookiePolicy, MaybeSession, RequireSession, SessionUser, CSRF_COOKIE, CSRF_HEADER,
+    SESSION_COOKIE,
 };
 use crate::http::{ApiError, ApiResult};
 use crate::privacy;
@@ -125,6 +126,7 @@ struct Capabilities {
 
 async fn register(
     State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
     headers: HeaderMap,
     Json(request): Json<RegisterRequest>,
 ) -> ApiResult<Response> {
@@ -229,6 +231,7 @@ struct LoginRequest {
 
 async fn login(
     State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
     headers: HeaderMap,
     Json(request): Json<LoginRequest>,
 ) -> ApiResult<Response> {
@@ -282,6 +285,7 @@ async fn login(
 
 async fn logout(
     State(state): State<AppState>,
+    RequireSession(_user): RequireSession,
     request: axum::extract::Request,
 ) -> ApiResult<Response> {
     // The CSRF middleware has already verified the token for this request, so
@@ -328,6 +332,7 @@ struct PasswordResetStarted {
 
 async fn password_reset(
     State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
     Json(request): Json<PasswordResetRequest>,
 ) -> ApiResult<Json<PasswordResetStarted>> {
     let email = request.email.trim().to_ascii_lowercase();
@@ -396,6 +401,7 @@ struct PasswordResetComplete {
 
 async fn password_reset_complete(
     State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
     Json(request): Json<PasswordResetComplete>,
 ) -> ApiResult<StatusCode> {
     validate_password(&request.new_password)?;

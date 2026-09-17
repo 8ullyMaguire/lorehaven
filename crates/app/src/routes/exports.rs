@@ -43,7 +43,7 @@ use lorehaven_db::exports as repo;
 use lorehaven_db::storage::BlobStore;
 use lorehaven_domain::exports::{ExportFormat, ExportOptions};
 
-use crate::auth::RequireSession;
+use crate::auth::{MaybeSession, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -308,6 +308,7 @@ async fn download_own(
 /// can only be given the one file the grant was minted for.
 async fn download_by_token(
     State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
     Path(token): Path<String>,
 ) -> ApiResult<Response> {
     let hash = crate::crypto::hash_token(&token);

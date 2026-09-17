@@ -81,7 +81,10 @@ async fn submit_report(
     Ok(Json(json!({ "id": id })))
 }
 
-async fn list_reports(State(state): State<AppState>) -> ApiResult<Json<Value>> {
+async fn list_reports(
+    State(state): State<AppState>,
+    RequireSession(_user): RequireSession,
+) -> ApiResult<Json<Value>> {
     let items = lorehaven_db::governance::list_open_reports(state.db(), 100)
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
@@ -91,6 +94,7 @@ async fn list_reports(State(state): State<AppState>) -> ApiResult<Json<Value>> {
 async fn get_report(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    RequireSession(_user): RequireSession,
 ) -> ApiResult<Json<Value>> {
     let items = lorehaven_db::governance::list_open_reports(state.db(), 1000)
         .await

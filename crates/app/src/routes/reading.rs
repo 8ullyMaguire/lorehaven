@@ -41,7 +41,7 @@ use lorehaven_domain::reading::{resolve_progress, ProgressResolution, ReadingPos
 use lorehaven_domain::{AppError, WorkId};
 use serde::{Deserialize, Serialize};
 
-use crate::auth::{RequirePseud, RequireSession};
+use crate::auth::{MaybeSession, RequirePseud, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -533,6 +533,7 @@ async fn delete_rating(
 
 async fn list_reviews(
     State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
     Path(id): Path<String>,
 ) -> ApiResult<Json<ReviewListView>> {
     // Public and anonymous by design (§9): only delivered public reviews are

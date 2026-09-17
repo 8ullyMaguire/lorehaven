@@ -9,7 +9,7 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::auth::RequirePseud;
+use crate::auth::{MaybeSession, RequirePseud};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -58,6 +58,7 @@ pub fn router() -> Router<AppState> {
 
 async fn get_collections(
     State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
     Query(params): Query<CursorQuery>,
 ) -> ApiResult<Json<Value>> {
     let rows = lorehaven_db::events::list_public_collections(state.db(), params.limit)
@@ -94,6 +95,7 @@ async fn post_collection(
 
 async fn get_collection(
     State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
     let collection = lorehaven_db::events::get_collection(state.db(), &id)
@@ -140,6 +142,7 @@ async fn put_collection(
 
 async fn get_collection_items(
     State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
     let items = lorehaven_db::events::list_collection_items(state.db(), &id)
@@ -224,6 +227,7 @@ struct CreateChallengeBody {
 
 async fn get_challenges(
     State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
     Query(params): Query<CursorQuery>,
 ) -> ApiResult<Json<Value>> {
     let rows = lorehaven_db::events::list_challenges(state.db(), params.limit)
@@ -251,6 +255,7 @@ async fn post_challenge(
 
 async fn get_challenge(
     State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
     let challenge = lorehaven_db::events::get_challenge(state.db(), &id)
@@ -306,6 +311,7 @@ struct CreateRequestBody {
 
 async fn get_requests(
     State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
     Query(params): Query<CursorQuery>,
 ) -> ApiResult<Json<Value>> {
     let rows = lorehaven_db::events::list_requests(state.db(), params.limit)
@@ -438,6 +444,7 @@ struct CreateEventBody {
 
 async fn get_events(
     State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
     Query(params): Query<CursorQuery>,
 ) -> ApiResult<Json<Value>> {
     let rows = lorehaven_db::events::list_events(state.db(), params.limit)
@@ -464,6 +471,7 @@ async fn post_event(
 
 async fn get_event(
     State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
     let event = lorehaven_db::events::get_event(state.db(), &id)
@@ -501,5 +509,3 @@ async fn join_event(
     }
     Ok(Json(json!({ "ok": true })))
 }
-
-use crate::auth::MaybeSession;

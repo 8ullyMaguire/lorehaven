@@ -269,3 +269,33 @@ async fn admin_stats_endpoint_works() {
 
     harness.cleanup().await;
 }
+
+// ---------------------------------------------------------------------------
+// P1-C regression: /api/v1/admin/abuse-status/{key} requires authentication
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn check_abuse_status_requires_authentication() {
+    let harness = Harness::new("abuse-status-auth").await;
+    let mut anon = harness.client();
+
+    let (status, body) = anon.get("/api/v1/admin/abuse-status/1.2.3.4").await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "anonymous must not query abuse status: {body}"
+    );
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn check_abuse_status_works_for_authenticated_users() {
+    let harness = Harness::new("abuse-status-ok").await;
+    let mut client = harness.client();
+    let _ = register(&mut client, "abuse@example.com", "AbuseUser").await;
+
+    let (status, body) = client.get("/api/v1/admin/abuse-status/1.2.3.4").await;
+    assert_eq!(status, StatusCode::OK, "auth user: {body}");
+    assert!(body.get("blocked").is_some());
+    harness.cleanup().await;
+}

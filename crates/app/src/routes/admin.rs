@@ -103,7 +103,7 @@ pub async fn create_privacy_request(
 pub async fn check_abuse_status(
     State(state): State<AppState>,
     Path(key): Path<String>,
-    MaybeSession(_user): MaybeSession,
+    RequireSession(_user): RequireSession,
 ) -> ApiResult<Json<Value>> {
     let (blocked, count) = lorehaven_db::admin::check_abuse_status(state.db(), &key)
         .await

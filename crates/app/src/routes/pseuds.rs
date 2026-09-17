@@ -26,7 +26,7 @@ use lorehaven_domain::policy::AgeState;
 use lorehaven_domain::{AppError, PseudId};
 use serde::{Deserialize, Serialize};
 
-use crate::auth::RequireSession;
+use crate::auth::{MaybeSession, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::privacy;
 use crate::state::AppState;
@@ -103,6 +103,7 @@ struct UpdatePseudRequest {
 
 async fn list_pseuds(
     State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
     crate::auth::RequireSession(user): crate::auth::RequireSession,
 ) -> ApiResult<Json<Vec<OwnPseudView>>> {
     let pseuds = identity::pseuds_for_account(state.db(), user.account_id).await?;
@@ -316,6 +317,7 @@ async fn activate_pseud(
 
 async fn public_profile(
     State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
     Path(id): Path<String>,
 ) -> ApiResult<Json<PublicPseudView>> {
     // A handle that looks like a UUID still resolves by handle first, so the

@@ -55,7 +55,7 @@ use lorehaven_domain::library::ReadingStatus;
 use lorehaven_domain::{AppError, PseudId};
 use lorehaven_scrapers::{SafeFetcher, SourceAdapter, SourceKey};
 
-use crate::auth::{RequirePseud, RequireSession};
+use crate::auth::{MaybeSession, RequirePseud, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -327,7 +327,10 @@ impl RobotsView {
 /// decided. So the adapter list comes first and the row refines it, and a row
 /// whose source this build cannot read is still reported — with `known: false`,
 /// because a record that a source exists is not a claim that it can be read.
-async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
+async fn list_sources(
+    State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
+) -> ApiResult<Json<serde_json::Value>> {
     let rows = imports::list_sources(state.db()).await?;
     let registry = state.registry();
 

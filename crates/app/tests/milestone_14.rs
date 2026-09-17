@@ -408,3 +408,99 @@ async fn a_user_can_open_and_list_their_own_appeals() {
 
     harness.cleanup().await;
 }
+
+// ---------------------------------------------------------------------------
+// P1-B regression: /api/v1/me/audit-log must filter by account
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn my_audit_log_filters_by_account() {
+    let harness = Harness::new("audit-log-filter").await;
+    let mut user = harness.client();
+    let (account, _) = register(&mut user, "filter@example.com", "FilterUser").await;
+
+    // Seed a foreign audit entry for a different account.
+    lorehaven_db::governance::audit_append(
+        harness.tdb.db(),
+        "foreign-account-id",
+        "foreign.action",
+        "work",
+        "foreign-work-id",
+        &serde_json::json!({"detail": "FOREIGN MODERATION DETAIL"}).to_string(),
+    )
+    .await
+    .expect("seed foreign audit entry");
+
+    // Seed an own audit entry so the caller has something to see.
+    lorehaven_db::governance::audit_append(
+        harness.tdb.db(),
+        &account,
+        "own.action",
+        "work",
+        "own-work-id",
+        &serde_json::json!({"detail": "OWN DETAIL"}).to_string(),
+    )
+    .await
+    .expect("seed own audit entry");
+
+    // Call my audit log.
+    let (status, body) = user.get("/api/v1/me/audit-log").await;
+    assert_eq!(status, StatusCode::OK, "audit log: {body}");
+    let items = body["items"].as_array().expect("items array");
+
+    // Must see own entries.
+    assert!(
+        !items.is_empty(),
+        "caller should see own audit entries: {body}"
+    );
+
+    // Must NOT see the foreign entry.
+    assert!(
+        !items.iter().any(|i| i["document"]
+            .to_string()
+            .contains("FOREIGN MODERATION DETAIL")),
+        "caller must not see foreign audit entries: {body}"
+    );
+
+    // Verify all entries belong to the caller's account.
+    for item in items {
+        assert_eq!(
+            item["actor"].as_str().expect("actor"),
+            account,
+            "every entry must belong to caller: {item}"
+        );
+    }
+    harness.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// P1-C regression: /api/v1/reports and /api/v1/reports/{id} require auth
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn list_reports_requires_authentication() {
+    let harness = Harness::new("reports-auth").await;
+    let mut anon = harness.client();
+
+    let (status, body) = anon.get("/api/v1/reports").await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "anonymous must not list reports: {body}"
+    );
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn get_report_requires_authentication() {
+    let harness = Harness::new("report-auth").await;
+    let mut anon = harness.client();
+
+    let (status, body) = anon.get("/api/v1/reports/r1").await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "anonymous must not read report: {body}"
+    );
+    harness.cleanup().await;
+}

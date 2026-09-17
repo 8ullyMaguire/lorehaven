@@ -5,6 +5,7 @@
 //! "A screen containing mock data is not an implemented feature"). It is also
 //! the first endpoint an integration touches when checking compatibility.
 
+use crate::auth::MaybeSession;
 use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
@@ -45,7 +46,10 @@ struct PolicySummary {
     csrf_required: bool,
 }
 
-async fn meta(State(state): State<AppState>) -> Json<MetaResponse> {
+async fn meta(
+    State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
+) -> Json<MetaResponse> {
     let config = state.config();
     let policy = lorehaven_domain::policy::AccessPolicy::default();
 

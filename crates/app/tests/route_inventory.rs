@@ -87,17 +87,15 @@ fn every_route_has_declared_audience() {
         let src = fs::read_to_string(&path).expect("read route source");
         for (line_no, line) in src.lines().enumerate() {
             let trimmed = line.trim();
-            // Only check `pub async fn` — these are registered route
-            // handlers.  Helper functions are `async fn` without `pub`.
-            if !trimmed.starts_with("pub async fn") {
+            // Check ALL async fn with State<AppState> — route handlers
+            // can be private (async fn) or public (pub async fn).
+            // Utility functions have State<AppState> too but the
+            // audience extractor is what matters.
+            if !trimmed.starts_with("async fn") && !trimmed.starts_with("pub async fn") {
                 continue;
             }
             let sig = collect_signature(&src, line_no);
-            // Only check functions that have `State<AppState>` in
-            // their signature — these are registered route handlers.
-            // Utility functions (like `check_storage`) are `pub
-            // async fn` too but have no `State` extractor.
-            if !sig.contains("State<AppState>") && !sig.contains("State(app") {
+            if !sig.contains("State<AppState>") {
                 continue;
             }
             if !has_audience_extractor(&sig) {
