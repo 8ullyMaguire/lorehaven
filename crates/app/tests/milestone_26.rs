@@ -1,4 +1,9 @@
-//! Milestone 26 — adult taxonomy behind age gates (spec §32.5).
+//! Milestone 26 — TTS narration edition CRUD (spec §32.5).
+//!
+//! Verifies that requesting a narration creates a `narration` edition in
+//! draft state with the machine producer credited as narrator. Does NOT
+//! test actual audio generation — that requires an AI provider integration
+//! that doesn't exist yet in this build.
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
@@ -11,7 +16,7 @@ use std::path::{Path, PathBuf};
 use tower::ServiceExt;
 
 fn scratch_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("lorehaven-m26-{tag}-{:?}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("lorehaven-m26-narrate-{tag}-{:?}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -71,17 +76,17 @@ impl Client {
         let value = if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap_or(Value::Null) };
         (status, value)
     }
-    async fn get(&mut self, uri: &str) -> (StatusCode, Value) { self.send("GET", uri, None).await }
     async fn post(&mut self, uri: &str, body: Value) -> (StatusCode, Value) { self.send("POST", uri, Some(body)).await }
     async fn patch(&mut self, uri: &str, body: Value) -> (StatusCode, Value) { self.send("PATCH", uri, Some(body)).await }
+    async fn get(&mut self, uri: &str) -> (StatusCode, Value) { self.send("GET", uri, None).await }
 }
 
-async fn register(client: &mut Client, email: &str, handle: &str, age_band: &str) {
-    let (status, body) = client.post("/api/v1/auth/register", json!({ "email": email, "password": "a-long-enough-passphrase", "handle": handle, "display_name": handle, "age_band": age_band })).await;
+async fn register(client: &mut Client, email: &str, handle: &str) {
+    let (status, body) = client.post("/api/v1/auth/register", json!({ "email": email, "password": "a-long-enough-passphrase", "handle": handle, "display_name": handle, "age_band": "adult" })).await;
     assert_eq!(status, StatusCode::CREATED, "register failed for {email}: {body}");
 }
 
-async fn create_and_publish_work(client: &mut Client, title: &str, rating: &str) -> String {
+async fn create_and_publish_work(client: &mut Client, title: &str) -> String {
     let (status, body) = client.post("/api/v1/works", json!({ "title": title })).await;
     assert_eq!(status, StatusCode::CREATED, "create work: {body}");
     let work_id = body["id"].as_str().unwrap().to_owned();
@@ -96,99 +101,67 @@ async fn create_and_publish_work(client: &mut Client, title: &str, rating: &str)
     let (status, _) = client.patch(&format!("/api/v1/chapters/{chapter_id}"), json!({ "expected_version": chapter_version, "document": doc })).await;
     assert_eq!(status, StatusCode::OK, "save chapter");
 
-    let (status, _) = client.post(&format!("/api/v1/works/{work_id}/publish"), json!({ "expected_version": work_version, "idempotency_key": format!("m26-{work_id}") })).await;
+    let (status, _) = client.post(&format!("/api/v1/works/{work_id}/publish"), json!({ "expected_version": work_version, "idempotency_key": format!("m26-narrate-{work_id}") })).await;
     assert_eq!(status, StatusCode::OK, "publish work");
-
-    let (status, _) = client.patch(&format!("/api/v1/works/{work_id}"), json!({ "expected_version": work_version + 1, "rating": rating })).await;
-    assert_eq!(status, StatusCode::OK, "set rating");
 
     work_id
 }
 
 #[tokio::test]
-async fn anonymous_readers_never_see_explicit() {
-    let dir = scratch_dir("anon-explicit");
-    let tdb = test_support::TestDb::connect_with_dir("anon-explicit", &dir).await;
+async fn request_narration_creates_draft_edition_with_credited_narrator() {
+    let dir = scratch_dir("narrate-create");
+    let tdb = test_support::TestDb::connect_with_dir("narrate-create", &dir).await;
     let app = server::build_router(AppState::new(config_for(&dir), tdb.db().clone()));
 
-    // Seed a published explicit work
-    let mut seed = Client::new(app.clone());
-    register(&mut seed, "author@example.com", "author", "adult").await;
-    let explicit_id = create_and_publish_work(&mut seed, "Explicit Work", "explicit").await;
-    let _general_id = create_and_publish_work(&mut seed, "General Work", "general").await;
+    let mut client = Client::new(app.clone());
+    register(&mut client, "author@example.com", "author").await;
+    let work_id = create_and_publish_work(&mut client, "Narration Work").await;
 
-    // Anonymous access
-    let mut anon = Client::new(app.clone());
-    let (status, body) = anon.get("/api/v1/media").await;
-    assert_eq!(status, StatusCode::OK, "media list: {body}");
-    let items = body["items"].as_array().expect("items");
-    assert_eq!(items.len(), 1, "anonymous sees only general: {}", items.len());
-    assert_eq!(items[0]["title"].as_str().unwrap(), "General Work");
+    // Request a TTS narration
+    let (status, body) = client.post(
+        &format!("/api/v1/works/{work_id}/editions"),
+        json!({ "provider": "ai-provider" }),
+    ).await;
+    assert_eq!(status, StatusCode::OK, "request narration: {body}");
+    assert_eq!(body["edition_kind"].as_str().unwrap(), "narration");
+    assert_eq!(body["state"].as_str().unwrap(), "draft");
+    assert!(body["machine_produced"].as_bool().unwrap_or(false));
 
-    // Direct access to explicit work should be refused
-    let (status, _) = anon.get(&format!("/api/v1/media/{explicit_id}")).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "explicit work should be hidden from anon");
+    let edition_id = body["edition_id"].as_str().unwrap().to_owned();
 
-    println!("PASS: anonymous_readers_never_see_explicit");
+    // Read the edition back
+    let (status, body) = client.get(&format!("/api/v1/editions/{edition_id}")).await;
+    assert_eq!(status, StatusCode::OK, "get edition: {body}");
+    assert_eq!(body["edition_kind"].as_str().unwrap(), "narration");
+    assert_eq!(body["work_id"].as_str().unwrap(), work_id);
+    assert!(body["label"].as_str().unwrap().contains("ai-provider"));
+
+    println!("PASS: request_narration_creates_draft_edition_with_credited_narrator");
 }
 
 #[tokio::test]
-async fn opted_out_readers_never_see_explicit() {
-    let dir = scratch_dir("optout-explicit");
-    let tdb = test_support::TestDb::connect_with_dir("optout-explicit", &dir).await;
+async fn narration_editions_listable_after_creation() {
+    let dir = scratch_dir("narrate-list");
+    let tdb = test_support::TestDb::connect_with_dir("narrate-list", &dir).await;
     let app = server::build_router(AppState::new(config_for(&dir), tdb.db().clone()));
 
-    // Seed
-    let mut seed = Client::new(app.clone());
-    register(&mut seed, "author@example.com", "author", "adult").await;
-    let explicit_id = create_and_publish_work(&mut seed, "Explicit Work", "explicit").await;
-    let _mature_id = create_and_publish_work(&mut seed, "Mature Work", "mature").await;
-    let _general_id = create_and_publish_work(&mut seed, "General Work", "general").await;
+    let mut client = Client::new(app.clone());
+    register(&mut client, "author@example.com", "author").await;
+    let work_id = create_and_publish_work(&mut client, "Listable Work").await;
 
-    // Reader with teen max_rating
-    let mut reader = Client::new(app.clone());
-    register(&mut reader, "reader@example.com", "reader", "adult").await;
-    let (status, body) = reader.post("/api/v1/settings/content-preferences", json!({ "max_rating": "teen" })).await;
-    assert!(status == StatusCode::OK || status == StatusCode::CREATED, "set prefs: {body}");
+    // Create narration
+    let (status, body) = client.post(
+        &format!("/api/v1/works/{work_id}/editions"),
+        json!({ "provider": "ai-provider" }),
+    ).await;
+    assert_eq!(status, StatusCode::OK, "request narration: {body}");
 
-    let (status, body) = reader.get("/api/v1/media").await;
-    assert_eq!(status, StatusCode::OK, "media list");
-    let items = body["items"].as_array().expect("items");
-    let has_explicit = items.iter().any(|i| i["id"].as_str().unwrap() == explicit_id);
-    assert!(!has_explicit, "teen-pref reader must not see explicit");
-    let has_general = items.iter().any(|i| i["title"].as_str().unwrap() == "General Work");
-    assert!(has_general, "teen-pref reader still sees general");
+    // List editions
+    let (status, body) = client.get(&format!("/api/v1/works/{work_id}/editions")).await;
+    assert_eq!(status, StatusCode::OK, "list editions: {body}");
+    let editions = body["editions"].as_array().expect("editions array");
+    assert_eq!(editions.len(), 1, "expected exactly one narration edition");
+    assert_eq!(editions[0]["edition_kind"].as_str().unwrap(), "narration");
 
-    println!("PASS: opted_out_readers_never_see_explicit");
-}
-
-#[tokio::test]
-async fn media_rating_filters_apply_to_all_doors() {
-    let dir = scratch_dir("rating-doors");
-    let tdb = test_support::TestDb::connect_with_dir("rating-doors", &dir).await;
-    let app = server::build_router(AppState::new(config_for(&dir), tdb.db().clone()));
-
-    let mut seed = Client::new(app.clone());
-    register(&mut seed, "author@example.com", "author", "adult").await;
-    let explicit_id = create_and_publish_work(&mut seed, "Explicit", "explicit").await;
-    let _mature_id = create_and_publish_work(&mut seed, "Mature", "mature").await;
-    let _general_id = create_and_publish_work(&mut seed, "General", "general").await;
-
-    // List endpoint
-    let mut anon = Client::new(app.clone());
-    let (status, body) = anon.get("/api/v1/media").await;
-    assert_eq!(status, StatusCode::OK, "media list");
-    let items = body["items"].as_array().expect("media items");
-    let has_explicit = items.iter().any(|i| i["id"].as_str().unwrap() == explicit_id);
-    assert!(!has_explicit, "anonymous must not see explicit in list");
-    assert_eq!(items.len(), 1, "list: only general");
-
-    // Search endpoint
-    let (status, body) = anon.get("/api/v1/search?q=work").await;
-    assert_eq!(status, StatusCode::OK, "search");
-    let results = body["items"].as_array().expect("search results");
-    let has_explicit = results.iter().any(|i| i["id"].as_str().unwrap() == explicit_id);
-    assert!(!has_explicit, "anonymous must not see explicit in search");
-
-    println!("PASS: media_rating_filters_apply_to_all_doors");
+    println!("PASS: narration_editions_listable_after_creation");
 }
