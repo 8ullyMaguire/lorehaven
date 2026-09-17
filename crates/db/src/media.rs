@@ -962,6 +962,30 @@ pub async fn list_media_editions(db: &Database, work_id: &str) -> Result<Vec<Med
     Ok(rows)
 }
 
+/// Find a single edition by id.
+pub async fn find_media_edition(db: &Database, id: &str) -> Result<Option<MediaEdition>> {
+    let sql = &db.sql(
+        "SELECT id, work_id, edition_kind, label, parent_edition_id, published_at, created_at, updated_at, version
+         FROM media_editions WHERE id = ?",
+        "SELECT id::text AS id, work_id::text AS work_id, edition_kind, label, parent_edition_id::text AS parent_edition_id, published_at, created_at, updated_at, version::bigint
+         FROM media_editions WHERE id = ?::uuid",
+    );
+    Ok(match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, MediaEdition>(sql)
+                .bind(id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, MediaEdition>(sql)
+                .bind(id)
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    })
+}
+
 /// List files for a work. The route has already applied the direct-door
 /// eligibility rule via `find_media`; this returns every file row of the
 /// work. PG twin: UUID ids decode as text, the bind casts to uuid.

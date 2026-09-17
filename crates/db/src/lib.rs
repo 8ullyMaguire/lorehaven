@@ -33,6 +33,7 @@ pub mod lending;
 pub mod library;
 pub mod marketplace;
 pub mod media;
+pub mod narration;
 pub mod migrate;
 pub mod monetization;
 pub mod notifications;

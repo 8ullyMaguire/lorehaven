@@ -494,6 +494,10 @@ impl Worker {
                 })?;
                 crate::derivative::handle_derivative(state, id, &derivative_id).await
             }
+            JobKind::Narration => Err(HandlerError::Fatal(format!(
+                "no handler for a {} job in this build",
+                kind.as_str()
+            ))),
         }
     }
 
