@@ -197,6 +197,31 @@ test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 lorehaven-app -p lorehaven-db -- --check`: clean. Workspace and
 PostgreSQL runs are reported in the session handoff.
 
+## 2026-09-17 (late session) — All remaining route stubs resolved
+
+**Commit:** `29cc5b4` — "Replace all remaining route stubs with real implementations" (14 files, 689 insertions).
+
+**Context.** After completing M26 TTS narration, a sweep of
+`crates/app/src/routes/` found 9 remaining placeholder handlers
+returning `[]`, `null`, or `true` instead of querying the DB.
+Each had a corresponding DB function that was either missing or
+unused. The work was to wire them together and add the missing
+DB functions.
+
+**Fixed:** `external.rs` (get_public_work, public_search, list_tokens),
+`economy.rs` (list_bounties, create_bounty, claim_bounty),
+`governance.rs` (my_appeals, my_audit_log),
+`translation.rs` (list_memory), `admin.rs` (list_privacy_requests,
+check_abuse_status). Added DB-layer functions for each. Added
+`0034_bounties.sql` migration.
+
+**Lessons learned:** The `bounties` table already existed in
+`0017_economy.sql` with a different schema — `0034_bounties`
+could not use `CREATE TABLE IF NOT EXISTS` (a no-op) and had to
+be rewritten as `ALTER TABLE`. Similarly `audit_log` uses
+`subject_type/subject_id/document`, not `target/target_details`.
+Both were discovered by test failures.
+
 ## 2026-09-16 — PG dialect parity complete, SQLite regressions from the parity pass fixed
 
 **Commit:** `69ee2d8` — "db: finish PG dialect parity and fix the SQLite
