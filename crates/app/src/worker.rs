@@ -489,17 +489,32 @@ impl Worker {
                 kind.as_str()
             ))),
             JobKind::Derivative => {
-                let derivative_id: String =
-                    serde_json::from_str(&job.payload).map_err(|error| {
-                        HandlerError::Fatal(format!("the derivative payload is not JSON: {error}"))
-                    })?;
+                let derivative_id = Self::payload_id(&job.payload, "derivative_id", kind.as_str())?;
                 crate::derivative::handle_derivative(state, id, &derivative_id).await
             }
-            JobKind::Narration => Err(HandlerError::Fatal(format!(
-                "no handler for a {} job in this build",
-                kind.as_str()
-            ))),
+            JobKind::Narration => {
+                let edition_id = Self::payload_id(&job.payload, "edition_id", kind.as_str())?;
+                crate::narration::handle_narration(state, id, &edition_id).await
+            }
         }
+    }
+
+    /// Read a named id out of a job payload.
+    ///
+    /// The payload vocabulary for these jobs is an object with one named key, like
+    /// the importer's and the exporter's: a bare JSON string would be a payload
+    /// that grows a second field by breaking every queued row, and the failure
+    /// message names the kind and the key so an operator can see which contract a
+    /// stale row predates.
+    fn payload_id(payload: &str, key: &str, kind: &str) -> Result<String, HandlerError> {
+        let value: serde_json::Value = serde_json::from_str(payload).map_err(|error| {
+            HandlerError::Fatal(format!("the {kind} payload is not JSON: {error}"))
+        })?;
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| HandlerError::Fatal(format!("the {kind} payload has no {key:?} string")))
     }
 
     /// The maintenance tasks. The payload names one; an unknown task is fatal.

@@ -124,6 +124,17 @@ impl Converters {
         format.is_builtin() || self.for_format(format).is_some()
     }
 
+    /// Find any program on `PATH` by name.
+    ///
+    /// The converters this struct holds are a fixed pair; this is for the other
+    /// programs the same startup discovery answers for (Piper for narration,
+    /// Tesseract and ffmpeg for derivatives). One `which` implementation, so a
+    /// binary found for one purpose is found by the same rule for every purpose.
+    #[must_use]
+    pub fn discover_program(&self, program: &str) -> Option<PathBuf> {
+        which(program)
+    }
+
     /// What the API reports, including what to install for what is missing.
     #[must_use]
     pub fn report(&self) -> Vec<Value> {

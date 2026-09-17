@@ -152,6 +152,7 @@ struct ChapterRow {
     title: String,
     current_revision_id: Option<String>,
     word_count: Option<i64>,
+    plain_text: Option<String>,
     revision_count: Option<i64>,
     created_at: String,
     updated_at: String,
@@ -173,6 +174,8 @@ pub struct Chapter {
     pub current_revision_id: Option<RevisionId>,
     /// Words in the current revision.
     pub word_count: i64,
+    /// Plain text of the current revision (for narration).
+    pub plain_text: String,
     /// How many revisions exist.
     pub revision_count: i64,
     /// Creation time, RFC 3339.
@@ -397,6 +400,7 @@ fn decode_chapter(row: ChapterRow) -> ContentResult<Chapter> {
             .map(|raw| parse_id::<RevisionId>(raw, "revision"))
             .transpose()?,
         word_count: row.word_count.unwrap_or(0),
+        plain_text: row.plain_text.unwrap_or_default(),
         revision_count: row.revision_count.unwrap_or(0),
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -661,13 +665,17 @@ pub async fn update_work(
 
 const CHAPTER_COLUMNS: &str = "c.id AS id, c.work_id AS work_id, c.order_key AS order_key, \
     c.title AS title, c.current_revision_id AS current_revision_id, \
-    r.word_count AS word_count, c.created_at AS created_at, c.updated_at AS updated_at, \
+    r.word_count AS word_count, \
+    r.plain_text AS plain_text, \
+    c.created_at AS created_at, c.updated_at AS updated_at, \
     c.version AS version, \
     (SELECT COUNT(*) FROM chapter_revisions cr WHERE cr.chapter_id = c.id) AS revision_count";
 
 const CHAPTER_COLUMNS_PG: &str = "c.id::text AS id, c.work_id::text AS work_id, c.order_key, \
     c.title, c.current_revision_id::text AS current_revision_id, \
-    r.word_count, c.created_at, c.updated_at, c.version, \
+    r.word_count, \
+    r.plain_text, \
+    c.created_at, c.updated_at, c.version, \
     (SELECT COUNT(*) FROM chapter_revisions cr WHERE cr.chapter_id = c.id) AS revision_count";
 
 /// Chapters of a work in reading order.
