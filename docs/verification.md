@@ -663,3 +663,86 @@ stays `queued` there; that is why test 22 asserts the export is *listed*
 rather than that the file exists. The worker was exercised separately on
 the local instance at `http://localhost:8180`, where the same export
 reached `ready` with a 3.3 KB EPUB in under a second.
+
+## 2026-09-17 (night) — review of `ac22a89`: the public search, claim by claim
+
+Reviewed `ac22a89` ("use works_index_terms instead of works_index for public
+search") one claim at a time. The direction was right and the query it replaced
+was genuinely broken — `works_index` holds only `(work_id, body_text)`, so
+`COUNT(t.term)` over it could not execute — but the commit touched no test file
+(`git show --stat ac22a89`) and the workspace count was unchanged at 1217. Three
+defects hid behind that silence.
+
+**Nothing was indexed at all.** The `publish.index` topic handler
+(`crates/app/src/server.rs`) enqueues the reindex job with the object payload
+every other kind uses (`{"work_id": …}`), while the worker parsed the payload as a
+bare JSON string. Measured on a fresh instance: seven publish-time jobs, seven
+terminal failures — `the reindex payload is not JSON: invalid type: map, expected
+a string` — zero rows in `works_index_terms`, and
+`GET /api/v1/public/search?q=…` → `{"results":[]}` for every query.
+
+**`500 INTERNAL` on a fresh database.** The new query selected `w.word_count`. No
+migration creates that column (`git log -S "ADD COLUMN word_count" -- migrations/`
+returns nothing; a fresh `migrate` gives `works` no word-count column), so every
+non-empty query answered `500`. A test discovers this immediately:
+`assertion left: 500, right: 200`. The instance the search was "verified" on had
+the column added by hand.
+
+**Drafts served to strangers.** The term index is not a visibility boundary —
+`worker.rs` says so in a comment ("the work's lifecycle … governs *visibility* in
+search results, not whether the text is indexed") — and the query carried no
+predicate. Anonymous probe on a database whose index held a draft's term:
+
+```
+GET /api/v1/public/search?q=zebracorn
+  -> {"results":[{"author_handle":"DraftAuthor","score":1,"title":"zebracorn draft",
+                  "word_count":6,"work_id":"b137cd3c-…"}]}
+GET /api/v1/search?q=zebracorn            (the older door, viewer branch present)
+  -> {"items":[]}
+```
+
+Two doors, one draft, opposite answers: the door holding the viewer branch is the
+one whose answer was right.
+
+Fixed in `768df88`, each fix with a test seen failing without it (`milestone_10`,
+19 tests):
+
+- `publishing_indexes_the_work_so_the_public_search_can_find_it` — without the
+  payload fix: `a publish-time reindex must not fail / left: Failed, right:
+  Succeeded`, with the production error in the worker log.
+- `public_search_does_not_serve_a_draft_the_index_holds` and
+  `…_does_not_serve_a_restricted_work_the_index_holds` — with the predicate
+  removed and everything else intact, both fail and print the leaked rows
+  (`zebracorn draft` / `Quokkafish`, with handles).
+- `public_search_serves_a_published_public_work_from_the_index` — positive
+  control, also asserting a real `word_count` rather than the unmaintained
+  column's zero — and `public_search_without_a_query_returns_an_empty_list`,
+  since a missing `q` used to answer the framework's plain-text 400.
+
+**The ReaderSettings half of `ac22a89` holds.** Its version guard fixes the
+discarded-typography bug: e2e test 17 failed at `8bf4b38` and passes now. Checked
+by hand that it does not introduce the obvious second defect either — a second
+account in the same browser keeps its own theme (the panel showed that account's
+`sepia`, not the first account's cached `dark`) and saves without a 409.
+
+Live verification of the fixed binary on a fresh database (terms counted in
+SQLite, searches anonymous):
+
+```
+draft chapter saved                  terms: 0        (unpublished works are not indexed)
+POST /works/{id}/publish             job: succeeded  terms: 20
+GET /public/search?q=wrenfield    -> the work, word_count 20
+draft with a seeded term          -> {"results":[]}
+published work set to restricted,
+index rows left behind            -> {"results":[]}
+```
+
+Gates on `768df88`: fmt clean; `clippy --workspace --all-targets -- -D warnings`
+0 warnings; SQLite suite **1222 passed / 0 failed / 13 ignored** across 47
+binaries (1217 + the five new); `milestone_10` 19/19; Playwright **27 passed**
+(25 green, 2 deliberate `test.fail()` markers); `svelte-check` 0 errors / 0
+warnings; vitest 150/150.
+
+PostgreSQL: unrun, as before. The two search SQL strings changed in `768df88` are
+**SQLite-verified only** — the PG twins mirror the SQLite shape and the
+`ast_search` pattern, but nothing here has executed them.
