@@ -46,6 +46,7 @@
     { href: '/search', label: 'Search', primary: true },
     { href: '/media', label: 'Media', primary: false },
     { href: '/library', label: 'Library', primary: true },
+    { href: '/library/history', label: 'History', primary: false },
     { href: '/import', label: 'Import', primary: true },
     { href: '/exports', label: 'Exports', primary: false },
     { href: '/write', label: 'Write', primary: true },
