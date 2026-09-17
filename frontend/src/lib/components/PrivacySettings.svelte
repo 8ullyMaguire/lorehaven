@@ -25,6 +25,7 @@
   let draft = $state<Record<string, string>>({});
   let error = $state<unknown>(null);
   let saving = $state(false);
+  let edited = $state(false);
 
   /**
    * Track the values we seeded the draft from, so a save (which replaces the
@@ -34,11 +35,16 @@
 
   $effect(() => {
     const signature = JSON.stringify(values);
-    if (signature !== seeded) {
+    if (signature !== seeded && !edited) {
       draft = { ...values };
       seeded = signature;
     }
+    edited = false;
   });
+
+  function markEdited() {
+    edited = true;
+  }
 
   /** Only what actually changed is sent. */
   function changed(): Record<string, string> {
@@ -61,6 +67,7 @@
     try {
       await onsave(changes);
       onsaved?.();
+      edited = false;
     } catch (failure) {
       error = failure;
     } finally {
@@ -83,8 +90,10 @@
       label={key.summary}
       value={draft[key.key] ?? values[key.key] ?? key.values[0]}
       options={key.values.map((value) => ({ value, label: describeValue(value) }))}
-      onchange={(event) =>
-        (draft = { ...draft, [key.key]: event.currentTarget.value })}
+      onchange={(event) => {
+        markEdited();
+        draft = { ...draft, [key.key]: event.currentTarget.value };
+      }}
     />
   {/each}
 

@@ -28,18 +28,24 @@
   let error = $state<unknown>(null);
   let saving = $state(false);
   let saved = $state(false);
+  let edited = $state(false);
 
   // Re-seed when the server's copy changes (after a save, or a reload).
   let seeded = $state('');
   $effect(() => {
     const signature = `${settings.version}:${settings.max_rating}`;
-    if (signature !== seeded) {
+    if (signature !== seeded && !edited) {
       rating = settings.max_rating;
       warnings = settings.excluded_warnings.join('\n');
       seeded = signature;
       error = null;
     }
+    edited = false;
   });
+
+  function markEdited() {
+    edited = true;
+  }
 
   function parsedWarnings(): string[] {
     return warnings
@@ -67,6 +73,7 @@
         excluded_warnings: parsedWarnings(),
       });
       saved = true;
+      edited = false;
     } catch (failure) {
       error = failure;
     } finally {
@@ -98,8 +105,8 @@
   label="Show me works rated up to"
   options={ratingOptions}
   value={rating}
-  onchange={(event) => (rating = event.currentTarget.value)}
-/>
+  onchange={(event) => { markEdited(); rating = event.currentTarget.value; }}
+  />
 
 <p class="ceiling">
   This instance will show this account works rated up to
@@ -125,8 +132,8 @@
   hint="One tag per line, for example: major character death. Matching is exact and case-insensitive."
   rows={5}
   value={warnings}
-  oninput={(event) => (warnings = event.currentTarget.value)}
-/>
+  oninput={(event) => { markEdited(); warnings = event.currentTarget.value }}
+  />
 
 <div class="actions">
   <Button onclick={save} loading={saving} disabled={!dirty && !error}>Save changes</Button>
