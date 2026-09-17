@@ -17,12 +17,40 @@ pub struct Loan {
     pub granted_at: String,
     pub expires_at: String,
     pub revoked_at: Option<String>,
+    /// When the periodic sweep recorded that the window had closed.
+    ///
+    /// Distinct from `expires_at` being in the past: the timestamp is when the
+    /// instance *noticed*, which is what a reader's history and an operator's
+    /// sweep report read. A loan whose window has passed but which no sweep has
+    /// reached yet has `expired_at: None` and is already inactive.
+    pub expired_at: Option<String>,
     pub copy_number: u32,
 }
 
 impl Loan {
-    pub fn is_active(&self) -> bool {
-        self.revoked_at.is_none()
+    /// Whether the loan is live at `now`.
+    ///
+    /// The time is a parameter because it is a fact about the clock, not about
+    /// the row: a loan does not become expired by being read, and a function
+    /// that consulted the clock itself could not be asked about a past moment.
+    #[must_use]
+    pub fn is_active_at(&self, now: &str) -> bool {
+        self.revoked_at.is_none() && !loan_is_expired(self, now)
+    }
+
+    /// How this loan reads at `now`: `active`, `expired` or `revoked`.
+    ///
+    /// Revocation wins over expiry: a revoked loan that would also have expired
+    /// is reported as revoked, because that is the thing a reader did.
+    #[must_use]
+    pub fn state_at(&self, now: &str) -> &'static str {
+        if self.revoked_at.is_some() {
+            "revoked"
+        } else if loan_is_expired(self, now) {
+            "expired"
+        } else {
+            "active"
+        }
     }
 }
 
@@ -129,6 +157,7 @@ mod tests {
             granted_at: "2024-01-01T00:00:00Z".into(),
             expires_at: "2024-01-15T00:00:00Z".into(),
             revoked_at: None,
+            expired_at: None,
             copy_number: 1,
         };
         assert!(loan_is_expired(&loan, "2024-01-16T00:00:00Z"));
@@ -136,15 +165,39 @@ mod tests {
 
     #[test]
     fn loan_is_expired_before() {
-        let loan = Loan {
+        let loan = loan(None);
+        assert!(!loan_is_expired(&loan, "2024-01-14T00:00:00Z"));
+    }
+
+    fn loan(revoked_at: Option<&str>) -> Loan {
+        Loan {
             id: "l1".into(),
             work_id: "w1".into(),
             borrower_account_id: "a1".into(),
             granted_at: "2024-01-01T00:00:00Z".into(),
             expires_at: "2024-01-15T00:00:00Z".into(),
-            revoked_at: None,
+            revoked_at: revoked_at.map(str::to_owned),
+            expired_at: None,
             copy_number: 1,
-        };
-        assert!(!loan_is_expired(&loan, "2024-01-14T00:00:00Z"));
+        }
+    }
+
+    #[test]
+    fn a_loan_past_its_window_is_not_active() {
+        // The bug this pins: an `is_active` that only asked about revocation
+        // called an expired loan live, which is the opposite of what the door
+        // and the cap need from it.
+        let loan = loan(None);
+        assert!(loan.is_active_at("2024-01-14T00:00:00Z"));
+        assert!(!loan.is_active_at("2024-01-16T00:00:00Z"));
+        assert_eq!(loan.state_at("2024-01-14T00:00:00Z"), "active");
+        assert_eq!(loan.state_at("2024-01-16T00:00:00Z"), "expired");
+    }
+
+    #[test]
+    fn revocation_wins_over_expiry_in_the_reported_state() {
+        let loan = loan(Some("2024-01-10T00:00:00Z"));
+        assert_eq!(loan.state_at("2024-01-16T00:00:00Z"), "revoked");
+        assert!(!loan.is_active_at("2024-01-11T00:00:00Z"));
     }
 }

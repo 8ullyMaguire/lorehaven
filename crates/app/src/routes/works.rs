@@ -982,6 +982,41 @@ pub(crate) async fn reading_decision(
     }
 }
 
+/// How this caller may see a work, looked up by id.
+///
+/// The one place a route outside this module asks the visibility question, so
+/// a door that hangs something off a work (an edition, a derivative) applies
+/// the same answer the work door does rather than re-deriving it.
+pub(crate) async fn reading_for_work(
+    state: &AppState,
+    work_id: &str,
+    session: Option<&SessionUser>,
+) -> ApiResult<Reading> {
+    let id = parse_work_id(work_id)?;
+    let work = content::find_work(state.db(), id)
+        .await?
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "work" }))?;
+    let contributors = collaboration::contributors_for_work(state.db(), id).await?;
+    Ok(reading_decision(state, actor_for(session).as_ref(), &work, &contributors).await)
+}
+
+/// Refuse a caller who may read a work but may not act on it.
+///
+/// A work the caller cannot read at all is reported as absent (§3.3) — the
+/// `Denied` arm carries that error — while a reader who can see it is told
+/// plainly that this is a contributor action.
+pub(crate) async fn require_contributor(
+    state: &AppState,
+    work_id: &str,
+    session: &SessionUser,
+) -> ApiResult<()> {
+    match reading_for_work(state, work_id, Some(session)).await? {
+        Reading::Contributor => Ok(()),
+        Reading::Public => Err(ApiError(AppError::AccessDenied)),
+        Reading::Denied(error) => Err(ApiError(error)),
+    }
+}
+
 fn refusal(reason: DenyReason) -> ApiError {
     tracing::debug!(reason = reason.as_str(), "content permission denied");
     match reason {

@@ -193,6 +193,37 @@ pub async fn mark_derivative_failed(db: &Database, id: &str, message: &str) -> R
     Ok(rows_affected > 0)
 }
 
+/// Record which job is building this derivative.
+///
+/// The row keeps its state; this is the link an operator follows from a
+/// stuck-looking derivative to the job whose failure explains it, and the link
+/// the verification sweep uses to skip a rebuild that is already running.
+pub async fn attach_derivative_job(db: &Database, id: &str, job_id: &str) -> Result<bool> {
+    let now = crate::identity::now_rfc3339();
+    let sql = sql_owned(
+        db,
+        "UPDATE derivatives SET job_id = ?, updated_at = ? WHERE id = ?".to_string(),
+        "UPDATE derivatives SET job_id = ?::uuid, updated_at = ? WHERE id = ?::uuid".to_string(),
+    );
+    let rows_affected = match db.backend() {
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(job_id)
+            .bind(&now)
+            .bind(id)
+            .execute(db.sqlite_pool().expect("sqlite handle"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(job_id)
+            .bind(&now)
+            .bind(id)
+            .execute(db.postgres_pool().expect("postgres handle"))
+            .await?
+            .rows_affected(),
+    };
+    Ok(rows_affected > 0)
+}
+
 /// Mark a derivative as stale (parent changed).
 pub async fn mark_derivative_stale(db: &Database, id: &str) -> Result<bool> {
     let now = crate::identity::now_rfc3339();
