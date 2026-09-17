@@ -68,9 +68,11 @@ pub async fn get_edition(
     let db = state.db();
     let edition = lorehaven_db::media::find_media_edition(db, &id)
         .await?
-        .ok_or_else(|| ApiError::from(lorehaven_domain::AppError::NotFound {
-            resource: "edition".into(),
-        }))?;
+        .ok_or_else(|| {
+            ApiError::from(lorehaven_domain::AppError::NotFound {
+                resource: "edition",
+            })
+        })?;
     Ok(Json(json!({
         "id": edition.id,
         "work_id": edition.work_id,

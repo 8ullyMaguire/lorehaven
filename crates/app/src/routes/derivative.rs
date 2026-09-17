@@ -70,8 +70,9 @@ pub async fn request_derivative(
 ) -> ApiResult<Json<Value>> {
     let db = state.db();
 
-    let derivative_kind = lorehaven_domain::derivative::DerivativeKind::parse(&body.derivative_kind)
-        .ok_or_else(|| validation("unknown derivative_kind"))?;
+    let derivative_kind =
+        lorehaven_domain::derivative::DerivativeKind::parse(&body.derivative_kind)
+            .ok_or_else(|| validation("unknown derivative_kind"))?;
 
     let new = lorehaven_db::derivative::NewDerivative {
         work_id: &id,
@@ -83,9 +84,7 @@ pub async fn request_derivative(
     let derivative_id = lorehaven_db::derivative::create_derivative(db, new).await?;
 
     // TODO: enqueue a Derivative job to actually build the rendition.
-    Ok(Json(
-        json!({ "id": derivative_id, "state": "queued" }),
-    ))
+    Ok(Json(json!({ "id": derivative_id, "state": "queued" })))
 }
 
 pub async fn get_derivative(
@@ -96,9 +95,11 @@ pub async fn get_derivative(
     let db = state.db();
     let derivative = lorehaven_db::derivative::find_derivative(db, &id)
         .await?
-        .ok_or_else(|| ApiError::from(lorehaven_domain::AppError::NotFound {
-            resource: "derivative",
-        }))?;
+        .ok_or_else(|| {
+            ApiError::from(lorehaven_domain::AppError::NotFound {
+                resource: "derivative",
+            })
+        })?;
     Ok(Json(json!({
         "id": derivative.id,
         "work_id": derivative.work_id,

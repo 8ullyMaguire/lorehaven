@@ -886,8 +886,13 @@ async fn media_feed(
 }
 
 /// Render media listings as Dublin Core XML (spec §32.2, IA-style item metadata).
-fn media_feed_dc(items: Vec<lorehaven_db::media::MediaRecord>, base: &str) -> axum::response::Response {
-    let mut xml = String::from(r#"<?xml version="1.0" encoding="UTF-8"?><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/">"#);
+fn media_feed_dc(
+    items: Vec<lorehaven_db::media::MediaRecord>,
+    base: &str,
+) -> axum::response::Response {
+    let mut xml = String::from(
+        r#"<?xml version="1.0" encoding="UTF-8"?><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/">"#,
+    );
     for item in items {
         let link = xml_escape(&format!("{}/works/{}", base, item.id));
         let title = xml_escape(&item.title);
@@ -903,7 +908,8 @@ fn media_feed_dc(items: Vec<lorehaven_db::media::MediaRecord>, base: &str) -> ax
         StatusCode::OK,
         [(axum::http::header::CONTENT_TYPE, "application/rdf+xml")],
         xml.into_bytes(),
-    ).into_response()
+    )
+        .into_response()
 }
 
 // ---------------------------------------------------------------------------

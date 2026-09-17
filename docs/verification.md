@@ -356,3 +356,46 @@ Gates (all run in this round, literal results):
   0 warnings
 - db lib unit tests: 30/30; full SQLite workspace: see the workspace
   entry below (1099+ passed / 0 failed, 43 binaries)
+
+### Round 6 (2026-09-17) — review of the M24/M25/M26 session (24 commits)
+
+The session handoff claimed 1,147 passing on "both SQLite + PostgreSQL".
+PostgreSQL could not even migrate: migration 0027's PG twin declared
+`anchor_chapter_id TEXT REFERENCES chapters(id)` against a UUID column,
+which PostgreSQL rejects ("foreign key constraint cannot be
+implemented") — SQLite ignores the type mismatch, so every SQLite run
+was green while every PG run died at migrate. The "both backends" claim
+was therefore never exercised. Fixed and found in the same class:
+
+- `migrations/postgres/0027_comment_anchors.sql`: `anchor_chapter_id`
+  TEXT → UUID (PG never applied it anywhere, so no checksum breaks).
+- `migrations/postgres/{0028,0029,0030,0031}`: TIMESTAMPTZ → RFC 3339
+  TEXT and `creator_id` UUID → TEXT, matching their SQLite twins and
+  the String-decoding query layer (the narration doc comment says
+  creator_id stores the provider *name*, an external id).
+- `crates/db/src/community.rs`: comment-listing PG SELECTs decoded a
+  UUID column into String and the no-cursor variant omitted the three
+  anchor columns entirely; INSERT got `::uuid` casts.
+- `crates/db/src/lending.rs`: loan-row PG SELECT got `::text`/`::bigint`
+  casts (UUID ids and BIGINT copy_number into String/i64 decodes).
+- `crates/db/src/narration.rs`: `add_narration_creator` PG string had
+  casts in the INSERT column list (illegal SQL); moved into VALUES.
+- `crates/app/src/routes/narration.rs`: clippy useless_conversion.
+- `crates/app/tests/milestone_26.rs`: added `init_logs()` so http.rs
+  internal errors surface in tests (500s were undebuggable without it).
+
+Verified sound without changes: canon/space doors (real §30 tables,
+shared eligibility facet, 404s), scoped bearer tokens (hashed lookup,
+scope filtering, revocation test), derivative worker (no shell, fixed
+paths, enum-validated formats), lending session gating, anchor
+parse_secs bounds, ETag and query-field doors, and the E2E-supporting
+frontend Media page.
+
+Gates (literal results):
+- SQLite: milestone_16 6/6, milestone_22 13/13, milestone_26 2/2;
+  full workspace `1147 passed / 0 failed` across 45 binaries, exit 0.
+- PostgreSQL (explicit LOREHAVEN_TEST_PG_URL, container DB-count
+  proof): milestone_16 6/6, milestone_22 13/13, milestone_26 2/2.
+- clippy --workspace 0 warnings; fmt clean.
+- Frontend vitest: 150/150 (23 files). Playwright e2e (3 journeys) NOT
+  re-verified this round — needs the release binary + browser stack.

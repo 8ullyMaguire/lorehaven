@@ -141,13 +141,21 @@ async fn post_comment(
         ),
     };
     // Validate anchor fields if provided.
-    let (anchor_kind, anchor_value, anchor_chapter_id) = match (&body.anchor_kind, &body.anchor_value, &body.anchor_chapter_id) {
+    let (anchor_kind, anchor_value, anchor_chapter_id) = match (
+        &body.anchor_kind,
+        &body.anchor_value,
+        &body.anchor_chapter_id,
+    ) {
         (Some(kind_str), Some(value), chapter_id) => {
             let kind = lorehaven_domain::anchor::AnchorKind::from_str(kind_str)
                 .map_err(|e| ApiError(lorehaven_domain::AppError::field("anchor_kind", &e)))?;
             lorehaven_domain::anchor::validate_anchor(kind, value, chapter_id.as_deref())
                 .map_err(|e| ApiError(lorehaven_domain::AppError::field("anchor", &e)))?;
-            (Some(kind_str.clone()), Some(value.clone()), chapter_id.clone())
+            (
+                Some(kind_str.clone()),
+                Some(value.clone()),
+                chapter_id.clone(),
+            )
         }
         (None, None, _) => (None, None, None),
         _ => {

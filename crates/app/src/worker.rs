@@ -489,9 +489,10 @@ impl Worker {
                 kind.as_str()
             ))),
             JobKind::Derivative => {
-                let derivative_id: String = serde_json::from_str(&job.payload).map_err(|error| {
-                    HandlerError::Fatal(format!("the derivative payload is not JSON: {error}"))
-                })?;
+                let derivative_id: String =
+                    serde_json::from_str(&job.payload).map_err(|error| {
+                        HandlerError::Fatal(format!("the derivative payload is not JSON: {error}"))
+                    })?;
                 crate::derivative::handle_derivative(state, id, &derivative_id).await
             }
             JobKind::Narration => Err(HandlerError::Fatal(format!(
@@ -656,20 +657,18 @@ impl Worker {
             .unwrap_or(50)
             .clamp(1, 500);
         let store = BlobStore::new(state.config().storage.root.clone());
-        let cutoff_ms = (OffsetDateTime::now_utc() - time::Duration::hours(24)).unix_timestamp() * 1000
+        let cutoff_ms = (OffsetDateTime::now_utc() - time::Duration::hours(24)).unix_timestamp()
+            * 1000
             + (OffsetDateTime::now_utc() - time::Duration::hours(24)).millisecond() as i64;
         let cutoff = lorehaven_db::identity::format_rfc3339(
             OffsetDateTime::from_unix_timestamp(cutoff_ms / 1000)
                 .unwrap_or_else(|_| OffsetDateTime::now_utc())
                 + time::Duration::milliseconds(cutoff_ms % 1000),
         );
-        let candidates = lorehaven_db::derivative::find_stale_for_verification(
-            state.db(),
-            &cutoff,
-            limit,
-        )
-        .await
-        .map_err(transient)?;
+        let candidates =
+            lorehaven_db::derivative::find_stale_for_verification(state.db(), &cutoff, limit)
+                .await
+                .map_err(transient)?;
         let total = i64::try_from(candidates.len()).unwrap_or(i64::MAX).max(1);
         let mut verified = 0;
         let mut stale = 0;

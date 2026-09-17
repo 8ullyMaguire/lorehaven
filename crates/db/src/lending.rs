@@ -48,10 +48,16 @@ pub async fn get_lending_config(db: &Database) -> Result<LendingConfig> {
     );
     match db.backend() {
         Backend::Sqlite => {
-            let _ = sqlx::query(&init_sql).bind(&now).execute(db.sqlite_pool().expect("sqlite handle")).await;
+            let _ = sqlx::query(&init_sql)
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await;
         }
         Backend::Postgres => {
-            let _ = sqlx::query(&init_sql).bind(&now).execute(db.postgres_pool().expect("postgres handle")).await;
+            let _ = sqlx::query(&init_sql)
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await;
         }
     }
 
@@ -62,12 +68,26 @@ pub async fn get_lending_config(db: &Database) -> Result<LendingConfig> {
     );
     let (enabled, copies, duration, max_loans) = match db.backend() {
         Backend::Sqlite => {
-            let row = sqlx::query(&sql).fetch_one(db.sqlite_pool().expect("sqlite handle")).await?;
-            (row.get::<bool, _>("enabled"), row.get::<i64, _>("copies_per_work"), row.get::<i64, _>("loan_duration_days"), row.get::<i64, _>("borrower_max_loans"))
+            let row = sqlx::query(&sql)
+                .fetch_one(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+            (
+                row.get::<bool, _>("enabled"),
+                row.get::<i64, _>("copies_per_work"),
+                row.get::<i64, _>("loan_duration_days"),
+                row.get::<i64, _>("borrower_max_loans"),
+            )
         }
         Backend::Postgres => {
-            let row = sqlx::query(&sql).fetch_one(db.postgres_pool().expect("postgres handle")).await?;
-            (row.get::<bool, _>("enabled"), row.get::<i64, _>("copies_per_work"), row.get::<i64, _>("loan_duration_days"), row.get::<i64, _>("borrower_max_loans"))
+            let row = sqlx::query(&sql)
+                .fetch_one(db.postgres_pool().expect("postgres handle"))
+                .await?;
+            (
+                row.get::<bool, _>("enabled"),
+                row.get::<i64, _>("copies_per_work"),
+                row.get::<i64, _>("loan_duration_days"),
+                row.get::<i64, _>("borrower_max_loans"),
+            )
         }
     };
 
@@ -89,11 +109,19 @@ pub async fn count_active_loans(db: &Database, work_id: &str) -> Result<i64> {
     );
     let count = match db.backend() {
         Backend::Sqlite => {
-            let row = sqlx::query(&sql).bind(work_id).bind(&now).fetch_one(db.sqlite_pool().expect("sqlite handle")).await?;
+            let row = sqlx::query(&sql)
+                .bind(work_id)
+                .bind(&now)
+                .fetch_one(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
             row.get::<i64, _>(0)
         }
         Backend::Postgres => {
-            let row = sqlx::query(&sql).bind(work_id).bind(&now).fetch_one(db.postgres_pool().expect("postgres handle")).await?;
+            let row = sqlx::query(&sql)
+                .bind(work_id)
+                .bind(&now)
+                .fetch_one(db.postgres_pool().expect("postgres handle"))
+                .await?;
             row.get::<i64, _>(0)
         }
     };
@@ -110,11 +138,19 @@ pub async fn count_borrower_loans(db: &Database, account_id: &str) -> Result<i64
     );
     let count = match db.backend() {
         Backend::Sqlite => {
-            let row = sqlx::query(&sql).bind(account_id).bind(&now).fetch_one(db.sqlite_pool().expect("sqlite handle")).await?;
+            let row = sqlx::query(&sql)
+                .bind(account_id)
+                .bind(&now)
+                .fetch_one(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
             row.get::<i64, _>(0)
         }
         Backend::Postgres => {
-            let row = sqlx::query(&sql).bind(account_id).bind(&now).fetch_one(db.postgres_pool().expect("postgres handle")).await?;
+            let row = sqlx::query(&sql)
+                .bind(account_id)
+                .bind(&now)
+                .fetch_one(db.postgres_pool().expect("postgres handle"))
+                .await?;
             row.get::<i64, _>(0)
         }
     };
@@ -138,13 +174,29 @@ pub async fn grant_loan(
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query(&sql)
-                .bind(&id).bind(work_id).bind(borrower_account_id).bind(&now).bind(expires_at).bind(copy_number as i64).bind(&now).bind(&now)
-                .execute(db.sqlite_pool().expect("sqlite handle")).await?;
+                .bind(&id)
+                .bind(work_id)
+                .bind(borrower_account_id)
+                .bind(&now)
+                .bind(expires_at)
+                .bind(copy_number as i64)
+                .bind(&now)
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
         }
         Backend::Postgres => {
             sqlx::query(&sql)
-                .bind(&id).bind(work_id).bind(borrower_account_id).bind(&now).bind(expires_at).bind(copy_number as i64).bind(&now).bind(&now)
-                .execute(db.postgres_pool().expect("postgres handle")).await?;
+                .bind(&id)
+                .bind(work_id)
+                .bind(borrower_account_id)
+                .bind(&now)
+                .bind(expires_at)
+                .bind(copy_number as i64)
+                .bind(&now)
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
         }
     }
 
@@ -167,12 +219,20 @@ pub async fn revoke_loan(db: &Database, loan_id: &str) -> Result<bool> {
         "UPDATE work_loans SET revoked_at = ?, updated_at = ?, version = version + 1 WHERE id = ?::uuid AND revoked_at IS NULL",
     );
     let rows_affected = match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query(&sql).bind(&now).bind(&now).bind(loan_id).execute(db.sqlite_pool().expect("sqlite handle")).await?.rows_affected()
-        }
-        Backend::Postgres => {
-            sqlx::query(&sql).bind(&now).bind(&now).bind(loan_id).execute(db.postgres_pool().expect("postgres handle")).await?.rows_affected()
-        }
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(&now)
+            .bind(&now)
+            .bind(loan_id)
+            .execute(db.sqlite_pool().expect("sqlite handle"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(&now)
+            .bind(&now)
+            .bind(loan_id)
+            .execute(db.postgres_pool().expect("postgres handle"))
+            .await?
+            .rows_affected(),
     };
     Ok(rows_affected > 0)
 }
@@ -182,11 +242,21 @@ pub async fn find_loan(db: &Database, loan_id: &str) -> Result<Option<Loan>> {
     let sql = sql_owned(
         db,
         "SELECT id, work_id, borrower_account_id, granted_at, expires_at, revoked_at, copy_number FROM work_loans WHERE id = ?".to_string(),
-        "SELECT id, work_id, borrower_account_id, granted_at, expires_at, revoked_at, copy_number FROM work_loans WHERE id = ?::uuid".to_string(),
+        "SELECT id::text AS id, work_id::text AS work_id, borrower_account_id::text AS borrower_account_id, granted_at, expires_at, revoked_at, copy_number::bigint AS copy_number FROM work_loans WHERE id = ?::uuid".to_string(),
     );
     let row: Option<LoanRow> = match db.backend() {
-        Backend::Sqlite => sqlx::query_as(&sql).bind(loan_id).fetch_optional(db.sqlite_pool().expect("sqlite handle")).await?,
-        Backend::Postgres => sqlx::query_as(&sql).bind(loan_id).fetch_optional(db.postgres_pool().expect("postgres handle")).await?,
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(loan_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(loan_id)
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
     };
     Ok(row.map(Loan::from))
 }

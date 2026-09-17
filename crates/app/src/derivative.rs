@@ -21,13 +21,14 @@ pub async fn handle_derivative(
     let derivative = lorehaven_db::derivative::find_derivative(db, derivative_id)
         .await
         .map_err(|e| HandlerError::Transient(e.to_string()))?
-        .ok_or_else(|| {
-            HandlerError::Fatal(format!("derivative {derivative_id} not found"))
-        })?;
+        .ok_or_else(|| HandlerError::Fatal(format!("derivative {derivative_id} not found")))?;
 
     let kind = lorehaven_domain::derivative::DerivativeKind::parse(&derivative.derivative_kind)
         .ok_or_else(|| {
-            HandlerError::Fatal(format!("unknown derivative_kind: {}", derivative.derivative_kind))
+            HandlerError::Fatal(format!(
+                "unknown derivative_kind: {}",
+                derivative.derivative_kind
+            ))
         })?;
 
     let store = lorehaven_db::storage::BlobStore::new(state.config().storage.root.clone());
@@ -111,7 +112,8 @@ async fn convert_with(
         .ok_or_else(|| anyhow::anyhow!("ebook-convert not installed"))?;
 
     // Write source to a temp file, convert, read output.
-    let temp_dir = std::env::temp_dir().join(format!("lorehaven-derivative-{}", uuid::Uuid::new_v4()));
+    let temp_dir =
+        std::env::temp_dir().join(format!("lorehaven-derivative-{}", uuid::Uuid::new_v4()));
     tokio::fs::create_dir_all(&temp_dir).await?;
     let source_path = temp_dir.join("source.html");
     tokio::fs::write(&source_path, source).await?;

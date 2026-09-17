@@ -55,7 +55,7 @@ pub async fn insert_comment(
         "INSERT INTO comments (id, subject_type, subject_id, author_pseud, body, body_version, classification_id, anchor_kind, anchor_value, anchor_chapter_id, created_at, edited_at, deleted_at)
          VALUES (?, ?, ?, ?, ?, 'v1', ?, ?, ?, ?, ?, NULL, NULL)",
         "INSERT INTO comments (id, subject_type, subject_id, author_pseud, body, body_version, classification_id, anchor_kind, anchor_value, anchor_chapter_id, created_at, edited_at, deleted_at)
-         VALUES ($1, $2, $3, $4, $5, 'v1', $6, $7, $8, $9, $10, NULL, NULL)",
+         VALUES ($1, $2, $3, $4, $5, 'v1', $6, $7, $8, $9::uuid, $10, NULL, NULL)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -171,7 +171,7 @@ pub async fn list_comments(
                AND pa.account_id NOT IN (SELECT blocker FROM blocks WHERE blocked = ?4 AND (scope = 'all' OR scope = 'comments'))
                AND (cc.outcome IS NULL OR cc.outcome = 'delivered')
              ORDER BY c.created_at DESC LIMIT ?5",
-            "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at, c.anchor_kind, c.anchor_value, c.anchor_chapter_id
+            "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at, c.anchor_kind, c.anchor_value, c.anchor_chapter_id::text AS anchor_chapter_id
              FROM comments c
              JOIN pseuds pa ON pa.id::text = c.author_pseud
              LEFT JOIN comment_classifications cc ON cc.comment_id = c.id
@@ -192,7 +192,7 @@ pub async fn list_comments(
                AND pa.account_id NOT IN (SELECT blocker FROM blocks WHERE blocked = ?3 AND (scope = 'all' OR scope = 'comments'))
                AND (cc.outcome IS NULL OR cc.outcome = 'delivered')
              ORDER BY c.created_at DESC LIMIT ?4",
-            "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at
+            "SELECT c.id, c.subject_type, c.subject_id, c.author_pseud, c.body, c.created_at, c.edited_at, c.deleted_at, c.anchor_kind, c.anchor_value, c.anchor_chapter_id::text AS anchor_chapter_id
              FROM comments c
              JOIN pseuds pa ON pa.id::text = c.author_pseud
              LEFT JOIN comment_classifications cc ON cc.comment_id = c.id

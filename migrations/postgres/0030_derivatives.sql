@@ -1,6 +1,6 @@
 -- 0030_derivatives: derivative pipeline (spec §32.4, M25).
 --
--- Dialect: PostgreSQL. Timestamps are TIMESTAMPTZ; checksums are TEXT (SHA-256 hex).
+-- Dialect: PostgreSQL. Timestamps are TEXT; checksums are TEXT (SHA-256 hex).
 
 CREATE TABLE IF NOT EXISTS derivatives (
   id               UUID PRIMARY KEY,
@@ -14,10 +14,10 @@ CREATE TABLE IF NOT EXISTS derivatives (
   state            TEXT NOT NULL DEFAULT 'queued',
   job_id           UUID,
   error_message    TEXT,
-  built_at         TIMESTAMPTZ,
-  verified_at      TIMESTAMPTZ,
-  created_at       TIMESTAMPTZ NOT NULL,
-  updated_at       TIMESTAMPTZ NOT NULL,
+  built_at         TEXT,
+  verified_at      TEXT,
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT NOT NULL,
   version          INTEGER NOT NULL DEFAULT 1
 );
 

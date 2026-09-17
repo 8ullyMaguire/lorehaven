@@ -59,11 +59,17 @@ pub async fn get_lending_status(
         })));
     }
 
-    let _ = lorehaven_db::media::find_media(db, &id).await?
+    let _ = lorehaven_db::media::find_media(db, &id)
+        .await?
         .ok_or(lorehaven_domain::AppError::NotFound { resource: "work" })?;
 
-    let (lendable, can_borrow) = lending_capacity(db, &id, &account_id, &config).await
-        .ok_or_else(|| ApiError::from(lorehaven_domain::AppError::Internal(anyhow::anyhow!("internal"))))?;
+    let (lendable, can_borrow) = lending_capacity(db, &id, &account_id, &config)
+        .await
+        .ok_or_else(|| {
+            ApiError::from(lorehaven_domain::AppError::Internal(anyhow::anyhow!(
+                "internal"
+            )))
+        })?;
 
     let current_loan = check_active_loan(db, &id, &account_id).await;
 
@@ -90,15 +96,21 @@ pub async fn lend_work(
         return Err(validation("lending is disabled"));
     }
 
-    let media = lorehaven_db::media::find_media(db, &id).await?
+    let media = lorehaven_db::media::find_media(db, &id)
+        .await?
         .ok_or(lorehaven_domain::AppError::NotFound { resource: "work" })?;
 
     if !matches!(media.lifecycle.as_str(), "published" | "active") {
         return Err(validation("only published works may be lent"));
     }
 
-    let (lendable, can_borrow) = lending_capacity(db, &id, &account_id, &config).await
-        .ok_or_else(|| ApiError::from(lorehaven_domain::AppError::Internal(anyhow::anyhow!("internal"))))?;
+    let (lendable, can_borrow) = lending_capacity(db, &id, &account_id, &config)
+        .await
+        .ok_or_else(|| {
+            ApiError::from(lorehaven_domain::AppError::Internal(anyhow::anyhow!(
+                "internal"
+            )))
+        })?;
 
     if !lendable {
         return Err(validation("this work is not available for lending"));
@@ -131,7 +143,8 @@ pub async fn lend_work(
         &account_id,
         (active_count as u32) + 1,
         &expires_at_str,
-    ).await?;
+    )
+    .await?;
 
     Ok(Json(json!({
         "id": loan.id,
