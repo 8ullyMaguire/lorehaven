@@ -97,7 +97,7 @@ pub async fn get_derivative(
     let derivative = lorehaven_db::derivative::find_derivative(db, &id)
         .await?
         .ok_or_else(|| ApiError::from(lorehaven_domain::AppError::NotFound {
-            resource: "derivative".into(),
+            resource: "derivative",
         }))?;
     Ok(Json(json!({
         "id": derivative.id,
