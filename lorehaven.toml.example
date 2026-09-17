@@ -105,6 +105,41 @@ format = "pretty"
 # of readers that its author withdrew.
 # archive_fallback = false
 
+[tts]
+# Which engine narrates a work when an author asks for a machine recording.
+#
+# `piper` (the default) is local: the text never leaves this host, which is the
+# point of the default. `silent` produces a well-formed but silent track and
+# exists so an operator can exercise the whole pipeline — chunking, storage, the
+# draft gate — on a host with no synthesizer at all. Cloud adapters (ElevenLabs,
+# AWS Polly) will be added behind the same setting, with their own keys and the
+# spend cap below.
+#
+# An engine that is named but not installed does not stop the instance: the
+# narration request is refused with the sentence `lorehaven doctor` prints, and
+# everything else keeps working.
+# engine = "piper"
+
+# Path to the `piper` binary. Unset means "whatever `piper` is on PATH"; a path
+# set here wins over discovery, because an operator who names a binary means
+# that binary.
+# piper_path = "/opt/piper/piper"
+
+# Path to the Piper voice model (`.onnx`). Required by Piper: the model is a
+# file, and Piper's model directory is a property of an installation, so a bare
+# voice name is not guessed at.
+# piper_voice_model = "/opt/piper/en_US-lessac-medium.onnx"
+
+# The voice a narration uses when the request does not name one. A name is
+# recorded on the edition as the voice, and only a path resolves to a model.
+# default_voice = "en_US-lessac-medium"
+
+# Per-instance monthly ceiling, in cents, for engines that charge per request.
+# Only a cloud adapter can spend, so this is unset by default — but it is
+# configuration before there is an adapter that bills, not a number invented in
+# a route later.
+# monthly_spend_cap_cents = 500
+
 [dev]
 # Whether `lorehaven seed` may write development fixtures. Defaults to true
 # outside production and false in it; enabling it in production is a startup

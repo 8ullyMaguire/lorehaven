@@ -18,6 +18,84 @@
 
 Newest first. Each section states what was verified, how, and the result.
 
+## 2026-09-17 — M26 TTS narration pipeline (spec §32.5) + adult gates restored to every door
+
+**Context.** The M26 narration half was draft-CRUD with no audio: a
+request created a `narration` edition and queued a `JobKind::Narration`
+job that had no handler, and the request door queued it even on an
+instance with no synthesizer at all. Alvaro's decision (2026-09-17) was
+a pluggable `TtsEngine` trait, local-first, cloud adapters later behind
+the same trait. The three rating-gate tests written earlier the same
+day had been dropped from `milestone_26.rs` when the narration tests
+replaced the file.
+
+**What was implemented.**
+
+- `crates/app/src/tts.rs` — `TtsEngine` (`name`, `is_available`,
+  `health`, `synthesize`) with a `PiperEngine` (local binary, `--model`,
+  argv only, temp file, no shell), a `SilentEngine` (a valid WAV whose
+  length follows the text, so the whole pipeline is exercisable on a
+  host with no synthesizer and in CI), and a `MissingEngine` whose
+  `health()` names the missing program. `build_engine` is the one place
+  a configured name maps to an implementation; `tts.engine` is
+  validated against `SUPPORTED_ENGINES`.
+- WAV splicing: `concat_audio` parses the RIFF chunks and splices the
+  `data` payloads, rewriting the RIFF and `data` sizes — `[a, b].concat()`
+  is not a playable file. Mismatched `fmt ` chunks or media types are
+  refused rather than guessed at.
+- `crates/app/src/narration.rs` — the worker handler: load the edition,
+  collect the work's chapter text, resolve and health-check the engine,
+  chunk (sentence-boundary-first, never splitting a multi-byte
+  character), synthesize with job progress, splice, store the blob and
+  a `media_file` row, record the checksum on the edition. It does not
+  publish: the §22.6 machine-producer credit and the draft gate stay.
+- `tts_engine()` / `can_narrate()` on `AppState`, built once at
+  startup from the same `which` discovery the converters use;
+  `lorehaven doctor` reports the engine with the same builder, so
+  doctor and the worker cannot disagree.
+- `[tts]` config section (engine, piper_path, piper_voice_model,
+  default_voice, monthly_spend_cap_cents) with `deny_unknown_fields`,
+  documented in `lorehaven.toml.example`.
+- Migration 0032 adds `media_editions.audio_checksum` (both dialects);
+  `mark_narration_audio_stored`, `narration_audio_checksum` and
+  `approve_narration_edition` (which refuses an edition with no audio).
+- The request door refuses up front when the engine is named but not
+  usable, carrying the sentence `doctor` prints, instead of queueing a
+  job that cannot succeed.
+
+**What was fixed, not just added.**
+
+- **The narration doors now use the app's one visibility rule.** They
+  previously fronted on `RequireSession` + a local contributor check:
+  any signed-in account could read a draft edition's metadata, and
+  `GET /editions/{id}/audio` served a *published* narration of an
+  explicit work to any anonymous caller who knew the id — a hole in
+  §32.5's "zero adult items in any door". `reading_decision` and
+  `actor_for` in `routes/works.rs` are now `pub(crate)` and the
+  narration doors apply them: a work the caller cannot read is 404,
+  a draft edition is contributor-only, and published audio is served
+  only to a caller who is eligible for the work. §3.3 settles the
+  anonymous-draft case: 404, never 401.
+- `GET /works/{id}/editions` is now a `MaybeSession` door whose list is
+  filtered for non-contributors (published editions only).
+- The deleted rating-gate tests are restored and the all-doors case now
+  walks list, search, media direct, files, editions, canon, space *and*
+  the narration audio door, and asserts the author still sees their own.
+
+**Evidence (literal).**
+
+```
+cargo test -p lorehaven-app --lib
+test result: ok. 134 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.03s
+
+cargo test -p lorehaven-app --test milestone_26
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.08s
+```
+
+`cargo clippy --workspace --all-targets`: no warnings. `cargo fmt -p
+lorehaven-app -p lorehaven-db -- --check`: clean. Workspace and
+PostgreSQL runs are reported in the session handoff.
+
 ## 2026-09-16 — PG dialect parity complete, SQLite regressions from the parity pass fixed
 
 **Commit:** `69ee2d8` — "db: finish PG dialect parity and fix the SQLite

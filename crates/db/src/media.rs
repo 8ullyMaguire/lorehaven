@@ -22,7 +22,7 @@ use lorehaven_domain::media::CreatorKind;
 use lorehaven_domain::query::QueryAst;
 use lorehaven_domain::query_sql::render_query;
 
-use crate::{Backend, Database};
+use crate::{sql_owned, Backend, Database};
 
 // ---------------------------------------------------------------------------
 // Row types
@@ -984,6 +984,56 @@ pub async fn find_media_edition(db: &Database, id: &str) -> Result<Option<MediaE
                 .await?
         }
     })
+}
+
+pub async fn create_media_file(
+    db: &Database,
+    work_id: &str,
+    edition_kind: &str,
+    checksum: &str,
+    size_bytes: i64,
+    mime_type: &str,
+) -> Result<String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = crate::identity::now_rfc3339();
+    let sql = sql_owned(
+        db,
+        "INSERT INTO media_files (id, work_id, edition_kind, checksum, size_bytes, mime_type, created_at, updated_at, version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)"
+            .to_string(),
+        "INSERT INTO media_files (id, work_id, edition_kind, checksum, size_bytes, mime_type, created_at, updated_at, version)
+         VALUES (?::uuid, ?::uuid, ?, ?, ?, ?, ?, ?, 1)"
+            .to_string(),
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind(work_id)
+                .bind(edition_kind)
+                .bind(checksum)
+                .bind(size_bytes)
+                .bind(mime_type)
+                .bind(&now)
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind(work_id)
+                .bind(edition_kind)
+                .bind(checksum)
+                .bind(size_bytes)
+                .bind(mime_type)
+                .bind(&now)
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
+        }
+    }
+    Ok(id)
 }
 
 /// List files for a work. The route has already applied the direct-door

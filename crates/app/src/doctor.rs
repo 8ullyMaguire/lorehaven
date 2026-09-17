@@ -272,6 +272,28 @@ pub async fn run(config: &Config, _args: &DoctorArgs) -> Report {
         }
     }
 
+    // --- narration ----------------------------------------------------------
+    // The engine is built the same way the running state builds it, so what the
+    // doctor says and what a job gets cannot disagree. A missing engine is a
+    // warning, not a failure: an instance that never narrates is a perfectly
+    // good library, and the remedy is what the operator needs to read.
+    match crate::tts::build_engine(&config.tts, which("piper").as_deref()) {
+        Ok(engine) => match engine.health() {
+            Ok(()) => report.ok("narration", format!("engine {:?} is ready", engine.name())),
+            Err(error) => report.warn(
+                "narration",
+                format!("engine {:?} is not usable: {error}", engine.name()),
+                "narration editions stay unavailable until this is fixed; \
+                 everything else is unaffected",
+            ),
+        },
+        Err(error) => report.warn(
+            "narration",
+            format!("tts.engine is not an engine this build has: {error}"),
+            "set tts.engine to one of: piper, silent",
+        ),
+    }
+
     // --- assets -------------------------------------------------------------
     match &config.assets.dir {
         Some(dir) if dir.join("index.html").exists() => report.ok(

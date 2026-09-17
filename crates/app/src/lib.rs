@@ -22,6 +22,7 @@ pub mod imports;
 pub mod library_updates;
 pub mod limiter;
 pub mod logging;
+pub mod narration;
 pub mod privacy;
 pub mod revisions;
 pub mod routes;
@@ -30,6 +31,7 @@ pub mod secrets;
 pub mod seed;
 pub mod server;
 pub mod state;
+pub mod tts;
 pub mod version;
 pub mod worker;
 

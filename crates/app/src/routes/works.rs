@@ -824,7 +824,7 @@ fn require_participation(user: &SessionUser) -> ApiResult<()> {
 /// has not chosen a pseud: a policy decision about "who is this" is meaningless
 /// without a public face, and the eligibility service treats `None` as
 /// anonymous rather than guessing.
-fn actor_for(user: Option<&SessionUser>) -> Option<Actor> {
+pub(crate) fn actor_for(user: Option<&SessionUser>) -> Option<Actor> {
     let user = user?;
     let pseud_id = user.pseud_id?;
     Some(user.actor(pseud_id))
@@ -871,7 +871,7 @@ fn can_edit(user: &SessionUser, contributors: &[Contributor]) -> Decision {
 }
 
 /// How a request for a work is answered.
-enum Reading {
+pub(crate) enum Reading {
     /// The actor contributes to it: the author view, drafts included.
     Contributor,
     /// The actor may read the published work.
@@ -907,7 +907,7 @@ async fn check_entitlement(state: &AppState, actor: &Actor, work_id: &WorkId) ->
     Ok(has)
 }
 
-async fn reading_decision(
+pub(crate) async fn reading_decision(
     state: &AppState,
     actor: Option<&Actor>,
     work: &Work,

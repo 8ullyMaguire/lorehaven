@@ -130,6 +130,8 @@ pub struct Config {
     pub imports: ImportsConfig,
     /// Discovery feed diversity settings.
     pub discovery: DiscoveryConfig,
+    /// TTS narration settings.
+    pub tts: TtsConfig,
     /// Where the configuration file was read from, if any.
     pub config_path: Option<PathBuf>,
 }
@@ -166,6 +168,36 @@ pub struct DiscoveryConfig {
     pub per_fandom_cap: usize,
     /// Fraction of the feed reserved for exploration (new fandoms).
     pub exploration_rate: f64,
+}
+
+/// TTS narration settings (M26 / spec §32.5).
+///
+/// Piper is the built-in local engine. Cloud adapters (ElevenLabs, AWS
+/// Polly) are added later behind the same `TtsEngine` trait.
+#[derive(Debug, Clone)]
+pub struct TtsConfig {
+    /// Which engine to use. `"piper"` is the only built-in option.
+    pub engine: String,
+    /// Path to the `piper` binary. Defaults to `piper` on `PATH`.
+    pub piper_path: Option<PathBuf>,
+    /// Path to the Piper voice model (`.onnx`).
+    pub piper_voice_model: Option<PathBuf>,
+    /// Default voice name (maps to a Piper model).
+    pub default_voice: Option<String>,
+    /// Per-instance monthly spend cap in cents (cloud engines only).
+    pub monthly_spend_cap_cents: Option<u64>,
+}
+
+impl Default for TtsConfig {
+    fn default() -> Self {
+        Self {
+            engine: "piper".to_string(),
+            piper_path: None,
+            piper_voice_model: None,
+            default_voice: None,
+            monthly_spend_cap_cents: None,
+        }
+    }
 }
 
 /// What the importer may do about a source that refuses a plain request.
@@ -658,6 +690,26 @@ impl Config {
             honour_robots: imports_file.honour_robots.unwrap_or(true),
         };
 
+        // --- tts ------------------------------------------------------------
+        let tts_file = file.tts.unwrap_or_default();
+        let tts = TtsConfig {
+            // An empty string means "unset", not "an engine named """, for the
+            // same reason an empty solver URL does: the failure belongs at the
+            // first narration, where the message can name what to install.
+            engine: tts_file
+                .engine
+                .map(|engine| engine.trim().to_owned())
+                .filter(|engine| !engine.is_empty())
+                .unwrap_or_else(|| TtsConfig::default().engine),
+            piper_path: tts_file.piper_path,
+            piper_voice_model: tts_file.piper_voice_model,
+            default_voice: tts_file
+                .default_voice
+                .map(|voice| voice.trim().to_owned())
+                .filter(|voice| !voice.is_empty()),
+            monthly_spend_cap_cents: tts_file.monthly_spend_cap_cents,
+        };
+
         let config = Self {
             environment,
             site,
@@ -676,6 +728,7 @@ impl Config {
             rate_limits,
             imports,
             discovery: DiscoveryConfig::default(),
+            tts,
             config_path,
         };
 
@@ -733,6 +786,7 @@ impl Config {
             // depend on which escalations happened to be configured.
             imports: ImportsConfig::default(),
             discovery: DiscoveryConfig::default(),
+            tts: TtsConfig::default(),
             config_path: None,
         }
     }
@@ -837,6 +891,27 @@ struct FileConfig {
     age: Option<AgeSection>,
     rate_limits: Option<RateLimitSection>,
     imports: Option<ImportsSection>,
+    tts: Option<TtsSection>,
+}
+
+/// The `[tts]` table: which engine narrates, and how an operator configured it
+/// (M26 / spec §32.5).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TtsSection {
+    /// `piper` (local, the default) or `silent` (a pipeline check that needs no
+    /// synthesizer). Cloud engines will be added behind the same `TtsEngine`.
+    engine: Option<String>,
+    /// Path to the `piper` binary. Unset means "whatever `piper` is on `PATH`".
+    piper_path: Option<PathBuf>,
+    /// Path to the Piper voice model (`.onnx`).
+    piper_voice_model: Option<PathBuf>,
+    /// The voice a narration uses when the request does not name one.
+    default_voice: Option<String>,
+    /// Per-instance monthly spend cap in cents. Only cloud engines can spend;
+    /// this exists so the ceiling is configuration before an adapter that
+    /// charges arrives, not a number invented in a route.
+    monthly_spend_cap_cents: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1124,6 +1199,76 @@ port = 7000
     }
 
     #[test]
+    fn tts_defaults_to_local_piper() {
+        // Local-first is the decision: an instance narrates with the binary on
+        // its own machine rather than sending a reader's text to a service.
+        let config = Config::development_defaults();
+        assert_eq!(config.tts.engine, "piper");
+        assert!(config.tts.piper_path.is_none());
+        assert!(config.tts.piper_voice_model.is_none());
+        assert!(
+            config.tts.monthly_spend_cap_cents.is_none(),
+            "no instance has a cloud budget until it configures one"
+        );
+    }
+
+    #[test]
+    fn a_tts_section_is_read_from_the_file() {
+        let parsed = load_from(
+            "tts",
+            "environment = \"development\"\n\
+             [tts]\n\
+             engine = \"piper\"\n\
+             piper_path = \"/opt/piper/piper\"\n\
+             piper_voice_model = \"/opt/piper/en_US-lessac-medium.onnx\"\n\
+             default_voice = \"en_US-lessac-medium\"\n",
+        )
+        .expect("a [tts] section parses");
+        assert_eq!(parsed.tts.engine, "piper");
+        assert_eq!(
+            parsed.tts.piper_path.expect("path"),
+            PathBuf::from("/opt/piper/piper")
+        );
+        assert_eq!(
+            parsed.tts.piper_voice_model.expect("model"),
+            PathBuf::from("/opt/piper/en_US-lessac-medium.onnx")
+        );
+        assert_eq!(
+            parsed.tts.default_voice.as_deref(),
+            Some("en_US-lessac-medium")
+        );
+    }
+
+    #[test]
+    fn an_empty_tts_engine_is_unset_rather_than_an_empty_name() {
+        // `engine = ""` would otherwise become an engine the builder cannot
+        // name, and the operator would meet the failure at the first narration
+        // instead of at startup. The default is what an empty value means.
+        let parsed = load_from(
+            "tts-empty",
+            "environment = \"development\"\n[tts]\nengine = \"  \"\n",
+        )
+        .expect("an empty engine is tolerated");
+        assert_eq!(parsed.tts.engine, "piper");
+    }
+
+    #[test]
+    fn an_unknown_key_in_the_tts_section_is_refused() {
+        // `deny_unknown_fields`, like every other section: a typo in a config
+        // file must be an error naming the file, not a setting that is silently
+        // ignored.
+        let error = load_from(
+            "tts-typo",
+            "environment = \"development\"\n[tts]\npiper_voice = \"x\"\n",
+        )
+        .expect_err("an unknown tts key is refused");
+        assert!(
+            error.to_string().contains("tts") || error.to_string().contains("unknown field"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
     fn the_shipped_example_configuration_parses() {
         // The example is what an operator copies, so a section it documents and
         // the parser does not accept is a startup failure handed to every new
@@ -1138,7 +1283,7 @@ port = 7000
         let dir = std::env::temp_dir().join(format!("lorehaven-example-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         let target = dir.join("lorehaven.toml");
-        std::fs::write(&target, body).expect("copy the example");
+        std::fs::write(&target, &body).expect("copy the example");
         let parsed = Config::load(&GlobalArgs {
             config: Some(target),
             ..GlobalArgs::default()
@@ -1151,6 +1296,27 @@ port = 7000
         assert!(parsed.imports.honour_robots);
         assert!(parsed.imports.solver_url.is_none());
         assert!(!parsed.imports.archive_fallback);
+        // And the sections themselves: a section that exists only in the parser
+        // leaves every operator copying the example without the setting.
+        assert_eq!(parsed.tts.engine, "piper");
+        assert!(parsed.tts.piper_path.is_none());
+        for section in [
+            "[site]",
+            "[server]",
+            "[database]",
+            "[storage]",
+            "[security]",
+            "[logging]",
+            "[assets]",
+            "[imports]",
+            "[tts]",
+            "[dev]",
+        ] {
+            assert!(
+                body.contains(section),
+                "the example config must document {section}"
+            );
+        }
     }
 
     #[test]
