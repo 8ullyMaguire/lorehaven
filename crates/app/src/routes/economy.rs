@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use time::OffsetDateTime;
 
-use crate::auth::MaybeSession;
+use crate::auth::{MaybeSession, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -136,10 +136,13 @@ pub async fn get_usage(
 
 /// List bounties.
 pub async fn list_bounties(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     MaybeSession(_user): MaybeSession,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(json!({ "bounties": [] })))
+    let bounties = lorehaven_db::economy::list_bounties(state.db())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "bounties": bounties })))
 }
 
 /// Create a bounty.
@@ -151,34 +154,36 @@ pub struct CreateBountyBody {
 }
 
 pub async fn create_bounty(
-    State(_state): State<AppState>,
-    MaybeSession(user): MaybeSession,
-    Json(_body): Json<CreateBountyBody>,
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Json(body): Json<CreateBountyBody>,
 ) -> ApiResult<Json<Value>> {
-    let account = user.map(|u| u.account_id.to_string()).unwrap_or_default();
-    if account.is_empty() {
-        return Err(ApiError(lorehaven_domain::AppError::field(
-            "session",
-            "sign in to create bounties",
-        )));
-    }
-    Ok(Json(json!({ "created": true })))
+    let account = user.account_id.to_string();
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = OffsetDateTime::now_utc();
+    let created_at = format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        now.year(), now.month() as u8, now.day(),
+        now.hour(), now.minute(), now.second());
+    lorehaven_db::economy::create_bounty(
+        state.db(), &id, &account, &body.job_kind, &body.terms.to_string(),
+        body.amount, &created_at,
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "id": id, "created": true })))
 }
 
 /// Claim a bounty.
 pub async fn claim_bounty(
-    State(_state): State<AppState>,
-    Path(_bounty_id): Path<String>,
-    MaybeSession(user): MaybeSession,
+    State(state): State<AppState>,
+    Path(bounty_id): Path<String>,
+    RequireSession(user): RequireSession,
     Json(_body): Json<serde_json::Value>,
 ) -> ApiResult<Json<Value>> {
-    let account = user.map(|u| u.account_id.to_string()).unwrap_or_default();
-    if account.is_empty() {
-        return Err(ApiError(lorehaven_domain::AppError::field(
-            "session",
-            "sign in to claim bounties",
-        )));
-    }
+    let account = user.account_id.to_string();
+    lorehaven_db::economy::claim_bounty(state.db(), &bounty_id, &account)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     Ok(Json(json!({ "claimed": true })))
 }
 

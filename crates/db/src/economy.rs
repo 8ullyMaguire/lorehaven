@@ -1,5 +1,6 @@
 //! M15 — Economy repository: ledger, holds, caps, queue, subscriptions.
 
+use serde_json::{json, Value};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -426,4 +427,55 @@ pub async fn usage_for(
             fetch_usage_postgres(db.postgres_pool().expect("postgres"), account, day).await
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Bounties
+// ---------------------------------------------------------------------------
+
+pub async fn create_bounty(
+    db: &Database,
+    id: &str,
+    account: &str,
+    job_kind: &str,
+    terms: &str,
+    amount: i64,
+    created_at: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO bounties (id, job_kind, terms, escrow_transaction, state, claimant, created_by, created_at, account, amount) VALUES (?, ?, ?, 'pending', 'open', '', '', ?, ?, ?)",
+    )
+    .bind(id)
+    .bind(job_kind)
+    .bind(terms)
+    .bind(created_at)
+    .bind(account)
+    .bind(amount)
+    .execute(db.sqlite_pool().expect("sqlite"))
+    .await?;
+    Ok(())
+}
+
+pub async fn list_bounties(db: &Database) -> Result<Vec<Value>, sqlx::Error> {
+    let rows: Vec<(String, String, String, String, Option<i64>, String, String)> = sqlx::query_as(
+        "SELECT id, account, job_kind, terms, amount, state, created_at FROM bounties WHERE state = 'open' ORDER BY created_at DESC LIMIT 50",
+    )
+    .fetch_all(db.sqlite_pool().expect("sqlite"))
+    .await?;
+    Ok(rows.into_iter().map(|r| json!({
+        "id": r.0, "account": r.1, "job_kind": r.2, "terms": r.3, "amount": r.4.unwrap_or(0), "state": r.5, "created_at": r.6
+    })).collect())
+}
+
+pub async fn claim_bounty(db: &Database, id: &str, fulfilled_by: &str) -> Result<(), sqlx::Error> {
+    let now = crate::identity::now_rfc3339();
+    sqlx::query(
+        "UPDATE bounties SET state = 'claimed', fulfilled_at = ?, fulfilled_by = ? WHERE id = ? AND state = 'open'"
+    )
+    .bind(now)
+    .bind(fulfilled_by)
+    .bind(id)
+    .execute(db.sqlite_pool().expect("sqlite"))
+    .await?;
+    Ok(())
 }

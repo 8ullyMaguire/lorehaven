@@ -357,12 +357,14 @@ async fn decide_appeal(
 }
 
 async fn list_my_appeals(
-    State(_state): State<AppState>,
-    RequireSession(_user): RequireSession,
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
 ) -> ApiResult<Json<Value>> {
-    // Listing one account's appeals needs a query that does not exist yet;
-    // the stub returns empty rather than pretending.
-    Ok(Json(json!({ "items": [] })))
+    let account = user.account_id.to_string();
+    let appeals = lorehaven_db::governance::list_appeals(state.db(), &account)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "items": appeals })))
 }
 
 // ---------------------------------------------------------------------------
@@ -393,10 +395,11 @@ async fn my_trust(
 }
 
 async fn my_audit_log(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     RequireSession(_user): RequireSession,
 ) -> ApiResult<Json<Value>> {
-    // Per-actor audit entries need a query that does not exist yet; the
-    // stub returns empty rather than pretending.
-    Ok(Json(json!({ "items": [] })))
+    let items = lorehaven_db::governance::list_audit_log(state.db(), 50)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "items": items })))
 }

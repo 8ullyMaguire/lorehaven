@@ -63,15 +63,20 @@ pub async fn record_admin_action(
 
 /// Get privacy requests for the current user.
 pub async fn list_privacy_requests(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     MaybeSession(user): MaybeSession,
 ) -> ApiResult<Json<Value>> {
     let account = user.map(|u| u.account_id.to_string()).unwrap_or_default();
     if account.is_empty() {
-        return Ok(Json(json!({ "requests": [] })));
+        return Err(ApiError(lorehaven_domain::AppError::field(
+            "session",
+            "sign in to view privacy requests",
+        )));
     }
-
-    Ok(Json(json!({ "requests": [] })))
+    let requests = lorehaven_db::admin::list_privacy_requests(state.db(), &account)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "requests": requests })))
 }
 
 /// Create a privacy request (export/delete).
@@ -96,11 +101,13 @@ pub async fn create_privacy_request(
 
 /// Abuse defence: check if IP/account is blocked.
 pub async fn check_abuse_status(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    // Placeholder: real implementation would check abuse_counters table
-    Ok(Json(json!({ "key": key, "blocked": false, "count": 0 })))
+    let (blocked, count) = lorehaven_db::admin::check_abuse_status(state.db(), &key)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "key": key, "blocked": blocked, "count": count })))
 }
 
 pub fn router() -> axum::Router<AppState> {

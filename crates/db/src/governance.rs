@@ -516,3 +516,99 @@ pub async fn grant_operator_role(
     }
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Appeal listing
+// ---------------------------------------------------------------------------
+
+pub async fn list_appeals(
+    db: &Database,
+    account: &str,
+) -> Result<Vec<Value>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let rows = sqlx::query("SELECT id, sanction_id, appellant, statement, created_at, state, decided_at, decision, decided_by FROM appeals WHERE appellant = ? ORDER BY created_at DESC")
+                .bind(account)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?;
+            Ok(rows.iter().map(|r| {
+                serde_json::json!({
+                    "id": r.get::<String, _>("id"),
+                    "sanction_id": r.get::<String, _>("sanction_id"),
+                    "appellant": r.get::<String, _>("appellant"),
+                    "statement": r.get::<String, _>("statement"),
+                    "created_at": r.get::<String, _>("created_at"),
+                    "state": r.get::<String, _>("state"),
+                    "decided_at": r.get::<Option<String>, _>("decided_at"),
+                    "decision": r.get::<String, _>("decision"),
+                    "decided_by": r.get::<String, _>("decided_by"),
+                })
+            }).collect())
+        }
+        Backend::Postgres => {
+            let rows = sqlx::query("SELECT id, sanction_id, appellant, statement, created_at, state, decided_at, decision, decided_by FROM appeals WHERE appellant = $1 ORDER BY created_at DESC")
+                .bind(account)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?;
+            Ok(rows.iter().map(|r| {
+                serde_json::json!({
+                    "id": r.get::<String, _>("id"),
+                    "sanction_id": r.get::<String, _>("sanction_id"),
+                    "appellant": r.get::<String, _>("appellant"),
+                    "statement": r.get::<String, _>("statement"),
+                    "created_at": r.get::<String, _>("created_at"),
+                    "state": r.get::<String, _>("state"),
+                    "decided_at": r.get::<Option<String>, _>("decided_at"),
+                    "decision": r.get::<String, _>("decision"),
+                    "decided_by": r.get::<String, _>("decided_by"),
+                })
+            }).collect())
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Audit log listing
+// ---------------------------------------------------------------------------
+
+pub async fn list_audit_log(
+    db: &Database,
+    limit: i64,
+) -> Result<Vec<Value>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let rows = sqlx::query("SELECT id, actor, action, subject_type, subject_id, document, created_at FROM audit_log ORDER BY created_at DESC LIMIT ?")
+                .bind(limit)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?;
+            Ok(rows.iter().map(|r| {
+                serde_json::json!({
+                    "id": r.get::<String, _>("id"),
+                    "actor": r.get::<String, _>("actor"),
+                    "action": r.get::<String, _>("action"),
+                    "subject_type": r.get::<String, _>("subject_type"),
+                    "subject_id": r.get::<String, _>("subject_id"),
+                    "document": r.get::<String, _>("document"),
+                    "created_at": r.get::<String, _>("created_at"),
+                })
+            }).collect())
+        }
+        Backend::Postgres => {
+            let rows = sqlx::query("SELECT id, actor, action, subject_type, subject_id, document, created_at FROM audit_log ORDER BY created_at DESC LIMIT $1")
+                .bind(limit)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?;
+            Ok(rows.iter().map(|r| {
+                serde_json::json!({
+                    "id": r.get::<String, _>("id"),
+                    "actor": r.get::<String, _>("actor"),
+                    "action": r.get::<String, _>("action"),
+                    "subject_type": r.get::<String, _>("subject_type"),
+                    "subject_id": r.get::<String, _>("subject_id"),
+                    "document": r.get::<String, _>("document"),
+                    "created_at": r.get::<String, _>("created_at"),
+                })
+            }).collect())
+        }
+    }
+}

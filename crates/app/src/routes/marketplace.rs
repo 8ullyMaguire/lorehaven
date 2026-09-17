@@ -119,21 +119,36 @@ pub async fn transition_commission(
     Ok(Json(json!({ "success": true })))
 }
 
-/// List extensions.
+/// List extensions submitted by the caller.
 pub async fn list_extensions(
-    State(_state): State<AppState>,
-    MaybeSession(_user): MaybeSession,
+    State(state): State<AppState>,
+    MaybeSession(user): MaybeSession,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(json!({ "extensions": [] })))
+    let account = user.map(|u| u.account_id.to_string()).unwrap_or_default();
+    if account.is_empty() {
+        return Err(ApiError(lorehaven_domain::AppError::field(
+            "session",
+            "sign in to list extensions",
+        )));
+    }
+    let extensions = lorehaven_db::marketplace::list_extensions(state.db(), Some(&account))
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "extensions": extensions })))
 }
 
-/// Get an extension.
+/// Get a single extension by slug.
 pub async fn get_extension(
-    State(_state): State<AppState>,
-    Path(_slug): Path<String>,
-    MaybeSession(_user): MaybeSession,
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(json!({ "extension": null })))
+    let ext = lorehaven_db::marketplace::get_extension(state.db(), &slug)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    match ext {
+        Some(e) => Ok(Json(json!({ "extension": e }))),
+        None => Ok(Json(json!({ "extension": null }))),
+    }
 }
 
 /// Grant an extension.
@@ -200,18 +215,38 @@ pub async fn revoke_extension(
 
 /// List my extension grants.
 pub async fn list_my_grants(
-    State(_state): State<AppState>,
-    MaybeSession(_user): MaybeSession,
+    State(state): State<AppState>,
+    MaybeSession(user): MaybeSession,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(json!({ "grants": [] })))
+    let account = user.map(|u| u.account_id.to_string()).unwrap_or_default();
+    if account.is_empty() {
+        return Err(ApiError(lorehaven_domain::AppError::field(
+            "session",
+            "sign in to list grants",
+        )));
+    }
+    let grants = lorehaven_db::marketplace::list_my_grants(state.db(), &account)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "grants": grants })))
 }
 
-/// List webhooks.
+/// List webhooks for the caller.
 pub async fn list_webhooks(
-    State(_state): State<AppState>,
-    MaybeSession(_user): MaybeSession,
+    State(state): State<AppState>,
+    MaybeSession(user): MaybeSession,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(json!({ "webhooks": [] })))
+    let account = user.map(|u| u.account_id.to_string()).unwrap_or_default();
+    if account.is_empty() {
+        return Err(ApiError(lorehaven_domain::AppError::field(
+            "session",
+            "sign in to list webhooks",
+        )));
+    }
+    let webhooks = lorehaven_db::marketplace::list_webhooks(state.db(), &account)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "webhooks": webhooks })))
 }
 
 /// Create a webhook.

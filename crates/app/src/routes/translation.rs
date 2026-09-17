@@ -92,12 +92,22 @@ pub async fn transition_translation(
     Ok(Json(json!({ "success": true })))
 }
 
-/// List translation memory entries.
+/// List translation memory entries for the caller.
 pub async fn list_memory(
-    State(_state): State<AppState>,
-    MaybeSession(_user): MaybeSession,
+    State(state): State<AppState>,
+    MaybeSession(user): MaybeSession,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(json!({ "memory": [] })))
+    let account = user.map(|u| u.account_id.to_string()).unwrap_or_default();
+    if account.is_empty() {
+        return Err(ApiError(lorehaven_domain::AppError::field(
+            "session",
+            "sign in to list translation memory",
+        )));
+    }
+    let memory = lorehaven_db::translation::list_memory(state.db(), &account)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "memory": memory })))
 }
 
 /// Add glossary term.

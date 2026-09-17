@@ -9,6 +9,9 @@ use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use uuid::Uuid;
 
+use lorehaven_db::content;
+use lorehaven_domain::WorkId;
+
 use crate::auth::MaybeSession;
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
@@ -19,31 +22,67 @@ use crate::state::AppState;
 
 /// Get public work data.
 pub async fn get_public_work(
-    State(_state): State<AppState>,
-    Path(_work_id): Path<String>,
-    MaybeSession(_user): MaybeSession,
+    State(state): State<AppState>,
+    Path(work_id): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(json!({ "work": null })))
+    let work_id: WorkId = work_id
+        .parse()
+        .map_err(|_| ApiError(lorehaven_domain::AppError::field("work_id", "invalid work id")))?;
+    let work = content::find_work(state.db(), work_id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    match work {
+        Some(w) => {
+            let work_json = json!({
+                "id": w.id.to_canonical_string(),
+                "title": w.title,
+                "summary": w.summary,
+                "language": w.language,
+                "rating": w.rating,
+                "visibility": w.visibility,
+                "lifecycle": w.lifecycle,
+                "completion": w.completion,
+                "scheduled_for": w.scheduled_for,
+                "published_at": w.published_at,
+                "withdrawn_at": w.withdrawn_at,
+            });
+            Ok(Json(json!({ "work": work_json })))
+        }
+        None => Ok(Json(json!({ "work": null }))),
+    }
 }
 
 /// Public search.
 pub async fn public_search(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     MaybeSession(_user): MaybeSession,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(json!({ "results": [] })))
+    let results = lorehaven_db::search::search_works(state.db(), "", 50)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "results": results })))
 }
 
 // ---------------------------------------------------------------------------
 // Token management
 // ---------------------------------------------------------------------------
 
-/// List tokens.
+/// List tokens for the caller.
 pub async fn list_tokens(
-    State(_state): State<AppState>,
-    MaybeSession(_user): MaybeSession,
+    State(state): State<AppState>,
+    MaybeSession(user): MaybeSession,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(json!({ "tokens": [] })))
+    let account = user.map(|u| u.account_id.to_string()).unwrap_or_default();
+    if account.is_empty() {
+        return Err(ApiError(lorehaven_domain::AppError::field(
+            "session",
+            "sign in to list tokens",
+        )));
+    }
+    let tokens = lorehaven_db::external::list_tokens(state.db(), &account)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "tokens": tokens })))
 }
 
 /// Issue a token.
