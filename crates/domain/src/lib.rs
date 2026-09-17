@@ -12,6 +12,7 @@ pub mod document;
 pub mod economy;
 pub mod error;
 pub mod events;
+pub mod derivative;
 pub mod exports;
 pub mod extension;
 pub mod fairqueue;

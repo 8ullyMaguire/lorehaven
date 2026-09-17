@@ -22,6 +22,7 @@ pub mod content;
 pub mod discovery;
 pub mod economy;
 pub mod events;
+pub mod derivative;
 pub mod exports;
 pub mod external;
 pub mod governance;
