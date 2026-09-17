@@ -456,8 +456,10 @@ pub async fn create_bounty(
     Ok(())
 }
 
+type BountyRow = (String, String, String, String, Option<i64>, String, String);
+
 pub async fn list_bounties(db: &Database) -> Result<Vec<Value>, sqlx::Error> {
-    let rows: Vec<(String, String, String, String, Option<i64>, String, String)> = sqlx::query_as(
+    let rows: Vec<BountyRow> = sqlx::query_as(
         "SELECT id, account, job_kind, terms, amount, state, created_at FROM bounties WHERE state = 'open' ORDER BY created_at DESC LIMIT 50",
     )
     .fetch_all(db.sqlite_pool().expect("sqlite"))

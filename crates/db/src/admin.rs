@@ -1,8 +1,8 @@
 //! M19 — Admin repository: admin actions, feature flags, abuse tracking, privacy requests.
 
-use uuid::Uuid;
 use serde_json::Value;
 use sqlx::Row;
+use uuid::Uuid;
 
 use crate::{Backend, Database};
 
@@ -154,34 +154,40 @@ pub async fn list_privacy_requests(
                 .bind(account)
                 .fetch_all(db.sqlite_pool().expect("sqlite"))
                 .await?;
-            Ok(rows.iter().map(|r| {
-                serde_json::json!({
-                    "id": r.get::<String, _>("id"),
-                    "account": r.get::<String, _>("account"),
-                    "kind": r.get::<String, _>("kind"),
-                    "state": r.get::<String, _>("state"),
-                    "requested_at": r.get::<String, _>("requested_at"),
-                    "completed_at": r.get::<Option<String>, _>("completed_at"),
-                    "result_ref": r.get::<Option<String>, _>("result_ref"),
+            Ok(rows
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "id": r.get::<String, _>("id"),
+                        "account": r.get::<String, _>("account"),
+                        "kind": r.get::<String, _>("kind"),
+                        "state": r.get::<String, _>("state"),
+                        "requested_at": r.get::<String, _>("requested_at"),
+                        "completed_at": r.get::<Option<String>, _>("completed_at"),
+                        "result_ref": r.get::<Option<String>, _>("result_ref"),
+                    })
                 })
-            }).collect())
+                .collect())
         }
         Backend::Postgres => {
             let rows = sqlx::query("SELECT id, account, kind, state, requested_at, completed_at, result_ref FROM privacy_requests WHERE account = $1 ORDER BY requested_at DESC")
                 .bind(account)
                 .fetch_all(db.postgres_pool().expect("postgres"))
                 .await?;
-            Ok(rows.iter().map(|r| {
-                serde_json::json!({
-                    "id": r.get::<String, _>("id"),
-                    "account": r.get::<String, _>("account"),
-                    "kind": r.get::<String, _>("kind"),
-                    "state": r.get::<String, _>("state"),
-                    "requested_at": r.get::<String, _>("requested_at"),
-                    "completed_at": r.get::<Option<String>, _>("completed_at"),
-                    "result_ref": r.get::<Option<String>, _>("result_ref"),
+            Ok(rows
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "id": r.get::<String, _>("id"),
+                        "account": r.get::<String, _>("account"),
+                        "kind": r.get::<String, _>("kind"),
+                        "state": r.get::<String, _>("state"),
+                        "requested_at": r.get::<String, _>("requested_at"),
+                        "completed_at": r.get::<Option<String>, _>("completed_at"),
+                        "result_ref": r.get::<Option<String>, _>("result_ref"),
+                    })
                 })
-            }).collect())
+                .collect())
         }
     }
 }
@@ -190,10 +196,7 @@ pub async fn list_privacy_requests(
 // Abuse status
 // ---------------------------------------------------------------------------
 
-pub async fn check_abuse_status(
-    db: &Database,
-    key: &str,
-) -> Result<(bool, i64), sqlx::Error> {
+pub async fn check_abuse_status(db: &Database, key: &str) -> Result<(bool, i64), sqlx::Error> {
     match db.backend() {
         Backend::Sqlite => {
             let row = sqlx::query("SELECT count, blocked_until FROM abuse_counters WHERE key = ?")
@@ -215,7 +218,10 @@ pub async fn check_abuse_status(
                 .fetch_optional(db.postgres_pool().expect("postgres"))
                 .await?;
             match row {
-                Some(r) => Ok((r.get::<Option<String>, _>("blocked_until").is_some(), r.get::<i64, _>("count"))),
+                Some(r) => Ok((
+                    r.get::<Option<String>, _>("blocked_until").is_some(),
+                    r.get::<i64, _>("count"),
+                )),
                 None => Ok((false, 0)),
             }
         }

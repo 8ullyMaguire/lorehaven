@@ -136,46 +136,49 @@ pub async fn revoke_token(db: &Database, token_id: &str) -> Result<(), sqlx::Err
 // Token listing
 // ---------------------------------------------------------------------------
 
-pub async fn list_tokens(
-    db: &Database,
-    account: &str,
-) -> Result<Vec<Value>, sqlx::Error> {
+pub async fn list_tokens(db: &Database, account: &str) -> Result<Vec<Value>, sqlx::Error> {
     match db.backend() {
         Backend::Sqlite => {
             let rows = sqlx::query("SELECT id, account_id, name, scopes, created_at, last_used_at, expires_at, revoked_at FROM api_tokens WHERE account_id = ? AND revoked_at IS NULL ORDER BY created_at DESC")
                 .bind(account)
                 .fetch_all(db.sqlite_pool().expect("sqlite"))
                 .await?;
-            Ok(rows.iter().map(|r| {
-                serde_json::json!({
-                    "id": r.get::<String, _>("id"),
-                    "account_id": r.get::<String, _>("account_id"),
-                    "name": r.get::<String, _>("name"),
-                    "scopes": r.get::<String, _>("scopes"),
-                    "created_at": r.get::<String, _>("created_at"),
-                    "last_used_at": r.get::<Option<String>, _>("last_used_at"),
-                    "expires_at": r.get::<Option<String>, _>("expires_at"),
-                    "revoked_at": r.get::<Option<String>, _>("revoked_at"),
+            Ok(rows
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "id": r.get::<String, _>("id"),
+                        "account_id": r.get::<String, _>("account_id"),
+                        "name": r.get::<String, _>("name"),
+                        "scopes": r.get::<String, _>("scopes"),
+                        "created_at": r.get::<String, _>("created_at"),
+                        "last_used_at": r.get::<Option<String>, _>("last_used_at"),
+                        "expires_at": r.get::<Option<String>, _>("expires_at"),
+                        "revoked_at": r.get::<Option<String>, _>("revoked_at"),
+                    })
                 })
-            }).collect())
+                .collect())
         }
         Backend::Postgres => {
             let rows = sqlx::query("SELECT id::text, account_id, name, scopes, created_at, last_used_at, expires_at, revoked_at FROM api_tokens WHERE account_id = $1 AND revoked_at IS NULL ORDER BY created_at DESC")
                 .bind(account)
                 .fetch_all(db.postgres_pool().expect("postgres"))
                 .await?;
-            Ok(rows.iter().map(|r| {
-                serde_json::json!({
-                    "id": r.get::<String, _>("id"),
-                    "account_id": r.get::<String, _>("account_id"),
-                    "name": r.get::<String, _>("name"),
-                    "scopes": r.get::<String, _>("scopes"),
-                    "created_at": r.get::<String, _>("created_at"),
-                    "last_used_at": r.get::<Option<String>, _>("last_used_at"),
-                    "expires_at": r.get::<Option<String>, _>("expires_at"),
-                    "revoked_at": r.get::<Option<String>, _>("revoked_at"),
+            Ok(rows
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "id": r.get::<String, _>("id"),
+                        "account_id": r.get::<String, _>("account_id"),
+                        "name": r.get::<String, _>("name"),
+                        "scopes": r.get::<String, _>("scopes"),
+                        "created_at": r.get::<String, _>("created_at"),
+                        "last_used_at": r.get::<Option<String>, _>("last_used_at"),
+                        "expires_at": r.get::<Option<String>, _>("expires_at"),
+                        "revoked_at": r.get::<Option<String>, _>("revoked_at"),
+                    })
                 })
-            }).collect())
+                .collect())
         }
     }
 }
