@@ -1428,6 +1428,94 @@ async fn seed_space_work(fx: &Fixture, space_id: &str, work_id: &str, position: 
     result.expect("seed space_work");
 }
 
+/// A scoped door pages: a two-page walk over a canon returns every item once.
+///
+/// The door used to answer with a silent `LIMIT 50`, so a canon of sixty works
+/// was twenty works short with nothing in the response to say so. The cursor is
+/// the whole ordering key (position, then created_at, then id), because that is
+/// what the ORDER BY compares — a cursor carrying only the id cannot advance
+/// this ordering at all, and one carrying only the position repeats a block.
+#[tokio::test]
+async fn the_canon_door_pages_with_a_cursor() {
+    let fx = Fixture::new("canon-pagination").await;
+    let mut owner = fx.client();
+    register(&mut owner, "pager@example.com", "pager").await;
+    let pseud_id = author_pseud_id(&fx, "pager@example.com").await;
+
+    let canon_id = seed_canon(&fx, 300, "Paged Canon").await;
+    let mut expected = Vec::new();
+    for n in 1..=5u32 {
+        let work_id = seed_work(
+            &fx,
+            n,
+            &pseud_id,
+            &format!("Paged Work {n}"),
+            "public",
+            "published",
+            &format!("2026-09-0{n}T00:00:00Z"),
+        )
+        .await;
+        seed_canon_work(&fx, &canon_id, &work_id, n as i32).await;
+        expected.push(work_id);
+    }
+
+    let mut anon = fx.client();
+    let mut cursor: Option<String> = None;
+    let mut seen: Vec<String> = Vec::new();
+    let mut pages = 0;
+    loop {
+        pages += 1;
+        assert!(pages <= 6, "the walk must terminate, not loop for ever");
+        let uri = match &cursor {
+            Some(cursor) => format!("/api/v1/canons/{canon_id}/media?limit=2&cursor={cursor}"),
+            None => format!("/api/v1/canons/{canon_id}/media?limit=2"),
+        };
+        let (status, body) = anon.get(&uri).await;
+        assert_eq!(status, StatusCode::OK, "page {pages}: {body}");
+        for item in body["items"].as_array().expect("items array") {
+            seen.push(item["id"].as_str().expect("id").to_owned());
+        }
+        match body["next_cursor"].as_str() {
+            Some(next) if !next.is_empty() => cursor = Some(next.to_owned()),
+            _ => break,
+        }
+    }
+
+    assert_eq!(pages, 3, "five items at two per page is three pages");
+    assert_eq!(
+        seen, expected,
+        "the walk must return every item exactly once, in canon order"
+    );
+
+    // A page that is not full ends the walk: no cursor, no empty page.
+    let (status, body) = anon
+        .get(&format!("/api/v1/canons/{canon_id}/media?limit=50"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["next_cursor"].is_null(), "{body}");
+
+    // The limit is validated rather than silently clamped.
+    let (status, body) = anon
+        .get(&format!("/api/v1/canons/{canon_id}/media?limit=0"))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "a zero limit is refused: {body}"
+    );
+
+    let (status, body) = anon
+        .get(&format!("/api/v1/canons/{canon_id}/media?cursor=nonsense"))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "a malformed cursor is refused, not treated as the first page: {body}"
+    );
+
+    fx.cleanup().await;
+}
+
 #[tokio::test]
 async fn canon_and_space_doors_return_scoped_media() {
     let fx = Fixture::new("canon-space").await;

@@ -4,6 +4,7 @@ pub mod admin;
 pub mod auth;
 pub mod collaborators;
 pub mod community;
+pub mod dashboard;
 pub mod derivative;
 pub mod discovery;
 pub mod economy;

@@ -78,7 +78,7 @@ async fn sweep_idle_scratch_databases(admin: &Database) {
         return;
     }
 
-    let Ok(pool) = admin.postgres_pool() else {
+    let Some(pool) = admin.postgres_pool() else {
         return;
     };
     let idle: Vec<String> = match sqlx::query_scalar(
@@ -107,7 +107,9 @@ async fn sweep_idle_scratch_databases(admin: &Database) {
         {
             Ok(_) => eprintln!("test-support: dropped the leaked scratch database {name}"),
             Err(error) => {
-                eprintln!("test-support: could not drop the leaked scratch database {name}: {error}")
+                eprintln!(
+                    "test-support: could not drop the leaked scratch database {name}: {error}"
+                )
             }
         }
     }

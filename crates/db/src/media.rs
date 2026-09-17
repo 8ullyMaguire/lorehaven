@@ -1072,7 +1072,9 @@ pub async fn canon_media(
     db: &Database,
     canon_id: &str,
     account_id: Option<&str>,
-) -> Result<(Vec<MediaRecord>, String)> {
+    limit: i64,
+    cursor: Option<&str>,
+) -> Result<(Vec<MediaRecord>, String, Option<String>)> {
     // First: check canon exists and get its name.
     let name = {
         let sqlite = "SELECT name FROM canons WHERE id = ?".to_string();
@@ -1097,46 +1099,146 @@ pub async fn canon_media(
 
     // Second: list works in the canon, with eligibility filter.
     let (eligible_sqlite, eligible_pg, values) = eligibility_filter(account_id);
+    // The cursor carries the whole ordering key — position, then created_at,
+    // then id — because that is what the ORDER BY compares. An id-only or
+    // position-only cursor against this ordering skips and repeats rows.
+    let (cursor_sqlite, cursor_pg) = canon_cursor_clause(cursor, "cw", "w")?;
     let sqlite = format!(
         "SELECT w.id, w.title, w.summary, w.format, w.rating, w.visibility, w.lifecycle,
-        p.account_id AS owning_account_id, w.created_at, w.updated_at, w.version
+        p.account_id AS owning_account_id, w.created_at, w.updated_at, w.version,
+        cw.position AS position
         FROM canon_works cw
         JOIN works w ON w.id = cw.work_id
         JOIN pseuds p ON p.id = w.owner_pseud_id
-        WHERE cw.canon_id = ? AND {eligible_sqlite}
-        ORDER BY cw.position, w.created_at DESC, w.id ASC LIMIT 50"
+        WHERE cw.canon_id = ? AND {eligible_sqlite}{cursor_sqlite}
+        ORDER BY cw.position, w.created_at DESC, w.id ASC LIMIT ?"
     );
     let postgres = format!(
         "SELECT w.id::text AS id, w.title, w.summary, w.format, w.rating, w.visibility, w.lifecycle,
-        p.account_id::text AS owning_account_id, w.created_at, w.updated_at, w.version::bigint
+        p.account_id::text AS owning_account_id, w.created_at, w.updated_at, w.version::bigint,
+        cw.position::bigint AS position
         FROM canon_works cw
         JOIN works w ON w.id = cw.work_id
         JOIN pseuds p ON p.id = w.owner_pseud_id
-        WHERE cw.canon_id = ?::uuid AND {eligible_pg}
-        ORDER BY cw.position, w.created_at DESC, w.id ASC LIMIT 50"
+        WHERE cw.canon_id = ?::uuid AND {eligible_pg}{cursor_pg}
+        ORDER BY cw.position, w.created_at DESC, w.id ASC LIMIT ?"
     );
     let sql = db.sql(&sqlite, &postgres);
     let rows = match db.backend() {
         Backend::Sqlite => {
-            let mut query = sqlx::query_as::<_, MediaRecord>(&sql).bind(canon_id);
+            let mut query = sqlx::query_as::<_, ScopedMedia>(&sql).bind(canon_id);
             for value in &values {
                 query = query.bind(value);
             }
+            for value in canon_cursor_binds(cursor) {
+                query = query.bind(value);
+            }
             query
+                .bind(limit)
                 .fetch_all(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
-            let mut query = sqlx::query_as::<_, MediaRecord>(&sql).bind(canon_id);
+            let mut query = sqlx::query_as::<_, ScopedMedia>(&sql).bind(canon_id);
             for value in &values {
                 query = query.bind(value);
             }
+            for value in canon_cursor_binds(cursor) {
+                query = query.bind(value);
+            }
             query
+                .bind(limit)
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
                 .await?
         }
     };
-    Ok((rows, name))
+    let next_cursor = scoped_next_cursor(&rows, limit);
+    Ok((
+        rows.into_iter().map(|row| row.record).collect(),
+        name,
+        next_cursor,
+    ))
+}
+
+/// The keyset predicate for a canon/space page, in both dialects.
+///
+/// `table` is the association table (`canon_works`/`space_works`) and `work` the
+/// works alias; both orderings put the association's `position` first and then
+/// the work's `created_at DESC, id ASC`, which is exactly what this compares.
+fn canon_cursor_clause(cursor: Option<&str>, table: &str, work: &str) -> Result<(String, String)> {
+    let Some(cursor) = cursor else {
+        return Ok((String::new(), String::new()));
+    };
+    let mut parts = cursor.rsplitn(3, '|');
+    let Some(id) = parts.next() else {
+        anyhow::bail!("malformed scoped cursor");
+    };
+    let Some(created_at) = parts.next() else {
+        anyhow::bail!("malformed scoped cursor");
+    };
+    let Some(position) = parts.next() else {
+        anyhow::bail!("malformed scoped cursor");
+    };
+    if position.is_empty() || created_at.is_empty() || id.is_empty() {
+        anyhow::bail!("malformed scoped cursor");
+    }
+    let sqlite = format!(
+        " AND ({table}.position > ? OR ({table}.position = ? AND ({work}.created_at < ? OR \
+          ({work}.created_at = ? AND {work}.id > ?))))"
+    );
+    let postgres = format!(
+        " AND ({table}.position > ? OR ({table}.position = ? AND ({work}.created_at < ?::text OR \
+          ({work}.created_at = ?::text AND {work}.id > ?::uuid))))"
+    );
+    Ok((sqlite, postgres))
+}
+
+/// The binds the cursor predicate takes, in order: position, position,
+/// created_at, created_at, id.
+fn canon_cursor_binds(cursor: Option<&str>) -> Vec<String> {
+    let Some(cursor) = cursor else {
+        return Vec::new();
+    };
+    let mut parts = cursor.rsplitn(3, '|');
+    let (Some(id), Some(created_at), Some(position)) = (parts.next(), parts.next(), parts.next())
+    else {
+        return Vec::new();
+    };
+    vec![
+        position.to_owned(),
+        position.to_owned(),
+        created_at.to_owned(),
+        created_at.to_owned(),
+        id.to_owned(),
+    ]
+}
+
+/// The next cursor for a scoped (canon/space) page: the last row's ordering key.
+///
+/// Emitted only for a full page, so the last page of a walk answers without one
+/// and a client stops naturally rather than asking for an empty page forever.
+fn scoped_next_cursor(rows: &[ScopedMedia], limit: i64) -> Option<String> {
+    if rows.len() as i64 != limit {
+        return None;
+    }
+    rows.last().map(|row| {
+        format!(
+            "{}|{}|{}",
+            row.position, row.record.created_at, row.record.id
+        )
+    })
+}
+
+/// A media record in a scoped list, with the association's position.
+///
+/// The position is not part of `MediaRecord` — it belongs to the canon or space
+/// row, not to the work — but it is half of the ordering key, so a page that
+/// wants a cursor has to carry it out of the query.
+#[derive(Debug, Clone, FromRow)]
+struct ScopedMedia {
+    #[sqlx(flatten)]
+    record: MediaRecord,
+    position: i64,
 }
 
 /// List media in a space, with the same eligibility filter as list_media_filtered.
@@ -1145,7 +1247,9 @@ pub async fn space_media(
     db: &Database,
     space_id: &str,
     account_id: Option<&str>,
-) -> Result<(Vec<MediaRecord>, String)> {
+    limit: i64,
+    cursor: Option<&str>,
+) -> Result<(Vec<MediaRecord>, String, Option<String>)> {
     let name = {
         let sqlite = "SELECT name FROM spaces WHERE id = ?".to_string();
         let postgres = "SELECT name FROM spaces WHERE id = ?::uuid".to_string();
@@ -1168,44 +1272,60 @@ pub async fn space_media(
     let name = name.ok_or_else(|| anyhow::anyhow!("space not found"))?;
 
     let (eligible_sqlite, eligible_pg, values) = eligibility_filter(account_id);
+    let (cursor_sqlite, cursor_pg) = canon_cursor_clause(cursor, "sw", "w")?;
     let sqlite = format!(
         "SELECT w.id, w.title, w.summary, w.format, w.rating, w.visibility, w.lifecycle,
-        p.account_id AS owning_account_id, w.created_at, w.updated_at, w.version
+        p.account_id AS owning_account_id, w.created_at, w.updated_at, w.version,
+        sw.position AS position
         FROM space_works sw
         JOIN works w ON w.id = sw.work_id
         JOIN pseuds p ON p.id = w.owner_pseud_id
-        WHERE sw.space_id = ? AND {eligible_sqlite}
-        ORDER BY sw.position, w.created_at DESC, w.id ASC LIMIT 50"
+        WHERE sw.space_id = ? AND {eligible_sqlite}{cursor_sqlite}
+        ORDER BY sw.position, w.created_at DESC, w.id ASC LIMIT ?"
     );
     let postgres = format!(
         "SELECT w.id::text AS id, w.title, w.summary, w.format, w.rating, w.visibility, w.lifecycle,
-        p.account_id::text AS owning_account_id, w.created_at, w.updated_at, w.version::bigint
+        p.account_id::text AS owning_account_id, w.created_at, w.updated_at, w.version::bigint,
+        sw.position::bigint AS position
         FROM space_works sw
         JOIN works w ON w.id = sw.work_id
         JOIN pseuds p ON p.id = w.owner_pseud_id
-        WHERE sw.space_id = ?::uuid AND {eligible_pg}
-        ORDER BY sw.position, w.created_at DESC, w.id ASC LIMIT 50"
+        WHERE sw.space_id = ?::uuid AND {eligible_pg}{cursor_pg}
+        ORDER BY sw.position, w.created_at DESC, w.id ASC LIMIT ?"
     );
     let sql = db.sql(&sqlite, &postgres);
     let rows = match db.backend() {
         Backend::Sqlite => {
-            let mut query = sqlx::query_as::<_, MediaRecord>(&sql).bind(space_id);
+            let mut query = sqlx::query_as::<_, ScopedMedia>(&sql).bind(space_id);
             for value in &values {
                 query = query.bind(value);
             }
+            for value in canon_cursor_binds(cursor) {
+                query = query.bind(value);
+            }
             query
+                .bind(limit)
                 .fetch_all(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
-            let mut query = sqlx::query_as::<_, MediaRecord>(&sql).bind(space_id);
+            let mut query = sqlx::query_as::<_, ScopedMedia>(&sql).bind(space_id);
             for value in &values {
                 query = query.bind(value);
             }
+            for value in canon_cursor_binds(cursor) {
+                query = query.bind(value);
+            }
             query
+                .bind(limit)
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
                 .await?
         }
     };
-    Ok((rows, name))
+    let next_cursor = scoped_next_cursor(&rows, limit);
+    Ok((
+        rows.into_iter().map(|row| row.record).collect(),
+        name,
+        next_cursor,
+    ))
 }
