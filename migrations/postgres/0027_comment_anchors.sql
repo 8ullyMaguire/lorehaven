@@ -4,6 +4,6 @@
 
 ALTER TABLE comments ADD COLUMN IF NOT EXISTS anchor_kind TEXT;
 ALTER TABLE comments ADD COLUMN IF NOT EXISTS anchor_value TEXT;
-ALTER TABLE comments ADD COLUMN IF NOT EXISTS anchor_chapter_id TEXT REFERENCES chapters(id) ON DELETE SET NULL;
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS anchor_chapter_id UUID REFERENCES chapters(id) ON DELETE SET NULL;
 
 CREATE INDEX IF NOT EXISTS comments_anchor ON comments (subject_type, subject_id, anchor_kind, anchor_value) WHERE anchor_kind IS NOT NULL;

@@ -28,15 +28,23 @@ pub async fn create_narration_edition(
     match db.backend() {
         Backend::Sqlite => {
             let _ = sqlx::query(&sql)
-                .bind(&id).bind(work_id).bind(label)
-                .bind(parent_edition_id).bind(&now).bind(&now)
+                .bind(&id)
+                .bind(work_id)
+                .bind(label)
+                .bind(parent_edition_id)
+                .bind(&now)
+                .bind(&now)
                 .execute(db.sqlite_pool().expect("sqlite handle"))
                 .await?;
         }
         Backend::Postgres => {
             let _ = sqlx::query(&sql)
-                .bind(&id).bind(work_id).bind(label)
-                .bind(parent_edition_id).bind(&now).bind(&now)
+                .bind(&id)
+                .bind(work_id)
+                .bind(label)
+                .bind(parent_edition_id)
+                .bind(&now)
+                .bind(&now)
                 .execute(db.postgres_pool().expect("postgres handle"))
                 .await?;
         }
@@ -62,20 +70,28 @@ pub async fn add_narration_creator(
         "INSERT INTO media_edition_creators (id, edition_id, creator_id, role, created_at)
          VALUES (?, ?, ?, ?, ?)"
             .to_string(),
-        "INSERT INTO media_edition_creators (id::uuid, edition_id::uuid, creator_id, role, created_at)
+        "INSERT INTO media_edition_creators (id, edition_id, creator_id, role, created_at)
          VALUES (?::uuid, ?::uuid, ?, ?, ?)"
             .to_string(),
     );
     match db.backend() {
         Backend::Sqlite => {
             let _ = sqlx::query(&sql)
-                .bind(&id).bind(edition_id).bind(creator_id).bind(role).bind(&now)
+                .bind(&id)
+                .bind(edition_id)
+                .bind(creator_id)
+                .bind(role)
+                .bind(&now)
                 .execute(db.sqlite_pool().expect("sqlite handle"))
                 .await?;
         }
         Backend::Postgres => {
             let _ = sqlx::query(&sql)
-                .bind(&id).bind(edition_id).bind(creator_id).bind(role).bind(&now)
+                .bind(&id)
+                .bind(edition_id)
+                .bind(creator_id)
+                .bind(role)
+                .bind(&now)
                 .execute(db.postgres_pool().expect("postgres handle"))
                 .await?;
         }
