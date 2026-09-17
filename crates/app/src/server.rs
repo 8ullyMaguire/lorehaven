@@ -475,6 +475,13 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // TTS narration (M26 / spec §32.5). Edition reads are public;
+        // requesting a narration requires a session.
+        .merge(classified(
+            routes::narration::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Controlled digital lending (M25 / spec §32.4). All endpoints require
         // a session: borrower identity is needed to grant or revoke a loan.
         .merge(classified(

@@ -109,6 +109,13 @@ pub enum JobKind {
     /// Build a derivative rendition (EPUB/PDF/text) or extract OCR from a
     /// scanned upload (M25 / spec §32.4).
     Derivative,
+    /// Produce or regenerate a TTS narration edition (M26 / spec §32.5).
+    ///
+    /// Author-approved machine narration. The worker invokes the configured
+    /// AI provider's TTS capability; the output is stored as a derivative
+    /// audio blob and a `narration` edition is created with the machine
+    /// producer labeled per §22.6/§30.8.
+    Narration,
 }
 
 impl JobKind {
@@ -124,6 +131,7 @@ impl JobKind {
             Self::Maintenance => "maintenance",
             Self::UpdateCheck => "update_check",
             Self::Derivative => "derivative",
+            Self::Narration => "narration",
         }
     }
 
@@ -139,6 +147,7 @@ impl JobKind {
             "maintenance" => Self::Maintenance,
             "update_check" => Self::UpdateCheck,
             "derivative" => Self::Derivative,
+            "narration" => Self::Narration,
             _ => return None,
         })
     }
