@@ -786,10 +786,11 @@ diagnosed rather than believed:
 | 1–3 | 14/11, 12/12, 21/5 | the suite's own assumptions (sign-in lands on `/`, the pseud page is `/pseud`, a review is private until published, `#my-exports` is a heading id), then a `pkill` that killed the e2e server mid-run (eleven `ERR_CONNECTION_REFUSED`) |
 | 5 | 26 / 1 | **product**: test 17, the discarded typography choice (fixed in `ac22a89`) |
 | 6 | 27 passed | — |
-| 7 | 26 / 1 | test 18b: it clicked "the first enabled Save changes" and asserted `/saved/i`, which matches "Unsaved changes" |
-| 8 | 26 / 1 | test 18b again: the panel locator named its ancestor by a button label that changes after the save |
-| 9 | 25 / 1 | test 16: the forum reply never landed, so the inbox was asked about a notification that could not exist. It passes in isolation; the test now asserts the reply landed first, so the next occurrence points at the post rather than the inbox |
+| 7 | 26 passed / 1 failed | test 18b: it clicked "the first enabled Save changes" and asserted `/saved/i`, which matches "Unsaved changes" |
+| 8 | 25 passed / 2 failed | test 18b again (the panel locator named its ancestor by a button label that changes after the save) **and** test 23, whose shelf never appeared — it now asserts the POST was accepted instead of waiting on a list that was never going to change |
+| 9 | 25 passed / 1 failed | test 16: the forum reply never landed, so the inbox was asked about a notification that could not exist. It passes in isolation; the test now asserts the reply landed first, so the next occurrence points at the post rather than the inbox |
 | 10 | 27 passed (25 green + 2 `test.fail()`) | — |
+| 11 | 27 passed | — |
 
 The pattern worth keeping: a red test in this suite has, so far, been my own
 loose assertion more often than a product defect — twice a success assertion that

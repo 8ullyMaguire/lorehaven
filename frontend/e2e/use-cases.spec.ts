@@ -483,7 +483,18 @@ test('23. a reader creates a shelf and sees their storage', async ({ page }) => 
   await page.goto('/library');
   await expect(page.getByRole('heading', { name: 'Shelves' })).toBeVisible();
   await page.fill('#new-shelf-name', 'Use case shelf');
-  await page.click('button:text-is("Add")');
+  await expect(page.locator('#new-shelf-name')).toHaveValue('Use case shelf');
+  const add = page.locator('button:text-is("Add")');
+  await expect(add).toBeEnabled();
+  // The shelf only appears if the POST was accepted; a refused one used to
+  // leave this test waiting ten seconds on a list that was never going to
+  // change. Fail at the response instead, where the reason is.
+  const posted = page.waitForResponse(
+    (r) => r.url().includes('/api/v1/shelves') && r.request().method() === 'POST',
+  );
+  await add.click();
+  const response = await posted;
+  expect(response.status(), `creating a shelf: ${response.status()}`).toBeLessThan(400);
   await expect(page.getByRole('button', { name: /Use case shelf/ })).toBeVisible();
 });
 
