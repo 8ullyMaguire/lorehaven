@@ -460,9 +460,13 @@ impl Worker {
                 crate::library_updates::run(state, &payload).await
             }
             JobKind::Reindex => {
-                let work_id: String = serde_json::from_str(&job.payload).map_err(|error| {
-                    HandlerError::Fatal(format!("the reindex payload is not JSON: {error}"))
-                })?;
+                // The payload is the object shape every other kind uses, because
+                // the topic handler that enqueues it (`server.rs`, topic
+                // `publish.index`) builds `{"work_id": "…"}`. This arm parsed it
+                // as a bare string, so every publish-time reindex failed
+                // ("invalid type: map, expected a string") and a fresh instance
+                // never indexed anything: the search doors had an empty index.
+                let work_id = Self::payload_id(&job.payload, "work_id", kind.as_str())?;
                 let work_id: lorehaven_domain::ids::WorkId = work_id
                     .parse()
                     .map_err(|_| HandlerError::Fatal(format!("invalid work id: {work_id}")))?;

@@ -140,7 +140,18 @@ async fn rebuild_work_index_postgres(
     Ok(())
 }
 
-/// Search works by a free-text term (simple body search).
+/// Search published public works by a free-text term (simple body search).
+///
+/// This is the anonymous door (`GET /api/v1/public/search`), so the predicate
+/// is the anonymous one from `ast_search`: only `published` works with
+/// `visibility = 'public'`. The term index is not a visibility boundary — the
+/// worker fills it from chapter text regardless of lifecycle, and a deindex
+/// event can lag or be overtaken by a `Reindex` that lands after a withdrawal,
+/// so the route is what keeps an unpublished work out of the results (§3.3).
+///
+/// `word_count` is summed from live chapter revisions, the same way
+/// `ast_search` computes it: the denormalised `works.word_count` column is not
+/// maintained, so reading it reported zero for every result.
 pub async fn search_works(db: &Database, needle: &str, limit: i64) -> Result<Vec<SearchResult>> {
     let needle = needle.trim();
     if needle.is_empty() {
@@ -160,11 +171,16 @@ pub async fn search_works(db: &Database, needle: &str, limit: i64) -> Result<Vec
                 .collect::<Vec<_>>()
                 .join(" OR ");
             let sql = format!(
-                "SELECT w.id, w.title, a.handle AS author_handle, w.word_count, COUNT(t.term) AS score \
+                "SELECT w.id, w.title, a.handle AS author_handle, \
+                        (SELECT COALESCE(SUM(cr.word_count), 0) \
+                         FROM chapters c \
+                         JOIN chapter_revisions cr ON cr.id = c.current_revision_id \
+                         WHERE c.work_id = w.id AND c.deleted_at IS NULL) AS word_count, \
+                        COUNT(t.term) AS score \
                  FROM works_index_terms t \
                  JOIN works w ON w.id = t.work_id \
                  JOIN pseuds a ON a.id = w.owner_pseud_id \
-                 WHERE {} \
+                 WHERE ({}) AND w.lifecycle = 'published' AND w.visibility = 'public' \
                  GROUP BY w.id \
                  ORDER BY score DESC \
                  LIMIT ?",
@@ -200,12 +216,17 @@ pub async fn search_works(db: &Database, needle: &str, limit: i64) -> Result<Vec
                 .collect::<Vec<_>>()
                 .join(" OR ");
             let sql = format!(
-                "SELECT w.id::text, w.title, a.handle AS author_handle, w.word_count, COUNT(t.term) AS score \
+                "SELECT w.id::text, w.title, a.handle AS author_handle, \
+                        (SELECT COALESCE(SUM(cr.word_count), 0)::bigint \
+                         FROM chapters c \
+                         JOIN chapter_revisions cr ON cr.id = c.current_revision_id \
+                         WHERE c.work_id = w.id AND c.deleted_at IS NULL) AS word_count, \
+                        COUNT(t.term) AS score \
                  FROM works_index_terms t \
                  JOIN works w ON w.id = t.work_id \
                  JOIN pseuds a ON a.id = w.owner_pseud_id::uuid \
-                 WHERE {} \
-                 GROUP BY w.id, w.title, a.handle, w.word_count \
+                 WHERE ({}) AND w.lifecycle = 'published' AND w.visibility = 'public' \
+                 GROUP BY w.id, w.title, a.handle \
                  ORDER BY score DESC \
                  LIMIT ${}",
                 like_placeholders,

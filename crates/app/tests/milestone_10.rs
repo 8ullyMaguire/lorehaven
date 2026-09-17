@@ -9,7 +9,8 @@ use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
-use lorehaven_db::DatabaseConfig;
+use lorehaven_app::worker::{Worker, WorkerOptions};
+use lorehaven_db::{Backend, DatabaseConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -508,5 +509,240 @@ async fn public_work_unknown_id_returns_404() {
         .get("/api/v1/public/works/00000000-0000-0000-0000-000000000000")
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "unknown id must 404: {body}");
+    harness.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// Public search (the anonymous door)
+// ---------------------------------------------------------------------------
+
+/// Put a term in the index without running the worker.
+///
+/// The index is filled by a `Reindex` job, so a test that wants to ask what the
+/// search door does with an indexed work has to write the row itself. Both
+/// dialects, because the predicate under test is written twice.
+async fn seed_index_term(harness: &Harness, work_id: &str, term: &str) {
+    let sql = harness.tdb.db().sql(
+        "INSERT INTO works_index_terms (work_id, term, pos) VALUES (?, ?, 0)",
+        "INSERT INTO works_index_terms (work_id, term, pos) VALUES ($1::uuid, $2, 0)",
+    );
+    match harness.tdb.db().backend() {
+        Backend::Sqlite => {
+            sqlx::query(sql.as_ref())
+                .bind(work_id)
+                .bind(term)
+                .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
+                .await
+                .expect("seed index term");
+        }
+        Backend::Postgres => {
+            sqlx::query(sql.as_ref())
+                .bind(work_id)
+                .bind(term)
+                .execute(harness.tdb.db().postgres_pool().expect("postgres"))
+                .await
+                .expect("seed index term");
+        }
+    }
+}
+
+/// Set a work's visibility without going through the route that would also
+/// enqueue its deindex event: the point is the state where the index still
+/// holds a work the public may no longer see.
+async fn set_visibility(harness: &Harness, work_id: &str, visibility: &str) {
+    let sql = harness.tdb.db().sql(
+        "UPDATE works SET visibility = ? WHERE id = ?",
+        "UPDATE works SET visibility = $1 WHERE id = $2::uuid",
+    );
+    match harness.tdb.db().backend() {
+        Backend::Sqlite => {
+            sqlx::query(sql.as_ref())
+                .bind(visibility)
+                .bind(work_id)
+                .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
+                .await
+                .expect("set visibility");
+        }
+        Backend::Postgres => {
+            sqlx::query(sql.as_ref())
+                .bind(visibility)
+                .bind(work_id)
+                .execute(harness.tdb.db().postgres_pool().expect("postgres"))
+                .await
+                .expect("set visibility");
+        }
+    }
+}
+
+/// A work with a chapter, left unpublished, carrying a distinctive word in the
+/// text so the index row for it is unambiguous.
+async fn draft_with_marker(client: &mut Client, marker: &str) -> String {
+    let (status, body) = client
+        .post(
+            "/api/v1/works",
+            json!({ "title": format!("{marker} draft") }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "create draft: {body}");
+    let work_id = body["id"].as_str().expect("id").to_owned();
+    let (status, body) = client
+        .post(
+            &format!("/api/v1/works/{work_id}/chapters"),
+            json!({ "title": "One" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "chapter: {body}");
+    let chapter = body["id"].as_str().expect("chapter").to_owned();
+    let version = body["version"].as_i64().expect("version");
+    let doc = json!({ "type": "doc", "content": [{ "type": "paragraph", "content": [
+        { "type": "text", "text": format!("A {marker} grazes in the margins.") }] }] });
+    let (status, body) = client
+        .request(
+            "PATCH",
+            &format!("/api/v1/chapters/{chapter}"),
+            Some(json!({ "expected_version": version, "document": doc })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "save draft chapter: {body}");
+    work_id
+}
+
+fn titles(body: &Value) -> Vec<String> {
+    body["results"]
+        .as_array()
+        .expect("results")
+        .iter()
+        .map(|r| r["title"].as_str().unwrap_or_default().to_owned())
+        .collect()
+}
+
+/// The index is not a visibility boundary: the worker fills it from chapter
+/// text whatever the work's lifecycle, and a deindex can lag or be overtaken by
+/// a `Reindex` that lands after a withdrawal. The anonymous door is what keeps
+/// an unpublished work out of the results (spec §3.3).
+#[tokio::test]
+async fn public_search_does_not_serve_a_draft_the_index_holds() {
+    let harness = Harness::new("public-search-draft").await;
+    let mut author = harness.client();
+    let _ = register(&mut author, "d@example.com", "DraftAuthor").await;
+    let work_id = draft_with_marker(&mut author, "zebracorn").await;
+    seed_index_term(&harness, &work_id, "zebracorn").await;
+
+    let mut anon = harness.client();
+    let (status, body) = anon.get("/api/v1/public/search?q=zebracorn").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        titles(&body).is_empty(),
+        "an unpublished work must not be served by the public search: {body}"
+    );
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn public_search_does_not_serve_a_restricted_work_the_index_holds() {
+    let harness = Harness::new("public-search-restricted").await;
+    let work_id = published_work(&harness, "e@example.com", "HiddenAuthor", "Quokkafish").await;
+    seed_index_term(&harness, &work_id, "quokkafish").await;
+    set_visibility(&harness, &work_id, "restricted").await;
+
+    let mut anon = harness.client();
+    let (status, body) = anon.get("/api/v1/public/search?q=quokkafish").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        titles(&body).is_empty(),
+        "a work the public may not see must not be served: {body}"
+    );
+    harness.cleanup().await;
+}
+
+/// The positive control for the two above: a published, public work the index
+/// holds is still found, and its word count is real rather than the unmaintained
+/// `works.word_count` column's zero.
+#[tokio::test]
+async fn public_search_serves_a_published_public_work_from_the_index() {
+    let harness = Harness::new("public-search-published").await;
+    let work_id = published_work(
+        &harness,
+        "f@example.com",
+        "FoundAuthor",
+        "Lighthouse Letters",
+    )
+    .await;
+    seed_index_term(&harness, &work_id, "lighthouse").await;
+
+    let mut anon = harness.client();
+    let (status, body) = anon.get("/api/v1/public/search?q=lighthouse").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        titles(&body),
+        vec!["Lighthouse Letters".to_owned()],
+        "{body}"
+    );
+    assert!(
+        body["results"][0]["word_count"].as_i64().unwrap_or(0) > 0,
+        "word_count must come from the live revisions, not works.word_count: {body}"
+    );
+    harness.cleanup().await;
+}
+
+/// A door bots call: no query is an empty result list, not a framework-shaped
+/// plain-text 400.
+#[tokio::test]
+async fn public_search_without_a_query_returns_an_empty_list() {
+    let harness = Harness::new("public-search-noquery").await;
+    let mut anon = harness.client();
+    let (status, body) = anon.get("/api/v1/public/search").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(titles(&body).len(), 0, "{body}");
+    harness.cleanup().await;
+}
+
+/// The publish path, end to end: the `publish.index` topic handler enqueues a
+/// reindex job whose payload is `{"work_id": "…"}`, the worker runs it, the term
+/// index fills, and the anonymous search finds the work.
+///
+/// This is the join between two files, and it was broken: the worker parsed the
+/// reindex payload as a bare string, so every publish-time reindex failed
+/// ("invalid type: map, expected a string") and a fresh instance served an empty
+/// index for every query — the search doors looked implemented and answered
+/// nothing.
+#[tokio::test]
+async fn publishing_indexes_the_work_so_the_public_search_can_find_it() {
+    let harness = Harness::new("public-search-publish").await;
+    let work_id =
+        published_work(&harness, "g@example.com", "IndexedAuthor", "Indexed Byline").await;
+
+    lorehaven_db::jobs::enqueue(
+        harness.tdb.db(),
+        lorehaven_domain::jobs::JobKind::Reindex,
+        &json!({ "work_id": work_id }).to_string(),
+        None,
+        None,
+        5,
+        &lorehaven_domain::jobs::RetryPolicy::default(),
+    )
+    .await
+    .expect("enqueue reindex");
+
+    let state = AppState::new(config_for(&harness.dir), harness.tdb.db().clone());
+    let report = Worker::new(WorkerOptions::default())
+        .run_once(&state)
+        .await
+        .expect("worker pass");
+    let (_, outcome) = report.job.expect("the reindex job must have run");
+    assert_eq!(
+        outcome,
+        lorehaven_domain::jobs::JobState::Succeeded,
+        "a publish-time reindex must not fail"
+    );
+
+    let mut anon = harness.client();
+    let (status, body) = anon.get("/api/v1/public/search?q=chapter").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        titles(&body),
+        vec!["Indexed Byline".to_owned()],
+        "the indexed work must be findable: {body}"
+    );
     harness.cleanup().await;
 }

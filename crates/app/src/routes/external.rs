@@ -70,7 +70,10 @@ pub async fn get_public_work(
 
 #[derive(Deserialize)]
 pub struct SearchQuery {
-    q: String,
+    /// Absent or blank means "no terms", which is an empty result list rather
+    /// than a framework-shaped 400 on a door bots call.
+    #[serde(default)]
+    q: Option<String>,
 }
 
 /// Public search.
@@ -79,7 +82,7 @@ pub async fn public_search(
     MaybeSession(_user): MaybeSession,
     Query(query): Query<SearchQuery>,
 ) -> ApiResult<Json<Value>> {
-    let needle = query.q.trim();
+    let needle = query.q.as_deref().unwrap_or("");
     let results = lorehaven_db::search::search_works(state.db(), needle, 50)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
