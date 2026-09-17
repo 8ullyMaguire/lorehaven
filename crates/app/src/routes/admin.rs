@@ -103,11 +103,14 @@ pub async fn create_privacy_request(
 pub async fn check_abuse_status(
     State(state): State<AppState>,
     Path(key): Path<String>,
+    MaybeSession(_user): MaybeSession,
 ) -> ApiResult<Json<Value>> {
     let (blocked, count) = lorehaven_db::admin::check_abuse_status(state.db(), &key)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
-    Ok(Json(json!({ "key": key, "blocked": blocked, "count": count })))
+    Ok(Json(
+        json!({ "key": key, "blocked": blocked, "count": count }),
+    ))
 }
 
 pub fn router() -> axum::Router<AppState> {

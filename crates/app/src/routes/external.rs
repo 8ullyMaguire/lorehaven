@@ -9,47 +9,63 @@ use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use uuid::Uuid;
 
+use lorehaven_db::collaboration;
 use lorehaven_db::content;
 use lorehaven_domain::WorkId;
 
 use crate::auth::MaybeSession;
 use crate::http::{ApiError, ApiResult};
+use crate::routes::works::{actor_for, reading_decision, Reading};
 use crate::state::AppState;
 
 // ---------------------------------------------------------------------------
 // Public read API
 // ---------------------------------------------------------------------------
 
-/// Get public work data.
+/// Get public work data. Returns 404 for drafts, unpublished,
+/// age-ineligible, or unknown ids — never leaks draft content.
 pub async fn get_public_work(
     State(state): State<AppState>,
     Path(work_id): Path<String>,
+    MaybeSession(session): MaybeSession,
 ) -> ApiResult<Json<Value>> {
-    let work_id: WorkId = work_id
-        .parse()
-        .map_err(|_| ApiError(lorehaven_domain::AppError::field("work_id", "invalid work id")))?;
+    let work_id: WorkId = work_id.parse().map_err(|_| {
+        ApiError(lorehaven_domain::AppError::field(
+            "work_id",
+            "invalid work id",
+        ))
+    })?;
     let work = content::find_work(state.db(), work_id)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
-    match work {
-        Some(w) => {
-            let work_json = json!({
-                "id": w.id.to_canonical_string(),
-                "title": w.title,
-                "summary": w.summary,
-                "language": w.language,
-                "rating": w.rating,
-                "visibility": w.visibility,
-                "lifecycle": w.lifecycle,
-                "completion": w.completion,
-                "scheduled_for": w.scheduled_for,
-                "published_at": w.published_at,
-                "withdrawn_at": w.withdrawn_at,
-            });
-            Ok(Json(json!({ "work": work_json })))
+    let work = match work {
+        Some(w) => w,
+        None => {
+            return Err(ApiError(lorehaven_domain::AppError::NotFound {
+                resource: "work",
+            }))
         }
-        None => Ok(Json(json!({ "work": null }))),
+    };
+    let actor = actor_for(session.as_ref());
+    let contributors = collaboration::contributors_for_work(state.db(), work_id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    match reading_decision(&state, actor.as_ref(), &work, &contributors).await {
+        Reading::Public => {}
+        Reading::Contributor => {}
+        Reading::Denied(e) => return Err(ApiError(e)),
     }
+    let work_json = json!({
+        "id": work.id.to_canonical_string(),
+        "title": work.title,
+        "summary": work.summary,
+        "language": work.language,
+        "rating": work.rating,
+        "lifecycle": work.lifecycle,
+        "completion": work.completion,
+        "published_at": work.published_at,
+    });
+    Ok(Json(json!({ "work": work_json })))
 }
 
 /// Public search.
@@ -59,7 +75,7 @@ pub async fn public_search(
 ) -> ApiResult<Json<Value>> {
     let results = lorehaven_db::search::search_works(state.db(), "", 50)
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     Ok(Json(json!({ "results": results })))
 }
 
@@ -216,6 +232,7 @@ pub async fn register_bot(
 pub async fn get_rss_feed(
     State(_state): State<AppState>,
     Path(_handle): Path<String>,
+    MaybeSession(_user): MaybeSession,
 ) -> ApiResult<Json<Value>> {
     Ok(Json(json!({ "feed": "rss" })))
 }
@@ -224,6 +241,7 @@ pub async fn get_rss_feed(
 pub async fn get_atom_feed(
     State(_state): State<AppState>,
     Path(_handle): Path<String>,
+    MaybeSession(_user): MaybeSession,
 ) -> ApiResult<Json<Value>> {
     Ok(Json(json!({ "feed": "atom" })))
 }
@@ -271,7 +289,10 @@ pub async fn subscribe_push(
 // ---------------------------------------------------------------------------
 
 /// Federation inbox.
-pub async fn federation_inbox(State(_state): State<AppState>) -> ApiResult<Json<Value>> {
+pub async fn federation_inbox(
+    State(_state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
+) -> ApiResult<Json<Value>> {
     Ok(Json(
         json!({ "accepted": false, "reason": "federation not configured" }),
     ))

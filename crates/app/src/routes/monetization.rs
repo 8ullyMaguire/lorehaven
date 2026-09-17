@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_json::json;
 use serde_json::Value;
 
-use crate::auth::RequireSession;
+use crate::auth::{MaybeSession, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -539,6 +539,7 @@ pub async fn list_gifts(
 pub async fn public_pricing(
     State(state): State<AppState>,
     Path(work_id): Path<String>,
+    MaybeSession(_user): MaybeSession,
 ) -> ApiResult<Json<Value>> {
     let work_id = work_id
         .parse::<lorehaven_domain::WorkId>()

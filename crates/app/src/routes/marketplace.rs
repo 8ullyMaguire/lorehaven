@@ -137,17 +137,20 @@ pub async fn list_extensions(
     Ok(Json(json!({ "extensions": extensions })))
 }
 
-/// Get a single extension by slug.
+/// Get a single extension by slug. Returns 404 for unknown slug.
 pub async fn get_extension(
     State(state): State<AppState>,
     Path(slug): Path<String>,
+    MaybeSession(_user): MaybeSession,
 ) -> ApiResult<Json<Value>> {
     let ext = lorehaven_db::marketplace::get_extension(state.db(), &slug)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     match ext {
         Some(e) => Ok(Json(json!({ "extension": e }))),
-        None => Ok(Json(json!({ "extension": null }))),
+        None => Err(ApiError(lorehaven_domain::AppError::NotFound {
+            resource: "extension",
+        })),
     }
 }
 

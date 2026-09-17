@@ -396,10 +396,11 @@ async fn my_trust(
 
 async fn my_audit_log(
     State(state): State<AppState>,
-    RequireSession(_user): RequireSession,
+    RequireSession(user): RequireSession,
 ) -> ApiResult<Json<Value>> {
-    let items = lorehaven_db::governance::list_audit_log(state.db(), 50)
-        .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let items =
+        lorehaven_db::governance::list_audit_log(state.db(), &user.account_id.to_string(), 50)
+            .await
+            .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     Ok(Json(json!({ "items": items })))
 }

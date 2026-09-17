@@ -161,12 +161,23 @@ pub async fn create_bounty(
     let account = user.account_id.to_string();
     let id = uuid::Uuid::new_v4().to_string();
     let now = OffsetDateTime::now_utc();
-    let created_at = format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        now.year(), now.month() as u8, now.day(),
-        now.hour(), now.minute(), now.second());
+    let created_at = format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        now.year(),
+        now.month() as u8,
+        now.day(),
+        now.hour(),
+        now.minute(),
+        now.second()
+    );
     lorehaven_db::economy::create_bounty(
-        state.db(), &id, &account, &body.job_kind, &body.terms.to_string(),
-        body.amount, &created_at,
+        state.db(),
+        &id,
+        &account,
+        &body.job_kind,
+        &body.terms.to_string(),
+        body.amount,
+        &created_at,
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
