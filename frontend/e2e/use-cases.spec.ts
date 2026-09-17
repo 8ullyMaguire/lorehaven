@@ -226,7 +226,7 @@ test('12. the work the reader opened appears in their history', async ({ page })
  * desktop there is no way to click through to it from anywhere in the site.
  * Marked `fail`: it documents the gap, and turns red when a link is added.
  */
-test.fail('12b. a signed-in reader can reach reading history from the desktop navigation', async ({ page }) => {
+test('12b. a signed-in reader can reach reading history from the desktop navigation', async ({ page }) => {
   await ensureAccount(page, reader);
   await page.goto('/');
   await expect(page.locator('a[href="/library/history"]:visible').first()).toBeVisible({ timeout: 5000 });
