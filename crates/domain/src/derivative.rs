@@ -5,6 +5,8 @@
 //! schedule — a derivative whose parent has changed is stale and needs
 //! rebuilding.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 /// What kind of derivative this is.
@@ -20,6 +22,12 @@ pub enum DerivativeKind {
     Ocr,
     /// Transcoded version of uploaded media (e.g. image resize).
     Transcode,
+}
+
+impl fmt::Display for DerivativeKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 impl DerivativeKind {
