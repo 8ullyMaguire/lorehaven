@@ -488,6 +488,10 @@ impl Worker {
                 "no handler for a {} job in this build",
                 kind.as_str()
             ))),
+            JobKind::Derivative => Err(HandlerError::Fatal(format!(
+                "no handler for a {} job in this build",
+                kind.as_str()
+            ))),
         }
     }
 

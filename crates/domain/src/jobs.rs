@@ -106,6 +106,9 @@ pub enum JobKind {
     /// while it does: spec §14.1 asks for a check, and `POST
     /// /library/updates/check` answers `202` with the job.
     UpdateCheck,
+    /// Build a derivative rendition (EPUB/PDF/text) or extract OCR from a
+    /// scanned upload (M25 / spec §32.4).
+    Derivative,
 }
 
 impl JobKind {
@@ -120,6 +123,7 @@ impl JobKind {
             Self::Thumbnail => "thumbnail",
             Self::Maintenance => "maintenance",
             Self::UpdateCheck => "update_check",
+            Self::Derivative => "derivative",
         }
     }
 
@@ -134,6 +138,7 @@ impl JobKind {
             "thumbnail" => Self::Thumbnail,
             "maintenance" => Self::Maintenance,
             "update_check" => Self::UpdateCheck,
+            "derivative" => Self::Derivative,
             _ => return None,
         })
     }
