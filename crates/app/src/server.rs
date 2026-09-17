@@ -482,6 +482,13 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // Derivative pipeline — §32.4. Session-scoped reads plus enqueue
+        // writes; actual building happens in the worker.
+        .merge(classified(
+            routes::derivative::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Notifications inbox — §5.5. Session-scoped reads plus idempotent
         // mark-read writes; rows are produced by replies, sales and gifts.
         .merge(classified(
