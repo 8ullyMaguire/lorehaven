@@ -24,6 +24,38 @@ pub fn router() -> Router<AppState> {
         .route("/media/{id}/lending", get(get_lending_status))
         .route("/media/{id}/lend", post(lend_work))
         .route("/media/{id}/lend", put(revoke_loan))
+        .route("/me/loans", get(list_my_loans))
+}
+
+/// The caller's own loans, newest window first.
+///
+/// A loan is a bounded window the reader agreed to, so the reader gets to see
+/// the window, its end, and how it ended: `active`, `expired` or `revoked`.
+/// Only the caller's own rows, and only their own account id keys them.
+pub async fn list_my_loans(
+    State(state): State<AppState>,
+    RequireSession(session): RequireSession,
+) -> ApiResult<Json<Value>> {
+    let db = state.db();
+    let now = now_rfc3339();
+    let loans =
+        lorehaven_db::lending::list_loans_for_borrower(db, &session.account_id.to_string()).await?;
+    let items: Vec<Value> = loans
+        .iter()
+        .map(|loan| {
+            json!({
+                "id": loan.id,
+                "work_id": loan.work_id,
+                "state": loan.state_at(&now),
+                "granted_at": loan.granted_at,
+                "expires_at": loan.expires_at,
+                "revoked_at": loan.revoked_at,
+                "expired_at": loan.expired_at,
+                "copy_number": loan.copy_number,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "items": items, "next_cursor": null })))
 }
 
 fn now_rfc3339() -> String {

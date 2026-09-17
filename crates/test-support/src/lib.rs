@@ -52,6 +52,67 @@ pub fn scratch_dir(tag: &str) -> PathBuf {
     dir
 }
 
+/// Sweep scratch databases nobody is connected to. Once per process.
+///
+/// A fixture drops its own database in [`TestDb::cleanup`], so a *failing* test
+/// leaks one and the container accumulates `lh_test_*` databases until
+/// `/dev/shm` runs out and every later run reports zero passes — the failure
+/// looks like the suite, not like the leftover.
+///
+/// Liveness, not age, is the criterion. `pg_database` has no creation
+/// timestamp, and a name cannot carry one because the suffix is a time/pid
+/// hash; what *is* authoritative is whether anyone is attached. A database with
+/// no backends belongs to no run: either its test finished and failed before
+/// `cleanup`, or its process died, and in both cases nothing will ever drop it.
+/// A database another test binary is using has a live backend and is left
+/// alone, which is the property that makes this safe to do concurrently.
+///
+/// Best effort by design: a sweep that fails must not fail the suite it is
+/// cleaning up after, so every error here is logged and swallowed.
+async fn sweep_idle_scratch_databases(admin: &Database) {
+    use std::sync::Once;
+    static SWEPT: Once = Once::new();
+    let mut sweep = false;
+    SWEPT.call_once(|| sweep = true);
+    if !sweep {
+        return;
+    }
+
+    let Ok(pool) = admin.postgres_pool() else {
+        return;
+    };
+    let idle: Vec<String> = match sqlx::query_scalar(
+        "SELECT d.datname FROM pg_database d
+         WHERE d.datname LIKE 'lh\\_test\\_%'
+           AND NOT EXISTS (
+                 SELECT 1 FROM pg_stat_activity a WHERE a.datid = d.oid
+           )
+         ORDER BY d.datname
+         LIMIT 50",
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(names) => names,
+        Err(error) => {
+            eprintln!("test-support: could not list leaked scratch databases: {error}");
+            return;
+        }
+    };
+
+    for name in idle {
+        match sqlx::query(&format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
+            .execute(pool)
+            .await
+        {
+            Ok(_) => eprintln!("test-support: dropped the leaked scratch database {name}"),
+            Err(error) => {
+                eprintln!("test-support: could not drop the leaked scratch database {name}: {error}")
+            }
+        }
+    }
+}
+
 impl TestDb {
     /// Connect (and create) the scratch database for one test. SQLite writes
     /// `lorehaven.sqlite` inside `dir`; PostgreSQL creates and migrates a
@@ -64,6 +125,8 @@ impl TestDb {
                 let admin = Database::connect(&DatabaseConfig::new(admin_url.clone()))
                     .await
                     .expect("connect to the PostgreSQL admin database");
+                // Before adding to the pile, clear what earlier failed runs left.
+                sweep_idle_scratch_databases(&admin).await;
                 sqlx::query(&format!("CREATE DATABASE {name}"))
                     .execute(admin.postgres_pool().expect("postgres admin pool"))
                     .await

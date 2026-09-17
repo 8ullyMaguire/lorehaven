@@ -58,6 +58,8 @@ pub enum ErrorCode {
     ExtensionPermissionDenied,
     /// Our fault. Details are logged, never returned.
     Internal,
+    /// The instance lacks the program this operation needs.
+    ConverterUnavailable,
     /// The operation is recognised but not yet implemented.
     NotImplemented,
 }
@@ -80,6 +82,7 @@ impl ErrorCode {
             Self::JobFailed => "JOB_FAILED",
             Self::InsufficientCredits => "INSUFFICIENT_CREDITS",
             Self::ExtensionPermissionDenied => "EXTENSION_PERMISSION_DENIED",
+            Self::ConverterUnavailable => "CONVERTER_UNAVAILABLE",
             Self::Internal => "INTERNAL",
             Self::NotImplemented => "NOT_IMPLEMENTED",
         }
@@ -190,6 +193,18 @@ pub enum AppError {
         permission: String,
     },
 
+    /// The instance cannot produce the requested form: the program that would
+    /// is not installed (spec §3.3's `CONVERTER_UNAVAILABLE`).
+    ///
+    /// Distinct from `Validation` because nothing about the request is wrong
+    /// and distinct from `Internal` because it is the operator's gap, not a
+    /// fault: the message names what has to be installed.
+    #[error("{message}")]
+    ConverterUnavailable {
+        /// What is missing and what to install, safe to display.
+        message: String,
+    },
+
     /// An unexpected fault. The inner error is logged, never returned.
     #[error("internal error")]
     Internal(#[from] anyhow::Error),
@@ -217,6 +232,7 @@ impl AppError {
             Self::JobFailed { .. } => ErrorCode::JobFailed,
             Self::InsufficientCredits { .. } => ErrorCode::InsufficientCredits,
             Self::ExtensionPermissionDenied { .. } => ErrorCode::ExtensionPermissionDenied,
+            Self::ConverterUnavailable { .. } => ErrorCode::ConverterUnavailable,
             Self::Internal(_) => ErrorCode::Internal,
             Self::NotImplemented => ErrorCode::NotImplemented,
         }
@@ -235,6 +251,11 @@ impl AppError {
             | Self::ExtensionPermissionDenied { .. } => 403,
             Self::NotFound { .. } => 404,
             Self::Validation { .. } | Self::SourceUnsupported { .. } => 422,
+            // The request is well formed and the instance cannot serve it: the
+            // program that would is absent. 422 rather than 503 — nothing is
+            // temporarily down, and retrying the same request changes nothing
+            // until an operator installs something.
+            Self::ConverterUnavailable { .. } => 422,
             Self::RevisionConflict { .. } => 409,
             Self::RateLimited { .. } | Self::QuotaExceeded { .. } => 429,
             Self::InsufficientCredits { .. } => 402,

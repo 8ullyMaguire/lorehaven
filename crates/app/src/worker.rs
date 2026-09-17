@@ -260,7 +260,8 @@ impl Worker {
     }
 
     /// The sweeps that keep the queue honest: expired leases back to the queue,
-    /// and terminal jobs past their retention window deleted.
+    /// terminal jobs past their retention window deleted, and loans whose
+    /// window has closed recorded as ended.
     pub async fn maintenance_pass(&self, state: &AppState) -> Result<()> {
         let now = OffsetDateTime::now_utc();
         let requeued = jobs::requeue_expired_leases(state.db(), now).await?;
@@ -272,6 +273,20 @@ impl Worker {
             tracing::info!(
                 purged,
                 "terminal jobs past their retention window were deleted"
+            );
+        }
+        // Loans: stamp the ones whose window has closed. Active-ness is derived
+        // from `expires_at`, so this is not what frees a copy — it is what turns
+        // "the clock passed it" into a recorded transition that a borrower's
+        // loan list and an operator's sweep can both read.
+        let now_rfc3339 = now
+            .format(&time::format_description::well_known::Rfc3339)
+            .context("formatting the sweep's clock")?;
+        let expired = lorehaven_db::lending::expire_due_loans(state.db(), &now_rfc3339).await?;
+        if !expired.is_empty() {
+            tracing::info!(
+                expired = expired.len(),
+                "loans past their window were recorded as expired; their copies are free again"
             );
         }
         Ok(())

@@ -22,14 +22,13 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::auth::{MaybeSession, RequireSession, SessionUser};
+use crate::auth::{MaybeSession, RequireSession};
 use crate::http::{ApiError, ApiResult};
-use crate::routes::works::{actor_for, reading_decision, Reading};
+use crate::routes::works::{reading_for_work, require_contributor, Reading};
 use crate::state::AppState;
 use lorehaven_db::storage::BlobStore;
-use lorehaven_db::{collaboration, content};
 use lorehaven_domain::jobs::{JobKind, RetryPolicy};
-use lorehaven_domain::{AppError, WorkId};
+use lorehaven_domain::AppError;
 
 #[derive(Debug, Deserialize)]
 pub struct RequestNarration {
@@ -59,44 +58,6 @@ fn validation(message: &str) -> ApiError {
         message: message.to_owned(),
         field_errors: Default::default(),
     })
-}
-
-/// How this caller may see the work an edition belongs to.
-///
-/// These doors do not invent a visibility rule of their own: `reading_decision`
-/// is the one service the work door uses, so a draft work, a rating the
-/// caller's policy forbids, a block, an unpriced-versus-priced work and a
-/// disabled-anonymous-reading instance all answer here exactly as they answer
-/// there. Re-asking the question in this module is how a narration door ends up
-/// serving adult audio to an opted-out reader that every other door hides.
-async fn reading_for_work(
-    state: &AppState,
-    work_id: &str,
-    session: Option<&SessionUser>,
-) -> ApiResult<Reading> {
-    let id: WorkId = work_id.parse().map_err(|_| not_found("work"))?;
-    let work = content::find_work(state.db(), id)
-        .await?
-        .ok_or_else(|| not_found("work"))?;
-    let contributors = collaboration::contributors_for_work(state.db(), id).await?;
-    Ok(reading_decision(state, actor_for(session).as_ref(), &work, &contributors).await)
-}
-
-/// Refuse a caller who may read a work but may not act on its editions.
-///
-/// A work the caller cannot read at all is reported as absent (§3.3) — the
-/// `Denied` arm carries that error — while a reader who can see it is told
-/// plainly that this is a contributor action.
-async fn require_contributor(
-    state: &AppState,
-    work_id: &str,
-    session: &SessionUser,
-) -> ApiResult<()> {
-    match reading_for_work(state, work_id, Some(session)).await? {
-        Reading::Contributor => Ok(()),
-        Reading::Public => Err(ApiError(AppError::AccessDenied)),
-        Reading::Denied(error) => Err(ApiError(error)),
-    }
 }
 
 /// The editions of a work this caller may see.
