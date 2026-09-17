@@ -64,23 +64,14 @@ the time). Trust `docs/verification.md`, this file, or a fresh run.
    say community reading is public) or the spec says reading them needs an
    account and the registration message stops claiming "Reading is unaffected".
    A decision, not a patch.
-3. **A public review notifies nobody.** Only purchases, sales and forum replies
-   call `notifications::notify` (`crates/app/src/routes/monetization.rs`,
-   `community.rs:416`); the loudest thing a reader does to a work lands in
-   silence. Test 16b is marked `test.fail()` and goes red the day it lands.
-4. **Reading history has no door on a desktop.** `/library/history` works, but
-   its only link is in the mobile "More" drawer: 0 `a[href="/library/history"]`
-   elements exist in the DOM at 1280 px, signed in or out. Test 12b documents it.
-5. **The settings panels are still exposed to the discarded-edit race.**
+3. **The settings panels are still exposed to the discarded-edit race.**
    `PrivacySettings.svelte:35` and `ContentPreferences.svelte:34` re-seed their
    form whenever the server's copy changes, so a response landing after the
    reader moved a select replaces the draft: `dirty` goes false, the save button
    relabels "Saved" and disables, and the edit vanishes silently — N7's shape,
    in the two panels `ac22a89` did not touch. Not reproduced (narrow window: the
-   account page fetches on mount, so the response usually beats the click), so
-   treat it as a hazard rather than a proven defect; the guard is two lines per
-   component (`if (signature !== seeded && !edited) { draft = { …values } }`,
-   with `edited` set on change and cleared after a save).
+   account page fetches on mount, so the response usually beats the click),
+   but two-line guard written up in `docs/sessions/2026-09-17.md`. Treat it as a hazard rather than a proven defect; the guard is two lines per component (`if (signature !== seeded && !edited) { draft = { …values } }`, with `edited` set on change and cleared after a save).
 6. **Index hygiene is still the worker's job, not the route's.** The route now
    refuses to serve a non-public work whatever the index holds, which is the
    safety net. The race underneath remains: a `Reindex` job that lands after a
