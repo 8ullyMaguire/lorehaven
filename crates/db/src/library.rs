@@ -1066,6 +1066,77 @@ pub async fn set_reading_status(
         .ok_or_else(|| anyhow::anyhow!("the reading status upsert left no row"))
 }
 
+/// Set a reading status the reader does not already have, and say whether it
+/// was written.
+///
+/// This is the shelf-import path. Imports bring a library state from another
+/// site, and a state the reader has already set here is theirs: the import can
+/// add what is missing and must never overwrite what the reader decided. The
+/// unique index on `(account_id, subject_type, subject_id)` is what makes
+/// "only if absent" exact rather than a read-then-write race.
+///
+/// `finished_at` comes from the export rather than from the clock, because the
+/// reader finished the book in 2019 and imported it today.
+pub async fn set_imported_reading_status(
+    db: &Database,
+    account_id: &str,
+    subject_type: &str,
+    subject_id: &str,
+    status: ReadingStatus,
+    finished_at: Option<&str>,
+) -> Result<bool> {
+    let now = now_rfc3339();
+    let id = uuid::Uuid::new_v4().to_string();
+    let started = status
+        .is_started()
+        .then(|| finished_at.unwrap_or(&now).to_owned());
+    let finished = status
+        .is_finished()
+        .then(|| finished_at.unwrap_or(&now).to_owned());
+    let sql = db.sql(
+        "INSERT INTO reading_status (id, account_id, subject_type, subject_id, status, \
+         started_at, finished_at, updated_at, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1) \
+         ON CONFLICT (account_id, subject_type, subject_id) DO NOTHING",
+        "INSERT INTO reading_status (id, account_id, subject_type, subject_id, status, \
+         started_at, finished_at, updated_at, version) \
+         VALUES (?::uuid, ?::uuid, ?, ?::uuid, ?, ?, ?, ?, 1) \
+         ON CONFLICT (account_id, subject_type, subject_id) DO NOTHING",
+    );
+    let affected = match db.backend() {
+        crate::Backend::Sqlite => {
+            let query = sqlx::query(&sql)
+                .bind(&id)
+                .bind(account_id)
+                .bind(subject_type)
+                .bind(subject_id)
+                .bind(status.as_str())
+                .bind(&started)
+                .bind(&finished)
+                .bind(&now);
+            query
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+                .rows_affected()
+        }
+        crate::Backend::Postgres => {
+            let query = sqlx::query(&sql)
+                .bind(&id)
+                .bind(account_id)
+                .bind(subject_type)
+                .bind(subject_id)
+                .bind(status.as_str())
+                .bind(&started)
+                .bind(&finished)
+                .bind(&now);
+            query
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?
+                .rows_affected()
+        }
+    };
+    Ok(affected > 0)
+}
+
 /// The reader's status for a subject, if they have set one.
 pub async fn reading_status_for(
     db: &Database,

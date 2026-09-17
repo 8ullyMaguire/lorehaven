@@ -29,11 +29,16 @@ pub fn parse(csv: &str) -> Result<ImportShelf, crate::csv::CsvError> {
 
     let mut rows = Vec::new();
     let mut skipped = 0;
-    for line in lines {
+    let mut skipped_lines = Vec::new();
+    for (offset, line) in lines.enumerate() {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
+        // 1-based, header included: the number the reader sees in a text editor.
+        // The header was consumed before this loop, so the first row here is
+        // the file's second line.
+        let line_number = offset + 2;
         let fields = split_csv_line(line);
 
         let title = title_idx
@@ -49,6 +54,7 @@ pub fn parse(csv: &str) -> Result<ImportShelf, crate::csv::CsvError> {
             (Some(t), Some(a)) => (t, a),
             _ => {
                 skipped += 1;
+                skipped_lines.push(line_number);
                 continue;
             }
         };
@@ -91,7 +97,9 @@ pub fn parse(csv: &str) -> Result<ImportShelf, crate::csv::CsvError> {
         });
     }
 
-    Ok(ImportShelf::new(rows, skipped))
+    let mut shelf = ImportShelf::new(rows, skipped);
+    shelf.skipped_lines = skipped_lines;
+    Ok(shelf)
 }
 
 #[cfg(test)]
@@ -126,5 +134,10 @@ mod tests {
         let parsed = parse(csv).expect("parse ok");
         assert_eq!(parsed.rows.len(), 1);
         assert_eq!(parsed.skipped, 1);
+        assert_eq!(
+            parsed.skipped_lines.len(),
+            1,
+            "the skipped row is identified by line"
+        );
     }
 }
