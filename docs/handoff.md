@@ -71,31 +71,41 @@ the time). Trust `docs/verification.md`, this file, or a fresh run.
 4. **Reading history has no door on a desktop.** `/library/history` works, but
    its only link is in the mobile "More" drawer: 0 `a[href="/library/history"]`
    elements exist in the DOM at 1280 px, signed in or out. Test 12b documents it.
-5. **Index hygiene is still the worker's job, not the route's.** The route now
+5. **The settings panels are still exposed to the discarded-edit race.**
+   `PrivacySettings.svelte:35` and `ContentPreferences.svelte:34` re-seed their
+   form whenever the server's copy changes, so a response landing after the
+   reader moved a select replaces the draft: `dirty` goes false, the save button
+   relabels "Saved" and disables, and the edit vanishes silently — N7's shape,
+   in the two panels `ac22a89` did not touch. Not reproduced (narrow window: the
+   account page fetches on mount, so the response usually beats the click), so
+   treat it as a hazard rather than a proven defect; the guard is two lines per
+   component (`if (signature !== seeded && !edited) { draft = { …values } }`,
+   with `edited` set on change and cleared after a save).
+6. **Index hygiene is still the worker's job, not the route's.** The route now
    refuses to serve a non-public work whatever the index holds, which is the
    safety net. The race underneath remains: a `Reindex` job that lands after a
    withdrawal repopulates rows for a work nobody may see, and the deindex event
    is a best-effort second. Consider having the reindex handler skip a work that
    is not published+public, so the index stops carrying rows it must never serve.
-6. **Search semantics worth pinning down.** Multiple words are OR-ed
+7. **Search semantics worth pinning down.** Multiple words are OR-ed
    (`term LIKE 'a%' OR term LIKE 'b%'`) while `score` counts the matched terms,
    so a two-word query ranks by how many words hit — intended, or should it be
    AND? And matching is prefix-per-word, so "light" finds "lighthouse" while
    "house" does not.
-7. **N5** — `check_abuse_status` is session-gated, not operator-gated: any
+8. **N5** — `check_abuse_status` is session-gated, not operator-gated: any
    account can probe any key's counter and block state. Wants the operator role
    plus an audit row (§11, §19).
-8. **N6** — unknown `/api/v1/*` paths answer `200 text/html` with the index page
+9. **N6** — unknown `/api/v1/*` paths answer `200 text/html` with the index page
    instead of the JSON error envelope (§3.3); it also hides client bugs.
-9. **Phase 2** — the search half is done (`public_search` takes a real query and
+10. **Phase 2** — the search half is done (`public_search` takes a real query and
    filters by lifecycle and visibility). Left: four `/me/*` doors answer 422
    where the convention is 401, and `/extensions` demands a session with 422, so
    the public gallery is closed to visitors.
-10. **Phase 3** — `create_bounty`/`list_bounties`/`claim_bounty` are the only
+11. **Phase 3** — `create_bounty`/`list_bounties`/`claim_bounty` are the only
     dialect-unguarded functions in `crates/db/src/economy.rs` (they panic on
     PostgreSQL); no escrow, no credits check, `claim_bounty` reports success on a
     zero-row update.
-11. **Phase 4 — bookkeeping.** `~/.config/lorehaven/pg-env` is missing, so no PG
+12. **Phase 4 — bookkeeping.** `~/.config/lorehaven/pg-env` is missing, so no PG
     claim in either doc can be reproduced; restore a PG path, then update
     `docs/requirements.csv` (M15, M18, M19) and the counts in
     `docs/sessions/2026-09-17.md` §0.

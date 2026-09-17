@@ -746,3 +746,52 @@ warnings; vitest 150/150.
 PostgreSQL: unrun, as before. The two search SQL strings changed in `768df88` are
 **SQLite-verified only** — the PG twins mirror the SQLite shape and the
 `ast_search` pattern, but nothing here has executed them.
+
+### N10 — the discarded-edit race is latent in the two panels that never got the guard
+
+`18b. an account keeps a privacy choice` failed once in three runs (`run 7`:
+chose `nobody`, clicked Save, reloaded, read `contacts_only`). Chasing it turned
+up one certain thing and one hazard.
+
+**Certain, and my fault twice over.** The test clicked "the first enabled
+`Save changes`" button on the page, which can match nothing at all once the edit
+has been discarded; and its success assertion,
+`toContainText(/saved/i)`, also matches **"Unsaved changes"** — the label the
+panel shows *before* a save — so it could pass while saving nothing. A third
+defect of the same kind appeared in the retry: scoping the panel by an ancestor
+that *contains* a "Save changes" button re-evaluates that predicate after the
+save, when the label is "Saved", and matches nothing. All three are fixed: the
+panel is the select's own `fieldset`, both account tests wait for the page's
+fetches to settle before editing, and the assertion is the clean-state label a
+landed save produces.
+
+**Hazard.** `PrivacySettings.svelte:35-41` (and `ContentPreferences.svelte:34-42`)
+re-seed the form from the server's copy whenever it changes, while `dirty`
+derives from the draft against those values — so a response landing after an edit
+would replace the draft, disable the save button and discard the edit with no
+message. That is N7's shape in the two panels `ac22a89` did not touch. It is not
+reproduced: with 700 ms of injected latency the edit at 150 ms survived, because
+the account page fetches these settings on mount and the response lands before a
+person (or a test) can move a select. Recorded as a hazard with the two-line
+guard, not as a demonstrated defect.
+
+
+### Suite run history, for the next person who sees a red test
+
+Ten runs of `frontend/e2e/use-cases.spec.ts` today, and every failure had to be
+diagnosed rather than believed:
+
+| run | result | what the failure was |
+| --- | --- | --- |
+| 1–3 | 14/11, 12/12, 21/5 | the suite's own assumptions (sign-in lands on `/`, the pseud page is `/pseud`, a review is private until published, `#my-exports` is a heading id), then a `pkill` that killed the e2e server mid-run (eleven `ERR_CONNECTION_REFUSED`) |
+| 5 | 26 / 1 | **product**: test 17, the discarded typography choice (fixed in `ac22a89`) |
+| 6 | 27 passed | — |
+| 7 | 26 / 1 | test 18b: it clicked "the first enabled Save changes" and asserted `/saved/i`, which matches "Unsaved changes" |
+| 8 | 26 / 1 | test 18b again: the panel locator named its ancestor by a button label that changes after the save |
+| 9 | 25 / 1 | test 16: the forum reply never landed, so the inbox was asked about a notification that could not exist. It passes in isolation; the test now asserts the reply landed first, so the next occurrence points at the post rather than the inbox |
+| 10 | 27 passed (25 green + 2 `test.fail()`) | — |
+
+The pattern worth keeping: a red test in this suite has, so far, been my own
+loose assertion more often than a product defect — twice a success assertion that
+matched a *pre-success* label, once a locator whose predicate was invalidated by
+the very state change it was waiting for. Assert the thing that changes.

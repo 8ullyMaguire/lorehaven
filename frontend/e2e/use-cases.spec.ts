@@ -291,11 +291,15 @@ test('16. the author is told when someone replies to their topic and can clear t
   await page.goto(topicHref!);
   await page.fill('#reply-body', 'A reply that should ring a bell.');
   await page.click('button:text-is("Post reply")');
+  // Prove the reply landed before asking about the notification: a refused
+  // post used to be invisible here, and the test then blamed the inbox.
+  await expect(page.getByText('A reply that should ring a bell.')).toBeVisible();
   await signOut(page);
 
   await ensureAccount(page, author);
   await page.goto('/notifications');
-  await expect(page.getByText('Someone replied to your topic')).toBeVisible();
+  await expect(page.locator('.notification-list li').first()).toBeVisible();
+  await expect(page.getByText(/replied to your topic/i)).toBeVisible();
   await page.click('button:text-is("Mark all as read")');
   await expect(page.locator('button:text-is("Mark all as read")')).toBeDisabled();
 });
@@ -359,6 +363,11 @@ test('18. an account keeps its content ceiling', async ({ page }) => {
 
   const ceiling = page.locator('#content-max-rating');
   await ceiling.waitFor();
+  // The account page fetches these settings on mount, and both panels re-seed
+  // their form from the server's copy whenever it changes — an edit made while
+  // that response is in flight is discarded (the save button goes back to
+  // "Saved" and disabled). Settle first so this measures the save.
+  await page.waitForLoadState('networkidle');
   const before = await ceiling.inputValue();
   const options = await ceiling
     .locator('option')
@@ -380,6 +389,7 @@ test('18b. an account keeps a privacy choice', async ({ page }) => {
 
   const scope = page.locator('select[id^=privacy-]').first();
   await scope.waitFor();
+  await page.waitForLoadState('networkidle');
   const before = await scope.inputValue();
   const options = await scope
     .locator('option')
@@ -388,13 +398,22 @@ test('18b. an account keeps a privacy choice', async ({ page }) => {
   expect(next, 'a privacy key with more than one value').toBeTruthy();
 
   await scope.selectOption(next!);
-  for (const button of await page.locator('button:text-is("Save changes")').all()) {
-    if (await button.isEnabled()) {
-      await button.click();
-      break;
-    }
-  }
-  await expect(page.getByRole('status').first()).toContainText(/saved/i);
+  // Two panels on this page carry a "Save changes" button (the content ceiling
+  // and privacy), and the click has to land in the one holding this select.
+  // Picking "the first enabled button" saved the other panel's values and
+  // reported success, which is how this test failed once in three runs.
+  // The panel's own fieldset, which stays the same element as the button's
+  // label changes. (Naming the ancestor by the label it contains re-evaluates
+  // the predicate after the save and matches nothing: the label is then
+  // "Saved", which is exactly the state this test asks for.)
+  const panel = scope.locator('xpath=ancestor::fieldset[1]');
+  await panel.locator('button:text-is("Save changes")').first().click();
+  // The button reads "Save changes" while there is something to save and
+  // "Saved" once it is clean. Asserting the clean state is the honest check;
+  // a case-insensitive /saved/i also matches "Unsaved changes", the label the
+  // panel shows *before* a save, which is how this test passed while saving
+  // nothing.
+  await expect(panel.locator('button:text-is("Saved")')).toBeVisible();
 
   await page.reload();
   await page.getByRole('tab', { name: 'Privacy' }).click();
