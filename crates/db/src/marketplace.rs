@@ -232,33 +232,176 @@ pub async fn transition_commission(
 // Extensions
 // ---------------------------------------------------------------------------
 
-pub async fn submit_extension(
+pub async fn list_extensions(
     db: &Database,
-    slug: &str,
-    version: &str,
-    document: &str,
-    submitted_by: &str,
-) -> Result<(), sqlx::Error> {
-    let now = crate::identity::now_rfc3339();
+    submitted_by: Option<&str>,
+) -> Result<Vec<Value>, sqlx::Error> {
+    let mut sqlite_sql =
+        "SELECT id, version, document, submitted_by, state, created_at FROM extension_manifests WHERE 1=1".to_string();
+    let mut pg_sql = "SELECT id, version, document, submitted_by, state, created_at FROM extension_manifests WHERE 1=1".to_string();
+    if submitted_by.is_some() {
+        sqlite_sql.push_str(" AND submitted_by = ?");
+        pg_sql.push_str(" AND submitted_by = $1");
+    }
+    sqlite_sql.push_str(" ORDER BY created_at DESC");
+    pg_sql.push_str(" ORDER BY created_at DESC");
+
     match db.backend() {
         Backend::Sqlite => {
-            sqlx::query(
-                "INSERT INTO extension_manifests (id, version, document, submitted_by, state, created_at)
-                 VALUES (?, ?, ?, ?, 'pending', ?)"
-            )
-            .bind(slug).bind(version).bind(document).bind(submitted_by).bind(&now)
-            .execute(db.sqlite_pool().expect("sqlite")).await?;
+            let mut q = sqlx::query(&sqlite_sql);
+            if let Some(by) = submitted_by {
+                q = q.bind(by);
+            }
+            let rows = q.fetch_all(db.sqlite_pool().expect("sqlite")).await?;
+            Ok(rows.iter().map(|r| {
+                serde_json::json!({
+                    "id": r.get::<String, _>("id"),
+                    "version": r.get::<String, _>("version"),
+                    "document": r.get::<String, _>("document"),
+                    "submitted_by": r.get::<String, _>("submitted_by"),
+                    "state": r.get::<String, _>("state"),
+                    "created_at": r.get::<String, _>("created_at"),
+                })
+            }).collect())
         }
         Backend::Postgres => {
-            sqlx::query(
-                "INSERT INTO extension_manifests (id, version, document, submitted_by, state, created_at)
-                 VALUES ($1, $2, $3, $4, 'pending', $5)"
-            )
-            .bind(slug).bind(version).bind(document).bind(submitted_by).bind(&now)
-            .execute(db.postgres_pool().expect("postgres")).await?;
+            let mut q = sqlx::query(&pg_sql);
+            if let Some(by) = submitted_by {
+                q = q.bind(by);
+            }
+            let rows = q.fetch_all(db.postgres_pool().expect("postgres")).await?;
+            Ok(rows.iter().map(|r| {
+                serde_json::json!({
+                    "id": r.get::<String, _>("id"),
+                    "version": r.get::<String, _>("version"),
+                    "document": r.get::<String, _>("document"),
+                    "submitted_by": r.get::<String, _>("submitted_by"),
+                    "state": r.get::<String, _>("state"),
+                    "created_at": r.get::<String, _>("created_at"),
+                })
+            }).collect())
         }
     }
-    Ok(())
+}
+
+pub async fn get_extension(
+    db: &Database,
+    id: &str,
+) -> Result<Option<Value>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let row = sqlx::query("SELECT id, version, document, submitted_by, state, created_at FROM extension_manifests WHERE id = ?")
+                .bind(id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?;
+            Ok(row.map(|r| {
+                serde_json::json!({
+                    "id": r.get::<String, _>("id"),
+                    "version": r.get::<String, _>("version"),
+                    "document": r.get::<String, _>("document"),
+                    "submitted_by": r.get::<String, _>("submitted_by"),
+                    "state": r.get::<String, _>("state"),
+                    "created_at": r.get::<String, _>("created_at"),
+                })
+            }))
+        }
+        Backend::Postgres => {
+            let row = sqlx::query("SELECT id, version, document, submitted_by, state, created_at FROM extension_manifests WHERE id = $1")
+                .bind(id)
+                .fetch_optional(db.postgres_pool().expect("postgres"))
+                .await?;
+            Ok(row.map(|r| {
+                serde_json::json!({
+                    "id": r.get::<String, _>("id"),
+                    "version": r.get::<String, _>("version"),
+                    "document": r.get::<String, _>("document"),
+                    "submitted_by": r.get::<String, _>("submitted_by"),
+                    "state": r.get::<String, _>("state"),
+                    "created_at": r.get::<String, _>("created_at"),
+                })
+            }))
+        }
+    }
+}
+
+pub async fn list_my_grants(
+    db: &Database,
+    account: &str,
+) -> Result<Vec<Value>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let rows = sqlx::query("SELECT account, manifest_id, version, capabilities, granted_at, revoked_at FROM extension_grants WHERE account = ?")
+                .bind(account)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?;
+            Ok(rows.iter().map(|r| {
+                serde_json::json!({
+                    "account": r.get::<String, _>("account"),
+                    "manifest_id": r.get::<String, _>("manifest_id"),
+                    "version": r.get::<String, _>("version"),
+                    "capabilities": r.get::<String, _>("capabilities"),
+                    "granted_at": r.get::<String, _>("granted_at"),
+                    "revoked_at": r.get::<Option<String>, _>("revoked_at"),
+                })
+            }).collect())
+        }
+        Backend::Postgres => {
+            let rows = sqlx::query("SELECT account, manifest_id, version, capabilities, granted_at, revoked_at FROM extension_grants WHERE account = $1")
+                .bind(account)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?;
+            Ok(rows.iter().map(|r| {
+                serde_json::json!({
+                    "account": r.get::<String, _>("account"),
+                    "manifest_id": r.get::<String, _>("manifest_id"),
+                    "version": r.get::<String, _>("version"),
+                    "capabilities": r.get::<String, _>("capabilities"),
+                    "granted_at": r.get::<String, _>("granted_at"),
+                    "revoked_at": r.get::<Option<String>, _>("revoked_at"),
+                })
+            }).collect())
+        }
+    }
+}
+
+pub async fn list_webhooks(
+    db: &Database,
+    owner: &str,
+) -> Result<Vec<Value>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let rows = sqlx::query("SELECT id, owner, url, events, active, created_at FROM webhook_endpoints WHERE owner = ?")
+                .bind(owner)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?;
+            Ok(rows.iter().map(|r| {
+                serde_json::json!({
+                    "id": r.get::<String, _>("id"),
+                    "owner": r.get::<String, _>("owner"),
+                    "url": r.get::<String, _>("url"),
+                    "events": r.get::<String, _>("events"),
+                    "active": r.get::<i64, _>("active") == 1,
+                    "created_at": r.get::<String, _>("created_at"),
+                })
+            }).collect())
+        }
+        Backend::Postgres => {
+            let rows = sqlx::query("SELECT id, owner, url, events, active, created_at FROM webhook_endpoints WHERE owner = $1")
+                .bind(owner)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?;
+            Ok(rows.iter().map(|r| {
+                serde_json::json!({
+                    "id": r.get::<String, _>("id"),
+                    "owner": r.get::<String, _>("owner"),
+                    "url": r.get::<String, _>("url"),
+                    "events": r.get::<String, _>("events"),
+                    "active": r.get::<i64, _>("active") == 1,
+                    "created_at": r.get::<String, _>("created_at"),
+                })
+            }).collect())
+        }
+    }
 }
 
 pub async fn grant_extension(

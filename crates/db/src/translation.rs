@@ -352,6 +352,58 @@ pub async fn lookup_memory(
 }
 
 // ---------------------------------------------------------------------------
+// Memory listing
+// ---------------------------------------------------------------------------
+
+pub async fn list_memory(
+    db: &Database,
+    owner: &str,
+) -> Result<Vec<Value>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let rows = sqlx::query("SELECT id, owner, source_lang, target_lang, source_hash, source_text, target_text, quality_bp, shared, created_at FROM translation_memory WHERE owner = ? ORDER BY created_at DESC")
+                .bind(owner)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?;
+            Ok(rows.iter().map(|r| {
+                serde_json::json!({
+                    "id": r.get::<String, _>("id"),
+                    "owner": r.get::<String, _>("owner"),
+                    "source_lang": r.get::<String, _>("source_lang"),
+                    "target_lang": r.get::<String, _>("target_lang"),
+                    "source_hash": r.get::<String, _>("source_hash"),
+                    "source_text": r.get::<String, _>("source_text"),
+                    "target_text": r.get::<String, _>("target_text"),
+                    "quality_bp": r.get::<i64, _>("quality_bp"),
+                    "shared": r.get::<i64, _>("shared") == 1,
+                    "created_at": r.get::<String, _>("created_at"),
+                })
+            }).collect())
+        }
+        Backend::Postgres => {
+            let rows = sqlx::query("SELECT id, owner, source_lang, target_lang, source_hash, source_text, target_text, quality_bp, shared, created_at FROM translation_memory WHERE owner = $1 ORDER BY created_at DESC")
+                .bind(owner)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?;
+            Ok(rows.iter().map(|r| {
+                serde_json::json!({
+                    "id": r.get::<String, _>("id"),
+                    "owner": r.get::<String, _>("owner"),
+                    "source_lang": r.get::<String, _>("source_lang"),
+                    "target_lang": r.get::<String, _>("target_lang"),
+                    "source_hash": r.get::<String, _>("source_hash"),
+                    "source_text": r.get::<String, _>("source_text"),
+                    "target_text": r.get::<String, _>("target_text"),
+                    "quality_bp": r.get::<i64, _>("quality_bp"),
+                    "shared": r.get::<i64, _>("shared") == 1,
+                    "created_at": r.get::<String, _>("created_at"),
+                })
+            }).collect())
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Glossaries
 // ---------------------------------------------------------------------------
 
