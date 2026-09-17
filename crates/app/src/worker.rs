@@ -488,10 +488,12 @@ impl Worker {
                 "no handler for a {} job in this build",
                 kind.as_str()
             ))),
-            JobKind::Derivative => Err(HandlerError::Fatal(format!(
-                "no handler for a {} job in this build",
-                kind.as_str()
-            ))),
+            JobKind::Derivative => {
+                let derivative_id: String = serde_json::from_str(&job.payload).map_err(|error| {
+                    HandlerError::Fatal(format!("the derivative payload is not JSON: {error}"))
+                })?;
+                crate::derivative::handle_derivative(state, id, &derivative_id).await
+            }
         }
     }
 

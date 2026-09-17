@@ -14,6 +14,7 @@ pub mod auth;
 pub mod cli;
 pub mod config;
 pub mod crypto;
+pub mod derivative;
 pub mod doctor;
 pub mod exports;
 pub mod http;
