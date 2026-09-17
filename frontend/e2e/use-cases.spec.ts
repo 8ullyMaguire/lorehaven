@@ -311,7 +311,7 @@ test('16. the author is told when someone replies to their topic and can clear t
  * `fail` so the suite stays green while the gap is open, and turns red the day
  * somebody closes it (in the right direction).
  */
-test.fail('16b. the author is told when their work is reviewed', async ({ page }) => {
+test('16b. the author is told when their work is reviewed', async ({ page }) => {
   await ensureAccount(page, author);
   // Empty the inbox first, so the only notification that can appear afterwards
   // is the one this test is about.
