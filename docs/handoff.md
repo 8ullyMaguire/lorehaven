@@ -6,9 +6,9 @@ end; this file is the short version that must stay true to the commit it names.
 
 ## The tree
 
-Code at **768df88**; every commit after it touches only `docs/`. Working tree
-clean. (This line deliberately names the code commit rather than its own, so it
-does not go stale the next time a document is added.)
+The application code is at **768df88**; the commits after it touch `docs/` and the
+e2e spec only. Working tree clean. (This line deliberately names the app commit
+rather than its own, so it does not go stale the next time a document is added.)
 
 Gates at this commit:
 
