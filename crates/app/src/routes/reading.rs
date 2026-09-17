@@ -34,6 +34,7 @@ use axum::http::StatusCode;
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use lorehaven_db::content;
+use lorehaven_db::notifications;
 use lorehaven_db::positivity;
 use lorehaven_db::reading::{self, HistoryRow, Note, Rating, Review};
 use lorehaven_domain::positivity::{effective, sender_receipt};
@@ -561,19 +562,15 @@ async fn upsert_review(
     let work_id: WorkId = id
         .parse()
         .map_err(|_| ApiError(AppError::NotFound { resource: "work" }))?;
+    let work = content::find_work(state.db(), work_id)
+        .await?
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "work" }))?;
 
     if request.body.trim().is_empty() {
         return Err(ApiError(AppError::field(
             "body",
             "A review needs some words.",
         )));
-    }
-
-    // A review on a work that does not exist would fail the foreign key and
-    // surface as an internal error; say `404` instead, with the same coarse
-    // noun every other unreachable resource uses (spec §3.3).
-    if content::find_work(state.db(), work_id).await?.is_none() {
-        return Err(ApiError(AppError::NotFound { resource: "work" }));
     }
 
     // Reviews are private until explicitly published (§9.5), so the default is
@@ -650,6 +647,20 @@ async fn upsert_review(
                         return Err(ApiError(AppError::internal("classifying the review", e)));
                     }
                 };
+                // Notify the work's author when a public review passes
+                // the positivity gate. A held review is invisible to
+                // the author anyway, so there's nothing to report.
+                if stored.outcome == lorehaven_domain::positivity::DeliveryOutcome::Delivered {
+                    let _ = notifications::notify(
+                        state.db(),
+                        &author_account.to_string(),
+                        "review",
+                        "Someone reviewed your work",
+                        &format!("A new public review was posted on {}.", work.title),
+                        Some(work_id.to_canonical_string().as_str()),
+                    )
+                    .await;
+                }
                 stored.outcome
             }
         }
