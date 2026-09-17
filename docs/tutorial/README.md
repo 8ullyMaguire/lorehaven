@@ -2,6 +2,11 @@
 
 Build Lorehaven from an empty directory, one milestone at a time.
 
+> **The book form of this tutorial lives in [`docs/books/`](../books/README.md)** —
+> the same material as parts, plus a merged markdown and an EPUB. The chapters in
+> this directory are the older per-milestone write-ups; `docs/books/` is the
+> maintained version.
+
 Each chapter follows the same shape, so you always know where you are:
 
 1. **Starting checkpoint** — the tag to check out before you begin.
