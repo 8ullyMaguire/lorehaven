@@ -49,8 +49,9 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD as BASE64;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
-use lorehaven_db::{imports, revisions, secrets};
+use lorehaven_db::{imports, library, revisions, secrets};
 use lorehaven_domain::imports::{plan_import, ChapterIdentity, ImportedWork};
+use lorehaven_domain::library::ReadingStatus;
 use lorehaven_domain::{AppError, PseudId};
 use lorehaven_scrapers::{SafeFetcher, SourceAdapter, SourceKey};
 
@@ -66,6 +67,7 @@ pub fn router() -> Router<AppState> {
         .route("/imports", get(list_imports).post(start_import))
         .route("/imports/{id}", get(get_import))
         .route("/imports/{id}/cancel", post(cancel_import))
+        .route("/library/imports/csv", post(import_shelf_csv))
         .route(
             "/imports/{id}/retry-failed-chapters",
             post(retry_failed_chapters),
@@ -1640,4 +1642,119 @@ mod times {
 /// RFC 3339 UTC, which is the only timestamp format this codebase stores.
 fn format_time(at: time::OffsetDateTime) -> String {
     crate::format_rfc3339(at)
+}
+
+// ---------------------------------------------------------------------------
+// Shelf exports (spec §32.3, M24)
+// ---------------------------------------------------------------------------
+
+/// A library export to import, and which site it came from.
+#[derive(Debug, Deserialize)]
+pub struct ShelfImportRequest {
+    /// `goodreads` or `storygraph`.
+    pub format: String,
+    /// The export file's contents, as text.
+    pub csv: String,
+}
+
+/// Import a shelf export from Goodreads or StoryGraph.
+///
+/// Ingestion only, and metadata only: a shelf export records what the reader
+/// read elsewhere, so this creates the reader's own library rows and the state
+/// each row implies — never chapter bodies, and never a claim that this instance
+/// holds the work.
+///
+/// # What "respects the reader's existing ratings and dates" means here
+///
+/// A row's date read becomes the item's `finished_at`, not the time of the
+/// import: the reader finished the book in 2019 and imported it today. A library
+/// state the reader has already set for an item is theirs and is left alone; the
+/// import fills in what is missing and reports how many it left. Rows it cannot
+/// map are refused by name, with the reason, rather than imported as a guess.
+pub async fn import_shelf_csv(
+    State(state): State<AppState>,
+    RequirePseud { user, pseud_id: _ }: RequirePseud,
+    Json(request): Json<ShelfImportRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let db = state.db();
+    let format = request.format.trim().to_ascii_lowercase();
+    let shelf = lorehaven_scrapers::csv::import_shelf(&request.csv, &format).map_err(|error| {
+        ApiError::from(AppError::Validation {
+            message: format!("this file is not a {format} library export: {error}"),
+            field_errors: Default::default(),
+        })
+    })?;
+
+    let plan = lorehaven_scrapers::csv::plan_shelf_import(&shelf);
+    let account_id = user.account_id.to_string();
+    let mut imported = 0i64;
+    let mut kept_existing_state = 0i64;
+
+    for item in &plan.items {
+        let input = shelf_import_input(&format, item);
+        let row =
+            imports::upsert_library_item(db, &account_id, &format, &item.source_work_key, &input)
+                .await?;
+
+        let status = if item.state == "finished" {
+            ReadingStatus::Finished
+        } else {
+            ReadingStatus::WantToRead
+        };
+        let written = library::set_imported_reading_status(
+            db,
+            &account_id,
+            "library_item",
+            &row.id,
+            status,
+            item.finished_at.as_deref(),
+        )
+        .await?;
+        if written {
+            imported += 1;
+        } else {
+            kept_existing_state += 1;
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "format": format,
+        "imported": imported,
+        "kept_existing_state": kept_existing_state,
+        "refused": plan
+            .refused
+            .iter()
+            .map(|refusal| serde_json::json!({
+                "title": refusal.title,
+                "reason": refusal.reason,
+            }))
+            .collect::<Vec<_>>(),
+        "skipped_rows_in_file": shelf.skipped,
+    })))
+}
+
+/// The library item an imported shelf row becomes.
+///
+/// `source_url` is an `import://` URI on purpose: a shelf export carries no URL
+/// for the book, and a fabricated `https://` one would be a link somebody could
+/// later follow and act on. The scheme says where the row came from and is not
+/// fetchable by anything.
+fn shelf_import_input(
+    format: &str,
+    item: &lorehaven_scrapers::csv::PlannedItem,
+) -> imports::LibraryItemInput {
+    imports::LibraryItemInput {
+        title: item.title.clone(),
+        author_text: item.author_text.clone(),
+        author_url: None,
+        summary: String::new(),
+        language: None,
+        word_count: None,
+        // A shelf export says nothing about where the book's text is, so the
+        // honest publication status is "unknown".
+        status: "unknown".to_owned(),
+        source_url: format!("import://{format}/{}", item.source_work_key),
+        source_updated_at: None,
+        provenance_json: item.provenance_json.clone(),
+    }
 }

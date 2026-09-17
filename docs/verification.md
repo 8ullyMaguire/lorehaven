@@ -74,6 +74,23 @@ the first PostgreSQL connect in a process. The criterion is liveness rather than
 age — `pg_database` has no creation timestamp, and a database nobody is attached
 to is one no run will ever drop — so a live run's databases are left alone.
 
+**Shelf exports import (M24-03).** The CSV shelf import was parser-only: no
+door, no persistence, so §32.3's acceptance ("a StoryGraph CSV import produces
+library states and reviews that respect the reader's existing ratings and dates,
+and refuses rows it cannot map, naming them") could not be met by any caller.
+`POST /api/v1/library/imports/csv` now plans the file
+(`scrapers::csv::plan_shelf_import`), creates the reader's own library rows
+through the existing `(account, source, source_work_key)` upsert, and sets the
+state each row implies through a new `set_imported_reading_status`, which writes
+only when the reader has no state of their own — a re-import reports how many it
+left alone rather than overwriting them. A row's date read becomes `finished_at`
+(the reader finished it in 2019; they imported it today). Refusals name the row:
+a date that does not parse is refused with the text as written, and a row the
+parser could not read at all is refused *by line*, because a row with no title
+has no other identity in the file the reader is looking at — that required the
+two CSV parsers to record the line numbers they skip instead of only counting
+them.
+
 **Evidence (literal).**
 
 ```
@@ -84,11 +101,23 @@ cargo test -p lorehaven-app --test milestone_22
 test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.43s
 
 cargo test -p lorehaven-app --test milestone_24
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.05s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.11s
+
+cargo test -p lorehaven-scrapers --lib
+test result: ok. 267 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 ```
 
-`cargo clippy --workspace --all-targets`: 0 warnings. `cargo fmt` clean. The
-workspace run is in the session handoff.
+`cargo clippy --workspace --all-targets`: 0 warnings. `cargo fmt` clean.
+
+```
+cargo test --workspace --no-fail-fast
+PASSED: 1206 FAILED: 0 BINARIES: 46
+```
+
+One failure was found and fixed on the way to that run: `normalise_date` matched
+the `YYYY-MM-DD` shape before checking for a full timestamp, so a `date_read` of
+`2019-12-31T10:11:12Z` became `2019-12-31T00:00:00Z` — the time silently
+dropped. The unit test caught it; the full-timestamp branch now runs first.
 
 ## 2026-09-17 — M26 TTS narration pipeline (spec §32.5) + adult gates restored to every door
 

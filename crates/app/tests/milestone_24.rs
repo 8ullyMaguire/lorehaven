@@ -399,3 +399,108 @@ async fn the_creator_dashboard_reports_banded_aggregates() {
 
     println!("PASS: the_creator_dashboard_reports_banded_aggregates");
 }
+
+/// A StoryGraph export produces library states that respect the reader's own,
+/// and rows it cannot map are refused by name. §32.3's acceptance criterion.
+#[tokio::test]
+async fn a_shelf_export_imports_states_and_names_what_it_refuses() {
+    let dir = scratch_dir("shelf-import");
+    let tdb = test_support::TestDb::connect_with_dir("shelf-import", &dir).await;
+    let app = server::build_router(AppState::new(config_for(&dir), tdb.db().clone()));
+
+    let mut reader = Client::new(app.clone());
+    register(&mut reader, "reader@example.com", "reader").await;
+
+    // A StoryGraph-shaped export: one finished with a date, one unread, and one
+    // row with no title that nothing can map.
+    let csv = "Title,Authors,ISBN,My Rating,Date Read,Review\n\
+Reading Book,Ada Writer,9780000000001,4,2019/03/09,Loved it.\n\
+Unread Book,Bo Writer,9780000000002,,,\n\
+,Cy Writer,9780000000003,3,2019/04/01,\n";
+    let (status, body) = reader
+        .post(
+            "/api/v1/library/imports/csv",
+            json!({ "format": "storygraph", "csv": csv }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "shelf import: {status} {body}");
+
+    assert_eq!(body["imported"].as_i64(), Some(2), "{body}");
+    assert_eq!(body["kept_existing_state"].as_i64(), Some(0), "{body}");
+    let refused = body["refused"].as_array().expect("refused array");
+    assert_eq!(refused.len(), 1, "the untitled row is refused: {body}");
+    assert!(
+        refused[0]["reason"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("no title"),
+        "{body}"
+    );
+    // Named by its line: a row with no title has no other identity in the file
+    // the reader is looking at.
+    assert!(
+        refused[0]["title"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("line "),
+        "the refusal must name where the row is: {body}"
+    );
+    assert_eq!(body["skipped_rows_in_file"].as_i64(), Some(1), "{body}");
+
+    // The finished row carries the reader's own date, not the import's.
+    let (status, body) = reader.get("/api/v1/library/items").await;
+    assert_eq!(status, StatusCode::OK, "library items: {body}");
+    let items = body["items"].as_array().expect("items");
+    assert_eq!(items.len(), 2, "two library rows: {body}");
+    let reading = items
+        .iter()
+        .find(|item| item["title"] == "Reading Book")
+        .expect("the finished row");
+    assert_eq!(
+        reading["source_url"].as_str().unwrap(),
+        "import://storygraph/isbn:9780000000001"
+    );
+
+    let item_id = reading["id"].as_str().unwrap().to_owned();
+    let (status, body) = reader
+        .get(&format!("/api/v1/library/items/{item_id}/status"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "reading status: {status} {body}");
+    assert_eq!(body["status"].as_str().unwrap(), "finished", "{body}");
+    assert!(
+        body["finished_at"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("2019-03-09"),
+        "the date read is the reader's, not the import's: {body}"
+    );
+
+    // Re-importing the same file updates the same two rows and adds none: the
+    // unique key is what makes that true rather than a check that could race.
+    let (status, body) = reader
+        .post(
+            "/api/v1/library/imports/csv",
+            json!({ "format": "storygraph", "csv": csv }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "re-import: {status} {body}");
+    assert_eq!(body["imported"].as_i64(), Some(0), "{body}");
+    assert_eq!(
+        body["kept_existing_state"].as_i64(),
+        Some(2),
+        "a re-import must not overwrite the reader's own state: {body}"
+    );
+    let (_, body) = reader.get("/api/v1/library/items").await;
+    assert_eq!(body["items"].as_array().unwrap().len(), 2, "{body}");
+
+    // An unknown format is refused before anything is written.
+    let (status, body) = reader
+        .post(
+            "/api/v1/library/imports/csv",
+            json!({ "format": "booklikes", "csv": csv }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    println!("PASS: a_shelf_export_imports_states_and_names_what_it_refuses");
+}
