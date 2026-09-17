@@ -583,6 +583,7 @@ impl Worker {
                 tracing::info!(removed, "maintenance removed expired exports");
                 Ok(())
             }
+            "verify_derivatives" => self.verify_derivatives(state, job, &payload).await,
             other => Err(HandlerError::Fatal(format!(
                 "unknown maintenance task {other:?}"
             ))),
@@ -636,6 +637,76 @@ impl Worker {
             .await
             .map_err(transient)?;
         }
+        Ok(())
+    }
+
+    async fn verify_derivatives(
+        &self,
+        state: &AppState,
+        job: JobId,
+        payload: &serde_json::Value,
+    ) -> Result<(), HandlerError> {
+        let limit = payload
+            .get("limit")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(50)
+            .clamp(1, 500);
+        let store = BlobStore::new(state.config().storage.root.clone());
+        let cutoff_ms = (OffsetDateTime::now_utc() - time::Duration::hours(24)).unix_timestamp() * 1000
+            + (OffsetDateTime::now_utc() - time::Duration::hours(24)).millisecond() as i64;
+        let cutoff = lorehaven_db::identity::format_rfc3339(
+            OffsetDateTime::from_unix_timestamp(cutoff_ms / 1000)
+                .unwrap_or_else(|_| OffsetDateTime::now_utc())
+                + time::Duration::milliseconds(cutoff_ms % 1000),
+        );
+        let candidates = lorehaven_db::derivative::find_stale_for_verification(
+            state.db(),
+            &cutoff,
+            limit,
+        )
+        .await
+        .map_err(transient)?;
+        let total = i64::try_from(candidates.len()).unwrap_or(i64::MAX).max(1);
+        let mut verified = 0;
+        let mut stale = 0;
+        for (index, derivative) in candidates.iter().enumerate() {
+            if jobs::is_cancelled(state.db(), job)
+                .await
+                .map_err(transient)?
+            {
+                return Err(HandlerError::Cancelled);
+            }
+            if store
+                .get(state.db(), &derivative.parent_checksum)
+                .await
+                .map_err(transient)?
+                .is_some()
+            {
+                if lorehaven_db::derivative::touch_derivative_verified(state.db(), &derivative.id)
+                    .await
+                    .map_err(transient)?
+                {
+                    verified += 1;
+                }
+            } else {
+                if lorehaven_db::derivative::mark_derivative_stale(state.db(), &derivative.id)
+                    .await
+                    .map_err(transient)?
+                {
+                    stale += 1;
+                }
+            }
+            let permille = i64::try_from(index + 1).unwrap_or(total) * 1000 / total;
+            jobs::progress(
+                state.db(),
+                job,
+                permille,
+                Some(&format!("verified {verified}, stale {stale}")),
+            )
+            .await
+            .map_err(transient)?;
+        }
+        tracing::info!(verified, stale, "derivative verification sweep");
         Ok(())
     }
 }
