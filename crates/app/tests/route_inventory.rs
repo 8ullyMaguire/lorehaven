@@ -1963,6 +1963,29 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/media-collections/{id}/media",
         audience: Audience::Public,
     },
+    // The three doors the direction test found untabled: the collection feed is
+    // mounted twice and the kind filter once, and none had a row.
+    RouteEntry {
+        file: "media.rs",
+        handler: "media_collection_feed",
+        method: "GET",
+        path: "/media-collections/{id}/media/feed",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "media.rs",
+        handler: "list_media_collections_by_kind",
+        method: "GET",
+        path: "/media-collections/kind/{kind}/media",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "media.rs",
+        handler: "media_collection_feed",
+        method: "GET",
+        path: "/media-collections/kind/{kind}/media/feed",
+        audience: Audience::Public,
+    },
     RouteEntry {
         file: "media.rs",
         handler: "canon_media",
@@ -2436,6 +2459,30 @@ fn every_route_has_correct_audience() {
 /// route may exist in `server.rs`.
 ///
 /// We check each route module's `router()` function for the path
+/// The name of the nearest `fn` declared at or above `index` — the function a
+/// `.route(...)` call on that line belongs to.
+fn enclosing_fn(lines: &[&str], index: usize) -> Option<(String, bool)> {
+    for line in lines[..=index].iter().rev() {
+        let t = line.trim_start();
+        if let Some(i) = t.find("fn ") {
+            let name: String = t[i + 3..]
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() {
+                // A router builder is any function returning `Router<…>`:
+                // `router()`, `routes()`, `write_router()`, `*_routes()`.  The
+                // name alone is not enough — `governance.rs` declares
+                // `fn router() { routes() }` and registers its doors in
+                // `fn routes()`, which a name list of "router"/"*_routes"
+                // silently skipped.
+                return Some((name, line.contains("Router<")));
+            }
+        }
+    }
+    None
+}
+
 /// Walk a module's `router()` and `*_routes()` functions, resolve `.nest()`
 /// prefixes, and collect every `(full_path, method, handler)` triple that the
 /// module registers.
@@ -2449,104 +2496,56 @@ fn collect_registered(module: &str) -> Vec<(String, String, String)> {
         .unwrap_or_else(|_| panic!("cannot read {}: {}", module, src_path.display()));
     let mut routes = Vec::new();
 
-    // Find each `fn foo_routes()` or `fn router()` body
-    let _func_iter = src.lines().enumerate().peekable();
-    let mut current_func: Option<String> = None;
-    let mut brace_depth: usize = 0;
-    let mut in_body = false;
-    let mut body_lines: Vec<String> = Vec::new();
-
-    for line in src.lines() {
-        let trimmed = line.trim();
-
-        // Detect function headers
-        if !in_body && (trimmed.starts_with("pub fn ") || trimmed.starts_with("fn ")) {
-            if let Some(idx) = trimmed.find("fn ") {
-                let name = trimmed[idx + 3..]
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or("")
-                    .trim_end_matches('(')
-                    .trim_end_matches('{');
-                current_func = Some(name.to_string());
-                body_lines = Vec::new();
-                brace_depth = 0;
-                in_body = true;
-                continue;
-            }
-        }
-
-        if !in_body {
+    // Associate every `.route(...)` with the nearest `fn` declared above it, and
+    // keep the ones registered in a `router()` / `*_routes()` function.
+    //
+    // This replaced a brace-counting scanner that walked function bodies. That
+    // scanner could not be trusted: braces inside strings and comments moved the
+    // depth, so a body could end early or swallow the rest of the file, and the
+    // failure mode was silence — it collected 0 routes from all 33 modules and
+    // this test still passed. Scanning backwards for the enclosing declaration
+    // has no depth to get wrong.
+    let lines: Vec<&str> = src.lines().collect();
+    for (idx, line) in lines.iter().enumerate() {
+        if !line.contains(".route(") {
             continue;
         }
+        let Some((func, builds_router)) = enclosing_fn(&lines, idx) else {
+            continue;
+        };
+        if !builds_router {
+            continue;
+        }
+        let prefix = find_nest_prefix(&src, module, &func);
+        let t = line.trim();
 
-        // Track brace depth to find function boundary
-        brace_depth += line.matches('{').count();
-        brace_depth -= line.matches('}').count();
+        // .route("path", handler) or .route("path", get(handler))
+        if let Some(route_start) = t.find(".route(") {
+            let after_route = &t[route_start + 7..];
+            if let Some(path_end) = after_route.find('"') {
+                let rest = &after_route[path_end + 1..];
+                if let Some(path_close) = rest.find('"') {
+                    let path = &rest[..path_close];
+                    let after_path = &rest[path_close + 1..];
 
-        body_lines.push(line.to_string());
-
-        if brace_depth == 0 && !line.trim().is_empty() {
-            // Function body complete
-            in_body = false;
-
-            // Only process router functions
-            let is_router = current_func.as_deref() == Some("router")
-                || current_func
-                    .as_deref()
-                    .is_some_and(|n| n.ends_with("_routes"));
-            if !is_router {
-                current_func = None;
-                continue;
-            }
-
-            // Determine the nest prefix from `.nest("...", ...)` calls
-            // that appear BEFORE this function's own routes
-            // We look for `.nest("prefix", func())` patterns in the module
-            // For now, the prefix is set by looking at the router function's
-            // own `.nest()` calls that reference other functions
-            // Actually, the prefix comes from the parent router calling
-            // `.nest("prefix", module::_routes())`.  We need to scan the
-            // module to find what prefix it's nested under.
-            // The simplest approach: scan the module for `.nest("prefix", func_name())`
-            // where func_name matches our current function.
-            let prefix = find_nest_prefix(&src, module, current_func.as_deref().unwrap());
-            for body_line in &body_lines {
-                let t = body_line.trim();
-
-                // .route("path", handler) or .route("path", get(handler))
-                if let Some(route_start) = t.find(".route(") {
-                    let after_route = &t[route_start + 7..];
-                    if let Some(path_end) = after_route.find('"') {
-                        let rest = &after_route[path_end + 1..];
-                        if let Some(path_close) = rest.find('"') {
-                            let path = &rest[..path_close];
-                            let after_path = &rest[path_close + 1..];
-
-                            // Find handler in the rest: get(handler), post(handler), etc.
-                            if let Some(handler) = extract_handler(after_path) {
-                                let full_path = if prefix.is_empty() {
-                                    path.to_string()
-                                } else if path == "/" {
-                                    prefix.clone()
-                                } else {
-                                    format!("{}{}", prefix, path)
-                                };
-                                routes.push((
-                                    full_path,
-                                    handler,
-                                    current_func.as_deref().unwrap().to_string(),
-                                ));
-                            }
-                        }
+                    // Find handler in the rest: get(handler), post(handler), etc.
+                    if let Some(handler) = extract_handler(after_path) {
+                        let full_path = if prefix.is_empty() {
+                            path.to_string()
+                        } else if path == "/" {
+                            // A nested router's own root is spelled with the
+                            // trailing slash the table uses (`/recipes/`).
+                            format!("{prefix}/")
+                        } else {
+                            format!("{}{}", prefix, path)
+                        };
+                        routes.push((full_path, handler, func.clone()));
                     }
                 }
-
-                // .nest("prefix", func()) — we handle this via find_nest_prefix
             }
-
-            current_func = None;
         }
+
+        // .nest("prefix", func()) — handled by `find_nest_prefix`.
     }
 
     routes
@@ -2573,23 +2572,20 @@ fn find_nest_prefix(src: &str, _module: &str, func_name: &str) -> String {
 }
 
 /// Extract the handler function name from the rest of a .route() call
-/// after the path, e.g. "get(handler)" → "handler"
+/// after the path, e.g. `, get(list_media))` → `list_media`
 fn extract_handler(s: &str) -> Option<String> {
-    let s = s.trim();
-    // Patterns: get(fn), post(fn), patch(fn), delete(fn), put(fn), etc.
-    for (idx, ch) in s.char_indices() {
-        if ch == '(' {
-            let before = &s[..idx];
-            let before_trimmed = before.trim();
-            if !before_trimmed.is_empty() && !before_trimmed.starts_with("/*") {
-                return Some(before_trimmed.to_string());
-            }
-        }
-        if ch == ')' || ch == ',' {
-            break;
-        }
-    }
-    None
+    // What follows the path is `, get(handler))` — with a leading comma, which
+    // the previous implementation treated as end-of-route and gave up on, so
+    // every route in every module was skipped and this test passed while
+    // collecting nothing.
+    let s = s.trim_start_matches(|c: char| c == ',' || c.is_whitespace());
+    let open = s.find('(')?;
+    let inner = &s[open + 1..];
+    let close = inner.find([')', ','])?;
+    let name = inner[..close].trim();
+    // A method chain (`get(a).post(b)`) contributes its first handler only; the
+    // rest are separate registrations and are not collected today.
+    (!name.is_empty() && !name.contains('(')).then(|| name.to_string())
 }
 
 /// The direction test: walk every module's router() and *_routes() to find
@@ -2627,6 +2623,18 @@ fn registered_routes_are_tabled() {
         }
 
         let registered = collect_registered(&module);
+        // A walk that collects nothing compares nothing and passes. Every module
+        // here declares a router function, so an empty result means the walk
+        // broke, not that the module registers no routes — which is exactly how
+        // this test passed while collecting 0 routes from all 33 modules.
+        let src = fs::read_to_string(&path).expect("read module source");
+        if registered.is_empty() && src.contains("Router<") {
+            failures.push(format!(
+                "{} — declares a router function but the walk collected no routes \
+                 (the walk is broken, not the module)",
+                file_name
+            ));
+        }
         for (full_path, handler, _func) in registered {
             // Find matching table entry: same file, path, method, handler
             let found = table_entries
