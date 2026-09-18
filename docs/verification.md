@@ -965,3 +965,46 @@ all use `RequireSession` in their handler signatures, confirmed by grep.
 `auth.rs:829`'s "Reading is unaffected" refers to the age-gating policy —
 `AccessPolicy` does not restrict reading for age-unverified users — not to the
 door's audience requirement. The table's `Authenticated` label is correct.
+
+### The route-inventory direction test (`127f72e`), repaired in `2cec0a1`
+
+`127f72e` claims the direction test. It did not run, and the suite was red at
+that commit — three faults, each hiding the next:
+
+- **It panicked.** `attempt to subtract with overflow` at `route_inventory.rs:2485`:
+  the function header was `continue`d past, so a body's opening brace was never
+  counted and its closing brace always over-ran a `usize`.
+- **It collected nothing.** With the panic fixed, an instrumented run printed
+  `COLLECT <module> 0` for all 33 modules. The header parse took `router()` as the
+  function's name — `trim_end_matches('(')` cannot strip a trailing `)` — so no
+  function was ever recognised as a router and nothing was ever compared.
+- **It found no handlers.** With that fixed, `extract_handler` still returned
+  `None` per route: it broke on the leading comma of `, get(list_media))` before
+  reaching the call.
+
+Repaired as: a backwards search for the enclosing declaration, kept only when its
+return type contains `Router<`, which also picks up `governance.rs`'s
+`fn router() { routes() }` — a shape the name list "router"/"*_routes" skipped —
+plus an assertion that a module building a router yields at least one route, so
+"collected nothing" fails instead of passing.
+
+Proof it runs now: deleting `discovery.rs:get_dashboard` from the table fails with
+
+```
+discovery.rs:/dashboard/ — handler 'get_dashboard' registered but not in ROUTE_TABLE (path /dashboard/)
+test result: FAILED. 1 passed; 1 failed
+```
+
+— a route inside `.nest("/dashboard", …)`, so the nest resolution is exercised —
+and restoring the row returns `2 passed`.
+
+What it found: three untabled doors, all `MaybeSession` — the collection feed
+`/media-collections/{id}/media/feed`, the kind filter
+`/media-collections/kind/{kind}/media` and the kind feed
+`/media-collections/kind/{kind}/media/feed` — now tabled. The table went from 303
+rows to 306.
+
+Limits that remain, none of which affects today's table: the comparison is
+`(file, path, handler)` and not the method; one `.route(...)` per line is read, so
+a wrapped call is missed; and a method chain (`get(a).post(b)`) contributes only
+its first handler.

@@ -41,6 +41,14 @@ the time). Trust `docs/verification.md`, this file, or a fresh run.
   version guard to `ReaderSettings`. Half of it held: the guard is verified by
   e2e test 17, which failed before it and passes now. The search half did not —
   see `768df88`.
+- `127f72e` + `2cec0a1` — the audience table is complete and the direction test
+  runs: 306 rows, `every_route_has_correct_audience` compares each row's expected
+  audience against the handler's extractor, and `registered_routes_are_tabled`
+  walks each module's router builders (including `governance.rs`'s
+  `fn router() { routes() }`) and fails on a registered route with no row —
+  proven by deleting a nested row and watching it fail. `2cec0a1` repaired it:
+  at `127f72e` it panicked and collected 0 routes from all 33 modules, and it
+  found three untabled doors on its first real run. See `docs/verification.md`.
 - `62102e3` — the Phase 1c §2.3c route-audience table: 293 rows, one per
   registered door, with a correctness test that fails on a wrong audience (proven
   by mutation). `7bfd832` fixes the red gate (fmt + clippy), `127f72e` adds the
@@ -86,37 +94,26 @@ the time). Trust `docs/verification.md`, this file, or a fresh run.
 
 ## Open, in the order I would take it
 
-1. **Phase 1c — finish the audience table.** `62102e3` built the table (293 rows,
-   every route module represented) and a correctness check that does fail on a
-   wrong audience (mutation-proven). `7bfd832` fixes the red gate. `127f72e`
-   implements the direction test and closes all three gaps:
-   - **11 registered handlers now have rows**: 7 `discovery.rs` (`/recipes/`,
-     `/recipes/{id}`, `/recipes/{id}/delete`, `/recipes/list`, `/dashboard/`),
-     4 `imports.rs` admin doors (`revision_cache_stats`, `clear_revision_cache`,
-     `purge_revision_cache`, `sweep_source_health` — all `Operator` audience).
-   - **Direction test implemented**: `collect_registered()` walks each module's
-     `router()` and `*_routes()` functions, resolves `.nest()` prefixes, and
-     `registered_routes_are_tabled()` fails on any registered triple with no row.
-   - **Duplicates removed**: `reading.rs:get_typography`/`save_typography` appeared
-     twice; one set removed.
-   - **Operator audience added**: new `Audience::Operator` variant for
-     `require_operator` doors (returns `"RequireSession"` extractor).
-   - **`registered_routes_are_tabled` does not check that direction.** It iterates
-     the *table* and greps the module for the path string, so an untabled route is
-     invisible. The fix is to walk each module's `router()` and `*_routes()`
-     helpers, resolve the `nest` prefixes, and fail on a registered
-     `(method, path, handler)` with no row.
-   - **The dir-walking net was dropped.** The old
-     `every_route_has_declared_audience` required every `State<AppState>` handler
-     to declare an extractor; both new tests are table-driven, so a new untabled
-     handler with no extractor now passes. Today none does.
-   Also: add a § citation per row, give the four operator doors an `operator`
-   audience (they call `require_operator`), and delete the `BTreeMap` in
-   `every_route_has_correct_audience` that is built and never read.
-   The commit also shipped a red gate — `cargo fmt` wanted the table expanded and
-   clippy refused to compile the test target (`clippy::question_mark`); both are
-   fixed in `7bfd832` (mechanical, tests still 2/2) and recorded in
-   `docs/verification.md`, so re-run fmt and clippy before starting.
+1. **M23-02 remainder — webhook watches and grant-gated bulk export.** Planned,
+   not started: `docs/plans/m23-webhooks-bulk-export.md` (written against
+   `6d1e1bf`, every claim carrying a `file:line`). One query engine already backs
+   the seven media doors; what is missing is bulk export and query watches.
+   Order, and why: Phase 1 is the queue fairness the acceptance line names
+   ("rate limited and fair-queued"), because nothing in the queue is fair today —
+   `claim_next` is `ORDER BY priority DESC, available_at ASC` with `priority`
+   always 0 (`crates/db/src/jobs.rs:237-256`). Phase 2 is the export itself, which
+   reuses `export_jobs` (a third `subject_type`) and `download_grants`, walks the
+   existing query with the reader's account so eligibility is inherent, checks
+   `has_entitlement` per work, and names every skipped work in the bundle's
+   manifest. Phase 3 is the webhook half.
+   Two corrections the planning round made to the obvious reading: **the webhook
+   half is the larger one, not the smaller** — M16 built tables, `GET`/`POST
+   /me/webhooks`, a bounded-payload helper and a signing helper, and *no sender*;
+   `crates/app/src/worker.rs` contains no occurrence of "webhook", `record_delivery`
+   has no caller on a delivery path, and the app crate has no HTTP client — and
+   **the signature is not HMAC** (`SHA256(secret ‖ canonical ‖ payload)`,
+   `crates/domain/src/webhook.rs:20-27`, whose unit test only verifies with the
+   same function). `requirements.csv`'s M16-01 row has been corrected accordingly.
 2. **N2b — decide the audience of the browsing doors.** The table now records them
    as `Authenticated`: `/works/{id}/comments`, `/forums`,
    `/forums/{category}/topics`, `/topics/{id}`, `/topics/{id}/replies`, `/groups`,
