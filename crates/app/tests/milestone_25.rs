@@ -994,3 +994,68 @@ async fn count(db: &lorehaven_db::Database, sql: &str) -> i64 {
             .expect("count"),
     }
 }
+
+/// Public-domain collections driven by the rights field.
+///
+/// Works with license = 'cc0' (or other public domain indicators) should
+/// automatically appear in the public_domain collection.
+#[tokio::test]
+async fn public_domain_collections_driven_by_rights_field() {
+    let dir = scratch_dir("public-domain-collection");
+    let _path = path_lock().await;
+    install_stubs(&dir, &[]);
+    let tdb = test_support::TestDb::connect_with_dir("public-domain-collection", &dir).await;
+    let app = server::build_router(AppState::new(config_for(&dir), tdb.db().clone()));
+    let mut client = Client::new(app.clone());
+
+    // Register and login a user
+    register(&mut client, "user@example.com", "user").await;
+
+    // Create a work with CC0 license (public domain)
+    let (work_id, _) = published_work_with_a_blob(&mut client, "Public Domain Work").await;
+    // Create media_rights row and set to CC0
+    insert_rights(&tdb, &work_id, "cc0").await;
+
+    // Create a work with standard license (not public domain)
+    let (work_id2, _) = published_work_with_a_blob(&mut client, "Copyrighted Work").await;
+    insert_rights(&tdb, &work_id2, "all rights reserved").await;
+
+    // List public domain collection - should contain the CC0 work
+    let (status, body) = client
+        .get("/api/v1/media-collections/kind/public_domain/media")
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"].as_str().unwrap(), work_id);
+
+    // Direct feed test: /api/v1/media-collections/kind/public_domain/media/feed
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/v1/media-collections/kind/public_domain/media/feed")
+        .body(Body::empty())
+        .expect("request");
+    let response = app.clone().oneshot(request).await.expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
+        .await
+        .expect("body");
+    let feed_content = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(feed_content.contains("Public Domain Work"), "feed should contain CC0 work: {feed_content}");
+    assert!(!feed_content.contains("Copyrighted Work"), "feed should not contain standard work: {feed_content}");
+
+    println!("PASS: public_domain_collections_driven_by_rights_field");
+}
+
+/// Helper: insert media_rights row for a work
+async fn insert_rights(tdb: &test_support::TestDb, work_id: &str, license: &str) {
+    let cast = if tdb.is_postgres() { "::uuid" } else { "" };
+    exec(
+        &tdb,
+        &format!(
+            "INSERT INTO media_rights (work_id, license, updated_at, version) VALUES (?{cast}, ?, '2026-09-01T00:00:00Z', 1)",
+        ),
+        &[work_id, license],
+    )
+    .await;
+}

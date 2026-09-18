@@ -82,6 +82,7 @@ vocabulary!(CollectionKind, as_str, {
     ArchiveCollection => "archive_collection",
     ChallengeAnthology => "challenge_anthology",
     PreservedBatch => "preserved_batch",
+    PublicDomain => "public_domain",
 });
 
 vocabulary!(EditionKind, as_str, {

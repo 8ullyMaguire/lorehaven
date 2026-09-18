@@ -433,6 +433,30 @@ async fn media_collection_media(
     }
 }
 
+/// Feed for a media collection (Atom/RSS).
+async fn media_collection_feed(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    MaybeSession(session): MaybeSession,
+) -> impl IntoResponse {
+    let db = state.db();
+    let account_id = session.as_ref().map(|u| u.account_id.to_string());
+
+    // id here can be either a collection id or a kind like "public_domain"
+    let items = if id == "public_domain" {
+        match lorehaven_db::media::list_media_by_license(db, "cc0", account_id.as_deref(), 50, None).await {
+            Ok((items, _, _)) => items,
+            Err(_) => Vec::new(),
+        }
+    } else {
+        match lorehaven_db::media::collection_media(db, &id, account_id.as_deref()).await {
+            Ok(items) => items,
+            Err(_) => Vec::new(),
+        }
+    };
+    media_feed_dc(items, "")
+}
+
 async fn canon_media(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -614,6 +638,43 @@ async fn get_media_collection(
     match lorehaven_db::media::find_collection(db, &id, account_id.as_deref()).await {
         Ok(Some(coll)) => Json(coll).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "not found"}))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+/// List media collections filtered by kind (e.g., public_domain).
+async fn list_media_collections_by_kind(
+    State(state): State<AppState>,
+    Path(kind): Path<String>,
+    MaybeSession(session): MaybeSession,
+) -> impl IntoResponse {
+    let db = state.db();
+    let account_id = session.as_ref().map(|u| u.account_id.to_string());
+    // For the special "public_domain" kind, query works by rights field
+    if kind == "public_domain" {
+        return match lorehaven_db::media::list_media_by_license(
+            db,
+            "cc0",
+            account_id.as_deref(),
+            50,
+            None,
+        )
+        .await
+        {
+            Ok((items, _, _)) => Json(json!({"items": items})).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+                .into_response(),
+        };
+    }
+    match lorehaven_db::media::list_collections_by_kind(db, &kind, account_id.as_deref()).await {
+        Ok(items) => Json(json!({"kind": kind, "collections": items})).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": e.to_string()})),
@@ -1078,6 +1139,9 @@ pub fn router() -> Router<AppState> {
         .route("/media-collections", get(list_media_collections))
         .route("/media-collections/{id}", get(get_media_collection))
         .route("/media-collections/{id}/media", get(media_collection_media))
+        .route("/media-collections/{id}/media/feed", get(media_collection_feed))
+        .route("/media-collections/kind/{kind}/media", get(list_media_collections_by_kind))
+        .route("/media-collections/kind/{kind}/media/feed", get(media_collection_feed))
         .route("/canons/{id}/media", get(canon_media))
         .route("/spaces/{id}/media", get(space_media))
 }
