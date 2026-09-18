@@ -6,7 +6,7 @@ end; this file is the short version that must stay true to the commit it names.
 
 ## The tree
 
-The application code is at **768df88**; the commits after it touch `docs/` and the
+The application code is at **24b5ee2**; the commits after it touch `docs/` and the
 e2e spec only. Working tree clean. (This line deliberately names the app commit
 rather than its own, so it does not go stale the next time a document is added.)
 
@@ -16,11 +16,11 @@ Gates at this commit:
 | --- | --- |
 | `cargo fmt --all -- --check` | clean |
 | `clippy --workspace --all-targets -- -D warnings` | 0 warnings, 0 errors |
-| SQLite workspace suite | **1222 passed / 0 failed / 13 ignored** across 47 binaries |
+| SQLite workspace suite | **1223 passed / 0 failed / 13 ignored** across 47 binaries |
 | the 13 ignored | network tests in `crates/scrapers/tests/live_verification.rs`, run deliberately, not by default |
-| Playwright e2e | **27 passed** (`frontend/e2e/use-cases.spec.ts`, 27 tests) — two are `test.fail()` markers, so 25 are green and 2 fail on purpose |
+| Playwright e2e | **30 passed** across `frontend/e2e/` (27 use cases, 2 journeys, 1 media) — and **no `test.fail()` markers left**: the last two, 12b and 16b, now assert the fixed behaviour |
 | `svelte-check --tsconfig ./tsconfig.json` | 0 errors, 0 warnings |
-| frontend vitest | 150 passed / 23 files |
+| frontend vitest | 153 passed / 25 files |
 | PostgreSQL | **not run — blocked**, see Environment |
 
 The commit messages in this series are not a reliable source of test counts
@@ -47,6 +47,27 @@ the time). Trust `docs/verification.md`, this file, or a fresh run.
   Verified live: publish → reindex succeeded → 20 index rows → anonymous search
   finds the work with a real word count; a draft with index rows present, and a
   restricted work with rows left behind, are both withheld.
+- The overnight round of 2026-09-18 — `6358720` (tell the author when a public
+  review is delivered), `fb717fc` (a History link in the desktop nav),
+  `fee36d6` (a guard against the settings panels discarding an in-flight edit) —
+  reviewed claim by claim, and two of the three needed work:
+  - the review notification is live and correct (author's inbox gets `kind:
+    review` with the work id; a held review notifies nobody; a private one
+    notifies nobody) **but fired on every delivered save**, so an edit
+    re-notified the author. Fixed in `24b5ee2`; `milestone_12`'s
+    `editing_a_public_review_does_not_notify_the_author_again` was seen failing
+    without the guard (two identical items from one post plus one edit).
+  - the History link is real: at 1280 px signed in, `nav.desktop` holds all
+    eleven destinations including `/library/history`, visible (58 × 43 box).
+    The claim looked false for a while because the instance serving it had been
+    built *before* the frontend was rebuilt, so it was serving the older bundle
+    — see Environment.
+  - the panels guard did **not** hold: `edited` was set on change, consulted by
+    the effect, and cleared at the end of that same effect run. Writing a value
+    the effect reads re-queues it, so the flag survived exactly one flush and the
+    next run re-seeded over the reader's edit. Three component tests pin both
+    directions now (the edit survives a late server copy; a copy arriving after a
+    save is still adopted), and the flag is cleared only by a save.
 - Earlier in the same day: M26 TTS narration (`6b6c684`), M25 residuals
   (`81c6cf9`), shelf CSV imports and the tutorial book (`4b33acb`).
 
@@ -64,39 +85,39 @@ the time). Trust `docs/verification.md`, this file, or a fresh run.
    say community reading is public) or the spec says reading them needs an
    account and the registration message stops claiming "Reading is unaffected".
    A decision, not a patch.
-3. **The settings panels are still exposed to the discarded-edit race.**
-   `PrivacySettings.svelte:35` and `ContentPreferences.svelte:34` re-seed their
-   form whenever the server's copy changes, so a response landing after the
-   reader moved a select replaces the draft: `dirty` goes false, the save button
-   relabels "Saved" and disables, and the edit vanishes silently — N7's shape,
-   in the two panels `ac22a89` did not touch. Not reproduced (narrow window: the
-   account page fetches on mount, so the response usually beats the click),
-   but two-line guard written up in `docs/sessions/2026-09-17.md`. Treat it as a hazard rather than a proven defect; the guard is two lines per component (`if (signature !== seeded && !edited) { draft = { …values } }`, with `edited` set on change and cleared after a save).
-6. **Index hygiene is still the worker's job, not the route's.** The route now
+3. **Index hygiene is still the worker's job, not the route's.** The route now
    refuses to serve a non-public work whatever the index holds, which is the
    safety net. The race underneath remains: a `Reindex` job that lands after a
    withdrawal repopulates rows for a work nobody may see, and the deindex event
    is a best-effort second. Consider having the reindex handler skip a work that
    is not published+public, so the index stops carrying rows it must never serve.
-7. **Search semantics worth pinning down.** Multiple words are OR-ed
+4. **Search semantics worth pinning down.** Multiple words are OR-ed
    (`term LIKE 'a%' OR term LIKE 'b%'`) while `score` counts the matched terms,
    so a two-word query ranks by how many words hit — intended, or should it be
    AND? And matching is prefix-per-word, so "light" finds "lighthouse" while
    "house" does not.
-8. **N5** — `check_abuse_status` is session-gated, not operator-gated: any
+5. **N5** — `check_abuse_status` is session-gated, not operator-gated: any
    account can probe any key's counter and block state. Wants the operator role
    plus an audit row (§11, §19).
-9. **N6** — unknown `/api/v1/*` paths answer `200 text/html` with the index page
-   instead of the JSON error envelope (§3.3); it also hides client bugs.
-10. **Phase 2** — the search half is done (`public_search` takes a real query and
+6. **N6** — unknown `/api/v1/*` paths answer `200 text/html` with the index page
+   instead of the JSON error envelope (§3.3); it also hides client bugs. (Cost
+   this review a probe: a mistyped path answered with HTML 200 rather than a
+   404, which reads as success to a careless `curl | jq`.)
+7. **Phase 2** — the search half is done (`public_search` takes a real query and
    filters by lifecycle and visibility). Left: four `/me/*` doors answer 422
    where the convention is 401, and `/extensions` demands a session with 422, so
    the public gallery is closed to visitors.
-11. **Phase 3** — `create_bounty`/`list_bounties`/`claim_bounty` are the only
-    dialect-unguarded functions in `crates/db/src/economy.rs` (they panic on
-    PostgreSQL); no escrow, no credits check, `claim_bounty` reports success on a
-    zero-row update.
-12. **Phase 4 — bookkeeping.** `~/.config/lorehaven/pg-env` is missing, so no PG
+8. **Phase 3** — `create_bounty`/`list_bounties`/`claim_bounty` are the only
+   dialect-unguarded functions in `crates/db/src/economy.rs` (they panic on
+   PostgreSQL); no escrow, no credits check, `claim_bounty` reports success on a
+   zero-row update.
+9. **A held review that a later edit gets delivered notifies nobody.** The
+   notification now waits for a review that was not already public, so the
+   sequence "held write, then a delivered edit" is silent until the reviewer
+   edits again. Narrow (it needs the gate to reverse itself for the same
+   reviewer), and the fix is to compare against the stored delivery outcome
+   rather than `is_public` — noted in the code comment. Low priority.
+10. **Phase 4 — bookkeeping.** `~/.config/lorehaven/pg-env` is missing, so no PG
     claim in either doc can be reproduced; restore a PG path, then update
     `docs/requirements.csv` (M15, M18, M19) and the counts in
     `docs/sessions/2026-09-17.md` §0.
@@ -135,6 +156,19 @@ Things that will cost a morning if discovered late.
   the browser tests run against a stale interface:
   `frontend/scripts/fe.sh build` then
   `CARGO_TARGET_DIR=~/.cargo-target/lorehaven-review cargo build --release`.
+  This bit the overnight round anyway: its instance answered with the *pre-change*
+  bundle for nine hours, and a `document.querySelectorAll` probe against it
+  "disproved" a fix that was in fact correct. Check which bundle is being served
+  before believing a UI probe — `curl -s localhost:8180/ | grep -o
+  'assets/index-[^"]*\.js'` against `ls frontend/dist/assets/index-*.js`; equal
+  names mean the embed is current.
+- **A restarted instance is not necessarily the one you started.** `kill <pid>`
+  on a stale pid leaves the old process holding the port while the new one exits
+  silently on a bind error, and the old one will happily serve the old build.
+  After every restart confirm both: `ss -ltnp | grep 8180` names the listening
+  pid, and `/health/ready` names the build it is running (a `.dirty` suffix means
+  uncommitted changes were compiled in). This is how the stale bundle above was
+  caught.
 - **A background cargo build can be stopped, not slow.** Started through the
   tool's `bash -lic` wrapper it may sit in state `T` (`ps -eo pid,stat,args |
   grep -E 'cargo|rustc'`) and never resume; a release build waited ten minutes
@@ -175,6 +209,12 @@ Things that will cost a morning if discovered late.
 ## Conventions this work is held to
 
 - A fix is not finished until its test has been **seen failing without it**.
+- A guard is not finished until its test covers **both** directions: the thing it
+  protects (the edit survives) and the thing it must not block (a later update is
+  still adopted). One direction alone lets a guard that never fires pass.
+- A test that can pass without the behaviour is not evidence. Two of this series'
+  defects shipped under green tests: a query that could not return rows, and an
+  assertion matching the label of the state *before* the action.
 - Findings are verified with the user and confirmed before implementation,
   especially for scraping and integration work; test approaches against the real
   thing before writing code.
@@ -191,12 +231,14 @@ Things that will cost a morning if discovered late.
 
 - `/home/alvaro/.hermes/plans/2026-09-17-lorehaven-stub-followup-plan.md` — the
   long-form plan this file summarises: status table, gate table, the phase plan
-  (1c, 2, 3, 4), the leak round's lessons and the review of `ac22a89`.
+  (1c, 2, 3, 4), the leak round's lessons, the review of `ac22a89` (§3c) and the
+  review of the overnight round (§3d).
 - `/home/alvaro/.hermes/plans/2026-09-17-lorehaven-remediation-plan.md` — the
   earlier remediation plan.
 - `docs/spec.md` — the authority the code is measured against;
   `docs/requirements.csv` — requirement status; `docs/verification.md` —
-  evidence; `docs/sessions/` — per-session records.
-- `frontend/e2e/use-cases.spec.ts` — the twenty use cases, with the findings
-  above encoded as tests (12b and 16b fail on purpose; 17 passes since the
-  ReaderSettings guard landed).
+  evidence; `docs/sessions/` — per-session records (`2026-09-18.md` is the
+  overnight round and its review).
+- `frontend/e2e/use-cases.spec.ts` — the twenty use cases; 12b (History on a
+  desktop) and 16b (a review notifies its author) now assert the fixed behaviour
+  and pass; 17 passes since the ReaderSettings guard landed.
