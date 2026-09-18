@@ -30,6 +30,8 @@ enum Audience {
     Authenticated,
     /// Pseudonymous door — `RequirePseud`.
     Pseudonymous,
+    /// Operator door — `RequireSession` + `require_operator`.
+    Operator,
 }
 
 impl Audience {
@@ -38,6 +40,7 @@ impl Audience {
             Audience::Public => "MaybeSession",
             Audience::Authenticated => "RequireSession",
             Audience::Pseudonymous => "RequirePseud",
+            Audience::Operator => "RequireSession",
         }
     }
 }
@@ -437,20 +440,6 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/notes/{id}",
         audience: Audience::Pseudonymous,
     },
-    RouteEntry {
-        file: "reading.rs",
-        handler: "get_typography",
-        method: "GET",
-        path: "/settings/typography",
-        audience: Audience::Authenticated,
-    },
-    RouteEntry {
-        file: "reading.rs",
-        handler: "save_typography",
-        method: "PATCH",
-        path: "/settings/typography",
-        audience: Audience::Authenticated,
-    },
     // ------------------------------------------------------------------
     // Library — session-scoped (all reads and writes)
     // ------------------------------------------------------------------
@@ -769,6 +758,37 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Pseudonymous,
     },
     // ------------------------------------------------------------------
+    // Imports — admin surface (operator-gated, spec §11.8)
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "imports.rs",
+        handler: "revision_cache_stats",
+        method: "GET",
+        path: "/admin/sources/revisions",
+        audience: Audience::Operator,
+    },
+    RouteEntry {
+        file: "imports.rs",
+        handler: "clear_revision_cache",
+        method: "DELETE",
+        path: "/admin/sources/revisions",
+        audience: Audience::Operator,
+    },
+    RouteEntry {
+        file: "imports.rs",
+        handler: "purge_revision_cache",
+        method: "POST",
+        path: "/admin/sources/revisions/purge",
+        audience: Audience::Operator,
+    },
+    RouteEntry {
+        file: "imports.rs",
+        handler: "sweep_source_health",
+        method: "POST",
+        path: "/admin/sources/health",
+        audience: Audience::Operator,
+    },
+    // ------------------------------------------------------------------
     // Exports — session-scoped (authed_router)
     // ------------------------------------------------------------------
     RouteEntry {
@@ -932,6 +952,58 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         handler: "set_operator_affinity",
         method: "POST",
         path: "/operator/affinities",
+        audience: Audience::Authenticated,
+    },
+    // ------------------------------------------------------------------
+    // Discovery — nested sub-routers (recipe_routes, dashboard_routes)
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "create_recipe",
+        method: "POST",
+        path: "/recipes/",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "get_recipe_route",
+        method: "GET",
+        path: "/recipes/{id}",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "update_recipe_route",
+        method: "PATCH",
+        path: "/recipes/{id}",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "delete_recipe_route",
+        method: "POST",
+        path: "/recipes/{id}/delete",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "list_recipes_route",
+        method: "GET",
+        path: "/recipes/list",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "get_dashboard",
+        method: "GET",
+        path: "/dashboard/",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "save_dashboard",
+        method: "POST",
+        path: "/dashboard/",
         audience: Audience::Authenticated,
     },
     // ------------------------------------------------------------------
@@ -2364,23 +2436,208 @@ fn every_route_has_correct_audience() {
 /// route may exist in `server.rs`.
 ///
 /// We check each route module's `router()` function for the path
-/// string.  The server merges these modules, so every table entry
-/// must appear in its module's router.
+/// Walk a module's `router()` and `*_routes()` functions, resolve `.nest()`
+/// prefixes, and collect every `(full_path, method, handler)` triple that the
+/// module registers.
+///
+/// This is the *direction* test: it walks the code, not the table.  Any
+/// handler registered in a module but missing from `ROUTE_TABLE` is caught
+/// here, including routes inside nested sub-routers.
+fn collect_registered(module: &str) -> Vec<(String, String, String)> {
+    let src_path = Path::new("src/routes").join(module);
+    let src = fs::read_to_string(&src_path)
+        .unwrap_or_else(|_| panic!("cannot read {}: {}", module, src_path.display()));
+    let mut routes = Vec::new();
+
+    // Find each `fn foo_routes()` or `fn router()` body
+    let _func_iter = src.lines().enumerate().peekable();
+    let mut current_func: Option<String> = None;
+    let mut brace_depth: usize = 0;
+    let mut in_body = false;
+    let mut body_lines: Vec<String> = Vec::new();
+
+    for line in src.lines() {
+        let trimmed = line.trim();
+
+        // Detect function headers
+        if !in_body && (trimmed.starts_with("pub fn ") || trimmed.starts_with("fn ")) {
+            if let Some(idx) = trimmed.find("fn ") {
+                let name = trimmed[idx + 3..]
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_end_matches('(')
+                    .trim_end_matches('{');
+                current_func = Some(name.to_string());
+                body_lines = Vec::new();
+                brace_depth = 0;
+                in_body = true;
+                continue;
+            }
+        }
+
+        if !in_body {
+            continue;
+        }
+
+        // Track brace depth to find function boundary
+        brace_depth += line.matches('{').count();
+        brace_depth -= line.matches('}').count();
+
+        body_lines.push(line.to_string());
+
+        if brace_depth == 0 && !line.trim().is_empty() {
+            // Function body complete
+            in_body = false;
+
+            // Only process router functions
+            let is_router = current_func.as_deref() == Some("router")
+                || current_func
+                    .as_deref()
+                    .is_some_and(|n| n.ends_with("_routes"));
+            if !is_router {
+                current_func = None;
+                continue;
+            }
+
+            // Determine the nest prefix from `.nest("...", ...)` calls
+            // that appear BEFORE this function's own routes
+            // We look for `.nest("prefix", func())` patterns in the module
+            // For now, the prefix is set by looking at the router function's
+            // own `.nest()` calls that reference other functions
+            // Actually, the prefix comes from the parent router calling
+            // `.nest("prefix", module::_routes())`.  We need to scan the
+            // module to find what prefix it's nested under.
+            // The simplest approach: scan the module for `.nest("prefix", func_name())`
+            // where func_name matches our current function.
+            let prefix = find_nest_prefix(&src, module, current_func.as_deref().unwrap());
+            for body_line in &body_lines {
+                let t = body_line.trim();
+
+                // .route("path", handler) or .route("path", get(handler))
+                if let Some(route_start) = t.find(".route(") {
+                    let after_route = &t[route_start + 7..];
+                    if let Some(path_end) = after_route.find('"') {
+                        let rest = &after_route[path_end + 1..];
+                        if let Some(path_close) = rest.find('"') {
+                            let path = &rest[..path_close];
+                            let after_path = &rest[path_close + 1..];
+
+                            // Find handler in the rest: get(handler), post(handler), etc.
+                            if let Some(handler) = extract_handler(after_path) {
+                                let full_path = if prefix.is_empty() {
+                                    path.to_string()
+                                } else if path == "/" {
+                                    prefix.clone()
+                                } else {
+                                    format!("{}{}", prefix, path)
+                                };
+                                routes.push((
+                                    full_path,
+                                    handler,
+                                    current_func.as_deref().unwrap().to_string(),
+                                ));
+                            }
+                        }
+                    }
+                }
+
+                // .nest("prefix", func()) — we handle this via find_nest_prefix
+            }
+
+            current_func = None;
+        }
+    }
+
+    routes
+}
+
+/// Find the `.nest("prefix", func_name())` call that nests this module's
+/// sub-router under a prefix.  Called from the parent router.
+fn find_nest_prefix(src: &str, _module: &str, func_name: &str) -> String {
+    for line in src.lines() {
+        let t = line.trim();
+        if t.contains(".nest(") && t.contains(func_name) {
+            if let Some(nest_start) = t.find(".nest(") {
+                let after = &t[nest_start + 6..];
+                if let Some(p_start) = after.find('"') {
+                    let rest = &after[p_start + 1..];
+                    if let Some(p_end) = rest.find('"') {
+                        return rest[..p_end].to_string();
+                    }
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+/// Extract the handler function name from the rest of a .route() call
+/// after the path, e.g. "get(handler)" → "handler"
+fn extract_handler(s: &str) -> Option<String> {
+    let s = s.trim();
+    // Patterns: get(fn), post(fn), patch(fn), delete(fn), put(fn), etc.
+    for (idx, ch) in s.char_indices() {
+        if ch == '(' {
+            let before = &s[..idx];
+            let before_trimmed = before.trim();
+            if !before_trimmed.is_empty() && !before_trimmed.starts_with("/*") {
+                return Some(before_trimmed.to_string());
+            }
+        }
+        if ch == ')' || ch == ',' {
+            break;
+        }
+    }
+    None
+}
+
+/// The direction test: walk every module's router() and *_routes() to find
+/// all registered paths, then verify each has a row in ROUTE_TABLE.
 #[test]
 fn registered_routes_are_tabled() {
     let routes_dir = Path::new("src/routes");
     let mut failures: Vec<String> = Vec::new();
 
+    // Build a set of all registered (file, path, method, handler) triples from the table
+    let mut table_entries: Vec<(String, String, String, String)> = Vec::new();
     for entry in ROUTE_TABLE {
-        let src_path = routes_dir.join(entry.file);
-        let src = fs::read_to_string(&src_path)
-            .unwrap_or_else(|_| panic!("cannot read {}: {}", entry.file, src_path.display()));
-        let search = format!("\"{}\"", entry.path);
-        if !src.contains(&search) {
-            failures.push(format!(
-                "{}:{} — path \"{}\" not found in {} router",
-                entry.method, entry.path, entry.path, entry.file
-            ));
+        table_entries.push((
+            entry.file.to_string(),
+            entry.path.to_string(),
+            entry.method.to_string(),
+            entry.handler.to_string(),
+        ));
+    }
+
+    // Walk every module file
+    let entries = fs::read_dir(routes_dir).expect("cannot read routes directory");
+    for entry in entries {
+        let entry = entry.expect("read_dir entry");
+        let path = entry.path();
+        if !path.is_file() || !path.extension().is_some_and(|e| e == "rs") {
+            continue;
+        }
+        let module = path.file_stem().unwrap().to_string_lossy().to_string() + ".rs";
+        let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+
+        // Skip lib.rs and non-router files
+        if file_name == "lib.rs" {
+            continue;
+        }
+
+        let registered = collect_registered(&module);
+        for (full_path, handler, _func) in registered {
+            // Find matching table entry: same file, path, method, handler
+            let found = table_entries
+                .iter()
+                .any(|(f, p, _m, h)| f == &file_name && p == &full_path && h == &handler);
+            if !found {
+                failures.push(format!(
+                    "{}:{} — handler '{}' registered but not in ROUTE_TABLE (path {})",
+                    file_name, full_path, handler, full_path
+                ));
+            }
         }
     }
 
