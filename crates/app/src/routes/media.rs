@@ -88,8 +88,21 @@ async fn list_media(
     State(state): State<AppState>,
     Query(params): Query<MediaQuery>,
     MaybeSession(session): MaybeSession,
+    MaybeToken(token): MaybeToken,
     headers: HeaderMap,
 ) -> impl IntoResponse {
+    // API scope enforcement (spec §23.1): a bearer token must carry
+    // ContentRead to list media. Session callers bypass scope checks.
+    if let Some(t) = &token {
+        use lorehaven_domain::api_scopes::Scope;
+        if !t.scopes.contains(&Scope::ContentRead) {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({"error": {"code": "FORBIDDEN", "message": "token lacks content.read scope"}})),
+            )
+                .into_response();
+        }
+    }
     let db = state.db();
     // Empty/absent q means match-all: no text facet is built, so the
     // query never touches works_index.
@@ -194,6 +207,15 @@ async fn direct_door_eligible(
     token: Option<&TokenUser>,
 ) -> bool {
     use lorehaven_domain::policy::{can_access_content, AccessPolicy, ContentFacts};
+    // If a bearer token is presented, enforce API scopes (spec §23.1): the
+    // token must carry ContentRead to read media. A session caller bypasses
+    // scope checks (session authorization is established at login).
+    if let Some(t) = token {
+        use lorehaven_domain::api_scopes::Scope;
+        if !t.scopes.contains(&Scope::ContentRead) {
+            return false;
+        }
+    }
     // Token-authenticated callers contribute as their account; session callers
     // contribute as their pseud. Either identity can satisfy contributor checks.
     let token_contributor =
@@ -617,6 +639,7 @@ async fn post_media_query(
         State(state),
         Query(body),
         MaybeSession(session),
+        MaybeToken(None),
         HeaderMap::new(),
     )
     .await
@@ -826,8 +849,21 @@ async fn media_feed(
     State(state): State<AppState>,
     Query(params): Query<MediaQuery>,
     MaybeSession(session): MaybeSession,
+    MaybeToken(token): MaybeToken,
     headers: HeaderMap,
 ) -> impl IntoResponse {
+    // API scope enforcement (spec §23.1): a bearer token must carry
+    // ContentRead to read the feed. Session callers bypass scope checks.
+    if let Some(t) = &token {
+        use lorehaven_domain::api_scopes::Scope;
+        if !t.scopes.contains(&Scope::ContentRead) {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({"error": {"code": "FORBIDDEN", "message": "token lacks content.read scope"}})),
+            )
+                .into_response();
+        }
+    }
     let db = state.db();
     // Same match-all rule as the list door: empty/absent q builds no text
     // facet, so the feed never touches works_index.

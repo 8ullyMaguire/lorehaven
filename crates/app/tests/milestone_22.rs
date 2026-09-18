@@ -783,6 +783,94 @@ async fn media_tokens_enforce_scopes_and_revocation() {
 }
 
 #[tokio::test]
+async fn media_list_requires_token_scope() {
+    use lorehaven_domain::api_scopes::Scope;
+    let fx = Fixture::new("list-scope").await;
+    let mut owner = fx.client();
+    register(&mut owner, "list-scope@example.com", "listscope").await;
+    let pseud = author_pseud_id(&fx, "list-scope@example.com").await;
+    let draft_id = seed_work(
+        &fx,
+        13,
+        &pseud,
+        "List scope draft",
+        "private",
+        "draft",
+        "2026-09-01T00:00:00Z",
+    )
+    .await;
+    let account = lorehaven_db::media::find_media(fx.tdb.db(), &draft_id)
+        .await
+        .unwrap()
+        .unwrap()
+        .owning_account_id;
+
+    // Token with ContentRead scope: list returns only public works for this account.
+    let raw_read = uuid::Uuid::new_v4().to_string();
+    let _read_token_id = lorehaven_db::external::issue_token(
+        fx.tdb.db(),
+        &account,
+        "personal",
+        "Reader",
+        &lorehaven_app::crypto::hash_token(&raw_read),
+        &[Scope::ContentRead],
+    )
+    .await
+    .unwrap();
+
+    let status = owner
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/media")
+                .header(header::AUTHORIZATION, format!("Bearer {raw_read}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status();
+    assert_eq!(status, StatusCode::OK, "read-token lists media");
+
+    // Token WITHOUT ContentRead scope: list is forbidden.
+    let raw_noread = uuid::Uuid::new_v4().to_string();
+    let _noread_token_id = lorehaven_db::external::issue_token(
+        fx.tdb.db(),
+        &account,
+        "personal",
+        "NoRead",
+        &lorehaven_app::crypto::hash_token(&raw_noread),
+        &[Scope::CommentsWrite],
+    )
+    .await
+    .unwrap();
+
+    let status = owner
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/media")
+                .header(header::AUTHORIZATION, format!("Bearer {raw_noread}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status();
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "token without content.read scope is forbidden"
+    );
+
+    fx.cleanup().await;
+}
+
+#[tokio::test]
 async fn anonymous_media_doors_exclude_explicit_content() {
     let fx = Fixture::new("media-anonymous-explicit").await;
     let mut owner = fx.client();
