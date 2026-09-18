@@ -562,6 +562,74 @@ async fn attributed_media(
         }
     }
 }
+
+/// List media filtered by license (e.g., public domain).
+///
+/// Returns works with the given license in media_rights.
+pub async fn list_media_by_license(
+    db: &Database,
+    license: &str,
+    account_id: Option<&str>,
+    limit: i64,
+    cursor: Option<&str>,
+) -> Result<(Vec<MediaRecord>, i64, Option<String>)> {
+    let (elig_sqlite, elig_postgres, elig_values) = eligibility_filter(account_id);
+    let sqlite = format!(
+        "SELECT w.id, w.title, w.summary, w.format, w.rating, w.visibility, w.lifecycle,\n\
+        p.account_id AS owning_account_id, w.created_at, w.updated_at, w.version\n\
+        FROM works w JOIN pseuds p ON p.id = w.owner_pseud_id\n\
+        JOIN media_rights r ON r.work_id = w.id\n\
+        WHERE r.license = ? AND ({}) ORDER BY w.created_at DESC, w.id ASC LIMIT ?",
+        elig_sqlite
+    );
+    let postgres = format!(
+        "SELECT w.id::text AS id, w.title, w.summary, w.format, w.rating, w.visibility, w.lifecycle,\n\
+        p.account_id::text AS owning_account_id, w.created_at, w.updated_at, w.version::bigint\n\
+        FROM works w JOIN pseuds p ON p.id = w.owner_pseud_id\n\
+        JOIN media_rights r ON r.work_id = w.id\n\
+        WHERE r.license = ? AND ({}) ORDER BY w.created_at DESC, w.id ASC LIMIT ?",
+        elig_postgres
+    );
+    let sql = crate::sql_owned(db, sqlite, postgres);
+    match db.backend() {
+        Backend::Sqlite => {
+            let mut query = sqlx::query_as::<_, MediaRecord>(&sql).bind(license);
+            for value in &elig_values {
+                query = query.bind(value);
+            }
+            query = query.bind(limit);
+            if let Some(cursor_val) = cursor {
+                query = query.bind(cursor_val);
+            }
+            let rows = query.fetch_all(db.sqlite_pool().expect("sqlite handle")).await?;
+            let mut next_cursor = None;
+            if let Some(last) = rows.last() {
+                if rows.len() == limit as usize {
+                    next_cursor = Some(last.id.clone());
+                }
+            }
+            Ok((rows, limit, next_cursor))
+        }
+        Backend::Postgres => {
+            let mut query = sqlx::query_as::<_, MediaRecord>(&sql).bind(license);
+            for value in &elig_values {
+                query = query.bind(value);
+            }
+            query = query.bind(limit);
+            if let Some(cursor_val) = cursor {
+                query = query.bind(cursor_val);
+            }
+            let rows = query.fetch_all(db.postgres_pool().expect("postgres handle")).await?;
+            let mut next_cursor = None;
+            if let Some(last) = rows.last() {
+                if rows.len() == limit as usize {
+                    next_cursor = Some(last.id.clone());
+                }
+            }
+            Ok((rows, limit, next_cursor))
+        }
+    }
+}
 pub async fn creator_media(
     db: &Database,
     id: &str,
@@ -668,6 +736,15 @@ pub async fn list_collections(
     read_collections(db, None, account_id).await
 }
 
+/// List collections filtered by kind (e.g., public_domain).
+pub async fn list_collections_by_kind(
+    db: &Database,
+    kind: &str,
+    account_id: Option<&str>,
+) -> Result<Vec<MediaCollection>> {
+    read_collections_by_kind(db, kind, account_id).await
+}
+
 /// Look up a collection without disclosing private collections to strangers.
 pub async fn find_collection(
     db: &Database,
@@ -685,21 +762,9 @@ async fn read_collections(
     id: Option<&str>,
     account_id: Option<&str>,
 ) -> Result<Vec<MediaCollection>> {
-    let sqlite = "SELECT id, collection_kind AS kind, title, description, owning_account_id,
-        visibility, created_at, updated_at, version FROM media_collections
-        WHERE (? IS NULL OR id = ?) AND
-        (visibility = 'public' OR owning_account_id = ? OR
-         (visibility = 'restricted' AND ? IS NOT NULL) OR
-         (visibility = 'unlisted' AND ? IS NOT NULL))
-        ORDER BY created_at ASC, id ASC LIMIT 200";
+    let sqlite = "SELECT id, collection_kind AS kind, title, description, owning_account_id,\n        visibility, created_at, updated_at, version FROM media_collections\n        WHERE (? IS NULL OR id = ?) AND\n        (visibility = 'public' OR owning_account_id = ? OR\n         (visibility = 'restricted' AND ? IS NOT NULL) OR\n         (visibility = 'unlisted' AND ? IS NOT NULL))\n        ORDER BY created_at ASC, id ASC LIMIT 200";
     let postgres =
-        "SELECT id::text, collection_kind AS kind, title, description, owning_account_id::text,
-        visibility, created_at, updated_at, version::bigint FROM media_collections
-        WHERE (?::text IS NULL OR id = ?::uuid) AND
-        (visibility = 'public' OR owning_account_id = ?::uuid OR
-         (visibility = 'restricted' AND ?::text IS NOT NULL) OR
-         (visibility = 'unlisted' AND ?::text IS NOT NULL))
-        ORDER BY created_at ASC, id ASC LIMIT 200";
+        "SELECT id::text, collection_kind AS kind, title, description, owning_account_id::text,\n        visibility, created_at, updated_at, version::bigint FROM media_collections\n        WHERE (?::text IS NULL OR id = ?::uuid) AND\n        (visibility = 'public' OR owning_account_id = ?::uuid OR\n         (visibility = 'restricted' AND ?::text IS NOT NULL) OR\n         (visibility = 'unlisted' AND ?::text IS NOT NULL))\n        ORDER BY created_at ASC, id ASC LIMIT 200";
     let sql = db.sql(sqlite, postgres);
     match db.backend() {
         Backend::Sqlite => Ok(sqlx::query_as::<_, MediaCollection>(&sql)
@@ -716,6 +781,32 @@ async fn read_collections(
             .bind(account_id)
             .bind(account_id)
             .bind(id)
+            .fetch_all(db.postgres_pool().expect("postgres handle"))
+            .await?),
+    }
+}
+
+/// List collections filtered by kind (e.g., public_domain).
+async fn read_collections_by_kind(
+    db: &Database,
+    kind: &str,
+    account_id: Option<&str>,
+) -> Result<Vec<MediaCollection>> {
+    let sqlite = "SELECT id, collection_kind AS kind, title, description, owning_account_id,\n        visibility, created_at, updated_at, version FROM media_collections\n        WHERE collection_kind = ? AND\n        (visibility = 'public' OR owning_account_id = ? OR\n         (visibility = 'restricted' AND ? IS NOT NULL) OR\n         (visibility = 'unlisted' AND ? IS NOT NULL))\n        ORDER BY created_at ASC, id ASC LIMIT 200";
+    let postgres =
+        "SELECT id::text, collection_kind AS kind, title, description, owning_account_id::text,\n        visibility, created_at, updated_at, version::bigint FROM media_collections\n        WHERE collection_kind = ? AND\n        (visibility = 'public' OR owning_account_id = ?::uuid OR\n         (visibility = 'restricted' AND ?::text IS NOT NULL) OR\n         (visibility = 'unlisted' AND ?::text IS NOT NULL))\n        ORDER BY created_at ASC, id ASC LIMIT 200";
+    let sql = db.sql(sqlite, postgres);
+    match db.backend() {
+        Backend::Sqlite => Ok(sqlx::query_as::<_, MediaCollection>(&sql)
+            .bind(kind)
+            .bind(account_id)
+            .bind(account_id)
+            .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+            .await?),
+        Backend::Postgres => Ok(sqlx::query_as::<_, MediaCollection>(&sql)
+            .bind(kind)
+            .bind(account_id)
+            .bind(account_id)
             .fetch_all(db.postgres_pool().expect("postgres handle"))
             .await?),
     }
