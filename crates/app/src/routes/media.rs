@@ -907,12 +907,15 @@ async fn media_feed(
     {
         Ok((items, _total, next_cursor)) => {
             let kind = params.format.as_deref().unwrap_or("atom");
-            if !matches!(kind, "atom" | "rss" | "opds" | "dc") {
-                return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({"error": {"code": "VALIDATION_FAILED", "message": "feed format must be atom, rss, opds, or dc"}}))).into_response();
+            if !matches!(kind, "atom" | "rss" | "opds" | "dc" | "jsonld") {
+                return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({"error": {"code": "VALIDATION_FAILED", "message": "feed format must be atom, rss, opds, dc, or jsonld"}}))).into_response();
             }
             let base = state.config().site.base_url.trim_end_matches('/');
             if kind == "dc" {
                 return media_feed_dc(items, base);
+            }
+            if kind == "jsonld" {
+                return media_feed_jsonld(items, base);
             }
             let mut self_url =
                 url::Url::parse(&format!("{base}/api/v1/media/feed")).expect("configured base URL");
@@ -1019,6 +1022,40 @@ fn media_feed_dc(
         StatusCode::OK,
         [(axum::http::header::CONTENT_TYPE, "application/rdf+xml")],
         xml.into_bytes(),
+    )
+        .into_response()
+}
+
+/// Render media listings as JSON-LD (CreativeWork family, spec §32.2).
+fn media_feed_jsonld(
+    items: Vec<lorehaven_db::media::MediaRecord>,
+    base: &str,
+) -> axum::response::Response {
+    use serde_json::json;
+    let context = "https://schema.org/";
+    let graph: Vec<serde_json::Value> = items
+        .iter()
+        .map(|item| {
+            let link = format!("{}/works/{}", base, item.id);
+            let summary = item.summary.as_deref().unwrap_or("");
+            let updated = item.updated_at.clone();
+            let media_type = item.format.clone();
+            json!({
+                "@context": context,
+                "@type": "CreativeWork",
+                "name": item.title,
+                "url": link,
+                "description": summary,
+                "dateModified": updated,
+                "genre": media_type,
+            })
+        })
+        .collect();
+    let body = json!({ "@context": context, "@graph": graph }).to_string();
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/ld+json")],
+        body.into_bytes(),
     )
         .into_response()
 }

@@ -1365,6 +1365,35 @@ async fn the_media_feed_escapes_user_text() {
 }
 
 #[tokio::test]
+async fn the_media_feed_supports_jsonld_format() {
+    let fx = Fixture::new("media-feed-jsonld").await;
+    let mut client = fx.client();
+    register(&mut client, "m22-jsonld@example.com", "m22jsonld").await;
+    let pseud_id = author_pseud_id(&fx, "m22-jsonld@example.com").await;
+    seed_work(
+        &fx,
+        1,
+        &pseud_id,
+        "JSON-LD Test Work",
+        "public",
+        "published",
+        "2026-09-01T00:01:00Z",
+    )
+    .await;
+
+    let (status, body) = client.get_raw("/api/v1/media/feed?format=jsonld").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("\"@context\""), "missing @context: {body}");
+    assert!(body.contains("\"@graph\""), "missing @graph: {body}");
+    assert!(body.contains("\"CreativeWork\""), "missing CreativeWork type: {body}");
+    assert!(body.contains("JSON-LD Test Work"), "missing work title: {body}");
+    assert!(body.contains("\"url\""), "missing url field: {body}");
+    assert!(body.contains("\"dateModified\""), "missing dateModified: {body}");
+
+    fx.cleanup().await;
+}
+
+#[tokio::test]
 async fn media_files_and_editions_doors_return_data() {
     let fx = Fixture::new("media_files_editions").await;
     let mut owner = fx.client();
