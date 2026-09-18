@@ -43,9 +43,12 @@ the time). Trust `docs/verification.md`, this file, or a fresh run.
   see `768df88`.
 - `62102e3` — the Phase 1c §2.3c route-audience table: 293 rows, one per
   registered door, with a correctness test that fails on a wrong audience (proven
-  by mutation). Its coverage test does not check the direction its name claims and
-  the commit shipped a red gate; `7bfd832` fixes the gate mechanically, and the
-  plan's §3e carries the review, the 11 uncovered handlers and the checklist.
+  by mutation). `7bfd832` fixes the red gate (fmt + clippy), `127f72e` adds the
+  direction test (`collect_registered` walks `router()` and `*_routes()`,
+  resolves `.nest()` prefixes, fails on registered triples with no row), adds
+  11 missing rows (7 discovery nested, 4 imports admin with `Operator` audience),
+  removes 2 duplicate reading.rs entries, and all gates pass: fmt clean, clippy
+  clean, 465+ tests pass.
 - `24b5ee2` — the two defects the overnight round left: a review notified its
   author again on every delivered edit (guarded on "not already public"), and
   `fee36d6`'s settings guard survived one flush instead of the window (the flag
@@ -85,14 +88,19 @@ the time). Trust `docs/verification.md`, this file, or a fresh run.
 
 1. **Phase 1c — finish the audience table.** `62102e3` built the table (293 rows,
    every route module represented) and a correctness check that does fail on a
-   wrong audience (mutation-proven, §3e of the plan). Three gaps remain, all in
-   `crates/app/tests/route_inventory.rs`:
-   - **11 registered handlers have no row**: `discovery.rs`'s seven, which live in
-     the `recipe_routes()`/`dashboard_routes()` sub-routers behind
-     `.nest("/recipes", …)` and `.nest("/dashboard", …)`, and four admin doors in
-     `imports.rs` (`GET`/`DELETE /admin/sources/revisions`,
-     `POST /admin/sources/revisions/purge`, `POST /admin/sources/health` — all
-     `RequireSession` + `require_operator`, verified).
+   wrong audience (mutation-proven). `7bfd832` fixes the red gate. `127f72e`
+   implements the direction test and closes all three gaps:
+   - **11 registered handlers now have rows**: 7 `discovery.rs` (`/recipes/`,
+     `/recipes/{id}`, `/recipes/{id}/delete`, `/recipes/list`, `/dashboard/`),
+     4 `imports.rs` admin doors (`revision_cache_stats`, `clear_revision_cache`,
+     `purge_revision_cache`, `sweep_source_health` — all `Operator` audience).
+   - **Direction test implemented**: `collect_registered()` walks each module's
+     `router()` and `*_routes()` functions, resolves `.nest()` prefixes, and
+     `registered_routes_are_tabled()` fails on any registered triple with no row.
+   - **Duplicates removed**: `reading.rs:get_typography`/`save_typography` appeared
+     twice; one set removed.
+   - **Operator audience added**: new `Audience::Operator` variant for
+     `require_operator` doors (returns `"RequireSession"` extractor).
    - **`registered_routes_are_tabled` does not check that direction.** It iterates
      the *table* and greps the module for the path string, so an untabled route is
      invisible. The fix is to walk each module's `router()` and `*_routes()`
