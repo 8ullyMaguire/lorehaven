@@ -306,32 +306,46 @@ test('16. the author is told when someone replies to their topic and can clear t
 
 /**
  * The same courtesy for reviews. A public review is the loudest thing a reader
- * can do to a work, and today nothing tells the author it happened: only
- * purchases, sales and forum replies call `notifications::notify`. Marked
- * `fail` so the suite stays green while the gap is open, and turns red the day
- * somebody closes it (in the right direction).
+ * can do to a work, and nothing used to tell the author it happened.
+ *
+ * The body has to be text the positivity gate *delivers*: the default
+ * preferences hold constructive criticism (`accept_constructive: false`), so a
+ * neutral or negative sentence is delivered to nobody and this test would fail
+ * for the wrong reason. The receipt — the only delivery signal the server sends
+ * (spec §12.4) — is asserted first, so a held review explains itself here rather
+ * than three steps later as a missing notification.
  */
 test('16b. the author is told when their work is reviewed', async ({ page }) => {
   await ensureAccount(page, author);
   // Empty the inbox first, so the only notification that can appear afterwards
   // is the one this test is about.
   await page.goto('/notifications');
-  if (!(await page.locator('button:text-is("Mark all as read")').isDisabled())) {
-    await page.click('button:text-is("Mark all as read")');
+  const markAll = page.locator('button:text-is("Mark all as read")');
+  // The button is rendered only when the list is non-empty, and disabled when
+  // nothing is unread (test 16 above leaves it read) — so neither its presence
+  // nor its state can be assumed.
+  if ((await markAll.count()) > 0 && (await markAll.isEnabled())) {
+    await markAll.click();
   }
-  await expect(page.locator('button:text-is("Mark all as read")')).toBeDisabled();
+  await expect(page.locator('.notification-list li:not(.read)')).toHaveCount(0);
 
   await signOut(page);
   await ensureAccount(page, second);
   await findWork(page);
-  await page.fill('#review-body', 'A public review nobody was told about.');
+  await page.fill('#review-body', 'Warm and well made, and the ending earns it.');
   await page.getByLabel(/Publish this review/).check();
   await page.click('button:text-is("Save review")');
+  await expect(page.getByText('Comment posted.')).toBeVisible();
 
   await signOut(page);
   await ensureAccount(page, author);
   await page.goto('/notifications');
-  await expect(page.locator('button:text-is("Mark all as read")')).toBeEnabled({ timeout: 5000 });
+  // One *unread* review notification is the thing being asserted: the author's
+  // inbox legitimately holds earlier ones from other tests in this file, which
+  // the preamble above marked read.
+  await expect(
+    page.locator('.notification-list li:not(.read)').filter({ hasText: /reviewed your work/i }),
+  ).toHaveCount(1, { timeout: 10_000 });
 });
 
 test('17. a reader changes their reader settings and they survive a reload', async ({ page }) => {
