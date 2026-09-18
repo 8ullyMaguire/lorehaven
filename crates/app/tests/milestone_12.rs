@@ -911,3 +911,105 @@ async fn a_reply_notifies_the_topic_author_and_the_inbox_settles() {
 
     harness.cleanup().await;
 }
+
+/// A public review tells the author once. The notification says "a new public
+/// review was posted", so an edit of one is not news — before this guard the
+/// author was told again on every save, once per delivered upsert.
+#[tokio::test]
+async fn editing_a_public_review_does_not_notify_the_author_again() {
+    let harness = Harness::new("review-notified-once").await;
+    let work_id = published_work(
+        &harness,
+        "notified-author@example.com",
+        "NotifiedAuthor",
+        "Reviewed Once",
+    )
+    .await;
+
+    let mut reviewer = harness.client();
+    register(&mut reviewer, "reviewer-once@example.com", "ReviewerOnce").await;
+    let review_path = format!("/api/v1/works/{work_id}/reviews");
+    let (status, body) = reviewer
+        .request(
+            "PUT",
+            &review_path,
+            Some(json!({
+                "body": "Warm and well made, and the ending earns it.",
+                "is_public": true
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["receipt"], "Comment posted.",
+        "the gate must deliver this text for the test to mean anything: {body}"
+    );
+
+    // The author is the account that published the work, so sign in rather
+    // than register (the email is taken).
+    let mut author = harness.client();
+    let (status, _) = author
+        .post(
+            "/api/v1/auth/login",
+            json!({ "email": "notified-author@example.com", "password": PASSWORD }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = author.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["items"].as_array().map(Vec::len),
+        Some(1),
+        "one review notification: {body}"
+    );
+    assert_eq!(body["items"][0]["kind"], "review", "{body}");
+
+    // The reviewer fixes a typo: still public, still delivered, still one.
+    let (status, body) = reviewer
+        .request(
+            "PUT",
+            &review_path,
+            Some(json!({
+                "body": "Warm and well made, and the ending earns it completely.",
+                "is_public": true
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["receipt"], "Comment posted.", "{body}");
+
+    let (status, body) = author.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["items"].as_array().map(Vec::len),
+        Some(1),
+        "an edit is not a new review: {body}"
+    );
+
+    // A second reviewer is news, so the guard is not silencing the feature.
+    let mut other = harness.client();
+    register(&mut other, "reviewer-two@example.com", "ReviewerTwo").await;
+    let (status, body) = other
+        .request(
+            "PUT",
+            &review_path,
+            Some(json!({
+                "body": "A lovely thing to read on a wet afternoon.",
+                "is_public": true
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["receipt"], "Comment posted.", "{body}");
+
+    let (status, body) = author.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["items"].as_array().map(Vec::len),
+        Some(2),
+        "a second reviewer is a second review: {body}"
+    );
+
+    harness.cleanup().await;
+}

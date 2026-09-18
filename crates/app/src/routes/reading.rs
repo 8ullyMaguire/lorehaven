@@ -590,6 +590,15 @@ async fn upsert_review(
         }
     }
 
+    // Was the author already able to read a review from this pseud? An edit to
+    // a review that is already public is not news, and the notification says
+    // "a new public review was posted" — so hold it back for edits. (A review
+    // that was held when it was written and delivered by a later edit is the
+    // one case this misses; the author learns on the reviewer's next edit.)
+    let was_public = reading::review_for(state.db(), pseud_id, work_id)
+        .await?
+        .is_some_and(|existing| existing.is_public);
+
     let version = reading::upsert_review(
         state.db(),
         user.account_id,
@@ -649,8 +658,11 @@ async fn upsert_review(
                 };
                 // Notify the work's author when a public review passes
                 // the positivity gate. A held review is invisible to
-                // the author anyway, so there's nothing to report.
-                if stored.outcome == lorehaven_domain::positivity::DeliveryOutcome::Delivered {
+                // the author anyway, so there's nothing to report, and an
+                // edit of a review that was already public is not news.
+                if stored.outcome == lorehaven_domain::positivity::DeliveryOutcome::Delivered
+                    && !was_public
+                {
                     let _ = notifications::notify(
                         state.db(),
                         &author_account.to_string(),

@@ -29,7 +29,10 @@
 
   /**
    * Track the values we seeded the draft from, so a save (which replaces the
-   * values) refreshes the form, while typing does not.
+   * server's copy) re-seeds rather than looking like a change to overwrite.
+   * An unsaved edit wins over a copy that arrives beside it: `edited` is
+   * cleared by a save, and not here — this effect reads it as a dependency, so
+   * clearing it here would queue another run that seeds after all.
    */
   let seeded = $state('');
 
@@ -39,7 +42,6 @@
       draft = { ...values };
       seeded = signature;
     }
-    edited = false;
   });
 
   function markEdited() {

@@ -30,7 +30,10 @@
   let saved = $state(false);
   let edited = $state(false);
 
-  // Re-seed when the server's copy changes (after a save, or a reload).
+  // Re-seed when the server's copy changes (after a save, or a reload), unless
+  // the reader has an unsaved edit: `edited` survives until a save clears it,
+  // and it must not be cleared here — this effect reads it as a dependency, so
+  // clearing it here would queue another run that seeds after all.
   let seeded = $state('');
   $effect(() => {
     const signature = `${settings.version}:${settings.max_rating}`;
@@ -40,7 +43,6 @@
       seeded = signature;
       error = null;
     }
-    edited = false;
   });
 
   function markEdited() {
