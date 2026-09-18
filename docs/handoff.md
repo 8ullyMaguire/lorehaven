@@ -117,7 +117,16 @@ the time). Trust `docs/verification.md`, this file, or a fresh run.
    edits again. Narrow (it needs the gate to reverse itself for the same
    reviewer), and the fix is to compare against the stored delivery outcome
    rather than `is_public` — noted in the code comment. Low priority.
-10. **Phase 4 — bookkeeping.** `~/.config/lorehaven/pg-env` is missing, so no PG
+10. **Search cannot find a work by its own title.** `rebuild_work_index` takes one
+    `body_text` string and indexes it (`crates/db/src/search.rs:34`), so the term
+    table holds revision prose only — no title, summary or tag. On the demo
+    instance, `?q=cartographer` finds nothing although a published work is called
+    *The Cartographer's Apprentice*, while `?q=quiet` finds *The Use Case
+    Chronicle* because "quiet" happens to occur in its text. A reader looking for
+    a work by name is the most ordinary search there is. Extend the indexed text
+    (title and summary into the term table) or add a weighed title predicate to
+    the query; decide which with the user, since it changes ranking.
+11. **Phase 4 — bookkeeping.** `~/.config/lorehaven/pg-env` is missing, so no PG
     claim in either doc can be reproduced; restore a PG path, then update
     `docs/requirements.csv` (M15, M18, M19) and the counts in
     `docs/sessions/2026-09-17.md` §0.
