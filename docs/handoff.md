@@ -6,17 +6,18 @@ end; this file is the short version that must stay true to the commit it names.
 
 ## The tree
 
-The application code is at **24b5ee2**; the commits after it touch `docs/` and the
-e2e spec only. Working tree clean. (This line deliberately names the app commit
-rather than its own, so it does not go stale the next time a document is added.)
+The application source is at **24b5ee2**; after it come the e2e spec, the
+route-inventory table (`62102e3`, gate-fixed in `7bfd832`) and doc commits.
+Working tree clean. (This line deliberately names the app commit rather than its
+own, so it does not go stale the next time a document is added.)
 
-Gates at this commit:
+Gates at this tree:
 
 | Gate | Measured |
 | --- | --- |
 | `cargo fmt --all -- --check` | clean |
 | `clippy --workspace --all-targets -- -D warnings` | 0 warnings, 0 errors |
-| SQLite workspace suite | **1223 passed / 0 failed / 13 ignored** across 47 binaries |
+| SQLite workspace suite | **1224 passed / 0 failed / 13 ignored** across 47 binaries |
 | the 13 ignored | network tests in `crates/scrapers/tests/live_verification.rs`, run deliberately, not by default |
 | Playwright e2e | **30 passed** across `frontend/e2e/` (27 use cases, 2 journeys, 1 media) — and **no `test.fail()` markers left**: the last two, 12b and 16b, now assert the fixed behaviour |
 | `svelte-check --tsconfig ./tsconfig.json` | 0 errors, 0 warnings |
@@ -40,6 +41,15 @@ the time). Trust `docs/verification.md`, this file, or a fresh run.
   version guard to `ReaderSettings`. Half of it held: the guard is verified by
   e2e test 17, which failed before it and passes now. The search half did not —
   see `768df88`.
+- `62102e3` — the Phase 1c §2.3c route-audience table: 293 rows, one per
+  registered door, with a correctness test that fails on a wrong audience (proven
+  by mutation). Its coverage test does not check the direction its name claims and
+  the commit shipped a red gate; `7bfd832` fixes the gate mechanically, and the
+  plan's §3e carries the review, the 11 uncovered handlers and the checklist.
+- `24b5ee2` — the two defects the overnight round left: a review notified its
+  author again on every delivered edit (guarded on "not already public"), and
+  `fee36d6`'s settings guard survived one flush instead of the window (the flag
+  was cleared by the effect that read it). Both with tests seen failing first.
 - `768df88` — the three defects the search path still had, each with a test that
   fails without the fix: the reindex job's payload shape (nothing was ever
   indexed), a query naming a column no migration creates (500 on a fresh
@@ -73,17 +83,40 @@ the time). Trust `docs/verification.md`, this file, or a fresh run.
 
 ## Open, in the order I would take it
 
-1. **Phase 1c — make the audience a declared value.** Extend
-   `route_inventory.rs` into an explicit `(method, path) → audience, scoping`
-   table with a spec citation per entry and assert the registered set equals the
-   tabled set. The current harness measures *presence* of an extractor, not the
-   *right* audience (see the plan's N2).
-2. **N2b — decide the audience of the browsing doors.** Anonymously:
-   `GET /works/{published}/comments` → 401, `/forums` → 401, `/topics/{id}` →
-   401, `/groups` → 401, `/taxonomy*` → 401, while `/search` → 200 and a
-   published work → 200. Either those six become `optional` (amend the spec to
-   say community reading is public) or the spec says reading them needs an
-   account and the registration message stops claiming "Reading is unaffected".
+1. **Phase 1c — finish the audience table.** `62102e3` built the table (293 rows,
+   every route module represented) and a correctness check that does fail on a
+   wrong audience (mutation-proven, §3e of the plan). Three gaps remain, all in
+   `crates/app/tests/route_inventory.rs`:
+   - **11 registered handlers have no row**: `discovery.rs`'s seven, which live in
+     the `recipe_routes()`/`dashboard_routes()` sub-routers behind
+     `.nest("/recipes", …)` and `.nest("/dashboard", …)`, and four admin doors in
+     `imports.rs` (`GET`/`DELETE /admin/sources/revisions`,
+     `POST /admin/sources/revisions/purge`, `POST /admin/sources/health` — all
+     `RequireSession` + `require_operator`, verified).
+   - **`registered_routes_are_tabled` does not check that direction.** It iterates
+     the *table* and greps the module for the path string, so an untabled route is
+     invisible. The fix is to walk each module's `router()` and `*_routes()`
+     helpers, resolve the `nest` prefixes, and fail on a registered
+     `(method, path, handler)` with no row.
+   - **The dir-walking net was dropped.** The old
+     `every_route_has_declared_audience` required every `State<AppState>` handler
+     to declare an extractor; both new tests are table-driven, so a new untabled
+     handler with no extractor now passes. Today none does.
+   Also: add a § citation per row, give the four operator doors an `operator`
+   audience (they call `require_operator`), and delete the `BTreeMap` in
+   `every_route_has_correct_audience` that is built and never read.
+   The commit also shipped a red gate — `cargo fmt` wanted the table expanded and
+   clippy refused to compile the test target (`clippy::question_mark`); both are
+   fixed in `7bfd832` (mechanical, tests still 2/2) and recorded in
+   `docs/verification.md`, so re-run fmt and clippy before starting.
+2. **N2b — decide the audience of the browsing doors.** The table now records them
+   as `Authenticated`: `/works/{id}/comments`, `/forums`,
+   `/forums/{category}/topics`, `/topics/{id}`, `/topics/{id}/replies`, `/groups`,
+   `/groups/{id}` — anonymous callers get 401, while `/search` and a published work
+   answer 200. `crates/app/src/routes/auth.rs:829` still says "Set your age group
+   before you can publish or message. Reading is unaffected.", which cannot be true
+   of those seven. Either make them `optional` (and amend the spec to say community
+   reading is public) or change the sentence and cite the decision in the table.
    A decision, not a patch.
 3. **Index hygiene is still the worker's job, not the route's.** The route now
    refuses to serve a non-public work whatever the index holds, which is the

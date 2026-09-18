@@ -874,3 +874,94 @@ touched login or the limiter in between. The test measures a rate *window*, not
 the presence of a limiter, so it is load-sensitive by construction: read it as a
 finding about the test, and do not run the workspace suite and the e2e suite at
 the same time.
+
+### Phase 1c §2.3c — the route-audience table (`62102e3`), reviewed
+
+Claim by claim, at the commit plus one mechanical fix (`7bfd832`).
+
+**The handler-name bug is real and fixed.** The harness it replaced read the
+function name as `split_whitespace().nth(2)`, which on `pub async fn
+list_notifications(` returns `fn` — so it compared `fn` against every table row
+and found nothing. The new extraction uses `rposition("fn") + 1`.
+
+**The table is real.** 293 `RouteEntry` rows, each naming file, handler, method,
+path and expected audience; all 32 modules under `crates/app/src/routes/` have at
+least one row. The earlier harness ran over the same source; what it lacked was an
+expectation to compare against.
+
+**The correctness half is a test, not a formality.** Flipping one row —
+`notifications.rs:list_notifications` from `Authenticated` to `Public` — fails it:
+
+```
+Audience mismatches:
+notifications.rs:20 — list_notifications expected MaybeSession but found RequireSession
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+Reverted immediately; the tree is clean.
+
+**The coverage half is not implemented, and 11 registered handlers are missing
+from the table.** `registered_routes_are_tabled` iterates the *table* and greps
+each module for the quoted path string — a path that appears anywhere in the file
+satisfies it, and nothing is ever compared against the registrations. An
+independent scan (every `.route("…", get|post|put|delete|patch(handler))` in the
+32 modules) finds 302 registered triples against 293 rows:
+
+```
+- discovery.rs:create_recipe            [POST /]              inside recipe_routes(), .nest("/recipes", …)
+- discovery.rs:get_recipe_route         [GET /{id}]
+- discovery.rs:update_recipe_route      [POST /{id}]
+- discovery.rs:delete_recipe_route      [POST /{id}/delete]
+- discovery.rs:list_recipes_route       [GET /list]
+- discovery.rs:get_dashboard            [GET /]              inside dashboard_routes(), .nest("/dashboard", …)
+- discovery.rs:save_dashboard           [POST /]
+- imports.rs:revision_cache_stats       [GET /admin/sources/revisions]
+- imports.rs:clear_revision_cache       [DELETE /admin/sources/revisions]
+- imports.rs:purge_revision_cache       [POST /admin/sources/revisions/purge]
+- imports.rs:sweep_source_health        [POST /admin/sources/health]
+```
+
+All eleven do declare an audience extractor (checked in the source), and the four
+`imports.rs` doors are `RequireSession` plus `require_operator(&state, &user)` — so
+nothing leaks today. They are uncovered, not ungated: the four are admin doors and
+the seven live behind the two `.nest()`ed sub-routers, which is precisely why a
+table keyed on paths recorded relative to a module misses them.
+
+**The net this replaced was wider in one direction.** The deleted
+`every_route_has_declared_audience` walked `fs::read_dir("src/routes")` and
+required *every* `async fn` taking `State<AppState>` to declare an extractor. Both
+new tests are table-driven, so a handler that is added without a row — and without
+an extractor — now passes both. That is the case the audit exists to prevent, and
+it is currently unwatched.
+
+**The commit shipped a red gate.** `cargo test --test route_inventory` passes (2
+tests), which is what the commit message reports, but the repo's gate is fmt +
+clippy:
+
+```
+$ cargo fmt --all -- --check
+Diff in crates/app/tests/route_inventory.rs:69:   (293 single-line entries, expanded)
+fmt_exit=1
+$ cargo clippy --workspace --all-targets -- -D warnings
+error: this `match` can be collapsed with `?` … clippy::question_mark
+error: could not compile `lorehaven-app` (test "route_inventory") due to 1 previous error
+```
+
+`7bfd832` fixes both mechanically — the lint's own suggestion
+(`let args_start = sig.find('(')?;`) and `cargo fmt --all` (which is why the file
+is now 2390 lines) — with the two tests still passing, clippy clean over the
+workspace, and fmt clean. A `#[rustfmt::skip]` on the table would have kept the
+compact one-line-per-route layout if that is preferred; the expansion is what the
+tool asks for.
+
+**Smaller things.** `every_route_has_correct_audience` builds a `BTreeMap` keyed by
+`(file, handler)` and never reads it — the table is iterated directly — and the
+same map is what would have hidden the two rows the table carries twice
+(`reading.rs:get_typography`, `reading.rs:save_typography`, identical fields).
+
+**N2's decision is still unmade, and the two statements still disagree.** The
+table records the contested community doors as `Authenticated` —
+`/works/{id}/comments`, `/forums`, `/forums/{category}/topics`, `/topics/{id}`,
+`/topics/{id}/replies`, `/groups`, `/groups/{id}` — while `crates/app/src/routes/auth.rs:829`
+tells the reader "Set your age group before you can publish or message. Reading is
+unaffected." One of the two has to change; the table makes it a one-line diff.
