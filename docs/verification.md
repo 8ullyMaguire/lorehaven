@@ -645,12 +645,37 @@ Findings, with the evidence that produced each:
    loads fire per panel (mount, and again when the session settles).
    Proposed fix: ignore a load response that lands after the reader has
    edited, or keep the controls disabled until the first response.
-2. **A public review tells the author nothing.** Fixed — `reading::upsert_review`
-   now calls `notifications::notify` when a public review passes the
-   positivity gate. Test 16b now passes.
-3. **Reading history has no door on a desktop.** Fixed — `{ href: '/library/history', label: 'History' }`
-   added to the `NAV` array in `App.svelte`, rendering the link in the
-   desktop nav bar. Test 12b now passes.
+2. **A public review told the author nothing.** Fixed in `6358720`, corrected in
+   `24b5ee2`. `reading::upsert_review` calls `notifications::notify` when a
+   public review is *delivered*, and only when the review was not already
+   public.
+   - Live, on the `serve --with-worker` instance at :8180, before the
+     correction (counters taken from the author's inbox):
+     `review notifications before: 2` → `edit, still public: Comment posted.` →
+     `review notifications after edit: 4`. Two notifications for one review: the
+     upsert notifies on every delivered save.
+   - After the correction, both directions:
+     `before: 4` → an edit of the already-public review, delivered
+     (`Comment posted.`) → `after edit: 4`; a first-time public review from the
+     same reader → `after a first-time review: 5`.
+   - Silence where it belongs: a review the gate held notified nobody, and a
+     private review (`is_public: false`, receipt `Comment posted.`) notified
+     nobody — both observed mid-probe rather than assumed.
+   - Rust test `milestone_12::editing_a_public_review_does_not_notify_the_author_again`,
+     seen failing without the guard (`left: Some(2) / right: Some(1)`, two
+     identical "A new public review was posted on …" items in one inbox).
+   - Browser test 16b asserts the author is told; it was red in run 12 for two
+     reasons of its own (see `docs/sessions/2026-09-18.md`).
+3. **Reading history had no door on a desktop.** Fixed in `fb717fc`. Signed in
+   at 1280 × 800, `nav.desktop` holds eleven destinations —
+   `/discover`, `/search`, `/media`, `/library`, `/library/history`, `/import`,
+   `/exports`, `/write`, `/community`, `/notifications`, `/pseud` — and the
+   History anchor is visible with a 58 × 43 box at (452, 46).
+   - The first probe returned `inDom: 0` and looked like a disproof. It was the
+     instance, not the fix: the process had been started before the frontend was
+     rebuilt, so it served the older bundle. The check is the served asset name
+     against the built one — served `assets/index-Dr6qyAZp.js`, on disk
+     `assets/index-DcLsLbMd.js`.
 4. `IdentitySwitcher.svelte` is imported nowhere; the switcher readers
    use is "Act as this" on each pseud card.
 5. `POST /api/v1/exports` answers `privacy_acknowledged: false` even
@@ -764,21 +789,34 @@ panel is the select's own `fieldset`, both account tests wait for the page's
 fetches to settle before editing, and the assertion is the clean-state label a
 landed save produces.
 
-**Hazard.** `PrivacySettings.svelte:35-41` (and `ContentPreferences.svelte:34-42`)
-re-seed the form from the server's copy whenever it changes, while `dirty`
-derives from the draft against those values — so a response landing after an edit
-would replace the draft, disable the save button and discard the edit with no
-message. That is N7's shape in the two panels `ac22a89` did not touch. It is not
-reproduced: with 700 ms of injected latency the edit at 150 ms survived, because
-the account page fetches these settings on mount and the response lands before a
-person (or a test) can move a select. Recorded as a hazard with the two-line
-guard, not as a demonstrated defect.
+**Hazard, then a guard that did not hold.** `PrivacySettings.svelte:35-41` (and
+`ContentPreferences.svelte:34-42`) re-seed the form from the server's copy
+whenever it changes, while `dirty` derives from the draft against those values —
+so a response landing after an edit would replace the draft, disable the save
+button and discard the edit with no message. That is N7's shape in the two panels
+`ac22a89` did not touch. It is not reproduced end to end: with 700 ms of injected
+latency the edit at 150 ms survived, because the account page fetches these
+settings on mount and the response lands before a person (or a test) can move a
+select.
+
+`fee36d6` closed it with an `edited` flag — and the flag was cleared at the end of
+the effect that read it. Writing a value an effect reads re-queues that effect, so
+the flag survived exactly one flush: the run that skipped the re-seed cleared it,
+the next run seeded, and the edit was discarded after all. Three component tests
+(`frontend/src/lib/components/ContentPreferences.test.ts`,
+`PrivacySettings.test.ts`) now pin both directions and were seen failing first:
+the reader moves the control, the server's copy lands, and the control has
+snapped back — `AssertionError: expected 'mature' to be 'general'` on the panel
+just edited, same shape on the other. The guard itself is one deletion: `edited`
+is cleared by a save, not by the effect.
 
 
 ### Suite run history, for the next person who sees a red test
 
-Ten runs of `frontend/e2e/use-cases.spec.ts` today, and every failure had to be
-diagnosed rather than believed:
+Fifteen runs across two days (runs 1–2 are in `docs/sessions/2026-09-17.md`), and
+every failure had to be diagnosed rather than believed. The suite is three specs
+— `use-cases.spec.ts` (27), `journeys.spec.ts` (2), `media.spec.ts` (1) — so a
+full run is 30 tests:
 
 | run | result | what the failure was |
 | --- | --- | --- |
@@ -790,8 +828,15 @@ diagnosed rather than believed:
 | 9 | 25 passed / 1 failed | test 16: the forum reply never landed, so the inbox was asked about a notification that could not exist. It passes in isolation; the test now asserts the reply landed first, so the next occurrence points at the post rather than the inbox |
 | 10 | 27 passed (25 green + 2 `test.fail()`) | — |
 | 11 | 27 passed | — |
+| 12 | 29 passed / 1 failed (30 tests) | **test 16b**, flipped off `test.fail()` by the overnight round, timed out in its own preamble: it clicked "Mark all as read" and then asserted the button was disabled, but the notifications page renders no such button when the inbox is empty (`Notifications.svelte:96`) and test 16 above leaves the inbox read |
+| 13 | 29 passed / 1 failed | test 16b again: the button *was* there and disabled, and the click waited for it to become enabled. Presence and state are both conditional; the preamble now checks both |
+| 14 | 29 passed / 1 failed | test 16b: the notification was **there** — the failure output shows `getByText(/reviewed your work/i)` resolving to two elements, one "just now" and one "1m ago", because an earlier test in the file also reviews the same author's work. The assertion now names one *unread* review item, so an earlier notification cannot satisfy it |
+| 15 | **30 passed** | green, and the last two `test.fail()` markers are gone — 12b (History on a desktop) and 16b (a review notifies its author) now assert the fixed behaviour |
 
 The pattern worth keeping: a red test in this suite has, so far, been my own
-loose assertion more often than a product defect — twice a success assertion that
-matched a *pre-success* label, once a locator whose predicate was invalidated by
-the very state change it was waiting for. Assert the thing that changes.
+loose assertion more often than a product defect — three times a success
+assertion that matched the wrong thing (a *pre-success* label, a locator
+invalidated by the state change it was waiting for, and a notification whose text
+matched an older one), once a locator waiting for an element the empty state
+never renders. The product defect in the list is test 17, the discarded
+typography choice. Assert the thing that changes, and make it the *new* thing.
