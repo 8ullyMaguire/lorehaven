@@ -200,6 +200,14 @@ Things that will cost a morning if discovered late.
   minute per address, writes 20 / 60 per account, address-keyed buckets ×4. A
   seeding script that writes quickly gets `RATE_LIMITED` and a half-built
   fixture; sleep between writes or raise the limits in the instance config.
+- **Do not run the workspace suite and the e2e suite at the same time.** The
+  window is a minute, and `milestone_2::repeated_login_attempts_are_rate_limited`
+  measures it rather than the limiter's presence: on a loaded machine the loop
+  outruns the window, the counter resets, and the last of the bad logins comes
+  back as an ordinary `AUTH_REQUIRED` — a red gate that is the test's
+  construction, not the code. It was the single failure of this round's first
+  gate and passed in the two that followed, with nothing touching login between
+  them. Evidence and reasoning: `docs/verification.md`'s gate note.
 - **PostgreSQL cannot be verified here**: `~/.config/lorehaven/pg-env` does not
   exist and the `lh-review-pg` container has no reachable URL, so do not report
   PG results — mark them unverified instead. The two search SQL strings were

@@ -829,9 +829,18 @@ full run is 30 tests:
 | 10 | 27 passed (25 green + 2 `test.fail()`) | — |
 | 11 | 27 passed | — |
 | 12 | 29 passed / 1 failed (30 tests) | **test 16b**, flipped off `test.fail()` by the overnight round, timed out in its own preamble: it clicked "Mark all as read" and then asserted the button was disabled, but the notifications page renders no such button when the inbox is empty (`Notifications.svelte:96`) and test 16 above leaves the inbox read |
-| 13 | 29 passed / 1 failed | test 16b again: the button *was* there and disabled, and the click waited for it to become enabled. Presence and state are both conditional; the preamble now checks both |
+| 13 | 27 passed / **3 failed** | 16b (still), 22 (export queue) and 23 (shelf). This run was launched with the workspace gate and a release build already running against the same machine, which is what 22 and 23 time out on; 23 had flaked the same way in run 8. Do not read a red run of these two as a code change — but do read it as a reason not to run the gates and the e2e suite together |
 | 14 | 29 passed / 1 failed | test 16b: the notification was **there** — the failure output shows `getByText(/reviewed your work/i)` resolving to two elements, one "just now" and one "1m ago", because an earlier test in the file also reviews the same author's work. The assertion now names one *unread* review item, so an earlier notification cannot satisfy it |
 | 15 | **30 passed** | green, and the last two `test.fail()` markers are gone — 12b (History on a desktop) and 16b (a review notifies its author) now assert the fixed behaviour |
+
+Run it from `frontend/` as `node node_modules/@playwright/test/cli.js test`:
+`./node_modules/.bin/playwright` is not permitted in this environment (it exits
+126 before Playwright starts, which is easy to read as a red suite). The suite
+spawns its own scratch server on the release binary, so it needs a fresh
+`~/.cargo-target/lorehaven-review/release/lorehaven` for a claim about a fix to
+mean anything. It also runs as one long file: a single test cannot be run alone
+(`--grep 16b` starts with no work published by the earlier tests, so `findWork`
+fails before it reaches anything it is testing).
 
 The pattern worth keeping: a red test in this suite has, so far, been my own
 loose assertion more often than a product defect — three times a success
@@ -840,3 +849,28 @@ invalidated by the state change it was waiting for, and a notification whose tex
 matched an older one), once a locator waiting for an element the empty state
 never renders. The product defect in the list is test 17, the discarded
 typography choice. Assert the thing that changes, and make it the *new* thing.
+
+### One workspace gate of three was red, and the reason is the test
+
+The first `cargo test --workspace` of this round (`/tmp/lh-gate3.txt`, the
+overnight tree, run concurrently with the e2e suite and a release build) exited
+101 on a single test:
+
+```
+test repeated_login_attempts_are_rate_limited has been running for over 60 seconds
+test repeated_login_attempts_are_rate_limited ... FAILED
+---- repeated_login_attempts_are_rate_limited stdout ----
+panicked at crates/app/tests/milestone_2.rs:1298:5:
+a credential-stuffing loop must be rate limited; last response:
+{"error":{"code":"AUTH_REQUIRED","message":"that email address and password do not match an account"...
+```
+
+The loop asserts that the *last* of a run of bad logins is refused by the rate
+limiter, and the limiter's window is a minute: on a loaded machine the loop takes
+longer than that, the counter resets, and the final response is an ordinary
+`AUTH_REQUIRED` — which is why the log reports the test running for over 60
+seconds. The two later gates (`lh-gate4`, `lh-gate5`) saw it pass, and nothing
+touched login or the limiter in between. The test measures a rate *window*, not
+the presence of a limiter, so it is load-sensitive by construction: read it as a
+finding about the test, and do not run the workspace suite and the e2e suite at
+the same time.
