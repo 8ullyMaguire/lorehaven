@@ -907,8 +907,8 @@ async fn media_feed(
     {
         Ok((items, _total, next_cursor)) => {
             let kind = params.format.as_deref().unwrap_or("atom");
-            if !matches!(kind, "atom" | "rss" | "dc") {
-                return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({"error": {"code": "VALIDATION_FAILED", "message": "feed format must be atom, rss, or dc"}}))).into_response();
+            if !matches!(kind, "atom" | "rss" | "opds" | "dc") {
+                return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({"error": {"code": "VALIDATION_FAILED", "message": "feed format must be atom, rss, opds, or dc"}}))).into_response();
             }
             let base = state.config().site.base_url.trim_end_matches('/');
             if kind == "dc" {
@@ -954,7 +954,7 @@ async fn media_feed(
                     next.query_pairs_mut().append_pair(&key, &value);
                 }
                 next.query_pairs_mut().append_pair("cursor", &cursor);
-                let prefix = if kind == "rss" { "atom:" } else { "" };
+                let prefix = if kind == "rss" || kind == "opds" { "atom:" } else { "" };
                 xml.push_str(&format!(
                     r#"<{prefix}link rel="next" href="{}"/>"#,
                     xml_escape(next.as_str())
@@ -981,6 +981,8 @@ async fn media_feed(
                 xml.into_bytes(),
                 if kind == "rss" {
                     "application/rss+xml"
+                } else if kind == "opds" {
+                    "application/atom+xml;profile=opds-catalog"
                 } else {
                     "application/atom+xml"
                 },
