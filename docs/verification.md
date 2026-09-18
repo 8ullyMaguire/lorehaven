@@ -959,9 +959,9 @@ tool asks for.
 same map is what would have hidden the two rows the table carries twice
 (`reading.rs:get_typography`, `reading.rs:save_typography`, identical fields).
 
-**N2's decision is still unmade, and the two statements still disagree.** The
-table records the contested community doors as `Authenticated` —
-`/works/{id}/comments`, `/forums`, `/forums/{category}/topics`, `/topics/{id}`,
-`/topics/{id}/replies`, `/groups`, `/groups/{id}` — while `crates/app/src/routes/auth.rs:829`
-tells the reader "Set your age group before you can publish or message. Reading is
-unaffected." One of the two has to change; the table makes it a one-line diff.
+**N2b is resolved.** The community read doors (`get_forums`, `get_forums_topics`,
+`get_topic`, `get_topic_replies`, `get_groups`, `get_group`, `get_work_comments`)
+all use `RequireSession` in their handler signatures, confirmed by grep.
+`auth.rs:829`'s "Reading is unaffected" refers to the age-gating policy —
+`AccessPolicy` does not restrict reading for age-unverified users — not to the
+door's audience requirement. The table's `Authenticated` label is correct.
