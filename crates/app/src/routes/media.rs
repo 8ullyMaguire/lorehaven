@@ -108,6 +108,34 @@ async fn list_media(
     };
     let account_id = session.as_ref().map(|u| u.account_id.to_string());
 
+    // Validate quality/date filters up front — fail fast with a clear code
+    // rather than letting an invalid value propagate into SQL.
+    if params.quality_min.is_some() && params.quality_kind.is_none() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"error": {"code": "VALIDATION_FAILED", "message": "quality_kind is required when quality_min is set"}})),
+        )
+            .into_response();
+    }
+    if let Some(from) = &params.date_from {
+        if time::OffsetDateTime::parse(from, &time::format_description::well_known::Rfc3339).is_err() {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({"error": {"code": "VALIDATION_FAILED", "message": "date_from must be RFC 3339"}})),
+            )
+                .into_response();
+        }
+    }
+    if let Some(to) = &params.date_to {
+        if time::OffsetDateTime::parse(to, &time::format_description::well_known::Rfc3339).is_err() {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({"error": {"code": "VALIDATION_FAILED", "message": "date_to must be RFC 3339"}})),
+            )
+                .into_response();
+        }
+    }
+
     let limit = match params.validate_pagination() {
         Ok(limit) => limit,
         Err(message) => {
@@ -124,6 +152,10 @@ async fn list_media(
         account_id.as_deref(),
         limit,
         params.cursor.as_deref(),
+        params.quality_kind.as_deref(),
+        params.quality_min,
+        params.date_from.as_deref(),
+        params.date_to.as_deref(),
     )
     .await
     {
@@ -830,6 +862,10 @@ async fn media_feed(
         account_id.as_deref(),
         limit,
         params.cursor.as_deref(),
+        params.quality_kind.as_deref(),
+        params.quality_min,
+        params.date_from.as_deref(),
+        params.date_to.as_deref(),
     )
     .await
     {
@@ -997,6 +1033,14 @@ pub struct MediaQuery {
     pub cursor: Option<String>,
     /// Output format override: `atom` (default), `opds`, `json`, or `dc` (Dublin Core).
     pub format: Option<String>,
+    /// Quality signal kind to filter by (e.g. `editorial_review`, `reader_positivity`).
+    pub quality_kind: Option<String>,
+    /// Minimum aggregate quality value (inclusive). Requires `quality_kind`.
+    pub quality_min: Option<i64>,
+    /// RFC 3339 lower bound on `created_at` (inclusive).
+    pub date_from: Option<String>,
+    /// RFC 3339 upper bound on `created_at` (inclusive).
+    pub date_to: Option<String>,
 }
 
 /// The limit and cursor for a scoped (canon/space) page.

@@ -305,20 +305,72 @@ pub async fn find_media(db: &Database, id: &str) -> Result<Option<MediaRecord>> 
 }
 
 /// List media with filtering, pagination, and eligibility.
+///
+/// Quality filters on `quality_kind` + `quality_min` join `quality_signals`
+/// and group by work, filtering with `HAVING SUM(value * weight)/SUM(weight) >= ?`.
+/// `date_from`/`date_to` bind RFC 3339 bounds on `works.created_at`.
 pub async fn list_media_filtered(
     db: &Database,
     query: Option<&QueryAst>,
     account_id: Option<&str>,
     limit: i64,
     cursor: Option<&str>,
+    quality_kind: Option<&str>,
+    quality_min: Option<i64>,
+    date_from: Option<&str>,
+    date_to: Option<&str>,
 ) -> Result<(Vec<MediaRecord>, i64, Option<String>)> {
-    let (where_sql, where_pg, values) = media_filter(query, account_id)?;
-    let mut bound: Vec<String> = values.clone();
+    let (where_sql, where_pg, mut bound) = media_filter(query, account_id)?;
+
+    // Quality facet: aggregate weighted quality per work, keep rows whose
+    // mean value meets the threshold. The JOIN and GROUP BY are skipped when
+    // no quality filter is requested (avoids the aggregate on every list page).
+    // quality_kind binds go FIRST (FROM clause); quality_min binds go LAST (HAVING clause).
+    let (qual_join_sql, qual_join_pg) = match (quality_kind, quality_min) {
+        (Some(_), Some(_)) => (
+            " JOIN quality_signals qs ON qs.work_id = w.id AND qs.signal_kind = ?"
+                .to_string(),
+            " JOIN quality_signals qs ON qs.work_id = w.id AND qs.signal_kind = ?"
+                .to_string(),
+        ),
+        _ => (String::new(), String::new()),
+    };
+    let (qual_group_sql, qual_group_pg) = match quality_min {
+        Some(_) => (
+            " GROUP BY w.id HAVING CASE WHEN SUM(qs.weight) > 0 THEN SUM(qs.value * qs.weight) / SUM(qs.weight) ELSE 0 END >= CAST(? AS INTEGER)".to_string(),
+            " GROUP BY w.id HAVING CASE WHEN SUM(qs.weight) > 0 THEN SUM(qs.value * qs.weight)::float / SUM(qs.weight) ELSE 0 END >= ?".to_string(),
+        ),
+        None => (String::new(), String::new()),
+    };
+
+    // quality_kind bind goes first (FROM clause).
+    let mut head: Vec<String> = Vec::new();
+    if let Some(kind) = quality_kind {
+        head.push(kind.to_string());
+    }
+
+    // Date range on works.created_at (inclusive both ends).
+    let (date_sql, date_pg) = match (date_from, date_to) {
+        (Some(_), Some(_)) => (
+            " AND w.created_at >= ? AND w.created_at <= ?".to_string(),
+            " AND w.created_at >= ?::text AND w.created_at <= ?::text".to_string(),
+        ),
+        (Some(_), None) => (
+            " AND w.created_at >= ?".to_string(),
+            " AND w.created_at >= ?::text".to_string(),
+        ),
+        (None, Some(_)) => (
+            " AND w.created_at <= ?".to_string(),
+            " AND w.created_at <= ?::text".to_string(),
+        ),
+        (None, None) => (String::new(), String::new()),
+    };
 
     // Compound cursor: "created_at|id" of the previous page's last row,
     // matching the ORDER BY (created_at DESC, id ASC). An id-only cursor
     // cannot paginate this order — it skips and repeats rows.
     let (cursor_sqlite, cursor_pg);
+    let mut cursor_binds: Vec<String> = Vec::new();
     match cursor {
         Some(cursor) => {
             let Some((created_at, id)) = cursor.rsplit_once('|') else {
@@ -329,9 +381,9 @@ pub async fn list_media_filtered(
             cursor_pg =
                 " AND (w.created_at < ?::text OR (w.created_at = ?::text AND w.id > ?::uuid))"
                     .to_string();
-            bound.push(created_at.to_string());
-            bound.push(created_at.to_string());
-            bound.push(id.to_string());
+            cursor_binds.push(created_at.to_string());
+            cursor_binds.push(created_at.to_string());
+            cursor_binds.push(id.to_string());
         }
         None => {
             cursor_sqlite = String::new();
@@ -339,15 +391,25 @@ pub async fn list_media_filtered(
         }
     }
 
+    // quality_min bind goes LAST (HAVING clause).
+    let mut tail: Vec<String> = Vec::new();
+    if let Some(min) = quality_min {
+        tail.push(min.to_string());
+    }
+
     // works_index backs the text facet; the LEFT JOIN is harmless when the
     // facet is absent. pseuds supplies the owning account (ADR 0003).
+    // qual_join_sql / qual_group_sql / date_sql are empty strings when the
+    // corresponding facet is not requested, so the base query is unchanged.
     let sqlite = format!(
         "SELECT w.id, w.title, w.summary, w.format, w.rating, w.visibility, w.lifecycle, \
                 p.account_id AS owning_account_id, w.created_at, w.updated_at, w.version \
          FROM works w \
          LEFT JOIN works_index wi ON wi.work_id = w.id \
          JOIN pseuds p ON p.id = w.owner_pseud_id \
-         WHERE {where_sql}{cursor_sqlite} \
+         {qual_join_sql} \
+         WHERE {where_sql}{date_sql}{cursor_sqlite} \
+         {qual_group_sql} \
          ORDER BY w.created_at DESC, w.id ASC \
          LIMIT ?"
     );
@@ -357,52 +419,51 @@ pub async fn list_media_filtered(
          FROM works w \
          LEFT JOIN works_index wi ON wi.work_id = w.id \
          JOIN pseuds p ON p.id = w.owner_pseud_id \
-         WHERE {where_pg}{cursor_pg} \
+         {qual_join_pg} \
+         WHERE {where_pg}{date_pg}{cursor_pg} \
+         {qual_group_pg} \
          ORDER BY w.created_at DESC, w.id ASC \
          LIMIT ?"
     );
 
+    // The count query wraps the filtered set so GROUP BY works correctly:
+    // when a quality filter is present, the inner query groups per work and
+    // the outer COUNT(*) counts the surviving works (one row each).
     let count_sql = format!(
-        "SELECT COUNT(*) FROM works w \
+        "SELECT COUNT(*) FROM (SELECT w.id FROM works w \
          LEFT JOIN works_index wi ON wi.work_id = w.id \
          JOIN pseuds p ON p.id = w.owner_pseud_id \
-         WHERE {where_sql}"
+         {qual_join_sql} \
+         WHERE {where_sql}{date_sql}{cursor_sqlite} \
+         {qual_group_sql}) AS filtered"
     );
     let count_pg = format!(
-        "SELECT COUNT(*) FROM works w \
+        "SELECT COUNT(*) FROM (SELECT w.id FROM works w \
          LEFT JOIN works_index wi ON wi.work_id = w.id \
          JOIN pseuds p ON p.id = w.owner_pseud_id \
-         WHERE {where_pg}"
+         {qual_join_pg} \
+         WHERE {where_pg}{date_pg}{cursor_pg} \
+         {qual_group_pg}) AS filtered"
     );
 
-    // The count MUST carry the facet binds too — an unbound parameter
-    // silently becomes NULL on SQLite and undercounts.
-    let count_sql_final = db.sql(&count_sql, &count_pg);
-    let count: (i64,) = match db.backend() {
-        Backend::Sqlite => {
-            let mut q = sqlx::query_as::<_, (i64,)>(&count_sql_final);
-            for val in &values {
-                q = q.bind(val.as_str());
-            }
-            q.fetch_one(db.sqlite_pool().expect("sqlite handle"))
-                .await?
-        }
-        Backend::Postgres => {
-            let mut q = sqlx::query_as::<_, (i64,)>(&count_sql_final);
-            for val in &values {
-                q = q.bind(val.as_str());
-            }
-            q.fetch_one(db.postgres_pool().expect("postgres handle"))
-                .await?
-        }
-    };
+    // Bind order: quality_kind (FROM) → WHERE binds → date → cursor → quality_min (HAVING) → limit.
+    let mut all_binds: Vec<String> = head;
+    all_binds.append(&mut bound);
+    if let Some(from) = date_from {
+        all_binds.push(from.to_string());
+    }
+    if let Some(to) = date_to {
+        all_binds.push(to.to_string());
+    }
+    all_binds.append(&mut cursor_binds);
+    all_binds.append(&mut tail);
 
-    // LIMIT takes an integer bind, not text: PG rejects a text LIMIT.
+
     let rows = match db.backend() {
         Backend::Sqlite => {
             let sql = &db.sql(&sqlite, &postgres);
             let mut q = sqlx::query_as::<_, MediaRecord>(sql);
-            for val in &bound {
+            for val in &all_binds {
                 q = q.bind(val.as_str());
             }
             q.bind(limit)
@@ -412,11 +473,33 @@ pub async fn list_media_filtered(
         Backend::Postgres => {
             let sql = &db.sql(&sqlite, &postgres);
             let mut q = sqlx::query_as::<_, MediaRecord>(sql);
-            for val in &bound {
+            for val in &all_binds {
                 q = q.bind(val.as_str());
             }
             q.bind(limit)
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+
+    // Count uses the same binds (minus LIMIT which is not in the count query).
+    let count = match db.backend() {
+        Backend::Sqlite => {
+            let sql = &db.sql(&count_sql, &count_pg);
+            let mut q = sqlx::query_as::<_, (i64,)>(sql);
+            for val in &all_binds {
+                q = q.bind(val.as_str());
+            }
+            q.fetch_one(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            let sql = &db.sql(&count_sql, &count_pg);
+            let mut q = sqlx::query_as::<_, (i64,)>(sql);
+            for val in &all_binds {
+                q = q.bind(val.as_str());
+            }
+            q.fetch_one(db.postgres_pool().expect("postgres handle"))
                 .await?
         }
     };
@@ -432,9 +515,8 @@ pub async fn list_media_filtered(
     Ok((rows, count.0, next_cursor))
 }
 
-// ---------------------------------------------------------------------------
-// Creator / distributor / collection accessors
-// ---------------------------------------------------------------------------
+
+/// List eligible media attributed to a creator.
 
 /// Scoped media listings share one decode and binding path.
 async fn attributed_media(
@@ -454,7 +536,7 @@ async fn attributed_media(
         AND {eligible} ORDER BY w.created_at DESC, w.id ASC LIMIT 200"
     );
     let postgres = format!("SELECT w.id::text AS id, w.title, w.summary, w.format, w.rating, w.visibility, w.lifecycle,
-        p.account_id::text AS owning_account_id, w.created_at, w.updated_at, w.version::bigint
+                p.account_id::text AS owning_account_id, w.created_at, w.updated_at, w.version::bigint
         FROM works w JOIN pseuds p ON p.id = w.owner_pseud_id
         WHERE EXISTS (SELECT 1 FROM {table} edge WHERE edge.work_id = w.id AND edge.{key} = ?::uuid)
         AND {eligible_pg} ORDER BY w.created_at DESC, w.id ASC LIMIT 200");
@@ -480,8 +562,6 @@ async fn attributed_media(
         }
     }
 }
-
-/// List eligible media attributed to a creator.
 pub async fn creator_media(
     db: &Database,
     id: &str,
@@ -855,7 +935,7 @@ pub async fn post_media_query(
     account_id: Option<&str>,
     limit: i64,
 ) -> Result<(Vec<MediaRecord>, i64)> {
-    let (rows, total, _) = list_media_filtered(db, Some(query), account_id, limit, None).await?;
+    let (rows, total, _) = list_media_filtered(db, Some(query), account_id, limit, None, None, None, None, None).await?;
     Ok((rows, total))
 }
 

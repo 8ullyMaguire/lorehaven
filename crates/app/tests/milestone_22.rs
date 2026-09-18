@@ -487,6 +487,23 @@ async fn seed_edition(fx: &Fixture, work_id: &str) {
     result.expect("seed media edition");
 }
 
+/// Seed a quality signal row. `n` is a disambiguator for the primary key.
+async fn seed_quality_signal(fx: &Fixture, n: u32, work_id: &str, signal_kind: &str, value: i64, weight: i64) {
+    let db = fx.tdb.db();
+    let id = format!("qs-{n}");
+    let now = "2026-01-01T00:00:00Z";
+    let sql = "INSERT INTO quality_signals (id, work_id, signal_kind, value, weight, source, computed_at) VALUES (?, ?, ?, ?, ?, 'test', ?)";
+    match db.backend() {
+        Backend::Sqlite => sqlx::query(sql)
+            .bind(&id).bind(work_id).bind(signal_kind).bind(value).bind(weight).bind(now)
+            .execute(db.sqlite_pool().expect("sqlite pool")).await.unwrap().rows_affected(),
+        Backend::Postgres => sqlx::query(sql)
+            .bind(&id).bind(work_id).bind(signal_kind).bind(value).bind(weight).bind(now)
+            .execute(db.postgres_pool().expect("postgres pool")).await.unwrap().rows_affected(),
+    };
+}
+
+
 /// Deterministic file/edition ids derived from the seeded work id: swap
 /// the work uuid's first group for `10…`/`20…`, keeping valid uuid shape
 /// on both dialects and avoiding collisions.
@@ -1612,8 +1629,8 @@ async fn canon_and_space_doors_return_scoped_media() {
         assert_eq!(items.len(), 2, "signed-in scope: {body}");
         assert!(items.iter().any(|item| item["id"] == restricted));
         assert!(!items.iter().any(|item| item["id"] == hidden));
-    }
 
+    }
     // 404 for non-existent canon.
     let bad_canon = "/api/v1/canons/00000000-0000-0000-0000-999999999999/media";
     let (status, _) = anon.get(bad_canon).await;
@@ -1626,3 +1643,136 @@ async fn canon_and_space_doors_return_scoped_media() {
 
     fx.cleanup().await;
 }
+
+#[tokio::test]
+async fn media_quality_and_date_filters() {
+    let fx = Fixture::new("quality-date").await;
+    let mut anon = fx.client();
+
+    // Create account + pseud directly in the DB.
+        let cast = if fx.tdb.is_postgres() { "::uuid" } else { "" };
+        let account_id = "11111111-1111-1111-1111-111111111111";
+        let pseud_id = "22222222-2222-2222-2222-222222222222";
+        let db = fx.tdb.db();
+        let now = "2026-01-01T00:00:00Z";
+        // Account
+        let sql = fx.tdb.sql(&format!(
+            "INSERT INTO accounts (id, status, email, age_state, created_at, updated_at, version) VALUES (?{cast}, 'active', ?, 'adult', ?, ?, 1)"
+        ));
+        match db.backend() {
+            Backend::Sqlite => sqlx::query(&sql)
+                .bind(account_id)
+                .bind("author@local")
+                .bind(now).bind(now)
+                .execute(db.sqlite_pool().expect("sqlite pool")).await.unwrap().rows_affected(),
+            Backend::Postgres => sqlx::query(&sql)
+                .bind(account_id)
+                .bind("author@local")
+                .bind(now).bind(now)
+                .execute(db.postgres_pool().expect("postgres pool")).await.unwrap().rows_affected(),
+        };
+        // Password credential
+        let sql = fx.tdb.sql(&format!(
+            "INSERT INTO password_credentials (account_id, password_hash, algorithm, created_at, updated_at) VALUES (?{cast}, ?, 'argon2id', ?, ?)"
+        ));
+        match db.backend() {
+            Backend::Sqlite => sqlx::query(&sql)
+                .bind(account_id)
+                .bind("$argon2id$v=19$m=65536,t=3,p=4$test$test")
+                .bind(now).bind(now)
+                .execute(db.sqlite_pool().expect("sqlite pool")).await.unwrap().rows_affected(),
+            Backend::Postgres => sqlx::query(&sql)
+                .bind(account_id)
+                .bind("$argon2id$v=19$m=65536,t=3,p=4$test$test")
+                .bind(now).bind(now)
+                .execute(db.postgres_pool().expect("postgres pool")).await.unwrap().rows_affected(),
+        };
+        // Pseud
+        let sql = fx.tdb.sql(&format!(
+            "INSERT INTO pseuds (id, account_id, handle, display_name, bio, discoverability, created_at, updated_at, version) VALUES (?{cast}, ?{cast}, ?, ?, NULL, 'listed', ?, ?, 1)"
+        ));
+        match db.backend() {
+            Backend::Sqlite => sqlx::query(&sql)
+                .bind(pseud_id).bind(account_id).bind("author").bind("Author")
+                .bind(now).bind(now)
+                .execute(db.sqlite_pool().expect("sqlite pool")).await.unwrap().rows_affected(),
+            Backend::Postgres => sqlx::query(&sql)
+                .bind(pseud_id).bind(account_id).bind("author").bind("Author")
+                .bind(now).bind(now)
+                .execute(db.postgres_pool().expect("postgres pool")).await.unwrap().rows_affected(),
+        };
+
+    // Work A: created 2026-09-01, quality editorial_review = 80 (weight 2) = weighted avg 80
+    let work_a = seed_work(&fx, 5, pseud_id, "Work A", "public", "published", "2026-09-01T10:00:00Z").await;
+    seed_quality_signal(&fx, 5, &work_a, "editorial_review", 80, 2).await;
+
+    // Work B: created 2026-09-05, quality editorial_review = 40 (weight 1) = weighted avg 40
+    let work_b = seed_work(&fx, 6, pseud_id, "Work B", "public", "published", "2026-09-05T10:00:00Z").await;
+    seed_quality_signal(&fx, 6, &work_b, "editorial_review", 40, 1).await;
+
+    // Work C: created 2026-09-10, quality reader_positivity = 90 (no editorial_review signal)
+    let work_c = seed_work(&fx, 7, pseud_id, "Work C", "public", "published", "2026-09-10T10:00:00Z").await;
+    seed_quality_signal(&fx, 7, &work_c, "reader_positivity", 90, 1).await;
+
+    // No filter: all three appear.
+    let (status, body) = anon.get("/api/v1/media").await;
+    assert_eq!(status, StatusCode::OK, "list failed: {body}");
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3, "all works should list: {body}");
+
+
+    // quality_kind=editorial_review, quality_min=50: only A (80 >= 50), B (40 < 50) excluded, C has no editorial_review signal.
+    let uri = "/api/v1/media?quality_kind=editorial_review&quality_min=50";
+    let (status, body) = anon.get(uri).await;
+    assert_eq!(status, StatusCode::OK, "quality filter failed: {body}");
+    let items = body["items"].as_array().unwrap();
+    let uri = "/api/v1/media?quality_kind=editorial_review&quality_min=30";
+    let (status, body) = anon.get(uri).await;
+    assert_eq!(status, StatusCode::OK, "quality filter failed: {body}");
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "A and B have editorial_review signal >= 30: {body}");
+    assert!(items.iter().any(|i| i["id"] == work_a));
+    assert!(items.iter().any(|i| i["id"] == work_b));
+    assert!(!items.iter().any(|i| i["id"] == work_c));
+
+    // date_from only: works created on or after Sep 3.
+    let uri = "/api/v1/media?date_from=2026-09-03T00:00:00Z";
+    let (status, body) = anon.get(uri).await;
+    assert_eq!(status, StatusCode::OK, "date_from filter failed: {body}");
+    let items = body["items"].as_array().unwrap();
+    assert!(items.iter().any(|i| i["id"] == work_b), "work B should appear: {body}");
+    assert!(items.iter().any(|i| i["id"] == work_c), "work C should appear: {body}");
+    assert!(!items.iter().any(|i| i["id"] == work_a), "work A should not appear: {body}");
+
+    // date_from + date_to: works created between Sep 3 and Sep 8 (inclusive).
+    let uri = "/api/v1/media?date_from=2026-09-03T00:00:00Z&date_to=2026-09-08T00:00:00Z";
+    let (status, body) = anon.get(uri).await;
+    assert_eq!(status, StatusCode::OK, "date range filter failed: {body}");
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "only work B in range Sep 3–8: {body}");
+    assert_eq!(items[0]["id"], work_b);
+
+    // Combined quality + date filter: editorial_review >= 30, created before Sep 4.
+    let uri = "/api/v1/media?quality_kind=editorial_review&quality_min=30&date_to=2026-09-04T00:00:00Z";
+    let (status, body) = anon.get(uri).await;
+    assert_eq!(status, StatusCode::OK, "combined filter failed: {body}");
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "only work A matches quality+date: {body}");
+    assert_eq!(items[0]["id"], work_a);
+
+    // quality_min without quality_kind: validation error.
+    let uri = "/api/v1/media?quality_min=50";
+    let (status, body) = anon.get(uri).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "should reject quality_min without kind: {body}");
+    assert_eq!(body["error"]["code"], "VALIDATION_FAILED");
+
+    // Invalid date format: validation error.
+    let uri = "/api/v1/media?date_from=not-a-date";
+    let (status, body) = anon.get(uri).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "should reject invalid date: {body}");
+    assert_eq!(body["error"]["code"], "VALIDATION_FAILED");
+
+    fx.cleanup().await;
+}
+
+
