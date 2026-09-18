@@ -396,7 +396,7 @@ record and the security posture.
 | "All write doors use RequireSession" | put_media_collection and patch_creator had none |
 | "restricted/private only visible to the owning account" | The SQL layer listed restricted works to everyone; unlisted was mishandled; route and SQL contradicted each other |
 | "cursor-based pagination" | Cursor was an id compared with `w.id > ?` while ordering by `created_at DESC`, and `next_cursor` echoed the input — pagination cannot advance and skips/duplicates rows |
-| M23-01/M23-02 `implemented-locally-tested` | OPDS, webhooks, bulk export, JSON-LD/DC absent; files/editions doors returned hardcoded empty arrays; patch_creator updated nonexistent columns |
+| M23-01/M23-02 `implemented-locally-tested` | webhooks, bulk export absent; files/editions doors returned hardcoded empty arrays; patch_creator updated nonexistent columns |
 
 **Security fixes applied by the review:**
 
