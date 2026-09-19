@@ -12,6 +12,7 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
+use lorehaven_app::limiter::RouteClass;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
 use lorehaven_app::worker::{PassReport, TopicHandler, Worker, WorkerOptions};
@@ -220,6 +221,9 @@ fn worker_with(policy: RetryPolicy) -> Worker {
         poll_interval: Duration::from_millis(10),
         policy,
         batch: 50,
+        resource_classes: None,
+        max_bulk_concurrent: 1,
+        fairness: true,
     })
 }
 
@@ -252,7 +256,7 @@ async fn a_claimed_job_is_not_claimed_twice() {
     // Eight claims by two workers, interleaved the way two processes would.
     for round in 0..4 {
         for name in ["worker-a", "worker-b"] {
-            let claimed = jobs::claim_next(harness.tdb.db(), name, Duration::from_secs(60), now)
+            let claimed = jobs::claim_next(harness.tdb.db(), name, Duration::from_secs(60), now, None, 1, true)
                 .await
                 .expect("claim")
                 .expect("a job is waiting");
@@ -292,6 +296,9 @@ async fn a_lease_that_expires_is_requeued() {
         "doomed-worker",
         Duration::from_secs(30),
         start,
+        None,
+        1,
+        true,
     )
     .await
     .expect("claim")
@@ -329,6 +336,9 @@ async fn a_lease_that_expires_is_requeued() {
         "second-worker",
         Duration::from_secs(30),
         start + Duration::from_secs(32),
+        None,
+        1,
+        true,
     )
     .await
     .expect("claim")
@@ -447,6 +457,9 @@ async fn a_retry_uses_the_backoff() {
         "eager-worker",
         Duration::from_secs(30),
         time::OffsetDateTime::now_utc(),
+        None,
+        1,
+        true,
     )
     .await
     .expect("claim");
@@ -461,6 +474,9 @@ async fn a_retry_uses_the_backoff() {
         "eager-worker",
         Duration::from_secs(30),
         available + Duration::from_secs(1),
+        None,
+        1,
+        true,
     )
     .await
     .expect("claim")
@@ -1556,4 +1572,137 @@ async fn a_page_of_jobs_carries_a_cursor_that_resumes_it() {
     assert_eq!(first["items"][0]["id"].as_str(), Some(ids[50].as_str()));
 
     harness.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// Queue fairness (M23-01 §D5): resource classes, bulk concurrency, per-requester
+// anti-starvation.
+// ---------------------------------------------------------------------------
+
+use lorehaven_domain::jobs::ResourceClass;
+
+/// Two bulk jobs are never leased at once when `max_bulk_concurrent = 1`.
+#[tokio::test]
+async fn a_second_bulk_job_waits_while_the_first_is_running() {
+    let harness = Harness::new("bulk-concurrency").await;
+    let policy = RetryPolicy::default();
+
+    for _ in 0..2 {
+        jobs::enqueue(
+            harness.tdb.db(),
+            JobKind::BulkExport,
+            r#"{"query":{}}"#,
+            None,
+            None,
+            0,
+            &policy,
+        )
+        .await
+        .expect("enqueue");
+    }
+
+    let now = time::OffsetDateTime::now_utc();
+    let first =
+        jobs::claim_next(harness.tdb.db(), "w1", Duration::from_secs(60), now, None, 1, false)
+            .await
+            .expect("claim first")
+            .expect("a job is waiting");
+    assert_eq!(first.kind, "bulk_export");
+
+    // Second claim: bulk cap hit, nothing else to give.
+    let second =
+        jobs::claim_next(harness.tdb.db(), "w2", Duration::from_secs(60), now, None, 1, false)
+            .await
+            .expect("claim second");
+    assert!(
+        second.is_none(),
+        "a second bulk job must not be leased while one is running"
+    );
+
+    // After the first finishes, the second is claimable.
+    jobs::complete(harness.tdb.db(), first.id.parse().expect("uuid"), "w1")
+        .await
+        .expect("finish");
+    let second =
+        jobs::claim_next(harness.tdb.db(), "w2", Duration::from_secs(60), now, None, 1, false)
+            .await
+            .expect("claim second")
+            .expect("the bulk job is now claimable");
+    assert_eq!(second.kind, "bulk_export");
+
+    harness.cleanup().await;
+}
+
+/// A worker restricted to one resource class never claims a job of another class.
+#[tokio::test]
+async fn a_worker_is_restricted_to_its_resource_classes() {
+    let harness = Harness::new("resource-class").await;
+    let policy = RetryPolicy::default();
+
+    jobs::enqueue(
+        harness.tdb.db(),
+        JobKind::BulkExport,
+        r#"{"query":{}}"#,
+        None,
+        None,
+        0,
+        &policy,
+    )
+    .await
+    .expect("enqueue");
+    jobs::enqueue(
+        harness.tdb.db(),
+        JobKind::Maintenance,
+        r#"{"task":"probe"}"#,
+        None,
+        None,
+        0,
+        &policy,
+    )
+    .await
+    .expect("enqueue");
+
+    let now = time::OffsetDateTime::now_utc();
+
+    // A worker that only wants Interactive jobs skips the bulk one.
+    let interactive_only = [ResourceClass::Interactive];
+    let claimed = jobs::claim_next(
+        harness.tdb.db(),
+        "interactive-worker",
+        Duration::from_secs(60),
+        now,
+        Some(&interactive_only),
+        1,
+        false,
+    )
+    .await
+    .expect("claim")
+    .expect("the maintenance job is claimable");
+    assert_eq!(claimed.kind, "maintenance");
+
+    // A worker that only wants Bulk jobs now gets the bulk one.
+    let bulk_only = [ResourceClass::Bulk];
+    let claimed = jobs::claim_next(
+        harness.tdb.db(),
+        "bulk-worker",
+        Duration::from_secs(60),
+        now,
+        Some(&bulk_only),
+        1,
+        false,
+    )
+    .await
+    .expect("claim")
+    .expect("the bulk job is claimable");
+    assert_eq!(claimed.kind, "bulk_export");
+
+    harness.cleanup().await;
+}
+
+/// `RouteClass::Export` round-trips and is the 5th class.
+#[test]
+fn route_class_export_round_trips() {
+    assert_eq!(RouteClass::Export.as_str(), "export");
+    assert_eq!(RouteClass::parse("export"), Some(RouteClass::Export));
+    assert_eq!(RouteClass::parse("bulk"), None);
 }

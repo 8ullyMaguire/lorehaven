@@ -357,7 +357,7 @@ pub fn build_router(state: AppState) -> Router {
         // needs no session because the token is the credential.
         .merge(classified(
             routes::exports::authed_router(),
-            RouteClass::Write,
+            RouteClass::Export,
             &state,
         ))
         .merge(classified(

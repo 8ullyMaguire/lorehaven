@@ -63,6 +63,15 @@ pub struct WorkerOptions {
     pub policy: RetryPolicy,
     /// How many outbox events to deliver per pass.
     pub batch: i64,
+    /// Which resource classes this worker claims. `None` means "all classes".
+    /// `Some(classes)` means "only these classes" — a bulk-only worker has
+    /// `Some(&[Bulk])`, a standard worker has `Some(&[Interactive])`, a general
+    /// worker has `None` or `Some(&[Interactive, Bulk])`.
+    pub resource_classes: Option<Vec<lorehaven_domain::jobs::ResourceClass>>,
+    /// How many bulk jobs may run at once across all workers.
+    pub max_bulk_concurrent: i64,
+    /// Whether to skip a job whose requester already has a leased/running job.
+    pub fairness: bool,
 }
 
 impl Default for WorkerOptions {
@@ -73,6 +82,9 @@ impl Default for WorkerOptions {
             poll_interval: Duration::from_secs(1),
             policy: RetryPolicy::default(),
             batch: 50,
+            resource_classes: None,
+            max_bulk_concurrent: 1,
+            fairness: true,
         }
     }
 }
@@ -194,6 +206,9 @@ impl Worker {
             &self.inner.options.id,
             self.inner.options.lease,
             now,
+            self.inner.options.resource_classes.as_deref(),
+            self.inner.options.max_bulk_concurrent,
+            self.inner.options.fairness,
         )
         .await
         .context("claiming the next job")?;

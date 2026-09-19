@@ -306,6 +306,9 @@ fn worker() -> Worker {
             jitter_permille: 0,
         },
         batch: 50,
+        resource_classes: None,
+        max_bulk_concurrent: 1,
+        fairness: true,
     })
 }
 

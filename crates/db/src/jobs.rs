@@ -220,40 +220,103 @@ pub async fn enqueue(
     }
 }
 
+/// Build the claim SQL for the given dialect.
+fn claim_sql(extra_clause: &str, backend: Backend) -> String {
+    let where_clause = if extra_clause.is_empty() {
+        "WHERE state = 'queued' AND available_at <= ?".to_string()
+    } else {
+        format!(
+            "WHERE state = 'queued' AND available_at <= ? AND {}",
+            extra_clause.trim_start_matches(" AND ")
+        )
+    };
+
+    match backend {
+        Backend::Sqlite => format!(
+            "UPDATE jobs
+                SET state = 'leased', lease_owner = ?, lease_expires_at = ?,
+                    updated_at = ?, version = version + 1
+              WHERE id = (SELECT id FROM jobs
+                           {where_clause}
+                           ORDER BY priority DESC, available_at ASC
+                           LIMIT 1)
+            RETURNING id"
+        ),
+        Backend::Postgres => format!(
+            "UPDATE jobs
+                SET state = 'leased', lease_owner = ?, lease_expires_at = ?,
+                    updated_at = ?, version = version + 1
+               FROM (SELECT id FROM jobs
+                      {where_clause}
+                      ORDER BY priority DESC, available_at ASC
+                      LIMIT 1
+                      FOR UPDATE SKIP LOCKED) AS claimed
+              WHERE jobs.id = claimed.id
+            RETURNING jobs.id::text AS id"
+        ),
+    }
+}
+
 /// Claim the next runnable job for `worker`, taking a lease for `lease`.
 ///
-/// One statement, because two workers racing must not both get the same row.
-/// `None` means the queue is empty (or everything is waiting or leased).
+/// `resource_classes`: if `Some`, only claim a job whose kind is in these classes.
+/// `max_bulk_concurrent` + `fairness`: if `fairness`, skip jobs whose requester
+/// already has a leased/running job, and skip a bulk job when
+/// `max_bulk_concurrent` bulk jobs are already leased/running.
 pub async fn claim_next(
     db: &Database,
     worker: &str,
     lease: Duration,
     now: OffsetDateTime,
+    resource_classes: Option<&[lorehaven_domain::jobs::ResourceClass]>,
+    max_bulk_concurrent: i64,
+    fairness: bool,
 ) -> Result<Option<Job>> {
     let now_text = crate::identity::format_rfc3339(now);
     let expires = crate::identity::format_rfc3339(now + lease);
     let lease_secs = i64::try_from(lease.as_secs()).unwrap_or(i64::MAX);
 
-    let claim = db.sql(
-        "UPDATE jobs
-            SET state = 'leased', lease_owner = ?, lease_expires_at = ?,
-                updated_at = ?, version = version + 1
-          WHERE id = (SELECT id FROM jobs
-                       WHERE state = 'queued' AND available_at <= ?
-                       ORDER BY priority DESC, available_at ASC
-                       LIMIT 1)
-        RETURNING id",
-        "UPDATE jobs
-            SET state = 'leased', lease_owner = ?, lease_expires_at = ?,
-                updated_at = ?, version = version + 1
-           FROM (SELECT id FROM jobs
-                  WHERE state = 'queued' AND available_at <= ?
-                  ORDER BY priority DESC, available_at ASC
-                  LIMIT 1
-                  FOR UPDATE SKIP LOCKED) AS claimed
-          WHERE jobs.id = claimed.id
-        RETURNING jobs.id::text AS id",
-    );
+    // Build the extra WHERE conditions for resource classes and fairness.
+    let mut extra = Vec::new();
+    if let Some(classes) = resource_classes {
+        let mut allowed = Vec::new();
+        for kind in lorehaven_domain::jobs::ALL_KINDS {
+            if classes.contains(&kind.resource_class()) {
+                allowed.push(format!("'{}'", kind.as_str()));
+            }
+        }
+        if allowed.is_empty() {
+            return Ok(None);
+        }
+        extra.push(format!("kind IN ({})", allowed.join(",")));
+    }
+    if fairness {
+        // Skip a job whose requester already has a leased job (anti-starvation).
+        // NULL requesters (system jobs) have no one to starve, so they pass.
+        extra.push(
+            "(requested_by IS NULL OR requested_by NOT IN \
+             (SELECT requested_by FROM jobs WHERE state = 'leased' AND requested_by IS NOT NULL))"
+                .to_string(),
+        );
+    }
+    // Bulk concurrency guard: only claim a bulk job when under the cap.
+    if max_bulk_concurrent > 0 {
+        extra.push(format!(
+            "(kind != 'bulk_export' OR \
+             (SELECT COUNT(*) FROM jobs WHERE state = 'leased' AND kind = 'bulk_export') < {})",
+            max_bulk_concurrent
+        ));
+    }
+
+    let extra_clause = if extra.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {}", extra.join(" AND "))
+    };
+
+    let sqlite_claim = claim_sql(&extra_clause, Backend::Sqlite);
+    let postgres_claim = claim_sql(&extra_clause, Backend::Postgres);
+    let claim = db.sql(&sqlite_claim, &postgres_claim);
     let _ = lease_secs;
 
     let find = db.sql(
