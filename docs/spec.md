@@ -4750,6 +4750,74 @@ timestamp-anchored comments already covered by M24; gallery mechanics
 - It does not federate queries (§23.6 stays announce/notify); remote
   queries would be a scraping vector wearing a protocol.
 
+# 33. Consent, Integrity, and Transparency (draft v1, spec-only)
+
+**Nothing in this section is implemented.** Milestones 27–29 were promoted on 2026-09-19 from a cross-project review (the vault notes `[[gravity-lorehaven-feature-crosswalk]]` and `[[lorehaven-jev-system-one-ideas]]`) after checking each item against §0–§32 rather than assuming it absent: the community roadmap and best-worst ballots already exist (§28.12, §29), canonicalization infrastructure already exists (§15.11), and a pluggable classifier with confidence scores is already anticipated (§12.2). What follows is what survived that check.
+
+## 33.1 Milestone 27 — Permission statements, derivative lineage, and the exclusion registry
+
+**Implement.** A **permission statement** on every work and every creator, covering podfic, translation, remix/fork, continuation, redistribution and AI training, each `yes | ask | no | unstated` and defaulting to `unstated`; editable only by the owner, and surviving orphaning and account deletion. A **derivative lineage** edge written whenever one work derives from another, carrying a relationship kind (`translation | podfic | remix | continuation | inspired_by`) and provenance; an imported work whose source states a parent carries the edge, and a parent lists its children. An **exclusion registry** naming external creators and works that must not be imported, narrated, translated, remixed or announced on this instance. Enforcement sits at every door that can create a derivative — the M25 derivative pipeline, TTS narration (M26), the M6 import adapters, the remix path, and ActivityPub announcements (§23.6) — enforced by the server and named in the refusal, never by interface alone.
+
+**Acceptance.**
+- A work stating `podfic: no` refuses a narration-edition request and names the statement; `ask` routes the request to the author rather than refusing it in the author's name.
+- A remix records its parent and the parent lists the child; the edge survives orphaning (§32.3), and deleting a parent never deletes a child.
+- An imported work whose source publishes a statement carries it with provenance; the instance never upgrades `unstated` to `yes`, and a source's `no` is honoured before the bytes are stored.
+- A creator or work on the exclusion registry is refused at import by name.
+
+**Deliberately out of scope:** the statement is not a licence (rights remain §32's), not a moderation tool, and not retroactive — it gates the creation of new derivatives, never the existence of existing ones.
+
+## 33.2 Milestone 28 — Rating signal integrity
+
+**Implement.** Trust-weighted aggregation for the ratings and reactions that feed quality signals — a fresh account's first ratings weigh less, and weights come from trust alone, never from credits, subscriptions, bounties or marketplace revenue (§0.3). Anomaly detection over the ratings stream: burst detection per work and per reviewer cohort, and per-account rating-profile outliers, feeding the existing §24.5 anomaly alerts and the §19.3 report queue rather than a parallel pipeline. Brigade early warning that marks a work's aggregate **contested** — visible to curators, never published as a public score — and pauses that work's promotion into recommendation surfaces until a quorum clears it. The honesty rules: a reader always sees their own rating unchanged, an aggregate display states when a cohort guard is suppressing a number (§24.3's k-anonymity pattern), and no individual rating is ever publicly attributed to its reader.
+
+**Acceptance.**
+- A rating burst from a fresh cohort raises a contested mark and stops promotion without hiding the work from any reader.
+- Trust weighting changes the aggregate while every individual rating stays visible to the reader who made it.
+- A contested work clears through quorum and resumes promotion; the clearance appears in the public log (§19.12).
+- A test asserts that credits, subscriptions, bounties and marketplace revenue can change no rating weight.
+
+**Extends:** §9.5 ratings, §9.7.8 anti-gaming (the credits half exists; this is the ratings half), §19.13, §24.5.
+
+## 33.3 Milestone 29 — Recommendation transparency and curation labour
+
+**Implement.** (a) **"Why am I seeing this"** on every recommendation slot in the M11 discovery surfaces and recipe dashboards: the reader-side reasons that produced the slot — taste signals, filters, the recipe stage, and the comparison that seeded it (§29.2's arena language where a preference produced it). The explanation must never reveal the administrator's taste multiplier or its breakdown (§0.3, §24.3); operator influence appears as one undifferentiated "instance curation" line. (b) A **private attention report**, off by default: what the reader read, what their own filters changed, what their own settings held back, and what instance curation did — aggregate only. (c) **Curation labour**: a tag-wrangling queue that turns canonicalization (§15.11) into visible trust-gated work — proposals (alias, merge, namespace move, canonical rename) enter a queue, trust levels gate who may propose and who may approve (§19.1), merges keep their history and stay reversible, and wrangling earns the same credits and reputation as any other curation, with the §0.3 refusal that no credit buys wrangling authority and no wrangling authority buys ranking.
+
+**Acceptance.**
+- Every recommended slot can name its reader-side reasons, and a test asserts no explanation path can surface the admin multiplier.
+- The attention report is private to its reader, includes at least one "held back by your own settings" line, and stays disabled until the reader enables it.
+- A tag merge requires the configured trust level, records its approver, is reversible, and appears in the public log (§19.12).
+- No wrangling proposal or vote is visible in another user's surface.
+
+# 34. Decision Services (calibrated classifiers)
+
+Cross-cutting contract rather than a milestone: it changes how §12.2, §22.8, §11.14, §11.10, M21's saved-search alerts and §24.14 are implemented, and it exists so those features stop each inventing their own threshold and their own silent failure mode. §12.2 already anticipates "an optional AI classifier returning a confidence score"; this section states the obligations that confidence carries.
+
+**34.1 The contract.** A decision service answers a declared question with a member of a declared answer set plus a calibrated probability — `decide(task, state) → { label, confidence }` — and never returns prose. Structured output is a schema guarantee rather than a hope: an answer outside the set is not representable, which is what makes a decision safe to place deep in a chain where a hallucination is a page failure rather than a bad paragraph. The answer set is declared per task, so a question with more than a few hundred options is narrowed by retrieval first (the §15 index), then decided.
+
+**34.2 Providers are pluggable and optional.** §12.2's optional classifier generalises to a `DecisionProvider` configured per task: a hosted service, a local model (the Ollama path §12.2 already names), or none. With none configured, every task falls back to its deterministic path — §12.2's rules and heuristics with the wider ambiguous band — and the fallback is disclosed on `/api/v1/meta` beside the active content policy. A hosted-only task is refused by design: self-hosting (§2.4) means no task may require a third party for the instance to keep working.
+
+**34.3 Thresholds, tail owners, and what is never decided.** Each task declares a confidence threshold and names the human path that owns the uncertain tail (§12.5 quorum, the §19.3 report queue, the curator queue), and the instance counts escalations — a classifier routing half a comment stream to moderators has automated nothing. **Never decided here:** sanctions (§19.6), shadowban (§19.7), DMCA notices (§19.11), money (§20.9), trust levels (§19.1), and the AI-training assertion as a verdict (M21 keeps it a signal). These are human by construction, and the decision surface cannot express them.
+
+**34.4 Declared tasks (v1).**
+- `positivity_class` — the §12.1 classes with calibrated confidence, so §12.3's delivery rules become threshold rules (high-confidence appreciation delivers; critique delivers only where the author opted in; the ambiguous band routes to §12.5 quorum exactly as §12.2 already states). This is the flagship: the pipeline is already specified; this is the confidence that lets delivery be trusted to it.
+- `translation_quality` — p(adequate) gating auto-published machine translation, which turns §22.5's "AI never overrides human" into a threshold with human-version precedence.
+- `import_outcome` — per-item import classification (§11.14) in the M5 worker, with the low-confidence tail to the batch review UI.
+- `identity_match` — p(same creator) over retrieved candidates for §11.10 cross-source identity; above threshold it *suggests*, and never merges (the no-force-merge rule stands).
+- `alert_match` — p(matches saved search) for M21's alerts, evaluated per new work across that reader's saved searches; a per-user threshold decides whether an alert is sent, which is what makes the alert queue affordable.
+- `mood_class` — §15.8 mood/tone labels for new units and as a corpus backfill: one worker pass that turns a planned search feature on.
+- `language_id` — per-unit language for transcripts and media (§30.8): a bounded choice among languages, which is exactly this shape.
+- `crawler_signal` — behavioural p(crawler) at the edge for §24.14, as a second line behind the deterministic rules the posture already states.
+
+**34.5 Batch passes produce signals, never verdicts.** The same contract run by the worker over the corpus (backfills, reindex passes). A backfilled label is metadata: it never retro-hides content, never changes an eligibility verdict on its own, and a re-run may change it.
+
+**34.6 Audit and disclosure.** Every automated decision that changes what a reader sees is recorded — task, label, confidence, model identity and version, timestamp — operator-only, hashes and labels rather than copied text, consistent with §24.3's privacy rules and §0.3's ban on hidden influence. Where an explanation surface exists (M29's "why am I seeing this"), it may cite a decision's task and label; it may never expose the operator's weights.
+
+**Acceptance.**
+- With no provider configured, §12's classification runs on the deterministic path, the wider ambiguous band reaches quorum, and `/api/v1/meta` says so.
+- No task can be invoked for a sanction, shadowban, DMCA case, payout, trust level or AI-training verdict; a test asserts the surface cannot express them.
+- A comment's class and confidence are recorded, and a published delivery decision can name the class that produced it.
+- Every task defaults to disabled, and an instance with all tasks disabled behaves exactly as §12.2's rules path describes.
+
 ---
 
 The resulting project should be judged by these working behaviors—not by the number of screens, lines of code, imported feature names, or claims in a README.
