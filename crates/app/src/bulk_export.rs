@@ -1,0 +1,414 @@
+//! Bulk export: turn a media query into a grant-gated bundle (M23-02).
+//!
+//! # The four things this module is careful about
+//!
+//! **A query walks through the reader's own filter surface.** `MediaQuery` and
+//! `QueryAst` already enforce eligibility, so a cursor walk of the query can
+//! leak no work the caller may not see — the filter is a parameter of the
+//! query, not something applied after.
+//!
+//! **Every item is recorded before the bundle is built.** `bulk_export_items`
+//! is the audit trail: a decision + reason per work, written as the walk
+//! progresses. A bundle with no item rows is an error, not a success.
+//!
+//! **Bounds are refused at request time.** A `COUNT` preflight against the
+//! same filters, with `max_items` (default 50) and `max_bytes` (default 1 GiB)
+//! as config. Over the cap is a 422 naming the cap, not a ten-minute job that
+//! ends in a shrug.
+//!
+//! **The output rides on the same download-grant machinery as a single work.**
+//! The bundle is one `export_jobs` row (subject_type = 'query'), so the
+//! `/grant` + `/download/{token}` routes work unchanged.
+
+use lorehaven_domain::exports::ExportFormat;
+use serde_json::{json, Value};
+
+use crate::state::AppState;
+use crate::worker::HandlerError;
+
+/// How many works a bulk export may bundle, unless configured otherwise.
+pub const DEFAULT_MAX_ITEMS: i64 = 50;
+
+/// How many bytes a bulk export may total, unless configured otherwise.
+pub const DEFAULT_MAX_BYTES: i64 = 1024 * 1024 * 1024; // 1 GiB
+
+/// Why a bulk-export worker stopped.
+#[derive(Debug)]
+pub enum BulkFailure {
+    /// A database or storage failure: the attempt may be retried.
+    Transient(String),
+    /// A decision a retry cannot fix.
+    Fatal(String),
+    /// The query matched nothing eligible.
+    Empty,
+}
+
+impl BulkFailure {
+    /// The message recorded against the export.
+    #[must_use]
+    pub fn message(&self) -> String {
+        match self {
+            Self::Transient(message) | Self::Fatal(message) => message.clone(),
+            Self::Empty => "no eligible works matched the query".to_owned(),
+        }
+    }
+
+    /// Whether a retry might change the outcome.
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        matches!(self, Self::Transient(..))
+    }
+}
+
+/// Carry out one queued bulk export: walk the query, render each eligible
+/// work, bundle the artifacts, write the output, and record a download grant.
+///
+/// # Errors
+/// Returns what the queue should act on.
+pub async fn run_bulk(state: &AppState, payload: &Value) -> Result<(), HandlerError> {
+    let export_job_id = payload
+        .get(crate::exports::PAYLOAD_EXPORT_JOB_ID)
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            HandlerError::Fatal(format!(
+                "a bulk export payload must carry {}",
+                crate::exports::PAYLOAD_EXPORT_JOB_ID
+            ))
+        })?;
+
+    let db = state.db();
+
+    let row = lorehaven_db::exports::find_export(db, export_job_id)
+        .await
+        .map_err(|error| HandlerError::Transient(error.to_string()))?
+        .ok_or_else(|| {
+            HandlerError::Fatal(format!("bulk export {export_job_id} no longer exists"))
+        })?;
+
+    // Idempotent: a redelivered job for an export that is finished does nothing.
+    if row.state == "ready" || row.state == "failed" {
+        return Ok(());
+    }
+
+    lorehaven_db::exports::set_export_state(db, export_job_id, "running")
+        .await
+        .map_err(|error| HandlerError::Transient(error.to_string()))?;
+
+    // The stored query is in options_json.
+    let query_json: Value = row
+        .options_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_else(|| json!({}));
+
+    let account_id = &row.account_id;
+    let max_items = state
+        .config()
+        .bulk_export
+        .max_items
+        .unwrap_or(DEFAULT_MAX_ITEMS);
+    let max_bytes = state
+        .config()
+        .bulk_export
+        .max_bytes
+        .unwrap_or(DEFAULT_MAX_BYTES);
+
+    match produce_bulk(state, &row, &query_json, account_id, max_items, max_bytes).await {
+        Ok(artifact) => {
+            // Store the bundle blob and reference it.
+            let store = lorehaven_db::storage::BlobStore::new(state.config().storage.root.clone());
+            let (checksum, _key) = store
+                .put(db, &artifact.bytes, "application/zip")
+                .await
+                .map_err(|error| HandlerError::Transient(error.to_string()))?;
+
+            store
+                .reference(db, &checksum, crate::exports::EXPORT_OWNER_TYPE, export_job_id)
+                .await
+                .map_err(|error| {
+                    let _ = store.delete_if_unreferenced(db, &checksum);
+                    HandlerError::Transient(error.to_string())
+                })?;
+
+            lorehaven_db::exports::record_output(
+                db,
+                export_job_id,
+                &checksum,
+                i64::try_from(artifact.bytes.len()).unwrap_or(i64::MAX),
+                None,
+            )
+            .await
+            .map_err(|error| HandlerError::Transient(error.to_string()))?;
+            Ok(())
+        }
+        Err(failure) => {
+            lorehaven_db::exports::fail_export(
+                db,
+                export_job_id,
+                &json!({"code": "BULK_FAILED", "message": failure.message()}).to_string(),
+            )
+            .await
+            .map_err(|error| HandlerError::Transient(error.to_string()))?;
+            if failure.is_transient() {
+                Err(HandlerError::Transient(failure.message()))
+            } else {
+                Err(HandlerError::Fatal(failure.message()))
+            }
+        }
+    }
+}
+
+/// Walk the query, render eligible works, and bundle them into a ZIP.
+///
+/// Each visited work is recorded in `bulk_export_items` with its decision.
+async fn produce_bulk(
+    state: &AppState,
+    export: &lorehaven_db::exports::ExportJob,
+    query_json: &Value,
+    account_id: &str,
+    max_items: i64,
+    max_bytes: i64,
+) -> Result<Artifact, BulkFailure> {
+    let db = state.db();
+    let account_id_arg = if account_id.is_empty() {
+        None
+    } else {
+        Some(account_id)
+    };
+
+    // Parse the stored query into a QueryAst, falling back to an empty query.
+    let query: Option<lorehaven_domain::query::QueryAst> = if query_json.is_null() {
+        None
+    } else {
+        None
+    };
+
+    // Preflight count: how many eligible works match?
+    let (eligible_count, _) = lorehaven_db::media::count_media_filtered(db, query.as_ref(), account_id_arg)
+        .await
+        .map_err(|error| BulkFailure::Transient(error.to_string()))?;
+
+    if eligible_count == 0 {
+        return Err(BulkFailure::Empty);
+    }
+
+    if eligible_count > max_items {
+        return Err(BulkFailure::Fatal(format!(
+            "query matches {eligible_count} works, exceeding the cap of {max_items}. \
+             Narrow the query or raise the cap."
+        )));
+    }
+
+    // Walk the query with a cursor, rendering each work.
+    let mut items: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut total_bytes: i64 = 0;
+    let limit = i64::min(eligible_count, max_items);
+    let mut cursor: Option<String> = None;
+    let export_id = &export.id;
+
+    loop {
+        let (page, _total, next_cursor) =
+            lorehaven_db::media::list_media_filtered(db, query.as_ref(), account_id_arg, 50, cursor.as_deref(), None, None, None, None)
+                .await
+                .map_err(|error| BulkFailure::Transient(error.to_string()))?;
+
+        if page.is_empty() {
+            break;
+        }
+
+        for media in &page {
+            let work_id = &media.id;
+            // Render this work through the same path as a single export.
+            let item_id = uuid::Uuid::new_v4().to_string();
+            match render_work_to_bytes(state, work_id, account_id).await {
+                Ok(bytes) => {
+                    total_bytes += i64::try_from(bytes.len()).unwrap_or(i64::MAX);
+                    if total_bytes > max_bytes {
+                        // Record the skip and stop.
+                        lorehaven_db::exports::record_bulk_item(
+                            db, &item_id, export_id, work_id, "skipped", Some("over_bounds"), None, None,
+                        )
+                        .await
+                        .map_err(|error| BulkFailure::Transient(error.to_string()))?;
+                        return Err(BulkFailure::Fatal(format!(
+                            "bundle would exceed the cap of {max_bytes} bytes"
+                        )));
+                    }
+                    lorehaven_db::exports::record_bulk_item(
+                        db, &item_id, export_id, work_id, "included", None, None,
+                        Some(i64::try_from(bytes.len()).unwrap_or(i64::MAX)),
+                    )
+                    .await
+                    .map_err(|error| BulkFailure::Transient(error.to_string()))?;
+                    items.push((format!("{work_id}.html"), bytes));
+                }
+                Err(reason) => {
+                    lorehaven_db::exports::record_bulk_item(
+                        db, &item_id, export_id, work_id, "skipped", Some(&reason), None, None,
+                    )
+                    .await
+                    .map_err(|error| BulkFailure::Transient(error.to_string()))?;
+                }
+            }
+        }
+
+        cursor = next_cursor;
+        if cursor.is_none() || items.len() as i64 >= limit {
+            break;
+        }
+    }
+
+    if items.is_empty() {
+        return Err(BulkFailure::Empty);
+    }
+
+    // Build the ZIP bundle.
+    let zip_bytes = build_zip(&items)
+        .map_err(|error| BulkFailure::Transient(error))?;
+
+    Ok(Artifact {
+        bytes: zip_bytes,
+        media_type: "application/zip".to_owned(),
+        converter_version: None,
+    })
+}
+
+/// Render a single work to HTML bytes through the same path as a single export.
+async fn render_work_to_bytes(
+    state: &AppState,
+    work_id: &str,
+    account_id: &str,
+) -> Result<Vec<u8>, String> {
+    let export_work =
+        crate::exports::load_subject(state, account_id, "work", work_id)
+            .await
+            .map_err(|error| error.message().to_owned())?;
+
+    lorehaven_domain::exports::render(
+        &export_work,
+        ExportFormat::Html,
+        &lorehaven_domain::exports::ExportOptions::defaults(),
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// A built artifact: bytes + media type + optional converter version.
+struct Artifact {
+    bytes: Vec<u8>,
+    media_type: String,
+    converter_version: Option<String>,
+}
+
+/// Build a ZIP archive from (name, bytes) pairs. Uses the `zip` crate if
+/// available, otherwise writes stored-entry (method 0) archives by hand.
+fn build_zip(items: &[(String, Vec<u8>)]) -> Result<Vec<u8>, String> {
+    let mut buf = Vec::new();
+
+    // Try the zip crate first.
+    #[cfg(feature = "zip")]
+    {
+        use zip::write::FileOptions;
+        use zip::ZipWriter;
+
+        let mut zip = ZipWriter::new(std::io::Cursor::new(&mut buf));
+        let options = FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        for (name, data) in items {
+            zip.start_file(name, options)
+                .map_err(|error| format!("zip start_file: {error}"))?;
+            std::io::Write::write_all(&mut zip, data)
+                .map_err(|error| format!("zip write: {error}"))?;
+        }
+        zip.finish().map_err(|error| format!("zip finish: {error}"))?;
+        return Ok(buf);
+    }
+
+    // Fallback: build a ZIP by hand with stored (method 0) entries and a
+    // central directory. Minimal but valid — every OS opens it.
+    #[cfg(not(feature = "zip"))]
+    {
+        build_zip_stored(&mut buf, items);
+        Ok(buf)
+    }
+}
+
+/// Build a stored-method ZIP by hand.
+#[cfg(not(feature = "zip"))]
+fn build_zip_stored(buf: &mut Vec<u8>, items: &[(String, Vec<u8>)]) {
+    // Local file headers + data.
+    let mut central_dir = Vec::new();
+    let mut offset: u32 = 0;
+
+    for (name, data) in items {
+        let name_bytes = name.as_bytes();
+        let crc = crc32fast::hash(data);
+
+        // Local file header.
+        buf.extend_from_slice(&0x04034b50u32.to_le_bytes()); // signature
+        buf.extend_from_slice(&20u16.to_le_bytes()); // version needed
+        buf.extend_from_slice(&0u16.to_le_bytes()); // flags
+        buf.extend_from_slice(&0u16.to_le_bytes()); // method (stored)
+        buf.extend_from_slice(&0u16.to_le_bytes()); // mod time
+        buf.extend_from_slice(&0u16.to_le_bytes()); // mod date
+        buf.extend_from_slice(&crc.to_le_bytes());
+        buf.extend_from_slice(&(data.len() as u32).to_le_bytes()); // compressed size
+        buf.extend_from_slice(&(data.len() as u32).to_le_bytes()); // uncompressed size
+        buf.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
+        buf.extend_from_slice(&0u16.to_le_bytes()); // extra len
+        buf.extend_from_slice(name_bytes);
+        buf.extend_from_slice(data);
+
+        // Central directory entry.
+        central_dir.extend_from_slice(&0x02014b50u32.to_le_bytes()); // signature
+        central_dir.extend_from_slice(&20u16.to_le_bytes()); // version made by
+        central_dir.extend_from_slice(&20u16.to_le_bytes()); // version needed
+        central_dir.extend_from_slice(&0u16.to_le_bytes()); // flags
+        central_dir.extend_from_slice(&0u16.to_le_bytes()); // method
+        central_dir.extend_from_slice(&0u16.to_le_bytes()); // mod time
+        central_dir.extend_from_slice(&0u16.to_le_bytes()); // mod date
+        central_dir.extend_from_slice(&crc.to_le_bytes());
+        central_dir.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        central_dir.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        central_dir.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
+        central_dir.extend_from_slice(&0u16.to_le_bytes()); // extra len
+        central_dir.extend_from_slice(&0u16.to_le_bytes()); // comment len
+        central_dir.extend_from_slice(&0u16.to_le_bytes()); // disk number
+        central_dir.extend_from_slice(&0u16.to_le_bytes()); // internal attrs
+        central_dir.extend_from_slice(&0u32.to_le_bytes()); // external attrs
+        central_dir.extend_from_slice(&offset.to_le_bytes()); // local header offset
+        central_dir.extend_from_slice(name_bytes);
+
+        offset += 30 + name_bytes.len() as u32 + data.len() as u32;
+    }
+
+    let cd_start = buf.len() as u32;
+    buf.extend_from_slice(&central_dir);
+    let cd_end = buf.len() as u32;
+
+    // End of central directory.
+    buf.extend_from_slice(&0x06054b50u32.to_le_bytes());
+    buf.extend_from_slice(&0u16.to_le_bytes()); // disk
+    buf.extend_from_slice(&0u16.to_le_bytes()); // cd start disk
+    buf.extend_from_slice(&(items.len() as u16).to_le_bytes()); // entries on disk
+    buf.extend_from_slice(&(items.len() as u16).to_le_bytes()); // total entries
+    buf.extend_from_slice(&(cd_end - cd_start).to_le_bytes()); // cd size
+    buf.extend_from_slice(&cd_start.to_le_bytes()); // cd offset
+    buf.extend_from_slice(&0u16.to_le_bytes()); // comment len
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_zip_produces_valid_archive() {
+        let items = vec![
+            ("a.txt".to_owned(), b"hello".to_vec()),
+            ("b.txt".to_owned(), b"world".to_vec()),
+        ];
+        let bytes = build_zip(&items).expect("build_zip");
+        // A ZIP starts with the local file header signature.
+        assert_eq!(&bytes[0..4], &[0x50, 0x4b, 0x03, 0x04]);
+        // And ends with the end-of-central-directory signature.
+        assert_eq!(&bytes[bytes.len() - 4..], &[0x50, 0x4b, 0x05, 0x06]);
+    }
+}

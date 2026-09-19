@@ -519,7 +519,7 @@ impl Worker {
                 let payload = serde_json::from_str(&job.payload).map_err(|error| {
                     HandlerError::Fatal(format!("the bulk export job's payload is not JSON: {error}"))
                 })?;
-                crate::exports::run_bulk(state, &payload).await
+                crate::bulk_export::run_bulk(state, &payload).await
             }
         }
     }

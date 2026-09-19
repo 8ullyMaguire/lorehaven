@@ -515,6 +515,49 @@ pub async fn list_media_filtered(
     Ok((rows, count.0, next_cursor))
 }
 
+/// Count eligible media matching the filters (for bulk-export preflight).
+///
+/// Walks the same [`media_filter`] as [`list_media_filtered`] so the cap is
+/// applied against the same set the walk would see.
+pub async fn count_media_filtered(
+    db: &Database,
+    query: Option<&QueryAst>,
+    account_id: Option<&str>,
+) -> Result<(i64, i64)> {
+    let (where_sqlite, where_pg, values) = media_filter(query, account_id)?;
+
+    let sqlite = format!(
+        "SELECT COUNT(*) FROM works w          LEFT JOIN works_index wi ON wi.work_id = w.id          JOIN pseuds p ON p.id = w.owner_pseud_id          WHERE {where_sqlite}"
+    );
+    let postgres = format!(
+        "SELECT COUNT(*) FROM works w          LEFT JOIN works_index wi ON wi.work_id = w.id          JOIN pseuds p ON p.id = w.owner_pseud_id          WHERE {where_pg}"
+    );
+
+    let count = match db.backend() {
+        Backend::Sqlite => {
+            let sql = &db.sql(&sqlite, &postgres);
+            let mut q = sqlx::query_as::<_, (i64,)>(sql);
+            for val in &values {
+                q = q.bind(val.as_str());
+            }
+            q.fetch_one(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+                .0
+        }
+        Backend::Postgres => {
+            let sql = &db.sql(&sqlite, &postgres);
+            let mut q = sqlx::query_as::<_, (i64,)>(sql);
+            for val in &values {
+                q = q.bind(val.as_str());
+            }
+            q.fetch_one(db.postgres_pool().expect("postgres handle"))
+                .await?
+                .0
+        }
+    };
+
+    Ok((count, 0))
+}
 
 /// List eligible media attributed to a creator.
 

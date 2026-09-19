@@ -875,3 +875,87 @@ pub async fn delete_device(db: &Database, id: &str, account_id: &str) -> Result<
         .with_context(|| format!("deleting device {id}"))?;
     Ok(affected > 0)
 }
+
+// ---------------------------------------------------------------------------
+// Bulk export items
+// ---------------------------------------------------------------------------
+
+/// One work a bulk export visited, and what became of it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, FromRow)]
+pub struct BulkExportItem {
+    pub id: String,
+    pub export_job_id: String,
+    pub work_id: String,
+    pub decision: String,
+    pub reason: Option<String>,
+    pub blob_checksum: Option<String>,
+    pub byte_size: Option<i64>,
+}
+
+/// Record one item of a bulk export. Called by the worker after it has decided
+/// what to do with a work, so the table is the audit trail of the export's
+/// decisions rather than a claim in the code.
+pub async fn record_bulk_item(
+    db: &Database,
+    id: &str,
+    export_job_id: &str,
+    work_id: &str,
+    decision: &str,
+    reason: Option<&str>,
+    blob_checksum: Option<&str>,
+    byte_size: Option<i64>,
+) -> Result<()> {
+    let now = now_rfc3339();
+    let sql = db.sql(
+        "INSERT INTO bulk_export_items (id, export_job_id, work_id, decision, reason, \
+         blob_checksum, byte_size, created_at, updated_at, version) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+        "INSERT INTO bulk_export_items (id, export_job_id, work_id, decision, reason, \
+         blob_checksum, byte_size, created_at, updated_at, version) \
+         VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?, ?, ?, ?, ?, 1)",
+    );
+    run!(db, &sql, |query| {
+        query
+            .bind(id)
+            .bind(export_job_id)
+            .bind(work_id)
+            .bind(decision)
+            .bind(reason)
+            .bind(blob_checksum)
+            .bind(byte_size)
+            .bind(&now)
+            .bind(&now)
+    })
+    .await
+    .with_context(|| format!("recording bulk item {id}"))?;
+    Ok(())
+}
+
+/// The items of a bulk export, so a reader (or a test) can see which works were
+/// included, which were skipped, and why.
+pub async fn bulk_items_for_export(
+    db: &Database,
+    export_job_id: &str,
+) -> Result<Vec<BulkExportItem>> {
+    let sql = db.sql(
+        "SELECT id, export_job_id, work_id, decision, reason, blob_checksum, byte_size \
+         FROM bulk_export_items WHERE export_job_id = ? ORDER BY created_at",
+        "SELECT id, export_job_id, work_id, decision, reason, blob_checksum, byte_size \
+         FROM bulk_export_items WHERE export_job_id::text = ? ORDER BY created_at",
+    );
+    let rows: Vec<BulkExportItem> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(export_job_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(export_job_id)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(rows)
+}
