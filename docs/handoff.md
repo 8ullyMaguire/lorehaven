@@ -94,35 +94,36 @@ the time). Trust `docs/verification.md`, this file, or a fresh run.
 
 ## Open, in the order I would take it
 
-1. **M23-02 — merge-blocking defects in the just-landed bulk-export work.** The
-   gate at `6be66b3` is **red**: 1237 passed / 2 failed / 13 ignored, `cargo fmt`
-   and `cargo clippy -D warnings` both failing. Fix in this order:
-   - **Every download grant is broken on SQLite.** `migration 0035` renames
-     `export_jobs` and drops the old table, which leaves
-     `download_grants.export_job_id` referencing the dropped `export_jobs_old`.
-     Reproducer: `INSERT INTO download_grants …` → `no such table:
-     main.export_jobs_old` with FKs on (the runner sets them,
-     `crates/db/src/lib.rs:186`). The suite fails too:
-     `milestone_7::the_download_grant_expires_and_is_single_use` → 422 on minting.
-     Drop and recreate the referencing FK in the rebuild, both dialects, and assert
-     in the migration test that every FK target exists. PostgreSQL is unverified
-     (no instance) and has the same rename-then-drop shape.
-   - **The bulk export ignores its query**: `if query_json.is_null() { None } else
-     { None }` in `crates/app/src/exports.rs:792` and
-     `crates/app/src/bulk_export.rs:180-184`. Every export currently means "all
-     visible media", and above the 50-item cap it always fails. Parse
-     `row.options_json` into the `QueryAst` the media doors use, in both places.
-   - **`/exports/bulk` is missing from `ROUTE_TABLE`** (`route_inventory` names it),
-     and `cargo fmt` wants two blocks in `bulk_export.rs` expanded.
-   Then the rest of the review's list, in `docs/verification.md`: the ZIP downloads
-   as `text/html`/`*.html` (the row says `format: "html"`), no manifest in the
-   bundle, no checkpoint (retries duplicate `bulk_export_items` rows), all
-   `load_subject` errors recorded as "skipped", no `has_entitlement` check, no
-   `ContentRead` scope on the route, no test for the export path at all.
-   **Webhooks**: the sender signs with real HMAC now but nothing calls it — no
-   delivery path, `record_delivery` without a production caller — and its SSRF
-   guard needs redirects disabled, all resolved addresses checked, and IPv4-mapped
-   IPv6 plus multicast/CGNAT ranges blocked before it faces the internet.
+1. **M23-02 — the FK break is fixed; five other things are not.** `f909775`
+   repaired the SQLite `download_grants` foreign key (verified with the fourth
+   pass's reproducer: `insert into download_grants: OK`, FK target `export_jobs`)
+   and added the `/exports/bulk` inventory row. Still open:
+   - **The query is still dropped.** `QueryAst` is the DSL enum built by
+     `parse_query(&str)`; the route takes `Json<MediaQuery>`, so
+     `as_str().unwrap_or_default()` gives `""` and every filter is ignored. Pick a
+     shape (DSL string or a `MediaQuery` → `QueryAst` bridge) and make an unreadable
+     stored query `Fatal` rather than "export everything".
+   - **`migrations/postgres/0035_bulk_export.sql` order is wrong**: it drops
+     `export_jobs_old` before its dependents, which PG refuses. Unverified here (no
+     instance). The SQLite twin rebuilds `download_grants` with
+     `DROP TABLE IF EXISTS`, discarding its rows; the sibling `export_jobs` rebuild
+     copies. Match it.
+   - **The working tree does not compile**: `crates/app/src/server.rs:159` omits
+     `attempts` in an `OutboxEvent` literal (`error[E0063]`), so the whole app crate
+     and every test fail to build. The handler already receives `&OutboxEvent`;
+     `event.clone()` is enough.
+   - **`cargo fmt` and `cargo clippy -D warnings` are red** — two blocks in
+     `bulk_export.rs` and three `lorehaven-db` lints (blank line after a doc
+     comment, `8/7` and `9/7` arguments).
+   - Shape gaps from the fourth pass remain: ZIP served as `text/html`/`*.html`, no
+     manifest, no checkpoint (duplicate `bulk_export_items` rows on retry),
+     `load_subject` errors recorded as "skipped", no `has_entitlement`, no
+     `ContentRead` scope on the route, and no test for the export path.
+   **Phase 3a is in flight** in `crates/app/src/webhook_delivery.rs` (uncommitted):
+   delivery to subscribed endpoints with attempts recorded, wired to
+   `publish.notify`. Query watches — the half M23-02 names — are still to come, and
+   the SSRF guard still needs redirects disabled, every resolved address checked,
+   and IPv4-mapped IPv6 plus multicast/CGNAT ranges blocked.
 2. **N2b — decide the audience of the browsing doors.** The table now records them
    as `Authenticated`: `/works/{id}/comments`, `/forums`,
    `/forums/{category}/topics`, `/topics/{id}`, `/topics/{id}/replies`, `/groups`,

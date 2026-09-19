@@ -1252,3 +1252,79 @@ match that gives uniqueness (its literal array still has to be raised when a kin
 is added, but it fails loudly). Queue fairness has the right shape — `claim_sql`
 plus a class filter derived from `ALL_KINDS`, a per-requester skip and a bulk
 concurrency guard (`7badbcc`, with 25 tests in `milestone_5`).
+
+### 2026-09-19, fifth pass — `f909775` (the fix commit) and the webhook wiring
+
+**Fixed and verified.** The SQLite FK break is gone. Same reproducer as the fourth
+pass, now against the fixed migrations:
+
+```
+download_grants FK -> [(0, 0, 'export_jobs', 'export_job_id', 'id', 'NO ACTION', 'CASCADE', 'NONE')]
+foreign_key_check: []
+insert into download_grants: OK
+```
+
+with an account, a job and an export row inserted first. The migration comment now
+describes SQLite's rename behaviour correctly, and the fix was to drop and recreate
+`download_grants` (and `bulk_export_items`) around the rebuild. The `/exports/bulk`
+row is in `ROUTE_TABLE` (`start_bulk_export`, POST, `Authenticated`) — the direction
+test's complaint is addressed. Verified at the commit in a clean worktree
+(`/tmp/lh-at-f909775`, its own target dir): `milestone_7` **10 passed / 0 failed**
+(the suite that was 9/10 while the FK was broken) and `route_inventory` **2
+passed**, `tests_exit=0`. The commit's own claims hold; `fmt_exit=1` there as well,
+and its file list contains no `crates/db`, so the three clippy lints it leaves
+standing predate it.
+
+**The query is still dropped.** `lorehaven_domain::query::QueryAst` is an enum
+(`crates/domain/src/query.rs:82`) built by `parse_query(&str)` — the *DSL string*
+parser the `?q=` path uses (`crates/app/src/routes/media.rs:110,932`) — while the
+bulk route's body is `Json<MediaQuery>` (`crates/app/src/routes/media.rs:693`), a
+JSON object. `Value::as_str()` is `None` for an object, so
+`unwrap_or_default()` supplies `""`, the parse yields nothing usable, and the
+caller's filters — quality, dates, facets, everything M23-01 built — never reach
+the walk. The commit message's "falling back to None only on parse failure" is
+inverted: for the documented body shape it *always* takes that path. This needs a
+decision, not a patch: either accept the DSL string (`{"q": "fandom:x tag:y"}`,
+documented as such) or bridge `MediaQuery` into a `QueryAst`. Either way an
+unreadable stored query must be `Fatal`, never "export everything".
+
+**PostgreSQL migration order is wrong.** In `migrations/postgres/0035_bulk_export.sql`
+`DROP TABLE export_jobs_old` (line 48) runs before `DROP TABLE IF EXISTS
+download_grants` (51) and `bulk_export_items` (64). PostgreSQL refuses to drop a
+table that another table's foreign key depends on ("cannot drop table
+export_jobs_old because other objects depend on it"), so the migration aborts
+before the fix it needs. Unverified — no PG instance was available — and flagged
+per the standing rule; the dependents must be dropped first.
+
+**The rebuild now discards grants.** `DROP TABLE IF EXISTS download_grants` throws
+away every outstanding token (SQLite and PG). The `export_jobs` rebuild beside it
+copies its rows; this one should too (`RENAME` → `INSERT … SELECT` → `DROP`). The
+rows are ephemeral so the blast radius is small, but nothing says so.
+
+**Gate is still red, for two independent reasons.**
+
+1. `cargo fmt` wants two blocks in `crates/app/src/bulk_export.rs` expanded (the
+   `store.reference(...)` call at ~123 and the `count_media_filtered` call at
+   ~184), and `cargo clippy -D warnings` fails `lorehaven-db` with the same three
+   lints as the last pass: an empty line after a doc comment, and `too many
+   arguments (8/7)` / `(9/7)`. `f909775` touched none of them.
+2. **The working tree does not compile.** The in-flight webhook wiring in
+   `crates/app/src/server.rs:159` builds `outbox::OutboxEvent { … }` field by field
+   and omits `attempts` → `error[E0063]: missing field 'attempts'`, so
+   `lorehaven-app` never builds and the gate's test stage produced zero results.
+   The reconstruction looks unnecessary: the topic handler already receives
+   `&OutboxEvent`, so `event.clone()` (or moving the borrow) is enough.
+
+**Still untouched from the fourth pass:** the ZIP downloads as `text/html` /
+`*.html` (the row is `format: "html"`), no manifest inside the bundle, no
+checkpoint (retries duplicate `bulk_export_items` rows), every `load_subject` error
+recorded as "skipped", no `has_entitlement` check, no `ContentRead` scope on the
+bulk route, and no test for the export path itself.
+
+**Webhook delivery is now being built** (`crates/app/src/webhook_delivery.rs`,
+uncommitted, 159 lines): `deliver_notification` calls `webhook_sender::send`,
+records each attempt through `marketplace::record_delivery` — closing the "no
+production caller" gap at last — filters endpoints by subscribed event type, and is
+wired to the outbox topic `publish.notify` in `server.rs`. That is the delivery
+half of Phase 3a; query watches (a webhook when new media matches a saved query)
+remain the missing piece of M23-02's webhook requirement.
