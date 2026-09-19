@@ -73,6 +73,7 @@ pub fn authed_router() -> Router<AppState> {
     Router::new()
         .route("/exports/formats", get(list_formats))
         .route("/exports", get(list_exports).post(start_export))
+        .route("/exports/bulk", post(start_bulk_export))
         .route("/exports/{id}", get(get_export))
         .route("/exports/{id}/grant", post(mint_grant))
         .route("/exports/{id}/download", get(download_own))
@@ -211,6 +212,51 @@ async fn start_export(
         &request.subject_id,
         format,
         &options,
+    )
+    .await
+    .map_err(|error| {
+        ApiError(lorehaven_domain::AppError::Validation {
+            message: error.message(),
+            field_errors: Default::default(),
+        })
+    })?;
+
+    repo::acknowledge_privacy(state.db(), &row.id).await?;
+
+    // 202: the work is accepted and has not happened.
+    Ok((StatusCode::ACCEPTED, Json(json!(ExportView::from(row)))))
+}
+
+/// A bulk export request: a media query turned into a bundle.
+#[derive(Debug, Deserialize)]
+struct StartBulkExportRequest {
+    /// The query to walk (the same shape as `POST /api/v1/media/query`).
+    query: Value,
+    /// Whether the reader has been shown the notice.
+    #[serde(default)]
+    acknowledge_privacy: bool,
+}
+
+/// Ask for a bulk export.
+async fn start_bulk_export(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Json(request): Json<StartBulkExportRequest>,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    // The notice is part of the contract, not decoration (same as start_export).
+    if !request.acknowledge_privacy {
+        return Err(ApiError(lorehaven_domain::AppError::Validation {
+            message: format!(
+                "this export has not acknowledged the privacy notice: {PRIVACY_NOTICE}"
+            ),
+            field_errors: Default::default(),
+        }));
+    }
+
+    let row = crate::exports::request_bulk(
+        &state,
+        &user.account_id.to_string(),
+        &request.query,
     )
     .await
     .map_err(|error| {

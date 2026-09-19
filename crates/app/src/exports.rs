@@ -254,8 +254,9 @@ impl ExportFailure {
 
 /// The subject kinds an export may be asked for.
 #[must_use]
+/// The subject types this instance exports.
 pub fn is_known_subject(subject_type: &str) -> bool {
-    matches!(subject_type, "work" | "library_item")
+    matches!(subject_type, "work" | "library_item" | "query")
 }
 
 /// Load a work or a library item into the shape the renderer wants.
@@ -762,6 +763,84 @@ pub async fn request(
             subject_id,
             format: format.as_str(),
             options_json: Some(&options.to_json().to_string()),
+        },
+    )
+    .await
+    .map_err(transient)?;
+
+    Ok(row)
+}
+
+/// Request a bulk export: a query turned into a grant-gated bundle.
+///
+/// The query is stored on the export row (`subject_type = 'query'`,
+/// `options_json` holds the query + caps). A preflight count checks the
+/// configured `max_items` cap; over the cap is a 422 naming the cap. The
+/// job walks the query in the worker via [`crate::bulk_export::run_bulk`].
+///
+/// # Errors
+/// Transient for a storage failure; a validation error if the query is
+/// unknown or over the cap.
+pub async fn request_bulk(
+    state: &AppState,
+    account_id: &str,
+    query_json: &Value,
+) -> Result<ExportJob, HandlerError> {
+    let db = state.db();
+
+    // Preflight count: how many eligible works match the query?
+    let query: Option<lorehaven_domain::query::QueryAst> = None;
+    let account_id_arg = if account_id.is_empty() {
+        None
+    } else {
+        Some(account_id)
+    };
+    let (eligible_count, _) =
+        lorehaven_db::media::count_media_filtered(db, query.as_ref(), account_id_arg)
+            .await
+            .map_err(transient)?;
+
+    if eligible_count == 0 {
+        return Err(fatal(
+            "no eligible works matched the query".to_owned(),
+        ));
+    }
+
+    let max_items = state
+        .config()
+        .bulk_export
+        .max_items
+        .unwrap_or(crate::bulk_export::DEFAULT_MAX_ITEMS);
+    if eligible_count > max_items {
+        return Err(fatal(format!(
+            "query matches {eligible_count} works, exceeding the cap of {max_items}. \
+             Narrow the query or raise the cap."
+        )));
+    }
+
+    let export_id = MediaAssetId::new().to_string();
+    let job_id = lorehaven_db::jobs::enqueue(
+        db,
+        JobKind::BulkExport,
+        &json!({ PAYLOAD_EXPORT_JOB_ID: export_id }).to_string(),
+        None,
+        Some(account_id.parse().unwrap_or_default()),
+        0,
+        &RetryPolicy::default(),
+    )
+    .await
+    .map_err(transient)?;
+
+    let row = repo::create_export(
+        db,
+        NewExport {
+            id: &export_id,
+            job_id: &job_id.to_string(),
+            account_id,
+            subject_type: "query",
+            subject_id: "", // query is in options_json, not a single subject
+            format: "html",
+            options_json: Some(&query_json.to_string()),
         },
     )
     .await
