@@ -682,6 +682,11 @@ impl Config {
                     section.search_per_minute,
                     defaults.search,
                 ),
+                export: build(
+                    section.export_burst,
+                    section.export_per_minute,
+                    defaults.export,
+                ),
                 default: build(
                     section.default_burst,
                     section.default_per_minute,
@@ -1011,6 +1016,8 @@ struct RateLimitSection {
     write_per_minute: Option<u32>,
     search_burst: Option<u32>,
     search_per_minute: Option<u32>,
+    export_burst: Option<u32>,
+    export_per_minute: Option<u32>,
     default_burst: Option<u32>,
     default_per_minute: Option<u32>,
     address_multiplier: Option<u32>,

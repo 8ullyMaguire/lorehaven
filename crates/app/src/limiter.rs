@@ -45,6 +45,8 @@ pub enum RouteClass {
     Write,
     /// Read requests that touch the database heavily.
     Search,
+    /// Bulk export: starting a job is cheap, the job itself is not.
+    Export,
     /// Everything else: static assets and cheap reads.
     Default,
 }
@@ -57,6 +59,7 @@ impl RouteClass {
             Self::Auth => "auth",
             Self::Write => "write",
             Self::Search => "search",
+            Self::Export => "export",
             Self::Default => "default",
         }
     }
@@ -68,6 +71,7 @@ impl RouteClass {
             "auth" => Some(Self::Auth),
             "write" => Some(Self::Write),
             "search" => Some(Self::Search),
+            "export" => Some(Self::Export),
             "default" => Some(Self::Default),
             _ => None,
         }
@@ -99,6 +103,8 @@ pub struct Limits {
     pub write: Quota,
     /// Expensive reads.
     pub search: Quota,
+    /// Bulk export: starting a job is cheap, the job itself is not.
+    pub export: Quota,
     /// Everything else.
     pub default: Quota,
     /// Multiplier applied to address-keyed buckets, to absorb shared NATs
@@ -124,6 +130,13 @@ impl Default for Limits {
                 burst: 30,
                 per_minute: 120,
             },
+            // Bulk export: 5 back-to-back is enough for a person who clicked
+            // twice; 10/minute leaves room for the other doors while a large
+            // bundle runs.
+            export: Quota {
+                burst: 5,
+                per_minute: 10,
+            },
             default: Quota {
                 burst: 120,
                 per_minute: 600,
@@ -141,6 +154,7 @@ impl Limits {
             RouteClass::Auth => self.auth,
             RouteClass::Write => self.write,
             RouteClass::Search => self.search,
+            RouteClass::Export => self.export,
             RouteClass::Default => self.default,
         }
     }
@@ -507,6 +521,7 @@ mod tests {
             RouteClass::Auth,
             RouteClass::Write,
             RouteClass::Search,
+            RouteClass::Export,
             RouteClass::Default,
         ] {
             assert_eq!(RouteClass::parse(class.as_str()), Some(class));
