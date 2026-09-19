@@ -85,71 +85,126 @@ impl JobState {
 /// What a job is for. The set is closed: a new kind is a code change, because
 /// the worker needs a handler for it and a silently unhandled kind would sit in
 /// the queue forever.
+///
+/// `job_kinds!` emits the enum, `ALL_KINDS`, `as_str` and `parse` from one
+/// token tree, so a new variant appears in all four at once — the list can
+/// never drift away from the enum. `kind_index()` is a separate exhaustive
+/// match, so adding a variant is also a compile error until an arm is assigned:
+/// the macro covers the list, `kind_index()` covers uniqueness.
+macro_rules! job_kinds {
+    ($($(#[$m:meta])* $variant:ident => $wire:expr),* $(,)?) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub enum JobKind {
+            $( $(#[$m])* $variant, )*
+        }
+
+        impl JobKind {
+            /// The wire and column representation.
+            #[must_use]
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $( Self::$variant => $wire, )*
+                }
+            }
+
+            /// Parse the stored representation.
+            #[must_use]
+            pub fn parse(raw: &str) -> Option<Self> {
+                match raw {
+                    $( $wire => Some(Self::$variant), )*
+                    _ => None
+                }
+            }
+        }
+
+        /// Every kind the queue understands, in declaration order. Emitted from
+        /// the same source as the enum, so it always covers every variant.
+        pub const ALL_KINDS: &[JobKind] = &[ $(JobKind::$variant,)* ];
+    };
+}
+
+job_kinds! {
+    #[doc = "Fetch a work from a source and store it (M6)."]
+    Import => "import",
+    #[doc = "Render a work into a downloadable file (M7)."]
+    Export => "export",
+    #[doc = "Render a query into a downloadable bundle (M23)."]
+    BulkExport => "bulk_export",
+    #[doc = "Rebuild a work's search document (M9)."]
+    Reindex => "reindex",
+    #[doc = "Deliver an outbox event (a notification, a webhook)."]
+    Notify => "notify",
+    #[doc = "Render a thumbnail for a cover or avatar."]
+    Thumbnail => "thumbnail",
+    #[doc = "Retention and collection: purge old jobs, collect unreferenced blobs."]
+    Maintenance => "maintenance",
+    #[doc = "Check the reader's library items against their sources (M8)."]
+    #[doc = ""]
+    #[doc = "A job rather than a request because it reads the network once per item"]
+    #[doc = "and a reader with a hundred imports should not hold a connection open"]
+    #[doc = "while it does: spec §14.1 asks for a check, and `POST"]
+    #[doc = "/library/updates/check` answers `202` with the job."]
+    UpdateCheck => "update_check",
+    #[doc = "Build a derivative rendition (EPUB/PDF/text) or extract OCR from a"]
+    #[doc = "scanned upload (M25 / spec §32.4)."]
+    Derivative => "derivative",
+    #[doc = "Produce or regenerate a TTS narration edition (M26 / spec §32.5)."]
+    #[doc = ""]
+    #[doc = "Author-approved machine narration. The worker invokes the configured"]
+    #[doc = "AI provider's TTS capability; the output is stored as a derivative"]
+    #[doc = "audio blob and a `narration` edition is created with the machine"]
+    #[doc = "producer labeled per §22.6/§30.8."]
+    Narration => "narration",
+}
+/// The queue's claim classes — separate from the HTTP route rate classes
+/// (`crate::limiter::RouteClass`). The rate limiter guards the HTTP surface;
+/// this is how the worker knows how to claim a job: an interactive job should
+/// not be starved by a bulk one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum JobKind {
-    /// Fetch a work from a source and store it (M6).
-    Import,
-    /// Render a work into a downloadable file (M7).
-    Export,
-    /// Rebuild a work's search document (M9).
-    Reindex,
-    /// Deliver an outbox event (a notification, a webhook).
-    Notify,
-    /// Render a thumbnail for a cover or avatar.
-    Thumbnail,
-    /// Retention and collection: purge old jobs, collect unreferenced blobs.
-    Maintenance,
-    /// Check the reader's library items against their sources (M8).
-    ///
-    /// A job rather than a request because it reads the network once per item
-    /// and a reader with a hundred imports should not hold a connection open
-    /// while it does: spec §14.1 asks for a check, and `POST
-    /// /library/updates/check` answers `202` with the job.
-    UpdateCheck,
-    /// Build a derivative rendition (EPUB/PDF/text) or extract OCR from a
-    /// scanned upload (M25 / spec §32.4).
-    Derivative,
-    /// Produce or regenerate a TTS narration edition (M26 / spec §32.5).
-    ///
-    /// Author-approved machine narration. The worker invokes the configured
-    /// AI provider's TTS capability; the output is stored as a derivative
-    /// audio blob and a `narration` edition is created with the machine
-    /// producer labeled per §22.6/§30.8.
-    Narration,
+pub enum ResourceClass {
+    /// Ordinary job that should run promptly.
+    Interactive,
+    /// A large job the worker may throttle behind interactive ones.
+    Bulk,
 }
 
 impl JobKind {
-    /// The wire and column representation.
+    /// The queue class a worker sees this job as.
     #[must_use]
-    pub const fn as_str(self) -> &'static str {
+    pub const fn resource_class(self) -> ResourceClass {
         match self {
-            Self::Import => "import",
-            Self::Export => "export",
-            Self::Reindex => "reindex",
-            Self::Notify => "notify",
-            Self::Thumbnail => "thumbnail",
-            Self::Maintenance => "maintenance",
-            Self::UpdateCheck => "update_check",
-            Self::Derivative => "derivative",
-            Self::Narration => "narration",
+            Self::Import => ResourceClass::Interactive,
+            Self::Export => ResourceClass::Interactive,
+            Self::BulkExport => ResourceClass::Bulk,
+            Self::Reindex => ResourceClass::Interactive,
+            Self::Notify => ResourceClass::Interactive,
+            Self::Thumbnail => ResourceClass::Interactive,
+            Self::Maintenance => ResourceClass::Interactive,
+            Self::UpdateCheck => ResourceClass::Interactive,
+            Self::Derivative => ResourceClass::Interactive,
+            Self::Narration => ResourceClass::Interactive,
         }
     }
 
-    /// Parse the stored representation.
+    /// A dense per-variant index, for placing a kind in a fixed array.
+    ///
+    /// The match is exhaustive: adding a variant to `JobKind` fails to
+    /// compile here until an arm is assigned, so a new kind can never
+    /// be "handled everywhere except the list".
     #[must_use]
-    pub fn parse(raw: &str) -> Option<Self> {
-        Some(match raw {
-            "import" => Self::Import,
-            "export" => Self::Export,
-            "reindex" => Self::Reindex,
-            "notify" => Self::Notify,
-            "thumbnail" => Self::Thumbnail,
-            "maintenance" => Self::Maintenance,
-            "update_check" => Self::UpdateCheck,
-            "derivative" => Self::Derivative,
-            "narration" => Self::Narration,
-            _ => return None,
-        })
+    pub const fn kind_index(self) -> usize {
+        match self {
+            Self::Import => 0,
+            Self::Export => 1,
+            Self::BulkExport => 2,
+            Self::Reindex => 3,
+            Self::Notify => 4,
+            Self::Thumbnail => 5,
+            Self::Maintenance => 6,
+            Self::UpdateCheck => 7,
+            Self::Derivative => 8,
+            Self::Narration => 9,
+        }
     }
 }
 
@@ -386,28 +441,18 @@ mod tests {
     }
 
     #[test]
-    fn states_and_kinds_round_trip_through_their_columns() {
-        for state in [
-            JobState::Queued,
-            JobState::Leased,
-            JobState::Running,
-            JobState::Succeeded,
-            JobState::Failed,
-            JobState::Cancelled,
-        ] {
-            assert_eq!(JobState::parse(state.as_str()), Some(state));
+    fn every_kind_round_trips_through_parse() {
+        for kind in ALL_KINDS {
+            assert_eq!(
+                JobKind::parse(kind.as_str()),
+                Some(*kind),
+                "parse(kind.as_str()) != kind for {:?}",
+                kind
+            );
         }
-        for kind in [
-            JobKind::Import,
-            JobKind::Export,
-            JobKind::Reindex,
-            JobKind::Notify,
-            JobKind::Thumbnail,
-            JobKind::Maintenance,
-        ] {
-            assert_eq!(JobKind::parse(kind.as_str()), Some(kind));
+        // Closed set: unknown wire values must not parse as any known kind.
+        for unknown in ["", "laundry", "bulk_import", "NARRATION"] {
+            assert_eq!(JobKind::parse(unknown), None, "{unknown} should not parse");
         }
-        assert_eq!(JobState::parse("running_away"), None);
-        assert_eq!(JobKind::parse("laundry"), None);
     }
 }

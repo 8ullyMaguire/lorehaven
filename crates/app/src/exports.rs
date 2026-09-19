@@ -792,6 +792,15 @@ pub async fn mint_grant(state: &AppState, export_job_id: &str) -> Result<String,
     Ok(token)
 }
 
+/// Carry out one queued bulk export.
+///
+/// # Errors
+/// Returns what the queue should act on: transient for a failure that might
+/// clear, fatal for what a retry cannot change.
+pub async fn run_bulk(_state: &AppState, _payload: &Value) -> Result<(), HandlerError> {
+    Err(fatal("bulk export handler not yet implemented"))
+}
+
 // ---------------------------------------------------------------------------
 // Retention
 // ---------------------------------------------------------------------------
