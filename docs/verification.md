@@ -1148,3 +1148,107 @@ lorehaven-app --no-fail-fast`): 31 targets, **763 passed / 0 failed / 0 ignored*
 `test_exit=0`, one warning — the other workstream's unused `items` at
 `crates/app/tests/milestone_22.rs:1931`. (The change's own report quoted 258 passed
 for "both crates"; that is a subset of what those two crates run.)
+
+### 2026-09-19, fourth pass — Phases 1 and 2 of M23-02, and the gate is red
+
+Six commits landed (`a6f0e20`, `1a56da0`, `c6fc318`, `b949f9e`, `7badbcc`, `6be66b3`).
+The workspace gate at `6be66b3`: **1237 passed / 2 failed / 13 ignored**, `fmt_exit=1`,
+`clippy_exit=101`. The report's "258 passed / 0 failed across both crates" is not
+that command's output, and two of the failures are real regressions.
+
+**Blocker 1 — migration 0035 breaks every download grant (SQLite; PostgreSQL
+unverified).** `ALTER TABLE export_jobs RENAME TO export_jobs_old` rewrites the
+*referencing* foreign keys to the new name, and the migration then drops that
+table. The comment claims the rename "keeps them pointing at the right table" —
+it is the opposite:
+
+```
+download_grants FK -> [(0, 0, 'export_jobs_old', 'export_job_id', 'id', 'NO ACTION', 'CASCADE', 'NONE')]
+```
+
+Reproducer, after applying every SQLite migration in order and with
+`PRAGMA foreign_keys=ON` (which the runner sets, `crates/db/src/lib.rs:186`):
+
+```
+insert into download_grants FAILS: OperationalError no such table: main.export_jobs_old
+```
+
+The suite sees it too: `milestone_7::the_download_grant_expires_and_is_single_use`
+fails with `422 VALIDATION_FAILED` — "minting a download grant for export …". So
+`POST /exports/{id}/grant` is broken for *every* export, bulk or single. The
+PostgreSQL twin has the same shape and would have `DROP TABLE export_jobs_old`
+refused for dependent constraints, or leave the FK dangling; no PG instance was
+available here, so that is flagged rather than verified. Fix: drop and recreate
+the referencing FK as part of the rebuild on both dialects, and assert in the
+migration test that every foreign key's target table exists.
+
+**Blocker 2 — the bulk export ignores the query, in both places.** `request_bulk`
+(`crates/app/src/exports.rs:792`) and `produce_bulk`
+(`crates/app/src/bulk_export.rs:180-184`) both read:
+
+```rust
+let query: Option<QueryAst> = if query_json.is_null() { None } else { None };
+```
+
+Both arms are `None`, so the stored query is never parsed and the preflight counts
+*all* media the caller can see. A reader who can see more than the cap (50) gets
+"query matches N works, exceeding the cap of 50" for any query; a reader under the
+cap gets a bundle of everything, not of what they asked for. The query is stored
+in `export_jobs.options_json` and nothing reads it. This replaced a loud stub with
+a silent one, and contradicts the module's own doc comment ("the filter is a
+parameter of the query, not something applied after").
+
+**Blocker 3 — the new route is not in the inventory table.** The direction test
+catches it: `exports.rs:/exports/bulk — handler 'start_bulk_export' registered but
+not in ROUTE_TABLE (path /exports/bulk)`. `cargo fmt` wants two blocks in
+`bulk_export.rs` expanded (one of them the dead `if/else` above), and clippy
+refuses the workspace with three lints: an empty line after a doc comment, and
+`too many arguments (8/7)` and `(9/7)` in `lorehaven-db`.
+
+**Wrong shape for the artifact.** The export row is created with
+`format: "html"`, and `serve()` derives both the media type and the extension from
+the row's format — so a ZIP bundle downloads as `*.html` with
+`Content-Type: text/html`. Add a zip format (or store the media type).
+
+**Gaps against the plan's own design.** No manifest inside the bundle (skipped
+works are only in `bulk_export_items`); no checkpoint, so a retried attempt
+re-renders everything and writes a second set of item rows (new UUID per attempt,
+no upsert on `(export_id, work_id)`); every `load_subject` error is recorded as
+"skipped", so an infrastructure fault yields a quietly smaller bundle and a
+`ready` export; `has_entitlement` is still consulted by no export path.
+
+**Claims that do not hold.** The bulk route does not enforce the `ContentRead`
+scope the commit message claims (the media doors do, in-handler, at
+`crates/app/src/routes/media.rs:95,211,917`; the bulk route is session-only). The
+rate class does hold (`crates/app/src/server.rs:360`, `RouteClass::Export`). The
+route is `/api/v1/exports/bulk`, not the plan's `/api/v1/media/export` — a
+defensible placement, but the message and the docs must say what the code does.
+
+**Smaller ones.** `MediaAssetId::new()` is used as the export id (works, wrong
+type). `build_zip_stored` is behind `#[cfg(not(feature = "zip"))]` and no `zip`
+feature exists — dead guard, and adding the feature today breaks the build. The
+hand-rolled stored-method ZIP matches the three record layouts I checked by hand,
+but its only test asserts two signatures; read an archive back with a real reader
+before trusting it.
+
+**Webhook sender (`6be66b3`) — half a feature.** Signing is now real HMAC-SHA256
+with an RFC 4231 test vector, which closes the first review's finding. But nothing
+calls `send`: `grep -rn "webhook_sender::send" crates/` finds only the module
+declaration and `state.rs`'s config, and `record_delivery` still has no production
+caller. So there is still no delivery path, and M23's webhook half is unimplemented
+in the sense that matters. The SSRF guard also has four holes: it checks only the
+first resolved address (multi-record and DNS-rebinding bypasses), it does not
+disable redirects (reqwest follows up to ten, re-sending the signature header to
+the redirect target — link-local and metadata endpoints are reachable that way),
+IPv4-mapped IPv6 (`::ffff:127.0.0.1`) is not blocked, and multicast/CGNAT/240-0
+ranges are unblocked. `backoff_delay` can also return a delay below its base,
+which contradicts the doctrine written in `crates/domain/src/jobs.rs` that jitter
+may only make a retry later.
+
+**Verified good.** `a6f0e20` closes the third pass's finding properly: `job_kinds!`
+emits the enum, `as_str`, `parse` and `ALL_KINDS` from one list, so drift is
+impossible by construction, and `kind_index()` remains the separate exhaustive
+match that gives uniqueness (its literal array still has to be raised when a kind
+is added, but it fails loudly). Queue fairness has the right shape — `claim_sql`
+plus a class filter derived from `ALL_KINDS`, a per-requester skip and a bulk
+concurrency guard (`7badbcc`, with 25 tests in `milestone_5`).
