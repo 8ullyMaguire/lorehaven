@@ -94,25 +94,35 @@ the time). Trust `docs/verification.md`, this file, or a fresh run.
 
 ## Open, in the order I would take it
 
-1. **M23-02 remainder — webhook watches and grant-gated bulk export.** Planned in
-   `docs/plans/m23-webhooks-bulk-export.md`; the shell is in the tree
-   **uncommitted**: `JobKind::BulkExport`, the worker arm
-   (`crates/app/src/worker.rs:518-523`), `run_bulk` as a `Fatal` stub
-   (`crates/app/src/exports.rs:795-800`), `ResourceClass` + `resource_class()`
-   (no consumer yet), and `kind_index()` + `ALL_KINDS` + two tests in `domain`.
-   Before Phase 2 builds on it:
-   - `ALL_KINDS`' completeness test does not catch the case it was written for: it
-     iterates the list with a literal `[false; 10]`, so a variant appended at index
-     10 and left off the list passes (mirror A, `docs/verification.md`). Make the
-     enum and the list come from one `macro_rules!` (or a derive crate) — the
-     compiler-forcement the doc comment claims is not there yet. `variant_count`
-     is unstable on rustc 1.98.
-   - `ResourceClass` has no consumer; the queue is priority-only.
-   - The stub is unreachable, so a green suite says nothing about bulk export.
-   Then: Phase 1 (class filter, `max_bulk_concurrent`, per-requester fairness,
-   `RouteClass::Export`), Phase 2 the export, Phase 3 the webhook half — the
-   **larger** half: no sender exists, and the signature is `SHA256(secret ‖
-   canonical ‖ payload)`, not HMAC.
+1. **M23-02 — merge-blocking defects in the just-landed bulk-export work.** The
+   gate at `6be66b3` is **red**: 1237 passed / 2 failed / 13 ignored, `cargo fmt`
+   and `cargo clippy -D warnings` both failing. Fix in this order:
+   - **Every download grant is broken on SQLite.** `migration 0035` renames
+     `export_jobs` and drops the old table, which leaves
+     `download_grants.export_job_id` referencing the dropped `export_jobs_old`.
+     Reproducer: `INSERT INTO download_grants …` → `no such table:
+     main.export_jobs_old` with FKs on (the runner sets them,
+     `crates/db/src/lib.rs:186`). The suite fails too:
+     `milestone_7::the_download_grant_expires_and_is_single_use` → 422 on minting.
+     Drop and recreate the referencing FK in the rebuild, both dialects, and assert
+     in the migration test that every FK target exists. PostgreSQL is unverified
+     (no instance) and has the same rename-then-drop shape.
+   - **The bulk export ignores its query**: `if query_json.is_null() { None } else
+     { None }` in `crates/app/src/exports.rs:792` and
+     `crates/app/src/bulk_export.rs:180-184`. Every export currently means "all
+     visible media", and above the 50-item cap it always fails. Parse
+     `row.options_json` into the `QueryAst` the media doors use, in both places.
+   - **`/exports/bulk` is missing from `ROUTE_TABLE`** (`route_inventory` names it),
+     and `cargo fmt` wants two blocks in `bulk_export.rs` expanded.
+   Then the rest of the review's list, in `docs/verification.md`: the ZIP downloads
+   as `text/html`/`*.html` (the row says `format: "html"`), no manifest in the
+   bundle, no checkpoint (retries duplicate `bulk_export_items` rows), all
+   `load_subject` errors recorded as "skipped", no `has_entitlement` check, no
+   `ContentRead` scope on the route, no test for the export path at all.
+   **Webhooks**: the sender signs with real HMAC now but nothing calls it — no
+   delivery path, `record_delivery` without a production caller — and its SSRF
+   guard needs redirects disabled, all resolved addresses checked, and IPv4-mapped
+   IPv6 plus multicast/CGNAT ranges blocked before it faces the internet.
 2. **N2b — decide the audience of the browsing doors.** The table now records them
    as `Authenticated`: `/works/{id}/comments`, `/forums`,
    `/forums/{category}/topics`, `/topics/{id}`, `/topics/{id}/replies`, `/groups`,
