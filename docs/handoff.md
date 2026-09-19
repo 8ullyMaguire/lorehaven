@@ -95,30 +95,24 @@ the time). Trust `docs/verification.md`, this file, or a fresh run.
 ## Open, in the order I would take it
 
 1. **M23-02 remainder — webhook watches and grant-gated bulk export.** Planned in
-   `docs/plans/m23-webhooks-bulk-export.md` (against `6d1e1bf`, `file:line` on
-   every claim), and the shell has landed **uncommitted** in the tree:
-   `JobKind::BulkExport` + `ResourceClass` + `JobKind::resource_class()` in
-   `domain`, the worker arm (`crates/app/src/worker.rs:518-523`), and `run_bulk`
-   as a stub returning `Fatal` (`crates/app/src/exports.rs:795-800`). A first
-   review round's findings were fixed (the doc comment that belonged to `sweep`).
-   Three things before Phase 2 builds on it:
-   - `ALL_KINDS` (`domain`) is a hand-written `const` array whose doc comment
-     claims a new variant is "a compile error everywhere it must be handled"
-     (`crates/domain/src/jobs.rs:134-136`). It is not: a mirror with a fourth
-     variant compiles, warns and passes the test as written. Drive it from a
-     match-forced index and assert every index is filled.
-   - `ResourceClass` has no consumers — the queue is still priority-only
-     (`claim_next`, `crates/db/src/jobs.rs:237-256`).
-   - The stub is unreachable, so nothing exercises the arm until the export does
-     something; do not read a green suite as evidence that bulk export works.
-   Then the order stands: Phase 1 queue fairness (class filter, `max_bulk_concurrent`,
-   per-requester fairness, `RouteClass::Export`), Phase 2 the export itself,
-   Phase 3 the webhook half — which is the **larger** half, not the smaller: M16
-   built tables, routes, a bounded-payload helper and a signing helper, and no
-   sender (`crates/app/src/worker.rs` contains no occurrence of "webhook",
-   `record_delivery` has no caller on a delivery path, the app crate has no HTTP
-   client), and the signature is `SHA256(secret ‖ canonical ‖ payload)`, not HMAC
-   (`crates/domain/src/webhook.rs:20-27`).
+   `docs/plans/m23-webhooks-bulk-export.md`; the shell is in the tree
+   **uncommitted**: `JobKind::BulkExport`, the worker arm
+   (`crates/app/src/worker.rs:518-523`), `run_bulk` as a `Fatal` stub
+   (`crates/app/src/exports.rs:795-800`), `ResourceClass` + `resource_class()`
+   (no consumer yet), and `kind_index()` + `ALL_KINDS` + two tests in `domain`.
+   Before Phase 2 builds on it:
+   - `ALL_KINDS`' completeness test does not catch the case it was written for: it
+     iterates the list with a literal `[false; 10]`, so a variant appended at index
+     10 and left off the list passes (mirror A, `docs/verification.md`). Make the
+     enum and the list come from one `macro_rules!` (or a derive crate) — the
+     compiler-forcement the doc comment claims is not there yet. `variant_count`
+     is unstable on rustc 1.98.
+   - `ResourceClass` has no consumer; the queue is priority-only.
+   - The stub is unreachable, so a green suite says nothing about bulk export.
+   Then: Phase 1 (class filter, `max_bulk_concurrent`, per-requester fairness,
+   `RouteClass::Export`), Phase 2 the export, Phase 3 the webhook half — the
+   **larger** half: no sender exists, and the signature is `SHA256(secret ‖
+   canonical ‖ payload)`, not HMAC.
 2. **N2b — decide the audience of the browsing doors.** The table now records them
    as `Authenticated`: `/works/{id}/comments`, `/forums`,
    `/forums/{category}/topics`, `/topics/{id}`, `/topics/{id}/replies`, `/groups`,

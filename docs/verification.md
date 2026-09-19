@@ -1095,3 +1095,56 @@ about bulk export yet.
 --no-fail-fast` → 1228 passed / 0 failed / 13 ignored across 47 binaries,
 `test_exit=0`, and one warning in the whole run — `crates/app/tests/milestone_22.rs:1931`,
 an unused `items` binding from the other workstream, not from the stub.
+
+### 2026-09-19, third pass — `kind_index()`, and what the completeness test actually catches
+
+The follow-up to the `ALL_KINDS` finding. Claim by claim:
+
+**Holds — "a missing `kind_index()` arm fails at compile time."** `kind_index()`
+is an exhaustive `match self` over all ten variants
+(`crates/domain/src/jobs.rs:175-190`). Reproduced with a four-variant mirror: a
+variant with no arm is `error[E0004]: non-exhaustive patterns: 'JobKind::NewKind'
+not covered`. That half of the mechanism is real.
+
+**Does not hold — "a variant added to enum JobKind but missing from ALL_KINDS now
+fails this test at index N."** The test is:
+
+```rust
+let mut seen = [false; 10];
+for kind in ALL_KINDS { … seen[kind.kind_index()] = true; }
+for (i, filled) in seen.iter().enumerate() { assert!(*filled, "no kind fills index {i}"); }
+```
+
+It iterates the *list*, and its array length is a literal `10`. A variant appended
+with index 10 and not added to `ALL_KINDS` leaves every slot filled by the ten
+listed kinds, so nothing fails. Mirror of the exact shapes
+(`/tmp/kindforce/mirror2.rs`, enum with 11 variants, `ALL_KINDS` with 10 entries):
+
+```
+A) test as written      [false; 10] -> PASSED — the guard did not notice NewKind
+B) length bumped by hand [false; 11] -> FAILED at 'no kind fills index 10'
+```
+
+So the guard works only if the author also remembers to raise the array length by
+hand — the manual step the change set out to remove. `std::mem::variant_count` is
+not available either: `error[E0658]: use of unstable library feature 'variant_count'`
+on this toolchain (rustc 1.98.0).
+
+**Fix that makes the doc comment true.** Stable Rust cannot enumerate an enum's
+variants, so the list and the enum have to come from one place: a `macro_rules!`
+that emits `enum JobKind` and `ALL_KINDS` together (no new dependency, ~15 lines),
+or a derive crate (`strum::EnumIter` / `enum-iterator`). Then a variant cannot be
+in one and not the other, and the test's literal length disappears.
+
+**Also found: a second stale list in the same file.** The older
+`states_and_kinds_round_trip_through_their_columns` still walks six kinds by hand
+(`Import, Export, Reindex, Notify, Thumbnail, Maintenance`) — it never grew
+`BulkExport`, `UpdateCheck`, `Derivative` or `Narration`. That is the same rot the
+new test was added for, one function above it; fold it into `ALL_KINDS` and delete
+the duplicate loop.
+
+**Gate for the two crates the change touches** (`cargo test -p lorehaven-domain -p
+lorehaven-app --no-fail-fast`): 31 targets, **763 passed / 0 failed / 0 ignored**,
+`test_exit=0`, one warning — the other workstream's unused `items` at
+`crates/app/tests/milestone_22.rs:1931`. (The change's own report quoted 258 passed
+for "both crates"; that is a subset of what those two crates run.)

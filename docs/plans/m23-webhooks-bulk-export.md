@@ -209,40 +209,32 @@ tests). New routes get rows in `crates/app/tests/route_inventory.rs`, which as o
 (`registered_routes_are_tabled` via `collect_registered`, which walks each
 module's `router()` and `*_routes()` and resolves `.nest()` prefixes).
 
-### Status (second review, 2026-09-19, still uncommitted in the tree)
+### Status (third review, 2026-09-19, still uncommitted in the tree)
 
-Landed so far, all in the working tree:
+Landed in the working tree:
 
-- `JobKind::BulkExport`, with `as_str`/`parse` = `"bulk_export"`
-  (`crates/domain/src/jobs.rs`), a worker arm that parses the payload and calls
-  `crate::exports::run_bulk` (`crates/app/src/worker.rs:518-523`), and `run_bulk`
-  as a stub returning `Fatal("bulk export handler not yet implemented")`
-  (`crates/app/src/exports.rs:795-800`, above the retention banner with its own
-  docs — the misplaced doc comment reported in the first review is fixed).
-- `ResourceClass { Interactive, Bulk }` and an exhaustive
-  `JobKind::resource_class()` in `crates/domain/src/jobs.rs` — the first bullet of
-  Phase 1 below, done exactly as designed, and it settles the earlier worry:
-  nothing has to move between crates, because the queue's class is a domain type
-  and the HTTP rate class stays app-side. **Nothing consumes it yet** (no
-  class-filtered claim, no `max_bulk_concurrent`), so the queue is still
-  priority-only.
-- `ALL_KINDS` + a `known_kinds()` derived from it + a `parse(as_str())` round-trip
-  test (`crates/domain/src/jobs.rs`, `crates/app/src/routes/jobs.rs:369-397`).
-  This corrected three kinds the old hand-written list had silently dropped
-  (`UpdateCheck`, `Derivative`, `Narration`): the list matches the enum today,
-  variant by variant. But it is a `const` array, so nothing forces it to stay in
-  step — and its doc comment claims otherwise ("Centralized so a new variant is a
-  compile error everywhere it must be handled", `crates/domain/src/jobs.rs:134-136`).
-  A mirror with a fourth variant compiles, warns and passes the test as written;
-  only the exhaustive `resource_class` match notices. Fix it before Phase 2 leans
-  on it: drive the list from a match-forced index and assert every index is
-  filled, so a new variant is a build error and a completeness error, not a
-  silent omission. Evidence in `docs/verification.md`.
-
-Still unreachable and still a landing place, not behaviour: nothing enqueues
-`BulkExport` and `POST /jobs` accepts only `maintenance`
-(`crates/app/src/routes/jobs.rs:86`). `jobs.kind` remains unconstrained `TEXT` in
-both dialects, so no migration is involved.
+- `JobKind::BulkExport`, with `as_str`/`parse` = `"bulk_export"`, a worker arm that
+  parses the payload (`crates/app/src/worker.rs:518-523`) and `run_bulk` as a stub
+  returning `Fatal` (`crates/app/src/exports.rs:795-800`). Stub unreachable:
+  nothing enqueues the kind, `POST /jobs` accepts only `maintenance`.
+- `ResourceClass { Interactive, Bulk }` and an exhaustive `JobKind::resource_class()`
+  — Phase 1's first bullet, done, and it needs no type to move between crates.
+  **No consumer yet**: the queue still claims by priority only
+  (`crates/db/src/jobs.rs:237-256`).
+- `JobKind::kind_index()` (exhaustive — a new variant is a compile error until it
+  has an index), `ALL_KINDS`, and two tests: unique/filled indices and a
+  `parse(as_str())` round-trip per kind. This restored the three kinds the old
+  hand-written list had dropped (`UpdateCheck`, `Derivative`, `Narration`); the
+  list matches the enum today, variant by variant.
+  **But the completeness claim is not yet true.** The test iterates `ALL_KINDS`
+  with a literal `[false; 10]`, so a variant appended with index 10 and left out of
+  the list passes it — verified with a mirror of the exact shapes (A/B/D evidence
+  in `docs/verification.md`). Stable Rust cannot count variants
+  (`variant_count` is unstable on this toolchain), so the list and the enum must
+  come from one place: a `macro_rules!` emitting both, or a derive crate. Until
+  then, treat `ALL_KINDS` as hand-maintained — the doc comment promising compiler
+  enforcement is not yet earned. Same file, same rot: the older
+  `states_and_kinds_round_trip_through_their_columns` still walks six kinds by hand.
 
 ### Phase 1 — queue groundwork (½–1 day, no new surfaces)
 
