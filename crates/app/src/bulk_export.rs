@@ -316,7 +316,6 @@ async fn produce_bulk(
     Ok(Artifact {
         bytes: zip_bytes,
         media_type: ExportFormat::Zip.media_type().to_owned(),
-        converter_version: None,
     })
 }
 
@@ -338,11 +337,10 @@ async fn render_work_to_bytes(
     .map_err(|error| error.to_string())
 }
 
-/// A built artifact: bytes + media type + optional converter version.
+/// A built artifact: bytes + media type.
 struct Artifact {
     bytes: Vec<u8>,
     media_type: String,
-    converter_version: Option<String>,
 }
 
 /// Build a ZIP archive from (name, bytes) pairs. Writes stored-method
@@ -354,7 +352,6 @@ fn build_zip(items: &[(String, Vec<u8>)]) -> Result<Vec<u8>, String> {
 }
 
 /// Build a stored-method ZIP by hand.
-#[cfg(not(feature = "zip"))]
 fn build_zip_stored(buf: &mut Vec<u8>, items: &[(String, Vec<u8>)]) {
     // Local file headers + data.
     let mut central_dir = Vec::new();
