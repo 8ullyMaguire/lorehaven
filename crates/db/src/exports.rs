@@ -895,6 +895,7 @@ pub struct BulkExportItem {
 /// Record one item of a bulk export. Called by the worker after it has decided
 /// what to do with a work, so the table is the audit trail of the export's
 /// decisions rather than a claim in the code.
+#[allow(clippy::too_many_arguments)]
 pub async fn record_bulk_item(
     db: &Database,
     id: &str,

@@ -256,10 +256,18 @@ async fn a_claimed_job_is_not_claimed_twice() {
     // Eight claims by two workers, interleaved the way two processes would.
     for round in 0..4 {
         for name in ["worker-a", "worker-b"] {
-            let claimed = jobs::claim_next(harness.tdb.db(), name, Duration::from_secs(60), now, None, 1, true)
-                .await
-                .expect("claim")
-                .expect("a job is waiting");
+            let claimed = jobs::claim_next(
+                harness.tdb.db(),
+                name,
+                Duration::from_secs(60),
+                now,
+                None,
+                1,
+                true,
+            )
+            .await
+            .expect("claim")
+            .expect("a job is waiting");
             assert!(
                 !seen.contains(&claimed.id),
                 "round {round}: {name} was given a job another worker already holds"
@@ -1602,18 +1610,32 @@ async fn a_second_bulk_job_waits_while_the_first_is_running() {
     }
 
     let now = time::OffsetDateTime::now_utc();
-    let first =
-        jobs::claim_next(harness.tdb.db(), "w1", Duration::from_secs(60), now, None, 1, false)
-            .await
-            .expect("claim first")
-            .expect("a job is waiting");
+    let first = jobs::claim_next(
+        harness.tdb.db(),
+        "w1",
+        Duration::from_secs(60),
+        now,
+        None,
+        1,
+        false,
+    )
+    .await
+    .expect("claim first")
+    .expect("a job is waiting");
     assert_eq!(first.kind, "bulk_export");
 
     // Second claim: bulk cap hit, nothing else to give.
-    let second =
-        jobs::claim_next(harness.tdb.db(), "w2", Duration::from_secs(60), now, None, 1, false)
-            .await
-            .expect("claim second");
+    let second = jobs::claim_next(
+        harness.tdb.db(),
+        "w2",
+        Duration::from_secs(60),
+        now,
+        None,
+        1,
+        false,
+    )
+    .await
+    .expect("claim second");
     assert!(
         second.is_none(),
         "a second bulk job must not be leased while one is running"
@@ -1623,11 +1645,18 @@ async fn a_second_bulk_job_waits_while_the_first_is_running() {
     jobs::complete(harness.tdb.db(), first.id.parse().expect("uuid"), "w1")
         .await
         .expect("finish");
-    let second =
-        jobs::claim_next(harness.tdb.db(), "w2", Duration::from_secs(60), now, None, 1, false)
-            .await
-            .expect("claim second")
-            .expect("the bulk job is now claimable");
+    let second = jobs::claim_next(
+        harness.tdb.db(),
+        "w2",
+        Duration::from_secs(60),
+        now,
+        None,
+        1,
+        false,
+    )
+    .await
+    .expect("claim second")
+    .expect("the bulk job is now claimable");
     assert_eq!(second.kind, "bulk_export");
 
     harness.cleanup().await;

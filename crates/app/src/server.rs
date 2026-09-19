@@ -145,6 +145,17 @@ pub async fn serve(config: Config, db: Database, args: &ServeArgs) -> Result<()>
                     })
                 });
                 handler
+            })
+
+            .with_topic("publish.notify", {
+                let handler: crate::worker::TopicHandler = Arc::new(|_state: &AppState, event: &outbox::OutboxEvent| {
+                    let state = _state.clone();
+                    let event = event.clone();
+                    Box::pin(async move {
+                        crate::webhook_delivery::deliver_notification(&state, &event).await
+                    })
+                });
+                handler
             });
         let worker_state = state.clone();
         tracing::info!(worker = %worker.options().id, "worker running in this process");

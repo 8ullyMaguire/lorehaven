@@ -49,6 +49,8 @@ pub enum ExportFormat {
     Azw3,
     /// MOBI, through an external converter.
     Mobi,
+    /// A ZIP archive containing multiple files.
+    Zip,
 }
 
 /// An external program a format depends on.
@@ -109,6 +111,7 @@ impl ExportFormat {
             Self::Pdf => "pdf",
             Self::Azw3 => "azw3",
             Self::Mobi => "mobi",
+            Self::Zip => "zip",
         }
     }
 
@@ -123,6 +126,7 @@ impl ExportFormat {
             "pdf" => Self::Pdf,
             "azw3" => Self::Azw3,
             "mobi" => Self::Mobi,
+            "zip" => Self::Zip,
             _ => return None,
         })
     }
@@ -137,7 +141,7 @@ impl ExportFormat {
     pub const fn is_builtin(self) -> bool {
         matches!(
             self,
-            Self::PlainText | Self::Html | Self::Markdown | Self::Epub
+            Self::PlainText | Self::Html | Self::Markdown | Self::Epub | Self::Zip
         )
     }
 
@@ -153,6 +157,7 @@ impl ExportFormat {
             Self::PlainText | Self::Html | Self::Markdown | Self::Epub => &[],
             Self::Pdf => &[Converter::EbookConvert, Converter::Pandoc],
             Self::Azw3 | Self::Mobi => &[Converter::EbookConvert],
+            Self::Zip => &[],
         }
     }
 
@@ -167,6 +172,7 @@ impl ExportFormat {
             Self::Pdf => "PDF",
             Self::Azw3 => "AZW3",
             Self::Mobi => "MOBI",
+            Self::Zip => "ZIP",
         }
     }
 
@@ -194,6 +200,7 @@ impl ExportFormat {
             Self::Pdf => "pdf",
             Self::Azw3 => "azw3",
             Self::Mobi => "mobi",
+            Self::Zip => "zip",
         }
     }
 
@@ -208,6 +215,7 @@ impl ExportFormat {
             Self::Pdf => "application/pdf",
             Self::Azw3 => "application/vnd.amazon.ebook",
             Self::Mobi => "application/x-mobipocket-ebook",
+            Self::Zip => "application/zip",
         }
     }
 }
@@ -473,6 +481,9 @@ pub enum ExportError {
     /// The EPUB container could not be built.
     #[error(transparent)]
     Epub(#[from] EpubError),
+    /// The ZIP format is only available for bulk exports.
+    #[error("ZIP format is only available for bulk exports")]
+    ZipOnlyForBulk,
 }
 
 /// Render a work (spec §13.1).
@@ -536,6 +547,7 @@ pub fn render(
         ExportFormat::Pdf | ExportFormat::Azw3 | ExportFormat::Mobi => {
             return Err(ExportError::NeedsConverter { format })
         }
+        ExportFormat::Zip => return Err(ExportError::ZipOnlyForBulk),
     })
 }
 

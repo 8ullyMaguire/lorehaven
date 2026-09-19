@@ -309,6 +309,7 @@ pub async fn find_media(db: &Database, id: &str) -> Result<Option<MediaRecord>> 
 /// Quality filters on `quality_kind` + `quality_min` join `quality_signals`
 /// and group by work, filtering with `HAVING SUM(value * weight)/SUM(weight) >= ?`.
 /// `date_from`/`date_to` bind RFC 3339 bounds on `works.created_at`.
+#[allow(clippy::too_many_arguments)]
 pub async fn list_media_filtered(
     db: &Database,
     query: Option<&QueryAst>,
@@ -328,10 +329,8 @@ pub async fn list_media_filtered(
     // quality_kind binds go FIRST (FROM clause); quality_min binds go LAST (HAVING clause).
     let (qual_join_sql, qual_join_pg) = match (quality_kind, quality_min) {
         (Some(_), Some(_)) => (
-            " JOIN quality_signals qs ON qs.work_id = w.id AND qs.signal_kind = ?"
-                .to_string(),
-            " JOIN quality_signals qs ON qs.work_id = w.id AND qs.signal_kind = ?"
-                .to_string(),
+            " JOIN quality_signals qs ON qs.work_id = w.id AND qs.signal_kind = ?".to_string(),
+            " JOIN quality_signals qs ON qs.work_id = w.id AND qs.signal_kind = ?".to_string(),
         ),
         _ => (String::new(), String::new()),
     };
@@ -458,7 +457,6 @@ pub async fn list_media_filtered(
     all_binds.append(&mut cursor_binds);
     all_binds.append(&mut tail);
 
-
     let rows = match db.backend() {
         Backend::Sqlite => {
             let sql = &db.sql(&sqlite, &postgres);
@@ -560,7 +558,6 @@ pub async fn count_media_filtered(
 }
 
 /// List eligible media attributed to a creator.
-
 /// Scoped media listings share one decode and binding path.
 async fn attributed_media(
     db: &Database,
@@ -644,7 +641,9 @@ pub async fn list_media_by_license(
             if let Some(cursor_val) = cursor {
                 query = query.bind(cursor_val);
             }
-            let rows = query.fetch_all(db.sqlite_pool().expect("sqlite handle")).await?;
+            let rows = query
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
             let mut next_cursor = None;
             if let Some(last) = rows.last() {
                 if rows.len() == limit as usize {
@@ -662,7 +661,9 @@ pub async fn list_media_by_license(
             if let Some(cursor_val) = cursor {
                 query = query.bind(cursor_val);
             }
-            let rows = query.fetch_all(db.postgres_pool().expect("postgres handle")).await?;
+            let rows = query
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?;
             let mut next_cursor = None;
             if let Some(last) = rows.last() {
                 if rows.len() == limit as usize {
@@ -1069,7 +1070,18 @@ pub async fn post_media_query(
     account_id: Option<&str>,
     limit: i64,
 ) -> Result<(Vec<MediaRecord>, i64)> {
-    let (rows, total, _) = list_media_filtered(db, Some(query), account_id, limit, None, None, None, None, None).await?;
+    let (rows, total, _) = list_media_filtered(
+        db,
+        Some(query),
+        account_id,
+        limit,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await?;
     Ok((rows, total))
 }
 
