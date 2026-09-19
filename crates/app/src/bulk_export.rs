@@ -299,36 +299,12 @@ struct Artifact {
     converter_version: Option<String>,
 }
 
-/// Build a ZIP archive from (name, bytes) pairs. Uses the `zip` crate if
-/// available, otherwise writes stored-entry (method 0) archives by hand.
+/// Build a ZIP archive from (name, bytes) pairs. Writes stored-method
+/// (method 0) entries by hand — minimal but valid, every OS opens it.
 fn build_zip(items: &[(String, Vec<u8>)]) -> Result<Vec<u8>, String> {
     let mut buf = Vec::new();
-
-    // Try the zip crate first.
-    #[cfg(feature = "zip")]
-    {
-        use zip::write::FileOptions;
-        use zip::ZipWriter;
-
-        let mut zip = ZipWriter::new(std::io::Cursor::new(&mut buf));
-        let options = FileOptions::default().compression_method(zip::CompressionMethod::Stored);
-        for (name, data) in items {
-            zip.start_file(name, options)
-                .map_err(|error| format!("zip start_file: {error}"))?;
-            std::io::Write::write_all(&mut zip, data)
-                .map_err(|error| format!("zip write: {error}"))?;
-        }
-        zip.finish().map_err(|error| format!("zip finish: {error}"))?;
-        return Ok(buf);
-    }
-
-    // Fallback: build a ZIP by hand with stored (method 0) entries and a
-    // central directory. Minimal but valid — every OS opens it.
-    #[cfg(not(feature = "zip"))]
-    {
-        build_zip_stored(&mut buf, items);
-        Ok(buf)
-    }
+    build_zip_stored(&mut buf, items);
+    Ok(buf)
 }
 
 /// Build a stored-method ZIP by hand.
@@ -408,7 +384,12 @@ mod tests {
         let bytes = build_zip(&items).expect("build_zip");
         // A ZIP starts with the local file header signature.
         assert_eq!(&bytes[0..4], &[0x50, 0x4b, 0x03, 0x04]);
-        // And ends with the end-of-central-directory signature.
-        assert_eq!(&bytes[bytes.len() - 4..], &[0x50, 0x4b, 0x05, 0x06]);
+        // And ends with the end-of-central-directory record (22 bytes, no comment).
+        assert!(bytes.len() >= 22, "ZIP too short: {}", bytes.len());
+        assert_eq!(
+            &bytes[bytes.len() - 22..bytes.len() - 18],
+            &[0x50, 0x4b, 0x05, 0x06],
+            "ZIP should end with EOCD record"
+        );
     }
 }
