@@ -1,6 +1,7 @@
 //! Shared application state.
 
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::Instant;
 
 use lorehaven_db::Database;
@@ -8,6 +9,7 @@ use lorehaven_scrapers::registry::Registry;
 
 use crate::config::Config;
 use crate::limiter::RateLimiter;
+use crate::webhook_sender::WebhookSenderConfig;
 
 /// Cloneable handle to everything a request needs.
 #[derive(Clone)]
@@ -42,6 +44,10 @@ struct Inner {
     /// does not have — that is reportable state, not a startup failure, so a
     /// deployment with a typo in `tts.engine` still serves its library.
     tts: Result<Arc<dyn crate::tts::TtsEngine>, String>,
+    /// HTTP client for webhook delivery — built once, reused for all attempts.
+    reqwest_client: reqwest::Client,
+    /// Webhook sender configuration.
+    webhook_config: WebhookSenderConfig,
 }
 
 impl AppState {
@@ -57,6 +63,16 @@ impl AppState {
         let tts = crate::tts::build_engine(&config.tts, piper.as_deref())
             .map(Arc::<dyn crate::tts::TtsEngine>::from)
             .map_err(|error| error.to_string());
+        let reqwest_client = reqwest::Client::builder()
+            .user_agent(format!("lorehaven/{}", crate::version::VERSION))
+            .build()
+            .expect("reqwest client");
+        let webhook_config = crate::webhook_sender::WebhookSenderConfig {
+            timeout: Duration::from_secs(config.administration.webhook_timeout_secs),
+            max_attempts: config.administration.webhook_max_attempts,
+            base_delay: Duration::from_millis(config.administration.webhook_base_delay_ms),
+            allowed_hosts: config.administration.webhook_allowed_hosts.clone(),
+        };
         Self {
             inner: Arc::new(Inner {
                 config,
@@ -66,6 +82,8 @@ impl AppState {
                 registry: lorehaven_scrapers::sites::default_registry(),
                 converters,
                 tts,
+                reqwest_client,
+                webhook_config,
             }),
         }
     }
@@ -108,6 +126,18 @@ impl AppState {
             .as_ref()
             .map(|engine| engine.is_available())
             .unwrap_or(false)
+    }
+
+    /// HTTP client for webhook delivery.
+    #[must_use]
+    pub fn reqwest_client(&self) -> &reqwest::Client {
+        &self.inner.reqwest_client
+    }
+
+    /// Webhook sender configuration.
+    #[must_use]
+    pub fn webhook_config(&self) -> &WebhookSenderConfig {
+        &self.inner.webhook_config
     }
 
     /// Replace the adapters.

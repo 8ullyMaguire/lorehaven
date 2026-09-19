@@ -1,6 +1,6 @@
 //! M16 — Marketplace routes: listings, commissions, extensions, webhooks, gallery.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::Json;
 use serde::Deserialize;
@@ -286,6 +286,32 @@ pub async fn create_webhook(
     Ok(Json(json!({ "id": id, "secret": secret })))
 }
 
+/// Delete a webhook endpoint.
+#[derive(Debug, Deserialize)]
+pub struct DeleteWebhookQuery {
+    pub id: String,
+}
+
+pub async fn delete_webhook(
+    State(state): State<AppState>,
+    MaybeSession(user): MaybeSession,
+    Query(query): Query<DeleteWebhookQuery>,
+) -> ApiResult<Json<Value>> {
+    let account = user.map(|u| u.account_id.to_string()).unwrap_or_default();
+    if account.is_empty() {
+        return Err(ApiError(lorehaven_domain::AppError::field(
+            "session",
+            "sign in to delete webhooks",
+        )));
+    }
+
+    lorehaven_db::marketplace::delete_webhook(state.db(), &account, &query.id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+
+    Ok(Json(json!({ "deleted": query.id })))
+}
+
 /// List gallery items for a work.
 pub async fn list_gallery(
     State(state): State<AppState>,
@@ -346,7 +372,7 @@ pub fn router() -> axum::Router<AppState> {
         .route("/extensions/{slug}/grant", post(grant_extension))
         .route("/extensions/{slug}/revoke", post(revoke_extension))
         .route("/me/extension-grants", get(list_my_grants))
-        .route("/me/webhooks", get(list_webhooks).post(create_webhook))
+        .route("/me/webhooks", get(list_webhooks).post(create_webhook).delete(delete_webhook))
         .route(
             "/works/{id}/gallery",
             get(list_gallery).post(add_gallery_item),

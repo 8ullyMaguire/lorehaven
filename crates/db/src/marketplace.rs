@@ -413,6 +413,30 @@ pub async fn list_webhooks(db: &Database, owner: &str) -> Result<Vec<Value>, sql
     }
 }
 
+pub async fn delete_webhook(
+    db: &Database,
+    owner: &str,
+    id: &str,
+) -> Result<(), sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query("DELETE FROM webhook_endpoints WHERE owner = ? AND id = ?")
+                .bind(owner)
+                .bind(id)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query("DELETE FROM webhook_endpoints WHERE owner = $1 AND id = $2")
+                .bind(owner)
+                .bind(id)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
 pub async fn grant_extension(
     db: &Database,
     account: &str,

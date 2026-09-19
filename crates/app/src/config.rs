@@ -150,6 +150,11 @@ pub struct Config {
 pub struct AdministrationConfig {
     /// The account allowed to reach `/admin` routes, if any.
     pub operator_account_id: Option<AccountId>,
+    /// Webhook delivery settings.
+    pub webhook_timeout_secs: u64,
+    pub webhook_max_attempts: u32,
+    pub webhook_base_delay_ms: u64,
+    pub webhook_allowed_hosts: Vec<String>,
 }
 
 /// Account creation settings.
@@ -745,6 +750,10 @@ impl Config {
             assets,
             administration: AdministrationConfig {
                 operator_account_id,
+                webhook_timeout_secs: 10,
+                webhook_max_attempts: 5,
+                webhook_base_delay_ms: 500,
+                webhook_allowed_hosts: Vec::new(),
             },
             dev,
             accounts,
@@ -796,6 +805,10 @@ impl Config {
             assets: AssetsConfig { dir: None },
             administration: AdministrationConfig {
                 operator_account_id: None,
+                webhook_timeout_secs: 10,
+                webhook_max_attempts: 5,
+                webhook_base_delay_ms: 500,
+                webhook_allowed_hosts: Vec::new(),
             },
             dev: DevConfig { seed_enabled: true },
             accounts: AccountsConfig {
