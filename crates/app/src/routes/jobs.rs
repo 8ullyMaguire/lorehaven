@@ -365,21 +365,13 @@ fn parse_job_id(raw: &str) -> ApiResult<JobId> {
 }
 
 /// The kinds the queue understands, for the admin filter and for a future
-/// extension UI. Unused here beyond the parse, which is why it is asserted in a
-/// test rather than left to rot.
+/// extension UI.
 #[must_use]
 pub fn known_kinds() -> Vec<&'static str> {
-    [
-        JobKind::Import,
-        JobKind::Export,
-        JobKind::Reindex,
-        JobKind::Notify,
-        JobKind::Thumbnail,
-        JobKind::Maintenance,
-    ]
-    .iter()
-    .map(|kind| kind.as_str())
-    .collect()
+    lorehaven_domain::jobs::ALL_KINDS
+        .iter()
+        .map(|kind| kind.as_str())
+        .collect()
 }
 
 #[cfg(test)]
@@ -393,7 +385,14 @@ mod tests {
 
     #[test]
     fn every_kind_has_a_wire_name() {
-        assert_eq!(known_kinds().len(), 6);
+        for kind in lorehaven_domain::jobs::ALL_KINDS {
+            assert_eq!(
+                JobKind::parse(kind.as_str()),
+                Some(*kind),
+                "round-trip for {:?}",
+                kind
+            );
+        }
         assert!(known_kinds().contains(&"maintenance"));
     }
 

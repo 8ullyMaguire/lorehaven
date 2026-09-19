@@ -515,6 +515,12 @@ impl Worker {
                 let edition_id = Self::payload_id(&job.payload, "edition_id", kind.as_str())?;
                 crate::narration::handle_narration(state, id, &edition_id).await
             }
+            JobKind::BulkExport => {
+                let payload = serde_json::from_str(&job.payload).map_err(|error| {
+                    HandlerError::Fatal(format!("the bulk export job's payload is not JSON: {error}"))
+                })?;
+                crate::exports::run_bulk(state, &payload).await
+            }
         }
     }
 
