@@ -11,6 +11,8 @@
 //! attempts is recorded as `failed` and the endpoint is deactivated.
 
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::time::Duration;
 
 use lorehaven_domain::webhook::WebhookEvent;
@@ -23,6 +25,16 @@ pub struct DeliveryRecord {
     pub payload: serde_json::Value,
     pub signature: String,
     pub status: DeliveryStatus,
+}
+fn ipv4_addr(addr: &str) -> Ipv4Addr {
+    addr.parse().expect("valid IP address")
+}
+
+fn ipv4_mapped_in_v6(v6: &Ipv6Addr) -> bool {
+    // ::ffff:0:0/96
+    (v6.segments()[0] & 0xffff) == 0x0000
+        && (v6.segments()[1] & 0xffff) == 0x0000
+        && (v6.segments()[2] & 0xffff) == 0xffff
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,7 +93,8 @@ pub async fn send(
     attempt: u32,
 ) -> Result<(DeliveryRecord, u16), WebhookSendError> {
     // SSRF check: resolve the URL's host and verify it is not private/loopback.
-    let url = reqwest::Url::parse(endpoint).map_err(|e| WebhookSendError::InvalidUrl(e.to_string()))?;
+    let url =
+        reqwest::Url::parse(endpoint).map_err(|e| WebhookSendError::InvalidUrl(e.to_string()))?;
     check_ssrf(&url, &config.allowed_hosts).await?;
 
     let payload = lorehaven_domain::webhook::bound_payload(&event.payload, 1024 * 1024);
@@ -181,9 +194,28 @@ fn is_ip_blocked(ip: IpAddr) -> bool {
                 || v4.is_broadcast()
                 || v4.is_documentation()
                 || v4.is_unspecified()
+                || (v4 >= ipv4_addr("100.64.0.0") && v4 <= ipv4_addr("100.127.255.255"))
+            // CGNAT
         }
         IpAddr::V6(v6) => {
-            v6.is_loopback() || v6.is_unspecified() || is_unique_local_or_link_local(&v6)
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || is_unique_local_or_link_local(&v6)
+                || v6.is_multicast()  // ff00::/8
+                || (v6.segments()[0] & 0xfe00) == 0xfc00  // Unique Local (fc00::/7)
+                || (v6.segments()[0] & 0xffc0) == 0xfe80  // Link-Local (fe80::/10)
+                || (v6.segments()[0] & 0xffff) == 0xfe00 && (v6.segments()[1] & 0xffc0) == 0xfb00  // Documentation (2001:db8::/32)
+                || (v6.segments()[0] & 0xffff) == 0xfe00 && (v6.segments()[1] & 0xffc0) == 0xfd00  // Deprecated site-local
+                || (v6.segments()[0] & 0xffc0) == 0xfd00 && (v6.segments()[1] & 0xffc0) == 0xfc00  // Unique Local (fd00::/8)
+                || (v6.segments()[0] & 0xffc0) == 0xfe00 && (v6.segments()[1] & 0xffc0) == 0xf800  // Teredo tunneling (2001::/32)
+                || (v6.segments()[0] & 0xffff) == 0x0000 && (v6.segments()[1] & 0xffff) == 0x0000 && (v6.segments()[2] & 0xffff) == 0x0000 && (v6.segments()[3] & 0xffff) == 0x0000  // Unspecified
+                || (v6.segments()[0] & 0xffff) == 0x0000 && (v6.segments()[1] & 0xffff) == 0x0000 && (v6.segments()[2] & 0xffff) == 0x0000 && (v6.segments()[3] & 0xffff) == 0x0001  // Loopback
+                || (v6.segments()[0] & 0xffff) == 0x0000 && (v6.segments()[1] & 0xffff) == 0x0000 && (v6.segments()[2] & 0xffff) == 0x0000 && (v6.segments()[3] & 0xffff) == 0x0002  // 6to4 relay anycast
+                || (v6.segments()[0] & 0xffff) == 0x2002 && (v6.segments()[1] & 0xffff) == 0x0000  // 6to4
+                || (v6.segments()[0] & 0xffc0) == 0xfe80  // Link-local (fe80::/10) - duplicate check for clarity
+                || (v6.segments()[0] & 0xffff) == 0x0000 && (v6.segments()[1] & 0xffff) == 0x0000 && (v6.segments()[2] & 0xffff) == 0x0000 && (v6.segments()[3] & 0xffff) == 0x0009  // Discard
+                || (v6.segments()[0] & 0xffff) == 0x0000 && (v6.segments()[1] & 0xffff) == 0x0000 && (v6.segments()[2] & 0xffff) == 0x0000 && (v6.segments()[3] & 0xffff) == 0x000f  // Port Control Protocol
+                || ipv4_mapped_in_v6(&v6) // IPv4-mapped IPv6 addresses (::ffff:0:0/96)
         }
     }
 }
@@ -191,8 +223,8 @@ fn is_ip_blocked(ip: IpAddr) -> bool {
 /// Check if a v6 address is unique-local (fc00::/7) or link-local (fe80::/10).
 fn is_unique_local_or_link_local(v6: &std::net::Ipv6Addr) -> bool {
     let segments = v6.segments();
-    // fc00::/7 — first 7 bits are 1111 110.
-    (segments[0] & 0xffc0) == 0xfc00 || (segments[0] & 0xffc0) == 0xfe80
+    // fc00::/7 — first 7 bits are 1111 110 (Unique Local)
+    (segments[0] & 0xffc0) == 0xfc00 || (segments[0] & 0xffc0) == 0xfe80 // fe80::/10 (Link-Local)
 }
 
 /// Compute the backoff delay for a given attempt (exponential with jitter).

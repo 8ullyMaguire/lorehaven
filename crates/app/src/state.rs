@@ -65,6 +65,7 @@ impl AppState {
             .map_err(|error| error.to_string());
         let reqwest_client = reqwest::Client::builder()
             .user_agent(format!("lorehaven/{}", crate::version::VERSION))
+            .redirect(reqwest::redirect::Policy::none()) // Disable redirects to prevent SSRF via redirect chains
             .build()
             .expect("reqwest client");
         let webhook_config = crate::webhook_sender::WebhookSenderConfig {

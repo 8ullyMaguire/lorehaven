@@ -372,7 +372,12 @@ pub fn router() -> axum::Router<AppState> {
         .route("/extensions/{slug}/grant", post(grant_extension))
         .route("/extensions/{slug}/revoke", post(revoke_extension))
         .route("/me/extension-grants", get(list_my_grants))
-        .route("/me/webhooks", get(list_webhooks).post(create_webhook).delete(delete_webhook))
+        .route(
+            "/me/webhooks",
+            get(list_webhooks)
+                .post(create_webhook)
+                .delete(delete_webhook),
+        )
         .route(
             "/works/{id}/gallery",
             get(list_gallery).post(add_gallery_item),

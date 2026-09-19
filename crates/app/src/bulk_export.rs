@@ -118,12 +118,17 @@ pub async fn run_bulk(state: &AppState, payload: &Value) -> Result<(), HandlerEr
             // Store the bundle blob and reference it.
             let store = lorehaven_db::storage::BlobStore::new(state.config().storage.root.clone());
             let (checksum, _key) = store
-                .put(db, &artifact.bytes, "application/zip")
+                .put(db, &artifact.bytes, &artifact.media_type)
                 .await
                 .map_err(|error| HandlerError::Transient(error.to_string()))?;
 
             store
-                .reference(db, &checksum, crate::exports::EXPORT_OWNER_TYPE, export_job_id)
+                .reference(
+                    db,
+                    &checksum,
+                    crate::exports::EXPORT_OWNER_TYPE,
+                    export_job_id,
+                )
                 .await
                 .map_err(|error| {
                     let _ = store.delete_if_unreferenced(db, &checksum);
@@ -177,16 +182,30 @@ async fn produce_bulk(
     };
 
     // Parse the stored query into a QueryAst, falling back to an empty query.
+    // Parse the stored query into a QueryAst, extracting the "q" field from JSON.
     let query: Option<lorehaven_domain::query::QueryAst> = if query_json.is_null() {
         None
     } else {
-        lorehaven_domain::query::parse_query(query_json.as_str().unwrap_or_default()).ok()
+        // Extract the "q" field (DSL string) from the JSON object
+        let query_str = query_json.get("q").and_then(|v| v.as_str()).unwrap_or("");
+        // Parse the DSL string, treating parse failure as fatal (never export everything)
+        match lorehaven_domain::query::parse_query(query_str) {
+            Ok(ast) => Some(ast),
+            Err(e) => {
+                // Invalid query in stored options is a data inconsistency - treat as fatal
+                return Err(BulkFailure::Fatal(format!(
+                    "stored query parse failed: {:?}",
+                    e
+                )));
+            }
+        }
     };
 
     // Preflight count: how many eligible works match?
-    let (eligible_count, _) = lorehaven_db::media::count_media_filtered(db, query.as_ref(), account_id_arg)
-        .await
-        .map_err(|error| BulkFailure::Transient(error.to_string()))?;
+    let (eligible_count, _) =
+        lorehaven_db::media::count_media_filtered(db, query.as_ref(), account_id_arg)
+            .await
+            .map_err(|error| BulkFailure::Transient(error.to_string()))?;
 
     if eligible_count == 0 {
         return Err(BulkFailure::Empty);
@@ -207,10 +226,19 @@ async fn produce_bulk(
     let export_id = &export.id;
 
     loop {
-        let (page, _total, next_cursor) =
-            lorehaven_db::media::list_media_filtered(db, query.as_ref(), account_id_arg, 50, cursor.as_deref(), None, None, None, None)
-                .await
-                .map_err(|error| BulkFailure::Transient(error.to_string()))?;
+        let (page, _total, next_cursor) = lorehaven_db::media::list_media_filtered(
+            db,
+            query.as_ref(),
+            account_id_arg,
+            50,
+            cursor.as_deref(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .map_err(|error| BulkFailure::Transient(error.to_string()))?;
 
         if page.is_empty() {
             break;
@@ -226,7 +254,14 @@ async fn produce_bulk(
                     if total_bytes > max_bytes {
                         // Record the skip and stop.
                         lorehaven_db::exports::record_bulk_item(
-                            db, &item_id, export_id, work_id, "skipped", Some("over_bounds"), None, None,
+                            db,
+                            &item_id,
+                            export_id,
+                            work_id,
+                            "skipped",
+                            Some("over_bounds"),
+                            None,
+                            None,
                         )
                         .await
                         .map_err(|error| BulkFailure::Transient(error.to_string()))?;
@@ -235,7 +270,13 @@ async fn produce_bulk(
                         )));
                     }
                     lorehaven_db::exports::record_bulk_item(
-                        db, &item_id, export_id, work_id, "included", None, None,
+                        db,
+                        &item_id,
+                        export_id,
+                        work_id,
+                        "included",
+                        None,
+                        None,
                         Some(i64::try_from(bytes.len()).unwrap_or(i64::MAX)),
                     )
                     .await
@@ -244,7 +285,14 @@ async fn produce_bulk(
                 }
                 Err(reason) => {
                     lorehaven_db::exports::record_bulk_item(
-                        db, &item_id, export_id, work_id, "skipped", Some(&reason), None, None,
+                        db,
+                        &item_id,
+                        export_id,
+                        work_id,
+                        "skipped",
+                        Some(&reason),
+                        None,
+                        None,
                     )
                     .await
                     .map_err(|error| BulkFailure::Transient(error.to_string()))?;
@@ -263,12 +311,11 @@ async fn produce_bulk(
     }
 
     // Build the ZIP bundle.
-    let zip_bytes = build_zip(&items)
-        .map_err(|error| BulkFailure::Transient(error))?;
+    let zip_bytes = build_zip(&items).map_err(|error| BulkFailure::Transient(error))?;
 
     Ok(Artifact {
         bytes: zip_bytes,
-        media_type: "application/zip".to_owned(),
+        media_type: ExportFormat::Zip.media_type().to_owned(),
         converter_version: None,
     })
 }
@@ -279,10 +326,9 @@ async fn render_work_to_bytes(
     work_id: &str,
     account_id: &str,
 ) -> Result<Vec<u8>, String> {
-    let export_work =
-        crate::exports::load_subject(state, account_id, "work", work_id)
-            .await
-            .map_err(|error| error.message().to_owned())?;
+    let export_work = crate::exports::load_subject(state, account_id, "work", work_id)
+        .await
+        .map_err(|error| error.message().to_owned())?;
 
     lorehaven_domain::exports::render(
         &export_work,

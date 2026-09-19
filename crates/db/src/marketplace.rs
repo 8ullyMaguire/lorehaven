@@ -413,11 +413,7 @@ pub async fn list_webhooks(db: &Database, owner: &str) -> Result<Vec<Value>, sql
     }
 }
 
-pub async fn delete_webhook(
-    db: &Database,
-    owner: &str,
-    id: &str,
-) -> Result<(), sqlx::Error> {
+pub async fn delete_webhook(db: &Database, owner: &str, id: &str) -> Result<(), sqlx::Error> {
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query("DELETE FROM webhook_endpoints WHERE owner = ? AND id = ?")
@@ -468,6 +464,53 @@ pub async fn grant_extension(
         }
     }
     Ok(())
+}
+
+/// Get all active webhook endpoints.
+pub async fn list_all_active_webhooks(db: &Database) -> Result<Vec<Value>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let rows = sqlx::query(
+                "SELECT id, owner, url, events, active, created_at FROM webhook_endpoints WHERE active = 1"
+            )
+            .fetch_all(db.sqlite_pool().expect("sqlite"))
+            .await?;
+            Ok(rows
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "id": r.get::<String, _>("id"),
+                        "owner": r.get::<String, _>("owner"),
+                        "url": r.get::<String, _>("url"),
+                        "events": r.get::<String, _>("events"),
+                        "active": r.get::<i64, _>("active") == 1,
+                        "created_at": r.get::<String, _>("created_at"),
+                    })
+                })
+                .collect())
+        }
+        Backend::Postgres => {
+            let rows = sqlx::query(
+                "SELECT id, owner, url, events, active, created_at FROM webhook_endpoints WHERE active = $1"
+            )
+            .bind(1i64)
+            .fetch_all(db.postgres_pool().expect("postgres"))
+            .await?;
+            Ok(rows
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "id": r.get::<String, _>("id"),
+                        "owner": r.get::<String, _>("owner"),
+                        "url": r.get::<String, _>("url"),
+                        "events": r.get::<String, _>("events"),
+                        "active": r.get::<i64, _>("active") == 1,
+                        "created_at": r.get::<String, _>("created_at"),
+                    })
+                })
+                .collect())
+        }
+    }
 }
 
 pub async fn revoke_extension(

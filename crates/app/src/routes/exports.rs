@@ -253,18 +253,14 @@ async fn start_bulk_export(
         }));
     }
 
-    let row = crate::exports::request_bulk(
-        &state,
-        &user.account_id.to_string(),
-        &request.query,
-    )
-    .await
-    .map_err(|error| {
-        ApiError(lorehaven_domain::AppError::Validation {
-            message: error.message(),
-            field_errors: Default::default(),
-        })
-    })?;
+    let row = crate::exports::request_bulk(&state, &user.account_id.to_string(), &request.query)
+        .await
+        .map_err(|error| {
+            ApiError(lorehaven_domain::AppError::Validation {
+                message: error.message(),
+                field_errors: Default::default(),
+            })
+        })?;
 
     repo::acknowledge_privacy(state.db(), &row.id).await?;
 

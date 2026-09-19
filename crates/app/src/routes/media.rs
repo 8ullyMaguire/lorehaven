@@ -131,7 +131,9 @@ async fn list_media(
             .into_response();
     }
     if let Some(from) = &params.date_from {
-        if time::OffsetDateTime::parse(from, &time::format_description::well_known::Rfc3339).is_err() {
+        if time::OffsetDateTime::parse(from, &time::format_description::well_known::Rfc3339)
+            .is_err()
+        {
             return (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Json(json!({"error": {"code": "VALIDATION_FAILED", "message": "date_from must be RFC 3339"}})),
@@ -140,7 +142,8 @@ async fn list_media(
         }
     }
     if let Some(to) = &params.date_to {
-        if time::OffsetDateTime::parse(to, &time::format_description::well_known::Rfc3339).is_err() {
+        if time::OffsetDateTime::parse(to, &time::format_description::well_known::Rfc3339).is_err()
+        {
             return (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Json(json!({"error": {"code": "VALIDATION_FAILED", "message": "date_to must be RFC 3339"}})),
@@ -444,7 +447,9 @@ async fn media_collection_feed(
 
     // id here can be either a collection id or a kind like "public_domain"
     let items = if id == "public_domain" {
-        match lorehaven_db::media::list_media_by_license(db, "cc0", account_id.as_deref(), 50, None).await {
+        match lorehaven_db::media::list_media_by_license(db, "cc0", account_id.as_deref(), 50, None)
+            .await
+        {
             Ok((items, _, _)) => items,
             Err(_) => Vec::new(),
         }
@@ -1018,7 +1023,11 @@ async fn media_feed(
                     next.query_pairs_mut().append_pair(&key, &value);
                 }
                 next.query_pairs_mut().append_pair("cursor", &cursor);
-                let prefix = if kind == "rss" || kind == "opds" { "atom:" } else { "" };
+                let prefix = if kind == "rss" || kind == "opds" {
+                    "atom:"
+                } else {
+                    ""
+                };
                 xml.push_str(&format!(
                     r#"<{prefix}link rel="next" href="{}"/>"#,
                     xml_escape(next.as_str())
@@ -1139,9 +1148,18 @@ pub fn router() -> Router<AppState> {
         .route("/media-collections", get(list_media_collections))
         .route("/media-collections/{id}", get(get_media_collection))
         .route("/media-collections/{id}/media", get(media_collection_media))
-        .route("/media-collections/{id}/media/feed", get(media_collection_feed))
-        .route("/media-collections/kind/{kind}/media", get(list_media_collections_by_kind))
-        .route("/media-collections/kind/{kind}/media/feed", get(media_collection_feed))
+        .route(
+            "/media-collections/{id}/media/feed",
+            get(media_collection_feed),
+        )
+        .route(
+            "/media-collections/kind/{kind}/media",
+            get(list_media_collections_by_kind),
+        )
+        .route(
+            "/media-collections/kind/{kind}/media/feed",
+            get(media_collection_feed),
+        )
         .route("/canons/{id}/media", get(canon_media))
         .route("/spaces/{id}/media", get(space_media))
 }

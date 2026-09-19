@@ -1041,8 +1041,14 @@ async fn public_domain_collections_driven_by_rights_field() {
         .await
         .expect("body");
     let feed_content = String::from_utf8(bytes.to_vec()).unwrap();
-    assert!(feed_content.contains("Public Domain Work"), "feed should contain CC0 work: {feed_content}");
-    assert!(!feed_content.contains("Copyrighted Work"), "feed should not contain standard work: {feed_content}");
+    assert!(
+        feed_content.contains("Public Domain Work"),
+        "feed should contain CC0 work: {feed_content}"
+    );
+    assert!(
+        !feed_content.contains("Copyrighted Work"),
+        "feed should not contain standard work: {feed_content}"
+    );
 
     println!("PASS: public_domain_collections_driven_by_rights_field");
 }
