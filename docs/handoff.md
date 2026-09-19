@@ -94,26 +94,34 @@ the time). Trust `docs/verification.md`, this file, or a fresh run.
 
 ## Open, in the order I would take it
 
-1. **M23-02 remainder — webhook watches and grant-gated bulk export.** Planned,
-   not started: `docs/plans/m23-webhooks-bulk-export.md` (written against
-   `6d1e1bf`, every claim carrying a `file:line`). One query engine already backs
-   the seven media doors; what is missing is bulk export and query watches.
-   Order, and why: Phase 1 is the queue fairness the acceptance line names
-   ("rate limited and fair-queued"), because nothing in the queue is fair today —
-   `claim_next` is `ORDER BY priority DESC, available_at ASC` with `priority`
-   always 0 (`crates/db/src/jobs.rs:237-256`). Phase 2 is the export itself, which
-   reuses `export_jobs` (a third `subject_type`) and `download_grants`, walks the
-   existing query with the reader's account so eligibility is inherent, checks
-   `has_entitlement` per work, and names every skipped work in the bundle's
-   manifest. Phase 3 is the webhook half.
+1. **M23-02 remainder — webhook watches and grant-gated bulk export.** Planned in
+   `docs/plans/m23-webhooks-bulk-export.md` (against `6d1e1bf`, every claim
+   carrying a `file:line`); Phase 2's shell has landed **uncommitted** in the
+   tree: `JobKind::BulkExport` (`crates/domain/src/jobs.rs:93-96,130,147`), a
+   worker arm (`crates/app/src/worker.rs:518-523`) and `run_bulk` as a stub
+   returning `Fatal` (`crates/app/src/exports.rs:804-812`). The stub is
+   unreachable — nothing enqueues the kind and `POST /jobs` takes only
+   `maintenance` — so it is a landing place, not a behaviour.
+   Clear two defects it brought before building on it: `sweep`'s doc comment was
+   left above `run_bulk` (`exports.rs:799-814` — `run_bulk`'s rustdoc opens with
+   "Delete exports past their retention window", and `sweep` now has none), and
+   `known_kinds()` hardcodes six kinds with a test asserting `len() == 6`
+   (`crates/app/src/routes/jobs.rs:371-383,394-398`), so it will not notice the
+   next variant; derive it from a match-forced `JobKind::all()` and assert the
+   `parse(as_str())` round-trip instead.
+   Then the order stands as planned: Phase 1 queue fairness (nothing is
+   fair-queued today — `claim_next` is `ORDER BY priority DESC, available_at ASC`
+   with `priority` always 0, `crates/db/src/jobs.rs:237-256`), Phase 2 the export
+   itself, Phase 3 the webhook half.
    Two corrections the planning round made to the obvious reading: **the webhook
    half is the larger one, not the smaller** — M16 built tables, `GET`/`POST
    /me/webhooks`, a bounded-payload helper and a signing helper, and *no sender*;
-   `crates/app/src/worker.rs` contains no occurrence of "webhook", `record_delivery`
-   has no caller on a delivery path, and the app crate has no HTTP client — and
-   **the signature is not HMAC** (`SHA256(secret ‖ canonical ‖ payload)`,
-   `crates/domain/src/webhook.rs:20-27`, whose unit test only verifies with the
-   same function). `requirements.csv`'s M16-01 row has been corrected accordingly.
+   `crates/app/src/worker.rs` contains no occurrence of "webhook",
+   `record_delivery` has no caller on a delivery path, and the app crate has no
+   HTTP client — and **the signature is not HMAC**
+   (`SHA256(secret ‖ canonical ‖ payload)`, `crates/domain/src/webhook.rs:20-27`,
+   whose unit test only verifies with the same function). `requirements.csv`'s
+   M16-01 row has been corrected accordingly.
 2. **N2b — decide the audience of the browsing doors.** The table now records them
    as `Authenticated`: `/works/{id}/comments`, `/forums`,
    `/forums/{category}/topics`, `/topics/{id}`, `/topics/{id}/replies`, `/groups`,
