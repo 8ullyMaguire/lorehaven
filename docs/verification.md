@@ -1008,3 +1008,42 @@ Limits that remain, none of which affects today's table: the comparison is
 `(file, path, handler)` and not the method; one `.route(...)` per line is read, so
 a wrapped call is missed; and a method chain (`get(a).post(b)`) contributes only
 its first handler.
+
+### 2026-09-19 — the bulk-export stub, reviewed
+
+Reviewed the uncommitted stub (`JobKind::BulkExport`, the worker arm, `run_bulk`).
+Claim by claim:
+
+- **Holds.** The variant is added with `as_str`/`parse` symmetric around
+  `"bulk_export"`. The worker arm parses the payload and maps a malformed one to
+  `Fatal` (a retry cannot make bad JSON good). The stub fails loudly instead of
+  succeeding quietly, and it is unreachable: `grep -rn BulkExport crates/` returns
+  the worker arm alone, and `crates/app/src/routes/jobs.rs:86` refuses any kind but
+  `maintenance`. No migration is needed — `jobs.kind` is unconstrained `TEXT` in
+  both dialects (the only `CHECK` in `0008_exports.sql` is on `target`) — and no
+  frontend surface maps kinds, so nothing upstream has to change. No test
+  enumerates the kinds (tests name individual variants), so the addition breaks
+  none.
+- **Defect 1 — a doc comment belongs to the wrong function.**
+  `crates/app/src/exports.rs:799-814`: `run_bulk` was inserted between `sweep`'s
+  doc comment and `sweep`, so `run_bulk`'s rustdoc opens with "Delete exports past
+  their retention window, with their output." and `sweep` has no docs at all. It
+  also sits under the "Retention" banner. Fix: move the paragraph back with
+  `sweep`, or move `run_bulk` below it.
+- **Defect 2 — the kind list did not grow with the enum.**
+  `crates/app/src/routes/jobs.rs:371-383` lists six kinds by hand and the test at
+  `:394-398` asserts `len() == 6`, so a seventh variant leaves both passing while
+  the doc comment ("The kinds the queue understands") and the test's name
+  ("every_kind_has_a_wire_name") promise coverage. The function has no callers
+  outside its own file, so this is not a live bug — it is a guard that cannot
+  fail, the same pattern the route-inventory direction test had. Fix: a
+  match-forced `JobKind::all()` in `domain` (adding a variant then fails to compile
+  until it is listed) plus a `parse(kind.as_str()) == kind` round-trip assertion
+  for every kind.
+- Minor: `crates/domain/src/.fuse_hidden002b5d6f00000862` is untracked junk in the
+  tree (a deleted file held open across the mount by another process). It is not
+  in any commit; do not let a `git add -A` sweep it in.
+
+The "12 passing" in the stub's own report is the `lorehaven-app` lib unit tests
+plus `route_inventory`; the workspace number is the one that says whether the tree
+is well (see the gate rows above).
