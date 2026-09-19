@@ -1047,3 +1047,51 @@ Claim by claim:
 The "12 passing" in the stub's own report is the `lorehaven-app` lib unit tests
 plus `route_inventory`; the workspace number is the one that says whether the tree
 is well (see the gate rows above).
+
+### 2026-09-19, second pass — the stub's follow-ups
+
+Re-reviewed the same uncommitted work after the first review's findings.
+
+**Fixed.** `run_bulk` now sits above the "Retention" banner with its own doc
+comment and `sweep` has its paragraph back (`crates/app/src/exports.rs:795-812`);
+`_state`/`_payload` replaced the `let _ = (…)` binding.
+
+**Half fixed, and now over-claimed.** `known_kinds()` derives from a single
+`ALL_KINDS` list and the test asserts `JobKind::parse(kind.as_str()) == kind` for
+every entry, instead of counting six (`crates/app/src/routes/jobs.rs:369-397`).
+That is the right property, and it repaired three kinds the old hand-written list
+had silently dropped — `UpdateCheck`, `Derivative`, `Narration`. Verified
+variant-by-variant: the enum declares ten variants and `ALL_KINDS` lists those ten
+and no others.
+
+But `ALL_KINDS` is a `const` array. Nothing forces it to grow with the enum, and
+the doc comment says the opposite: "Centralized so a new variant is a compile
+error everywhere it must be handled, not a silent default"
+(`crates/domain/src/jobs.rs:134-136`). Demonstrated with a four-variant mirror of
+the same shape (`/tmp/kindforce/demo.rs`): with a variant absent from the list,
+
+```
+compiled with 4 enum variants; ALL_KINDS still lists 3 -> nothing failed, nothing warned
+```
+
+The build is silent, the round-trip test passes (it iterates the list, so an
+omission is invisible to it), and the only thing that notices is the exhaustive
+`resource_class()` match — which forces an *arm*, not a list entry. Fix: make the
+list come out of a match-forced index (a variant without an arm fails to compile)
+and assert every index is filled, so staleness is a build error and then a test
+failure rather than a silence.
+
+**New and unused.** `ResourceClass { Interactive, Bulk }` with an exhaustive
+`JobKind::resource_class()` landed in `domain` — the design Phase 1 asked for, and
+it needs no type to move between crates. `grep -rn ResourceClass crates/` finds no
+consumer: the queue still claims by `ORDER BY priority DESC, available_at ASC` with
+`priority` always 0 (`crates/db/src/jobs.rs:237-256`).
+
+**Still unreachable.** Nothing enqueues `BulkExport`; `POST /jobs` accepts only
+`maintenance` (`crates/app/src/routes/jobs.rs:86`). A green suite says nothing
+about bulk export yet.
+
+**Gate, this tree, with all of the above uncommitted:** `cargo test --workspace
+--no-fail-fast` → 1228 passed / 0 failed / 13 ignored across 47 binaries,
+`test_exit=0`, and one warning in the whole run — `crates/app/tests/milestone_22.rs:1931`,
+an unused `items` binding from the other workstream, not from the stub.
