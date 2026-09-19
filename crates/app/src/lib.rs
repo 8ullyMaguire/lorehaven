@@ -11,6 +11,7 @@
 
 pub mod assets;
 pub mod auth;
+pub mod bulk_export;
 pub mod cli;
 pub mod config;
 pub mod crypto;

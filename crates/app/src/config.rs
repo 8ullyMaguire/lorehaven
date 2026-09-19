@@ -132,6 +132,8 @@ pub struct Config {
     pub discovery: DiscoveryConfig,
     /// TTS narration settings.
     pub tts: TtsConfig,
+    /// Bulk export settings.
+    pub bulk_export: BulkExportConfig,
     /// Where the configuration file was read from, if any.
     pub config_path: Option<PathBuf>,
 }
@@ -174,6 +176,23 @@ pub struct DiscoveryConfig {
 ///
 /// Piper is the built-in local engine. Cloud adapters (ElevenLabs, AWS
 /// Polly) are added later behind the same `TtsEngine` trait.
+#[derive(Debug, Clone)]
+pub struct BulkExportConfig {
+    /// How many works a bulk export may bundle. `None` means the default.
+    pub max_items: Option<i64>,
+    /// How many bytes a bulk export may total. `None` means the default.
+    pub max_bytes: Option<i64>,
+}
+
+impl Default for BulkExportConfig {
+    fn default() -> Self {
+        Self {
+            max_items: None,
+            max_bytes: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TtsConfig {
     /// Which engine to use. `"piper"` is the only built-in option.
@@ -729,6 +748,7 @@ impl Config {
             imports,
             discovery: DiscoveryConfig::default(),
             tts,
+            bulk_export: BulkExportConfig::default(),
             config_path,
         };
 
@@ -787,6 +807,7 @@ impl Config {
             imports: ImportsConfig::default(),
             discovery: DiscoveryConfig::default(),
             tts: TtsConfig::default(),
+            bulk_export: BulkExportConfig::default(),
             config_path: None,
         }
     }
