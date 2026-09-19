@@ -34,6 +34,7 @@ pub mod server;
 pub mod state;
 pub mod tts;
 pub mod version;
+pub mod webhook_sender;
 pub mod worker;
 
 use std::process::ExitCode;

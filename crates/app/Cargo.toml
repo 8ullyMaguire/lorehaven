@@ -21,6 +21,10 @@ clap.workspace = true
 hex.workspace = true
 mime_guess.workspace = true
 rand.workspace = true
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "http2",
+] }
 rust-embed.workspace = true
 serde.workspace = true
 serde_json.workspace = true

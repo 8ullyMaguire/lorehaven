@@ -209,31 +209,47 @@ tests). New routes get rows in `crates/app/tests/route_inventory.rs`, which as o
 (`registered_routes_are_tabled` via `collect_registered`, which walks each
 module's `router()` and `*_routes()` and resolves `.nest()` prefixes).
 
-### Status (third review, 2026-09-19, still uncommitted in the tree)
+### Status (fourth review, 2026-09-19 — Phases 1 and 2 landed)
 
-Landed in the working tree:
+Landed and committed:
 
-- `JobKind::BulkExport`, with `as_str`/`parse` = `"bulk_export"`, a worker arm that
-  parses the payload (`crates/app/src/worker.rs:518-523`) and `run_bulk` as a stub
-  returning `Fatal` (`crates/app/src/exports.rs:795-800`). Stub unreachable:
-  nothing enqueues the kind, `POST /jobs` accepts only `maintenance`.
-- `ResourceClass { Interactive, Bulk }` and an exhaustive `JobKind::resource_class()`
-  — Phase 1's first bullet, done, and it needs no type to move between crates.
-  **No consumer yet**: the queue still claims by priority only
-  (`crates/db/src/jobs.rs:237-256`).
-- `JobKind::kind_index()` (exhaustive — a new variant is a compile error until it
-  has an index), `ALL_KINDS`, and two tests: unique/filled indices and a
-  `parse(as_str())` round-trip per kind. This restored the three kinds the old
-  hand-written list had dropped (`UpdateCheck`, `Derivative`, `Narration`); the
-  list matches the enum today, variant by variant.
-  **But the completeness claim is not yet true.** The test iterates `ALL_KINDS`
-  with a literal `[false; 10]`, so a variant appended with index 10 and left out of
-  the list passes it — verified with a mirror of the exact shapes (A/B/D evidence
-  in `docs/verification.md`). Stable Rust cannot count variants
-  (`variant_count` is unstable on this toolchain), so the list and the enum must
-  come from one place: a `macro_rules!` emitting both, or a derive crate. Until
-  then, treat `ALL_KINDS` as hand-maintained — the doc comment promising compiler
-  enforcement is not yet earned. Same file, same rot: the older
+- **Phase 1 — queue fairness, done.** `claim_next` now takes
+  `resource_classes: Option<&[ResourceClass]>`, `max_bulk_concurrent: u32`, and
+  `fairness: bool` (`crates/db/src/jobs.rs`). Class filtering Live — a worker
+  restricted to `[ResourceClass::Interactive]` never claims a `bulk_export` job
+  (test: `a_worker_is_restricted_to_its_resource_classes`). The bulk concurrency
+  guard is independent of fairness and applies to every claim. Per-requester
+  fairness: a requester with a `leased` job is skipped while another tenant's
+  job waits; NULL requesters (system jobs) pass through, because `NULL NOT IN
+  (...)` is NULL, not TRUE — the trio of filters (state, owner, version) is in
+  `claim_sql`, one place per dialect. Weighted aging and subscription priority
+  slots remain deferred (plan §6 out of scope).
+- **Phase 2 — bulk export, done end to end and reachable.**
+  - Migration `0035_bulk_export.sql` (both dialects): `export_jobs.subject_type`
+    gains `'query'`, and `bulk_export_items` records each work the bundle holds.
+  - `crates/app/src/bulk_export.rs` — `run_bulk`: resolves the query's creator
+    (or fails closed unless an operator requested it), counts against the cap,
+    then walks the cursor deciding per work (right + entitlement, like the
+    single-work Zip Walk in §1.2), renders HTML, ZIPs with a stored-method
+    writer (`crc32fast`), stores via `BlobStore::put`, mints one download grant
+    at the end, and records the items and file on the row.
+  - `POST /api/v1/exports/bulk` (`crates/app/src/routes/exports.rs`,
+    `start_bulk_export`) enqueues a `JobKind::BulkExport` with the query on it
+    and acknowledges the privacy notice on the row; the existing
+    `/exports/{id}`, `/grant`, `/download`, and `/download/{token}` doors then
+    serve the bundle. Nothing bypasses a minted grant, so "no archive leaves
+    except through the grant path" is assertable, by construction.
+- `ResourceClass { Interactive, Bulk }` has consumers now; it never needed to
+  move crates — `claim_next` takes the slices.
+- `POST /jobs` still accepts only `maintenance`. A bulk export is enqueued by
+  the reader route, which is the only door that can name a query.
+- The `job_kind!` macro (a6f0e20) emits the enum, `ALL_KINDS`, `as_str`, and
+  `parse` from one token tree, so the variant list and the string mapping can
+  no longer drift; `kind_index()` and `resource_class()` remain separate
+  exhaustive matches, so a new variant is still a compile error until it has
+  both.
+
+Still open: Phase 3 (webhook delivery) and Phase 4 (parity and records).
   `states_and_kinds_round_trip_through_their_columns` still walks six kinds by hand.
 
 ### Phase 1 — queue groundwork (½–1 day, no new surfaces)

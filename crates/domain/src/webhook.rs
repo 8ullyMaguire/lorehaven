@@ -1,6 +1,7 @@
 //! M16 — Webhook domain: event envelope, HMAC signing, bounded payload.
 
-use sha2::{Digest, Sha256};
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 
 /// Webhook event envelope.
 #[derive(Debug, Clone)]
@@ -18,12 +19,16 @@ impl WebhookEvent {
     }
 
     /// Compute HMAC-SHA256 signature over the canonical string + payload.
+    ///
+    /// Uses proper HMAC-SHA256 (RFC 2104) with a 32-byte output, encoded as hex.
+    /// The signing input is `canonical_string + payload.to_string()`.
     pub fn sign(&self, secret: &str) -> String {
-        let mut mac = Sha256::new();
-        mac.update(secret.as_bytes());
+        let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
+            .expect("HMAC can take a key of any size");
         mac.update(self.canonical_string().as_bytes());
         mac.update(self.payload.to_string().as_bytes());
-        format!("{:x}", mac.finalize())
+        let result = mac.finalize();
+        hex::encode(result.into_bytes())
     }
 
     /// Verify a signature against the envelope.
@@ -64,6 +69,22 @@ mod tests {
         let sig = event.sign(secret);
         assert!(event.verify(secret, &sig));
         assert!(!event.verify("wrong-secret", &sig));
+    }
+
+    /// RFC 4231 test case 2: key = "Jefe", data = "what do ya want for nothing?".
+    /// Tested directly since `sign()` prepends the event envelope.
+    #[test]
+    fn hmac_matches_rfc4231_test_case_2() {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+
+        let mut mac = Hmac::<Sha256>::new_from_slice(b"Jefe").unwrap();
+        mac.update(b"what do ya want for nothing?");
+        let result = mac.finalize();
+        assert_eq!(
+            hex::encode(result.into_bytes()),
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
     }
 
     #[test]
