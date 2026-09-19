@@ -209,40 +209,47 @@ tests). New routes get rows in `crates/app/tests/route_inventory.rs`, which as o
 (`registered_routes_are_tabled` via `collect_registered`, which walks each
 module's `router()` and `*_routes()` and resolves `.nest()` prefixes).
 
-### Status (reviewed 2026-09-19, uncommitted in the tree)
+### Status (second review, 2026-09-19, still uncommitted in the tree)
 
-Phase 2's shell has landed ahead of Phase 1: `JobKind::BulkExport` with
-`as_str`/`parse` = `"bulk_export"` (`crates/domain/src/jobs.rs:93-96,130,147`), a
-worker arm that parses the payload and calls `crate::exports::run_bulk`
-(`crates/app/src/worker.rs:518-523`), and `run_bulk` as a stub that returns
-`Fatal("bulk export handler not yet implemented")` (`crates/app/src/exports.rs:804-812`).
+Landed so far, all in the working tree:
 
-What that buys and what it does not:
+- `JobKind::BulkExport`, with `as_str`/`parse` = `"bulk_export"`
+  (`crates/domain/src/jobs.rs`), a worker arm that parses the payload and calls
+  `crate::exports::run_bulk` (`crates/app/src/worker.rs:518-523`), and `run_bulk`
+  as a stub returning `Fatal("bulk export handler not yet implemented")`
+  (`crates/app/src/exports.rs:795-800`, above the retention banner with its own
+  docs — the misplaced doc comment reported in the first review is fixed).
+- `ResourceClass { Interactive, Bulk }` and an exhaustive
+  `JobKind::resource_class()` in `crates/domain/src/jobs.rs` — the first bullet of
+  Phase 1 below, done exactly as designed, and it settles the earlier worry:
+  nothing has to move between crates, because the queue's class is a domain type
+  and the HTTP rate class stays app-side. **Nothing consumes it yet** (no
+  class-filtered claim, no `max_bulk_concurrent`), so the queue is still
+  priority-only.
+- `ALL_KINDS` + a `known_kinds()` derived from it + a `parse(as_str())` round-trip
+  test (`crates/domain/src/jobs.rs`, `crates/app/src/routes/jobs.rs:369-397`).
+  This corrected three kinds the old hand-written list had silently dropped
+  (`UpdateCheck`, `Derivative`, `Narration`): the list matches the enum today,
+  variant by variant. But it is a `const` array, so nothing forces it to stay in
+  step — and its doc comment claims otherwise ("Centralized so a new variant is a
+  compile error everywhere it must be handled", `crates/domain/src/jobs.rs:134-136`).
+  A mirror with a fourth variant compiles, warns and passes the test as written;
+  only the exhaustive `resource_class` match notices. Fix it before Phase 2 leans
+  on it: drive the list from a match-forced index and assert every index is
+  filled, so a new variant is a build error and a completeness error, not a
+  silent omission. Evidence in `docs/verification.md`.
 
-- The stub is **unreachable**: nothing enqueues `BulkExport` (the only occurrence
-  outside `domain` is the worker arm) and `POST /jobs` still accepts only
-  `maintenance` (`crates/app/src/routes/jobs.rs:86`). So no reader can hit the
-  failure; it is a compile-checked landing place for Phase 2.
-- The `Fatal` choice is right — a retry cannot implement a function — and the
-  message says what it is rather than looking like a success.
-- `jobs.kind` is unconstrained `TEXT` in both dialects (no `CHECK` list; the only
-  `CHECK` in `0008_exports.sql` is on `target`), and no frontend surface maps
-  kinds, so the new variant needs no migration and no UI change.
-- Two defects came with the stub and should be cleared before Phase 2 builds on
-  it: the doc comment of `sweep` was left attached to `run_bulk` (see
-  `docs/verification.md`), and `known_kinds()` still lists six kinds with a test
-  asserting `len() == 6` (`crates/app/src/routes/jobs.rs:371-383,394-398`), so the
-  guard that exists to notice enum growth cannot notice it.
+Still unreachable and still a landing place, not behaviour: nothing enqueues
+`BulkExport` and `POST /jobs` accepts only `maintenance`
+(`crates/app/src/routes/jobs.rs:86`). `jobs.kind` remains unconstrained `TEXT` in
+both dialects, so no migration is involved.
 
 ### Phase 1 — queue groundwork (½–1 day, no new surfaces)
 
-- `JobKind::resource_class()` returning a **domain** `ResourceClass`
-  (`{ Interactive, Bulk }`, defined in `crates/domain/src/jobs.rs`), not
-  `RouteClass` — the queue's class decides which worker may claim a job and
-  belongs in `domain`; the HTTP rate class stays in
-  `crates/app/src/limiter.rs` and is attached to the export route. No type
-  has to move between crates for this. Worker option + config
-  `max_bulk_concurrent`.
+- **Done:** `JobKind::resource_class()` returning a domain `ResourceClass`
+  (`crates/domain/src/jobs.rs`) — see the status block; nothing consumes it
+  yet. What remains here: the worker option + config `max_bulk_concurrent`,
+  and the class-filtered claim.
 - Per-requester fairness in `claim_next` (`crates/db/src/jobs.rs:237-256`), both
   dialects, with an index if the plan wants it.
 - `RouteClass::Export` + config field + defaults + the class round-trip test.
