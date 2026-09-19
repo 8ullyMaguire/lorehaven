@@ -789,7 +789,11 @@ pub async fn request_bulk(
     let db = state.db();
 
     // Preflight count: how many eligible works match the query?
-    let query: Option<lorehaven_domain::query::QueryAst> = None;
+    let query: Option<lorehaven_domain::query::QueryAst> = if query_json.is_null() {
+        None
+    } else {
+        lorehaven_domain::query::parse_query(query_json.as_str().unwrap_or_default()).ok()
+    };
     let account_id_arg = if account_id.is_empty() {
         None
     } else {

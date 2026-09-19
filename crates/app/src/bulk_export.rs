@@ -180,7 +180,7 @@ async fn produce_bulk(
     let query: Option<lorehaven_domain::query::QueryAst> = if query_json.is_null() {
         None
     } else {
-        None
+        lorehaven_domain::query::parse_query(query_json.as_str().unwrap_or_default()).ok()
     };
 
     // Preflight count: how many eligible works match?

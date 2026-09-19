@@ -842,6 +842,13 @@ const ROUTE_TABLE: &[RouteEntry] = &[
     },
     RouteEntry {
         file: "exports.rs",
+        handler: "start_bulk_export",
+        method: "POST",
+        path: "/exports/bulk",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "exports.rs",
         handler: "forget_export",
         method: "DELETE",
         path: "/exports/{id}",
