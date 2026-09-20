@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ApiError, completePasswordReset, requestPasswordReset } from '../lib/api';
   import { handleLinkClick } from '../lib/router';
-  import { session } from '../lib/session.svelte';
+  import { session } from '../lib/session.svelte.ts';
   import Button from '../lib/components/Button.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import TextField from '../lib/components/TextField.svelte';

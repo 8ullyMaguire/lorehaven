@@ -33,7 +33,7 @@
     type PreviewView,
   } from '../lib/api';
   import { handleLinkClick } from '../lib/router';
-  import { session } from '../lib/session.svelte';
+  import { session } from '../lib/session.svelte.ts';
   import Button from '../lib/components/Button.svelte';
   import ClampedText from '../lib/components/ClampedText.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';

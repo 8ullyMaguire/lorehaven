@@ -12,7 +12,7 @@
     setFederationScope,
     setSlowMode,
     type Sanction,
-  } from '../lib/api';
+  } from '../api';
 
   let { topicId, isModerator }: { topicId: string; isModerator: boolean } =
     $props();

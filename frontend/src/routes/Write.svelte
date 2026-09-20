@@ -17,7 +17,7 @@
   } from '../lib/api';
   import { describeLifecycle, describeVisibility } from '../lib/labels';
   import { handleLinkClick } from '../lib/router';
-  import { session } from '../lib/session.svelte';
+  import { session } from '../lib/session.svelte.ts';
   import Button from '../lib/components/Button.svelte';
   import EmptyState from '../lib/components/EmptyState.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';

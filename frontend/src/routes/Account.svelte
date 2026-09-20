@@ -21,7 +21,7 @@
   } from '../lib/api';
   import { describeAgeState } from '../lib/labels';
   import { handleLinkClick } from '../lib/router';
-  import { session } from '../lib/session.svelte';
+  import { session } from '../lib/session.svelte.ts';
   import { formatTimestamp } from '../lib/time';
   import Button from '../lib/components/Button.svelte';
   import ContentPreferences from '../lib/components/ContentPreferences.svelte';

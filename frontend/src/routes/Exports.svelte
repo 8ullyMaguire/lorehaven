@@ -37,7 +37,7 @@
     saveCopy,
     type OfflineCopy,
   } from '../lib/offline';
-  import { session } from '../lib/session.svelte';
+  import { session } from '../lib/session.svelte.ts';
   import { formatBytes } from '../lib/labels';
   import { formatTimestamp } from '../lib/time';
   import Button from '../lib/components/Button.svelte';

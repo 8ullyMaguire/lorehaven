@@ -36,7 +36,7 @@
   import { ApiError } from '../lib/api';
   import { describeCompletion, describeDiscussionMode, describeLifecycle, describeRating, describeReactionType, describeVisibility, reactionGlyph } from '../lib/labels';
   import { handleLinkClick } from '../lib/router';
-  import { session } from '../lib/session.svelte';
+  import { session } from '../lib/session.svelte.ts';
   import DiscussLink from '../lib/components/DiscussLink.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import NotePanel from '../lib/components/NotePanel.svelte';

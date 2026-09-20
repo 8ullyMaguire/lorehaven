@@ -19,7 +19,7 @@
    */
   import { cancelJob, fetchJobs, startJob, type Job } from '../lib/api';
   import { handleLinkClick } from '../lib/router';
-  import { session } from '../lib/session.svelte';
+  import { session } from '../lib/session.svelte.ts';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 

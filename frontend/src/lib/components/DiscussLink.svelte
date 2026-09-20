@@ -6,8 +6,8 @@
    * the topic id and deep-links to it; if none exists yet, links to the
    * category so the reader can start one.
    */
-  import { fetchThread, type ThreadResponse } from '../lib/api';
-  import { handleLinkClick } from '../lib/router';
+  import { fetchThread, type ThreadResponse } from '../api';
+  import { handleLinkClick } from '../router';
 
   interface Props {
     workId: string;

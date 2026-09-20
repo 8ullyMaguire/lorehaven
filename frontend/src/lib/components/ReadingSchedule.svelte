@@ -5,7 +5,7 @@
    * Shows a topic's reading schedule with dated unlocks. Used on topics
    * with mode=reading_group to show readers what to read and when.
    */
-  import { addScheduleSection, getSchedule, type ScheduleSection } from '../lib/api';
+  import { addScheduleSection, getSchedule, type ScheduleSection } from '../api';
 
   let { topicId, isModerator }: { topicId: string; isModerator: boolean } = $props();
 

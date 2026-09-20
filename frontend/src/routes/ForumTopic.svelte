@@ -15,7 +15,7 @@
     type ForumPost,
     setTopicMode,
   } from '../lib/api';
-  import { session } from '../lib/session.svelte';
+  import { session } from '../lib/session.svelte.ts';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
   import WorkBacklink from '../lib/components/WorkBacklink.svelte';

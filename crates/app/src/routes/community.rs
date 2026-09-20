@@ -241,6 +241,8 @@ async fn delete_comment(
 #[derive(Debug, Deserialize)]
 pub struct CreateTopicBody {
     title: String,
+    #[serde(default)]
+    mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -330,11 +332,12 @@ async fn post_topic(
     if trust < min_trust {
         return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
-    let id = lorehaven_db::community::create_topic(
+    let id = lorehaven_db::community::create_topic_with_mode(
         state.db(),
         &category,
         &pseud_id.to_string(),
         &body.title,
+        body.mode.as_deref().unwrap_or("plain"),
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;

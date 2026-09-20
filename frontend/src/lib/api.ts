@@ -2389,6 +2389,17 @@ export async function createTopic(
   });
 }
 
+export async function createTopicWithMode(
+  categoryId: string,
+  title: string,
+  mode: string,
+): Promise<ForumTopic> {
+  return apiFetch<ForumTopic>(`/forums/${encodeURIComponent(categoryId)}/topics`, {
+    method: 'POST',
+    body: JSON.stringify({ title, mode }),
+  });
+}
+
 export async function fetchTopic(topicId: string, signal?: AbortSignal): Promise<ForumTopic> {
   const page = await apiFetch<{ topic: ForumTopic }>(`/topics/${encodeURIComponent(topicId)}`, {
     signal,
