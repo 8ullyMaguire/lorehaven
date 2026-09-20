@@ -318,7 +318,10 @@ async fn produce_bulk(
     // size; skipped ones carry the reason they were skipped.
     let manifest = build_manifest(export, &items, &skipped);
     let mut zip_items = items.clone();
-    zip_items.push(("manifest.json".to_string(), serde_json::to_vec_pretty(&manifest).unwrap_or_default()));
+    zip_items.push((
+        "manifest.json".to_string(),
+        serde_json::to_vec_pretty(&manifest).unwrap_or_default(),
+    ));
 
     // Build the ZIP bundle.
     let zip_bytes = build_zip(&zip_items).map_err(|error| BulkFailure::Transient(error))?;

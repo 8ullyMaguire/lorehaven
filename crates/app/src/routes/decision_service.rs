@@ -53,10 +53,12 @@ async fn evaluate_decision(
         "mood_class" => "neutral".to_string(),
         "language_id" => "en".to_string(),
         "crawler_signal" => "human".to_string(),
-        _ => return Err(ApiError(lorehaven_domain::AppError::Validation {
-            message: format!("unknown decision task: {}", body.task),
-            field_errors: Default::default(),
-        })),
+        _ => {
+            return Err(ApiError(lorehaven_domain::AppError::Validation {
+                message: format!("unknown decision task: {}", body.task),
+                field_errors: Default::default(),
+            }))
+        }
     };
 
     Ok(Json(DecisionResponse {
@@ -80,14 +82,54 @@ async fn list_tasks(
     RequireSession(_user): RequireSession,
 ) -> ApiResult<Json<Value>> {
     let tasks = vec![
-        TaskStatus { task: "positivity_class".to_string(), enabled: true, provider: "deterministic".to_string(), fallback: "deterministic".to_string() },
-        TaskStatus { task: "translation_quality".to_string(), enabled: true, provider: "deterministic".to_string(), fallback: "deterministic".to_string() },
-        TaskStatus { task: "import_outcome".to_string(), enabled: true, provider: "deterministic".to_string(), fallback: "deterministic".to_string() },
-        TaskStatus { task: "identity_match".to_string(), enabled: true, provider: "deterministic".to_string(), fallback: "deterministic".to_string() },
-        TaskStatus { task: "alert_match".to_string(), enabled: true, provider: "deterministic".to_string(), fallback: "deterministic".to_string() },
-        TaskStatus { task: "mood_class".to_string(), enabled: true, provider: "deterministic".to_string(), fallback: "deterministic".to_string() },
-        TaskStatus { task: "language_id".to_string(), enabled: true, provider: "deterministic".to_string(), fallback: "deterministic".to_string() },
-        TaskStatus { task: "crawler_signal".to_string(), enabled: true, provider: "deterministic".to_string(), fallback: "deterministic".to_string() },
+        TaskStatus {
+            task: "positivity_class".to_string(),
+            enabled: true,
+            provider: "deterministic".to_string(),
+            fallback: "deterministic".to_string(),
+        },
+        TaskStatus {
+            task: "translation_quality".to_string(),
+            enabled: true,
+            provider: "deterministic".to_string(),
+            fallback: "deterministic".to_string(),
+        },
+        TaskStatus {
+            task: "import_outcome".to_string(),
+            enabled: true,
+            provider: "deterministic".to_string(),
+            fallback: "deterministic".to_string(),
+        },
+        TaskStatus {
+            task: "identity_match".to_string(),
+            enabled: true,
+            provider: "deterministic".to_string(),
+            fallback: "deterministic".to_string(),
+        },
+        TaskStatus {
+            task: "alert_match".to_string(),
+            enabled: true,
+            provider: "deterministic".to_string(),
+            fallback: "deterministic".to_string(),
+        },
+        TaskStatus {
+            task: "mood_class".to_string(),
+            enabled: true,
+            provider: "deterministic".to_string(),
+            fallback: "deterministic".to_string(),
+        },
+        TaskStatus {
+            task: "language_id".to_string(),
+            enabled: true,
+            provider: "deterministic".to_string(),
+            fallback: "deterministic".to_string(),
+        },
+        TaskStatus {
+            task: "crawler_signal".to_string(),
+            enabled: true,
+            provider: "deterministic".to_string(),
+            fallback: "deterministic".to_string(),
+        },
     ];
     Ok(Json(json!({ "tasks": tasks })))
 }

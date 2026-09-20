@@ -55,21 +55,20 @@ pub async fn get_trust_weighted_rating_summary(
                 .await?
         }
     };
-    Ok(row.map(|(count, weighted_sum, total_weight): (i64, i64, i64)| RatingSummary {
-        count,
-        mean_permille: if total_weight > 0 {
-            (weighted_sum * 1000) / total_weight
-        } else {
-            0
+    Ok(row.map(
+        |(count, weighted_sum, total_weight): (i64, i64, i64)| RatingSummary {
+            count,
+            mean_permille: if total_weight > 0 {
+                (weighted_sum * 1000) / total_weight
+            } else {
+                0
+            },
         },
-    }))
+    ))
 }
 
 /// Insert a rating anomaly event.
-pub async fn insert_rating_anomaly_event(
-    db: &Database,
-    event: &RatingAnomalyEvent,
-) -> Result<()> {
+pub async fn insert_rating_anomaly_event(db: &Database, event: &RatingAnomalyEvent) -> Result<()> {
     let sql = db.sql(
         "INSERT INTO rating_anomaly_events (id, work_id, cohort_id, kind, severity, detail, detected_at, cleared_at, cleared_by) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -95,7 +94,12 @@ pub async fn insert_rating_anomaly_event(
             sqlx::query(&sql)
                 .bind(&event.id)
                 .bind(Uuid::parse_str(&event.work_id).context("parse work_id")?)
-                .bind(event.cohort_id.as_ref().and_then(|c| Uuid::parse_str(c).ok()))
+                .bind(
+                    event
+                        .cohort_id
+                        .as_ref()
+                        .and_then(|c| Uuid::parse_str(c).ok()),
+                )
                 .bind(&event.kind)
                 .bind(event.severity)
                 .bind(&event.detail)
@@ -194,7 +198,9 @@ pub async fn get_work_anomaly_events(
                     detail: r.get::<String, _>(5),
                     detected_at: r.get::<String, _>(6),
                     cleared_at: r.get::<Option<String>, _>(7),
-                    cleared_by: r.get::<Option<String>, _>(8).and_then(|s| s.parse::<AccountId>().ok()),
+                    cleared_by: r
+                        .get::<Option<String>, _>(8)
+                        .and_then(|s| s.parse::<AccountId>().ok()),
                 });
             }
         }
@@ -203,11 +209,7 @@ pub async fn get_work_anomaly_events(
 }
 
 /// Set a work's contested mark.
-pub async fn set_work_contested(
-    db: &Database,
-    work_id: &WorkId,
-    reason: &str,
-) -> Result<()> {
+pub async fn set_work_contested(db: &Database, work_id: &WorkId, reason: &str) -> Result<()> {
     let sql = db.sql(
         "UPDATE works SET contested = 1, contested_at = ?, contested_reason = ? WHERE id = ?",
         "UPDATE works SET contested = 1, contested_at = $1, contested_reason = $2 WHERE id = $3",
@@ -235,10 +237,7 @@ pub async fn set_work_contested(
 }
 
 /// Clear a work's contested mark.
-pub async fn clear_work_contested(
-    db: &Database,
-    work_id: &WorkId,
-) -> Result<()> {
+pub async fn clear_work_contested(db: &Database, work_id: &WorkId) -> Result<()> {
     let sql = db.sql(
         "UPDATE works SET contested = 0, contested_at = NULL, contested_reason = NULL WHERE id = ?",
         "UPDATE works SET contested = 0, contested_at = NULL, contested_reason = NULL WHERE id = $1",
@@ -261,10 +260,7 @@ pub async fn clear_work_contested(
 }
 
 /// Check if a work is currently contested.
-pub async fn is_work_contested(
-    db: &Database,
-    work_id: &WorkId,
-) -> Result<bool> {
+pub async fn is_work_contested(db: &Database, work_id: &WorkId) -> Result<bool> {
     let sql = db.sql(
         "SELECT contested FROM works WHERE id = ?",
         "SELECT contested FROM works WHERE id = $1",
@@ -311,8 +307,8 @@ pub struct RatingSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::identity::{AccountStatus, create_account, create_pseud};
     use crate::content::create_work;
+    use crate::identity::{create_account, create_pseud, AccountStatus};
     use lorehaven_domain::ids::PseudId;
     use lorehaven_domain::policy::AgeState;
     use uuid::Uuid;
@@ -428,10 +424,8 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create scratch dir");
-        let config = crate::DatabaseConfig::new(format!(
-            "sqlite://{}/test.db?mode=rwc",
-            dir.display()
-        ));
+        let config =
+            crate::DatabaseConfig::new(format!("sqlite://{}/test.db?mode=rwc", dir.display()));
         let db = crate::Database::connect(&config).await.expect("connect");
         db.migrate().await.expect("migrate");
 
@@ -464,10 +458,8 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create scratch dir");
-        let config = crate::DatabaseConfig::new(format!(
-            "sqlite://{}/test.db?mode=rwc",
-            dir.display()
-        ));
+        let config =
+            crate::DatabaseConfig::new(format!("sqlite://{}/test.db?mode=rwc", dir.display()));
         let db = crate::Database::connect(&config).await.expect("connect");
         db.migrate().await.expect("migrate");
 
@@ -500,10 +492,8 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create scratch dir");
-        let config = crate::DatabaseConfig::new(format!(
-            "sqlite://{}/test.db?mode=rwc",
-            dir.display()
-        ));
+        let config =
+            crate::DatabaseConfig::new(format!("sqlite://{}/test.db?mode=rwc", dir.display()));
         let db = crate::Database::connect(&config).await.expect("connect");
         db.migrate().await.expect("migrate");
 
@@ -547,10 +537,8 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create scratch dir");
-        let config = crate::DatabaseConfig::new(format!(
-            "sqlite://{}/test.db?mode=rwc",
-            dir.display()
-        ));
+        let config =
+            crate::DatabaseConfig::new(format!("sqlite://{}/test.db?mode=rwc", dir.display()));
         let db = crate::Database::connect(&config).await.expect("connect");
         db.migrate().await.expect("migrate");
 
@@ -577,10 +565,8 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create scratch dir");
-        let config = crate::DatabaseConfig::new(format!(
-            "sqlite://{}/test.db?mode=rwc",
-            dir.display()
-        ));
+        let config =
+            crate::DatabaseConfig::new(format!("sqlite://{}/test.db?mode=rwc", dir.display()));
         let db = crate::Database::connect(&config).await.expect("connect");
         db.migrate().await.expect("migrate");
 
@@ -626,10 +612,8 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create scratch dir");
-        let config = crate::DatabaseConfig::new(format!(
-            "sqlite://{}/test.db?mode=rwc",
-            dir.display()
-        ));
+        let config =
+            crate::DatabaseConfig::new(format!("sqlite://{}/test.db?mode=rwc", dir.display()));
         let db = crate::Database::connect(&config).await.expect("connect");
         db.migrate().await.expect("migrate");
 

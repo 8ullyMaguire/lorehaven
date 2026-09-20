@@ -460,7 +460,9 @@ pub async fn produce(state: &AppState, row: &ExportJob) -> Result<Artifact, Expo
             ExportError::Epub(error) => {
                 ExportFailure::Storage(format!("the EPUB could not be assembled: {error}"))
             }
-            ExportError::ZipOnlyForBulk => ExportFailure::Unsupported("ZIP format is only available for bulk exports".to_owned()),
+            ExportError::ZipOnlyForBulk => ExportFailure::Unsupported(
+                "ZIP format is only available for bulk exports".to_owned(),
+            ),
         })?;
         return Ok(Artifact {
             bytes,
@@ -483,17 +485,19 @@ pub async fn produce(state: &AppState, row: &ExportJob) -> Result<Artifact, Expo
     // rendering already verified for the HTML format, and using it means a PDF
     // and an HTML export of the same work cannot disagree.
     let html = render(&work, ExportFormat::Html, &options).map_err(|error| match error {
-                ExportError::Empty => {
-                    ExportFailure::Empty("there is nothing to put in that export".to_owned())
-                }
-                ExportError::NeedsConverter { .. } => {
-                    ExportFailure::Unsupported("HTML is rendered by this instance".to_owned())
-                }
-                ExportError::Epub(error) => {
-                    ExportFailure::Storage(format!("the intermediate could not be built: {error}"))
-                }
-                ExportError::ZipOnlyForBulk => ExportFailure::Unsupported("ZIP format is only available for bulk exports".to_owned()),
-            })?;
+        ExportError::Empty => {
+            ExportFailure::Empty("there is nothing to put in that export".to_owned())
+        }
+        ExportError::NeedsConverter { .. } => {
+            ExportFailure::Unsupported("HTML is rendered by this instance".to_owned())
+        }
+        ExportError::Epub(error) => {
+            ExportFailure::Storage(format!("the intermediate could not be built: {error}"))
+        }
+        ExportError::ZipOnlyForBulk => {
+            ExportFailure::Unsupported("ZIP format is only available for bulk exports".to_owned())
+        }
+    })?;
 
     let bytes = convert(state, program, converter, format, &html).await?;
     Ok(Artifact {

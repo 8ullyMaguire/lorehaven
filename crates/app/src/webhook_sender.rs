@@ -157,6 +157,9 @@ impl std::error::Error for WebhookSendError {}
 
 /// Check a URL against SSRF rules: refuse loopback, private, and link-local
 /// addresses unless the host is explicitly allowlisted.
+///
+/// Checks ALL resolved addresses, not just the first — a DNS record with
+/// multiple A/AAAA records where any one is private must be refused.
 async fn check_ssrf(url: &reqwest::Url, allowed_hosts: &[String]) -> Result<(), WebhookSendError> {
     let host = url
         .host_str()
@@ -167,18 +170,26 @@ async fn check_ssrf(url: &reqwest::Url, allowed_hosts: &[String]) -> Result<(), 
         return Ok(());
     }
 
-    // Resolve the hostname to an IP.
-    let ip = tokio::net::lookup_host((host, url.port_or_known_default().unwrap_or(80)))
+    // Resolve the hostname and check EVERY address, not just the first.
+    let addrs = tokio::net::lookup_host((host, url.port_or_known_default().unwrap_or(80)))
         .await
-        .map_err(|e| WebhookSendError::Ssrf(e.to_string()))?
-        .next()
-        .ok_or_else(|| WebhookSendError::Ssrf("DNS resolution returned no addresses".into()))?
-        .ip();
+        .map_err(|e| WebhookSendError::Ssrf(e.to_string()))?;
 
-    if is_ip_blocked(ip) {
-        return Err(WebhookSendError::Ssrf(format!(
-            "address {ip} is not allowed (loopback/private/link-local)"
-        )));
+    let mut found_any = false;
+    for socket_addr in addrs {
+        found_any = true;
+        if is_ip_blocked(socket_addr.ip()) {
+            return Err(WebhookSendError::Ssrf(format!(
+                "address {} is not allowed (loopback/private/link-local)",
+                socket_addr.ip()
+            )));
+        }
+    }
+
+    if !found_any {
+        return Err(WebhookSendError::Ssrf(
+            "DNS resolution returned no addresses".into(),
+        ));
     }
 
     Ok(())

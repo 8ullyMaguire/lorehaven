@@ -73,7 +73,10 @@ pub fn router() -> Router<AppState> {
         .route("/works/{id}/withdraw", post(withdraw_work))
         .route("/works/{id}/chapters", post(add_chapter))
         .route("/works/{id}/reorder-chapters", post(reorder_chapters))
-        .route("/works/{id}/permissions", get(get_work_permissions).put(put_work_permissions))
+        .route(
+            "/works/{id}/permissions",
+            get(get_work_permissions).put(put_work_permissions),
+        )
         .route("/works/{id}/lineage", get(list_lineage).post(add_lineage))
         .route("/chapters/{id}", patch(update_chapter))
         .route("/chapters/{id}/revisions", get(list_revisions))
@@ -1381,28 +1384,54 @@ pub async fn put_work_permissions(
     let db = state.db();
     let mut stmt = permission::get_work_permission_statement(db, &id).await?;
     if let Some(v) = &body.podfic {
-        stmt.podfic = lorehaven_domain::permission::Permission::parse(v)
-            .ok_or_else(|| ApiError(AppError::Validation { message: format!("invalid podfic permission: {v}"), field_errors: Default::default() }))?;
+        stmt.podfic = lorehaven_domain::permission::Permission::parse(v).ok_or_else(|| {
+            ApiError(AppError::Validation {
+                message: format!("invalid podfic permission: {v}"),
+                field_errors: Default::default(),
+            })
+        })?;
     }
     if let Some(v) = &body.translation {
-        stmt.translation = lorehaven_domain::permission::Permission::parse(v)
-            .ok_or_else(|| ApiError(AppError::Validation { message: format!("invalid translation permission: {v}"), field_errors: Default::default() }))?;
+        stmt.translation = lorehaven_domain::permission::Permission::parse(v).ok_or_else(|| {
+            ApiError(AppError::Validation {
+                message: format!("invalid translation permission: {v}"),
+                field_errors: Default::default(),
+            })
+        })?;
     }
     if let Some(v) = &body.remix {
-        stmt.remix = lorehaven_domain::permission::Permission::parse(v)
-            .ok_or_else(|| ApiError(AppError::Validation { message: format!("invalid remix permission: {v}"), field_errors: Default::default() }))?;
+        stmt.remix = lorehaven_domain::permission::Permission::parse(v).ok_or_else(|| {
+            ApiError(AppError::Validation {
+                message: format!("invalid remix permission: {v}"),
+                field_errors: Default::default(),
+            })
+        })?;
     }
     if let Some(v) = &body.continuation {
-        stmt.continuation = lorehaven_domain::permission::Permission::parse(v)
-            .ok_or_else(|| ApiError(AppError::Validation { message: format!("invalid continuation permission: {v}"), field_errors: Default::default() }))?;
+        stmt.continuation =
+            lorehaven_domain::permission::Permission::parse(v).ok_or_else(|| {
+                ApiError(AppError::Validation {
+                    message: format!("invalid continuation permission: {v}"),
+                    field_errors: Default::default(),
+                })
+            })?;
     }
     if let Some(v) = &body.redistribution {
-        stmt.redistribution = lorehaven_domain::permission::Permission::parse(v)
-            .ok_or_else(|| ApiError(AppError::Validation { message: format!("invalid redistribution permission: {v}"), field_errors: Default::default() }))?;
+        stmt.redistribution =
+            lorehaven_domain::permission::Permission::parse(v).ok_or_else(|| {
+                ApiError(AppError::Validation {
+                    message: format!("invalid redistribution permission: {v}"),
+                    field_errors: Default::default(),
+                })
+            })?;
     }
     if let Some(v) = &body.ai_training {
-        stmt.ai_training = lorehaven_domain::permission::Permission::parse(v)
-            .ok_or_else(|| ApiError(AppError::Validation { message: format!("invalid ai_training permission: {v}"), field_errors: Default::default() }))?;
+        stmt.ai_training = lorehaven_domain::permission::Permission::parse(v).ok_or_else(|| {
+            ApiError(AppError::Validation {
+                message: format!("invalid ai_training permission: {v}"),
+                field_errors: Default::default(),
+            })
+        })?;
     }
     permission::set_work_permission_statement(db, &id, &stmt).await?;
     Ok(Json(stmt))
@@ -1424,8 +1453,12 @@ pub async fn add_lineage(
     // Only contributors to the target work may add lineage edges
     require_contributor(&state, &id, &user).await?;
     let db = state.db();
-    let kind = LineageKind::parse(&body.kind)
-        .ok_or_else(|| ApiError(AppError::Validation { message: format!("invalid lineage kind: {}", body.kind), field_errors: Default::default() }))?;
+    let kind = LineageKind::parse(&body.kind).ok_or_else(|| {
+        ApiError(AppError::Validation {
+            message: format!("invalid lineage kind: {}", body.kind),
+            field_errors: Default::default(),
+        })
+    })?;
     let edge = LineageEdge {
         id: uuid::Uuid::new_v4().to_string(),
         from_work_id: body.from_work_id,
@@ -1448,16 +1481,19 @@ pub async fn list_lineage(
     }
     let db = state.db();
     let edges = permission::lineage_edges_for_work(db, &id).await?;
-    let items: Vec<Value> = edges.iter().map(|e| {
-        json!({
-            "id": e.id,
-            "from_work_id": e.from_work_id,
-            "to_work_id": e.to_work_id,
-            "kind": e.kind.as_str(),
-            "provenance": e.provenance,
-            "created_at": e.created_at,
+    let items: Vec<Value> = edges
+        .iter()
+        .map(|e| {
+            json!({
+                "id": e.id,
+                "from_work_id": e.from_work_id,
+                "to_work_id": e.to_work_id,
+                "kind": e.kind.as_str(),
+                "provenance": e.provenance,
+                "created_at": e.created_at,
+            })
         })
-    }).collect();
+        .collect();
     Ok(Json(json!({ "items": items })))
 }
 

@@ -78,11 +78,20 @@ async fn meta(
             registration_open: true,
             csrf_required: config.security.csrf_required,
         },
-        topics: config.site.topics.iter().map(|t| TopicSummary {
-            name: t.name.clone(),
-            public: t.public,
-            bonus_credits: if t.bonus_credits > 0 { Some(t.bonus_credits) } else { None },
-        }).collect(),
+        topics: config
+            .site
+            .topics
+            .iter()
+            .map(|t| TopicSummary {
+                name: t.name.clone(),
+                public: t.public,
+                bonus_credits: if t.bonus_credits > 0 {
+                    Some(t.bonus_credits)
+                } else {
+                    None
+                },
+            })
+            .collect(),
     })
 }
 

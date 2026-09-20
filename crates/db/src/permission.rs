@@ -49,8 +49,8 @@ pub async fn set_work_permission_statement(
     work_id: &str,
     statement: &PermissionStatement,
 ) -> Result<()> {
-    let json = serde_json::to_string(&statement)
-        .context("failed to serialize permission statement")?;
+    let json =
+        serde_json::to_string(&statement).context("failed to serialize permission statement")?;
     let sql = db.sql(
         "UPDATE works SET permission_statement = ?, updated_at = ? WHERE id = ?",
         "UPDATE works SET permission_statement = $1, updated_at = $2 WHERE id = $3",
@@ -114,8 +114,8 @@ pub async fn set_account_permission_statement(
     account_id: &str,
     statement: &PermissionStatement,
 ) -> Result<()> {
-    let json = serde_json::to_string(&statement)
-        .context("failed to serialize permission statement")?;
+    let json =
+        serde_json::to_string(&statement).context("failed to serialize permission statement")?;
     let sql = db.sql(
         "UPDATE accounts SET permission_statement = ?, updated_at = ? WHERE id = ?",
         "UPDATE accounts SET permission_statement = $1, updated_at = $2 WHERE id = $3",
@@ -143,10 +143,7 @@ pub async fn set_account_permission_statement(
 }
 
 /// Insert a derivative lineage edge.
-pub async fn insert_lineage_edge(
-    db: &Database,
-    edge: &LineageEdge,
-) -> Result<()> {
+pub async fn insert_lineage_edge(db: &Database, edge: &LineageEdge) -> Result<()> {
     let sql = db.sql(
         "INSERT INTO derivative_lineage (id, from_work_id, to_work_id, kind, provenance, created_at) \
               VALUES (?, ?, ?, ?, ?, ?)",
@@ -181,10 +178,7 @@ pub async fn insert_lineage_edge(
 }
 
 /// Fetch all lineage edges for a work (as parent or child).
-pub async fn lineage_edges_for_work(
-    db: &Database,
-    work_id: &str,
-) -> Result<Vec<LineageEdge>> {
+pub async fn lineage_edges_for_work(db: &Database, work_id: &str) -> Result<Vec<LineageEdge>> {
     let sql = db.sql(
         "SELECT id, from_work_id, to_work_id, kind, provenance, created_at \
               FROM derivative_lineage \
@@ -238,10 +232,7 @@ pub async fn lineage_edges_for_work(
 }
 
 /// Insert an exclusion registry entry.
-pub async fn insert_exclusion_entry(
-    db: &Database,
-    entry: &ExclusionEntry,
-) -> Result<()> {
+pub async fn insert_exclusion_entry(db: &Database, entry: &ExclusionEntry) -> Result<()> {
     let sql = db.sql(
         "INSERT INTO exclusion_registry (id, target_type, target_id, reason, created_by, created_at) \
               VALUES (?, ?, ?, ?, ?, ?)",
@@ -313,9 +304,9 @@ mod tests {
 
     /// Create a minimal account → pseud → work chain for testing.
     async fn create_test_work(db: &crate::Database) -> anyhow::Result<String> {
-        use crate::identity::{create_account, create_pseud};
         use crate::content::create_work;
         use crate::identity::AccountStatus;
+        use crate::identity::{create_account, create_pseud};
         use lorehaven_domain::policy::AgeState;
         let account = create_account(
             db,
@@ -344,10 +335,8 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create scratch dir");
-        let config = crate::DatabaseConfig::new(format!(
-            "sqlite://{}/test.db?mode=rwc",
-            dir.display()
-        ));
+        let config =
+            crate::DatabaseConfig::new(format!("sqlite://{}/test.db?mode=rwc", dir.display()));
         let db = crate::Database::connect(&config).await.expect("connect");
         db.migrate().await.expect("migrate");
 
@@ -382,10 +371,8 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create scratch dir");
-        let config = crate::DatabaseConfig::new(format!(
-            "sqlite://{}/test.db?mode=rwc",
-            dir.display()
-        ));
+        let config =
+            crate::DatabaseConfig::new(format!("sqlite://{}/test.db?mode=rwc", dir.display()));
         let db = crate::Database::connect(&config).await.expect("connect");
         db.migrate().await.expect("migrate");
 
@@ -431,10 +418,8 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create scratch dir");
-        let config = crate::DatabaseConfig::new(format!(
-            "sqlite://{}/test.db?mode=rwc",
-            dir.display()
-        ));
+        let config =
+            crate::DatabaseConfig::new(format!("sqlite://{}/test.db?mode=rwc", dir.display()));
         let db = crate::Database::connect(&config).await.expect("connect");
         db.migrate().await.expect("migrate");
 

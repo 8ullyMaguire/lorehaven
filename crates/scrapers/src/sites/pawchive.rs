@@ -84,9 +84,7 @@ impl Pawchive {
 
     /// Build the JSON API URL for a user's posts page.
     fn api_user_posts_url(uid: &str, offset: u32) -> String {
-        format!(
-            "https://pawchive.pw/api/v1/patreon/user/{uid}/posts?limit=50&o={offset}"
-        )
+        format!("https://pawchive.pw/api/v1/patreon/user/{uid}/posts?limit=50&o={offset}")
     }
 }
 
@@ -146,9 +144,8 @@ impl SourceAdapter for Pawchive {
         url: &Url,
         _creds: Option<&Credentials>,
     ) -> SourceResult<SourceWork> {
-        let uid = Self::user_id(url).ok_or_else(|| {
-            SourceError::Unsupported(format!("{url} is not a Pawchive user URL"))
-        })?;
+        let uid = Self::user_id(url)
+            .ok_or_else(|| SourceError::Unsupported(format!("{url} is not a Pawchive user URL")))?;
 
         // Fetch first page of posts to count them and pick up metadata.
         let api_url = Self::api_user_posts_url(&uid, 0);
@@ -156,9 +153,8 @@ impl SourceAdapter for Pawchive {
             .get(&api_url)
             .await
             .map_err(|e| SourceError::Network(format!("listing posts: {e}")))?;
-        let posts: ApiPostList = serde_json::from_str(&page.body).map_err(|e| {
-            SourceError::Parse(format!("Pawchive API returned invalid JSON: {e}"))
-        })?;
+        let posts: ApiPostList = serde_json::from_str(&page.body)
+            .map_err(|e| SourceError::Parse(format!("Pawchive API returned invalid JSON: {e}")))?;
 
         if posts.is_empty() {
             return Err(SourceError::NotFound);
