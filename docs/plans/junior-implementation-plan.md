@@ -2859,143 +2859,271 @@ reaction bar must fail closed (hidden) when the vote type set is
 unconfigured.
 
 ### 15a.2 Milestone 32 (repo) — Typed votes, budgets, meta-moderation, karma
+Spec §35.2. Depends on: M31 (work reactions), M14 (trust levels).
+**Full detail: `docs/plans/m32-m35-detailed.md` §15a.2.**
 
-**Ledger rows:**
+**Migration `0039_forum_votes.sql` (SQLite dialect shown; PostgreSQL mirrors):**
+```sql
+CREATE TABLE forum_vote_types (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL UNIQUE,
+    category_scope TEXT,            -- NULL = instance-wide default
+    weight REAL NOT NULL DEFAULT 1.0,
+    cost INTEGER NOT NULL DEFAULT 1,
+    is_negative INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX forum_vote_types_category ON forum_vote_types (category_scope);
 
+CREATE TABLE forum_votes (
+    post_id TEXT NOT NULL,
+    pseud TEXT NOT NULL,
+    vote_type TEXT NOT NULL,
+    weight_at_cast REAL NOT NULL DEFAULT 1.0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (post_id, pseud)
+);
+CREATE INDEX forum_votes_type ON forum_votes (post_id, vote_type);
+
+CREATE TABLE forum_meta_votes (
+    vote_post_id TEXT NOT NULL,
+    vote_pseud TEXT NOT NULL,
+    pseud TEXT NOT NULL,
+    fair INTEGER NOT NULL,          -- 1 fair, 0 unfair
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (vote_post_id, vote_pseud, pseud),
+    FOREIGN KEY (vote_post_id, vote_pseud) REFERENCES forum_votes(post_id, pseud)
+);
+
+CREATE TABLE forum_karma (
+    pseud TEXT PRIMARY KEY,
+    karma REAL NOT NULL DEFAULT 0.0,
+    updated_at TEXT NOT NULL
+);
 ```
-M32-01,community,Typed vote taxonomy configurable per category,M32,<status>,<evidence>,spec §35.2
-M32-02,community,Vote budget per rolling 24h scaled by trust level,M32,<status>,<evidence>,spec §35.2
-M32-03,community,Meta-moderation of votes by TL4+ with vote-weight decay,M32,<status>,<evidence>,spec §35.2
-M32-04,community,Vote transparency tiers (aggregates public, individuals tiered),M32,<status>,<evidence>,spec §35.2
-M32-05,community,Karma from received votes with inactivity decay, display-only,M32,<status>,<evidence>,spec §35.2
-```
+Seed default taxonomy: `insightful, funny, interesting, well-written, disagree`
+(the last with `cost=3, is_negative=1`).
 
-**Migration `0039_typed_votes.sql` (both dialects):**
-`forum_vote_types (id, label, category_scope NULL, weight, cost, is_negative)`,
-`forum_votes (post_id, pseud, vote_type, weight_at_cast, created_at,
-PRIMARY KEY (post_id, pseud))`, `forum_meta_votes (vote_id, pseud, fair,
-created_at, PRIMARY KEY (vote_id, pseud))`, `forum_karma (pseud PRIMARY KEY,
-karma, updated_at)`. Seed the default taxonomy as data.
+**Config `[forum]`:** `vote_budget_base INTEGER DEFAULT 10`,
+`vote_budget_tl_multiplier INTEGER DEFAULT 5` (TL1=10, TL3=30, TL5=60),
+`meta_mod_tl_required INTEGER DEFAULT 4`, `karma_decay_monthly REAL DEFAULT 0.05`,
+`karma_inactivity_threshold_days INTEGER DEFAULT 30`.
 
-**Domain:** budget window math (rolling 24h, trust-scaled, no rollover),
-negative-vote extra cost, weight decay function from meta-vote ratio
-(floor at a configured minimum — weight decays, voice never does),
-transparency-tier visibility rules, karma accrual + monthly inactivity
-decay. Karma is read by nothing but its own display surface — enforce with
-a test that greps the workspace for `forum_karma` outside its module.
+**API response shapes:**
+- `POST /forum/posts/{id}/vote` body `{"vote_type":"insightful"}` → `{"outcome":"cast"}` (201)
+  Budget exhausted → 429 `BUDGET_EXHAUSTED`. Invalid type → 422.
+- `DELETE /forum/posts/{id}/vote` → `{"outcome":"retracted"}` (024).
+- `GET /forum/posts/{id}/votes` → `{"counts":{"insightful":5},"mine":"insightful"}` (200).
+- `POST /forum/votes/{id}/meta` body `{"fair":true}` → `{"recorded":true}` (201).
+- `GET /me/vote-budget` → `{"remaining":7,"reset_at":"...","trust_level":3}` (200).
+- `GET /forum/karma/{pseud}` → `{"pseud":"...","karma":123.4}` (200).
 
-**Routes:** `POST/DELETE /forum/posts/{id}/vote`,
-`GET /forum/posts/{id}/votes`, `POST /forum/votes/{id}/meta`,
-`GET /me/vote-budget`, `GET /forum/karma/{pseud}`.
+**Acceptance tests (`milestone_32.rs`):**
+- `budget_rejects_exhausted_voter`: POST 11 votes, 11th gets 429.
+- `meta_mod_decay_reduces_weight`: cast 3 unfair meta-votes, check `weight_at_cast` drops.
+- `transparency_hides_individual_votes`: anonymous user sees counts, not voter list.
+- `karma_decays_on_inactivity`: UPDATE `forum_karma.updated_at` to 31 days ago, run decay, verify `karma *= 0.95`.
+- `category_taxonomy_override`: create Critique category with custom types, verify different vote options.
+- `negative_vote_costs_more`: disagree costs 3 budget (not 1).
+- `karma_never_in_trust_code`: `grep -r forum_karma crates/ --include='*.rs'` only in its module.
 
-**Acceptance tests (`milestone_32.rs`):** budget exhaustion reported;
-negative vote costs more; meta-moderation decays weight not ability;
-individual votes hidden per tier; karma decays on inactivity; karma never
-appears in trust, ranking, or credit code paths (grep test); per-category
-taxonomy override works without code change.
+**Frontend:** `ForumVoteBar.svelte` (per-post), `VoteBudget.svelte` (badge), `KarmaBadge.svelte` (profile).
 
 ### 15a.3 Milestone 33 (repo) — Thread modes
+Spec §35.3. Depends on: M31 (linked topics), M32 (votes inside prompt/AMA).
+**Full detail: `docs/plans/m32-m35-detailed.md` §15a.3.**
 
-**Ledger rows:**
+**Migration `0040_thread_modes.sql` (SQLite shown, PostgreSQL mirrors):**
+```sql
+ALTER TABLE forum_topics ADD COLUMN mode TEXT NOT NULL DEFAULT 'plain';
+-- plain | ama | reading_group | critique | wiki_pin | collab_fic | prompt | character_voice
 
+CREATE TABLE topic_schedules (
+    id TEXT PRIMARY KEY,
+    topic_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    unlocks_at TEXT NOT NULL,
+    chapter_start INTEGER,
+    chapter_end INTEGER
+);
+CREATE INDEX topic_schedules_topic ON topic_schedules (topic_id);
+
+CREATE TABLE topic_wiki_pins (
+    id TEXT PRIMARY KEY,
+    topic_id TEXT NOT NULL UNIQUE,
+    post_id TEXT,
+    revision INTEGER NOT NULL DEFAULT 0,
+    approved_by TEXT,
+    approved_at TEXT
+);
+
+CREATE TABLE critique_queue (
+    id TEXT PRIMARY KEY,
+    topic_id TEXT NOT NULL,
+    pseud TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    posted_at TEXT,
+    UNIQUE (topic_id, pseud)
+);
+CREATE INDEX critique_queue_topic ON critique_queue (topic_id);
+
+CREATE TABLE prompt_posts (
+    id TEXT PRIMARY KEY,
+    topic_id TEXT NOT NULL UNIQUE,
+    prompt_date TEXT NOT NULL,
+    winner_pseud TEXT
+);
+
+ALTER TABLE forum_posts ADD COLUMN character_id TEXT;
 ```
-M33-01,community,AMA mode: questions float, author cards,M33,<status>,<evidence>,spec §35.3
-M33-02,community,Reading group mode with dated section unlocks and progress tracker,M33,<status>,<evidence>,spec §35.3
-M33-03,community,Critique circle mode with enforced turn order,M33,<status>,<evidence>,spec §35.3
-M33-04,community,Wiki pin with approval queue,M33,<status>,<evidence>,spec §35.3
-M33-05,community,Collaborative fiction mode with compile and promote-to-work,M33,<status>,<evidence>,spec §35.3
-M33-06,community,Prompt mode with automatic prompts and community voting,M33,<status>,<evidence>,spec §35.3
-M33-07,community,Character voice mode rendering as character, moderated as user,M33,<status>,<evidence>,spec §35.3
-```
 
-**Migration `0040_thread_modes.sql` (both dialects):**
-`forum_topics.mode TEXT NOT NULL DEFAULT 'plain'`,
-`topic_schedules`, `topic_wiki_pins`, `critique_queue`, `prompt_posts`.
+**API response shapes:**
+- `PUT /topics/{id}/mode` body `{"mode":"ama"}` → `{"mode":"ama"}` (200).
+- `POST /topics/{id}/sections` body `{"title":"Week 1","unlocks_at":"...","chapter_start":1,"chapter_end":5}` → `{"id":"..."}` (201).
+- `GET /topics/{id}/sections` → `{"items":[{"title":"Week 1","unlocks_at":"...","unlocked":true}]}` (200; only unlocked sections visible).
+- `POST /topics/{id}/wiki` body `{"body":"..."}` → `{"status":"pending"}` (201).
+- `POST /topics/{id}/wiki/approve` → `{"status":"approved"}` (201).
+- `POST /topics/{id}/critique/join` → `{"position":3}` (201).
+- `POST /topics/{id}/critique/submit` → `{"accepted":true}` (201). Wrong turn → 422.
+- `POST /topics/{id}/compile` → `{"text":"..."}` (200; stitched posts).
+- `POST /topics/{id}/promote` → `{"work_id":"..."}` (201; creates work, thread read-only).
 
-**Domain:** one module per mode under `crates/domain/src/forum_modes/`,
-each exporting the same tiny trait (`affects_reply_ordering`,
-`visible_posts`, `render_hints`) so routes stay mode-agnostic. Promote-to-
-work runs the §33.1 permission check (participants' permission statements)
-before creating anything.
+**Acceptance tests (`milestone_33.rs`):**
+- `reading_group_hides_future_sections`: GET sections before unlock → 404.
+- `critique_enforces_turn_order`: out-of-order submit → 422.
+- `wiki_pin_invisible_until_approved`: GET pin shows pending state.
+- `compile_stitches_posts_in_order`: verify output text order.
+- `promote_to_work_creates_readable_work`: work exists with chapters.
+- `ama_sorts_questions_to_top`: check reply ordering.
+- `character_voice_post_resolves_to_user_for_mod`: block/mute still works.
 
-**Acceptance tests (`milestone_33.rs`):** section invisibility before
-unlock (fetch returns 404/403 — not just hidden UI); server-enforced turn
-order; wiki-pin edit invisible until approved; promote-to-work creates a
-real work and read-only thread; character-voice post resolves to user for
-blocks/moderation; plain topics byte-identical in behavior.
+**Frontend:** `ThreadModePicker.svelte`, `ReadingGroupProgress.svelte`, `WikiPin.svelte`, `CritiqueQueue.svelte`, `CollabCompileButton.svelte`, `CharacterVoiceBadge.svelte`.
 
 ### 15a.4 Milestone 34 (repo) — Spoilers, warnings, readability
+Spec §35.4. Depends on: M12 (post drafts, scheduled posts — verify tables exist first).
+**Full detail: `docs/plans/m32-m35-detailed.md` §15a.4.**
 
-**Ledger rows:**
+**Migration `0041_spoilers_warnings.sql` (SQLite shown, PostgreSQL mirrors):**
+```sql
+ALTER TABLE forum_topics ADD COLUMN spoiler_scope_chapter INTEGER;
+ALTER TABLE forum_posts ADD COLUMN fold_at_word_count INTEGER;
 
+CREATE TABLE content_warnings (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL UNIQUE,
+    severity INTEGER NOT NULL DEFAULT 0  -- 0=info, 1=warn, 2=severe
+);
+
+CREATE TABLE post_content_warnings (
+    post_id TEXT NOT NULL,
+    warning_id TEXT NOT NULL,
+    custom_text TEXT,
+    PRIMARY KEY (post_id, warning_id)
+);
+
+-- Verify these exist from M12 before adding:
+-- ALTER TABLE forum_posts ADD COLUMN scheduled_at TEXT;
+-- ALTER TABLE forum_posts ADD COLUMN published_at TEXT;
+-- CREATE INDEX forum_posts_scheduled ON forum_posts (scheduled_at) WHERE scheduled_at IS NOT NULL;
+-- post_drafts table should exist from M12 §4.6.
 ```
-M34-01,community,Per-topic spoiler scope and collapsible spoiler blocks,M34,<status>,<evidence>,spec §35.4
-M34-02,community,Structured content warnings with per-user reveal prefs,M34,<status>,<evidence>,spec §35.4
-M34-03,community,Reading time estimates on topics and posts,M34,<status>,<evidence>,spec §35.4
-M34-04,community,Post draft autosave every 30s with resume,M34,<status>,<evidence>,spec §35.4
-M34-05,community,Scheduled posts published by background job,M34,<status>,<evidence>,spec §35.4
-M34-06,community,Collapsible long posts with user-configurable threshold,M34,<status>,<evidence>,spec §35.4
-```
 
-**Migration `0041_forum_readability.sql` (both dialects):**
-`forum_topics.spoiler_scope`, `content_warnings`, `forum_posts.language`,
-`forum_posts.scheduled_at`, `forum_posts.word_count`.
+**Config `[forum]`:** `fold_default_word_count INTEGER DEFAULT 800`.
 
-Post drafts and scheduled posts already have tables from M12 (§4.6) —
-verify before adding anything; this milestone wires autosave and the
-publish job, it does not re-create storage.
+**API response shapes:**
+- `GET /topics/{id}` → includes `spoiler_scope_chapter: 12` (or null).
+- `POST /posts/{id}/warnings` body `{"warning_id":"violence","custom_text":"..."}` → `{"added":true}` (201).
+- `GET /posts/{id}` → includes `warnings: [{"id":"violation","severity":1}]`, `fold_at: 800`.
+- `POST /posts/{id}/draft` body `{"body":"..."}` → `{"saved_at":"..."}` (201; UPSERT).
+- `GET /posts/{id}/draft` → `{"body":"..."}` (200; only own draft).
+- `POST /posts/{id}/schedule` body `{"scheduled_at":"..."}` → `{"scheduled":true}` (201).
 
-**Acceptance tests (`milestone_34.rs`):** collapsed spoiler hidden from
-a11y tree; warning blur follows viewer prefs; draft resume exactly-once;
-scheduled post publishes once idempotently (job re-run does not
-double-post); fold never hides first screenful.
+**Acceptance tests (`milestone_34.rs`):**
+- `spoiler_block_hidden_from_screen_reader`: verify `aria-expanded=false` + content in `aria-hidden`.
+- `content_warning_blur_follows_viewer_prefs`: different users see different states.
+- `draft_survives_hard_reload`: save → reload → resume.
+- `scheduled_post_publishes_once_at_its_time`: job re-run does not double-post.
+- `fold_never_hides_first_screenful`: measure rendered height > viewport.
+
+**Frontend:** `SpoilerBlock.svelte`, `ContentWarningBar.svelte`, `PostComposer.svelte` (autosave), `ReadingTimeBadge.svelte`.
 
 ### 15a.5 Milestone 35 (repo) — Discovery, health, UX, federation
+Spec §35.5. Depends on: M31–M34, M18 (federation base), M24 (moderation).
+**Full detail: `docs/plans/m32-m35-detailed.md` §15a.5.**
 
-**Ledger rows:**
+**Migration `0042_discovery.sql` (SQLite shown, PostgreSQL mirrors):**
+```sql
+ALTER TABLE forum_topics ADD COLUMN summary_text TEXT;
+ALTER TABLE forum_topics ADD COLUMN summary_revision INTEGER DEFAULT 0;
+ALTER TABLE forum_topics ADD COLUMN federation_scope TEXT NOT NULL DEFAULT 'public';
+ALTER TABLE forum_topics ADD COLUMN slow_mode_seconds INTEGER DEFAULT 0;
+ALTER TABLE forum_topics ADD COLUMN activity_history TEXT NOT NULL DEFAULT '[]';
 
-```
-M35-01,community,Thread summaries via optional AI provider with deterministic abstention,M35,<status>,<evidence>,spec §35.5
-M35-02,community,Semantic search and similar threads (PostgreSQL deployments),M35,<status>,<evidence>,spec §35.5
-M35-03,community,Thread forking with tombstones and audit trail,M35,<status>,<evidence>,spec §35.5
-M35-04,community,Cross-reference preview cards for internal links,M35,<status>,<evidence>,spec §35.5
-M35-05,community,Best-of digest with featured posts and optional newsletter,M35,<status>,<evidence>,spec §35.5
-M35-06,community,Graduated response ladder and appeals routing,M35,<status>,<evidence>,spec §35.5
-M35-07,community,Community-elected category moderators,M35,<status>,<evidence>,spec §35.5
-M35-08,community,Diversity-of-voices metric surfaced to moderators,M35,<status>,<evidence>,spec §35.5
-M35-09,community,Slow mode per topic or category,M35,<status>,<evidence>,spec §35.5
-M35-10,community,Keyboard shortcuts with documented modal,M35,<status>,<evidence>,spec §35.5
-M35-11,community,Reading progress and persisted scroll position,M35,<status>,<evidence>,spec §35.5
-M35-12,community,Multi-language posts with language filter,M35,<status>,<evidence>,spec §35.5
-M35-13,community,Offline topic cache with read-state sync,M35,<status>,<evidence>,spec §35.5
-M35-14,community,Community health dashboard,M35,<status>,<evidence>,spec §35.5
-M35-15,community,Zero-result search tracking,M35,<status>,<evidence>,spec §35.5
-M35-16,community,Activity sparklines from stored daily counts,M35,<status>,<evidence>,spec §35.5
-M35-17,community,First-votes notification once per post,M35,<status>,<evidence>,spec §35.5
-M35-18,interop,Per-topic federation scope with local topics never federated,M35,<status>,<evidence>,spec §35.5
-M35-19,interop,Remote profile cards with cached TTL,M35,<status>,<evidence>,spec §35.5
-M35-20,interop,Federated moderation protocol (Reject, aggregated reports),M35,<status>,<evidence>,spec §35.5
-M35-21,interop,Instance reputation metrics and auto-defederation threshold,M35,<status>,<evidence>,spec §35.5
-M35-22,interop,Federated polls via Question objects,M35,<status>,<evidence>,spec §35.5
+ALTER TABLE forum_posts ADD COLUMN original_topic_id TEXT;
+ALTER TABLE forum_posts ADD COLUMN featured INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE forum_posts ADD COLUMN featured_by TEXT;
+ALTER TABLE forum_posts ADD COLUMN featured_at TEXT;
+ALTER TABLE forum_posts ADD COLUMN moderation_action TEXT;
+ALTER TABLE forum_posts ADD COLUMN moderation_expires_at TEXT;
+ALTER TABLE forum_posts ADD COLUMN moderation_reason TEXT;
 ```
 
-**Migrations `0042_forum_discovery.sql` + `0043_forum_federation.sql`
-(both dialects):** `forum_topics.summary_text/summary_revision/
-federation_scope/slow_mode_seconds/activity_history`,
-`forum_posts.original_topic_id/featured`, `topic_forks`, `link_cards`,
-`forum_digests`, `mod_elections`, `sanction_ladder_events`,
-`instance_reputation`, `zero_result_queries`.
+**Migration `0043_federation.sql`:**
+```sql
+CREATE TABLE remote_profiles (
+    actor_id TEXT PRIMARY KEY,
+    instance_host TEXT NOT NULL,
+    display_name TEXT,
+    bio TEXT,
+    avatar_url TEXT,
+    cached_at TEXT NOT NULL,
+    ttl_seconds INTEGER NOT NULL DEFAULT 3600
+);
 
-**Ordering inside the milestone:** federation scope first (it constrains
-every outbound payload), then forking/cards/digest, then health dashboard,
-then semantic search (Postgres-only, feature-flagged), summaries last
-(AI-optional).
+CREATE TABLE instance_reputation (
+    instance_host TEXT PRIMARY KEY,
+    spam_rate REAL NOT NULL DEFAULT 0.0,
+    report_rate REAL NOT NULL DEFAULT 0.0,
+    avg_takedown_seconds REAL NOT NULL DEFAULT 0.0,
+    auto_defederated INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
 
-**Acceptance tests (`milestone_35.rs`):** a `local` topic appears in no
-outbound payload (assert on the delivery builder, not the UI); fork
-preserves authorship/timestamps/audit; dashboard aggregates only §24.3
-data; federated poll never counts an actor twice; shortcuts documented and
-focus-safe.
+CREATE TABLE forum_poll_votes (
+    poll_id TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    option_index INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (poll_id, actor_id)
+);
+```
+
+**Config `[forum]`:** `summary_min_replies INTEGER DEFAULT 20`,
+`summary_regenerate_every INTEGER DEFAULT 10`,
+`slow_mode_default_seconds INTEGER DEFAULT 0`.
+
+**API response shapes:**
+- `GET /topics/{id}/summary` → `{"text":"...","revision":3}` (200; null if no summary).
+- `PUT /topics/{id}/summary` body `{"text":"..."}` → `{"revision":4}` (201).
+- `PUT /topics/{id}/federation-scope` body `{"scope":"local"}` → `{"scope":"local"}` (201).
+- `POST /topics/{id}/fork` body `{"title":"...","post_ids":[...]}` → `{"topic_id":"..."}` (201).
+- `POST /posts/{id}/feature` → `{"featured":true}` (201).
+- `PUT /topics/{id}/slow-mode` body `{"seconds":300}` → `{"slow_mode_seconds":300}` (201).
+- `GET /forum/digest` → `{"items":[{"post_id":"...","title":"..."}]}` (200).
+- `GET /forum/health` → `{"daily_active_posters":42,"new_user_retention_7d":0.3,...}` (200; admin only).
+- `GET /forum/search?q=...&semantic=true` → `{"items":[...],"method":"pgvector|fts"}` (200).
+- `GET /forum/remote-profiles/{id}` → `{"actor_id":"...","display_name":"...","instance_host":"..."}` (200).
+
+**Acceptance tests (`milestone_35.rs`):**
+- `local_topic_absent_from_federation_outbound`: assert on delivery builder, not UI.
+- `forking_preserves_audit_trail`: original_topic_id set, tombstone present.
+- `health_dashboard_respects_privacy_ceilings`: no individual user data.
+- `slow_mode_enforces_rate_limit`: 429 SLOW_MODE.
+- `federated_poll_counts_one_actor_once`: duplicate actor_id rejected.
+- `keyboard_shortcuts_documented_and_focus_safe`: ? modal lists all shortcuts.
+
+**Frontend:** `ThreadSummary.svelte`, `ForkButton.svelte`, `FeatureBadge.svelte`, `DigestView.svelte`, `SlowModeIndicator.svelte`, `RemoteProfileCard.svelte`, `KeyboardShortcuts.svelte`, `SearchBar.svelte`.
 
 ### 15a.6 Sign-off
 
