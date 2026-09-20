@@ -2774,6 +2774,238 @@ instances are the default.
 
 ---
 
+
+---
+
+## 15a. Forum-first milestones (repo M31–M35, spec §35)
+
+**Read first:** spec §35 in full, plus §17 (the surface being revised),
+§12.8 (forum positivity policy), §19 (trust ladder, modlog, appeals),
+§23.6–23.10 (federation), §29.6 (ballot privacy), §0.3 (what votes and
+karma may never buy). Every brief below follows the §1 workflow loop and
+the §2 house rules; only the parts that differ are written out.
+
+### 15a.0 Numbering map additions
+
+| Repo | Spec | Topic | Depends on |
+|---|---|---|---|
+| M31 | §35.1 | Work-linked threads, reaction bar, discussion modes, comment migration tool | M12 |
+|| M32 | §35.2 | Typed votes, budgets, meta-moderation, karma | M12, M14 |
+|| M33 | §35.3 | Thread modes: AMA, reading group, critique circle, wiki pin, collab fic, prompt, character voice | M31, M32 |
+|| M34 | §35.4 | Spoilers, content warnings, reading time, draft autosave, scheduling, long-post fold | M12 |
+|| M35 | §35.5 | Discovery, health, UX, federation scope | M31–M34, M18 |
+
+Order matters: M31 before M33 (thread modes link to works), M32 before M33
+(votes are the signal inside prompt/AMA modes), M34 anywhere after M12,
+M35 last (it builds on all of them plus M18's federation base).
+
+### 15a.1 Milestone 31 (repo) — Work-linked threads and the reaction bar
+
+**Ledger rows (add before code):**
+
+```
+M31-01,community,Work discussion mode per work and instance default (ThreadOnly/CommentsOnly/Both),M31,<status>,<evidence>,spec §35.0
+M31-02,community,Typed-vote reaction bar on work page with one vote per pseud,M31,<status>,<evidence>,spec §35.1
+M31-03,community,Work-linked forum topics with backlink cards and Discuss button,M31,<status>,<evidence>,spec §35.1
+M31-04,community,Chapter publish auto-creates or prompts linked topic exactly once,M31,<status>,<evidence>,spec §35.1
+M31-05,community,Batch comment-to-topic migration preserving authorship and timestamps,M31,<status>,<evidence>,spec §35.1
+M31-06,community,ThreadOnly work page renders no comment form,M31,<status>,<evidence>,spec §35.0
+```
+
+**Migration `0038_work_discussion.sql` (both dialects):**
+
+- `ALTER TABLE works ADD COLUMN discussion_mode TEXT NOT NULL DEFAULT 'comments_only'`
+  — existing works keep today's behavior; the instance default is config
+  (`[forum] work_discussion_default = "thread_only"`), applied to **new**
+  works at creation, never retroactively.
+- `topic_work_links (id, topic_id UNIQUE, work_id, chapter_id NULL, created_at)`,
+  index on `work_id`; FK to `forum_topics`/`works`.
+- `work_reactions (work_id, pseud, vote_type, created_at, updated_at,
+  PRIMARY KEY (work_id, pseud))`.
+
+**Domain (`crates/domain/src/forum.rs` grows, new `work_discussion.rs`):**
+mode resolution (work override → instance default), reaction vote rules
+(allowed types on this surface = positive set + `disagree`, one-per-pseud,
+change/retract), linked-topic uniqueness per work/chapter, migration
+round-trip rules.
+
+**Repository (`crates/db/src/community.rs` grows):** reaction upsert with
+count aggregation, `topic_work_links` CRUD, comment→post conversion in one
+transaction (comments copied in order, `comments.deleted_at` set, tombstone
+marker stored).
+
+**Routes (`crates/app/src/routes/` — extend `community.rs`, new
+`work_discussion.rs`):** `GET/PUT /works/{id}/discussion-mode`,
+`GET /works/{id}/reactions`, `POST/DELETE /works/{id}/reactions/{type}` or
+`POST /works/{id}/reactions` with body, `GET /works/{id}/thread`,
+`POST /works/{id}/migrate-comments`. All `classified(...)`; author-only
+gates on mode change and migration.
+
+**Frontend:** `WorkPage.svelte` reaction bar (typed buttons + counts +
+Discuss link, no comment form in ThreadOnly), discussion-mode picker in the
+work editor, backlink card on the topic page. State quartet on every new
+surface; labels `en` + `eo`.
+
+**Acceptance tests (`crates/app/tests/milestone_31.rs`):** mode resolution
+(preference order), reaction one-per-pseud under concurrency, linked topic
+created exactly once per chapter publish, migration round-trip preserves
+author + timestamp + order, ThreadOnly page has no comment form (assert the
+route refuses comment creation in ThreadOnly mode), CommentsOnly work
+behaves as before.
+
+**Pitfalls:** do not apply the instance default retroactively; do not let
+the migration tool run twice concurrently (idempotency key on work); the
+reaction bar must fail closed (hidden) when the vote type set is
+unconfigured.
+
+### 15a.2 Milestone 32 (repo) — Typed votes, budgets, meta-moderation, karma
+
+**Ledger rows:**
+
+```
+M32-01,community,Typed vote taxonomy configurable per category,M32,<status>,<evidence>,spec §35.2
+M32-02,community,Vote budget per rolling 24h scaled by trust level,M32,<status>,<evidence>,spec §35.2
+M32-03,community,Meta-moderation of votes by TL4+ with vote-weight decay,M32,<status>,<evidence>,spec §35.2
+M32-04,community,Vote transparency tiers (aggregates public, individuals tiered),M32,<status>,<evidence>,spec §35.2
+M32-05,community,Karma from received votes with inactivity decay, display-only,M32,<status>,<evidence>,spec §35.2
+```
+
+**Migration `0039_typed_votes.sql` (both dialects):**
+`forum_vote_types (id, label, category_scope NULL, weight, cost, is_negative)`,
+`forum_votes (post_id, pseud, vote_type, weight_at_cast, created_at,
+PRIMARY KEY (post_id, pseud))`, `forum_meta_votes (vote_id, pseud, fair,
+created_at, PRIMARY KEY (vote_id, pseud))`, `forum_karma (pseud PRIMARY KEY,
+karma, updated_at)`. Seed the default taxonomy as data.
+
+**Domain:** budget window math (rolling 24h, trust-scaled, no rollover),
+negative-vote extra cost, weight decay function from meta-vote ratio
+(floor at a configured minimum — weight decays, voice never does),
+transparency-tier visibility rules, karma accrual + monthly inactivity
+decay. Karma is read by nothing but its own display surface — enforce with
+a test that greps the workspace for `forum_karma` outside its module.
+
+**Routes:** `POST/DELETE /forum/posts/{id}/vote`,
+`GET /forum/posts/{id}/votes`, `POST /forum/votes/{id}/meta`,
+`GET /me/vote-budget`, `GET /forum/karma/{pseud}`.
+
+**Acceptance tests (`milestone_32.rs`):** budget exhaustion reported;
+negative vote costs more; meta-moderation decays weight not ability;
+individual votes hidden per tier; karma decays on inactivity; karma never
+appears in trust, ranking, or credit code paths (grep test); per-category
+taxonomy override works without code change.
+
+### 15a.3 Milestone 33 (repo) — Thread modes
+
+**Ledger rows:**
+
+```
+M33-01,community,AMA mode: questions float, author cards,M33,<status>,<evidence>,spec §35.3
+M33-02,community,Reading group mode with dated section unlocks and progress tracker,M33,<status>,<evidence>,spec §35.3
+M33-03,community,Critique circle mode with enforced turn order,M33,<status>,<evidence>,spec §35.3
+M33-04,community,Wiki pin with approval queue,M33,<status>,<evidence>,spec §35.3
+M33-05,community,Collaborative fiction mode with compile and promote-to-work,M33,<status>,<evidence>,spec §35.3
+M33-06,community,Prompt mode with automatic prompts and community voting,M33,<status>,<evidence>,spec §35.3
+M33-07,community,Character voice mode rendering as character, moderated as user,M33,<status>,<evidence>,spec §35.3
+```
+
+**Migration `0040_thread_modes.sql` (both dialects):**
+`forum_topics.mode TEXT NOT NULL DEFAULT 'plain'`,
+`topic_schedules`, `topic_wiki_pins`, `critique_queue`, `prompt_posts`.
+
+**Domain:** one module per mode under `crates/domain/src/forum_modes/`,
+each exporting the same tiny trait (`affects_reply_ordering`,
+`visible_posts`, `render_hints`) so routes stay mode-agnostic. Promote-to-
+work runs the §33.1 permission check (participants' permission statements)
+before creating anything.
+
+**Acceptance tests (`milestone_33.rs`):** section invisibility before
+unlock (fetch returns 404/403 — not just hidden UI); server-enforced turn
+order; wiki-pin edit invisible until approved; promote-to-work creates a
+real work and read-only thread; character-voice post resolves to user for
+blocks/moderation; plain topics byte-identical in behavior.
+
+### 15a.4 Milestone 34 (repo) — Spoilers, warnings, readability
+
+**Ledger rows:**
+
+```
+M34-01,community,Per-topic spoiler scope and collapsible spoiler blocks,M34,<status>,<evidence>,spec §35.4
+M34-02,community,Structured content warnings with per-user reveal prefs,M34,<status>,<evidence>,spec §35.4
+M34-03,community,Reading time estimates on topics and posts,M34,<status>,<evidence>,spec §35.4
+M34-04,community,Post draft autosave every 30s with resume,M34,<status>,<evidence>,spec §35.4
+M34-05,community,Scheduled posts published by background job,M34,<status>,<evidence>,spec §35.4
+M34-06,community,Collapsible long posts with user-configurable threshold,M34,<status>,<evidence>,spec §35.4
+```
+
+**Migration `0041_forum_readability.sql` (both dialects):**
+`forum_topics.spoiler_scope`, `content_warnings`, `forum_posts.language`,
+`forum_posts.scheduled_at`, `forum_posts.word_count`.
+
+Post drafts and scheduled posts already have tables from M12 (§4.6) —
+verify before adding anything; this milestone wires autosave and the
+publish job, it does not re-create storage.
+
+**Acceptance tests (`milestone_34.rs`):** collapsed spoiler hidden from
+a11y tree; warning blur follows viewer prefs; draft resume exactly-once;
+scheduled post publishes once idempotently (job re-run does not
+double-post); fold never hides first screenful.
+
+### 15a.5 Milestone 35 (repo) — Discovery, health, UX, federation
+
+**Ledger rows:**
+
+```
+M35-01,community,Thread summaries via optional AI provider with deterministic abstention,M35,<status>,<evidence>,spec §35.5
+M35-02,community,Semantic search and similar threads (PostgreSQL deployments),M35,<status>,<evidence>,spec §35.5
+M35-03,community,Thread forking with tombstones and audit trail,M35,<status>,<evidence>,spec §35.5
+M35-04,community,Cross-reference preview cards for internal links,M35,<status>,<evidence>,spec §35.5
+M35-05,community,Best-of digest with featured posts and optional newsletter,M35,<status>,<evidence>,spec §35.5
+M35-06,community,Graduated response ladder and appeals routing,M35,<status>,<evidence>,spec §35.5
+M35-07,community,Community-elected category moderators,M35,<status>,<evidence>,spec §35.5
+M35-08,community,Diversity-of-voices metric surfaced to moderators,M35,<status>,<evidence>,spec §35.5
+M35-09,community,Slow mode per topic or category,M35,<status>,<evidence>,spec §35.5
+M35-10,community,Keyboard shortcuts with documented modal,M35,<status>,<evidence>,spec §35.5
+M35-11,community,Reading progress and persisted scroll position,M35,<status>,<evidence>,spec §35.5
+M35-12,community,Multi-language posts with language filter,M35,<status>,<evidence>,spec §35.5
+M35-13,community,Offline topic cache with read-state sync,M35,<status>,<evidence>,spec §35.5
+M35-14,community,Community health dashboard,M35,<status>,<evidence>,spec §35.5
+M35-15,community,Zero-result search tracking,M35,<status>,<evidence>,spec §35.5
+M35-16,community,Activity sparklines from stored daily counts,M35,<status>,<evidence>,spec §35.5
+M35-17,community,First-votes notification once per post,M35,<status>,<evidence>,spec §35.5
+M35-18,interop,Per-topic federation scope with local topics never federated,M35,<status>,<evidence>,spec §35.5
+M35-19,interop,Remote profile cards with cached TTL,M35,<status>,<evidence>,spec §35.5
+M35-20,interop,Federated moderation protocol (Reject, aggregated reports),M35,<status>,<evidence>,spec §35.5
+M35-21,interop,Instance reputation metrics and auto-defederation threshold,M35,<status>,<evidence>,spec §35.5
+M35-22,interop,Federated polls via Question objects,M35,<status>,<evidence>,spec §35.5
+```
+
+**Migrations `0042_forum_discovery.sql` + `0043_forum_federation.sql`
+(both dialects):** `forum_topics.summary_text/summary_revision/
+federation_scope/slow_mode_seconds/activity_history`,
+`forum_posts.original_topic_id/featured`, `topic_forks`, `link_cards`,
+`forum_digests`, `mod_elections`, `sanction_ladder_events`,
+`instance_reputation`, `zero_result_queries`.
+
+**Ordering inside the milestone:** federation scope first (it constrains
+every outbound payload), then forking/cards/digest, then health dashboard,
+then semantic search (Postgres-only, feature-flagged), summaries last
+(AI-optional).
+
+**Acceptance tests (`milestone_35.rs`):** a `local` topic appears in no
+outbound payload (assert on the delivery builder, not the UI); fork
+preserves authorship/timestamps/audit; dashboard aggregates only §24.3
+data; federated poll never counts an actor twice; shortcuts documented and
+focus-safe.
+
+### 15a.6 Sign-off
+
+Tag `v0.31-work-threads` … `v0.35-forum-federation` per milestone, each
+with its ledger rows flipped and evidence named. The §16 checklist applies
+to every tag. When M35 lands, update §17's revision note to say the forum-
+first surface is implemented, and update `docs/verification.md`.
+
+---
+
 ## 16. Cross-cutting sign-off checklist (run at every milestone tag)
 
 - [ ] Ledger: rows added **before** code; flipped after evidence; `M<repo>-NN`
