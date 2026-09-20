@@ -19,6 +19,7 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -212,7 +213,17 @@ impl Bucket {
 }
 
 /// The in-process limiter.
+///
+/// Uses `Arc<Mutex<...>>` so clones of `AppState` share the same bucket map
+/// (Axum clones the state per request; a fresh Mutex per clone would reset
+/// the buckets and make the limiter inert).
+#[derive(Clone)]
 pub struct RateLimiter {
+    inner: Arc<RateLimiterInner>,
+}
+
+#[derive(Debug)]
+struct RateLimiterInner {
     buckets: Mutex<HashMap<String, Bucket>>,
     last_prune: Mutex<Instant>,
 }
@@ -232,8 +243,10 @@ impl RateLimiter {
     #[must_use]
     pub fn new(_limits: Limits) -> Self {
         Self {
-            buckets: Mutex::new(HashMap::new()),
-            last_prune: Mutex::new(Instant::now()),
+            inner: Arc::new(RateLimiterInner {
+                buckets: Mutex::new(HashMap::new()),
+                last_prune: Mutex::new(Instant::now()),
+            }),
         }
     }
 
@@ -241,6 +254,7 @@ impl RateLimiter {
     fn check(&self, key: &str, quota: Quota) -> Result<(), Duration> {
         let now = Instant::now();
         let mut buckets = self
+            .inner
             .buckets
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -256,6 +270,7 @@ impl RateLimiter {
     /// Drop buckets that have refilled and gone quiet.
     fn prune_if_stale(&self, buckets: &mut HashMap<String, Bucket>, now: Instant) {
         let mut last = self
+            .inner
             .last_prune
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -271,7 +286,8 @@ impl RateLimiter {
     /// Number of tracked buckets. Exposed for tests and diagnostics.
     #[must_use]
     pub fn tracked_buckets(&self) -> usize {
-        self.buckets
+        self.inner
+            .buckets
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .len()
