@@ -55,14 +55,8 @@ pub const PAYLOAD_EXPORT_JOB_ID: &str = "export_job_id";
 /// How an export's output blob is owned, so the collector leaves it alone.
 pub const EXPORT_OWNER_TYPE: &str = "export_job";
 
-/// How long a download grant lives. Short by design: the reader who owns the
-/// export can always be given another one, so a leaked URL has a small window.
-pub const GRANT_TTL_SECONDS: i64 = 3600;
 
-/// How long an export's output is kept after it is produced.
-pub const RETENTION_DAYS: i64 = 7;
 
-/// A converter is given two minutes for a work of ordinary length.
 ///
 /// The limit exists so that a pathological input — a work whose HTML sends a
 /// converter into a long loop — cannot occupy a worker indefinitely. It is
@@ -877,7 +871,8 @@ pub async fn request_bulk(
 pub async fn mint_grant(state: &AppState, export_job_id: &str) -> Result<String, HandlerError> {
     let token = crate::crypto::generate_token();
     let hash = crate::crypto::hash_token(&token);
-    let expires_at = lorehaven_db::identity::in_seconds(GRANT_TTL_SECONDS);
+    let ttl = state.config().exports.grant_ttl_secs;
+    let expires_at = lorehaven_db::identity::in_seconds(ttl);
     repo::mint_grant(
         state.db(),
         &MediaAssetId::new().to_string(),
@@ -910,7 +905,11 @@ pub async fn run_bulk(_state: &AppState, _payload: &Value) -> Result<(), Handler
 /// an export must not be able to delete a reader's reading copy.
 pub async fn sweep(state: &AppState) -> Result<usize, HandlerError> {
     let db = state.db();
-    let cutoff = lorehaven_db::identity::in_seconds(-RETENTION_DAYS * 24 * 60 * 60);
+    let retention_days = state.config().exports.retention_days;
+    if retention_days <= 0 {
+        return Ok(0);
+    }
+    let cutoff = lorehaven_db::identity::in_seconds(-retention_days * 24 * 60 * 60);
     let store = BlobStore::new(state.config().storage.root.clone());
 
     let expired = repo::purge_expired(db, &cutoff, 500)

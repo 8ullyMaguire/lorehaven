@@ -142,7 +142,7 @@ async fn list_formats(
     Ok(Json(json!({
         "formats": state.converters().report(),
         "privacy_notice": PRIVACY_NOTICE,
-        "retention_days": crate::exports::RETENTION_DAYS,
+        "retention_days": state.config().exports.retention_days,
     })))
 }
 
@@ -329,7 +329,7 @@ async fn mint_grant(
     Ok(Json(json!({
         "token": token,
         "url": format!("/exports/download/{token}"),
-        "expires_in_seconds": crate::exports::GRANT_TTL_SECONDS,
+        "expires_in_seconds": state.config().exports.grant_ttl_secs,
     })))
 }
 
