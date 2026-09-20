@@ -594,13 +594,15 @@ where
 {
     let state = state.clone();
     router
+        // Added first, therefore innermost: the limiter runs after the
+        // Classified extension has been inserted by the layer below.
+        .layer(middleware::from_fn_with_state(state, limiter::enforce))
         .layer(middleware::from_fn(
             move |mut request: Request, next: Next| async move {
                 request.extensions_mut().insert(Classified(class));
                 next.run(request).await
             },
         ))
-        .layer(middleware::from_fn_with_state(state, limiter::enforce))
 }
 
 /// Record whether a reverse proxy is trusted, for rate-limit keying.
