@@ -1,4 +1,4 @@
-# Handoff — forum-first build (M31 done, M32–M35 next)
+# Handoff — forum-first build (M31 complete, M32–M35 next)
 
 Date: 2026-09-20. Read this with `docs/plans/junior-implementation-plan.md` §15a
 and `docs/spec.md` §35.
@@ -20,33 +20,29 @@ The forum is being made a first-class surface of the creative ecosystem
 - `e6411c9` spec: §35 + §17 revision note (work discussion modes)
 - `60bfbe8` plan: §15a briefs for repo M31–M35
 - `4f7bea4` ledger: M31-01..06 rows
-- `10721b5`, `eb7d2d1` rate limiter fixes (share state, async middleware) —
-  from the interrupted turn; superseded my earlier Arc commit `ea12b11`
+- `10721b5`, `eb7d2d1` rate limiter fixes (share state, async middleware)
 - `53c1318` M31 implementation (migration 0038, domain, db, routes, config)
 - `43f7ed9` M31 acceptance tests 6/6 + **limiter middleware order fix**
 - `7329d59` ledger: M31 flipped to implemented-locally-tested
+- `6c23e3f` M31 frontend: reaction bar, Discuss link, backlink card, editor mode picker
 
 ## State
 
-- **M31 complete**: work discussion modes (thread_only/comments_only/both),
-  reaction bar (one vote per pseud, change/retract), linked topics
-  (idempotent per work), comment→topic migration tool (authorship/order/
-  timestamps preserved, idempotent), server-side refusal of comments on
-  ThreadOnly works. All 6 acceptance tests pass
-  (`cargo test --test milestone_31`).
+- **M31 complete** (backend + frontend): work discussion modes
+  (thread_only/comments_only/both), reaction bar (one vote per pseud,
+  changeable/retractable), linked topics (idempotent per work),
+  comment→topic migration tool (authorship/order/timestamps preserved,
+  idempotent), server-side refusal of comments on ThreadOnly works.
+- **6/6 acceptance tests pass** (`cargo test --test milestone_31`).
 - Workspace `cargo check --workspace` clean, `cargo fmt` applied, working
-  tree clean at `7329d59`.
+  tree clean at `6c23e3f`.
 - E2E suite (frontend/e2e/extended.spec.ts, 20 tests) passed earlier
-  against the thinkcentre scratch server — not re-run after M31 (frontend
-  work for M31 is not built yet; see below).
+  against the thinkcentre scratch server — not re-run after M31 frontend.
 
 ## What's left in the forum-first arc (plan §15a)
 
-1. **M31 frontend (owed):** reaction bar + Discuss link on WorkPage.svelte,
-   mode picker in the work editor, backlink card on the topic page. The API
-   is ready: `GET/PUT /works/{id}/discussion-mode`, `GET/POST
-   /works/{id}/reactions`, `GET /works/{id}/thread`, `POST
-   /works/{id}/migrate-comments`. Labels in `en` + `eo`.
+1. **M31 E2E (owed):** run the extended E2E suite on thinkcentre to cover
+   the new frontend surfaces (reaction bar, Discuss link, editor picker).
 2. **M32** typed votes/budgets/meta-mod/karma (migration 0039, plan §15a.2).
 3. **M33** thread modes (AMA, reading group, critique circle, wiki pin,
    collab fiction + promote-to-work, prompt, character voice) — migration
@@ -62,7 +58,7 @@ The forum is being made a first-class surface of the creative ecosystem
 ## Environment quirks (unchanged, still true)
 
 - `~/code` is an SSHFS symlink to thinkcentre: builds/tests are slow
-  (a full `cargo test --test milestone_31` cycle ≈ 4–8 min; run as
+  (a full `cargo test --test milestone_31` cycle ≈ 15–25 min; run as
   background process with notify, poll the log file). Never create venvs or
   try to execute `node_modules/.bin` through the mount.
 - Playwright E2E must run ON thinkcentre over SSH (see
@@ -91,10 +87,13 @@ The forum is being made a first-class surface of the creative ecosystem
 - A stray `~/` directory appears in the repo when cargo writes to a bad
   path over SSHFS; delete it with `rm -rf './~'` (quoted, from inside the
   repo) before committing.
+- **SSHFS compilation is I/O-bound**: a rustc process can sit at 0.2% CPU
+  for 15+ min. Don't kill it — just wait, or commit and push to let the
+  user run CI on thinkcentre.
 
 ## How to resume
 
-1. `cd /home/alvaro/code/rust/lorehaven`, confirm clean tree at `7329d59`.
-2. Build the M31 frontend (item 1 above), then E2E it on thinkcentre.
+1. `cd /home/alvaro/code/rust/lorehaven`, confirm clean tree at `6c23e3f`.
+2. Run the M31 E2E suite on thinkcentre (item 1 above).
 3. Proceed to M32 following plan §15a.2 exactly (ledger rows first, then
    migration 0039 in both dialects, domain, db, routes, tests).
