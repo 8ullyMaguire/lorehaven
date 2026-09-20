@@ -49,6 +49,7 @@ pub mod secrets;
 pub mod sessions;
 pub mod storage;
 pub mod subscriptions;
+pub mod spoilers;
 pub mod taxonomy;
 pub mod thread_modes;
 pub mod translation;
