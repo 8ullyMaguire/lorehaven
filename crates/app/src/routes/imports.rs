@@ -4,6 +4,7 @@
 //! GET    /imports/sources                     the catalogue this build ships
 //! POST   /imports/preview                     detect, fetch metadata, plan; writes nothing
 //! POST   /imports                             enqueue an import
+//! POST   /imports/batch                       enqueue one import per URL in a plain-text list
 //! GET    /imports?cursor=…&state=…            the caller's own imports, envelope
 //! GET    /imports/:id                         one import, with its chapters
 //! POST   /imports/:id/cancel                  ask the worker to stop
@@ -65,6 +66,7 @@ pub fn router() -> Router<AppState> {
         .route("/imports/sources", get(list_sources))
         .route("/imports/preview", post(preview_import))
         .route("/imports", get(list_imports).post(start_import))
+        .route("/imports/batch", post(start_import_batch))
         .route("/imports/{id}", get(get_import))
         .route("/imports/{id}/cancel", post(cancel_import))
         .route("/library/imports/csv", post(import_shelf_csv))
@@ -924,6 +926,210 @@ async fn start_import(
             // worker will pick up, and `pending` was never a state it has.
             "state": import.state,
             "created_at": import.created_at,
+        })),
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// Batch import
+// ---------------------------------------------------------------------------
+
+/// The ceiling on a batch, so one request cannot fill the queue past what a
+/// worker running alongside it could ever drain. 500 URLs is already a large
+/// deliberate migration; anything bigger belongs in several requests.
+const BATCH_MAX_URLS: usize = 500;
+
+#[derive(Debug, Deserialize)]
+struct BatchImportRequest {
+    /// One URL per line, plain text. Blank lines and `#` comments are ignored,
+    /// so the file a reader keeps their links in can be posted as it is.
+    urls: String,
+    #[serde(default)]
+    pseud_id: Option<String>,
+    /// Only `library`, for the same reason [`StartImportRequest`] allows it.
+    #[serde(default = "default_destination")]
+    destination: String,
+    #[serde(default)]
+    dry_run: bool,
+}
+
+/// Split a plain-text URL list into lines, dropping blanks, comments and
+/// duplicates. A batch that names the same work twice queues it twice, and the
+/// second import would arrive as an update that changed nothing — so the
+/// duplicates are reported rather than silently queued.
+fn split_url_list(raw: &str) -> (Vec<String>, usize) {
+    let mut seen = std::collections::HashSet::new();
+    let mut urls = Vec::new();
+    let mut duplicates = 0usize;
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if seen.insert(trimmed.to_owned()) {
+            urls.push(trimmed.to_owned());
+        } else {
+            duplicates += 1;
+        }
+    }
+    (urls, duplicates)
+}
+
+/// Enqueue one import per URL in a plain-text list.
+///
+/// This is a queueing loop around [`start_import`]'s own checks, not a bypass
+/// of them: every URL is parsed, routed to an adapter, and refused against the
+/// same catalogue rules before its job is created. What a batch adds is the
+/// per-URL answer — one bad line does not fail the file, it is reported as
+/// `failed` alongside the `queued` — and a single response that says what
+/// happened to each line.
+async fn start_import_batch(
+    State(state): State<AppState>,
+    RequirePseud { user, pseud_id }: RequirePseud,
+    Json(request): Json<BatchImportRequest>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    let pseud = match &request.pseud_id {
+        Some(raw) => parse_pseud(raw)?,
+        None => pseud_id,
+    };
+    if request.destination != "library" {
+        return Err(ApiError(AppError::Validation {
+            message: format!(
+                "{} is not a destination this build can import into; only \"library\" is",
+                request.destination
+            ),
+            field_errors: Default::default(),
+        }));
+    }
+
+    let (urls, duplicates) = split_url_list(&request.urls);
+    if urls.is_empty() {
+        return Err(ApiError(AppError::Validation {
+            message: "the batch lists no URLs: give it one web address per line".to_owned(),
+            field_errors: Default::default(),
+        }));
+    }
+    if urls.len() > BATCH_MAX_URLS {
+        return Err(ApiError(AppError::Validation {
+            message: format!(
+                "the batch lists {} URLs; split it into files of at most {BATCH_MAX_URLS}",
+                urls.len()
+            ),
+            field_errors: Default::default(),
+        }));
+    }
+
+    let mut queued = Vec::new();
+    let mut failed = Vec::new();
+
+    for url in &urls {
+        // The same parse and routing a single import goes through, so a batch
+        // cannot queue a URL the single endpoint would have refused.
+        let parsed = match parse_import_url(url) {
+            Ok(parsed) => parsed,
+            Err(_) => {
+                failed.push(serde_json::json!({
+                    "url": url,
+                    "code": "invalid_url",
+                    "message": "must be an absolute http(s) address",
+                }));
+                continue;
+            }
+        };
+        let adapter = match state.registry().route(&parsed) {
+            Ok(adapter) => adapter,
+            Err(_) => {
+                failed.push(serde_json::json!({
+                    "url": url,
+                    "code": "no_source",
+                    "message": "no source in this build handles that address",
+                }));
+                continue;
+            }
+        };
+        let source_key = adapter.key().as_str().to_owned();
+        if let Err(reason) = refuse_unusable_source(&state, &source_key).await {
+            failed.push(serde_json::json!({
+                "url": url,
+                "code": "source_disabled",
+                "message": format!("{reason}"),
+            }));
+            continue;
+        }
+        if !adapter.capabilities().metadata {
+            failed.push(serde_json::json!({
+                "url": url,
+                "code": "no_metadata",
+                "message": format!("the {source_key} adapter cannot read a work's metadata"),
+            }));
+            continue;
+        }
+
+        // The same order [`start_import`] keeps: the import's id exists before
+        // the queue row that points at it, and the payload names the import and
+        // nothing else.
+        let id = lorehaven_domain::ImportJobId::new().to_string();
+        let job = lorehaven_db::jobs::enqueue(
+            state.db(),
+            lorehaven_domain::jobs::JobKind::Import,
+            &serde_json::json!({ "import_job_id": id }).to_string(),
+            None,
+            Some(user.account_id),
+            0,
+            &lorehaven_domain::jobs::RetryPolicy::default(),
+        )
+        .await;
+        let job_id = match job {
+            Ok(job_id) => job_id,
+            Err(error) => {
+                failed.push(serde_json::json!({
+                    "url": url,
+                    "code": "queue_error",
+                    "message": format!("{error}"),
+                }));
+                continue;
+            }
+        };
+
+        let created = imports::create_import_job(
+            state.db(),
+            &id,
+            &job_id.to_string(),
+            &user.account_id.to_string(),
+            &pseud.to_string(),
+            &source_key,
+            parsed.as_str(),
+            &request.destination,
+            request.dry_run,
+        )
+        .await;
+
+        match created {
+            Ok(import) => queued.push(serde_json::json!({
+                "url": url,
+                "import_id": import.id,
+                "job_id": job_id.to_string(),
+                "source_key": source_key,
+                "state": import.state,
+            })),
+            Err(error) => {
+                failed.push(serde_json::json!({
+                    "url": url,
+                    "code": "create_error",
+                    "message": format!("{error}"),
+                }));
+            }
+        }
+    }
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({
+            "queued": queued,
+            "failed": failed,
+            "duplicates_skipped": duplicates,
+            "queued_count": queued.len(),
+            "failed_count": failed.len(),
         })),
     ))
 }

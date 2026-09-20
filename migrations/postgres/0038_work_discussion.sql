@@ -7,14 +7,14 @@ ALTER TABLE works ADD COLUMN discussion_mode TEXT NOT NULL DEFAULT 'comments_onl
 CREATE TABLE topic_work_links (
     id TEXT PRIMARY KEY,
     topic_id TEXT NOT NULL UNIQUE REFERENCES forum_topics(id) ON DELETE CASCADE,
-    work_id TEXT NOT NULL REFERENCES works(id) ON DELETE CASCADE,
-    chapter_id TEXT,
+    work_id UUID NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+    chapter_id UUID,
     created_at TEXT NOT NULL
 );
 CREATE INDEX topic_work_links_work ON topic_work_links (work_id);
 
 CREATE TABLE work_reactions (
-    work_id TEXT NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+    work_id UUID NOT NULL REFERENCES works(id) ON DELETE CASCADE,
     pseud TEXT NOT NULL,
     vote_type TEXT NOT NULL,
     created_at TEXT NOT NULL,

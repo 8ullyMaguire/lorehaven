@@ -6,11 +6,12 @@
    * its posts but refuses new ones — the lock is the server's word, and the
    * form is hidden to match.
    */
-  import { createReply, fetchLinkedWork, fetchPosts, fetchTopic, type ForumPost, type ForumTopic, type LinkedWorkResponse } from '../lib/api';
+  import { createReply, fetchLinkedWork, fetchPosts, fetchTopic, type ForumTopic, type ForumPost, type LinkedWorkResponse, setTopicMode } from '../lib/api';
   import { session } from '../lib/session.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
   import WorkBacklink from '../lib/components/WorkBacklink.svelte';
+  import ThreadModePicker from '../lib/components/ThreadModePicker.svelte';
   import { handleLinkClick } from '../lib/router';
 
   let { topicId }: { topicId: string } = $props();
@@ -73,6 +74,14 @@
 
     <WorkBacklink {topicId} />
 
+    {#if topic.mode !== 'plain'}
+      <p class="mode-badge">Mode: {topic.mode}</p>
+    {/if}
+
+    {#if session.isSignedIn}
+      <ThreadModePicker {topicId} mode={topic.mode} />
+    {/if}
+
     {#if posts.length === 0}
       <p>No replies yet.</p>
     {:else}
@@ -111,6 +120,14 @@
 <style>
   .meta {
     opacity: 0.7;
+  }
+  .mode-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 999px;
+    background: var(--accent-bg, #eef);
+    font-size: 0.875rem;
+    margin: 0.5rem 0;
   }
   .posts {
     padding-left: 1.25rem;

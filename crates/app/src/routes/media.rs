@@ -1023,13 +1023,8 @@ async fn media_feed(
                     next.query_pairs_mut().append_pair(&key, &value);
                 }
                 next.query_pairs_mut().append_pair("cursor", &cursor);
-                let prefix = if kind == "rss" || kind == "opds" {
-                    "atom:"
-                } else {
-                    ""
-                };
                 xml.push_str(&format!(
-                    r#"<{prefix}link rel="next" href="{}"/>"#,
+                    r#"<link rel="next" href="{}"/>"#,
                     xml_escape(next.as_str())
                 ));
             }
