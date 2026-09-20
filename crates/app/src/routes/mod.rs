@@ -1,7 +1,7 @@
 //! HTTP routes.
 
-pub mod admin;
 pub mod account_permissions;
+pub mod admin;
 pub mod auth;
 pub mod collaborators;
 pub mod community;
@@ -27,9 +27,9 @@ pub mod monetization;
 pub mod narration;
 pub mod notifications;
 pub mod pseuds;
+pub mod rating_integrity;
 pub mod reading;
 pub mod recommendation_transparency;
-pub mod rating_integrity;
 pub mod search;
 pub mod settings;
 pub mod subscriptions;

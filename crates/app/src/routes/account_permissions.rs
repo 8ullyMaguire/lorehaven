@@ -77,7 +77,9 @@ async fn put_account_permissions(
     Ok(Json(next))
 }
 
-fn parse_perm(raw: &str) -> Result<darkhold_domain::permission::Permission, crate::http::ApiError> {
+fn parse_perm(
+    raw: &str,
+) -> Result<darkhold_domain::permission::Permission, crate::http::ApiError> {
     darkhold_domain::permission::Permission::parse(raw).ok_or_else(|| {
         crate::http::ApiError(darkhold_domain::AppError::Validation {
             message: format!("unknown permission value: {raw}"),
