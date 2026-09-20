@@ -13,7 +13,7 @@ use lorehaven_db::rating_integrity;
 use lorehaven_domain::ids::WorkId;
 use serde_json::{json, Value};
 
-use crate::auth::RequireSession;
+use crate::auth::{MaybeSession, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -71,6 +71,7 @@ async fn clear_anomaly(
 
 async fn get_rating_summary(
     State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
     let db = state.db();
