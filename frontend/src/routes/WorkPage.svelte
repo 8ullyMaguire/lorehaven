@@ -15,9 +15,9 @@
     fetchReviews,
     fetchWork,
     fetchWorkPricing,
-    purchaseWork,
     getProgress,
     isAuthorWork,
+    purchaseWork,
     upsertReview,
     type AuthorWork,
     type ProgressView,
@@ -34,6 +34,13 @@
   import Rating from '../lib/components/Rating.svelte';
   import ResumePrompt from '../lib/components/ResumePrompt.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
+
+  interface GalleryItem {
+    id: string;
+    media_type: string;
+    storage_key: string;
+    alt_text: string;
+  }
 
   interface Props {
     workId: string;
@@ -80,6 +87,7 @@
           progress = null;
         }
       }
+      void loadGallery();
     } catch (failure) {
       // Paywall: a priced work returns 403 CONTENT_RESTRICTED for non-buyers.
       // Fetch public pricing so we can render a buy screen.
@@ -97,6 +105,18 @@
     }
   }
 
+  async function loadGallery() {
+    try {
+      const res = await apiFetch<{ items: GalleryItem[] }>(
+        `/works/${workId}/gallery`,
+      );
+      gallery = res.items;
+    } catch {
+      gallery = null;
+    }
+  }
+
+  let gallery = $state<GalleryItem[] | null>(null);
   let reviewReceipt = $state<string | null>(null);
 
   async function publishReview() {
@@ -201,6 +221,30 @@
 
   {#if work.summary.trim() !== ''}
     <p class="summary">{work.summary}</p>
+  {/if}
+
+  {#if gallery && gallery.length > 0}
+    <h2>Gallery</h2>
+    <ul class="gallery">
+      {#each gallery as item (item.id)}
+        <li>
+          <figure>
+            {#if item.media_type === 'image'}
+              <img src={`/api/v1/media/files/${item.storage_key}`} alt={item.alt_text} loading="lazy" />
+            {:else if item.media_type === 'audio'}
+              <audio controls src={`/api/v1/media/files/${item.storage_key}`}>
+                <track kind="descriptions" label={item.alt_text} />
+              </audio>
+            {:else}
+              <a href={`/api/v1/media/files/${item.storage_key}`} download>{item.alt_text}</a>
+            {/if}
+            {#if item.alt_text.trim() !== ''}
+              <figcaption>{item.alt_text}</figcaption>
+            {/if}
+          </figure>
+        </li>
+      {/each}
+    </ul>
   {/if}
 
   {#if progress && progress.resolution.kind !== 'no_position'}
@@ -354,6 +398,42 @@
   .note {
     color: var(--color-muted);
     font-size: var(--text-sm);
+  }
+
+  .gallery {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: var(--space-3);
+    margin: var(--space-4) 0;
+  }
+
+  .gallery figure {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .gallery img {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+  }
+
+  .gallery audio {
+    width: 100%;
+    padding: var(--space-2);
+  }
+
+  .gallery figcaption {
+    padding: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--color-muted);
+    background: var(--color-surface);
   }
 
   .paywall-price {
