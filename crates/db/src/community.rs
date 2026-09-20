@@ -1576,6 +1576,27 @@ pub async fn list_conversations(db: &Database, viewer_account: &str) -> Result<V
     Ok(rows.into_iter().map(Conversation::from).collect())
 }
 
+/// Fetch a single post by id.
+pub async fn post_by_id(db: &Database, post_id: &str) -> Result<Option<ForumPost>> {
+    let sql = db.sql(
+        "SELECT id, topic_id, author_pseud, body, created_at, deleted_at FROM forum_posts WHERE id = ?",
+        "SELECT id, topic_id, author_pseud, body, created_at, deleted_at FROM forum_posts WHERE id = $1",
+    );
+    let row = match db.backend() {
+        Backend::Sqlite => sqlx::query_as::<_, ForumPostRow>(&sql)
+            .bind(post_id)
+            .fetch_optional(db.sqlite_pool().expect("sqlite"))
+            .await?
+            .map(ForumPost::from),
+        Backend::Postgres => sqlx::query_as::<_, ForumPostRow>(&sql)
+            .bind(post_id)
+            .fetch_optional(db.postgres_pool().expect("postgres"))
+            .await?
+            .map(ForumPost::from),
+    };
+    Ok(row)
+}
+
 /// Set a topic's thread mode (spec §35.3).
 pub async fn set_topic_mode(db: &Database, topic_id: &str, mode: &str) -> Result<()> {
     match db.backend() {
