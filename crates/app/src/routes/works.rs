@@ -44,9 +44,7 @@ use darkhold_db::permission;
 use darkhold_db::reading;
 use darkhold_domain::content::Contributor;
 use darkhold_domain::document::Document;
-use darkhold_domain::permission::{
-    LineageEdge, LineageKind, PermissionStatement,
-};
+use darkhold_domain::permission::{LineageEdge, LineageKind, PermissionStatement};
 use darkhold_domain::policy::{
     can_access_content, AccessPolicy, Actor, ContentFacts, Decision, DenyReason, Lifecycle,
     Visibility,

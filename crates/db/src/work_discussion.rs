@@ -9,7 +9,10 @@ use crate::identity::now_rfc3339;
 use crate::{Backend, Database};
 
 /// A work's discussion mode, read from storage.
-pub async fn work_discussion_mode(db: &Database, work_id: &str) -> Result<Option<WorkDiscussionMode>> {
+pub async fn work_discussion_mode(
+    db: &Database,
+    work_id: &str,
+) -> Result<Option<WorkDiscussionMode>> {
     let sql = db.sql(
         "SELECT discussion_mode FROM works WHERE id = ? AND deleted_at IS NULL",
         "SELECT discussion_mode FROM works WHERE id::text = $1 AND deleted_at IS NULL",
@@ -76,14 +79,18 @@ pub async fn linked_topic(db: &Database, work_id: &str) -> Result<Option<TopicWo
         "SELECT id, topic_id, work_id, chapter_id::text AS chapter_id, created_at FROM topic_work_links WHERE work_id::text = $1 ORDER BY created_at LIMIT 1",
     );
     let row = match db.backend() {
-        Backend::Sqlite => sqlx::query_as::<_, TopicWorkLink>(&sql)
-            .bind(work_id)
-            .fetch_optional(db.sqlite_pool().expect("sqlite"))
-            .await?,
-        Backend::Postgres => sqlx::query_as::<_, TopicWorkLink>(&sql)
-            .bind(work_id)
-            .fetch_optional(db.postgres_pool().expect("postgres"))
-            .await?,
+        Backend::Sqlite => {
+            sqlx::query_as::<_, TopicWorkLink>(&sql)
+                .bind(work_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, TopicWorkLink>(&sql)
+                .bind(work_id)
+                .fetch_optional(db.postgres_pool().expect("postgres"))
+                .await?
+        }
     };
     Ok(row)
 }
@@ -110,22 +117,26 @@ pub async fn link_topic(
         "INSERT INTO topic_work_links (id, topic_id, work_id, chapter_id, created_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5)",
     );
     match db.backend() {
-        Backend::Sqlite => sqlx::query(&sql)
-            .bind(&id)
-            .bind(&topic_id)
-            .bind(work_id)
-            .bind(chapter_id)
-            .bind(&now)
-            .execute(db.sqlite_pool().expect("sqlite"))
-            .await?,
-        Backend::Postgres => sqlx::query(&sql)
-            .bind(&id)
-            .bind(&topic_id)
-            .bind(work_id)
-            .bind(chapter_id)
-            .bind(&now)
-            .execute(db.postgres_pool().expect("postgres"))
-            .await?,
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind(&topic_id)
+                .bind(work_id)
+                .bind(chapter_id)
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind(&topic_id)
+                .bind(work_id)
+                .bind(chapter_id)
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?;
+        }
     }
     Ok(TopicWorkLink {
         id,
@@ -150,14 +161,18 @@ pub async fn reaction_counts(db: &Database, work_id: &str) -> Result<Vec<Reactio
         "SELECT vote_type, COUNT(*) AS count FROM work_reactions WHERE work_id::text = $1 GROUP BY vote_type ORDER BY count DESC, vote_type",
     );
     let rows = match db.backend() {
-        Backend::Sqlite => sqlx::query_as::<_, ReactionCount>(&sql)
-            .bind(work_id)
-            .fetch_all(db.sqlite_pool().expect("sqlite"))
-            .await?,
-        Backend::Postgres => sqlx::query_as::<_, ReactionCount>(&sql)
-            .bind(work_id)
-            .fetch_all(db.postgres_pool().expect("postgres"))
-            .await?,
+        Backend::Sqlite => {
+            sqlx::query_as::<_, ReactionCount>(&sql)
+                .bind(work_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, ReactionCount>(&sql)
+                .bind(work_id)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
     };
     Ok(rows)
 }
@@ -206,22 +221,26 @@ pub async fn set_reaction(
                 "INSERT INTO work_reactions (work_id, pseud, vote_type, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, $4, $5)",
             );
             match db.backend() {
-                Backend::Sqlite => sqlx::query(&sql)
-                    .bind(work_id)
-                    .bind(pseud)
-                    .bind(vt)
-                    .bind(&now)
-                    .bind(&now)
-                    .execute(db.sqlite_pool().expect("sqlite"))
-                    .await?,
-                Backend::Postgres => sqlx::query(&sql)
-                    .bind(work_id)
-                    .bind(pseud)
-                    .bind(vt)
-                    .bind(&now)
-                    .bind(&now)
-                    .execute(db.postgres_pool().expect("postgres"))
-                    .await?,
+                Backend::Sqlite => {
+                    sqlx::query(&sql)
+                        .bind(work_id)
+                        .bind(pseud)
+                        .bind(vt)
+                        .bind(&now)
+                        .bind(&now)
+                        .execute(db.sqlite_pool().expect("sqlite"))
+                        .await?;
+                }
+                Backend::Postgres => {
+                    sqlx::query(&sql)
+                        .bind(work_id)
+                        .bind(pseud)
+                        .bind(vt)
+                        .bind(&now)
+                        .bind(&now)
+                        .execute(db.postgres_pool().expect("postgres"))
+                        .await?;
+                }
             };
             Ok(ReactionOutcome::Cast)
         }
@@ -231,16 +250,20 @@ pub async fn set_reaction(
                 "DELETE FROM work_reactions WHERE work_id::text = $1 AND pseud::text = $2",
             );
             match db.backend() {
-                Backend::Sqlite => sqlx::query(&sql)
-                    .bind(work_id)
-                    .bind(pseud)
-                    .execute(db.sqlite_pool().expect("sqlite"))
-                    .await?,
-                Backend::Postgres => sqlx::query(&sql)
-                    .bind(work_id)
-                    .bind(pseud)
-                    .execute(db.postgres_pool().expect("postgres"))
-                    .await?,
+                Backend::Sqlite => {
+                    sqlx::query(&sql)
+                        .bind(work_id)
+                        .bind(pseud)
+                        .execute(db.sqlite_pool().expect("sqlite"))
+                        .await?;
+                }
+                Backend::Postgres => {
+                    sqlx::query(&sql)
+                        .bind(work_id)
+                        .bind(pseud)
+                        .execute(db.postgres_pool().expect("postgres"))
+                        .await?;
+                }
             };
             Ok(ReactionOutcome::Retracted)
         }
@@ -251,20 +274,24 @@ pub async fn set_reaction(
                 "UPDATE work_reactions SET vote_type = $1, updated_at = $2 WHERE work_id::text = $3 AND pseud::text = $4",
             );
             match db.backend() {
-                Backend::Sqlite => sqlx::query(&sql)
-                    .bind(vt)
-                    .bind(&now)
-                    .bind(work_id)
-                    .bind(pseud)
-                    .execute(db.sqlite_pool().expect("sqlite"))
-                    .await?,
-                Backend::Postgres => sqlx::query(&sql)
-                    .bind(vt)
-                    .bind(&now)
-                    .bind(work_id)
-                    .bind(pseud)
-                    .execute(db.postgres_pool().expect("postgres"))
-                    .await?,
+                Backend::Sqlite => {
+                    sqlx::query(&sql)
+                        .bind(vt)
+                        .bind(&now)
+                        .bind(work_id)
+                        .bind(pseud)
+                        .execute(db.sqlite_pool().expect("sqlite"))
+                        .await?;
+                }
+                Backend::Postgres => {
+                    sqlx::query(&sql)
+                        .bind(vt)
+                        .bind(&now)
+                        .bind(work_id)
+                        .bind(pseud)
+                        .execute(db.postgres_pool().expect("postgres"))
+                        .await?;
+                }
             };
             Ok(ReactionOutcome::Changed)
         }
@@ -311,14 +338,18 @@ pub async fn migrate_comments_to_topic(
         "SELECT id, author_pseud, body, created_at FROM comments WHERE subject_type = 'work' AND subject_id::text = $1 AND deleted_at IS NULL ORDER BY created_at",
     );
     let comments: Vec<CommentMigrationRow> = match db.backend() {
-        Backend::Sqlite => sqlx::query_as::<_, CommentMigrationRow>(&select)
-            .bind(work_id)
-            .fetch_all(db.sqlite_pool().expect("sqlite"))
-            .await?,
-        Backend::Postgres => sqlx::query_as::<_, CommentMigrationRow>(&select)
-            .bind(work_id)
-            .fetch_all(db.postgres_pool().expect("postgres"))
-            .await?,
+        Backend::Sqlite => {
+            sqlx::query_as::<_, CommentMigrationRow>(&select)
+                .bind(work_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, CommentMigrationRow>(&select)
+                .bind(work_id)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
     };
 
     let mut moved = 0usize;
@@ -326,7 +357,11 @@ pub async fn migrate_comments_to_topic(
         // The post keeps the comment's author and timestamp; the tombstone
         // body records where the text went.
         crate::community::create_post_with_timestamp(
-            db, &link.topic_id, &c.author_pseud, &c.body, &c.created_at,
+            db,
+            &link.topic_id,
+            &c.author_pseud,
+            &c.body,
+            &c.created_at,
         )
         .await?;
         let delete = db.sql(
@@ -335,18 +370,22 @@ pub async fn migrate_comments_to_topic(
         );
         let now = now_rfc3339();
         match db.backend() {
-            Backend::Sqlite => sqlx::query(&delete)
-                .bind(&now)
-                .bind(TOMBSTONE)
-                .bind(&c.id)
-                .execute(db.sqlite_pool().expect("sqlite"))
-                .await?,
-            Backend::Postgres => sqlx::query(&delete)
-                .bind(&now)
-                .bind(TOMBSTONE)
-                .bind(&c.id)
-                .execute(db.postgres_pool().expect("postgres"))
-                .await?,
+            Backend::Sqlite => {
+                sqlx::query(&delete)
+                    .bind(&now)
+                    .bind(TOMBSTONE)
+                    .bind(&c.id)
+                    .execute(db.sqlite_pool().expect("sqlite"))
+                    .await?;
+            }
+            Backend::Postgres => {
+                sqlx::query(&delete)
+                    .bind(&now)
+                    .bind(TOMBSTONE)
+                    .bind(&c.id)
+                    .execute(db.postgres_pool().expect("postgres"))
+                    .await?;
+            }
         };
         moved += 1;
     }

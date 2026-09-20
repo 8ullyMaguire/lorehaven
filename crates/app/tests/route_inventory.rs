@@ -461,7 +461,6 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/admin/anomalies/{id}/clear",
         audience: Audience::Operator,
     },
-
     RouteEntry {
         file: "works.rs",
         handler: "list_lineage",
@@ -539,7 +538,6 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/admin/tag-wrangling/proposals",
         audience: Audience::Authenticated,
     },
-
     // ------------------------------------------------------------------
     // Library — session-scoped (all reads and writes)
     // ------------------------------------------------------------------
