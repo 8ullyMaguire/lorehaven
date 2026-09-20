@@ -20,11 +20,11 @@ use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/discovery/slots/:slot_id/explanation", get(explain_slot))
+        .route("/discovery/slots/{slot_id}/explanation", get(explain_slot))
         .route("/me/attention-report", get(get_attention_report))
         .route("/admin/tag-wrangling/proposals", post(propose_wrangling))
         .route("/admin/tag-wrangling/proposals", get(list_wrangling_proposals))
-        .route("/admin/tag-wrangling/proposals/:id/approve", post(approve_wrangling))
+        .route("/admin/tag-wrangling/proposals/{id}/approve", post(approve_wrangling))
 }
 
 #[derive(Debug, Serialize)]
