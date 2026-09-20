@@ -775,6 +775,7 @@ pub struct ForumTopic {
     pub created_at: String,
     pub last_post_at: Option<String>,
     pub locked: bool,
+    pub mode: String,
 }
 
 /// Whether a forum category exists. `create_topic` refuses dangling
@@ -855,12 +856,12 @@ pub async fn list_topics_in_category(
 ) -> Result<Vec<ForumTopic>> {
     let sql = match cursor {
         Some(_) => db.sql(
-            "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked FROM forum_topics WHERE category_id = ? AND last_post_at < ? ORDER BY last_post_at DESC LIMIT ?",
-            "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked::int::bigint AS locked FROM forum_topics WHERE category_id = $1 AND last_post_at < $2 ORDER BY last_post_at DESC LIMIT $3",
+            "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked, mode FROM forum_topics WHERE category_id = ? AND last_post_at < ? ORDER BY last_post_at DESC LIMIT ?",
+            "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked::int::bigint AS locked, mode FROM forum_topics WHERE category_id = $1 AND last_post_at < $2 ORDER BY last_post_at DESC LIMIT $3",
         ),
         None => db.sql(
-            "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked FROM forum_topics WHERE category_id = ? ORDER BY last_post_at DESC LIMIT ?",
-            "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked::int::bigint AS locked FROM forum_topics WHERE category_id = $1 ORDER BY last_post_at DESC LIMIT $2",
+            "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked, mode FROM forum_topics WHERE category_id = ? ORDER BY last_post_at DESC LIMIT ?",
+            "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked::int::bigint AS locked, mode FROM forum_topics WHERE category_id = $1 ORDER BY last_post_at DESC LIMIT $2",
         ),
     };
     let rows: Vec<ForumTopicRow> = match db.backend() {
@@ -930,8 +931,8 @@ pub async fn create_topic_with_mode(
 /// Fetch a topic by id.
 pub async fn topic_by_id(db: &Database, topic_id: &str) -> Result<Option<ForumTopic>> {
     let sql = db.sql(
-        "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked FROM forum_topics WHERE id = ?",
-        "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked::int::bigint AS locked FROM forum_topics WHERE id = $1",
+        "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked, mode FROM forum_topics WHERE id = ?",
+        "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked::int::bigint AS locked, mode FROM forum_topics WHERE id = $1",
     );
     let row = match db.backend() {
         Backend::Sqlite => sqlx::query_as::<_, ForumTopicRow>(&sql)
@@ -957,6 +958,7 @@ struct ForumTopicRow {
     created_at: String,
     last_post_at: Option<String>,
     locked: i64,
+    mode: String,
 }
 
 impl From<ForumTopicRow> for ForumTopic {
@@ -1571,6 +1573,27 @@ pub async fn list_conversations(db: &Database, viewer_account: &str) -> Result<V
         }
     };
     Ok(rows.into_iter().map(Conversation::from).collect())
+}
+
+/// Set a topic's thread mode (spec §35.3).
+pub async fn set_topic_mode(db: &Database, topic_id: &str, mode: &str) -> Result<()> {
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query("UPDATE forum_topics SET mode = ? WHERE id = ?")
+                .bind(mode)
+                .bind(topic_id)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query("UPDATE forum_topics SET mode = $1 WHERE id = $2")
+                .bind(mode)
+                .bind(topic_id)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?;
+        }
+    }
+    Ok(())
 }
 
 /// Toggle the locked state of a forum topic. Returns true if a row was
