@@ -4,7 +4,7 @@
 //! Skeleton: signatures are the contract; the implementing agent fills the
 //! bodies marked [`Rules::todo`].
 
-use crate::error::AppError;
+
 
 /// What a reader may subscribe to (§23.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,10 +61,6 @@ impl Rules {
         false
     }
 
-    /// Skeleton marker: the implementing agent replaces stub bodies.
-    pub fn todo() -> AppError {
-        AppError::NotImplemented
-    }
 }
 
 #[cfg(test)]

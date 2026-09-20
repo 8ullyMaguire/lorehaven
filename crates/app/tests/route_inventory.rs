@@ -440,6 +440,13 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/notes/{id}",
         audience: Audience::Pseudonymous,
     },
+    RouteEntry {
+        file: "rating_integrity.rs",
+        handler: "get_rating_summary",
+        method: "GET",
+        path: "/works/{id}/rating-summary",
+        audience: Audience::Public,
+    },
     // ------------------------------------------------------------------
     // Library — session-scoped (all reads and writes)
     // ------------------------------------------------------------------

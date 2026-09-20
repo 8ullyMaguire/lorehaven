@@ -5,7 +5,7 @@
 //! crate compiles and the contracts are testable. The implementing agent
 //! replaces the bodies; the signatures are the contract.
 
-use crate::error::AppError;
+
 
 /// Instance-level eligibility setting (§20.9.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,10 +97,6 @@ impl Rules {
         (amount_minor - platform, platform)
     }
 
-    /// Skeleton marker: the implementing agent replaces stub bodies.
-    pub fn todo() -> AppError {
-        AppError::NotImplemented
-    }
 }
 
 #[cfg(test)]
