@@ -6,6 +6,7 @@ pub mod auth;
 pub mod collaborators;
 pub mod community;
 pub mod dashboard;
+pub mod decision_service;
 pub mod derivative;
 pub mod discovery;
 pub mod economy;

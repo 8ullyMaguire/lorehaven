@@ -518,6 +518,12 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // Decision service (M30 / spec §34).
+        .merge(classified(
+            routes::decision_service::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // Controlled digital lending (M25 / spec §32.4). All endpoints require
         // a session: borrower identity is needed to grant or revoke a loan.
         .merge(classified(
