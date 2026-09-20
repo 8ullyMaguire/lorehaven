@@ -25,6 +25,10 @@ The forum is being made a first-class surface of the creative ecosystem
 - `43f7ed9` M31 acceptance tests 6/6 + **limiter middleware order fix**
 - `7329d59` ledger: M31 flipped to implemented-locally-tested
 - `6c23e3f` M31 frontend: reaction bar, Discuss link, backlink card, editor mode picker
+- M32 implementation (migration 0039, domain, db, routes, config, 8 tests)
+- M32 test fix: widened auth/write rate-limiter bursts in test config to
+  avoid collision across 8 parallel tests sharing the process-global bucket
+  map (limiter buckets keyed by 127.0.0.1).
 
 ## State
 
@@ -34,16 +38,30 @@ The forum is being made a first-class surface of the creative ecosystem
   comment→topic migration tool (authorship/order/timestamps preserved,
   idempotent), server-side refusal of comments on ThreadOnly works.
 - **6/6 acceptance tests pass** (`cargo test --test milestone_31`).
+- **M32 complete** (backend only): typed votes with per-category taxonomy,
+  per-account 24h rolling budget scaled by trust level, meta-moderation
+  by TL4+ with vote-weight decay (never removes voting ability),
+  transparency tiers (aggregates-only by default, individual votes visible
+  to author/moderator/TL4+), karma derived from weighted votes with
+  monthly inactivity decay (display-only — never gates trust/ranking/
+  credits), and a workspace-grep containment test proving karma rows are
+  only read by storage + the display route.
+- **8/8 acceptance tests pass** (`cargo test --test milestone_32`).
 - Workspace `cargo check --workspace` clean, `cargo fmt` applied, working
   tree clean at `6c23e3f`.
 - E2E suite (frontend/e2e/extended.spec.ts, 20 tests) passed earlier
   against the thinkcentre scratch server — not re-run after M31 frontend.
+- M32 frontend (`ForumVoteBar.svelte`, `VoteBudget.svelte`,
+  `KarmaBadge.svelte`) is planned (plan §15a.2) but not yet implemented;
+  the backend is fully tested and ready for it.
 
 ## What's left in the forum-first arc (plan §15a)
 
 1. **M31 E2E (owed):** run the extended E2E suite on thinkcentre to cover
    the new frontend surfaces (reaction bar, Discuss link, editor picker).
-2. **M32** typed votes/budgets/meta-mod/karma (migration 0039, plan §15a.2).
+2. **M32 frontend:** extend `ForumTopic.svelte` with a vote bar, add
+   `ForumVoteBar.svelte` / `VoteBudget.svelte` / `KarmaBadge.svelte`,
+   add vote endpoints to `api.ts`.
 3. **M33** thread modes (AMA, reading group, critique circle, wiki pin,
    collab fiction + promote-to-work, prompt, character voice) — migration
    0040.
@@ -90,10 +108,20 @@ The forum is being made a first-class surface of the creative ecosystem
 - **SSHFS compilation is I/O-bound**: a rustc process can sit at 0.2% CPU
   for 15+ min. Don't kill it — just wait, or commit and push to let the
   user run CI on thinkcentre.
+- **Rate limiter buckets are process-global statics** (`GLOBAL_BUCKETS` in
+  `limiter.rs`), keyed by IP address. Parallel integration tests sharing
+  127.0.0.1 exhaust the default auth burst (10) and write burst (20).
+  Test harnesses must widen `config.rate_limits.auth` and `.write` when
+  registering multiple accounts or casting many votes across tests.
 
 ## How to resume
 
 1. `cd /home/alvaro/code/rust/lorehaven`, confirm clean tree at `6c23e3f`.
 2. Run the M31 E2E suite on thinkcentre (item 1 above).
-3. Proceed to M32 following plan §15a.2 exactly (ledger rows first, then
-   migration 0039 in both dialects, domain, db, routes, tests).
+3. **M32 is complete** (backend only): `cargo test --test milestone_32`
+   passes 8/8, `cargo test --test route_inventory` passes 2/2,
+   `cargo test --workspace --doc` clean.
+4. Proceed to M32 frontend (extend `ForumTopic.svelte` with vote bar,
+   add `ForumVoteBar.svelte` / `VoteBudget.svelte` / `KarmaBadge.svelte`,
+   add vote endpoints to `api.ts`) and then M33 following plan §15a.3,
+   migration 0040 in both dialects (domain, db, routes, tests).

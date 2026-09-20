@@ -669,6 +669,7 @@ pub struct KarmaSummary {
 }
 
 /// Read the stored karma row.
+#[allow(dead_code)]
 async fn read_karma(db: &Database, pseud: &str) -> Result<Option<(i64, String)>> {
     let sql = db.sql(
         "SELECT karma_bp, updated_at FROM forum_karma WHERE pseud = ?",

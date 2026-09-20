@@ -44,6 +44,19 @@ fn config_for(dir: &Path) -> Config {
         "sqlite://{}/lorehaven.sqlite?mode=rwc",
         dir.display()
     ));
+    // Tests drive many accounts through the shared in-process rate limiter
+    // (whose buckets are process-global statics, keyed by 127.0.0.1). A burst
+    // of 10 is enough for a person but not for eight parallel tests that each
+    // register several accounts. Widen the auth and write classes so the rate
+    // limiter never masks the behaviour under test.
+    config.rate_limits.auth = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.write = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
     config
 }
 
