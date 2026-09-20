@@ -136,6 +136,8 @@ pub struct Config {
     pub bulk_export: BulkExportConfig,
     /// Forum settings (spec 35).
     pub forum: ForumConfig,
+    /// Export retention settings (spec §38).
+    pub exports: ExportsConfig,
     /// Where the configuration file was read from, if any.
     pub config_path: Option<PathBuf>,
 }
@@ -237,6 +239,10 @@ impl Default for BulkExportConfig {
     }
 }
 
+/// TTS narration settings (M26 / spec §32.5).
+///
+/// Piper is the built-in local engine. Cloud adapters (ElevenLabs, AWS
+/// Polly) are added later behind the same `TtsEngine` trait.
 #[derive(Debug, Clone)]
 pub struct TtsConfig {
     /// Which engine to use. `"piper"` is the only built-in option.
@@ -251,19 +257,28 @@ pub struct TtsConfig {
     pub monthly_spend_cap_cents: Option<u64>,
 }
 
-impl Default for TtsConfig {
+/// Export retention settings (spec §38).
+#[derive(Debug, Clone)]
+pub struct ExportsConfig {
+    /// How long an export's output is kept after it is produced, in days.
+    /// `0` means "keep forever" — the sweep never removes exports.
+    pub retention_days: i64,
+    /// How long a download grant lives, in seconds. Short by design: the reader
+    /// who owns the export can always be given another one, so a leaked URL
+    /// has a small window.
+    pub grant_ttl_secs: i64,
+}
+
+impl Default for ExportsConfig {
     fn default() -> Self {
         Self {
-            engine: "piper".to_string(),
-            piper_path: None,
-            piper_voice_model: None,
-            default_voice: None,
-            monthly_spend_cap_cents: None,
+            retention_days: 0,
+            grant_ttl_secs: 3600,
         }
     }
 }
 
-/// What the importer may do about a source that refuses a plain request.
+
 ///
 /// # Why this is a configuration section and not a default
 ///
@@ -841,6 +856,13 @@ impl Config {
                 .unwrap_or_else(|| ForumConfig::default().karma_decay_percent),
         };
 
+        // --- exports ------------------------------------------------------
+        let exports_file = file.exports.unwrap_or_default();
+        let exports = ExportsConfig {
+            retention_days: exports_file.retention_days.unwrap_or_else(|| ExportsConfig::default().retention_days),
+            grant_ttl_secs: exports_file.grant_ttl_secs.unwrap_or_else(|| ExportsConfig::default().grant_ttl_secs),
+        };
+
         let config = Self {
             environment,
             site,
@@ -866,6 +888,7 @@ impl Config {
             tts,
             bulk_export: BulkExportConfig::default(),
             forum,
+            exports: ExportsConfig::default(),
             config_path,
         };
 
@@ -931,6 +954,7 @@ impl Config {
             tts: TtsConfig::default(),
             bulk_export: BulkExportConfig::default(),
             forum: ForumConfig::default(),
+            exports: ExportsConfig::default(),
             config_path: None,
         }
     }
@@ -1005,6 +1029,13 @@ impl Config {
         if !(0..=100).contains(&self.forum.karma_decay_percent) {
             anyhow::bail!("forum.karma_decay_percent must be between 0 and 100");
         }
+        // Export retention settings (spec §38).
+        if self.exports.retention_days < 0 {
+            anyhow::bail!("exports.retention_days must be >= 0, got {}", self.exports.retention_days);
+        }
+        if self.exports.grant_ttl_secs <= 0 {
+            anyhow::bail!("exports.grant_ttl_secs must be > 0, got {}", self.exports.grant_ttl_secs);
+        }
         // Checked here rather than at the first challenged chapter: a solver URL
         // that does not parse is an operator's typo, and a typo should stop the
         // instance rather than surface hours later as an import that cannot read
@@ -1067,6 +1098,7 @@ struct FileConfig {
     imports: Option<ImportsSection>,
     tts: Option<TtsSection>,
     forum: Option<ForumSection>,
+    exports: Option<ExportsSection>,
 }
 
 /// The `[tts]` table: which engine narrates, and how an operator configured it
@@ -1106,6 +1138,18 @@ struct ForumSection {
     min_vote_weight_bp: Option<i64>,
     /// Monthly karma decay for an inactive receiver, in percent.
     karma_decay_percent: Option<i64>,
+}
+
+/// The `[exports]` table: how long an export's output is kept, and how long a
+/// download grant lives (spec §38).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExportsSection {
+    /// How long an export's output is kept after it is produced, in days.
+    /// `0` means "keep forever" — the sweep never removes exports.
+    retention_days: Option<i64>,
+    /// How long a download grant lives, in seconds.
+    grant_ttl_secs: Option<i64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
