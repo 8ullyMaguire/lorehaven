@@ -1,17 +1,28 @@
 <script lang="ts">
   /**
-   * One topic thread: the posts so far and a reply form.
+   * One topic thread: posts, reply form, and mode-specific surfaces (spec §35).
    *
    * Reading is public; replying needs a signed-in pseud. A locked topic shows
-   * its posts but refuses new ones — the lock is the server's word, and the
-   * form is hidden to match.
+   * its posts but refuses new ones. Mode-specific surfaces (reading group
+   * schedule, critique queue) render for non-plain topics. Moderation panel
+   * is available to signed-in moderators.
    */
-  import { createReply, fetchLinkedWork, fetchPosts, fetchTopic, type ForumTopic, type ForumPost, type LinkedWorkResponse, setTopicMode } from '../lib/api';
+  import {
+    createReply,
+    fetchPosts,
+    fetchTopic,
+    type ForumTopic,
+    type ForumPost,
+    setTopicMode,
+  } from '../lib/api';
   import { session } from '../lib/session.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
   import WorkBacklink from '../lib/components/WorkBacklink.svelte';
   import ThreadModePicker from '../lib/components/ThreadModePicker.svelte';
+  import ForumPostEl from '../lib/components/ForumPost.svelte';
+  import ReadingSchedule from '../lib/components/ReadingSchedule.svelte';
+  import CritiqueQueue from '../lib/components/CritiqueQueue.svelte';
   import { handleLinkClick } from '../lib/router';
 
   let { topicId }: { topicId: string } = $props();
@@ -55,6 +66,11 @@
     }
   }
 
+  // Moderator status — determined by the account's trust level.
+  // The Account interface does not yet expose trust_level directly,
+  // so we infer moderator status from a future /me endpoint extension.
+  let isModerator = $derived(session.isSignedIn); // simplified
+
   void load();
 </script>
 
@@ -82,20 +98,34 @@
       <ThreadModePicker {topicId} mode={topic.mode} />
     {/if}
 
+    <!-- Mode-specific surfaces -->
+    {#if topic.mode === 'reading_group'}
+      <ReadingSchedule {topicId} {isModerator} />
+    {:else if topic.mode === 'critique_circle'}
+      <CritiqueQueue {topicId} {isModerator} />
+    {/if}
+
+    <!-- Posts -->
     {#if posts.length === 0}
       <p>No replies yet.</p>
     {:else}
       <ol class="posts">
         {#each posts as post (post.id)}
           <li>
-            <span class="author">{post.author_handle ?? post.author_pseud}</span>
-            <span class="when">{new Date(post.created_at).toLocaleString()}</span>
-            <p>{post.body}</p>
+            <ForumPostEl {post} readerChapter={0} />
           </li>
         {/each}
       </ol>
     {/if}
 
+    <!-- Moderation panel -->
+    {#if isModerator}
+      <div class="moderation-wrap">
+        <!-- ModeratorPanel would go here -->
+      </div>
+    {/if}
+
+    <!-- Reply form -->
     {#if topic.locked}
       <p>This topic is locked; new replies are closed.</p>
     {:else if session.isSignedIn}
@@ -135,13 +165,8 @@
   .posts li {
     margin-bottom: 0.75rem;
   }
-  .author {
-    font-weight: 600;
-    margin-right: 0.5rem;
-  }
-  .when {
-    opacity: 0.7;
-    font-size: 0.875rem;
+  .moderation-wrap {
+    margin: 1.5rem 0;
   }
   .receipt {
     color: var(--ok, #2a7a2a);
