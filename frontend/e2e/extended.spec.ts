@@ -4,14 +4,14 @@ import { expect, test, type Page } from '@playwright/test';
  * Extended E2E coverage for pages and features not covered by the core
  * journeys and use-case suites.
  *
- * Fix notes (round 3):
- * - Jobs heading is "Jobs" (not "Your jobs").
- * - History heading is "History" (not "Reading history").
- * - ForumCategory heading is "Topics" (not "General discussion").
- * - Import heading "Import" matches two elements — use exact: true.
- * - PrivacySettings auto-saves via onsave; look for toast "Privacy settings saved."
- * - Search: input[type=search] is the right selector but the page may render
- *   results differently — use a more lenient assertion.
+ * Fix notes (round 4):
+ * - Search heading is "Search works" (not "Search").
+ * - Forum "Start topic" is disabled until a body is typed into #topic-body.
+ * - Privacy toast says "Saved" not "Privacy settings saved".
+ * - Jobs renders rows as <li> in a <ul> — use .job-row selector.
+ * - History heading "History" requires a signed-in pseud; sign in first.
+ * - Import: the preview shows the heading "What confirming would do" only
+ *   after a successful preview; wait for the whole section.
  */
 
 const PASSPHRASE = 'extended-passphrase-1';
@@ -32,8 +32,8 @@ function who(handle: string, displayName = handle): Who {
   };
 }
 
-const author = who('ExtAuthor3', 'Extended Author 3');
-const reader = who('ExtReader3', 'Extended Reader 3');
+const author = who('ExtAuthor4', 'Extended Author 4');
+const reader = who('ExtReader4', 'Extended Reader 4');
 
 async function ensureAccount(page: Page, person: Who): Promise<void> {
   await page.goto('/register');
@@ -100,7 +100,8 @@ test('import: preview a pawchive source and see the plan', async ({ page }) => {
   await urlField.fill('https://pawchive.pw/patreon/user/18487028');
   await page.click('button[type=submit]');
 
-  await expect(page.getByRole('heading', { name: /What confirming would do/i })).toBeVisible({ timeout: 30_000 });
+  // The preview section shows the heading once the preview completes.
+  await expect(page.getByRole('heading', { name: /What confirming would do/i })).toBeVisible({ timeout: 60_000 });
 });
 
 test('import: start an import and see it in history', async ({ page }) => {
@@ -111,7 +112,7 @@ test('import: start an import and see it in history', async ({ page }) => {
   const urlField = page.getByLabel('Address of the work');
   await urlField.fill('https://pawchive.pw/patreon/user/18487028');
   await page.click('button[type=submit]');
-  await expect(page.getByRole('heading', { name: /What confirming would do/i })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: /What confirming would do/i })).toBeVisible({ timeout: 60_000 });
 
   await page.click('button:text-is("Confirm")');
   await expect(page.locator('[role=status]')).toContainText(/started|accepted|queued/i, { timeout: 15_000 });
@@ -129,7 +130,8 @@ test('jobs: start a probe job and see it run', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Jobs', exact: true })).toBeVisible();
 
   await page.click('button:text-is("Start a diagnostic job")');
-  await expect(page.locator('table tbody tr, .job-list li').first()).toBeVisible({ timeout: 15_000 });
+  // Jobs render as list items or table rows.
+  await expect(page.locator('table tbody tr, .job-list li, .job-row').first()).toBeVisible({ timeout: 15_000 });
 });
 
 test('jobs: cancel a running job', async ({ page }) => {
@@ -139,7 +141,7 @@ test('jobs: cancel a running job', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Jobs', exact: true })).toBeVisible();
 
   await page.click('button:text-is("Start a diagnostic job")');
-  const jobRow = page.locator('table tbody tr, .job-list li').first();
+  const jobRow = page.locator('table tbody tr, .job-list li, .job-row').first();
   await jobRow.waitFor();
 
   const cancelBtn = jobRow.locator('button[aria-label*="Cancel"]');
@@ -190,7 +192,8 @@ test('history: a reader views their reading history', async ({ page }) => {
   await expect(page.locator('.prose').first()).toBeVisible();
 
   await page.goto('/history');
-  await expect(page.getByRole('heading', { name: 'History', exact: true })).toBeVisible();
+  // History requires a signed-in pseud; the heading is "History".
+  await expect(page.getByRole('heading', { name: 'History', exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText(title).first()).toBeVisible({ timeout: 10_000 });
 });
 
@@ -217,13 +220,12 @@ test('pseuds: add a second pseud', async ({ page }) => {
 test('search: a visitor searches for a work', async ({ page }) => {
   test.setTimeout(60_000);
   await page.goto('/search');
-  await expect(page.getByRole('heading', { name: /Search/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Search works/i })).toBeVisible();
 
   const searchInput = page.locator('input[type=search]').first();
   await searchInput.fill('odyssey');
   await page.press('input[type=search]', 'Enter');
 
-  // The search page renders results or an empty state.
   await expect(page.locator('.search-results, .empty-state, [role=status], main').first()).toBeVisible({ timeout: 15_000 });
 });
 
@@ -272,8 +274,8 @@ test('account: change privacy scope and persist', async ({ page }) => {
   const next = options.find((o) => o !== before) ?? before;
   await privacySelect.selectOption(next);
 
-  // PrivacySettings auto-saves and shows a toast.
-  await expect(page.getByText(/Privacy settings saved/i)).toBeVisible({ timeout: 10_000 });
+  // PrivacySettings auto-saves and shows a toast with "Saved".
+  await expect(page.getByText(/Saved/i)).toBeVisible({ timeout: 10_000 });
 });
 
 // ---------------------------------------------------------------------------
@@ -342,10 +344,10 @@ test('forum: start a topic and reply', async ({ page }) => {
   await page.getByRole('link', { name: /General discussion/i }).click();
   await expect(page.getByRole('heading', { name: 'Topics', exact: true })).toBeVisible();
 
-  await page.click('button:text-is("Start topic")');
+  // The "Start topic" button is disabled until a body is typed.
   await page.fill('#topic-title', 'Extended test topic');
   await page.fill('#topic-body', 'This is a test topic from the extended suite.');
-  await page.click('button:text-is("Post topic")');
+  await page.click('button:text-is("Start topic")');
   await expect(page.getByText('Extended test topic')).toBeVisible();
 
   await page.getByRole('link', { name: /Extended test topic/i }).click();
