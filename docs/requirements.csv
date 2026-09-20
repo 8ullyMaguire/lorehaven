@@ -208,8 +208,8 @@ M37-12,community,Cross-platform rate limiter,M37,planned,docs/spec.md §37.1,
 M37-13,community,Intent classification (heuristic + optional LLM),M37,planned,docs/spec.md §37.1,
 M37-14,community,30-command canonical command list,M37,planned,docs/spec.md §37.2,
 M37-15,community,Webhook receiver + platform forwarding,M37,planned,docs/spec.md §37.9,
-M38-01,infrastructure,[exports] retention_days config key (0=forever),M38,planned,docs/spec.md §38.3,
-M38-02,infrastructure,[exports] grant_ttl_secs config key,M38,planned,docs/spec.md §38.3,
+M38-01,infrastructure,[exports] retention_days config key (0=forever),M38,implemented-locally-tested,docs/spec.md §38.3,crates/app/src/config.rs
+M38-02,infrastructure,[exports] grant_ttl_secs config key,M38,implemented-locally-tested,docs/spec.md §38.3,crates/app/src/config.rs
 M38-03,infrastructure,[revisions] ttl_secs config key,M38,planned,docs/spec.md §38.3,
 M38-04,infrastructure,[jobs] terminal_retention_days config key,M38,planned,docs/spec.md §38.3,
 M38-05,infrastructure,[bulk_export] max_items config key,M38,planned,docs/spec.md §38.3,
