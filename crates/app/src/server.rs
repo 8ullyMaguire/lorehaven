@@ -580,21 +580,19 @@ pub fn build_router(state: AppState) -> Router {
 
 /// Declare a route tree's rate-limit class and install the limiter for it.
 ///
-/// The class marker is layered *outside* the limiter on purpose. Middleware
-/// runs outermost-first, so a marker appended afterwards is visible by the time
-/// the limiter runs. Adding it the other way round — which is the obvious way
-/// to write it — means the limiter inspects a request that does not yet carry a
-/// class, and the fail-closed guard rejects every request on the route.
+/// The class marker is inserted into the request extensions by a middleware
+/// that runs before the limiter, so the limiter can read the class.
 fn classified<S>(router: Router<S>, class: RouteClass, state: &AppState) -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
+    let state = state.clone();
     router
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            limiter::enforce,
-        ))
-        .layer(axum::Extension(Classified(class)))
+        .layer(middleware::from_fn(move |mut request: Request, next: Next| {
+            request.extensions_mut().insert(Classified(class));
+            next.run(request)
+        }))
+        .layer(middleware::from_fn_with_state(state, limiter::enforce))
 }
 
 /// Record whether a reverse proxy is trusted, for rate-limit keying.

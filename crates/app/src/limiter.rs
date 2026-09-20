@@ -264,7 +264,10 @@ impl RateLimiter {
         let bucket = buckets
             .entry(key.to_owned())
             .or_insert_with(|| Bucket::new(f64::from(quota.burst)));
-        bucket.take(quota, now)
+
+        let result = bucket.take(quota, now);
+        tracing::debug!(key = %key, tokens = bucket.tokens, result = ?result, "rate limit check");
+        result
     }
 
     /// Drop buckets that have refilled and gone quiet.
