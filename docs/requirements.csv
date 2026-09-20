@@ -136,6 +136,7 @@ M28-02,integrity,Contested aggregate marking with quorum clearance and promotion
 M29-01,discovery,Why-am-I-seeing-this explanation on recommendation slots,M29,specified,docs/spec.md §33.3,"Spec-only; must not reveal the administrator taste multiplier (§0.3/§24.3)"
 M29-02,discovery,Private opt-in attention report for the reader,M29,specified,docs/spec.md §33.3,"Spec-only; extends 9.6 reading history"
 M29-03,governance,Trust-gated tag wrangling queue with reversibility and public log,M29,specified,docs/spec.md §33.3,"Spec-only; 15.11 canonicalization infra exists, the labour queue for it does not"
+M30-01,gamification,Instance topics configurable with public/private/flags and bonus credits,M30,specified,docs/spec.md §0.4,"Spec-only: no migration, route or UI. Config shape and gamification effects specified"
 DS-01,platform,Decision-service contract - declared answer set with calibrated confidence,cross-cutting,specified,docs/spec.md §34,"Spec-only; 12.2's optional classifier returning a confidence score is the closest existing hook"
 DS-02,platform,Pluggable optional decision provider with deterministic fallback disclosed on /api/v1/meta,cross-cutting,specified,docs/spec.md §34.2,"Spec-only; self-host constraint - no task may require a third party"
 DS-03,platform,Thresholds with named tail owners plus the never-decided list,cross-cutting,specified,docs/spec.md §34.3,"Spec-only"

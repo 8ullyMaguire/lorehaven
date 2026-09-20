@@ -7,6 +7,10 @@ license.workspace = true
 description = "Source adapters for Lorehaven's importer: fetch and parse other sites' works (spec §11)"
 publish = false
 
+[lib]
+name = "lorehaven_scrapers"
+path = "src/lib.rs"
+
 [dependencies]
 async-trait.workspace = true
 encoding_rs.workspace = true

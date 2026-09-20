@@ -390,6 +390,12 @@ pub fn build_router(state: AppState) -> Router {
             &state,
         ))
         .merge(account_routes)
+        // Account permission statement (M27). Write class: session-scoped mutation.
+        .merge(classified(
+            routes::account_permissions::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Taxonomy (nodes, aliases, tags) — M10. Every route needs a session and
         // most write, so it sits under the writers' class.
         .merge(classified(

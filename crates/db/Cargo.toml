@@ -7,6 +7,10 @@ license.workspace = true
 description = "Database access, migrations and repositories for Lorehaven"
 build = "build.rs"
 
+[lib]
+name = "lorehaven_db"
+path = "src/lib.rs"
+
 [dependencies]
 anyhow.workspace = true
 hex.workspace = true

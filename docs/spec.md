@@ -43,6 +43,55 @@ These are not priorities that yield to others. They constrain every priority abo
 
 ---
 
+# 0.4 Instance Topics
+
+An instance **may** declare the topics it is about — but is never required to.
+An instance whose focus is a kink or sensitive subject does not have to say so.
+
+Each topic has three properties:
+- **`name`** — the operator's own label ("hurt/comfort", "omegaverse", …).
+- **`public`** — `true` means the topic is shown publicly (landing page, meta API, leaderboard descriptions); `false` means it is used only internally for recommendations and credit bonuses, never named.
+- **`bonus_credits`** — extra credits a reader earns for finishing a work in that topic (default 0).
+
+An instance may declare **multiple topics**; a work may match several; the
+bonus stacks per matching public topic. Private topics earn the same bonus
+but are never surfaced. **No topics = topic-agnostic**; the baseline gamification rules in §9.7 apply universally, no bonuses.
+
+## 0.4.1 Gamification effects of public topics
+
+An extra completion-credit row in §9.7.3: "Finish a work in a public topic" — `bonus_credits` per matching public topic, once per work per pseud, with the same minimum time-on-page gate as §9.7.3.
+
+Per-public-topic leaderboard category in §9.7.5 (metric: works finished in that topic). Only appears when the operator declares at least one public topic.
+
+## 0.4.2 Anti-gaming
+
+The topic completion bonus never applies to a work the reader imported or wrote themselves. Same minimum time-on-page, same pseud isolation, same unique-source dedup as §9.7.8. A reader cannot inflate a topic bonus by re-reading the same work.
+
+## 0.4.3 Reporting and visibility
+
+`/api/v1/meta` surfaces the instance's public topic names only — never counts,
+never flags indicating which are kink-related. Private topics are entirely invisible on every public surface.
+
+Instance operators who do not declare any topics behave identically to a
+topic-agnostic instance. Kink-focused instances are the **default**; declaring
+anything is the deliberate act.
+
+## 0.4.4 Configuration
+
+```toml
+# lorehaven.toml
+[site]
+name = "Lorehaven"
+topics = [
+  { name = "hurt/comfort", public = true,  bonus_credits = 3 },
+  { name = "omegaverse",   public = false, bonus_credits = 5 },
+]
+```
+
+Each entry: `name: String`, `public: bool`, `bonus_credits: i64` (default 0).
+
+---
+
 # 1. Ground Rules for Implementation
 
 ## 1.1 Completion means working behavior

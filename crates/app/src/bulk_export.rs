@@ -220,6 +220,7 @@ async fn produce_bulk(
 
     // Walk the query with a cursor, rendering each work.
     let mut items: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut skipped: Vec<(String, String)> = Vec::new();
     let mut total_bytes: i64 = 0;
     let limit = i64::min(eligible_count, max_items);
     let mut cursor: Option<String> = None;
@@ -253,6 +254,7 @@ async fn produce_bulk(
                     total_bytes += i64::try_from(bytes.len()).unwrap_or(i64::MAX);
                     if total_bytes > max_bytes {
                         // Record the skip and stop.
+                        skipped.push((work_id.clone(), "over_bounds".to_string()));
                         lorehaven_db::exports::record_bulk_item(
                             db,
                             &item_id,
@@ -284,6 +286,7 @@ async fn produce_bulk(
                     items.push((format!("{work_id}.html"), bytes));
                 }
                 Err(reason) => {
+                    skipped.push((work_id.clone(), reason.clone()));
                     lorehaven_db::exports::record_bulk_item(
                         db,
                         &item_id,
@@ -310,8 +313,15 @@ async fn produce_bulk(
         return Err(BulkFailure::Empty);
     }
 
+    // The manifest: every item with its decision, so the bundle is auditable
+    // without opening the database. Included items carry their file name and
+    // size; skipped ones carry the reason they were skipped.
+    let manifest = build_manifest(export, &items, &skipped);
+    let mut zip_items = items.clone();
+    zip_items.push(("manifest.json".to_string(), serde_json::to_vec_pretty(&manifest).unwrap_or_default()));
+
     // Build the ZIP bundle.
-    let zip_bytes = build_zip(&items).map_err(|error| BulkFailure::Transient(error))?;
+    let zip_bytes = build_zip(&zip_items).map_err(|error| BulkFailure::Transient(error))?;
 
     Ok(Artifact {
         bytes: zip_bytes,
@@ -341,6 +351,54 @@ async fn render_work_to_bytes(
 struct Artifact {
     bytes: Vec<u8>,
     media_type: String,
+}
+
+/// The bundle manifest, embedded as `manifest.json` in every bulk export.
+///
+/// Mirrors the `bulk_export_items` audit table: one row per work the walk
+/// visited, with the decision and, for skips, the reason. A reader can
+/// verify what the bundle contains (and what it refused) without database
+/// access.
+fn build_manifest(
+    export: &lorehaven_db::exports::ExportJob,
+    included: &[(String, Vec<u8>)],
+    skipped: &[(String, String)],
+) -> Value {
+    use serde_json::json;
+
+    let included_json: Vec<Value> = included
+        .iter()
+        .map(|(name, bytes)| {
+            json!({
+                "work_id": name.trim_end_matches(".html"),
+                "file": name,
+                "bytes": bytes.len(),
+                "decision": "included",
+            })
+        })
+        .collect();
+    let skipped_json: Vec<Value> = skipped
+        .iter()
+        .map(|(work_id, reason)| {
+            json!({
+                "work_id": work_id,
+                "decision": "skipped",
+                "reason": reason,
+            })
+        })
+        .collect();
+
+    json!({
+        "export_id": export.id,
+        "requested_at": export.created_at,
+        "format": "zip",
+        "included": included_json,
+        "skipped": skipped_json,
+        "totals": {
+            "included": included.len(),
+            "skipped": skipped.len(),
+        }
+    })
 }
 
 /// Build a ZIP archive from (name, bytes) pairs. Writes stored-method

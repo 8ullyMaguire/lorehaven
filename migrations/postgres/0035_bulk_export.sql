@@ -3,14 +3,13 @@
 -- Dialect: PostgreSQL.
 -- Timestamps are RFC 3339 UTC text; identifiers are canonical UUID text.
 --
--- SQLite cannot extend a CHECK in place and rebuilds the table. PostgreSQL
--- can ALTER CONSTRAINT, but we rebuild the same way so the two dialects
--- produce the same final schema — a rebuild is the one path that works for
--- both and keeps the migration test (which compares table shapes) honest.
---
--- Foreign keys are dropped before the rename and recreated after, because
--- PostgreSQL's ALTER TABLE RENAME leaves referencing tables pointing at
--- export_jobs_old, and the subsequent DROP then breaks them.
+-- Rebuild export_jobs to widen the subject enum and add converter tracking.
+-- PostgreSQL cannot ALTER CONSTRAINT in place, so we rebuild the table.
+
+-- Drop the dependent tables first (their FKs will be invalidated by the rename).
+DROP TABLE IF EXISTS device_deliveries;
+DROP TABLE IF EXISTS bulk_export_items;
+DROP TABLE IF EXISTS download_grants;
 
 ALTER TABLE export_jobs RENAME TO export_jobs_old;
 
@@ -36,6 +35,9 @@ CREATE TABLE export_jobs (
     version               INTEGER NOT NULL DEFAULT 1
 );
 
+ALTER TABLE export_jobs_old ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at::TIMESTAMPTZ;
+ALTER TABLE export_jobs_old ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at::TIMESTAMPTZ;
+
 INSERT INTO export_jobs
     (id, job_id, account_id, subject_type, subject_id, format, options_json,
      privacy_acknowledged_at, state, output_blob_checksum, output_bytes,
@@ -47,8 +49,6 @@ SELECT id, job_id, account_id, subject_type, subject_id, format, options_json,
 
 DROP TABLE export_jobs_old;
 
--- Recreate the referencing tables (their FKs were invalidated by the rename).
-DROP TABLE IF EXISTS download_grants;
 CREATE TABLE download_grants (
     id            UUID    PRIMARY KEY,
     export_job_id UUID    NOT NULL REFERENCES export_jobs (id) ON DELETE CASCADE,
@@ -61,7 +61,6 @@ CREATE TABLE download_grants (
     created_at    TIMESTAMPTZ NOT NULL
 );
 
-DROP TABLE IF EXISTS bulk_export_items;
 CREATE TABLE bulk_export_items (
     id              UUID    PRIMARY KEY,
     export_job_id   UUID    NOT NULL REFERENCES export_jobs (id) ON DELETE CASCADE,

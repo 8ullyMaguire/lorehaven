@@ -407,6 +407,25 @@ pub struct SiteConfig {
     pub base_url: String,
     /// Operator contact address, for legal pages and feeds.
     pub contact_email: Option<String>,
+    /// Instance topics (M30) — configurable public/private with bonus credits.
+    pub topics: Vec<InstanceTopic>,
+}
+
+/// A topic an instance is about (M30 / spec §0.4).
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct InstanceTopic {
+    /// The operator's own label ("hurt/comfort", "omegaverse", ...).
+    pub name: String,
+    /// Whether the topic is shown publicly (landing page, meta API, leaderboards).
+    #[serde(default)]
+    pub public: bool,
+    /// Extra credits a reader earns for finishing a work in this topic.
+    #[serde(default = "default_bonus_credits")]
+    pub bonus_credits: u32,
+}
+
+fn default_bonus_credits() -> u32 {
+    0
 }
 
 /// HTTP listener settings.
@@ -530,6 +549,7 @@ impl Config {
             name: site_file.name.unwrap_or_else(|| "Lorehaven".to_owned()),
             base_url: base_url.trim_end_matches('/').to_owned(),
             contact_email: site_file.contact_email,
+            topics: site_file.topics.unwrap_or_default(),
         };
 
         // --- server ---------------------------------------------------------
@@ -779,6 +799,7 @@ impl Config {
                 name: "Lorehaven".to_owned(),
                 base_url: "http://localhost:8080".to_owned(),
                 contact_email: None,
+                topics: Vec::new(),
             },
             server: ServerConfig {
                 bind: "127.0.0.1".to_owned(),
@@ -970,6 +991,7 @@ struct SiteSection {
     name: Option<String>,
     base_url: Option<String>,
     contact_email: Option<String>,
+    topics: Option<Vec<InstanceTopic>>,
 }
 
 #[derive(Debug, Default, Deserialize)]

@@ -7,6 +7,10 @@ license.workspace = true
 description = "Lorehaven server binary: CLI, composition root, HTTP surface"
 build = "build.rs"
 
+[lib]
+name = "lorehaven_app"
+path = "src/lib.rs"
+
 [[bin]]
 name = "lorehaven"
 path = "src/main.rs"
