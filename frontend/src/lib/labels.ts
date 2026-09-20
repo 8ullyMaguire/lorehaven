@@ -170,3 +170,57 @@ export function formatBytes(bytes: number): string {
   }
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`;
 }
+
+// ---------------------------------------------------------------------------
+// Work discussion modes and typed-vote reactions (spec §35.0–35.1)
+// ---------------------------------------------------------------------------
+
+/** A human label for a work discussion mode. */
+export function describeDiscussionMode(mode: string): string {
+  switch (mode) {
+    case 'thread_only':
+      return 'Reactions and linked discussion';
+    case 'comments_only':
+      return 'Inline comments';
+    case 'both':
+      return 'Reactions, comments, and linked discussion';
+    default:
+      return mode;
+  }
+}
+
+/** A human label for a reaction vote type. */
+export function describeReactionType(voteType: string): string {
+  switch (voteType) {
+    case 'well_written':
+      return 'Well written';
+    case 'insightful':
+      return 'Insightful';
+    case 'funny':
+      return 'Funny';
+    case 'interesting':
+      return 'Interesting';
+    case 'disagree':
+      return 'Disagree';
+    default:
+      return voteType;
+  }
+}
+
+/** A short emoji/icon glyph for a reaction vote type. */
+export function reactionGlyph(voteType: string): string {
+  switch (voteType) {
+    case 'well_written':
+      return '✍️';
+    case 'insightful':
+      return '💡';
+    case 'funny':
+      return '😂';
+    case 'interesting':
+      return '🤔';
+    case 'disagree':
+      return '👎';
+    default:
+      return '⭐';
+  }
+}

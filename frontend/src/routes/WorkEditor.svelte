@@ -21,6 +21,7 @@
     publishWork,
     removeContributor,
     reorderChapters,
+    setDiscussionMode,
     updateContributor,
     updateWork,
     withdrawWork,
@@ -68,6 +69,9 @@
   let savingMeta = $state(false);
   let metaError = $state<unknown>(null);
   let metaMessage = $state<string | null>(null);
+  // Discussion mode form.
+  let discussionMode = $state('thread_only');
+  let discussionMessage = $state<string | null>(null);
 
   // Chapters.
   let openChapter = $state<string | null>(null);
@@ -152,6 +156,7 @@
     visibility = next.visibility;
     completion = next.completion;
     showRatings = next.show_public_ratings;
+    discussionMode = next.discussion_mode;
   }
 
   const canEdit = $derived(work !== null && work.role !== 'beta_reader');
@@ -288,6 +293,18 @@
       await load();
     } catch (failure) {
       chapterError = failure;
+    }
+  }
+
+  async function saveDiscussionMode(mode: string) {
+    const current = work;
+    if (!current) return;
+    discussionMessage = null;
+    try {
+      await setDiscussionMode(current.id, mode);
+      discussionMessage = 'Discussion mode updated.';
+    } catch (failure) {
+      discussionMessage = 'Could not update discussion mode.';
     }
   }
 
@@ -447,6 +464,23 @@
       </div>
     </form>
     {#if metaError}<ErrorSummary error={metaError} />{/if}
+  </section>
+
+  <section aria-labelledby="discussion-heading">
+    <h2 id="discussion-heading">Discussion</h2>
+    <p class="note">How readers talk about this work. Reactions and a linked forum thread, inline comments, or both.</p>
+    <Select
+      label="Discussion mode"
+      value={discussionMode}
+      options={[
+        { value: 'thread_only', label: 'Reactions and linked discussion' },
+        { value: 'comments_only', label: 'Inline comments' },
+        { value: 'both', label: 'Reactions, comments, and linked discussion' },
+      ]}
+      onchange={(event) => void saveDiscussionMode(event.currentTarget.value)}
+      disabled={!canEdit}
+    />
+    {#if discussionMessage}<span class="note">{discussionMessage}</span>{/if}
   </section>
 
   <section aria-labelledby="pricing-heading">

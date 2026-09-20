@@ -6,10 +6,11 @@
    * its posts but refuses new ones — the lock is the server's word, and the
    * form is hidden to match.
    */
-  import { createReply, fetchPosts, fetchTopic, type ForumPost, type ForumTopic } from '../lib/api';
+  import { createReply, fetchLinkedWork, fetchPosts, fetchTopic, type ForumPost, type ForumTopic, type LinkedWorkResponse } from '../lib/api';
   import { session } from '../lib/session.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
+  import WorkBacklink from '../lib/components/WorkBacklink.svelte';
   import { handleLinkClick } from '../lib/router';
 
   let { topicId }: { topicId: string } = $props();
@@ -69,6 +70,8 @@
         · locked
       {/if}
     </p>
+
+    <WorkBacklink {topicId} />
 
     {#if posts.length === 0}
       <p>No replies yet.</p>
