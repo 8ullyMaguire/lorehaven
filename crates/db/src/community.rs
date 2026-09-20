@@ -1044,6 +1044,48 @@ pub async fn create_post(
     Ok(id)
 }
 
+/// Create a forum post with an explicit timestamp.
+///
+/// Only for the comment-to-topic migration tool (spec §35.1): a migrated
+/// comment must keep the moment it was written, not the moment it moved.
+/// Normal posting always uses [`create_post`].
+pub async fn create_post_with_timestamp(
+    db: &Database,
+    topic_id: &str,
+    author_pseud: &str,
+    body: &str,
+    created_at: &str,
+) -> Result<String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let sql = db.sql(
+        "INSERT INTO forum_posts (id, topic_id, author_pseud, body, created_at, deleted_at) VALUES (?, ?, ?, ?, ?, NULL)",
+        "INSERT INTO forum_posts (id, topic_id, author_pseud, body, created_at, deleted_at) VALUES ($1, $2, $3, $4, $5, NULL)",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind(topic_id)
+                .bind(author_pseud)
+                .bind(body)
+                .bind(created_at)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind(topic_id)
+                .bind(author_pseud)
+                .bind(body)
+                .bind(created_at)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?;
+        }
+    }
+    Ok(id)
+}
+
 /// Cursor-paginated posts for a topic.
 pub async fn list_posts(
     db: &Database,
