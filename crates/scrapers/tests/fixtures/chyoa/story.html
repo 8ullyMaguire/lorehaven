@@ -1,0 +1,1917 @@
+<!DOCTYPE html>
+<html lang="en" class="tw-antialiased ">
+	<head>
+		<meta charset="utf-8">
+		<meta http-equiv="X-UA-Compatible" content="IE=edge">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<script>
+		(function(global, root) {
+			var bootstrap;
+			var className = 'js-chapter-terminal-streams';
+			var errorHandler;
+			var fallbackTimer = null;
+
+			function removePreparationClass() {
+				root.className = String(root.className || '')
+					.replace(/(^|\s)js-chapter-terminal-streams(?=\s|$)/g, ' ')
+					.replace(/^\s+|\s+$/g, '');
+			}
+
+			function stopWatching() {
+				if (fallbackTimer !== null) {
+					global.clearTimeout(fallbackTimer);
+					fallbackTimer = null;
+				}
+				if (global.removeEventListener) {
+					global.removeEventListener('error', errorHandler, true);
+				}
+			}
+
+			bootstrap = {
+				failed: false,
+				complete: function() {
+					stopWatching();
+					removePreparationClass();
+				},
+				fail: function() {
+					bootstrap.failed = true;
+					bootstrap.complete();
+				}
+			};
+			errorHandler = function(event) {
+				// Resource errors identify their failed element as the target. The
+				// main bundle has its own onerror hook, so ignore unrelated images,
+				// styles, scripts, and named runtime errors from other bundles.
+				if (event && event.target && event.target !== global) {
+					return;
+				}
+				if (event && event.filename &&
+					!/\/assets\/js\/main(?:-[a-f0-9]+)?\.js(?:[?#]|$)/i.test(event.filename)) {
+					return;
+				}
+				bootstrap.fail();
+			};
+
+			root.className = String(root.className || '')+' '+className;
+			global.ChyoaTerminalStreamBootstrap = bootstrap;
+			if (global.addEventListener) {
+				global.addEventListener('error', errorHandler, true);
+			}
+			// Keep the server-rendered transcript as the final fallback even when
+			// a stalled or partially evaluated bundle cannot report its own error.
+			fallbackTimer = global.setTimeout(bootstrap.fail, 4000);
+		}(window, document.documentElement));
+		</script>
+			
+		<title> The Waifu Catalog- Beta Testers  &mdash; CHYOA</title>
+
+		<link href="https://chyoa.com/build/assets/css/main-fee822030f.css" rel="stylesheet">
+		<link href="https://chyoa.com/build/assets/css/redesign-fa1b54198e.css" rel="stylesheet">
+
+		<link rel="apple-touch-icon" href="https://chyoa.com/apple-touch-icon.png">
+		<link rel="icon" type="image/png" href="https://chyoa.com/favicon.png">
+
+		<link href="https://fonts.googleapis.com/css?family=Gentium+Basic:400,400i,700,700i" rel="stylesheet">
+
+		<!--[if IE]>
+			<link rel="shortcut icon" type="image/x-icon" href="https://chyoa.com/favicon.ico">
+		<![endif]-->
+
+		<meta name="RATING" content="RTA-5042-1996-1400-1577-RTA">
+
+		<meta name="google-site-verification" content="NtYyMd9PkW5y8mhqiJa0ufWlIYVaMKkG7aUSYXvG_d8">
+		<meta name="trafficjunky-site-verification" content="2qoz8x3nt">
+
+		<link rel="canonical" href="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833">
+		<meta name="robots" content="noindex, follow, noodp">
+		<meta property="og:site_name" content="CHYOA">
+		 <meta name="description" content="What happens after death? For some lucky individuals, a new career beta testing artificial worlds for the Company. "> <meta property="og:title" content="The Waifu Catalog- Beta Testers">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833">
+<meta property="og:image" content="https://chyoa.com/data/covers/l/47/47833.jpg?1678067701">
+<meta property="og:description" content="What happens after death? For some lucky individuals, a new career beta testing artificial worlds for the Company. ">
+		 <meta property="article:published_time" content="2022-09-25T22:48:46+00:00"> 		 <meta property="article:modified_time" content="2026-09-19T16:24:19+00:00"> 	<meta property="article:tag" content="Mind control">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:site" content="@CHYOAcom">
+<meta name="twitter:description" content="What happens after death? For some lucky individuals, a new career beta testing artificial worlds for the Company. ">
+<meta name="twitter:title" content="The Waifu Catalog- Beta Testers">
+<meta name="twitter:image" content="https://chyoa.com/data/covers/l/47/47833.jpg?1678067701">
+<script type="application/ld+json">
+{
+	"@context": "https://schema.org/",
+	"@type": "CreativeWork",
+	"name": "The Waifu Catalog- Beta Testers",
+	"genre": "Romance",
+	"url": "https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833",
+	"interactionStatistic": [
+		{
+			"@type": "InteractionCounter",
+			"interactionType": "https://schema.org/LikeAction",
+			"userInteractionCount":  "9378" 		},
+		{
+			"@type": "InteractionCounter",
+			"interactionType": "https://schema.org/WantAction",
+			"userInteractionCount":  "985" 		},
+		{
+			"@type": "InteractionCounter",
+			"interactionType": "https://schema.org/WatchAction",
+			"userInteractionCount":  "788733" 		},
+		{
+			"@type": "InteractionCounter",
+			"interactionType": "https://schema.org/CommentAction",
+			"userInteractionCount":  "5427" 		}
+	],
+	"commentCount":  "5427" 	 ,"image": "https://chyoa.com/data/covers/l/47/47833.jpg?1678067701" 	 ,"description": "What happens after death? For some lucky individuals, a new career beta testing artificial worlds for the Company. " 	 ,"keywords": "Mind control,Tutorial,Warcraft,Healer,Magic,genderbending,possession,DCU,RWBY,Pathfinder,pirates,Litrpg,Disney,Waifu Catalog" 		 ,"author": {
+		"@type": "Person",
+		"name": "Jerynboe"
+	} 				 ,"datePublished": "2022-09-25T22:48:46+00:00" 			 ,"dateCreated": "2022-09-25T22:48:46+00:00" 			 ,"dateModified": "2026-09-19T16:24:19+00:00" 			 ,"inLanguage": {
+		"@type": "Language",
+		"name": "English",
+		"alternateName": "en"
+	} }
+</script>
+
+		<!--
+		So, you little PERV like to have a lookie lookie at other websites' sources, huh?
+		Well, luckily I don't mind, so feel free to check out this source and
+		do whatever dirty perverted things you fantasize about.
+		-->
+
+				<!-- Global site tag (gtag.js) - Google Analytics -->
+		<script async src="https://www.googletagmanager.com/gtag/js?id=G-MBS2YL1JSW"></script>
+		<script>
+		  window.dataLayer = window.dataLayer || [];
+		  function gtag(){dataLayer.push(arguments);}
+		  gtag('js', new Date());
+
+		  gtag('config', 'G-MBS2YL1JSW');
+		</script>
+		
+		<style type="text/css">
+			@media (max-width: 992px) {
+			    body[data-rx_background=black] #content .layout-single-column.with-sidebar {
+			        box-shadow: none;
+			    }
+			    .layout-single-column.with-sidebar {
+			        margin-right: 0;
+			    }
+			    .sidebar.collapsed-sidebar {
+			        width: 0;
+			    }
+			}
+
+			html.age-blur img:not(.rd-age-verify-figure__image),
+			html.age-blur video {
+			    filter: blur(8px);
+			    transition: filter .3s ease;
+			    pointer-events: none;
+			    user-select: none;
+			}
+		</style>
+	</head>
+	<body data-rx_background="white">
+				<header id="masthead" role="banner" class="tw-relative tw-z-[1030] tw-bg-[rgb(var(--chyoa-header-bg))] tw-text-[rgb(var(--chyoa-header-text))] tw-shadow-[0_8px_24px_rgb(var(--chyoa-header-shadow)/var(--chyoa-header-shadow-opacity))]">
+	<div class="tw-relative tw-flex tw-min-h-14 tw-w-full tw-items-center tw-gap-2 tw-px-3 tw-py-2 min-[768px]:tw-gap-3 min-[768px]:tw-px-6 min-[992px]:tw-gap-3 min-[992px]:tw-px-7">
+		<div class="rd-header-brand tw-flex tw-min-w-0 tw-shrink-0 tw-items-center max-[767px]:tw-ml-2 max-[360px]:tw-ml-1">
+			<a href="https://chyoa.com" class="redesign-brand-wordmark tw-rounded tw-no-underline tw-outline-none focus-visible:tw-shadow-[0_0_0_3px_rgb(var(--chyoa-header-link)/0.18)]" aria-label="Homepage"><svg class="redesign-brand-wordmark__logo" viewBox="0 0 373 122" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+	<g transform="matrix(1,0,0,1,58.027,20.1711)">
+		<path class="redesign-brand-wordmark__text" d="M0,78.428C-3.054,79.894 -9.895,81.482 -18.446,81.482C-44.711,81.482 -58.027,63.891 -58.027,40.436C-58.027,11.483 -38.848,-3.054 -16.614,-3.054C-8.185,-3.054 -1.833,-1.466 0.978,0.122L-2.565,14.537C-5.742,13.072 -10.017,11.85 -15.759,11.85C-28.708,11.85 -39.214,20.523 -39.214,39.336C-39.214,56.805 -30.174,66.334 -15.637,66.334C-10.873,66.334 -5.62,65.479 -2.443,64.135L0,78.428Z"/>
+	</g>
+	<g transform="matrix(1,0,0,1,87.1012,100.554)">
+		<path class="redesign-brand-wordmark__text" d="M0,-82.337L0,-50.209L26.509,-50.209L26.509,-82.337L44.345,-82.337L44.345,0L26.509,0L26.509,-34.45L0,-34.45L0,0L-17.835,0L-17.835,-82.337L0,-82.337Z"/>
+	</g>
+	<g transform="matrix(1,0,0,1,161.621,18.2167)">
+		<path class="redesign-brand-wordmark__text" d="M0,82.337L0,49.231L-23.578,0L-3.543,0L3.909,19.79C6.23,25.532 7.94,30.418 9.65,36.038L9.895,36.038C11.483,30.663 13.315,25.532 15.514,19.668L22.722,0L42.39,0L17.835,48.62L17.835,82.337L0,82.337Z"/>
+	</g>
+	<g transform="matrix(1,0,0,1,222.336,59.2634)">
+		<path class="redesign-brand-wordmark__text" d="M0,0.244C0,17.102 6.353,27.975 16.98,27.975C27.731,27.975 33.595,16.003 33.595,-0.245C33.595,-14.904 27.976,-27.731 16.858,-27.731C6.108,-27.731 0,-16.248 0,0.244M52.408,-0.856C52.408,27.364 37.626,42.512 16.126,42.512C-6.597,42.512 -18.812,23.699 -18.812,0.488C-18.812,-23.578 -5.131,-42.268 17.348,-42.268C41.047,-42.268 52.408,-22.478 52.408,-0.856"/>
+	</g>
+	<g transform="matrix(1,0,0,1,320.312,52.0559)">
+		<path class="redesign-brand-wordmark__text" d="M0,14.659L-4.398,-2.81C-5.62,-7.696 -6.964,-14.538 -8.186,-19.546L-8.43,-19.546C-9.529,-14.538 -10.751,-7.574 -11.973,-2.81L-16.248,14.659L0,14.659ZM-18.691,28.097L-23.822,48.498L-41.902,48.498L-19.058,-33.839L3.786,-33.839L26.509,48.498L7.818,48.498L2.32,28.097L-18.691,28.097Z"/>
+	</g>
+	<g transform="matrix(1,0,0,1,-327.581,-471.587)">
+		<rect class="redesign-brand-wordmark__cursor" x="686.077" y="471.587" width="14.252" height="121.81"/>
+	</g>
+</svg>
+</a>
+		</div>
+
+		<nav class="rd-header-community-nav tw-hidden tw-min-w-0 tw-shrink-0 tw-items-center min-[992px]:tw-flex" aria-label="Story navigation">
+			<div class="js-header-dropdown rd-header-browse-menu tw-relative tw-m-0" data-header-dropdown="standard" data-header-dropdown-placement="bottom-start">
+	<button class="tw-relative tw-inline-flex tw-h-9 tw-items-center tw-gap-2 tw-rounded-md tw-border-0 tw-bg-transparent tw-pl-2.5 tw-pr-2 tw-text-15 tw-font-semibold tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.06)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none focus-visible:tw-shadow-[0_0_0_3px_rgb(var(--chyoa-header-link)/0.16)] js-header-dropdown-trigger" type="button" id="rd-header-browse-menu" aria-haspopup="menu" aria-expanded="false" aria-label="Browse stories">
+		<span class="">Browse</span>
+		<i data-lucide="chevron-down" class="icon-lucide rd-header-browse-menu__chevron tw-size-4 tw-shrink-0" aria-hidden="true"></i>
+		<span class="tw-pointer-events-none tw-absolute tw-left-0 tw-top-1/2 tw-h-12 tw-w-full -tw-translate-y-1/2 sm:tw-hidden" aria-hidden="true"></span>
+	</button>
+	<ul class="rd-header-dropdown-panel rd-header-browse-panel js-header-dropdown-menu tw-mt-2 tw-max-h-[calc(100vh-72px)] tw-w-72 tw-max-w-[calc(100vw-1.5rem)] tw-list-none tw-overflow-y-auto tw-rounded-lg tw-bg-[rgb(var(--chyoa-header-panel))] tw-p-2 tw-shadow-[0_18px_44px_rgb(var(--chyoa-header-shadow)/0.14)] tw-ring-1 tw-ring-[rgb(var(--chyoa-header-border)/0.10)]" role="menu" aria-labelledby="rd-header-browse-menu">
+				<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/trending-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="trending-up" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Trending Stories</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Stories gaining momentum this week</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/recently-updated-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="clock" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Recently Updated</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Latest chapters and branches</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/new-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="sparkles" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">New Stories</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Fresh starts from authors</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/deep-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="network" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Deep Stories</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Stories with long published paths</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/many-paths-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="route" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Many Paths</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Stories with lots of reader choices</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/deep-branching-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="git-branch" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Deep &amp; Branching</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Stories with long paths and many choices</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/most-liked-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="heart" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Most Liked</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Stories readers liked most</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/most-viewed-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="eye" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Most Viewed</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Stories readers return to</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/customizable-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="sliders-horizontal" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Customizable</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Stories with reader variables</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/adult-text-games" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="gamepad-2" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Game Mode</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Stories with rules and state</span>
+					</span>
+			</a>
+</li>
+		<li role="separator" class="tw-my-2 tw-h-px tw-bg-[rgb(var(--chyoa-header-border)/0.09)]"></li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/categories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="layout-grid" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Story Categories</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Find stories by genre and theme</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/feed" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="newspaper" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">News Feed</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Public activity across CHYOA</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/active-polls" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="bar-chart-3" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Active Polls</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Open chapter polls across visible stories</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/leaderboard" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="award" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Leaderboard</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Awarded community writers</span>
+					</span>
+			</a>
+</li>
+		<li role="separator" class="tw-my-2 tw-h-px tw-bg-[rgb(var(--chyoa-header-border)/0.09)]"></li>
+		<li role="presentation" class="tw-list-none">
+			<ul class="rd-header-browse-quick-links tw-m-0 tw-grid tw-list-none tw-grid-cols-2 tw-gap-1 tw-p-0" role="group" aria-label="Quick links">
+				<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="https://chyoa.com/goto/random" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none rd-header-menu-item--compact tw-min-h-16 tw-flex-col tw-items-center tw-justify-center tw-gap-1.5 tw-px-2 tw-py-2 tw-text-center">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center tw-justify-center" aria-hidden="true"><i data-lucide="dice-5" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-w-full tw-min-w-0 tw-flex-none tw-flex-col tw-items-center">
+			<span class="tw-whitespace-normal tw-text-center tw-font-semibold tw-leading-5 tw-text-current">Random Story</span>
+					</span>
+			</a>
+</li>
+				<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="https://chyoa.com/goto/storyoftheweek" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none rd-header-menu-item--compact tw-min-h-16 tw-flex-col tw-items-center tw-justify-center tw-gap-1.5 tw-px-2 tw-py-2 tw-text-center">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center tw-justify-center" aria-hidden="true"><i data-lucide="trophy" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-w-full tw-min-w-0 tw-flex-none tw-flex-col tw-items-center">
+			<span class="tw-whitespace-normal tw-text-center tw-font-semibold tw-leading-5 tw-text-current">Story of the Week</span>
+					</span>
+			</a>
+</li>
+				<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/story/chyoa-guide.6006" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none rd-header-menu-item--compact tw-min-h-16 tw-flex-col tw-items-center tw-justify-center tw-gap-1.5 tw-px-2 tw-py-2 tw-text-center">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center tw-justify-center" aria-hidden="true"><i data-lucide="book-open-check" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-w-full tw-min-w-0 tw-flex-none tw-flex-col tw-items-center">
+			<span class="tw-whitespace-normal tw-text-center tw-font-semibold tw-leading-5 tw-text-current">CHYOA Guide</span>
+					</span>
+			</a>
+</li>
+				<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="https://forum.chyoa.com" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none rd-header-menu-item--compact tw-min-h-16 tw-flex-col tw-items-center tw-justify-center tw-gap-1.5 tw-px-2 tw-py-2 tw-text-center">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center tw-justify-center" aria-hidden="true"><i data-lucide="message-square-text" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-w-full tw-min-w-0 tw-flex-none tw-flex-col tw-items-center">
+			<span class="tw-whitespace-normal tw-text-center tw-font-semibold tw-leading-5 tw-text-current">CHYOA Forum</span>
+					</span>
+			</a>
+</li>
+			</ul>
+		</li>
+	</ul>
+</div>
+		</nav>
+
+		<div class="js-header-search tw-hidden tw-min-w-[210px] min-[900px]:tw-block min-[900px]:tw-flex-none min-[900px]:tw-w-[min(44vw,500px)] min-[1200px]:tw-w-[560px] max-[899px]:tw-absolute max-[899px]:tw-inset-0 max-[899px]:tw-z-40 max-[899px]:tw-gap-1.5 max-[899px]:tw-bg-[rgb(var(--chyoa-header-bg))] max-[899px]:tw-px-2 max-[899px]:tw-py-1.5 max-[899px]:tw-shadow-[0_10px_30px_rgb(var(--chyoa-header-shadow)/var(--chyoa-header-shadow-opacity))]" id="header-search">
+	<button class="js-header-search-close tw-relative tw-hidden tw-h-11 tw-min-w-11 tw-items-center tw-justify-center tw-rounded-md tw-border-0 tw-bg-transparent tw-p-0 tw-text-[rgb(var(--chyoa-header-muted))] hover:tw-bg-[rgb(var(--chyoa-header-link)/0.06)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none focus-visible:tw-shadow-[0_0_0_3px_rgb(var(--chyoa-header-link)/0.16)] max-[899px]:tw-inline-flex" type="button" aria-expanded="false" aria-controls="header-search" aria-label="Close search">
+		<i data-lucide="arrow-left" class="icon-lucide tw-size-5 tw-shrink-0"></i>
+		<span class="tw-pointer-events-none tw-absolute tw-left-0 tw-top-1/2 tw-h-12 tw-w-full -tw-translate-y-1/2 sm:tw-hidden" aria-hidden="true"></span>
+	</button>
+	<form action="https://chyoa.com/search" method="GET" class="rd-header-search-form tw-m-0" role="search">
+		<div class="rd-header-search-field tw-flex tw-h-11 tw-w-full tw-items-center tw-rounded-lg tw-bg-[rgb(var(--chyoa-header-panel))] tw-ring-1 tw-ring-[rgb(var(--chyoa-header-border)/0.18)] focus-within:tw-ring-[rgb(var(--chyoa-header-link)/0.52)] focus-within:tw-shadow-[0_0_0_3px_rgb(var(--chyoa-header-link)/0.12)] min-[768px]:tw-h-10 min-[768px]:tw-rounded-md min-[768px]:tw-ring-[rgb(var(--chyoa-header-border)/0.14)]">
+			<input type="text" name="q" value="" class="tw-h-full tw-min-w-0 tw-flex-1 tw-rounded-md tw-border-0 tw-bg-transparent tw-py-2 tw-pl-3.5 tw-pr-2 tw-text-16 tw-leading-6 tw-text-[rgb(var(--chyoa-header-text))] tw-shadow-none tw-outline-none placeholder:tw-text-[rgb(var(--chyoa-header-subtle))] min-[900px]:tw-text-15" placeholder="Search stories, chapters, authors" autocomplete="off" id="navigator" aria-label="Search">
+			<span class="tw-flex tw-shrink-0 tw-items-center tw-gap-1 tw-pr-1">
+				<a href="https://chyoa.com/goto/random" class="rd-header-search-random-link tw-relative tw-hidden tw-h-8 tw-min-w-8 tw-items-center tw-justify-center tw-rounded-md tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.06)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none focus-visible:tw-shadow-[0_0_0_3px_rgb(var(--chyoa-header-link)/0.16)] min-[900px]:tw-inline-flex" data-toggle="tooltip" data-placement="bottom" title="Random Story" aria-label="Random Story">
+					<i data-lucide="dice-5" class="icon-lucide tw-size-5 tw-shrink-0"></i>
+				</a>
+				<button class="tw-relative tw-inline-flex tw-h-10 tw-min-w-10 tw-items-center tw-justify-center tw-rounded-md tw-border-0 tw-bg-transparent tw-p-0 tw-text-[rgb(var(--chyoa-header-accent))] hover:tw-bg-[rgb(var(--chyoa-header-accent)/0.08)] hover:tw-text-[rgb(var(--chyoa-header-accent))] focus:tw-outline-none focus-visible:tw-shadow-[0_0_0_3px_rgb(var(--chyoa-header-accent)/0.16)] min-[900px]:tw-h-8 min-[900px]:tw-min-w-8" type="submit" aria-label="Search">
+					<i data-lucide="search" class="icon-lucide tw-size-5 tw-shrink-0"></i>
+				</button>
+			</span>
+		</div>
+			</form>
+</div>
+
+		<div class="rd-header-nav-links tw-ml-auto tw-flex tw-min-w-0 tw-shrink-0 tw-items-center tw-justify-end tw-gap-1.5 min-[768px]:tw-gap-2">
+			<div class="js-header-dropdown rd-header-mobile-menu tw-relative tw-m-0 min-[992px]:tw-hidden" data-header-dropdown="standard" data-header-dropdown-placement="bottom-end">
+	<button class="tw-relative tw-inline-flex tw-h-10 tw-min-w-10 tw-items-center tw-justify-center tw-gap-1.5 tw-rounded-md tw-border-0 tw-bg-transparent tw-pl-3 tw-pr-2.5 tw-text-15 tw-font-semibold tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.06)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none focus-visible:tw-shadow-[0_0_0_3px_rgb(var(--chyoa-header-link)/0.16)] max-[360px]:tw-w-10 max-[360px]:tw-px-0 js-header-dropdown-trigger" type="button" id="rd-header-mobile-menu" aria-haspopup="menu" aria-expanded="false" aria-label="Browse stories">
+		<span class="max-[360px]:tw-hidden">Browse</span>
+		<i data-lucide="chevron-down" class="icon-lucide rd-header-mobile-menu__chevron tw-size-4 tw-shrink-0" aria-hidden="true"></i>
+		<span class="tw-pointer-events-none tw-absolute tw-left-0 tw-top-1/2 tw-h-12 tw-w-full -tw-translate-y-1/2 sm:tw-hidden" aria-hidden="true"></span>
+	</button>
+	<ul class="rd-header-dropdown-panel rd-header-browse-panel js-header-dropdown-menu tw-right-0 tw-left-auto tw-mt-2 tw-max-h-[calc(100vh-72px)] tw-w-72 tw-max-w-[calc(100vw-1.5rem)] tw-list-none tw-overflow-y-auto tw-rounded-lg tw-bg-[rgb(var(--chyoa-header-panel))] tw-p-2 tw-shadow-[0_18px_44px_rgb(var(--chyoa-header-shadow)/0.14)] tw-ring-1 tw-ring-[rgb(var(--chyoa-header-border)/0.10)]" role="menu" aria-labelledby="rd-header-mobile-menu">
+				<li role="presentation" class="rd-header-browse-auth-group tw-list-none min-[768px]:tw-hidden">
+			<ul class="rd-header-browse-auth-links tw-m-0 tw-grid tw-list-none tw-grid-cols-2 tw-gap-1 tw-p-0" role="group" aria-label="Account">
+				<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/auth/register" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none rd-header-menu-item--compact tw-min-h-16 tw-flex-col tw-items-center tw-justify-center tw-gap-1.5 tw-px-2 tw-py-2 tw-text-center">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center tw-justify-center" aria-hidden="true"><i data-lucide="user-plus" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-w-full tw-min-w-0 tw-flex-none tw-flex-col tw-items-center">
+			<span class="tw-whitespace-normal tw-text-center tw-font-semibold tw-leading-5 tw-text-current">Sign Up</span>
+					</span>
+			</a>
+</li>
+				<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/auth/login" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none rd-header-menu-item--compact tw-min-h-16 tw-flex-col tw-items-center tw-justify-center tw-gap-1.5 tw-px-2 tw-py-2 tw-text-center">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center tw-justify-center" aria-hidden="true"><i data-lucide="log-in" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-w-full tw-min-w-0 tw-flex-none tw-flex-col tw-items-center">
+			<span class="tw-whitespace-normal tw-text-center tw-font-semibold tw-leading-5 tw-text-current">Log In</span>
+					</span>
+			</a>
+</li>
+			</ul>
+		</li>
+		<li role="separator" class="rd-header-browse-auth-separator tw-my-2 tw-h-px tw-bg-[rgb(var(--chyoa-header-border)/0.09)] min-[768px]:tw-hidden"></li>
+				<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/trending-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="trending-up" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Trending Stories</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Stories gaining momentum this week</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/recently-updated-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="clock" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Recently Updated</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Latest chapters and branches</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/new-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="sparkles" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">New Stories</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Fresh starts from authors</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/deep-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="network" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Deep Stories</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Stories with long published paths</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/many-paths-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="route" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Many Paths</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Stories with lots of reader choices</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/deep-branching-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="git-branch" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Deep &amp; Branching</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Stories with long paths and many choices</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/most-liked-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="heart" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Most Liked</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Stories readers liked most</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/most-viewed-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="eye" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Most Viewed</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Stories readers return to</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/customizable-sex-stories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="sliders-horizontal" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Customizable</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Stories with reader variables</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/adult-text-games" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="gamepad-2" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Game Mode</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Stories with rules and state</span>
+					</span>
+			</a>
+</li>
+		<li role="separator" class="tw-my-2 tw-h-px tw-bg-[rgb(var(--chyoa-header-border)/0.09)]"></li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/categories" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="layout-grid" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Story Categories</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Find stories by genre and theme</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/feed" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="newspaper" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">News Feed</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Public activity across CHYOA</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/active-polls" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="bar-chart-3" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Active Polls</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Open chapter polls across visible stories</span>
+					</span>
+			</a>
+</li>
+		<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/leaderboard" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none tw-gap-2.5 tw-px-3 tw-py-2 tw-min-h-14 tw-items-start">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center" aria-hidden="true"><i data-lucide="award" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-gap-0.5">
+			<span class="tw-truncate tw-font-semibold tw-text-current">Leaderboard</span>
+						<span class="rd-header-menu-item__description tw-text-13 tw-font-normal tw-leading-4 tw-text-[rgb(var(--chyoa-header-muted))]">Awarded community writers</span>
+					</span>
+			</a>
+</li>
+		<li role="separator" class="tw-my-2 tw-h-px tw-bg-[rgb(var(--chyoa-header-border)/0.09)]"></li>
+		<li role="presentation" class="tw-list-none">
+			<ul class="rd-header-browse-quick-links tw-m-0 tw-grid tw-list-none tw-grid-cols-2 tw-gap-1 tw-p-0" role="group" aria-label="Quick links">
+				<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="https://chyoa.com/goto/random" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none rd-header-menu-item--compact tw-min-h-16 tw-flex-col tw-items-center tw-justify-center tw-gap-1.5 tw-px-2 tw-py-2 tw-text-center">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center tw-justify-center" aria-hidden="true"><i data-lucide="dice-5" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-w-full tw-min-w-0 tw-flex-none tw-flex-col tw-items-center">
+			<span class="tw-whitespace-normal tw-text-center tw-font-semibold tw-leading-5 tw-text-current">Random Story</span>
+					</span>
+			</a>
+</li>
+				<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="https://chyoa.com/goto/storyoftheweek" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none rd-header-menu-item--compact tw-min-h-16 tw-flex-col tw-items-center tw-justify-center tw-gap-1.5 tw-px-2 tw-py-2 tw-text-center">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center tw-justify-center" aria-hidden="true"><i data-lucide="trophy" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-w-full tw-min-w-0 tw-flex-none tw-flex-col tw-items-center">
+			<span class="tw-whitespace-normal tw-text-center tw-font-semibold tw-leading-5 tw-text-current">Story of the Week</span>
+					</span>
+			</a>
+</li>
+				<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="/story/chyoa-guide.6006" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none rd-header-menu-item--compact tw-min-h-16 tw-flex-col tw-items-center tw-justify-center tw-gap-1.5 tw-px-2 tw-py-2 tw-text-center">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center tw-justify-center" aria-hidden="true"><i data-lucide="book-open-check" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-w-full tw-min-w-0 tw-flex-none tw-flex-col tw-items-center">
+			<span class="tw-whitespace-normal tw-text-center tw-font-semibold tw-leading-5 tw-text-current">CHYOA Guide</span>
+					</span>
+			</a>
+</li>
+				<li role="presentation" class="tw-list-none">
+	<a role="menuitem" tabindex="-1" href="https://forum.chyoa.com" class="tw-flex tw-w-full tw-rounded-md tw-text-15 tw-font-medium tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none rd-header-menu-item--compact tw-min-h-16 tw-flex-col tw-items-center tw-justify-center tw-gap-1.5 tw-px-2 tw-py-2 tw-text-center">
+				<span class="tw-flex tw-h-5 tw-shrink-0 tw-items-center tw-justify-center" aria-hidden="true"><i data-lucide="message-square-text" class="icon-lucide tw-size-4 tw-shrink-0"></i></span>
+				<span class="tw-flex tw-w-full tw-min-w-0 tw-flex-none tw-flex-col tw-items-center">
+			<span class="tw-whitespace-normal tw-text-center tw-font-semibold tw-leading-5 tw-text-current">CHYOA Forum</span>
+					</span>
+			</a>
+</li>
+			</ul>
+		</li>
+	</ul>
+</div>
+
+			<button class="js-header-search-toggle rd-header-search-toggle tw-relative tw-inline-flex tw-h-10 tw-min-w-10 tw-items-center tw-justify-center tw-rounded-md tw-border-0 tw-bg-transparent tw-px-3 tw-text-[rgb(var(--chyoa-header-muted))] hover:tw-bg-[rgb(var(--chyoa-header-link)/0.06)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none focus-visible:tw-shadow-[0_0_0_3px_rgb(var(--chyoa-header-link)/0.16)] min-[900px]:tw-hidden" type="button" aria-expanded="false" aria-controls="header-search" aria-label="Search">
+				<i data-lucide="search" class="icon-lucide tw-size-5 tw-shrink-0"></i>
+				<span class="tw-pointer-events-none tw-absolute tw-left-0 tw-top-1/2 tw-h-12 tw-w-full -tw-translate-y-1/2 sm:tw-hidden" aria-hidden="true"></span>
+			</button>
+
+			<div class="js-header-dropdown tw-relative tw-m-0" data-header-dropdown="theme" data-header-dropdown-placement="bottom-end">
+	<button id="dd-site-theme" type="button" class="js-header-dropdown-trigger tw-relative tw-inline-flex tw-h-10 tw-min-w-10 tw-items-center tw-justify-center tw-rounded-md tw-border-0 tw-bg-transparent tw-px-3 tw-text-[rgb(var(--chyoa-header-muted))] hover:tw-bg-[rgb(var(--chyoa-header-link)/0.06)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none focus-visible:tw-shadow-[0_0_0_3px_rgb(var(--chyoa-header-link)/0.16)] min-[768px]:tw-h-9 min-[768px]:tw-w-10 min-[768px]:tw-min-w-10 min-[768px]:tw-px-0" aria-haspopup="menu" aria-expanded="false" title="Site theme" aria-label="Site theme">
+		<i data-lucide="monitor" class="icon-lucide tw-size-5 tw-shrink-0"></i>
+			<span class="tw-sr-only">Site theme</span>
+		<span class="tw-pointer-events-none tw-absolute tw-left-0 tw-top-1/2 tw-h-12 tw-w-full -tw-translate-y-1/2 sm:tw-hidden" aria-hidden="true"></span>
+	</button>
+	<div class="rd-header-dropdown-panel rd-header-theme-dropdown-panel js-header-dropdown-menu tw-right-0 tw-left-auto tw-mt-2 tw-w-44 tw-rounded-lg tw-bg-[rgb(var(--chyoa-header-panel))] tw-p-1.5 tw-shadow-[0_18px_44px_rgb(var(--chyoa-header-shadow)/0.14)] tw-ring-1 tw-ring-[rgb(var(--chyoa-header-border)/0.10)]" role="menu" aria-labelledby="dd-site-theme">
+					<button type="button" class="js-change-appearance rd-theme-dropdown-option rd-theme-dropdown-option--white tw-flex tw-min-h-10 tw-w-full tw-items-center tw-gap-2 tw-rounded-md tw-border-0 tw-bg-transparent tw-px-2 tw-py-1.5 tw-text-left tw-text-[rgb(var(--chyoa-header-muted))] hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none aria-pressed:tw-bg-[rgb(var(--chyoa-header-link)/0.08)] aria-pressed:tw-text-[rgb(var(--chyoa-header-link))]" data-url="https://chyoa.com/settings/change/appearance" data-rx_background="white" aria-pressed="true" aria-checked="true" role="menuitemradio">
+				<span class="rd-theme-dropdown-swatch rd-theme-dropdown-swatch--white" aria-hidden="true"></span>
+			<span class="rd-theme-dropdown-label tw-min-w-0 tw-flex-1 tw-text-15 tw-font-semibold tw-text-[rgb(var(--chyoa-header-text))]">White</span>
+			<i data-lucide="check" class="icon-lucide rd-theme-dropdown-check tw-size-4 tw-shrink-0 tw-opacity-100" aria-hidden="true"></i>
+		</button>
+					<button type="button" class="js-change-appearance rd-theme-dropdown-option rd-theme-dropdown-option--black tw-flex tw-min-h-10 tw-w-full tw-items-center tw-gap-2 tw-rounded-md tw-border-0 tw-bg-transparent tw-px-2 tw-py-1.5 tw-text-left tw-text-[rgb(var(--chyoa-header-muted))] hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none aria-pressed:tw-bg-[rgb(var(--chyoa-header-link)/0.08)] aria-pressed:tw-text-[rgb(var(--chyoa-header-link))]" data-url="https://chyoa.com/settings/change/appearance" data-rx_background="black" aria-pressed="false" aria-checked="false" role="menuitemradio">
+				<span class="rd-theme-dropdown-swatch rd-theme-dropdown-swatch--black" aria-hidden="true"></span>
+			<span class="rd-theme-dropdown-label tw-min-w-0 tw-flex-1 tw-text-15 tw-font-semibold tw-text-[rgb(var(--chyoa-header-text))]">Black</span>
+			<i data-lucide="check" class="icon-lucide rd-theme-dropdown-check tw-size-4 tw-shrink-0 tw-opacity-0" aria-hidden="true"></i>
+		</button>
+					<button type="button" class="js-change-appearance rd-theme-dropdown-option rd-theme-dropdown-option--sepia tw-flex tw-min-h-10 tw-w-full tw-items-center tw-gap-2 tw-rounded-md tw-border-0 tw-bg-transparent tw-px-2 tw-py-1.5 tw-text-left tw-text-[rgb(var(--chyoa-header-muted))] hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] focus:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none aria-pressed:tw-bg-[rgb(var(--chyoa-header-link)/0.08)] aria-pressed:tw-text-[rgb(var(--chyoa-header-link))]" data-url="https://chyoa.com/settings/change/appearance" data-rx_background="sepia" aria-pressed="false" aria-checked="false" role="menuitemradio">
+				<span class="rd-theme-dropdown-swatch rd-theme-dropdown-swatch--sepia" aria-hidden="true"></span>
+			<span class="rd-theme-dropdown-label tw-min-w-0 tw-flex-1 tw-text-15 tw-font-semibold tw-text-[rgb(var(--chyoa-header-text))]">Sepia</span>
+			<i data-lucide="check" class="icon-lucide rd-theme-dropdown-check tw-size-4 tw-shrink-0 tw-opacity-0" aria-hidden="true"></i>
+		</button>
+			</div>
+</div>
+
+							<div class="tw-flex tw-min-w-0 tw-items-center tw-gap-1 min-[768px]:tw-gap-2">
+	<a href="https://chyoa.com/auth/login" class="rd-header-mobile-login-link nopop tw-relative tw-inline-flex tw-h-10 tw-w-10 tw-items-center tw-justify-center tw-rounded-md tw-border-0 tw-bg-transparent tw-p-0 tw-text-[rgb(var(--chyoa-header-link))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.08)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none focus-visible:tw-shadow-[0_0_0_3px_rgb(var(--chyoa-header-link)/0.16)] min-[768px]:tw-hidden" aria-label="Log In">
+		<i data-lucide="log-in" class="icon-lucide tw-size-5 tw-shrink-0" aria-hidden="true"></i>
+		<span class="tw-pointer-events-none tw-absolute tw-left-0 tw-top-1/2 tw-h-12 tw-w-full -tw-translate-y-1/2 sm:tw-hidden" aria-hidden="true"></span>
+	</a>
+	<a href="https://chyoa.com/auth/login" class="rd-header-write-link nopop tw-relative tw-hidden tw-h-9 tw-items-center tw-justify-center tw-gap-1.5 tw-rounded-md tw-border-0 tw-bg-transparent tw-pl-2 tw-pr-2.5 tw-font-semibold tw-text-[rgb(var(--chyoa-header-accent))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-accent)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-accent))] focus:tw-outline-none focus-visible:tw-shadow-[0_0_0_3px_rgb(var(--chyoa-header-accent)/0.16)] min-[992px]:tw-inline-flex" aria-label="Write a story">
+		<i data-lucide="pen-line" class="icon-lucide rd-header-write-link__icon tw-size-4 tw-shrink-0" aria-hidden="true"></i>
+		<span>Write</span>
+	</a>
+	<a href="https://chyoa.com/auth/register" class="rd-header-signup-link nopop tw-relative tw-hidden tw-h-9 tw-items-center tw-rounded-md tw-bg-transparent tw-px-2.5 tw-font-semibold tw-text-[rgb(var(--chyoa-header-link))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.07)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none focus-visible:tw-shadow-[0_0_0_3px_rgb(var(--chyoa-header-link)/0.16)] min-[768px]:tw-inline-flex">Sign Up</a>
+	<a href="https://chyoa.com/auth/login" class="rd-header-login-link nopop tw-relative tw-hidden tw-h-9 tw-items-center tw-rounded-md tw-bg-transparent tw-px-2.5 tw-font-semibold tw-text-[rgb(var(--chyoa-header-muted))] tw-no-underline hover:tw-bg-[rgb(var(--chyoa-header-link)/0.06)] hover:tw-text-[rgb(var(--chyoa-header-link))] focus:tw-outline-none focus-visible:tw-shadow-[0_0_0_3px_rgb(var(--chyoa-header-link)/0.16)] min-[768px]:tw-inline-flex">Log In</a>
+</div>
+					</div>
+	</div>
+</header>
+
+		
+		<div id="content" class="redesign-page-frame rd-story-shell story-element-theme--default" data-story-id="47833" data-chapter-id="1215015" data-game-mode-report-context="">
+		<div class="redesign-page-sidebar-layer">
+		<aside class="redesign-page-sidebar redesign-sidebar redesign-sidebar--collapsed rd-story-sidebar" aria-label="Story details">
+			<div class="redesign-sidebar__content js-scrolllock">
+				<div class="rd-story-sidebar__inner">
+								<div class="rd-story-sidebar-section rd-story-data story-data rd-story-data--without-heading rd-story-data--without-tabs tw-bg-transparent tw-p-0">
+										<div class="tab-content">
+						<div role="tabpanel" class="tab-pane fade in active" id="about">
+																					<p class="synopsis">What happens after death? For some lucky individuals, a new career beta testing artificial worlds for the Company. </p>
+																						<dl class="rd-story-info-list">
+								<div class="rd-story-info-item">
+									<dt>POV</dt>
+									<dd>
+																				<a href="/search?type=story&amp;pov_person=1st">1st Person</a>,
+																														<a href="/search?type=story&amp;pov_gender=both">Multiple genders</a>
+																			</dd>
+								</div>
+								<div class="rd-story-info-item">
+									<dt>Category</dt>
+									<dd><a href="https://chyoa.com/category/fantasy">Fantasy</a></dd>
+								</div>
+								<div class="rd-story-info-item">
+									<dt>Language</dt>
+									<dd><a href="/search?type=story&amp;language=en">English</a></dd>
+								</div>
+								<div class="rd-story-info-item">
+									<dt>Mode</dt>
+									<dd>Moderated</dd>
+								</div>
+																<div class="rd-story-info-item rd-story-info-item--date">
+									<dt>Updated</dt>
+									<dd>
+										<span class="rd-story-info-item__date">Sep 19, 2026</span>
+																				<span class="rd-story-info-item__byline">
+											<span>by</span>
+																						<a href="https://chyoa.com/user/Jerynboe" class="redesign-profile-identity">Jerynboe</a>
+																					</span>
+																			</dd>
+								</div>
+																								<div class="rd-story-info-item rd-story-info-item--date">
+									<dt>Published</dt>
+									<dd>
+										<span class="rd-story-info-item__date">Sep 25, 2022</span>
+																				<span class="rd-story-info-item__byline">
+											<span>by</span>
+																						<a href="https://chyoa.com/user/Jerynboe" class="redesign-profile-identity">Jerynboe</a>
+																					</span>
+																			</dd>
+								</div>
+															</dl>
+							<div class="rd-story-about-collapse story-about-collapse story-contributors">
+	<button type="button" class="btn-blank story-about-collapse__toggle js-story-section-toggle" aria-expanded="false" aria-controls="story-contributors-47833">
+		<span class="story-about-collapse__summary">
+			<span class="story-about-collapse__title"><i data-lucide="users" class="icon-lucide"></i>Contributors</span>
+		</span>
+					<span class="story-about-collapse__preview" aria-hidden="true">
+						<span class="story-about-collapse__preview-avatar"><span class="redesign-avatar redesign-avatar--sm redesign-avatar--default">
+		<span class="redesign-avatar__default" aria-label="Jerynboe" role="img">
+		<i data-lucide="user-round" class="icon-lucide" aria-hidden="true"></i>
+	</span>
+	</span>
+</span>
+						<span class="story-about-collapse__preview-avatar"><span class="redesign-avatar redesign-avatar--sm ">
+		<img class="redesign-avatar__image" src="https://chyoa.com/data/avatars/s/89/89723.jpg?1702324877" alt="Wrynn">
+	</span>
+</span>
+						<span class="story-about-collapse__preview-avatar"><span class="redesign-avatar redesign-avatar--sm ">
+		<img class="redesign-avatar__image" src="https://chyoa.com/data/avatars/s/468/468717.jpg?1649888033" alt="Unwanted-Empathy ">
+	</span>
+</span>
+									<span class="story-about-collapse__preview-avatar story-about-collapse__preview-more">+2</span>
+						</span>
+				<i data-lucide="chevron-down" class="icon-lucide story-about-collapse__icon"></i>
+	</button>
+	<div id="story-contributors-47833" class="story-about-collapse__content" aria-hidden="true">
+		<div class="story-about-collapse__content-inner">
+			
+						<div class="story-contributors__group">
+				<h3><span>Story Owner</span> <span class="number">1</span></h3>
+				<ul class="story-contributors__list tw-m-0 tw-flex tw-list-none tw-flex-wrap tw-gap-2 tw-p-0">
+										<li>
+						<a href="https://chyoa.com/user/Jerynboe" class="story-contributors__avatar rd-story-contributors__avatar--profile-linked" aria-label="Jerynboe" data-toggle="tooltip" data-placement="top" title="Jerynboe &middot; 671 chapters"><span class="redesign-avatar redesign-avatar--md redesign-avatar--default">
+		<span class="redesign-avatar__default" aria-label="Jerynboe" role="img">
+		<i data-lucide="user-round" class="icon-lucide" aria-hidden="true"></i>
+	</span>
+	</span>
+</a>
+					</li>
+									</ul>
+			</div>
+			
+			
+			
+						<div class="story-contributors__group">
+				<h3>
+					<span class="story-contributors__group-title"><span>Contributors</span></span>
+				</h3>
+				<ul class="story-contributors__list tw-m-0 tw-flex tw-list-none tw-flex-wrap tw-gap-2 tw-p-0">
+										<li>
+						<a href="https://chyoa.com/user/Wrynn" class="story-contributors__avatar rd-story-contributors__avatar--profile-linked" aria-label="Wrynn" data-toggle="tooltip" data-placement="top" title="Wrynn &middot; 89 chapters"><span class="redesign-avatar redesign-avatar--md ">
+		<img class="redesign-avatar__image" src="https://chyoa.com/data/avatars/m/89/89723.jpg?1702324877" alt="Wrynn">
+	</span>
+</a>
+					</li>
+										<li>
+						<a href="https://chyoa.com/user/Unwanted-Empathy%20" class="story-contributors__avatar rd-story-contributors__avatar--profile-linked" aria-label="Unwanted-Empathy " data-toggle="tooltip" data-placement="top" title="Unwanted-Empathy  &middot; 4 chapters"><span class="redesign-avatar redesign-avatar--md ">
+		<img class="redesign-avatar__image" src="https://chyoa.com/data/avatars/m/468/468717.jpg?1649888033" alt="Unwanted-Empathy ">
+	</span>
+</a>
+					</li>
+										<li>
+						<a href="https://chyoa.com/user/ShadeWriter" class="story-contributors__avatar rd-story-contributors__avatar--profile-linked" aria-label="ShadeWriter" data-toggle="tooltip" data-placement="top" title="ShadeWriter &middot; 3 chapters"><span class="redesign-avatar redesign-avatar--md ">
+		<img class="redesign-avatar__image" src="https://chyoa.com/data/avatars/m/219/219905.jpg?1649873672" alt="ShadeWriter">
+	</span>
+</a>
+					</li>
+										<li>
+						<a href="https://chyoa.com/user/Darkfirephoenix" class="story-contributors__avatar rd-story-contributors__avatar--profile-linked" aria-label="Darkfirephoenix" data-toggle="tooltip" data-placement="top" title="Darkfirephoenix &middot; 1 chapter"><span class="redesign-avatar redesign-avatar--md redesign-avatar--default">
+		<span class="redesign-avatar__default" aria-label="Darkfirephoenix" role="img">
+		<i data-lucide="user-round" class="icon-lucide" aria-hidden="true"></i>
+	</span>
+	</span>
+</a>
+					</li>
+														</ul>
+							</div>
+					</div>
+	</div>
+</div>
+																					<div class="rd-story-about-collapse story-about-collapse story-tags">
+								<button type="button" class="btn-blank story-about-collapse__toggle js-story-section-toggle" aria-expanded="false" aria-controls="story-tags-47833">
+									<span class="story-about-collapse__summary">
+										<span class="story-about-collapse__title"><i data-lucide="tags" class="icon-lucide"></i>Tags</span>
+									</span>
+									<i data-lucide="chevron-down" class="icon-lucide story-about-collapse__icon"></i>
+								</button>
+								<div id="story-tags-47833" class="story-about-collapse__content" aria-hidden="true">
+									<div class="story-about-collapse__content-inner tags">
+										<a href="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833/tag/mind%20control">Mind control</a><a href="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833/tag/tutorial">Tutorial</a><a href="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833/tag/warcraft">Warcraft</a><a href="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833/tag/healer">Healer</a><a href="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833/tag/magic">Magic</a><a href="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833/tag/genderbending">genderbending</a><a href="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833/tag/possession">possession</a><a href="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833/tag/dcu">DCU</a><a href="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833/tag/rwby">RWBY</a><a href="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833/tag/pathfinder">Pathfinder</a><a href="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833/tag/pirates">pirates</a><a href="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833/tag/litrpg">Litrpg</a><a href="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833/tag/disney">Disney</a><a href="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833/tag/waifu%20catalog">Waifu Catalog</a>
+									</div>
+								</div>
+							</div>
+													</div>
+																	</div>
+				</div>
+
+				<div class="rd-story-sidebar-section rd-story-stats story-stats tw-bg-transparent tw-p-0">
+					<div class="rd-story-sidebar-actions">
+												<div class="rd-story-sidebar-action-combo rd-story-sidebar-action-combo--map">
+							<a href="https://chyoa.com/auth/login" class="rd-story-sidebar-action nopop" data-toggle="modal">
+								<i data-lucide="map" class="icon-lucide icon-fw"></i>
+								<span>View Story Map</span>
+							</a>
+														<a href="https://chyoa.com/auth/login" class="rd-story-sidebar-action-popout nopop" aria-label="Log in to locate current chapter in story map" data-toggle="modal">
+								<span class="rd-story-navigation__tooltip-target" data-toggle="tooltip" data-placement="top" title="Log in to locate in story map"><i data-lucide="locate-fixed" class="icon-lucide" aria-hidden="true"></i></span>
+							</a>
+													</div>
+												<div class="rd-story-sidebar-action-combo">
+							<a href="#comments" class="rd-story-sidebar-action rd-story-sidebar-action--comment js-comment-link">
+								<i data-lucide="message-circle" class="icon-lucide icon-fw"></i>
+								<span class="rd-story-sidebar-action__text">
+									<span class="rd-story-sidebar-action__primary js-comment-write-label">Write Comment</span>
+									<span class="rd-story-sidebar-action__meta"><span class="js-chapter-comment-count" data-chapter-id="1215015" data-count="44">44</span> <span class="js-chapter-comment-count-label">Chapter Comments</span></span>
+								</span>
+							</a>
+														<button type="button" class="btn-blank rd-story-sidebar-action-popout js-floating-comment-open" aria-label="Open comment box" aria-controls="floating-comment-composer" aria-expanded="false" aria-hidden="false" data-toggle="tooltip" data-placement="top" title="Open comment box">
+								<i data-lucide="picture-in-picture-2" class="icon-lucide"></i>
+							</button>
+													</div>
+					</div>
+					<ul class="rd-story-stat-grid tw-m-0 tw-grid tw-list-none tw-grid-cols-2 tw-gap-2 tw-p-0">
+						<li>
+							<i data-lucide="heart" class="icon-lucide icon-fw"></i>
+							<span class="rd-story-stat-grid__text">
+								<strong class="js-story-stat-value" data-story-stat="likes">9,378</strong>
+								<span>Likes</span>
+							</span>
+						</li>
+						<li>
+							<i data-lucide="eye" class="icon-lucide icon-fw"></i>
+							<span class="rd-story-stat-grid__text">
+								<strong>788,733</strong>
+								<span>Views</span>
+							</span>
+						</li>
+						<li>
+							<i data-lucide="star" class="icon-lucide icon-fw"></i>
+							<span class="rd-story-stat-grid__text">
+								<strong class="js-story-stat-value" data-story-stat="favorites">985</strong>
+								<span>Favorites</span>
+							</span>
+						</li>
+						<li>
+							<i data-lucide="bookmark" class="icon-lucide icon-fw"></i>
+							<span class="rd-story-stat-grid__text">
+								<strong class="js-story-stat-value" data-story-stat="bookmarks">774</strong>
+								<span>Bookmarks</span>
+							</span>
+						</li>
+						<li>
+							<i data-lucide="file-text" class="icon-lucide icon-fw"></i>
+							<span class="rd-story-stat-grid__text">
+								<strong>768</strong>
+								<span>Chapters</span>
+							</span>
+						</li>
+						<li>
+							<i data-lucide="network" class="icon-lucide icon-fw"></i>
+							<span class="rd-story-stat-grid__text">
+								<strong>336</strong>
+								<span>Chapters Deep</span>
+							</span>
+						</li>
+												<li class="rd-story-branch-metric" tabindex="0" data-toggle="tooltip" data-placement="top" data-original-title="Extra routes across the story. At each branch, every route beyond the first adds one.">
+							<i data-lucide="route" class="icon-lucide icon-fw"></i>
+							<span class="rd-story-stat-grid__text">
+								<strong>42</strong>
+								<span>Alternative Paths</span>
+							</span>
+						</li>
+						<li class="rd-story-branch-metric" tabindex="0" data-toggle="tooltip" data-placement="top" data-original-title="Places where one chapter leads to two or more routes.">
+							<i data-lucide="git-fork" class="icon-lucide icon-fw"></i>
+							<span class="rd-story-stat-grid__text">
+								<strong>21</strong>
+								<span>Choice Points</span>
+							</span>
+						</li>
+																		<li>
+							<i data-lucide="pilcrow" class="icon-lucide icon-fw"></i>
+							<span class="rd-story-stat-grid__text">
+								<strong>1,705,141</strong>
+								<span>Words</span>
+							</span>
+						</li>
+						<li>
+							<i data-lucide="whole-word" class="icon-lucide icon-fw"></i>
+							<span class="rd-story-stat-grid__text">
+								<strong>2,238</strong>
+								<span>Words per Chapter</span>
+							</span>
+						</li>
+												<li>
+							<i data-lucide="message-circle" class="icon-lucide icon-fw"></i>
+							<span class="rd-story-stat-grid__text">
+								<strong class="js-story-stat-value" data-story-stat="comments">5,427</strong>
+								<span class="js-story-comment-count-label">Comments</span>
+							</span>
+						</li>
+					</ul>
+										<div class="rd-story-view-trend" aria-labelledby="story-view-trend-title">
+						<div class="rd-story-view-trend__header">
+							<h4 id="story-view-trend-title" class="tw-m-0">Activity trend</h4>
+							<span>Last 30 days</span>
+						</div>
+						<input id="story-view-trend-mode-all" class="rd-story-view-trend__mode-input rd-story-view-trend__mode-input--all" type="radio" name="story_view_trend_mode" value="all" aria-label="Show all activity trend" checked>
+						<input id="story-view-trend-mode-views" class="rd-story-view-trend__mode-input rd-story-view-trend__mode-input--views" type="radio" name="story_view_trend_mode" value="views" aria-label="Show views trend">
+						<input id="story-view-trend-mode-actions" class="rd-story-view-trend__mode-input rd-story-view-trend__mode-input--actions" type="radio" name="story_view_trend_mode" value="actions" aria-label="Show reactions trend">
+						<input id="story-view-trend-mode-chapters" class="rd-story-view-trend__mode-input rd-story-view-trend__mode-input--chapters" type="radio" name="story_view_trend_mode" value="chapters" aria-label="Show new chapters trend">
+						<ol class="rd-story-view-trend__chart" role="list" aria-label="Daily story activity over the last 30 days">
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 27%; --rd-trend-height-views: 27%; --rd-trend-height-actions: 19%; --rd-trend-height-chapters: 100%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 98%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 1%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--chapters" style="--rd-trend-segment-height: 1%;"></span>
+																	</span>
+								<span class="tw-sr-only">Aug 22: 461 views, 3 reader reactions, 1 new chapter</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 30%; --rd-trend-height-views: 29%; --rd-trend-height-actions: 100%; --rd-trend-height-chapters: 100%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 96%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 3%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--chapters" style="--rd-trend-segment-height: 1%;"></span>
+																	</span>
+								<span class="tw-sr-only">Aug 23: 501 views, 16 reader reactions, 1 new chapter</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 17%; --rd-trend-height-views: 17%; --rd-trend-height-actions: 8%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 99%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 1%;"></span>
+																										</span>
+								<span class="tw-sr-only">Aug 24: 293 views, 1 reader reaction, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 8%; --rd-trend-height-views: 8%; --rd-trend-height-actions: 0%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 100%;"></span>
+																																			</span>
+								<span class="tw-sr-only">Aug 25: 130 views, 0 reader reactions, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 11%; --rd-trend-height-views: 11%; --rd-trend-height-actions: 0%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 100%;"></span>
+																																			</span>
+								<span class="tw-sr-only">Aug 26: 193 views, 0 reader reactions, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 26%; --rd-trend-height-views: 26%; --rd-trend-height-actions: 0%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 100%;"></span>
+																																			</span>
+								<span class="tw-sr-only">Aug 27: 449 views, 0 reader reactions, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 19%; --rd-trend-height-views: 20%; --rd-trend-height-actions: 0%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 100%;"></span>
+																																			</span>
+								<span class="tw-sr-only">Aug 28: 338 views, 0 reader reactions, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 11%; --rd-trend-height-views: 11%; --rd-trend-height-actions: 0%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 100%;"></span>
+																																			</span>
+								<span class="tw-sr-only">Aug 29: 189 views, 0 reader reactions, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 24%; --rd-trend-height-views: 23%; --rd-trend-height-actions: 50%; --rd-trend-height-chapters: 100%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 97%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 2%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--chapters" style="--rd-trend-segment-height: 1%;"></span>
+																	</span>
+								<span class="tw-sr-only">Aug 30: 400 views, 8 reader reactions, 1 new chapter</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 20%; --rd-trend-height-views: 20%; --rd-trend-height-actions: 0%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 100%;"></span>
+																																			</span>
+								<span class="tw-sr-only">Aug 31: 348 views, 0 reader reactions, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 12%; --rd-trend-height-views: 12%; --rd-trend-height-actions: 0%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 100%;"></span>
+																																			</span>
+								<span class="tw-sr-only">Sep 1: 201 views, 0 reader reactions, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 9%; --rd-trend-height-views: 9%; --rd-trend-height-actions: 8%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 99%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 1%;"></span>
+																										</span>
+								<span class="tw-sr-only">Sep 2: 163 views, 1 reader reaction, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 26%; --rd-trend-height-views: 25%; --rd-trend-height-actions: 50%; --rd-trend-height-chapters: 100%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 97%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 2%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--chapters" style="--rd-trend-segment-height: 1%;"></span>
+																	</span>
+								<span class="tw-sr-only">Sep 3: 440 views, 8 reader reactions, 1 new chapter</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 36%; --rd-trend-height-views: 35%; --rd-trend-height-actions: 63%; --rd-trend-height-chapters: 100%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 97%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 2%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--chapters" style="--rd-trend-segment-height: 1%;"></span>
+																	</span>
+								<span class="tw-sr-only">Sep 4: 609 views, 10 reader reactions, 1 new chapter</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 29%; --rd-trend-height-views: 29%; --rd-trend-height-actions: 8%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 99%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 1%;"></span>
+																										</span>
+								<span class="tw-sr-only">Sep 5: 506 views, 1 reader reaction, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 27%; --rd-trend-height-views: 27%; --rd-trend-height-actions: 0%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 100%;"></span>
+																																			</span>
+								<span class="tw-sr-only">Sep 6: 461 views, 0 reader reactions, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 50%; --rd-trend-height-views: 50%; --rd-trend-height-actions: 0%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 100%;"></span>
+																																			</span>
+								<span class="tw-sr-only">Sep 7: 867 views, 0 reader reactions, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 22%; --rd-trend-height-views: 22%; --rd-trend-height-actions: 8%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 99%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 1%;"></span>
+																										</span>
+								<span class="tw-sr-only">Sep 8: 373 views, 1 reader reaction, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 26%; --rd-trend-height-views: 26%; --rd-trend-height-actions: 50%; --rd-trend-height-chapters: 100%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 97%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 2%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--chapters" style="--rd-trend-segment-height: 1%;"></span>
+																	</span>
+								<span class="tw-sr-only">Sep 9: 447 views, 8 reader reactions, 1 new chapter</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 13%; --rd-trend-height-views: 13%; --rd-trend-height-actions: 0%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 100%;"></span>
+																																			</span>
+								<span class="tw-sr-only">Sep 10: 233 views, 0 reader reactions, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 17%; --rd-trend-height-views: 17%; --rd-trend-height-actions: 38%; --rd-trend-height-chapters: 100%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 97%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 2%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--chapters" style="--rd-trend-segment-height: 1%;"></span>
+																	</span>
+								<span class="tw-sr-only">Sep 11: 289 views, 6 reader reactions, 1 new chapter</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 12%; --rd-trend-height-views: 12%; --rd-trend-height-actions: 13%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 99%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 1%;"></span>
+																										</span>
+								<span class="tw-sr-only">Sep 12: 206 views, 2 reader reactions, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 12%; --rd-trend-height-views: 12%; --rd-trend-height-actions: 8%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 99%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 1%;"></span>
+																										</span>
+								<span class="tw-sr-only">Sep 13: 204 views, 1 reader reaction, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 8%; --rd-trend-height-views: 8%; --rd-trend-height-actions: 0%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 100%;"></span>
+																																			</span>
+								<span class="tw-sr-only">Sep 14: 123 views, 0 reader reactions, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 23%; --rd-trend-height-views: 23%; --rd-trend-height-actions: 38%; --rd-trend-height-chapters: 100%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 98%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 1%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--chapters" style="--rd-trend-segment-height: 1%;"></span>
+																	</span>
+								<span class="tw-sr-only">Sep 15: 398 views, 6 reader reactions, 1 new chapter</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 33%; --rd-trend-height-views: 33%; --rd-trend-height-actions: 0%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 100%;"></span>
+																																			</span>
+								<span class="tw-sr-only">Sep 16: 568 views, 0 reader reactions, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 73%; --rd-trend-height-views: 74%; --rd-trend-height-actions: 8%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 99%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 1%;"></span>
+																										</span>
+								<span class="tw-sr-only">Sep 17: 1,275 views, 1 reader reaction, 0 new chapters</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 100%; --rd-trend-height-views: 100%; --rd-trend-height-actions: 25%; --rd-trend-height-chapters: 100%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 98%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 1%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--chapters" style="--rd-trend-segment-height: 1%;"></span>
+																	</span>
+								<span class="tw-sr-only">Sep 18: 1,733 views, 4 reader reactions, 1 new chapter</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 90%; --rd-trend-height-views: 90%; --rd-trend-height-actions: 81%; --rd-trend-height-chapters: 100%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 98%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 1%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--chapters" style="--rd-trend-segment-height: 1%;"></span>
+																	</span>
+								<span class="tw-sr-only">Sep 19: 1,554 views, 13 reader reactions, 1 new chapter</span>
+							</li>
+																					<li class="rd-story-view-trend__point" style="--rd-trend-height-all: 22%; --rd-trend-height-views: 22%; --rd-trend-height-actions: 50%; --rd-trend-height-chapters: 0%;">
+								<span class="rd-story-view-trend__bar" aria-hidden="true">
+																		<span class="rd-story-view-trend__segment rd-story-view-trend__segment--views" style="--rd-trend-segment-height: 98%;"></span>
+																											<span class="rd-story-view-trend__segment rd-story-view-trend__segment--actions" style="--rd-trend-segment-height: 2%;"></span>
+																										</span>
+								<span class="tw-sr-only">Sep 20: 381 views, 8 reader reactions, 0 new chapters</span>
+							</li>
+													</ol>
+						<div class="rd-story-view-trend__metrics" aria-label="Activity trend metric">
+							<label for="story-view-trend-mode-all" class="rd-story-view-trend__metric rd-story-view-trend__metric--all">
+								<span class="rd-story-view-trend__metric-label">All</span>
+								<strong>14,441</strong>
+							</label>
+							<label for="story-view-trend-mode-views" class="rd-story-view-trend__metric rd-story-view-trend__metric--views">
+								<span class="rd-story-view-trend__metric-label"><span class="rd-story-view-trend__key rd-story-view-trend__key--views"></span>Views</span>
+								<strong>14,333</strong>
+							</label>
+							<label for="story-view-trend-mode-actions" class="rd-story-view-trend__metric rd-story-view-trend__metric--actions">
+								<span class="rd-story-view-trend__metric-label"><span class="rd-story-view-trend__key rd-story-view-trend__key--actions"></span>Reactions</span>
+								<strong>98</strong>
+							</label>
+							<label for="story-view-trend-mode-chapters" class="rd-story-view-trend__metric rd-story-view-trend__metric--chapters">
+								<span class="rd-story-view-trend__metric-label"><span class="rd-story-view-trend__key rd-story-view-trend__key--chapters"></span>Chapters</span>
+								<strong>10</strong>
+							</label>
+						</div>
+					</div>
+									</div>
+				</div>
+			</div>
+		</aside>
+		<button type="button" class="redesign-sidebar-toggle" aria-label="Open sidebar" aria-expanded="false">
+	<span class="redesign-sidebar-toggle__hit-area" aria-hidden="true"></span>
+	<span class="redesign-sidebar-toggle__icon-wrap" aria-hidden="true">
+		<i data-lucide="panel-right-open" class="icon-lucide redesign-sidebar-toggle__icon redesign-sidebar-toggle__icon--open"></i>
+		<i data-lucide="panel-right-close" class="icon-lucide redesign-sidebar-toggle__icon redesign-sidebar-toggle__icon--close"></i>
+	</span>
+</button>
+	</div>
+	<div class="redesign-page-main rd-story-main ">
+				<div class="redesign-page-content rd-story-page rd-story-page--with-footer-ad">
+			<span class="rd-chapter-draw-page-status js-chapter-draw-page-status" role="status" aria-live="polite" aria-atomic="true"></span>
+						<section class="rd-story-chapter chapter">
+				<header class="rd-story-reading-header rd-story-reading-header--story rd-story-reading-header--with-cover story-header">
+				<div class="rd-story-reading-header__cover cover">
+			<img src="https://chyoa.com/data/covers/l/47/47833.jpg?1678067701" alt="" />
+		</div>
+				<div class="rd-story-reading-header__body">
+						<h1 class="rd-story-reading-title tw-m-0 tw-text-40 tw-font-semibold tw-leading-tight tw-text-[rgb(var(--chyoa-home-text))] md:tw-text-46">The Waifu Catalog- Beta Testers</h1>
+						<h2 class="rd-story-reading-subtitle tw-m-0 tw-mt-3 tw-text-20 tw-font-normal tw-leading-7 tw-text-[rgb(var(--chyoa-home-muted))]">An exciting opportunity!</h2>
+						<p class="rd-story-reading-meta meta tw-m-0 tw-mt-4 tw-flex tw-flex-wrap tw-items-center tw-gap-x-2 tw-gap-y-1 tw-text-15 tw-leading-6">
+				Chapter 1
+				by <a href="https://chyoa.com/user/Jerynboe" class="redesign-profile-identity"><span class="avatar avatar-sm avatar--default default-media default-media--user" role="img" aria-label="Jerynboe"><i data-lucide="user-round" class="icon-lucide" aria-hidden="true"></i></span> Jerynboe</a>
+			</p>
+		</div>
+	</header>
+			<div class="rd-story-prose chapter-content">
+				<p>This story is intended to be open, and anyone at all who wants to make stories based on this general premise/the Waifu Catalogue in general should feel free to throw their hat into the ring.</p>
+<p>••••••••••</p>
+<p>I was in an endless sky. Blue skies and clouds as far as the eye could see. It wasn’t so bad really. I wasn’t hungry, I wasn’t tired, I wasn’t anything really. I was dead; this was honestly more than I expected. Thankfully they kind of turned off my need for stimulation before they put me in here. Whoever “they” are; they’ve just called themselves “The Company.” You could practically hear the capital letters.</p>
+<p>I was purchased after my death, apparently. Wholesale. The god of my world had a chosen people and I wasn’t one of them. I don’t resent him for it. He didn’t throw me into some kind of hell. Apparently The Company was some kind of interdimensional entertainment corporation. I didn’t really love the idea of being someone’s sex doll or action figure, but they assured me that hardly anyone actually wanted someone who wasn’t happy to be there, and they typically used the souls of serial rapists for that kind of client when they did show up.</p>
+<p>For a long time I just waited. Chatting occasionally with my neighbors or caretakers when the mood struck me. I still enjoyed company even if I didn’t need it. Eventually, I was pulled out. I assumed I’d be turned into a clone of someone’s favorite anime waifu or something, and made peace with it. Instead, they offered me a job.</p>
+<p>••••••••••</p>
+<p>They wanted a beta tester for a product they were developing. An immersive full recreation of a fictional setting, with access to an extremely pay-to-win cash shop. They had tens of millions in production, and I’d be matched with one and go through the experience they were developing for their customers. If my experiences and feedback provide them with acceptably useful data, I may even be placed in a queue to test another world after my eventual demise. Otherwise, I’d likely be integrated into the final version as a constantly reincarnating soul.</p>
+<p>It seemed like a good deal. After all, if I was going to be The Company’s bitch for eternity either way I might as well enjoy myself. I put down my name to be entered into the lottery.</p>
+<p>••••••••••</p>
+<p>Mechanics</p>
+<p><a href="https://waifu-catalog.neocities.org" target="_blank" rel="noopener nofollow">https://waifu-catalog.neocities.org</a> for the catalog itself</p>
+<p>(While I love a good power fantasy as much as the next guy, I thought an alternate structure deliberately playing it down slightly while keeping all the wonderful toys active would be a bit of fun. A 35 credit budget individual stranded in Warhammer 40k is more “hope and a prayer” than total power fantasy, but a fun story could be told there. Essentially I wanted to take the concept of choice out of the hands of the main character while keeping it in the hands of the writer. I now eagerly await being shamed for my hubris, it might help me become a better writer.)</p>
+<p>Each soul will be placed into a lottery, and placed into different tiers. The tiers will determine their starting budget. They will then be randomly assigned certain modifiers to encourage them to test certain aspects of the experience. The Company wants a good spread.</p>
+<p>Tier 1: Free Trial- You will start with no budget. Nothing at all from the catalog. You may be given opportunities to earn credits, but that is at the discretion of the oversight committee.</p>
+<p>Tier 2: Freemium- We occasionally offer promotional packages to promising prospective clients. You will receive one of our basic binding tools, either the stamp or the hypnotic phone app (available in magical variants as well), and a budget of 5 credits.</p>
+<p>Tier 3: Basic Package- you will be given a budget of 35 credits. This is enough to dip your toes into things and enjoy yourself in many worlds if you stay in reasonably safe areas.</p>
+<p>Tier 4: Premium Package- you will be given a budget of 150 credits, as well as free access to the “sexual calibration” perk. In most worlds you should be able to get by with a bit of care, but you will preserve the challenge.</p>
+<p>Tier 5: Gold Package- you will be given a budget of 400 credits, with a free upgrade in the form of a pocket apartment, the sexual calibration perk, and a ticket for a single T4 or lower companion native to your world.</p>
+<p>Tier 6: Diamond package- you will receive a budget of 500, as well as sexual calibration, a pocket apartment, a locally sourced T4 or lower companion, and a single TX ticket. Note that you are still restricted to our beta test multiverse.</p>
+<p>The Agent Experience: Some of our clients have expressed interest in living the glamorous life of one of our field agents. Obviously our agents are highly trained professionals with stressful lives, that’s why they get paid the big bucks, but for some reason many of our clients are convinced they live a life of endless hedonism and power fantasy. You will go through a simulation of our onboarding process and treated exactly as we would one of our agents, though of course our need for feedback may override standard operating procedures. By default, Capture Structure, Mission Structure, and PVP Structure will all be in play, and your starting budget will scale to your starting world.</p>
+<p>••••••••••</p>
+<p>Modifiers</p>
+<p>Multiplayer: you will be placed in the same world as other beta testers. Depending on the size of the world, you may not even notice at first. We will not necessarily incentivize PVP, but we have brought in a think tank by the name of VaultTech to help us think of various engineered situations to assist us in collecting data on as many dynamics as possible.</p>
+<p>Closed Loop: to maintain verisimilitude within our world, we will require that all purchased and captured waifus and powers take a form corresponding to the world you start in. Furthermore, all interdimensional travel will be restricted to variations of that setting.</p>
+<p>Build Tester: the overseer wants you to try out an unusual build. You have no choice in how your starting credits are spent, but they will usually not be what you would have chosen. Making you a master of seduction with no combat skills in a fighting anime, turning you into a wizard in an otherwise hard sci fi setting, giving you a harem of thirty-five devoted but normal women with no survival skills in a zombie apocalypse, and making you functionally immortal while sending you to the French Revolution are all on the table. Your overseer will determine which bindings you have; if any.</p>
+<p>This build is subject to change at any time, but as a courtesy you will be informed 1-24 hours in advance and any captured or purchased waifus will retain at least a basic stamp binding. There is a company pool going on whether a certain Diamond Tier tester assigned this modifier will consider himself lucky or find reasons to complain, and his Game Master put a lot of money on the latter.</p>
+<p>Alpha testing: you will be placed in one of our less developed builds. Many features may not be fully implemented yet, and rapid unannounced changes are to be expected. If paired with mission structure you will be expected to engage with new features as they come out.</p>
+<p>Variants: Many of our clients have particular tastes, especially when they are asking for custom work. We may match you with a variation on your world set in a different genre or with different tropes in play. Cowboy, High Fantasy, Low Fantasy, Urban Fantasy, Hentai, superhero, Sci fi, Post Apocalyptic, Crossover and Parody variants are being made for most settings. We are also making linked-multiverse variants, which can maintain continuity while switching between variants. If you are placed in a linked multiverse variant, you may or may not be given influence or notice when and how shifts happen.</p>
+<p>Payment structures</p>
+<p>Though in the final version of the product we intend to have our catalog primarily be a cash shop, we are experimenting with ways of providing premium currency and bonuses within the context of the CustomWorld.</p>
+<p>Mission structure: our moderators will give you specific tasks to complete, which will allow you to earn assets from The Company or credits allowing you to make in-game purchases.</p>
+<p>Plotline: Some of our clients expect a more curated experience. This variant of the mission structure will focus on incentivizing a certain chain of activities calculated to create a compelling and enriching narrative. Personally I think our writing staff is a bunch of hacks, and keep in mind that you may be going through what amounts to a first draft.</p>
+<p>Subscription structure: we will ask you to test one of our subscription models, at least from the client’s perspective. You will receive an infusion of credits at the end of each month equal to 10% of your assigned starting budget, with a minimum of 1 for our tier 1-2 clients.</p>
+<p>Capture Structure: we have agents exploring the actual multiverse tasked with the collection of in-demand waifus and husbandos. They are paid primarily on commission for the capture and sale of these waifus back to the company. We have been informed this is a satisfying way to gamify the job, and are experimenting with having it as a mechanic in our CustomWorld systems. You will be testing it for us, using the same pricing structure as is standard for our agents.</p>
+<p>PvP Structure: We at The Company encourage our agents to do battle with one another in Peer vs Peer conflicts in order to maintain a productive outlook. As cosmically wealthy gamers are as competitive as middle class neckbeards, we are developing various brackets of PvP conflict. You will be set to test these. Note that while we typically match our agents in balanced conflicts where possible, as a tester we make no promises that your opponents will be in the same realms of power, influence, or development as you. We need data on all possible matchups. PvP victories will be rewarded appropriately, primarily with credit payouts but sometimes with various bonuses.</p>
+
+			</div>
+	<div class="rd-story-chapter-actions chapter-options">
+				<div class="rd-story-menu-controls">
+						<div class="dropdown rd-story-info-menu">
+				<button class="rd-story-icon-button rd-story-info-menu__trigger dropdown-toggle" type="button" id="chapterInfoMenu" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" aria-label="Chapter details">
+					<i data-lucide="info" class="icon-lucide"></i>
+				</button>
+				<div class="rd-story-menu rd-story-info-panel dropdown-menu dropdown-menu-right" role="group" aria-labelledby="chapterInfoMenu">
+					<div class="rd-story-menu-meta" aria-label="Chapter details">
+						<span class="rd-story-menu-meta__heading">Chapter details</span>
+												<span class="rd-story-menu-meta__row"><span class="rd-story-menu-meta__label">State</span><span class="rd-story-menu-meta__value">Published</span></span>
+																		<span class="rd-story-menu-meta__row"><span class="rd-story-menu-meta__label">Position</span><span class="rd-story-menu-meta__value">Chapter 1</span></span>
+																		<span class="rd-story-menu-meta__row"><span class="rd-story-menu-meta__label">Views</span><span class="rd-story-menu-meta__value">160,078</span></span>
+																		<span class="rd-story-menu-meta__row"><span class="rd-story-menu-meta__label">Bookmarks</span><span class="rd-story-menu-meta__value js-chapter-menu-stat" data-chapter-stat="bookmarks" data-chapter-id="1215015">211</span></span>
+																		<span class="rd-story-menu-meta__row"><span class="rd-story-menu-meta__label">Words</span><span class="rd-story-menu-meta__value">1,703</span></span>
+																		<span class="rd-story-menu-meta__row">
+							<span class="rd-story-menu-meta__label">Published</span>
+							<span class="rd-story-menu-meta__value rd-story-menu-meta__value--stacked">
+								<time datetime="2022-09-25T22:48:46+00:00">Sep 25, 2022</time>
+																<span class="rd-story-menu-meta__byline">
+									<span>by</span>
+																		<a href="https://chyoa.com/user/Jerynboe" class="redesign-profile-identity">Jerynboe</a>
+																	</span>
+															</span>
+						</span>
+																		<span class="rd-story-menu-meta__row">
+							<span class="rd-story-menu-meta__label">Updated</span>
+							<span class="rd-story-menu-meta__value rd-story-menu-meta__value--stacked">
+								<time datetime="2022-09-25T22:48:46+00:00">Sep 25, 2022</time>
+																<span class="rd-story-menu-meta__byline">
+									<span>by</span>
+																		<a href="https://chyoa.com/user/Jerynboe" class="redesign-profile-identity">Jerynboe</a>
+																	</span>
+															</span>
+						</span>
+											</div>
+				</div>
+			</div>
+									<div class="dropdown rd-story-actions-menu">
+				<button class="rd-story-icon-button dropdown-toggle" type="button" id="dropdownMenu1" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" aria-label="Chapter actions">
+					<i data-lucide="ellipsis" class="icon-lucide"></i>
+				</button>
+				<ul class="rd-story-menu dropdown-menu dropdown-menu-right" role="menu" aria-labelledby="dropdownMenu1">
+																																												<li role="presentation"><a role="menuitem" tabindex="-1" href="https://chyoa.com/chapter/Introduction.1215015/report" data-prompt="Report this chapter" data-placeholder="Please describe the issue..." rel="nofollow"><span class="rd-story-menu-item__icon" aria-hidden="true"><i data-lucide="flag" class="icon-lucide"></i></span><span class="rd-story-menu-item__label">Report chapter</span></a></li>
+
+								</ul>
+			</div>
+					</div>
+		
+								<div class="ratings">
+								<a href="https://chyoa.com/auth/login" class="rd-story-action-button like btn-disabled nopop" data-toggle="tooltip" data-placement="top" title="Log in to like this chapter">
+					<i data-lucide="heart" class="icon-lucide" aria-hidden="true"></i>
+					<span class="rd-story-action-button__label">Like</span>
+					<span class="rd-story-action-button__count">72</span>
+				</a>
+							</div>
+						<div class="links">
+				<button type="button" class="rd-story-action-button comment js-comment-link">
+					<i data-lucide="message-circle" class="icon-lucide"></i>
+					<span>Comments</span>
+					<span class="rd-story-action-button__count js-chapter-comment-count" data-chapter-id="1215015" data-count="44">44</span>
+				</button>
+			</div>
+			</div>
+</section>
+	<div class="rd-story-native-link chapter-moderation chapter-moderation--link">
+	<div class="rd-story-native-link__body">
+		<a href="https://www.gptgirlfriend.online/?utm_source=chyoa&amp;utm_medium=fantasy&amp;utm_campaign=sidebar&amp;ref=odexytr" target="_blank" rel="sponsored noopener" class="rd-story-native-link__title ga-track">Start your own immersive adult AI roleplay story</a>
+	</div>
+	<div class="rd-story-native-link__actions">
+				<span class="rd-story-ad-badge">Ad</span>
+	</div>
+</div>
+    			<section class="rd-story-question question js-story-question ">
+		<header class="rd-story-question-header question-header">
+		<h2 class="tw-m-0 tw-text-26 tw-font-semibold tw-leading-8 tw-text-[rgb(var(--chyoa-home-text))]">Will we be following me, or someone like me?</h2>
+	</header>
+	<div class="rd-story-branches question-content">
+		<ul class="rd-story-branch-list tw-m-0 tw-grid tw-list-none tw-gap-2 tw-p-0">
+																													<li class="">
+														<a href="https://chyoa.com/chapter/A-human-in-Azeroth-%28complete%29.1215016" class="rd-story-branch-link  ">
+																	<span class="rd-story-branch-link__title">
+										<span class="rd-story-branch-link__text">A human in Azeroth (complete)</span>
+										
+									</span>
+																									<i data-lucide="chevron-right" class="icon-lucide" aria-hidden="true"></i>
+							</a>
+						</li>
+																															<li class="">
+														<a href="https://chyoa.com/chapter/Noah-on-Ilias.1334409" class="rd-story-branch-link  ">
+																	<span class="rd-story-branch-link__title">
+										<span class="rd-story-branch-link__text">Noah on Ilias</span>
+										
+									</span>
+																									<i data-lucide="chevron-right" class="icon-lucide" aria-hidden="true"></i>
+							</a>
+						</li>
+																															<li class="">
+														<a href="https://chyoa.com/chapter/Dragon-invasion-of-the-DCU.1386406" class="rd-story-branch-link  ">
+																	<span class="rd-story-branch-link__title">
+										<span class="rd-story-branch-link__text">Dragon invasion of the DCU</span>
+										
+									</span>
+																									<i data-lucide="chevron-right" class="icon-lucide" aria-hidden="true"></i>
+							</a>
+						</li>
+																															<li class="">
+														<a href="https://chyoa.com/chapter/Well-At-Least-I%E2%80%99m-a-Magic-Pirate-Now.1400412" class="rd-story-branch-link  ">
+																	<span class="rd-story-branch-link__title">
+										<span class="rd-story-branch-link__text">Well At Least I&rsquo;m a Magic Pirate Now</span>
+										
+									</span>
+																									<i data-lucide="chevron-right" class="icon-lucide" aria-hidden="true"></i>
+							</a>
+						</li>
+																															<li class="">
+														<a href="https://chyoa.com/chapter/Additional-optional-rules.1427883" class="rd-story-branch-link  ">
+																	<span class="rd-story-branch-link__title">
+										<span class="rd-story-branch-link__text">Additional optional rules</span>
+										
+									</span>
+																									<i data-lucide="chevron-right" class="icon-lucide" aria-hidden="true"></i>
+							</a>
+						</li>
+																															<li class="">
+														<a href="https://chyoa.com/chapter/Skyblock-Challenge%3A-World-Hopping.1548740" class="rd-story-branch-link  ">
+																	<span class="rd-story-branch-link__title">
+										<span class="rd-story-branch-link__text">Skyblock Challenge: World Hopping </span>
+										
+									</span>
+																									<i data-lucide="chevron-right" class="icon-lucide" aria-hidden="true"></i>
+							</a>
+						</li>
+																															<li class="">
+														<a href="https://chyoa.com/chapter/Free-Repository-of-test-runs-for-Staff-use.1579631" class="rd-story-branch-link  ">
+																	<span class="rd-story-branch-link__title">
+										<span class="rd-story-branch-link__text">Free Repository of test runs for Staff use</span>
+										
+									</span>
+																									<i data-lucide="chevron-right" class="icon-lucide" aria-hidden="true"></i>
+							</a>
+						</li>
+																															<li class="">
+														<a href="https://chyoa.com/chapter/Running-the-Gauntlet.1583837" class="rd-story-branch-link  ">
+																	<span class="rd-story-branch-link__title">
+										<span class="rd-story-branch-link__text">Running the Gauntlet</span>
+										
+									</span>
+																									<i data-lucide="chevron-right" class="icon-lucide" aria-hidden="true"></i>
+							</a>
+						</li>
+																															<li class="">
+														<a href="https://chyoa.com/chapter/Tutorial--Build-Creation.1799856" class="rd-story-branch-link  ">
+																	<span class="rd-story-branch-link__title">
+										<span class="rd-story-branch-link__text">--Tutorial; Build Creation --</span>
+										
+									</span>
+																									<i data-lucide="chevron-right" class="icon-lucide" aria-hidden="true"></i>
+							</a>
+						</li>
+												
+												<li><a href="https://chyoa.com/auth/login" class="rd-story-branch-link nopop" data-toggle="modal"><span class="rd-story-branch-link__title"><i data-lucide="circle-plus" class="icon-lucide"></i>Add a new chapter</span></a></li>
+							
+			<li class="rd-story-branch-management-item">
+								<a href="https://chyoa.com/auth/login" class="rd-story-branch-management nopop" data-toggle="modal" aria-label="Log in to customize chapter choices">
+					<span class="rd-story-branch-management__title"><i data-lucide="sliders-horizontal" class="icon-lucide" aria-hidden="true"></i>Customize choices</span>
+				</a>
+							</li>
+		</ul>
+	</div>
+		<div class="rd-story-navigation">
+		<span class="rd-story-navigation__links">
+									<a href="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833"><i data-lucide="rotate-ccw" class="icon-lucide"></i>Start Over</a>
+						<span class="rd-story-navigation__map-actions">
+				<a href="https://chyoa.com/auth/login" class="nopop" data-toggle="modal"><i data-lucide="map" class="icon-lucide"></i>View Story Map</a>
+				<a href="https://chyoa.com/auth/login" class="rd-story-navigation__icon-action nopop" aria-label="Log in to locate current chapter in story map" data-toggle="modal"><span class="rd-story-navigation__tooltip-target" data-toggle="tooltip" data-placement="top" title="Log in to locate in story map"><i data-lucide="locate-fixed" class="icon-lucide" aria-hidden="true"></i></span></a>
+			</span>
+								</span>
+		<span class="rd-story-navigation__saved">
+						<a href="https://chyoa.com/auth/login" class="nopop" data-toggle="modal" aria-label="Log in to bookmark this chapter"><span class="rd-story-navigation__tooltip-target" data-toggle="tooltip" data-placement="top" title="Log in to bookmark this chapter"><i data-lucide="bookmark" class="icon-lucide" aria-hidden="true"></i></span></a>
+			<a href="https://chyoa.com/auth/login" class="nopop" data-toggle="modal" aria-label="Log in to add this story to favorites"><span class="rd-story-navigation__tooltip-target" data-toggle="tooltip" data-placement="top" title="Log in to add this story to favorites"><i data-lucide="star" class="icon-lucide" aria-hidden="true"></i></span></a>
+					</span>
+	</div>
+</section>
+			<section class="rd-story-comments js-comments-section" id="comments"
+	data-comment-restriction-poll-enabled="0"
+	data-comment-local-posting-blocked="0"
+	data-commenting-restriction-active="0"
+	data-commenting-restriction-expires-at-iso8601=""
+	data-commenting-restriction-expires-at-display=""
+	data-commenting-restriction-expires-at-utc=""
+	data-commenting-restriction-scope=""
+	data-commenting-restriction-appeal-url="">
+	<div class="rd-story-comments__header">
+		<h2 class="tw-m-0 tw-text-26 tw-font-semibold tw-leading-8 tw-text-[rgb(var(--chyoa-home-text))]">
+			<span class="js-chapter-comment-heading-text" data-chapter-id="1215015" data-count="44">44 comments</span>
+		</h2>
+		<ul class="rd-story-comment-tabs tw-m-0 tw-flex tw-list-none tw-gap-1 tw-p-0" role="tablist" aria-label="Comment scope">
+			<li role="presentation"><a href="#all_comments" aria-controls="all_comments" role="tab" data-toggle="tab" id="tab-all-comments" data-url="https://chyoa.com/story/The-Waifu-Catalog--Beta-Testers.47833/comments" data-init="true" data-mobile-label="All">All comments</a></li>
+			<li role="presentation" class="active"><a href="#chapter_comments" aria-controls="chapter_comments" role="tab" data-toggle="tab" id="tab-chapter-comments" data-url="https://chyoa.com/chapter/Introduction.1215015/comments" data-init="true" data-mobile-label="Chapter">Chapter comments</a></li>
+		</ul>
+	</div>
+	<div class="tab-content">
+		<div class="rd-story-comment-form-home js-comment-form-home">
+			<div class="js-comment-restriction-slot" aria-live="polite" aria-atomic="true">
+				<div class="js-comment-restriction-live-notice">
+									</div>
+							</div>
+			<span class="tw-sr-only js-comment-restriction-status" role="status" aria-live="polite" aria-atomic="true"></span>
+						<form method="POST" action="https://chyoa.com/chapter/Introduction.1215015/comment" accept-charset="UTF-8" class="rd-story-comment-new-form" id="comment-form" data-persist="garlic"><input name="_token" type="hidden" value="jCdq1TBqToh1adNFb0xxm20UjNMujuwjj7Yq91OF">
+				<div class="rd-story-comment-form">
+					<div class="rd-story-comment-form__media">
+						<span class="redesign-avatar redesign-avatar--sm redesign-avatar--default">
+		<span class="redesign-avatar__default" aria-label="" role="img">
+		<i data-lucide="user-round" class="icon-lucide" aria-hidden="true"></i>
+	</span>
+	</span>
+					</div>
+					<div class="rd-story-comment-form__body">
+						<div class="rd-story-comment-form-field">
+							<textarea class="rd-story-textarea js-autosize js-comment" placeholder="Leave a comment..." aria-label="Comment" rows="1" name="comment" cols="50"></textarea>
+						</div>
+						<div class="rd-story-comment-form-actions hidden">
+														<div class="rd-story-comment-form-actions__group">
+								<span class="rd-story-comment-save-status" role="status" aria-live="polite">
+									<i data-lucide="loader-circle" class="icon-lucide icon-spin" aria-hidden="true"></i>
+									<span>Saving</span>
+								</span>
+																<a class="rd-home-action rd-home-action--primary rd-story-comment-form-submit" href="https://chyoa.com/auth/login">
+									<i data-lucide="log-in" class="icon-lucide" aria-hidden="true"></i>
+									<span>Log in to Comment</span>
+								</a>
+															</div>
+						</div>
+					</div>
+				</div>
+			</form>
+					</div>
+		<div role="tabpanel" class="tab-pane fade" id="all_comments">
+			<div class="rd-story-comment-panel js-all-comments">
+				<ol class="rd-story-comment-list tw-m-0 tw-list-none tw-p-0 js-data-receiver" role="list"></ol>
+				<div class="js-placeholder hidden">
+					<div class="redesign-empty-state rd-story-comment-empty" role="status">
+						<div class="redesign-empty-state__icon" aria-hidden="true"><i data-lucide="messages-square" class="icon-lucide"></i></div>
+						<div class="redesign-empty-state__body">
+							<p class="redesign-empty-state__title">No comments yet</p>
+							<p class="redesign-empty-state__copy">The story has no discussion yet. Leave a note here when a branch gives you something to say.</p>
+						</div>
+					</div>
+				</div>
+				<div class="js-loader hidden" role="status" aria-live="polite" aria-label="Loading comments">
+	<div class="rd-story-comment-skeleton-list">
+				<div class="rd-story-comment-skeleton-row" aria-hidden="true">
+			<span class="rd-story-comment-skeleton-item">
+				<span class="rd-story-comment-skeleton-media"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--avatar"></span></span>
+				<span class="rd-story-comment-skeleton-body">
+					<span class="rd-story-comment-skeleton-header">
+						<span class="rd-story-comment-skeleton-heading">
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--name"></span>
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--timestamp"></span>
+						</span>
+						<span class="rd-story-comment-skeleton rd-story-comment-skeleton--menu"></span>
+					</span>
+										<span class="rd-story-comment-skeleton rd-story-comment-skeleton--context"></span>
+										<span class="rd-story-comment-skeleton rd-story-comment-skeleton--text rd-story-comment-skeleton--text-mid"></span>
+					<span class="rd-story-comment-skeleton-actions">
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label"></span></span>
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label rd-story-comment-skeleton--action-label-short"></span></span>
+					</span>
+				</span>
+			</span>
+		</div>
+				<div class="rd-story-comment-skeleton-row" aria-hidden="true">
+			<span class="rd-story-comment-skeleton-item">
+				<span class="rd-story-comment-skeleton-media"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--avatar"></span></span>
+				<span class="rd-story-comment-skeleton-body">
+					<span class="rd-story-comment-skeleton-header">
+						<span class="rd-story-comment-skeleton-heading">
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--name"></span>
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--timestamp"></span>
+						</span>
+						<span class="rd-story-comment-skeleton rd-story-comment-skeleton--menu"></span>
+					</span>
+										<span class="rd-story-comment-skeleton rd-story-comment-skeleton--text rd-story-comment-skeleton--text-long"></span>
+					<span class="rd-story-comment-skeleton-actions">
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label"></span></span>
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label rd-story-comment-skeleton--action-label-short"></span></span>
+					</span>
+				</span>
+			</span>
+		</div>
+				<div class="rd-story-comment-skeleton-row" aria-hidden="true">
+			<span class="rd-story-comment-skeleton-item">
+				<span class="rd-story-comment-skeleton-media"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--avatar"></span></span>
+				<span class="rd-story-comment-skeleton-body">
+					<span class="rd-story-comment-skeleton-header">
+						<span class="rd-story-comment-skeleton-heading">
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--name"></span>
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--timestamp"></span>
+						</span>
+						<span class="rd-story-comment-skeleton rd-story-comment-skeleton--menu"></span>
+					</span>
+										<span class="rd-story-comment-skeleton rd-story-comment-skeleton--context"></span>
+										<span class="rd-story-comment-skeleton rd-story-comment-skeleton--text rd-story-comment-skeleton--text-short"></span>
+					<span class="rd-story-comment-skeleton-actions">
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label"></span></span>
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label rd-story-comment-skeleton--action-label-short"></span></span>
+					</span>
+				</span>
+			</span>
+		</div>
+				<div class="rd-story-comment-skeleton-row" aria-hidden="true">
+			<span class="rd-story-comment-skeleton-item">
+				<span class="rd-story-comment-skeleton-media"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--avatar"></span></span>
+				<span class="rd-story-comment-skeleton-body">
+					<span class="rd-story-comment-skeleton-header">
+						<span class="rd-story-comment-skeleton-heading">
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--name"></span>
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--timestamp"></span>
+						</span>
+						<span class="rd-story-comment-skeleton rd-story-comment-skeleton--menu"></span>
+					</span>
+										<span class="rd-story-comment-skeleton rd-story-comment-skeleton--text rd-story-comment-skeleton--text-mid"></span>
+					<span class="rd-story-comment-skeleton-actions">
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label"></span></span>
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label rd-story-comment-skeleton--action-label-short"></span></span>
+					</span>
+				</span>
+			</span>
+		</div>
+				<div class="rd-story-comment-skeleton-row" aria-hidden="true">
+			<span class="rd-story-comment-skeleton-item">
+				<span class="rd-story-comment-skeleton-media"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--avatar"></span></span>
+				<span class="rd-story-comment-skeleton-body">
+					<span class="rd-story-comment-skeleton-header">
+						<span class="rd-story-comment-skeleton-heading">
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--name"></span>
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--timestamp"></span>
+						</span>
+						<span class="rd-story-comment-skeleton rd-story-comment-skeleton--menu"></span>
+					</span>
+										<span class="rd-story-comment-skeleton rd-story-comment-skeleton--context"></span>
+										<span class="rd-story-comment-skeleton rd-story-comment-skeleton--text rd-story-comment-skeleton--text-long"></span>
+					<span class="rd-story-comment-skeleton-actions">
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label"></span></span>
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label rd-story-comment-skeleton--action-label-short"></span></span>
+					</span>
+				</span>
+			</span>
+		</div>
+			</div>
+</div>
+			</div>
+		</div>
+		<div role="tabpanel" class="tab-pane fade in active" id="chapter_comments">
+			<div class="rd-story-comment-panel js-all-comments">
+				<ol class="rd-story-comment-list tw-m-0 tw-list-none tw-p-0 js-data-receiver" role="list"></ol>
+				<div class="js-placeholder hidden">
+					<div class="redesign-empty-state rd-story-comment-empty" role="status">
+						<div class="redesign-empty-state__icon" aria-hidden="true"><i data-lucide="message-circle" class="icon-lucide"></i></div>
+						<div class="redesign-empty-state__body">
+							<p class="redesign-empty-state__title">No chapter comments yet</p>
+							<p class="redesign-empty-state__copy">No one has commented on this branch yet. Add the first note above.</p>
+						</div>
+					</div>
+				</div>
+				<div class="js-loader hidden" role="status" aria-live="polite" aria-label="Loading comments">
+	<div class="rd-story-comment-skeleton-list">
+				<div class="rd-story-comment-skeleton-row" aria-hidden="true">
+			<span class="rd-story-comment-skeleton-item">
+				<span class="rd-story-comment-skeleton-media"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--avatar"></span></span>
+				<span class="rd-story-comment-skeleton-body">
+					<span class="rd-story-comment-skeleton-header">
+						<span class="rd-story-comment-skeleton-heading">
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--name"></span>
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--timestamp"></span>
+						</span>
+						<span class="rd-story-comment-skeleton rd-story-comment-skeleton--menu"></span>
+					</span>
+										<span class="rd-story-comment-skeleton rd-story-comment-skeleton--context"></span>
+										<span class="rd-story-comment-skeleton rd-story-comment-skeleton--text rd-story-comment-skeleton--text-mid"></span>
+					<span class="rd-story-comment-skeleton-actions">
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label"></span></span>
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label rd-story-comment-skeleton--action-label-short"></span></span>
+					</span>
+				</span>
+			</span>
+		</div>
+				<div class="rd-story-comment-skeleton-row" aria-hidden="true">
+			<span class="rd-story-comment-skeleton-item">
+				<span class="rd-story-comment-skeleton-media"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--avatar"></span></span>
+				<span class="rd-story-comment-skeleton-body">
+					<span class="rd-story-comment-skeleton-header">
+						<span class="rd-story-comment-skeleton-heading">
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--name"></span>
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--timestamp"></span>
+						</span>
+						<span class="rd-story-comment-skeleton rd-story-comment-skeleton--menu"></span>
+					</span>
+										<span class="rd-story-comment-skeleton rd-story-comment-skeleton--text rd-story-comment-skeleton--text-long"></span>
+					<span class="rd-story-comment-skeleton-actions">
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label"></span></span>
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label rd-story-comment-skeleton--action-label-short"></span></span>
+					</span>
+				</span>
+			</span>
+		</div>
+				<div class="rd-story-comment-skeleton-row" aria-hidden="true">
+			<span class="rd-story-comment-skeleton-item">
+				<span class="rd-story-comment-skeleton-media"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--avatar"></span></span>
+				<span class="rd-story-comment-skeleton-body">
+					<span class="rd-story-comment-skeleton-header">
+						<span class="rd-story-comment-skeleton-heading">
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--name"></span>
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--timestamp"></span>
+						</span>
+						<span class="rd-story-comment-skeleton rd-story-comment-skeleton--menu"></span>
+					</span>
+										<span class="rd-story-comment-skeleton rd-story-comment-skeleton--context"></span>
+										<span class="rd-story-comment-skeleton rd-story-comment-skeleton--text rd-story-comment-skeleton--text-short"></span>
+					<span class="rd-story-comment-skeleton-actions">
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label"></span></span>
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label rd-story-comment-skeleton--action-label-short"></span></span>
+					</span>
+				</span>
+			</span>
+		</div>
+				<div class="rd-story-comment-skeleton-row" aria-hidden="true">
+			<span class="rd-story-comment-skeleton-item">
+				<span class="rd-story-comment-skeleton-media"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--avatar"></span></span>
+				<span class="rd-story-comment-skeleton-body">
+					<span class="rd-story-comment-skeleton-header">
+						<span class="rd-story-comment-skeleton-heading">
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--name"></span>
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--timestamp"></span>
+						</span>
+						<span class="rd-story-comment-skeleton rd-story-comment-skeleton--menu"></span>
+					</span>
+										<span class="rd-story-comment-skeleton rd-story-comment-skeleton--text rd-story-comment-skeleton--text-mid"></span>
+					<span class="rd-story-comment-skeleton-actions">
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label"></span></span>
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label rd-story-comment-skeleton--action-label-short"></span></span>
+					</span>
+				</span>
+			</span>
+		</div>
+				<div class="rd-story-comment-skeleton-row" aria-hidden="true">
+			<span class="rd-story-comment-skeleton-item">
+				<span class="rd-story-comment-skeleton-media"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--avatar"></span></span>
+				<span class="rd-story-comment-skeleton-body">
+					<span class="rd-story-comment-skeleton-header">
+						<span class="rd-story-comment-skeleton-heading">
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--name"></span>
+							<span class="rd-story-comment-skeleton rd-story-comment-skeleton--timestamp"></span>
+						</span>
+						<span class="rd-story-comment-skeleton rd-story-comment-skeleton--menu"></span>
+					</span>
+										<span class="rd-story-comment-skeleton rd-story-comment-skeleton--context"></span>
+										<span class="rd-story-comment-skeleton rd-story-comment-skeleton--text rd-story-comment-skeleton--text-long"></span>
+					<span class="rd-story-comment-skeleton-actions">
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label"></span></span>
+						<span class="rd-story-comment-skeleton-action"><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-icon"></span><span class="rd-story-comment-skeleton rd-story-comment-skeleton--action-label rd-story-comment-skeleton--action-label-short"></span></span>
+					</span>
+				</span>
+			</span>
+		</div>
+			</div>
+</div>
+			</div>
+		</div>
+	</div>
+</section>
+
+						<aside class="rd-story-page-ad rd-story-page-ad--bottom" aria-label="Advertisement">
+				<div class="chyoa-adzone chyoa-adzone-2">
+    <div class="chyoa-banner" style="width:100%;height:200px;background:#fff;">
+        <iframe
+    width="100%"
+    height="200"
+    style="display:block;width:100%;height:200px;border:0;margin:0 auto;"
+    marginwidth="0"
+    marginheight="0"
+    frameborder="0"
+    src="https://creative.whitetrafsa.com/widgets/v4/Universal?autoplay=onHover&amp;hideTitle=1&amp;sourceId=chyoa&amp;creativeId=desktopfooter&amp;tag=girls&amp;userId=773bd36d81ec5b5aec0a0040f68f5e1adc74803aaec32dc4a8340a851d720d1d"
+></iframe>
+        <div class="chyoa-adblock-message">
+            <div class="vertical-alignment-wrapper">
+                <div class="vertical-alignment">Want to support CHYOA?<br>Disable your Ad Blocker! Thanks :)</div>
+            </div>
+        </div>
+    </div>
+    </div>
+    			</aside>
+					</div>
+	</div>
+		<div class="floating-comment-composer js-floating-comment-composer" id="floating-comment-composer" role="dialog" aria-modal="false" aria-labelledby="floating-comment-composer-title" aria-hidden="true">
+		<div class="floating-comment-composer__inner">
+			<div class="floating-comment-composer__header">
+				<div class="floating-comment-composer__title">
+					<span class="floating-comment-composer__title-icon" aria-hidden="true"><i data-lucide="message-square-plus" class="icon-lucide"></i></span>
+					<strong id="floating-comment-composer-title">Comment on this chapter</strong>
+				</div>
+				<button type="button" class="btn-blank floating-comment-composer__close js-floating-comment-close" aria-label="Close comment composer">
+					<i data-lucide="x" class="icon-lucide"></i>
+				</button>
+			</div>
+			<div class="floating-comment-composer__body js-floating-comment-body"></div>
+		</div>
+	</div>
+			</div>
+<footer id="footer" class="rd-home-footer">
+	<div class="rd-home-footer__inner">
+		<div class="rd-home-footer__brand">
+			<a href="https://chyoa.com" class="rd-home-footer__logo" aria-label="CHYOA home"><svg class="redesign-brand-wordmark__logo" viewBox="0 0 373 122" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+	<g transform="matrix(1,0,0,1,58.027,20.1711)">
+		<path class="redesign-brand-wordmark__text" d="M0,78.428C-3.054,79.894 -9.895,81.482 -18.446,81.482C-44.711,81.482 -58.027,63.891 -58.027,40.436C-58.027,11.483 -38.848,-3.054 -16.614,-3.054C-8.185,-3.054 -1.833,-1.466 0.978,0.122L-2.565,14.537C-5.742,13.072 -10.017,11.85 -15.759,11.85C-28.708,11.85 -39.214,20.523 -39.214,39.336C-39.214,56.805 -30.174,66.334 -15.637,66.334C-10.873,66.334 -5.62,65.479 -2.443,64.135L0,78.428Z"/>
+	</g>
+	<g transform="matrix(1,0,0,1,87.1012,100.554)">
+		<path class="redesign-brand-wordmark__text" d="M0,-82.337L0,-50.209L26.509,-50.209L26.509,-82.337L44.345,-82.337L44.345,0L26.509,0L26.509,-34.45L0,-34.45L0,0L-17.835,0L-17.835,-82.337L0,-82.337Z"/>
+	</g>
+	<g transform="matrix(1,0,0,1,161.621,18.2167)">
+		<path class="redesign-brand-wordmark__text" d="M0,82.337L0,49.231L-23.578,0L-3.543,0L3.909,19.79C6.23,25.532 7.94,30.418 9.65,36.038L9.895,36.038C11.483,30.663 13.315,25.532 15.514,19.668L22.722,0L42.39,0L17.835,48.62L17.835,82.337L0,82.337Z"/>
+	</g>
+	<g transform="matrix(1,0,0,1,222.336,59.2634)">
+		<path class="redesign-brand-wordmark__text" d="M0,0.244C0,17.102 6.353,27.975 16.98,27.975C27.731,27.975 33.595,16.003 33.595,-0.245C33.595,-14.904 27.976,-27.731 16.858,-27.731C6.108,-27.731 0,-16.248 0,0.244M52.408,-0.856C52.408,27.364 37.626,42.512 16.126,42.512C-6.597,42.512 -18.812,23.699 -18.812,0.488C-18.812,-23.578 -5.131,-42.268 17.348,-42.268C41.047,-42.268 52.408,-22.478 52.408,-0.856"/>
+	</g>
+	<g transform="matrix(1,0,0,1,320.312,52.0559)">
+		<path class="redesign-brand-wordmark__text" d="M0,14.659L-4.398,-2.81C-5.62,-7.696 -6.964,-14.538 -8.186,-19.546L-8.43,-19.546C-9.529,-14.538 -10.751,-7.574 -11.973,-2.81L-16.248,14.659L0,14.659ZM-18.691,28.097L-23.822,48.498L-41.902,48.498L-19.058,-33.839L3.786,-33.839L26.509,48.498L7.818,48.498L2.32,28.097L-18.691,28.097Z"/>
+	</g>
+	<g transform="matrix(1,0,0,1,-327.581,-471.587)">
+		<rect class="redesign-brand-wordmark__cursor" x="686.077" y="471.587" width="14.252" height="121.81"/>
+	</g>
+</svg>
+</a>
+			<p>CHYOA is a community library for interactive adult fiction, where readers choose the path and authors keep the branches growing.</p>
+		</div>
+		<nav class="rd-home-footer__nav" aria-label="Footer">
+			<ul class="tw-m-0 tw-flex tw-list-none tw-flex-wrap tw-gap-x-2 tw-gap-y-2 tw-p-0" role="list">
+				<li><a href="https://chyoa.com/story/CHYOA-GUIDE.6006">CHYOA Guide</a></li>
+				<li><a href="https://forum.chyoa.com">CHYOA Forum</a></li>
+				<li><a href="https://chyoa.com/chapter/Thank-You.323093">Supporters</a></li>
+				<li><a href="https://chyoa.com/chapter/Copyright-and-DMCA-Policy.817024">DMCA</a></li>
+		<li><a href="https://chyoa.com/chapter/TAKE-IT-DOWN-Act-Policy.1851488">Take It Down</a></li>
+		<li><a href="https://chyoa.com/chapter/Contact.251853">Contact</a></li>
+				</ul>
+		</nav>
+		<div class="rd-home-footer__legal">
+			<p>
+				No part may be reproduced in any form without explicit written permission.
+				All characters in all stories on this site are over 18.
+			</p>
+			<a href="http://www.rtalabel.org" target="_blank" rel="nofollow" class="rd-home-footer__rta-label" aria-label="Restricted to Adults">
+				<svg class="rd-home-footer__rta-logo" viewBox="0 0 81 28" xmlns="http://www.w3.org/2000/svg" fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" stroke-linejoin="round" stroke-miterlimit="2" aria-hidden="true" focusable="false">
+	<g transform="matrix(0.784835,0,0,1.69335,28.026,-21.4614)">
+		<rect x="26.209" y="12.674" width="6.062" height="4.035"/>
+	</g>
+	<g transform="matrix(1.59066,0,0,0.628671,-28.2237,-7.96774)">
+		<rect x="26.209" y="12.674" width="6.062" height="4.035"/>
+	</g>
+	<g transform="matrix(1.87805,0,0,1.31818,-23.6038,-7.90909)">
+		<path d="M12.568,26.997L12.568,6L20.158,6C21.566,6 22.641,6.172 23.385,6.516C24.129,6.859 24.729,7.497 25.185,8.428C25.641,9.359 25.869,10.493 25.869,11.829C25.869,12.994 25.694,13.999 25.346,14.844C24.997,15.689 24.518,16.375 23.908,16.9C23.519,17.234 22.987,17.511 22.31,17.73C22.853,17.988 23.248,18.246 23.496,18.504C23.664,18.676 23.907,19.043 24.225,19.607C24.543,20.17 24.756,20.605 24.863,20.91L27.065,26.997L21.918,26.997L19.485,20.581C19.177,19.75 18.902,19.211 18.66,18.962C18.332,18.638 17.96,18.475 17.545,18.475L17.142,18.475L17.142,26.997L12.568,26.997ZM17.142,14.508L19.063,14.508C19.27,14.508 19.672,14.412 20.269,14.221C20.571,14.135 20.817,13.916 21.008,13.562C21.199,13.209 21.294,12.803 21.294,12.345C21.294,11.667 21.144,11.147 20.842,10.784C20.54,10.421 19.974,10.24 19.143,10.24L17.142,10.24L17.142,14.508Z" fill-rule="nonzero"/>
+		<path d="M24.794,6L38.637,6L38.637,11.185L33.993,11.185L33.993,26.997L29.439,26.997L29.439,11.185L24.794,11.185L24.794,6Z" fill-rule="nonzero"/>
+		<path d="M45.857,23.531L40.67,23.531L39.956,26.997L35.301,26.997L40.84,6L45.807,6L51.346,26.997L46.581,26.997L45.857,23.531ZM44.902,18.991L43.273,11.443L41.655,18.991L44.902,18.991Z" fill-rule="nonzero"/>
+	</g>
+	<g transform="matrix(0.292683,0,0,0.545455,66.8352,8.72727)">
+		<path d="M46.257,14.809C46.257,16.44 45.497,17.96 43.977,19.368C42.457,20.776 40.384,21.887 37.759,22.698C35.135,23.51 32.302,23.916 29.262,23.916C26.237,23.916 23.412,23.51 20.787,22.698C18.163,21.887 16.09,20.776 14.57,19.368C13.05,17.96 12.29,16.44 12.29,14.809C12.29,13.185 13.05,11.667 14.57,10.255C16.09,8.843 18.163,7.731 20.787,6.919C23.412,6.107 26.237,5.702 29.262,5.702C32.302,5.702 35.135,6.107 37.759,6.919C40.384,7.731 42.457,8.843 43.977,10.255C45.497,11.667 46.257,13.185 46.257,14.809ZM42.965,14.809C42.965,12.78 41.626,11.047 38.949,9.611C36.273,8.174 33.044,7.456 29.262,7.456C25.481,7.456 22.252,8.174 19.575,9.611C16.898,11.047 15.56,12.78 15.56,14.809C15.56,16.838 16.898,18.57 19.575,20.007C22.252,21.443 25.481,22.161 29.262,22.161C33.044,22.161 36.273,21.443 38.949,20.007C41.626,18.57 42.965,16.838 42.965,14.809ZM21.566,9.939L29.685,9.939C31.983,9.939 33.648,10.187 34.679,10.685C35.709,11.182 36.225,11.849 36.225,12.684C36.225,13.337 35.832,13.901 35.046,14.379C34.26,14.856 33.021,15.202 31.331,15.417C32.028,15.561 32.54,15.712 32.866,15.871C33.325,16.094 33.807,16.424 34.312,16.862C34.341,16.893 35.32,17.832 37.248,19.678L31.909,19.678C30.174,17.824 29.01,16.716 28.417,16.354C27.824,15.992 27.231,15.811 26.637,15.811C26.504,15.811 26.319,15.823 26.081,15.847L26.081,19.678L21.566,19.678L21.566,9.939ZM26.081,14.069L28.039,14.069C29.344,14.069 30.263,13.955 30.797,13.728C31.331,13.502 31.598,13.209 31.598,12.851C31.598,12.493 31.342,12.201 30.83,11.974C30.319,11.747 29.448,11.634 28.217,11.634L26.081,11.634L26.081,14.069Z" fill-rule="nonzero"/>
+	</g>
+</svg>
+			</a>
+		</div>
+	</div>
+</footer>
+
+					<div
+	id="age-consent-dialog"
+	class="rd-age-consent js-age-consent"
+	role="dialog"
+	aria-modal="true"
+	aria-labelledby="age-consent-title"
+	aria-describedby="age-consent-description"
+	aria-hidden="true"
+	hidden
+	data-cookie-name="iconsent_age"
+	data-cookie-value="18+"
+	data-cookie-days="365"
+	data-dissent-url="https://www.google.com/"
+>
+	<div class="rd-age-consent__backdrop" aria-hidden="true"></div>
+	<div class="rd-age-consent__viewport">
+		<section class="rd-age-consent__panel" role="document">
+			<div class="rd-age-consent__brand" aria-hidden="true"><svg class="redesign-brand-wordmark__logo" viewBox="0 0 373 122" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+	<g transform="matrix(1,0,0,1,58.027,20.1711)">
+		<path class="redesign-brand-wordmark__text" d="M0,78.428C-3.054,79.894 -9.895,81.482 -18.446,81.482C-44.711,81.482 -58.027,63.891 -58.027,40.436C-58.027,11.483 -38.848,-3.054 -16.614,-3.054C-8.185,-3.054 -1.833,-1.466 0.978,0.122L-2.565,14.537C-5.742,13.072 -10.017,11.85 -15.759,11.85C-28.708,11.85 -39.214,20.523 -39.214,39.336C-39.214,56.805 -30.174,66.334 -15.637,66.334C-10.873,66.334 -5.62,65.479 -2.443,64.135L0,78.428Z"/>
+	</g>
+	<g transform="matrix(1,0,0,1,87.1012,100.554)">
+		<path class="redesign-brand-wordmark__text" d="M0,-82.337L0,-50.209L26.509,-50.209L26.509,-82.337L44.345,-82.337L44.345,0L26.509,0L26.509,-34.45L0,-34.45L0,0L-17.835,0L-17.835,-82.337L0,-82.337Z"/>
+	</g>
+	<g transform="matrix(1,0,0,1,161.621,18.2167)">
+		<path class="redesign-brand-wordmark__text" d="M0,82.337L0,49.231L-23.578,0L-3.543,0L3.909,19.79C6.23,25.532 7.94,30.418 9.65,36.038L9.895,36.038C11.483,30.663 13.315,25.532 15.514,19.668L22.722,0L42.39,0L17.835,48.62L17.835,82.337L0,82.337Z"/>
+	</g>
+	<g transform="matrix(1,0,0,1,222.336,59.2634)">
+		<path class="redesign-brand-wordmark__text" d="M0,0.244C0,17.102 6.353,27.975 16.98,27.975C27.731,27.975 33.595,16.003 33.595,-0.245C33.595,-14.904 27.976,-27.731 16.858,-27.731C6.108,-27.731 0,-16.248 0,0.244M52.408,-0.856C52.408,27.364 37.626,42.512 16.126,42.512C-6.597,42.512 -18.812,23.699 -18.812,0.488C-18.812,-23.578 -5.131,-42.268 17.348,-42.268C41.047,-42.268 52.408,-22.478 52.408,-0.856"/>
+	</g>
+	<g transform="matrix(1,0,0,1,320.312,52.0559)">
+		<path class="redesign-brand-wordmark__text" d="M0,14.659L-4.398,-2.81C-5.62,-7.696 -6.964,-14.538 -8.186,-19.546L-8.43,-19.546C-9.529,-14.538 -10.751,-7.574 -11.973,-2.81L-16.248,14.659L0,14.659ZM-18.691,28.097L-23.822,48.498L-41.902,48.498L-19.058,-33.839L3.786,-33.839L26.509,48.498L7.818,48.498L2.32,28.097L-18.691,28.097Z"/>
+	</g>
+	<g transform="matrix(1,0,0,1,-327.581,-471.587)">
+		<rect class="redesign-brand-wordmark__cursor" x="686.077" y="471.587" width="14.252" height="121.81"/>
+	</g>
+</svg>
+</div>
+			<div class="rd-age-consent__copy">
+				<h2 id="age-consent-title" class="rd-age-consent__title">Adult stories ahead</h2>
+				<p id="age-consent-description" class="rd-age-consent__description">
+					CHYOA is a community library for interactive adult fiction. Please confirm that you are at least 18 years old and allowed to view adult content where you live.
+				</p>
+			</div>
+			<div class="rd-age-consent__actions">
+				<button type="button" class="rd-age-consent__action rd-age-consent__action--secondary js-age-consent-decline">
+					Leave
+				</button>
+				<button type="button" class="rd-age-consent__action rd-age-consent__action--primary js-age-consent-accept">
+					I am 18 or older
+				</button>
+			</div>
+		</section>
+	</div>
+</div>
+		
+		<div id="indicator" class="tw-hidden">
+			<i data-lucide="loader-circle" class="icon-lucide icon-spin"></i>
+		</div>
+
+		<script src="https://chyoa.com/build/assets/js/main-7ec9206236.js" onerror="window.ChyoaTerminalStreamBootstrap &amp;&amp; window.ChyoaTerminalStreamBootstrap.fail();"></script>
+		<script>
+		$.extend(Chyoa, {
+			csrf_token: "jCdq1TBqToh1adNFb0xxm20UjNMujuwjj7Yq91OF",
+			authenticated_user_id: null,
+			editor_autosave_owner: "guest",
+			editor_autosave_submit_failed: false,
+			header_dropdown_loading_preview_ms: 0,
+			profile_tab_loading_preview_ms: 0,
+			comment_loading_preview_ms: 0,
+			story_action_loading_preview_ms: 0,
+			story_saved_action_loading_preview_ms: 0,
+			route: {
+				'messages_all': "https://chyoa.com/messages",
+				'messages_new': "https://chyoa.com/messages/new",
+				'messages_reply': "https://chyoa.com/messages/?/reply",
+				'messages_show': "https://chyoa.com/messages/?",
+				'messages_read': "https://chyoa.com/messages/?/read",
+				'messages_leave': "https://chyoa.com/messages/?/leave",
+				'user_profile': "https://chyoa.com/user/?",
+				'user_find': "https://chyoa.com/user/find",
+				'csrf_token': "https://chyoa.com/csrf-token"
+			},
+			lang: {
+				'yes': "Yes",
+				'no': "No",
+				'general_error': "An error occurred. Please try again later.",
+				'new_conversation_title': "New Message"
+			}
+		});
+		</script>
+
+		
+		
+		<script>
+$(document).ready(function() {
+	initStory();
+	initChapter();
+			});
+</script>
+
+				<script src="https://chyoa.com/build/assets/js/ads-8a68886c66.js"></script>
+		<script>
+			(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+			(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+			m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+			})(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+			ga('create', 'UA-64664508-1', 'auto');
+			ga('require', 'displayfeatures');
+			ga('require', 'linkid', 'linkid.js');
+			ga('set', 'dimension1', typeof canRunAds === 'undefined' ? 'Active' : 'Inactive');
+			ga('send', 'pageview');
+		</script>
+
+		<script>
+		  document.addEventListener('click', function (e) {
+		    const a = e.target.closest('a.ga-track');
+		    if (!a) return;
+
+		    const href = a.href;
+		    const sameTab = !a.target || a.target === '_self';
+		    const isOutbound = a.host !== location.host;
+
+		    // Only delay navigation when leaving the current tab
+		    if (sameTab) {
+		      e.preventDefault();
+		      let navigated = false;
+		      const go = () => { if (!navigated) { navigated = true; location.href = href; } };
+
+		      gtag('event', 'link_click', {
+		        link_url: href,
+		        link_text: (a.textContent || '').trim(),
+				outbound: isOutbound ? 'true' : 'false',
+		        event_callback: go,
+		        event_timeout: 1500 // fallback in case the callback doesn’t fire
+		      });
+
+
+		      // Extra safety fallback
+		      setTimeout(go, 1600);
+		    } else {
+		      // New tab: no need to delay
+		      gtag('event', 'link_click', {
+		        link_url: href,
+		        link_text: (a.textContent || '').trim(),
+		        outbound: isOutbound ? 'true' : 'false'
+		      });
+		    }
+		  });
+		</script>
+		
+	<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3e3665919e9ec9e',t:'MTc4OTkzNDI1Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

@@ -22,6 +22,7 @@
 //! the crate documentation for why that is a security boundary.
 
 pub mod ao3;
+pub mod chyoa;
 pub mod efiction;
 pub mod ffnet;
 pub mod ficbook;
@@ -52,6 +53,7 @@ pub fn default_registry() -> Registry {
     registry.register(Box::new(syosetu::Syosetu::new()));
     registry.register(Box::new(wattpad::Wattpad::new()));
     registry.register(Box::new(pawchive::Pawchive::new()));
+    registry.register(Box::new(chyoa::Chyoa::new()));
     for forum in xenforo::Forum::all() {
         registry.register(Box::new(xenforo::XenForo::new(forum)));
     }
