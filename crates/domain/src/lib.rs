@@ -25,6 +25,7 @@ pub mod lending;
 pub mod library;
 pub mod marketplace;
 pub mod media;
+pub mod moderation;
 pub mod monetization;
 pub mod orphaning;
 pub mod permission;

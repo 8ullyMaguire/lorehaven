@@ -35,6 +35,7 @@ pub mod library;
 pub mod marketplace;
 pub mod media;
 pub mod migrate;
+pub mod moderation;
 pub mod monetization;
 pub mod narration;
 pub mod notifications;
