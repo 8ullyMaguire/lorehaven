@@ -3125,12 +3125,72 @@ CREATE TABLE forum_poll_votes (
 
 **Frontend:** `ThreadSummary.svelte`, `ForkButton.svelte`, `FeatureBadge.svelte`, `DigestView.svelte`, `SlowModeIndicator.svelte`, `RemoteProfileCard.svelte`, `KeyboardShortcuts.svelte`, `SearchBar.svelte`.
 
-### 15a.6 Sign-off
+
 
 Tag `v0.31-work-threads` … `v0.35-forum-federation` per milestone, each
 with its ledger rows flipped and evidence named. The §16 checklist applies
 to every tag. When M35 lands, update §17's revision note to say the forum-
 first surface is implemented, and update `docs/verification.md`.
+
+---
+
+## 15b. Milestone 36 (repo) — Growth, Sharing & Ecosystem Expansion
+Spec §36. Depends on: M31–M35, M16 (recommendation engines), M11 (adapter).
+
+**Migration `0044_growth.sql` (both dialects):**
+`quote_cards (id, work_id, author_pseud, start_pos, end_pos, theme, image_url, short_url, qr_url, created_at)`,
+`import_jobs (id, profile_url, status, works_total, works_done, error, enqueued_at, completed_at)`,
+`prompts (id, text, fandom_scope, author_pseud, created_at)`,
+`prompt_votes (prompt_id, pseud, vote_type, created_at, PRIMARY KEY (prompt_id, pseud))`,
+`prompt_adoptions (prompt_id, pseud, adopted_at, completed_at, PRIMARY KEY (prompt_id, pseud))`,
+`gift_exchanges (id, title, signup_start, signup_end, matching_date, creation_end, reveal_date, status)`,
+`exchange_participants (exchange_id, pseud, letter, fandoms, tropes, dnws, min_words, matched_pseud, created_at)`,
+`beta_requests (id, work_id, focus_areas, turnaround_days, min_fandom_knowledge, word_count, status, created_at)`,
+`beta_claims (request_id, pseud, status, claimed_at, completed_at, PRIMARY KEY (request_id, pseud))`,
+`beta_annotations (id, claim_id, post_id, span_start, span_end, comment, status, created_at)`,
+`recommendation_requests (topic_id PRIMARY KEY, description, filters_json, created_at)`,
+`fan_art (id, work_id, artist_pseud, storage_key, status, cover_for_work_id, created_at)`,
+`interactive_branches (id, work_id, from_choice, to_choice, label, position, created_at)`,
+`reading_paths (reader_pseud, work_id, mood_tag, private_note, created_at, updated_at)`,
+`mood_tags (work_id, reader_pseud, tag, note, created_at, PRIMARY KEY (work_id, reader_pseud))`,
+`author_analytics (work_id, date, views, chapter_dropoffs_json, referral_sources_json, geo_json, device_json, completion_rate, PRIMARY KEY (work_id, date))`,
+`webhooks (id, pseud, url, secret, events_json, active, created_at, updated_at)`,
+`webhook_deliveries (id, webhook_id, event_type, payload_json, status_code, response_body, idempotency_key, created_at)`,
+`instance_directory (instance_host PRIMARY KEY, name, description, fandoms_json, moderation_style, federation_scope, stats_json, signed_at)`,
+`migration_jobs (id, source_instance, status, total_items, done_items, enqueued_at, completed_at)`,
+`migration_items (job_id, item_type, item_id, status, error, created_at)`.
+
+**Ordering:** quote cards → import → prompts → gift exchanges → beta marketplace → rec threads → fan art → interactive fiction → mood journal → analytics → SEO → webhooks/CLI → instance discovery/migration.
+
+**Acceptance tests (`milestone_36.rs`):**
+- `quote_card_contains_exact_text`
+- `mirror_import_never_alters_source`
+- `cross_post_fails_cleanly`
+- `ffn_adapter_backsoff_on_429`
+- `wattpad_adapter_completes_import`
+- `wrapped_page_renders_at_375px`
+- `daily_prompt_highest_voted_unused`
+- `gift_exchange_matching_deterministic`
+- `beta_annotations_private_to_author_and_reader`
+- `auto_recommendation_labeled_machine_generated`
+- `fan_art_invisible_until_approved`
+- `interactive_fiction_branch_navigation`
+- `mood_journal_searchable_by_mood`
+- `analytics_suppresses_under_10_views`
+- `json_ld_structured_data_emitted`
+- `webhook_includes_hmac_and_idempotency_key`
+- `migration_source_becomes_tombstone`
+
+**Frontend:** `QuoteCard.svelte`, `ImportProgress.svelte`, `WrappedPage.svelte`, `PromptFeed.svelte`, `ExchangeSignup.svelte`, `BetaMarketplace.svelte`, `RecommendationThread.svelte`, `FanArtGallery.svelte`, `InteractiveFictionReader.svelte`, `MoodJournal.svelte`, `AuthorAnalytics.svelte`, `WebhookConfig.svelte`, `InstanceDirectory.svelte`, `MigrationWizard.svelte`, `SearchBar.svelte`.
+
+---
+
+### 15b.1 Sign-off
+
+Tag `v0.36-growth-ecosystem` with its ledger rows flipped and evidence named.
+The §16 checklist applies to the tag. When M36 lands, the forum-first and
+growth surfaces are complete, and the specification at §35 + §36 is fully
+represented in code.
 
 ---
 
