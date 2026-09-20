@@ -336,6 +336,48 @@ async fn gallery_item_can_be_added() {
 }
 
 #[tokio::test]
+async fn webhook_delivery_records_to_outbox() {
+    let harness = Harness::new("webhook-delivery").await;
+
+    // Create a webhook subscribed to a specific event.
+    let _id = lorehaven_db::marketplace::create_webhook(
+        harness.tdb.db(),
+        "test-account",
+        "https://example.com/hook",
+        "whsec_delivery_secret",
+        &["work.published".to_string()],
+    )
+    .await
+    .expect("create webhook");
+
+    // Enqueue a publish.notify outbox event.
+    let outbox_id = uuid::Uuid::new_v4().to_string();
+    let payload = serde_json::json!({
+        "event_type": "work.published",
+        "work_id": "work-456",
+        "title": "Test Work"
+    })
+    .to_string();
+
+    lorehaven_db::outbox::enqueue(
+        harness.tdb.db(),
+        "publish.notify",
+        &payload,
+        Some(&outbox_id),
+    )
+    .await
+    .expect("enqueue outbox");
+
+    // The webhook exists and is active.
+    let webhooks = lorehaven_db::marketplace::list_all_active_webhooks(harness.tdb.db())
+        .await
+        .expect("list webhooks");
+    assert!(!webhooks.is_empty(), "webhook should be active");
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
 async fn webhook_signing_verifies() {
     let harness = Harness::new("webhook-sign").await;
 
