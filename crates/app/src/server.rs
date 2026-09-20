@@ -435,6 +435,13 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // Spoilers, content warnings, drafts, scheduled posts, readability
+        // (spec 35.4, M34).
+        .merge(classified(
+            routes::spoilers::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Thread modes: reading groups, critique circles, wiki pins, prompts
         // (spec 35.3, M33). Same writers' class as typed votes.
         .merge(classified(
