@@ -910,34 +910,20 @@ pub async fn create_topic(
     title: &str,
 ) -> Result<String> {
     let id = uuid::Uuid::new_v4().to_string();
-    let now = crate::identity::now_rfc3339();
-    let sql = db.sql(
-        "INSERT INTO forum_topics (id, category_id, author_pseud, title, created_at, last_post_at, locked) VALUES (?, ?, ?, ?, ?, ?, 0)",
-        "INSERT INTO forum_topics (id, category_id, author_pseud, title, created_at, last_post_at, locked) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $5, FALSE)",
-    );
-    match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query(&sql)
-                .bind(&id)
-                .bind(category_id)
-                .bind(author_pseud)
-                .bind(title)
-                .bind(&now)
-                .bind(&now)
-                .execute(db.sqlite_pool().expect("sqlite"))
-                .await?;
-        }
-        Backend::Postgres => {
-            sqlx::query(&sql)
-                .bind(&id)
-                .bind(category_id)
-                .bind(author_pseud)
-                .bind(title)
-                .bind(&now)
-                .execute(db.postgres_pool().expect("postgres"))
-                .await?;
-        }
-    }
+    super::thread_modes::create_topic(db, &id, category_id, author_pseud, title, "plain").await?;
+    Ok(id)
+}
+
+/// Create a forum topic with a thread mode (spec §35.3).
+pub async fn create_topic_with_mode(
+    db: &Database,
+    category_id: &str,
+    author_pseud: &str,
+    title: &str,
+    mode: &str,
+) -> Result<String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    super::thread_modes::create_topic(db, &id, category_id, author_pseud, title, mode).await?;
     Ok(id)
 }
 

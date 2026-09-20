@@ -36,6 +36,7 @@ pub mod reading;
 pub mod stats;
 pub mod subscriptions;
 pub mod taxonomy;
+pub mod thread_modes;
 pub mod translation;
 pub mod typed_votes;
 pub mod webhook;
