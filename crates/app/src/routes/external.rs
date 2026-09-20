@@ -295,20 +295,6 @@ pub async fn subscribe_push(
 }
 
 // ---------------------------------------------------------------------------
-// Federation
-// ---------------------------------------------------------------------------
-
-/// Federation inbox.
-pub async fn federation_inbox(
-    State(_state): State<AppState>,
-    MaybeSession(_user): MaybeSession,
-) -> ApiResult<Json<Value>> {
-    Ok(Json(
-        json!({ "accepted": false, "reason": "federation not configured" }),
-    ))
-}
-
-// ---------------------------------------------------------------------------
 // AI
 // ---------------------------------------------------------------------------
 
@@ -347,8 +333,6 @@ pub fn router() -> axum::Router<AppState> {
         .route("/feeds/{handle}/atom", get(get_atom_feed))
         // Push
         .route("/me/push/subscribe", post(subscribe_push))
-        // Federation
-        .route("/federation/inbox", post(federation_inbox))
         // AI
         .route("/ai/works/{id}", get(get_ai_work))
 }
