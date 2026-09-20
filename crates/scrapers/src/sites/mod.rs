@@ -25,6 +25,7 @@ pub mod ao3;
 pub mod efiction;
 pub mod ffnet;
 pub mod ficbook;
+pub mod pawchive;
 pub mod royalroad;
 pub mod scribblehub;
 pub mod syosetu;
@@ -50,6 +51,7 @@ pub fn default_registry() -> Registry {
     registry.register(Box::new(scribblehub::ScribbleHub::new()));
     registry.register(Box::new(syosetu::Syosetu::new()));
     registry.register(Box::new(wattpad::Wattpad::new()));
+    registry.register(Box::new(pawchive::Pawchive::new()));
     for forum in xenforo::Forum::all() {
         registry.register(Box::new(xenforo::XenForo::new(forum)));
     }

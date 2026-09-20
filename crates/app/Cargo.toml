@@ -7,6 +7,10 @@ license.workspace = true
 description = "Darkhold server binary: CLI, composition root, HTTP surface"
 build = "build.rs"
 
+[lib]
+name = "darkhold_app"
+path = "src/lib.rs"
+
 [[bin]]
 name = "darkhold"
 path = "src/main.rs"

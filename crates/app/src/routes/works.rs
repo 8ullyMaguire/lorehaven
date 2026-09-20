@@ -40,15 +40,20 @@ use darkhold_db::content::{
     self, ContentError, PublicationOutcome, RevisionInput, RevisionSummary, Work, WorkPatch,
 };
 use darkhold_db::identity;
+use darkhold_db::permission;
 use darkhold_db::reading;
 use darkhold_domain::content::Contributor;
 use darkhold_domain::document::Document;
+use darkhold_domain::permission::{
+    LineageEdge, LineageKind, Permission as PermissionValue, PermissionStatement,
+};
 use darkhold_domain::policy::{
     can_access_content, AccessPolicy, Actor, ContentFacts, Decision, DenyReason, Lifecycle,
     Visibility,
 };
 use darkhold_domain::{AppError, ChapterId, PseudId, RevisionId, WorkId};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 use crate::auth::{MaybeSession, RequireSession, SessionUser};
 use crate::http::{ApiError, ApiResult};
@@ -68,6 +73,8 @@ pub fn router() -> Router<AppState> {
         .route("/works/{id}/withdraw", post(withdraw_work))
         .route("/works/{id}/chapters", post(add_chapter))
         .route("/works/{id}/reorder-chapters", post(reorder_chapters))
+        .route("/works/{id}/permissions", get(get_work_permissions).put(put_work_permissions))
+        .route("/works/{id}/lineage", get(list_lineage).post(add_lineage))
         .route("/chapters/{id}", patch(update_chapter))
         .route("/chapters/{id}/revisions", get(list_revisions))
         .route("/chapters/{id}/restore-revision", post(restore_revision))
@@ -1328,6 +1335,130 @@ fn from_content(error: ContentError) -> ApiError {
         ContentError::Refused(app) => ApiError(app),
         ContentError::Fault(cause) => ApiError(AppError::Internal(cause)),
     }
+}
+// ---------------------------------------------------------------------------
+// Permission statements (M27)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct PutWorkPermissions {
+    #[serde(default)]
+    pub podfic: Option<String>,
+    #[serde(default)]
+    pub translation: Option<String>,
+    #[serde(default)]
+    pub remix: Option<String>,
+    #[serde(default)]
+    pub continuation: Option<String>,
+    #[serde(default)]
+    pub redistribution: Option<String>,
+    #[serde(default)]
+    pub ai_training: Option<String>,
+}
+
+pub async fn get_work_permissions(
+    State(state): State<AppState>,
+    MaybeSession(session): MaybeSession,
+    Path(id): Path<String>,
+) -> ApiResult<Json<PermissionStatement>> {
+    // Reading a work's permission statement follows the work's own visibility
+    if let Reading::Denied(error) = reading_for_work(&state, &id, session.as_ref()).await? {
+        return Err(ApiError(error));
+    }
+    let db = state.db();
+    let stmt = permission::get_work_permission_statement(db, &id).await?;
+    Ok(Json(stmt))
+}
+
+pub async fn put_work_permissions(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(body): Json<PutWorkPermissions>,
+) -> ApiResult<Json<PermissionStatement>> {
+    // Only a contributor may change a work's permission statement
+    require_contributor(&state, &id, &user).await?;
+    let db = state.db();
+    let mut stmt = permission::get_work_permission_statement(db, &id).await?;
+    if let Some(v) = &body.podfic {
+        stmt.podfic = darkhold_domain::permission::Permission::parse(v)
+            .ok_or_else(|| ApiError(AppError::Validation { message: format!("invalid podfic permission: {v}"), field_errors: Default::default() }))?;
+    }
+    if let Some(v) = &body.translation {
+        stmt.translation = darkhold_domain::permission::Permission::parse(v)
+            .ok_or_else(|| ApiError(AppError::Validation { message: format!("invalid translation permission: {v}"), field_errors: Default::default() }))?;
+    }
+    if let Some(v) = &body.remix {
+        stmt.remix = darkhold_domain::permission::Permission::parse(v)
+            .ok_or_else(|| ApiError(AppError::Validation { message: format!("invalid remix permission: {v}"), field_errors: Default::default() }))?;
+    }
+    if let Some(v) = &body.continuation {
+        stmt.continuation = darkhold_domain::permission::Permission::parse(v)
+            .ok_or_else(|| ApiError(AppError::Validation { message: format!("invalid continuation permission: {v}"), field_errors: Default::default() }))?;
+    }
+    if let Some(v) = &body.redistribution {
+        stmt.redistribution = darkhold_domain::permission::Permission::parse(v)
+            .ok_or_else(|| ApiError(AppError::Validation { message: format!("invalid redistribution permission: {v}"), field_errors: Default::default() }))?;
+    }
+    if let Some(v) = &body.ai_training {
+        stmt.ai_training = darkhold_domain::permission::Permission::parse(v)
+            .ok_or_else(|| ApiError(AppError::Validation { message: format!("invalid ai_training permission: {v}"), field_errors: Default::default() }))?;
+    }
+    permission::set_work_permission_statement(db, &id, &stmt).await?;
+    Ok(Json(stmt))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddLineageRequest {
+    pub from_work_id: String,
+    pub kind: String,
+    pub provenance: String,
+}
+
+pub async fn add_lineage(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(body): Json<AddLineageRequest>,
+) -> ApiResult<Json<Value>> {
+    // Only contributors to the target work may add lineage edges
+    require_contributor(&state, &id, &user).await?;
+    let db = state.db();
+    let kind = LineageKind::parse(&body.kind)
+        .ok_or_else(|| ApiError(AppError::Validation { message: format!("invalid lineage kind: {}", body.kind), field_errors: Default::default() }))?;
+    let edge = LineageEdge {
+        id: uuid::Uuid::new_v4().to_string(),
+        from_work_id: body.from_work_id,
+        to_work_id: id,
+        kind,
+        provenance: body.provenance,
+        created_at: darkhold_db::identity::now_rfc3339(),
+    };
+    permission::insert_lineage_edge(db, &edge).await?;
+    Ok(Json(json!({ "id": edge.id, "kind": edge.kind.as_str() })))
+}
+
+pub async fn list_lineage(
+    State(state): State<AppState>,
+    MaybeSession(session): MaybeSession,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    if let Reading::Denied(error) = reading_for_work(&state, &id, session.as_ref()).await? {
+        return Err(ApiError(error));
+    }
+    let db = state.db();
+    let edges = permission::lineage_edges_for_work(db, &id).await?;
+    let items: Vec<Value> = edges.iter().map(|e| {
+        json!({
+            "id": e.id,
+            "from_work_id": e.from_work_id,
+            "to_work_id": e.to_work_id,
+            "kind": e.kind.as_str(),
+            "provenance": e.provenance,
+            "created_at": e.created_at,
+        })
+    }).collect();
+    Ok(Json(json!({ "items": items })))
 }
 
 #[cfg(test)]

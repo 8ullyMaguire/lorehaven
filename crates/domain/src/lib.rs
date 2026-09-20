@@ -27,6 +27,7 @@ pub mod marketplace;
 pub mod media;
 pub mod monetization;
 pub mod orphaning;
+pub mod permission;
 pub mod policy;
 pub mod positivity;
 pub mod query;

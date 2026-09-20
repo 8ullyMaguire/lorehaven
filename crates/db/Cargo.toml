@@ -7,6 +7,10 @@ license.workspace = true
 description = "Database access, migrations and repositories for Darkhold"
 build = "build.rs"
 
+[lib]
+name = "darkhold_db"
+path = "src/lib.rs"
+
 [dependencies]
 anyhow.workspace = true
 hex.workspace = true

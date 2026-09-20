@@ -59,20 +59,21 @@ Two spec milestones (§12 and §22) were skipped by the schedule that produced
 tags `v0.05-reader` … `v0.09-library`: they have no rows in
 `docs/requirements.csv` and no code. This plan restores them.
 
-| Repo | Spec | Topic | Depends on |
-|---|---|---|---|
-| M9 | §12 | Positivity filter and feedback delivery | M3–M5 |
-| M10 | §15 | Structured taxonomy, body search, query language | M3, M4 |
-| M11 | §16 | Discovery, private taste influence, recipes, dashboards | M10 |
-| M12 | §17 | Comments, forums, groups, messaging, presence | M9 |
-| M13 | §18 | Collections, challenges, requests, wishlists, events | M9, M10 |
-| M14 | §19 | Trust, reports, quorum, appeals, sanctions | M9, M12 |
-| M15 | §20 | Credits, fair queues, bounties, billing | M9–M14 |
-| M16 | §21 | Marketplace, extension isolation, webhooks, gallery | M15 |
-| M17 | §22 | Translation pipeline | M9, M10, M15 |
-| M18 | §23 | Public API, bots, feeds, push, federation, AI providers | M9–M17 |
-| M19 | §24 | Administration, statistics, abuse defence, privacy, operations | M14–M18 |
-| M20 | §25 | Hardening and release | everything |
+|| Repo | Spec | Topic | Depends on |
+||---|---|---|---|
+|| M9 | §12 | Positivity filter and feedback delivery | M3–M5 |
+|| M10 | §15 | Structured taxonomy, body search, query language | M3, M4 |
+|| M11 | §16 | Discovery, private taste influence, recipes, dashboards | M10 |
+|| M12 | §17 | Comments, forums, groups, messaging, presence | M9 |
+|| M13 | §18 | Collections, challenges, requests, wishlists, events | M9, M10 |
+|| M14 | §19 | Trust, reports, quorum, appeals, sanctions | M9, M12 |
+|| M15 | §20 | Credits, fair queues, bounties, billing | M9–M14 |
+|| M16 | §21 | Marketplace, extension isolation, webhooks, gallery | M15 |
+|| M17 | §22 | Translation pipeline | M9, M10, M15 |
+|| M18 | §23 | Public API, bots, feeds, push, federation, AI providers | M9–M17 |
+|| M19 | §24 | Administration, statistics, abuse defence, privacy, operations | M14–M18 |
+|| M20 | §25 | Hardening and release | everything |
+|| M30 | §0.4 | Instance topics — configurable public/private/flags with gamification bonuses | M15 (credits), M11 (leaderboards) |
 
 The order is a dependency order, not a preference. Three examples, because a
 junior will be tempted to reorder:
@@ -2761,6 +2762,15 @@ replacing the opt-out switch (§16.5).
   read path; a per-handler `if purchased` is the bug that ships.
 - **Robots defaults are configuration, not folklore.** The default list
   lives in the operator docs and is asserted by a test.
+
+### 16.4 Instance Topics (M30, §0.4) — landed 2026-09-19
+
+Config shape (`[site] topics = [...]`), gamification effects (public-topic
+completion bonus + per-public-topic leaderboard category), anti-gaming (never
+applies to imported/own work, same time-on-page gate as §9.7.3), visibility
+(`/api/v1/meta` reports public topic names only). Operator who declares
+nothing behaves identically to a topic-agnostic instance — kink-focused
+instances are the default.
 
 ---
 

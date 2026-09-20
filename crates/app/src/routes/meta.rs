@@ -28,6 +28,15 @@ struct MetaResponse {
     environment: &'static str,
     base_url: String,
     policy: PolicySummary,
+    topics: Vec<TopicSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct TopicSummary {
+    name: String,
+    public: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bonus_credits: Option<u32>,
 }
 
 /// The instance's content policy, as the frontend needs to apply it.
@@ -69,6 +78,11 @@ async fn meta(
             registration_open: true,
             csrf_required: config.security.csrf_required,
         },
+        topics: config.site.topics.iter().map(|t| TopicSummary {
+            name: t.name.clone(),
+            public: t.public,
+            bonus_credits: if t.bonus_credits > 0 { Some(t.bonus_credits) } else { None },
+        }).collect(),
     })
 }
 
