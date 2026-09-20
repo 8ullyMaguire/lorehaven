@@ -14,7 +14,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::auth::RequireSession;
+use crate::auth::{MaybeSession, RequireSession};
 use crate::http::ApiResult;
 use crate::state::AppState;
 
@@ -52,6 +52,7 @@ struct SlotExplanation {
 
 async fn explain_slot(
     State(_state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
     Path(slot_id): Path<String>,
 ) -> ApiResult<Json<SlotExplanation>> {
     Ok(Json(SlotExplanation {
