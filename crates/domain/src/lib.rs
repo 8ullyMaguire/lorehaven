@@ -33,6 +33,7 @@ pub mod positivity;
 pub mod query;
 pub mod query_sql;
 pub mod reading;
+pub mod spoilers;
 pub mod stats;
 pub mod subscriptions;
 pub mod taxonomy;
