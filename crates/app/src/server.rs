@@ -396,6 +396,11 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        .merge(classified(
+            routes::rating_integrity::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // Taxonomy (nodes, aliases, tags) — M10. Every route needs a session and
         // most write, so it sits under the writers' class.
         .merge(classified(
