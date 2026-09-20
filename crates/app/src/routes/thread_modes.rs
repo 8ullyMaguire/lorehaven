@@ -37,9 +37,9 @@ async fn get_mode(
 ) -> ApiResult<Json<serde_json::Value>> {
     let topic = lorehaven_db::community::topic_by_id(state.db(), &id)
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     match topic {
-        Some(t) => Ok(Json(json!({ "mode": t.mode.or(Some("plain".to_string())).unwrap_or_default() }))),
+        Some(t) => Ok(Json(json!({ "mode": t.mode }))),
         None => Err(ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" })),
     }
 }
@@ -59,21 +59,18 @@ async fn put_mode(
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::field("mode", "unknown thread mode")))?;
     let topic = lorehaven_db::community::topic_by_id(state.db(), &id)
         .await
-        .map_err(internal)?
+        .map_err(|e| internal(e.into()))?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
-    // Only the topic author or a moderator can change the mode.
     let trust = lorehaven_db::governance::trust_for(state.db(), &pseud_id.to_string())
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     if topic.author_pseud != pseud_id.to_string() && !is_moderator(trust)
     {
-        return Err(ApiError(lorehaven_domain::AppError::access_denied(
-            "Only the topic author or a moderator can change the thread mode.",
-        )));
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
     lorehaven_db::community::set_topic_mode(state.db(), &id, mode.as_str())
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "mode": mode.as_str() })))
 }
 
@@ -87,7 +84,7 @@ async fn get_schedule(
 ) -> ApiResult<Json<serde_json::Value>> {
     let sections = thread_modes::get_schedule(state.db(), &id)
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "sections": sections })))
 }
 
@@ -109,12 +106,10 @@ async fn add_schedule_section(
     // Only the topic author can add schedule sections.
     let topic = lorehaven_db::community::topic_by_id(state.db(), &id)
         .await
-        .map_err(internal)?
+        .map_err(|e| internal(e.into()))?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
     if topic.author_pseud != pseud_id.to_string() {
-        return Err(ApiError(lorehaven_domain::AppError::access_denied(
-            "Only the topic author can add schedule sections.",
-        )));
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
     thread_modes::add_schedule_section(
         state.db(),
@@ -126,7 +121,7 @@ async fn add_schedule_section(
         &body.unlocks_at,
     )
     .await
-    .map_err(internal)?;
+    .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "added": true })))
 }
 
@@ -140,7 +135,7 @@ async fn get_wiki_pin(
 ) -> ApiResult<Json<serde_json::Value>> {
     let pin = thread_modes::get_wiki_pin(state.db(), &id)
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "wiki_pin": pin })))
 }
 
@@ -155,12 +150,10 @@ async fn post_wiki_pin(
     Path(id): Path<String>,
     Json(body): Json<WikiPinBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    // Create a new wiki pin (requires a post_id — for simplicity we create a
-    // dummy post that will serve as the pin container).
     let post_id = uuid::Uuid::new_v4().to_string();
     thread_modes::create_wiki_pin(state.db(), &id, &post_id, &body.body, &pseud_id.to_string())
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "created": true })))
 }
 
@@ -175,23 +168,20 @@ async fn approve_wiki_pin(
     Path(id): Path<String>,
     Json(body): Json<ApprovePinBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    // Only the topic author or moderators can approve.
     let topic = lorehaven_db::community::topic_by_id(state.db(), &id)
         .await
-        .map_err(internal)?
+        .map_err(|e| internal(e.into()))?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
     let trust = lorehaven_db::governance::trust_for(state.db(), &pseud_id.to_string())
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     if topic.author_pseud != pseud_id.to_string() && !is_moderator(trust)
     {
-        return Err(ApiError(lorehaven_domain::AppError::access_denied(
-            "Only the topic author or a moderator can approve the wiki pin.",
-        )));
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
     thread_modes::approve_wiki_pin(state.db(), &id, &body.post_id, &pseud_id.to_string())
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "approved": true })))
 }
 
@@ -206,7 +196,7 @@ async fn join_critique(
 ) -> ApiResult<Json<serde_json::Value>> {
     let position = thread_modes::join_critique(state.db(), &id, &pseud_id.to_string())
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "joined": true, "position": position })))
 }
 
@@ -216,7 +206,7 @@ async fn get_critique_queue(
 ) -> ApiResult<Json<serde_json::Value>> {
     let queue = thread_modes::get_critique_queue(state.db(), &id)
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "queue": queue })))
 }
 

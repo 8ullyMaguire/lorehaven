@@ -45,22 +45,20 @@ async fn put_spoiler_scope(
 ) -> ApiResult<Json<serde_json::Value>> {
     let topic = lorehaven_db::community::topic_by_id(state.db(), &id)
         .await
-        .map_err(internal)?
+        .map_err(|e| internal(e.into()))?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
     // Only the topic author or a moderator (TL3+) can set spoiler scope.
     let trust = lorehaven_db::governance::trust_for(state.db(), &pseud_id.to_string())
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     if topic.author_pseud != pseud_id.to_string()
         && !lorehaven_domain::typed_votes::is_moderator(trust)
     {
-        return Err(ApiError(lorehaven_domain::AppError::access_denied(
-            "Only the topic author or a moderator can set spoiler scope.",
-        )));
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
     spoilers::set_topic_spoiler_scope(state.db(), &id, body.chapter)
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "spoiler_scope_chapter": body.chapter })))
 }
 
@@ -75,7 +73,7 @@ async fn get_progress(
 ) -> ApiResult<Json<serde_json::Value>> {
     let progress = spoilers::get_reader_progress(state.db(), &pseud_id.to_string(), &id)
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "last_chapter": progress.unwrap_or(0) })))
 }
 
@@ -92,7 +90,7 @@ async fn put_progress(
 ) -> ApiResult<Json<serde_json::Value>> {
     spoilers::upsert_reader_progress(state.db(), &pseud_id.to_string(), &id, body.last_chapter)
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "last_chapter": body.last_chapter })))
 }
 
@@ -106,7 +104,7 @@ async fn get_warnings(
 ) -> ApiResult<Json<serde_json::Value>> {
     let warnings = spoilers::list_content_warnings(state.db(), &id)
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     let warnings: Vec<serde_json::Value> = warnings
         .into_iter()
         .map(|w| {
@@ -139,16 +137,14 @@ async fn post_warning(
     // Only the post author can add warnings (verified via post lookup).
     let post = lorehaven_db::community::post_by_id(state.db(), &id)
         .await
-        .map_err(internal)?
+        .map_err(|e| internal(e.into()))?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "post" }))?;
     if post.author_pseud != pseud_id.to_string() {
-        return Err(ApiError(lorehaven_domain::AppError::access_denied(
-            "Only the post author can add content warnings.",
-        )));
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
     spoilers::add_content_warning(state.db(), &id, warning_type, severity, body.custom_text.as_deref())
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "added": true })))
 }
 
@@ -163,7 +159,7 @@ async fn get_draft(
 ) -> ApiResult<Json<serde_json::Value>> {
     let body = spoilers::get_draft(state.db(), &pseud_id.to_string(), &id)
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "body": body.unwrap_or_default() })))
 }
 
@@ -180,7 +176,7 @@ async fn post_draft(
 ) -> ApiResult<Json<serde_json::Value>> {
     spoilers::upsert_draft(state.db(), &pseud_id.to_string(), &id, &body.body)
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "saved": true })))
 }
 
@@ -191,7 +187,7 @@ async fn delete_draft(
 ) -> ApiResult<Json<serde_json::Value>> {
     let deleted = spoilers::delete_draft(state.db(), &pseud_id.to_string(), &id)
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "deleted": deleted })))
 }
 
@@ -212,16 +208,14 @@ async fn post_schedule(
 ) -> ApiResult<Json<serde_json::Value>> {
     let post = lorehaven_db::community::post_by_id(state.db(), &id)
         .await
-        .map_err(internal)?
+        .map_err(|e| internal(e.into()))?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "post" }))?;
     if post.author_pseud != pseud_id.to_string() {
-        return Err(ApiError(lorehaven_domain::AppError::access_denied(
-            "Only the post author can schedule it.",
-        )));
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
     spoilers::schedule_post(state.db(), &id, &body.scheduled_at)
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "scheduled": true })))
 }
 
@@ -231,7 +225,7 @@ async fn get_due_scheduled(
     let now = lorehaven_db::identity::now_rfc3339();
     let due = spoilers::list_due_scheduled_posts(state.db(), &now, 50)
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "post_ids": due })))
 }
 
@@ -241,7 +235,7 @@ async fn post_publish_scheduled(
 ) -> ApiResult<Json<serde_json::Value>> {
     let published = spoilers::publish_scheduled_post(state.db(), &id)
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "published": published })))
 }
 
@@ -255,7 +249,7 @@ async fn get_warning_prefs(
 ) -> ApiResult<Json<serde_json::Value>> {
     let prefs = spoilers::list_warning_prefs(state.db(), &pseud_id.to_string())
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     let prefs: Vec<serde_json::Value> = prefs
         .into_iter()
         .map(|(t, a)| {
@@ -282,7 +276,7 @@ async fn put_warning_pref(
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::field("action", "must be 'blur' or 'show'")))?;
     spoilers::set_warning_pref(state.db(), &pseud_id.to_string(), warning_type, action)
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "set": true })))
 }
 

@@ -30,7 +30,7 @@ pub fn router() -> Router<AppState> {
 async fn moderator_check(state: &AppState, pseud_id: &str) -> Result<bool, ApiError> {
     let trust = lorehaven_db::governance::trust_for(state.db(), pseud_id)
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(is_moderator(trust))
 }
 
@@ -53,9 +53,7 @@ async fn post_sanction(
     Json(body): Json<SanctionBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
     if !moderator_check(&state, &pseud_id.to_string()).await? {
-        return Err(ApiError(lorehaven_domain::AppError::access_denied(
-            "Only moderators can apply sanctions.",
-        )));
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
     let level = SanctionLevel::from_str(&body.level)
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::field("level", "unknown sanction level")))?;
@@ -69,7 +67,7 @@ async fn post_sanction(
         body.expires_at.as_deref(),
     )
     .await
-    .map_err(internal)?;
+    .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "id": id, "applied": true })))
 }
 
@@ -89,7 +87,7 @@ async fn get_sanction_check(
         query.category_id.as_deref(),
     )
     .await
-    .map_err(internal)?;
+    .map_err(|e| internal(e.into()))?;
     Ok(Json(match sanction {
         Some(s) => json!({
             "active": true,
@@ -117,18 +115,16 @@ async fn put_slow_mode(
 ) -> ApiResult<Json<serde_json::Value>> {
     let topic = lorehaven_db::community::topic_by_id(state.db(), &id)
         .await
-        .map_err(internal)?
+        .map_err(|e| internal(e.into()))?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
     if topic.author_pseud != pseud_id.to_string()
         && !moderator_check(&state, &pseud_id.to_string()).await?
     {
-        return Err(ApiError(lorehaven_domain::AppError::access_denied(
-            "Only the topic author or a moderator can change slow mode.",
-        )));
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
     moderation::set_slow_mode(state.db(), &id, body.seconds)
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "slow_mode_seconds": body.seconds })))
 }
 
@@ -147,18 +143,16 @@ async fn put_federation_scope(
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::field("scope", "must be 'public', 'local', or 'unlisted'")))?;
     let topic = lorehaven_db::community::topic_by_id(state.db(), &id)
         .await
-        .map_err(internal)?
+        .map_err(|e| internal(e.into()))?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
     if topic.author_pseud != pseud_id.to_string()
         && !moderator_check(&state, &pseud_id.to_string()).await?
     {
-        return Err(ApiError(lorehaven_domain::AppError::access_denied(
-            "Only the topic author or a moderator can change the federation scope.",
-        )));
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
     moderation::set_federation_scope(state.db(), &id, scope.as_str())
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "federation_scope": scope.as_str() })))
 }
 
@@ -172,13 +166,11 @@ async fn post_feature(
     Path(id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
     if !moderator_check(&state, &pseud_id.to_string()).await? {
-        return Err(ApiError(lorehaven_domain::AppError::access_denied(
-            "Only moderators can feature posts.",
-        )));
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
     moderation::feature_post(state.db(), &id, &pseud_id.to_string())
         .await
-        .map_err(internal)?;
+        .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "featured": true })))
 }
 
