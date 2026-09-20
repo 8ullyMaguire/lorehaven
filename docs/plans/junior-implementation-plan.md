@@ -3194,6 +3194,144 @@ represented in code.
 
 ---
 
+## 15c. Milestone 37 (repo) — Multi-Platform Companion Bot
+Spec §37. Depends on: §23.1 (public API), M31 (forum routes).
+
+**Workspace layout** (separate `lorehaven-bot` workspace):
+```
+lorehaven-bot/
+├── crates/
+│   ├── bot-core/                    # platform-neutral core
+│   ├── lorehaven-bot-discord/       # Poise + Serenity
+│   ├── lorehaven-bot-telegram/      # Teloxide
+│   ├── lorehaven-bot-matrix/        # matrix-sdk
+│   ├── lorehaven-bot-irc/           # irc crate
+│   ├── lorehaven-bot-fediverse/     # Mastodon + Bluesky
+│   └── lorehaven-bot-cli/           # REPL + TUI + download
+├── Cargo.toml                       # workspace root
+└── .env.example                     # all LOHAVEN_BOT_* vars
+```
+
+**bot-core crate** (`crates/bot-core/`):
+- `Cargo.toml`: `reqwest`, `serde`, `serde_json`, `redis`, `chrono`, `thiserror`, `tracing`, `url`
+- `src/api.rs` — `LorehavenClient` with methods: `search`, `recommendations`, `work`, `work_download`, `work_bookmark`, `work_kudos`, `forum_categories`, `forum_topics`, `forum_topic`, `forum_post_create`, `fandoms`, `fandom`, `tags`, `random`, `trending`, `similar`, `also_bookmarked`, `blind_date`, `comments`, `reading_status`, `user`, `user_works`, `user_bookmarks`, `notifications`, `me`, `link_token`, `link`, `unlink`
+- `src/model.rs` — response structs: `SearchResponse`, `SearchResult`, `Work`, `WorkDownload`, `ForumCategory`, `ForumTopic`, `ForumPost`, `Fandom`, `Tag`, `RecResult`, `User`, `Notification`, `LinkToken`
+- `src/core.rs` — `PlatformMessage` IR: `title`, `description`, `url`, `fields: Vec<RichItem>`, `actions: Vec<ActionRow>`, `file: Option<FileAttachment>`
+- `src/dispatch.rs` — `CoreCtx` + `do_*` functions: `do_search`, `do_ask`, `do_recs`, `do_fresh`, `do_gems`, `do_roll`, `do_download`, `do_metadata`, `do_bookmark`, `do_kudos`, `do_work`, `do_fandoms`, `do_fandom`, `do_forum_categories`, `do_forum_topics`, `do_forum_topic`, `do_forum_create`, `do_forum_reply`, `do_forum_follow`, `do_forum_mark_read`, `do_forum_search`, `do_blind_date`, `do_trending`, `do_similar`, `do_also_bookmarked`, `do_comments`, `do_random`, `do_help`, `do_link`, `do_unlink`, `do_me`
+- `src/intent.rs` — `Intent` enum: `Search`, `Ask`, `Quote`, `Recs`, `Fresh`, `Gems`, `Roll`, `Download`, `Bookmark`, `Metadata`, `Help`, `Fandoms`, `Fandom`, `Work`, `Forum`, `BlindDate`, `Trending`, `Similar`, `AlsoBookmarked`, `Comments`, `Random`, `Link`, `Unlink`, `Me`. `classify(text) -> Intent` with heuristic fallback + optional Ollama
+- `src/store.rs` — `TokenStore` (Redis-backed): `get(platform, user_id) -> Option<StoredToken>`, `set(platform, user_id, token)`, `del(platform, user_id)`, `get_prefs(platform, user_id) -> UserPrefs`, `set_prefs(platform, user_id, prefs)`, `create_link_code(platform, user_id) -> String`, `claim_link_code(code) -> Option<(String, String)>`
+- `src/cache.rs` — `PageCache` (Redis-backed): `cache_response(key, value, ttl)`, `cached_response(key) -> Option<Value>`, `log_search(entry)`, `get_page(user_id) -> usize`, `set_page(user_id, page)`
+- `src/ratelimit.rs` — `RateLimiter`: `check(platform, user_id) -> bool` (Redis bucket, configurable per-minute)
+- `src/config.rs` — `BotConfig` from env vars (all `LOHAVEN_BOT_*`)
+- `src/error.rs` — `BotError` enum: `Api`, `Redis`, `RateLimit`, `NotLinked`, `InsufficientLevel`, `Command(String)`
+- `src/util.rs` — `extract_fanfic_url(text) -> Option<String>`, `format_words(n)`, `truncate(s, len)`, `normalize_url(u)`
+
+**Discord adapter** (`crates/lorehaven-bot-discord/`):
+- `Cargo.toml`: `poise`, `serenity`, `archivist-core`
+- `src/main.rs` — build `Dispatcher` with Poise framework, register commands, start Serenity `Client`
+- `src/commands/mod.rs` — re-export all command modules
+- `src/commands/search.rs`, `recs.rs`, `download.rs`, `metadata.rs`, `bookmark.rs`, `kudos.rs`, `work.rs`, `fandoms.rs`, `fandom.rs`, `forum.rs`, `blind_date.rs`, `trending.rs`, `similar.rs`, `also_bookmarked.rs`, `comments.rs`, `random.rs`, `help.rs`, `link.rs`, `unlink.rs`, `me.rs`, `guild.rs` — one file per command group
+- `src/render.rs` — `to_embed(PlatformMessage) -> CreateEmbed`, `to_components(PlatformMessage) -> Vec<ActionRow>`
+- `src/intent.rs` — `on_mention(ctx, msg) -> Result<()>`: strip @mention, call `intent::classify`, dispatch
+
+**Telegram adapter** (`crates/lorehaven-bot-telegram/`):
+- `Cargo.toml`: `teloxide`, `archivist-core`
+- `src/main.rs` — build `Dispatcher` with dptree, start Teloxide `Bot`
+- `src/commands.rs` — `#[derive(BotCommands)]` enum mirroring Discord surface
+- `src/handlers.rs` — one handler per command, calling `do_*` from core
+- `src/render.rs` — `to_html(PlatformMessage) -> String`, `to_inline_keyboard(PlatformMessage) -> InlineKeyboardMarkup`
+- `src/intent.rs` — inline query handler + free-text handler
+
+**Matrix adapter** (`crates/lorehaven-bot-matrix/`):
+- `Cargo.toml`: `matrix-sdk`, `archivist-core`
+- `src/main.rs` — login, join rooms, start sync loop
+- `src/parse.rs` — `detect_command(text) -> Option<Command>`, `strip_prefixes(text) -> String`
+- `src/render.rs` — `render_message(PlatformMessage) -> RoomMessageEventContent`
+
+**IRC adapter** (`crates/lorehaven-bot-irc/`):
+- `Cargo.toml`: `irc`, `archivist-core`
+- `src/main.rs` — connect, join channels, listen for messages
+- `src/command.rs` — `parse_line(text) -> IrcCommand`
+- `src/render.rs` — `render_plain(PlatformMessage) -> String` with numbered actions
+
+**Fediverse adapter** (`crates/lorehaven-bot-fediverse/`):
+- `Cargo.toml`: `reqwest`, `serde`, `archivist-core`
+- `src/main.rs` — spawn Mastodon poller + Bluesky poller + optional Piefed monitor
+- `src/mastodon.rs` — `poll_mentions() -> Vec<Mention>`, `reply_to(mention, PlatformMessage)`, `post_work(work, quote_card_url)`
+- `src/bsky.rs` — `poll_mentions() -> Vec<BskyNotification>`, `reply_to(notif, PlatformMessage)` via raw XRPC
+- `src/parse.rs` — `strip_mention(text) -> String`, `parse_command(text) -> Option<Command>`, `render_plain(PlatformMessage) -> String`
+- `src/config.rs` — `FediverseConfig` from env
+
+**CLI/TUI adapter** (`crates/lorehaven-bot-cli/`):
+- `Cargo.toml`: `clap`, `tokio`, `crossterm`, `ratatui`, `archivist-core`
+- `src/main.rs` — `clap` subcommands: `repl`, `tui`, `download`, `search`, `work`, `forum`
+- `src/repl.rs` — `Repl` struct, `parse_line(raw) -> Line`, `run(config, client, token, user_id)`
+- `src/tui.rs` — `run(config, client, token, user_id, force)` entry point
+- `src/tui/state.rs` — `AppState`, `BrowseMode`, `Detail`, `ListState`, `Pane`, `Tab`
+- `src/tui/worker.rs` — `WorkerCmd`, `TuiMsg`, background task owning `CoreCtx`
+- `src/tui/commands.rs` — `TuiCommand` enum, `parse_input(raw) -> TuiCommand`
+- `src/download.rs` — `download_work(client, url, format, path) -> Result<()>`
+- `src/render.rs` — `render_search_json(results)`, `render_work_json(work)`, `render_forum_json(topic)`
+
+**bot-core unit tests** (in `crates/bot-core/tests/`):
+- `intent.rs` — `classify_search_query`, `classify_url`, `classify_question`, `classify_help`, `classify_fandom`, `classify_forum`, `classify_blind_date`, `classify_trending`, `classify_random`, `classify_link`, `classify_unknown`
+- `store.rs` — `token_roundtrip`, `link_code_claim`, `link_code_expiry`, `prefs_roundtrip`
+- `cache.rs` — `cache_response_roundtrip`, `page_pointer_roundtrip`
+- `ratelimit.rs` — `rate_limit_allows_under_limit`, `rate_limit_blocks_at_limit`, `rate_limit_resets_after_window`
+- `util.rs` — `extract_url_from_text`, `format_words_trousands`, `truncate_preserves_short`, `truncate_cuts_long`
+
+**Adapter integration tests** (in each adapter crate's `tests/`):
+- `discord::test_search_renders_embed`
+- `telegram::test_search_renders_html`
+- `matrix::test_parse_detects_command`
+- `irc::test_parse_line_command`
+- `fediverse::test_mastodon_parse_mention`
+- `cli::test_repl_parse_line`
+- `cli::test_tui_parse_input`
+
+**Acceptance tests** (`milestone_37.rs` in bot-core):
+- `search_returns_results` — `do_search` returns `PlatformMessage` with items
+- `recs_requires_auth` — `do_recs` fails with `NotLinked` when no token
+- `download_returns_links` — `do_download` returns EPUB/PDF/MOBI links
+- `bookmark_requires_auth` — `do_bookmark` fails with `NotLinked` when no token
+- `kudos_requires_auth` — `do_kudos` fails with `NotLinked` when no token
+- `forum_categories_returns_list` — `do_forum_categories` returns categories
+- `forum_topics_returns_list` — `do_forum_topics` returns topics
+- `forum_topic_returns_detail` — `do_forum_topic` returns thread
+- `fandoms_returns_list` — `do_fandoms` returns fandoms
+- `fandom_returns_detail` — `do_fandom` returns fandom
+- `random_returns_work` — `do_random` returns a work
+- `trending_returns_list` — `do_trending` returns works
+- `similar_returns_list` — `do_similar` returns works
+- `also_bookmarked_returns_list` — `do_also_bookmarked` returns works
+- `blind_date_returns_work` — `do_blind_date` returns a work
+- `comments_returns_list` — `do_comments` returns comments
+- `link_creates_code` — `do_link` returns a link code
+- `unlink_deletes_token` — `do_unlink` deletes the stored token
+- `me_returns_profile` — `do_me` returns the linked user's profile
+- `help_returns_text` — `do_help` returns help text
+- `intent_classifies_search` — `intent::classify("search drarry")` → `Intent::Search`
+- `intent_classifies_url` — `intent::classify("https://...")` → `Intent::Metadata`
+- `intent_classifies_question` — `intent::classify("how do I...")` → `Intent::Ask`
+- `rate_limit_allows_under_limit` — 9 commands in 60s → allowed
+- `rate_limit_blocks_at_limit` — 11 commands in 60s → blocked
+- `cache_hit_returns_value` — cached search response returned without API call
+- `pagination_next_advances` — `do_search` with page=2 returns next page
+- `pagination_prev_returns` — `do_search` with page=1 returns previous page
+
+**Frontend:** None (bot is API-only; no Svelte components).
+
+---
+
+### 15c.1 Sign-off
+
+Tag `v0.37-companion-bot` with its ledger rows flipped and evidence named.
+The §16 checklist applies to the tag. When M37 lands, the companion bot
+covers Discord, Telegram, Matrix, IRC, the Fediverse (Mastodon + Bluesky),
+and the terminal (REPL + TUI + download).
+
+---
+
 ## 16. Cross-cutting sign-off checklist (run at every milestone tag)
 
 - [ ] Ledger: rows added **before** code; flipped after evidence; `M<repo>-NN`
