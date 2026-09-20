@@ -435,6 +435,13 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // Thread modes: reading groups, critique circles, wiki pins, prompts
+        // (spec 35.3, M33). Same writers' class as typed votes.
+        .merge(classified(
+            routes::thread_modes::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Events (collections, challenges, requests, wishlists, events) — M13.
         .merge(classified(
             routes::events::router(),
