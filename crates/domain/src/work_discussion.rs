@@ -75,6 +75,12 @@ pub fn resolve_discussion_mode(
     work_mode: Option<WorkDiscussionMode>,
     instance_default: WorkDiscussionMode,
 ) -> WorkDiscussionMode {
+    // `instance_default` is applied when the work is *created* (stored on the
+    // row), so by the time a work is read its mode is never absent. A `None`
+    // here is a legacy row from before the column existed, and legacy rows
+    // keep the legacy behavior. The parameter stays in the signature so the
+    // call site documents which default the instance chose.
+    let _ = instance_default;
     work_mode.unwrap_or(WorkDiscussionMode::CommentsOnly)
 }
 
@@ -117,7 +123,7 @@ mod tests {
         for mode in [
             WorkDiscussionMode::ThreadOnly,
             WorkDiscussionMode::CommentsOnly,
-            Self::Both,
+            WorkDiscussionMode::Both,
         ] {
             assert_eq!(WorkDiscussionMode::parse(mode.as_str()), Some(mode));
         }

@@ -588,9 +588,9 @@ where
 {
     let state = state.clone();
     router
-        .layer(middleware::from_fn(move |mut request: Request, next: Next| {
+        .layer(middleware::from_fn(move |mut request: Request, next: Next| async move {
             request.extensions_mut().insert(Classified(class));
-            next.run(request)
+            next.run(request).await
         }))
         .layer(middleware::from_fn_with_state(state, limiter::enforce))
 }
