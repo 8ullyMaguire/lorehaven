@@ -12,26 +12,36 @@
    * rating needs an account rather than shown stars that would fail on click.
    */
   import {
+    fetchDiscussionMode,
+    fetchReactions,
     fetchReviews,
+    fetchThread,
     fetchWork,
     fetchWorkPricing,
     getProgress,
     isAuthorWork,
+    postReaction,
     purchaseWork,
+    setDiscussionMode,
     upsertReview,
     type AuthorWork,
+    type DiscussionModeResponse,
     type ProgressView,
-    type PublicWork,
     type PublicPricingResponse,
+    type PublicWork,
+    type ReactionsResponse,
     type ReviewView,
+    type ThreadResponse,
   } from '../lib/api';
   import { ApiError } from '../lib/api';
-  import { describeCompletion, describeLifecycle, describeRating, describeVisibility } from '../lib/labels';
+  import { describeCompletion, describeDiscussionMode, describeLifecycle, describeRating, describeReactionType, describeVisibility, reactionGlyph } from '../lib/labels';
   import { handleLinkClick } from '../lib/router';
   import { session } from '../lib/session.svelte';
+  import DiscussLink from '../lib/components/DiscussLink.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import NotePanel from '../lib/components/NotePanel.svelte';
   import Rating from '../lib/components/Rating.svelte';
+  import ReactionBar from '../lib/components/ReactionBar.svelte';
   import ResumePrompt from '../lib/components/ResumePrompt.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
@@ -87,6 +97,12 @@
           progress = null;
         }
       }
+      // Discussion mode: drives the reaction bar + Discuss link visibility.
+      try {
+        discussionMode = await fetchDiscussionMode(workId);
+      } catch {
+        discussionMode = null;
+      }
       void loadGallery();
     } catch (failure) {
       // Paywall: a priced work returns 403 CONTENT_RESTRICTED for non-buyers.
@@ -118,6 +134,8 @@
 
   let gallery = $state<GalleryItem[] | null>(null);
   let reviewReceipt = $state<string | null>(null);
+  // Discussion surface state (spec §35): the effective mode for this work.
+  let discussionMode = $state<DiscussionModeResponse | null>(null);
 
   async function publishReview() {
     if (reviewDraft.trim() === '') return;
@@ -266,6 +284,12 @@
         </li>
       {/each}
     </ol>
+  {/if}
+
+  <!-- Discussion surface (spec §35): reaction bar + Discuss link. -->
+  {#if discussionMode?.thread_enabled}
+    <ReactionBar workId={workId} />
+    <DiscussLink workId={workId} />
   {/if}
 
   <div id="rate">

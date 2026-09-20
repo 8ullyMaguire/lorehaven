@@ -52,6 +52,7 @@ pub mod subscriptions;
 pub mod taxonomy;
 pub mod translation;
 pub mod work_discussion;
+pub mod work_backlink;
 
 use std::borrow::Cow;
 use std::path::Path;

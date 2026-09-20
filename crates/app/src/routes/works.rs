@@ -114,6 +114,8 @@ struct AuthorWorkView {
     published_at: Option<String>,
     withdrawn_at: Option<String>,
     show_public_ratings: bool,
+    /// The effective discussion mode (thread_only/comments_only/both).
+    discussion_mode: String,
     /// What the *acting* pseud may do with it.
     role: String,
     chapters: Vec<ChapterView>,
@@ -217,6 +219,8 @@ struct PublicWorkView {
     completion: String,
     published_at: Option<String>,
     show_public_ratings: bool,
+    /// The effective discussion mode (thread_only/comments_only/both).
+    discussion_mode: String,
     /// The public aggregate rating, when the owner allows it and the minimum
     /// count is met. `null` otherwise, including below the threshold.
     rating_summary: Option<PublicRatingSummaryView>,
@@ -1102,6 +1106,7 @@ async fn author_view(
         published_at: work.published_at.clone(),
         withdrawn_at: work.withdrawn_at.clone(),
         show_public_ratings: work.show_public_ratings,
+        discussion_mode: work.discussion_mode.clone(),
         role,
         chapters: chapters.into_iter().map(ChapterView::from).collect(),
         contributors: contributor_views,
@@ -1141,6 +1146,7 @@ async fn public_view(state: &AppState, work: &Work) -> ApiResult<PublicWorkView>
         completion: work.completion.clone(),
         published_at: work.published_at.clone(),
         show_public_ratings: work.show_public_ratings,
+        discussion_mode: work.discussion_mode.clone(),
         rating_summary: rating_summary.map(|summary| PublicRatingSummaryView {
             count: summary.count,
             mean_stars: summary.mean_permille as f64 / 1000.0,

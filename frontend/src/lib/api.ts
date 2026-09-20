@@ -559,6 +559,8 @@ export interface AuthorWork {
   published_at: string | null;
   withdrawn_at: string | null;
   show_public_ratings: boolean;
+  /** How discussion happens around this work (thread_only/comments_only/both). */
+  discussion_mode: string;
   role: string;
   chapters: ChapterSummary[];
   contributors: Contributor[];
@@ -584,6 +586,8 @@ export interface PublicWork {
   completion: string;
   published_at: string | null;
   show_public_ratings: boolean;
+  /** How discussion happens around this work (thread_only/comments_only/both). */
+  discussion_mode: string;
   authors: PublicAuthor[];
   chapters: ChapterSummary[];
 }
@@ -1056,6 +1060,80 @@ export function upsertReview(
 /** Withdraw the caller's review of a work. */
 export function deleteReview(workId: string): Promise<void> {
   return apiFetch<void>(`/works/${encodeURIComponent(workId)}/reviews`, { method: 'DELETE' });
+}
+
+/** How discussion happens around a work. */
+export interface DiscussionModeResponse {
+  mode: string;
+  comments_enabled: boolean;
+  thread_enabled: boolean;
+}
+
+/** Get the effective discussion mode for a work. */
+export function fetchDiscussionMode(workId: string, signal?: AbortSignal): Promise<DiscussionModeResponse> {
+  return apiFetch<DiscussionModeResponse>(`/works/${encodeURIComponent(workId)}/discussion-mode`, { signal });
+}
+
+/** Set the discussion mode (author only). */
+export function setDiscussionMode(workId: string, mode: string): Promise<{ mode: string }> {
+  return apiFetch<{ mode: string }>(`/works/${encodeURIComponent(workId)}/discussion-mode`, {
+    method: 'PUT',
+    body: JSON.stringify({ mode }),
+  });
+}
+
+/** The typed-vote reaction bar for a work. */
+export interface ReactionsResponse {
+  counts: Record<string, number>;
+  mine: string | null;
+  types: string[];
+}
+
+/** Get reaction counts and the caller's own vote. */
+export function fetchReactions(workId: string, signal?: AbortSignal): Promise<ReactionsResponse> {
+  return apiFetch<ReactionsResponse>(`/works/${encodeURIComponent(workId)}/reactions`, { signal });
+}
+
+/** Cast, change, or retract a reaction. */
+export function postReaction(
+  workId: string,
+  voteType: string | null,
+): Promise<{ outcome: string }> {
+  return apiFetch<{ outcome: string }>(`/works/${encodeURIComponent(workId)}/reactions`, {
+    method: 'POST',
+    body: JSON.stringify({ vote_type: voteType }),
+  });
+}
+
+/** The work's linked discussion topic. */
+export interface ThreadResponse {
+  topic_id: string;
+  chapter_id: string | null;
+}
+
+/** Get the linked forum topic for a work. */
+export function fetchThread(workId: string, signal?: AbortSignal): Promise<ThreadResponse> {
+  return apiFetch<ThreadResponse>(`/works/${encodeURIComponent(workId)}/thread`, { signal });
+}
+
+/** Migrate inline comments to a linked forum topic (author only). */
+export function migrateComments(workId: string): Promise<{ topic_id: string; moved: number }> {
+  return apiFetch<{ topic_id: string; moved: number }>(
+    `/works/${encodeURIComponent(workId)}/migrate-comments`,
+    { method: 'POST' },
+  );
+}
+
+/** The work linked to a topic (backlink card). */
+export interface LinkedWorkResponse {
+  id: string;
+  title: string;
+  author_handles: string[];
+}
+
+/** Get the work linked to a topic, if any. */
+export function fetchLinkedWork(topicId: string, signal?: AbortSignal): Promise<LinkedWorkResponse> {
+  return apiFetch<LinkedWorkResponse>(`/topics/${encodeURIComponent(topicId)}/work`, { signal });
 }
 
 /** Get the acting pseud's private notes for a subject. */

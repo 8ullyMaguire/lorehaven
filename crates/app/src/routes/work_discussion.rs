@@ -14,6 +14,7 @@ use lorehaven_domain::work_discussion::{is_valid_work_reaction, WorkDiscussionMo
 use crate::auth::{RequirePseud, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
+use lorehaven_db::work_backlink::LinkedWork;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -29,6 +30,8 @@ pub fn router() -> Router<AppState> {
         )
         // The linked forum topic ("Discuss" link target).
         .route("/works/{id}/thread", get(get_thread))
+        // The work linked to a topic (backlink card on the topic page).
+        .route("/topics/{id}/work", get(get_linked_work))
         // The comment-to-topic batch migration tool (author only).
         .route("/works/{id}/migrate-comments", post(post_migrate_comments))
 }
@@ -231,4 +234,19 @@ async fn post_migrate_comments(
 
 fn internal(e: anyhow::Error) -> ApiError {
     ApiError(lorehaven_domain::AppError::Internal(e))
+}
+
+/// The work linked to a topic — backlink card data for the topic page.
+async fn get_linked_work(
+    State(state): State<AppState>,
+    RequireSession(_user): RequireSession,
+    Path(id): Path<String>,
+) -> ApiResult<Json<LinkedWork>> {
+    let work = lorehaven_db::work_backlink::work_for_topic(state.db(), &id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound {
+            resource: "work",
+        }))?;
+    Ok(Json(work))
 }
