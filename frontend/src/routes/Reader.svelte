@@ -50,6 +50,7 @@
   let error = $state<unknown>(null);
   let loading = $state(true);
   let showSettings = $state(false);
+  let narrationEditionId = $state<string | null>(null);
 
   /**
    * The reading surface's appearance, applied as the page opens.
@@ -140,10 +141,23 @@
           window.scrollTo({ top: document.body.scrollHeight * fraction });
         });
       }
+      void loadNarrationEdition();
     } catch (failure) {
       error = failure;
     } finally {
       loading = false;
+    }
+  }
+
+  async function loadNarrationEdition() {
+    try {
+      const res = await apiFetch<{ items: Array<{ id: string; edition_kind: string; published_at: string | null }> }>(
+        `/works/${workId}/editions`,
+      );
+      const narration = res.items.find((e) => e.edition_kind === 'narration' && e.published_at);
+      narrationEditionId = narration?.id ?? null;
+    } catch {
+      narrationEditionId = null;
     }
   }
 
@@ -367,6 +381,15 @@
     <ReaderSettings signedIn={session.isSignedIn} />
   {/if}
 
+  {#if narrationEditionId}
+    <div class="narration-player">
+      <audio controls src={`/editions/${narrationEditionId}/audio`} preload="metadata">
+        Your browser does not support audio playback.
+      </audio>
+      <p class="narration-note">Listen to a narrated edition (machine-generated).</p>
+    </div>
+  {/if}
+
   <div class="reader-body">
     <!-- Server-sanitized HTML; see the module note. -->
     <article class="prose">{@html chapter.sanitized_html}</article>
@@ -584,7 +607,25 @@
     gap: var(--space-4);
     margin-top: var(--space-6);
     padding-top: var(--space-4);
-    border-top: var(--border-width) solid var(--color-border);
+    border-top: 1px solid var(--color-border);
+  }
+
+  .narration-player {
+    margin: var(--space-4) 0;
+    padding: var(--space-3);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+  }
+
+  .narration-player audio {
+    width: 100%;
+  }
+
+  .narration-note {
+    margin: var(--space-2) 0 0;
+    font-size: var(--text-sm);
+    color: var(--color-muted);
   }
 
   .next {
