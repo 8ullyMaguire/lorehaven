@@ -38,6 +38,7 @@ pub mod subscriptions;
 pub mod taxonomy;
 pub mod translation;
 pub mod webhook;
+pub mod work_discussion;
 
 pub use error::{AppError, ErrorCode, Result};
 pub use ids::*;

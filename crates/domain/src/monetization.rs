@@ -5,8 +5,6 @@
 //! crate compiles and the contracts are testable. The implementing agent
 //! replaces the bodies; the signatures are the contract.
 
-
-
 /// Instance-level eligibility setting (§20.9.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Eligibility {
@@ -96,7 +94,6 @@ impl Rules {
         let platform = amount_minor * platform_fee_bp / 10_000;
         (amount_minor - platform, platform)
     }
-
 }
 
 #[cfg(test)]

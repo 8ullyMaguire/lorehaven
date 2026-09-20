@@ -4,8 +4,6 @@
 //! Skeleton: signatures are the contract; the implementing agent fills the
 //! bodies marked [`Rules::todo`].
 
-
-
 /// What a reader may subscribe to (§23.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Subject {
@@ -60,7 +58,6 @@ impl Rules {
     pub fn match_activity_disclosed() -> bool {
         false
     }
-
 }
 
 #[cfg(test)]
