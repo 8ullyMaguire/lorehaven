@@ -113,7 +113,7 @@ pub async fn create_actor(
                 .execute(db.sqlite_pool().expect("sqlite")).await?;
         }
         Backend::Postgres => {
-            sqlx::query("INSERT INTO ap_actors (id, actor_type, user_id, instance_host, ap_id, inbox_url, outbox_url, followers_url, following_url, public_key, created_at) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11)")
+            sqlx::query("INSERT INTO ap_actors (id, actor_type, user_id, instance_host, ap_id, inbox_url, outbox_url, followers_url, following_url, public_key, created_at) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)")
                 .bind(&id).bind(actor_type).bind(user_id).bind(instance_host)
                 .bind(ap_id).bind(inbox_url).bind(outbox_url).bind(followers_url).bind(following_url)
                 .bind(public_key).bind(&now)
@@ -164,7 +164,7 @@ pub async fn create_activity(
                 .execute(db.sqlite_pool().expect("sqlite")).await?;
         }
         Backend::Postgres => {
-            sqlx::query("INSERT INTO ap_activities (id, activity_type, actor_id, object_id, object_type, payload, created_at) VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5, $6::jsonb, $7)")
+            sqlx::query("INSERT INTO ap_activities (id, activity_type, actor_id, object_id, object_type, payload, created_at) VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb, $7)")
                 .bind(&id).bind(activity_type).bind(actor_id).bind(object_id).bind(object_type)
                 .bind(&payload_str).bind(&now)
                 .execute(db.postgres_pool().expect("postgres")).await?;

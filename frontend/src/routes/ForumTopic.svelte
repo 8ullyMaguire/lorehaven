@@ -23,6 +23,7 @@
   import ForumPostEl from '../lib/components/ForumPost.svelte';
   import ReadingSchedule from '../lib/components/ReadingSchedule.svelte';
   import CritiqueQueue from '../lib/components/CritiqueQueue.svelte';
+  import ModerationPanel from '../lib/components/ModerationPanel.svelte';
   import { handleLinkClick } from '../lib/router';
 
   let { topicId }: { topicId: string } = $props();
@@ -121,7 +122,7 @@
     <!-- Moderation panel -->
     {#if isModerator}
       <div class="moderation-wrap">
-        <!-- ModeratorPanel would go here -->
+        <ModerationPanel {topicId} />
       </div>
     {/if}
 
