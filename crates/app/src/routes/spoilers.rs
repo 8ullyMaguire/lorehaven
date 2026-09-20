@@ -18,19 +18,13 @@ use darkhold_db::spoilers;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        // Spoiler scope on topics.
         .route("/topics/{id}/spoiler-scope", put(put_spoiler_scope))
-        // Reader progress.
         .route("/works/{id}/progress", get(get_progress).put(put_progress))
-        // Content warnings on posts.
         .route("/posts/{id}/warnings", get(get_warnings).post(post_warning))
-        // Draft autosave.
         .route("/topics/{id}/draft", get(get_draft).post(post_draft).delete(delete_draft))
-        // Scheduled posts.
         .route("/posts/{id}/schedule", post(post_schedule))
         .route("/posts/scheduled/due", get(get_due_scheduled))
         .route("/posts/scheduled/{id}/publish", post(post_publish_scheduled))
-        // Reader warning prefs.
         .route("/me/warning-prefs", get(get_warning_prefs).put(put_warning_pref))
 }
 
@@ -53,10 +47,12 @@ async fn put_spoiler_scope(
         .await
         .map_err(internal)?
         .ok_or_else(|| ApiError(darkhold_domain::AppError::NotFound { resource: "topic" }))?;
+    // Only the topic author or a moderator (TL3+) can set spoiler scope.
+    let trust = darkhold_db::governance::trust_for(state.db(), &pseud_id.to_string())
+        .await
+        .map_err(internal)?;
     if topic.author_pseud != pseud_id.to_string()
-        && !darkhold_db::typed_votes::is_moderator(state.db(), &pseud_id.to_string())
-            .await
-            .map_err(internal)?
+        && !darkhold_domain::typed_votes::is_moderator(trust)
     {
         return Err(ApiError(darkhold_domain::AppError::access_denied(
             "Only the topic author or a moderator can set spoiler scope.",
