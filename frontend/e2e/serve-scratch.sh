@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.."
 rm -rf test-results/scratch
 mkdir -p test-results/scratch/storage
 
-BIN=${DARKHOLD_BIN:-$HOME/.cargo-target/darkhold-review/release/darkhold}
+BIN=${DARKHOLD_BIN:-$HOME/.cargo-target/darkhold/debug/darkhold}
 PORT=${DARKHOLD_E2E_PORT:-8173}
 SCRATCH="$(pwd)/test-results/scratch"
 
