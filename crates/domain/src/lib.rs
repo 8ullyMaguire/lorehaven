@@ -37,6 +37,7 @@ pub mod stats;
 pub mod subscriptions;
 pub mod taxonomy;
 pub mod translation;
+pub mod typed_votes;
 pub mod webhook;
 pub mod work_discussion;
 

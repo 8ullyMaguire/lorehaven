@@ -427,6 +427,14 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // Typed votes, budgets, meta-moderation and karma (spec 35.2, M32).
+        // Writers' class: every route here needs a session, and the reads are
+        // per-viewer because the transparency tier depends on who is asking.
+        .merge(classified(
+            routes::typed_votes::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Events (collections, challenges, requests, wishlists, events) — M13.
         .merge(classified(
             routes::events::router(),

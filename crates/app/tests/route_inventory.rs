@@ -2413,6 +2413,124 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/notifications/{id}/read",
         audience: Audience::Authenticated,
     },
+    // ------------------------------------------------------------------
+    // Work discussion (spec §35.1, M31) — session-scoped, writes pseud-scoped
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "work_discussion.rs",
+        handler: "get_discussion_mode",
+        method: "GET",
+        path: "/works/{id}/discussion-mode",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "work_discussion.rs",
+        handler: "put_discussion_mode",
+        method: "PUT",
+        path: "/works/{id}/discussion-mode",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "work_discussion.rs",
+        handler: "get_reactions",
+        method: "GET",
+        path: "/works/{id}/reactions",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "work_discussion.rs",
+        handler: "post_reaction",
+        method: "POST",
+        path: "/works/{id}/reactions",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "work_discussion.rs",
+        handler: "get_thread",
+        method: "GET",
+        path: "/works/{id}/thread",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "work_discussion.rs",
+        handler: "post_migrate_comments",
+        method: "POST",
+        path: "/works/{id}/migrate-comments",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "work_discussion.rs",
+        handler: "get_linked_work",
+        method: "GET",
+        path: "/topics/{id}/work",
+        audience: Audience::Authenticated,
+    },
+    // ------------------------------------------------------------------
+    // Typed votes, budgets, meta-moderation, karma (spec §35.2, M32)
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "typed_votes.rs",
+        handler: "cast_vote",
+        method: "POST",
+        path: "/forum/posts/{id}/vote",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "typed_votes.rs",
+        handler: "retract_vote",
+        method: "DELETE",
+        path: "/forum/posts/{id}/vote",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "typed_votes.rs",
+        handler: "get_post_votes",
+        method: "GET",
+        path: "/forum/posts/{id}/votes",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "typed_votes.rs",
+        handler: "put_vote_visibility",
+        method: "PUT",
+        path: "/forum/posts/{id}/vote-visibility",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "typed_votes.rs",
+        handler: "post_meta_vote",
+        method: "POST",
+        path: "/forum/votes/{id}/meta",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "typed_votes.rs",
+        handler: "get_category_vote_types",
+        method: "GET",
+        path: "/forum/categories/{id}/vote-types",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "typed_votes.rs",
+        handler: "get_vote_budget",
+        method: "GET",
+        path: "/me/vote-budget",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "typed_votes.rs",
+        handler: "get_own_karma",
+        method: "GET",
+        path: "/forum/karma",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "typed_votes.rs",
+        handler: "get_karma",
+        method: "GET",
+        path: "/forum/karma/{pseud}",
+        audience: Audience::Authenticated,
+    },
 ];
 
 /// Check whether a function signature contains an audience extractor

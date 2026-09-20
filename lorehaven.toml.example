@@ -140,6 +140,36 @@ format = "pretty"
 # a route later.
 # monthly_spend_cap_cents = 500
 
+[forum]
+# How discussion happens around a work (spec §35.0).
+#
+# `comments_only` (the default) keeps the classic comment surface. Setting
+# `thread_only` applies to **new** works: the work page shows a typed-vote
+# reaction bar and a "Discuss" link, and all text discussion lives in a linked
+# forum topic. The default is never applied to existing works retroactively.
+# `both` offers both surfaces and splits conversation — use it deliberately.
+# work_discussion_default = "comments_only"
+
+# Typed votes (spec §35.2). The vote budget is a rolling 24-hour allowance,
+# keyed by trust level; unused votes do not roll over. The values below are the
+# spec's defaults. A trust level below the lowest rung gets that rung's
+# allowance, so a new account can still vote.
+# vote_budget = { "1" = 10, "3" = 30, "5" = 60 }
+
+# Meta-moderation (spec §35.2): TL4+ stewards flag votes fair or unfair. These
+# are the points a steward may spend per rolling 24 hours, and the number of
+# verdicts a caster needs before their vote *weight* (never their voice) starts
+# to decay. `min_vote_weight_bp` is the floor, in basis points: 1000 is full
+# weight, so 100 means a fully-decayed caster's votes count one tenth.
+# meta_mod_points = 20
+# meta_mod_min_verdicts = 3
+# min_vote_weight_bp = 100
+
+# Karma decays while its holder is inactive (spec §35.2), at this percentage
+# per 30-day month. Karma is a display signal only: it never gates trust,
+# moderation, search ranking or credits.
+# karma_decay_percent = 5
+
 [dev]
 # Whether `lorehaven seed` may write development fixtures. Defaults to true
 # outside production and false in it; enabling it in production is a startup

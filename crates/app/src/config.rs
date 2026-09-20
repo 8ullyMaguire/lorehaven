@@ -197,6 +197,20 @@ pub struct ForumConfig {
     /// The discussion mode applied to **new** works. Existing works keep
     /// their own mode; the default is never applied retroactively.
     pub work_discussion_default: lorehaven_domain::work_discussion::WorkDiscussionMode,
+    /// `(minimum trust level, votes per rolling 24h)` rungs of the vote
+    /// budget, ascending by level (spec §35.2). A level below every rung gets
+    /// the first rung's allowance.
+    pub vote_budget: Vec<lorehaven_domain::typed_votes::BudgetRung>,
+    /// Meta-mod points (vote flags) a TL4+ steward may spend per rolling 24h.
+    pub meta_mod_points: i64,
+    /// Verdicts a caster needs before their vote weight may decay. Below this
+    /// a single flag changes nothing.
+    pub meta_mod_min_verdicts: i64,
+    /// The floor a decayed vote weight never goes below, in basis points.
+    /// Lower weight, never fewer rights (spec §35.2).
+    pub min_vote_weight_bp: i64,
+    /// Monthly karma decay for an inactive receiver, in percent (§35.2).
+    pub karma_decay_percent: i64,
 }
 
 impl Default for ForumConfig {
@@ -204,6 +218,12 @@ impl Default for ForumConfig {
         Self {
             work_discussion_default:
                 lorehaven_domain::work_discussion::WorkDiscussionMode::CommentsOnly,
+            // Spec §35.2: TL1=10, TL3=30, TL5=60.
+            vote_budget: vec![(1, 10), (3, 30), (5, 60)],
+            meta_mod_points: 20,
+            meta_mod_min_verdicts: 3,
+            min_vote_weight_bp: 100,
+            karma_decay_percent: lorehaven_domain::typed_votes::KARMA_DECAY_PERCENT,
         }
     }
 }
@@ -780,12 +800,45 @@ impl Config {
 
         // --- forum ----------------------------------------------------------
         let forum_file = file.forum.unwrap_or_default();
+        let mut vote_budget: Vec<lorehaven_domain::typed_votes::BudgetRung> = forum_file
+            .vote_budget
+            .map(|rungs| {
+                rungs
+                    .iter()
+                    .map(|(level, votes)| {
+                        let level: i64 = level.trim().parse().map_err(|_| {
+                            anyhow::anyhow!(
+                                "forum.vote_budget key {level:?} is not a trust level"
+                            )
+                        })?;
+                        Ok((level, *votes))
+                    })
+                    .collect::<anyhow::Result<Vec<_>>>()
+            })
+            .transpose()?
+            .unwrap_or_else(|| ForumConfig::default().vote_budget);
+        // Ascending by level, so resolution is "the highest rung reached" and
+        // not "whichever key the parser happened to see last".
+        vote_budget.sort_unstable_by_key(|(level, _)| *level);
         let forum = ForumConfig {
             work_discussion_default: forum_file
                 .work_discussion_default
                 .as_deref()
                 .and_then(lorehaven_domain::work_discussion::WorkDiscussionMode::parse)
                 .unwrap_or_else(|| ForumConfig::default().work_discussion_default),
+            vote_budget,
+            meta_mod_points: forum_file
+                .meta_mod_points
+                .unwrap_or_else(|| ForumConfig::default().meta_mod_points),
+            meta_mod_min_verdicts: forum_file
+                .meta_mod_min_verdicts
+                .unwrap_or_else(|| ForumConfig::default().meta_mod_min_verdicts),
+            min_vote_weight_bp: forum_file
+                .min_vote_weight_bp
+                .unwrap_or_else(|| ForumConfig::default().min_vote_weight_bp),
+            karma_decay_percent: forum_file
+                .karma_decay_percent
+                .unwrap_or_else(|| ForumConfig::default().karma_decay_percent),
         };
 
         let config = Self {
@@ -922,6 +975,36 @@ impl Config {
         if self.rate_limits.write.burst == 0 || self.rate_limits.auth.burst == 0 {
             anyhow::bail!("rate limits must allow at least one request in a burst");
         }
+        // Forum vote settings (spec §35.2). These are numbers a route uses to
+        // refuse a vote, so a nonsense value has to stop the instance rather
+        // than make every vote impossible or free.
+        if self.forum.vote_budget.is_empty() {
+            anyhow::bail!("forum.vote_budget must have at least one trust rung");
+        }
+        for (level, votes) in &self.forum.vote_budget {
+            if *level < 0 {
+                anyhow::bail!("forum.vote_budget trust levels must not be negative, got {level}");
+            }
+            if *votes < 0 {
+                anyhow::bail!("forum.vote_budget must not be negative, got {votes} at level {level}");
+            }
+        }
+        if self.forum.meta_mod_points < 0 {
+            anyhow::bail!("forum.meta_mod_points must not be negative");
+        }
+        if self.forum.meta_mod_min_verdicts < 1 {
+            anyhow::bail!("forum.meta_mod_min_verdicts must be at least 1");
+        }
+        if !(0..=lorehaven_domain::typed_votes::WEIGHT_SCALE_BP).contains(&self.forum.min_vote_weight_bp)
+        {
+            anyhow::bail!(
+                "forum.min_vote_weight_bp must be between 0 and {}",
+                lorehaven_domain::typed_votes::WEIGHT_SCALE_BP
+            );
+        }
+        if !(0..=100).contains(&self.forum.karma_decay_percent) {
+            anyhow::bail!("forum.karma_decay_percent must be between 0 and 100");
+        }
         // Checked here rather than at the first challenged chapter: a solver URL
         // that does not parse is an operator's typo, and a typo should stop the
         // instance rather than surface hours later as an import that cannot read
@@ -1012,6 +1095,17 @@ struct TtsSection {
 struct ForumSection {
     /// `thread_only` (recommended), `comments_only` (legacy default), or `both`.
     work_discussion_default: Option<String>,
+    /// Vote budget rungs, keyed by trust level: `vote_budget = { "1" = 10,
+    /// "3" = 30, "5" = 60 }` (spec §35.2).
+    vote_budget: Option<std::collections::BTreeMap<String, i64>>,
+    /// Meta-mod points a TL4+ steward may spend per rolling 24h.
+    meta_mod_points: Option<i64>,
+    /// Verdicts needed before a caster's vote weight may decay.
+    meta_mod_min_verdicts: Option<i64>,
+    /// The floor a decayed vote weight never goes below, in basis points.
+    min_vote_weight_bp: Option<i64>,
+    /// Monthly karma decay for an inactive receiver, in percent.
+    karma_decay_percent: Option<i64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1413,6 +1507,7 @@ port = 7000
             "[assets]",
             "[imports]",
             "[tts]",
+            "[forum]",
             "[dev]",
         ] {
             assert!(
