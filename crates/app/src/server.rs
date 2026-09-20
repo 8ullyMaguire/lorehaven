@@ -421,6 +421,12 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // Work discussion modes, reaction bar, linked topics (spec 35.1, M31).
+        .merge(classified(
+            routes::work_discussion::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Events (collections, challenges, requests, wishlists, events) — M13.
         .merge(classified(
             routes::events::router(),
@@ -588,10 +594,12 @@ where
 {
     let state = state.clone();
     router
-        .layer(middleware::from_fn(move |mut request: Request, next: Next| async move {
-            request.extensions_mut().insert(Classified(class));
-            next.run(request).await
-        }))
+        .layer(middleware::from_fn(
+            move |mut request: Request, next: Next| async move {
+                request.extensions_mut().insert(Classified(class));
+                next.run(request).await
+            },
+        ))
         .layer(middleware::from_fn_with_state(state, limiter::enforce))
 }
 

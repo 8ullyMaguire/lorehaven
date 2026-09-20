@@ -120,6 +120,22 @@ async fn post_comment(
     let work_id: lorehaven_domain::WorkId = id
         .parse()
         .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    // A ThreadOnly work has no comment surface at all: the reaction bar and
+    // the linked forum thread are where feedback lives (spec 35.0). The
+    // refusal is the server's, never the interface's alone.
+    let discussion_mode = lorehaven_db::work_discussion::work_discussion_mode(state.db(), &id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    let effective = lorehaven_domain::work_discussion::resolve_discussion_mode(
+        discussion_mode,
+        state.config().forum.work_discussion_default,
+    );
+    if !effective.comments_enabled() {
+        return Err(ApiError(lorehaven_domain::AppError::field(
+            "work",
+            "This work's discussion lives in its forum thread; use the Discuss link.",
+        )));
+    }
     let author_account = lorehaven_db::positivity::author_account_for_work(state.db(), work_id)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;

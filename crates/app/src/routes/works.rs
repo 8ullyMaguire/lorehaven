@@ -44,9 +44,7 @@ use lorehaven_db::permission;
 use lorehaven_db::reading;
 use lorehaven_domain::content::Contributor;
 use lorehaven_domain::document::Document;
-use lorehaven_domain::permission::{
-    LineageEdge, LineageKind, PermissionStatement,
-};
+use lorehaven_domain::permission::{LineageEdge, LineageKind, PermissionStatement};
 use lorehaven_domain::policy::{
     can_access_content, AccessPolicy, Actor, ContentFacts, Decision, DenyReason, Lifecycle,
     Visibility,

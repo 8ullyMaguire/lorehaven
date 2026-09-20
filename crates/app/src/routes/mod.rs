@@ -35,4 +35,5 @@ pub mod settings;
 pub mod subscriptions;
 pub mod taxonomy;
 pub mod translation;
+pub mod work_discussion;
 pub mod works;

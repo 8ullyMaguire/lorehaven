@@ -134,6 +134,8 @@ pub struct Config {
     pub tts: TtsConfig,
     /// Bulk export settings.
     pub bulk_export: BulkExportConfig,
+    /// Forum settings (spec 35).
+    pub forum: ForumConfig,
     /// Where the configuration file was read from, if any.
     pub config_path: Option<PathBuf>,
 }
@@ -187,6 +189,23 @@ pub struct BulkExportConfig {
     pub max_items: Option<i64>,
     /// How many bytes a bulk export may total. `None` means the default.
     pub max_bytes: Option<i64>,
+}
+
+/// Forum settings (spec 35).
+#[derive(Debug, Clone)]
+pub struct ForumConfig {
+    /// The discussion mode applied to **new** works. Existing works keep
+    /// their own mode; the default is never applied retroactively.
+    pub work_discussion_default: lorehaven_domain::work_discussion::WorkDiscussionMode,
+}
+
+impl Default for ForumConfig {
+    fn default() -> Self {
+        Self {
+            work_discussion_default:
+                lorehaven_domain::work_discussion::WorkDiscussionMode::CommentsOnly,
+        }
+    }
 }
 
 impl Default for BulkExportConfig {
@@ -759,6 +778,16 @@ impl Config {
             monthly_spend_cap_cents: tts_file.monthly_spend_cap_cents,
         };
 
+        // --- forum ----------------------------------------------------------
+        let forum_file = file.forum.unwrap_or_default();
+        let forum = ForumConfig {
+            work_discussion_default: forum_file
+                .work_discussion_default
+                .as_deref()
+                .and_then(lorehaven_domain::work_discussion::WorkDiscussionMode::parse)
+                .unwrap_or_else(|| ForumConfig::default().work_discussion_default),
+        };
+
         let config = Self {
             environment,
             site,
@@ -783,6 +812,7 @@ impl Config {
             discovery: DiscoveryConfig::default(),
             tts,
             bulk_export: BulkExportConfig::default(),
+            forum,
             config_path,
         };
 
@@ -847,6 +877,7 @@ impl Config {
             discovery: DiscoveryConfig::default(),
             tts: TtsConfig::default(),
             bulk_export: BulkExportConfig::default(),
+            forum: ForumConfig::default(),
             config_path: None,
         }
     }
@@ -952,6 +983,7 @@ struct FileConfig {
     rate_limits: Option<RateLimitSection>,
     imports: Option<ImportsSection>,
     tts: Option<TtsSection>,
+    forum: Option<ForumSection>,
 }
 
 /// The `[tts]` table: which engine narrates, and how an operator configured it
@@ -972,6 +1004,14 @@ struct TtsSection {
     /// this exists so the ceiling is configuration before an adapter that
     /// charges arrives, not a number invented in a route.
     monthly_spend_cap_cents: Option<u64>,
+}
+
+/// The `[forum]` table (spec 35.0).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ForumSection {
+    /// `thread_only` (recommended), `comments_only` (legacy default), or `both`.
+    work_discussion_default: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

@@ -19,7 +19,6 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -212,21 +211,24 @@ impl Bucket {
     }
 }
 
+/// Global bucket map shared by all RateLimiter instances.
+///
+/// A single process serves many requests, and Axum clones AppState per
+/// request. If each clone carried its own bucket map, a credential-stuffing
+/// loop would never trip the limit — every request would find a fresh bucket.
+/// The bucket map lives in a global static so every instance of the limiter
+/// sees the same state.
+static GLOBAL_BUCKETS: std::sync::LazyLock<Mutex<HashMap<String, Bucket>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+static GLOBAL_LAST_PRUNE: std::sync::LazyLock<Mutex<Instant>> =
+    std::sync::LazyLock::new(|| Mutex::new(Instant::now()));
+
 /// The in-process limiter.
 ///
-/// Uses `Arc<Mutex<...>>` so clones of `AppState` share the same bucket map
-/// (Axum clones the state per request; a fresh Mutex per clone would reset
-/// the buckets and make the limiter inert).
-#[derive(Clone)]
-pub struct RateLimiter {
-    inner: Arc<RateLimiterInner>,
-}
-
-#[derive(Debug)]
-struct RateLimiterInner {
-    buckets: Mutex<HashMap<String, Bucket>>,
-    last_prune: Mutex<Instant>,
-}
+/// Stateless: all bucket data lives in global statics so clones of AppState
+/// (and therefore RateLimiter) share the same bucket map.
+#[derive(Clone, Debug)]
+pub struct RateLimiter;
 
 /// How long an unused bucket is kept before it is dropped.
 ///
@@ -242,20 +244,13 @@ impl RateLimiter {
     /// at the call site, so there is exactly one place a limit is defined.
     #[must_use]
     pub fn new(_limits: Limits) -> Self {
-        Self {
-            inner: Arc::new(RateLimiterInner {
-                buckets: Mutex::new(HashMap::new()),
-                last_prune: Mutex::new(Instant::now()),
-            }),
-        }
+        Self
     }
 
     /// Check a request cost against a bucket, returning a retry delay on refusal.
     fn check(&self, key: &str, quota: Quota) -> Result<(), Duration> {
         let now = Instant::now();
-        let mut buckets = self
-            .inner
-            .buckets
+        let mut buckets = GLOBAL_BUCKETS
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
 
@@ -265,16 +260,12 @@ impl RateLimiter {
             .entry(key.to_owned())
             .or_insert_with(|| Bucket::new(f64::from(quota.burst)));
 
-        let result = bucket.take(quota, now);
-        tracing::debug!(key = %key, tokens = bucket.tokens, result = ?result, "rate limit check");
-        result
+        bucket.take(quota, now)
     }
 
     /// Drop buckets that have refilled and gone quiet.
     fn prune_if_stale(&self, buckets: &mut HashMap<String, Bucket>, now: Instant) {
-        let mut last = self
-            .inner
-            .last_prune
+        let mut last = GLOBAL_LAST_PRUNE
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if now.saturating_duration_since(*last) < BUCKET_IDLE_TTL {
@@ -289,8 +280,7 @@ impl RateLimiter {
     /// Number of tracked buckets. Exposed for tests and diagnostics.
     #[must_use]
     pub fn tracked_buckets(&self) -> usize {
-        self.inner
-            .buckets
+        GLOBAL_BUCKETS
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .len()
