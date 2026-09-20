@@ -90,17 +90,18 @@ impl Pawchive {
 
 /// One post from Pawchive's JSON API.
 #[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct ApiPost {
     id: String,
     user: String,
     title: String,
     content: String,
     #[serde(default)]
-    tags: serde_json::Value,
+    tags: Option<Vec<String>>,
     #[serde(default)]
     published: Option<String>,
     #[serde(default)]
-    attachments: serde_json::Value,
+    attachments: Option<Vec<serde_json::Value>>,
 }
 
 /// The JSON list response is just an array of posts.
