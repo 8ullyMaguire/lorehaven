@@ -492,6 +492,10 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // Federation: instance themes, ActivityPub inbox/outbox, similarity — M36.
+        // Merged at the root level (not under /api/v1) so ActivityPub endpoints
+        // are reachable at /federation/inbox, /federation/actor, etc.
+        .merge(routes::federation::routes())
         // Administration — M19.
         .merge(classified(
             routes::admin::router(),
