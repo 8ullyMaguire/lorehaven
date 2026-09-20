@@ -1132,8 +1132,198 @@ export interface LinkedWorkResponse {
 }
 
 /** Get the work linked to a topic, if any. */
-export function fetchLinkedWork(topicId: string, signal?: AbortSignal): Promise<LinkedWorkResponse> {
+export async function fetchLinkedWork(topicId: string, signal?: AbortSignal): Promise<LinkedWorkResponse> {
   return apiFetch<LinkedWorkResponse>(`/topics/${encodeURIComponent(topicId)}/work`, { signal });
+}
+
+// M33 — Thread modes (spec §35.3)
+
+export interface ScheduleSection {
+  position: number;
+  title: string;
+  chapter_start: number;
+  chapter_end: number;
+  unlocks_at: string;
+  created_at: string;
+}
+
+export async function getSchedule(topicId: string, signal?: AbortSignal): Promise<ScheduleSection[]> {
+  const page = await apiFetch<{ sections: ScheduleSection[] }>(
+    `/topics/${encodeURIComponent(topicId)}/schedule`,
+    { signal },
+  );
+  return page.sections;
+}
+
+export async function addScheduleSection(
+  topicId: string,
+  input: { position: number; title: string; chapter_start: number; chapter_end: number; unlocks_at: string },
+): Promise<void> {
+  await apiFetch(`/topics/${encodeURIComponent(topicId)}/schedule`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function setTopicMode(topicId: string, mode: string): Promise<void> {
+  await apiFetch(`/topics/${encodeURIComponent(topicId)}/mode`, {
+    method: 'PUT',
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export interface WikiPin {
+  post_id: string;
+  body: string;
+  author_pseud: string;
+  created_at: string;
+}
+
+export async function getWikiPin(topicId: string, signal?: AbortSignal): Promise<WikiPin | null> {
+  const page = await apiFetch<{ wiki_pin: WikiPin | null }>(
+    `/topics/${encodeURIComponent(topicId)}/wiki-pin`,
+    { signal },
+  );
+  return page.wiki_pin;
+}
+
+export async function postWikiPin(topicId: string, body: string): Promise<void> {
+  await apiFetch(`/topics/${encodeURIComponent(topicId)}/wiki-pin`, {
+    method: 'POST',
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function approveWikiPin(topicId: string, postId: string): Promise<void> {
+  await apiFetch(`/topics/${encodeURIComponent(topicId)}/wiki-pin`, {
+    method: 'PUT',
+    body: JSON.stringify({ post_id: postId }),
+  });
+}
+
+export async function joinCritique(topicId: string): Promise<number> {
+  const page = await apiFetch<{ position: number }>(
+    `/topics/${encodeURIComponent(topicId)}/critique/join`,
+    { method: 'POST' },
+  );
+  return page.position;
+}
+
+export interface CritiqueEntry {
+  pseud_id: string;
+  position: number;
+  work_id: string;
+}
+
+export async function getCritiqueQueue(topicId: string, signal?: AbortSignal): Promise<CritiqueEntry[]> {
+  const page = await apiFetch<{ queue: CritiqueEntry[] }>(
+    `/topics/${encodeURIComponent(topicId)}/critique/queue`,
+    { signal },
+  );
+  return page.queue;
+}
+
+// M34 — Spoilers & readability (spec §35.4)
+
+export interface ContentWarning {
+  warning_type: string;
+  severity: number;
+  custom_text?: string;
+}
+
+export async function getContentWarnings(postId: string, signal?: AbortSignal): Promise<ContentWarning[]> {
+  const page = await apiFetch<{ warnings: ContentWarning[] }>(
+    `/posts/${encodeURIComponent(postId)}/warnings`,
+    { signal },
+  );
+  return page.warnings;
+}
+
+export async function addContentWarning(
+  postId: string,
+  input: { warning_type: string; severity?: number; custom_text?: string },
+): Promise<void> {
+  await apiFetch(`/posts/${encodeURIComponent(postId)}/warnings`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getReaderProgress(workId: string, signal?: AbortSignal): Promise<number> {
+  const page = await apiFetch<{ last_chapter: number }>(
+    `/works/${encodeURIComponent(workId)}/progress`,
+    { signal },
+  );
+  return page.last_chapter;
+}
+
+export async function setReaderProgress(workId: string, lastChapter: number): Promise<void> {
+  await apiFetch(`/works/${encodeURIComponent(workId)}/progress`, {
+    method: 'PUT',
+    body: JSON.stringify({ last_chapter: lastChapter }),
+  });
+}
+
+export interface WarningPref {
+  warning_type: string;
+  action: 'blur' | 'show';
+}
+
+export async function getWarningPrefs(signal?: AbortSignal): Promise<WarningPref[]> {
+  const page = await apiFetch<{ prefs: WarningPref[] }>('/me/warning-prefs', { signal });
+  return page.prefs;
+}
+
+export async function setWarningPref(input: { warning_type: string; action: 'blur' | 'show' }): Promise<void> {
+  await apiFetch('/me/warning-prefs', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
+
+// M35 — Moderation & community health (spec §35.5)
+
+export interface Sanction {
+  level: 'verbal_warning' | 'post_throttle' | 'read_only' | 'forum_ban' | 'site_ban';
+  expires_at?: string;
+}
+
+export async function applySanction(input: {
+  account: string;
+  category_id?: string;
+  level: string;
+  reason: string;
+  expires_at?: string;
+}): Promise<string> {
+  const page = await apiFetch<{ id: string }>('/mod/sanctions', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return page.id;
+}
+
+export async function checkSanction(account: string, categoryId?: string): Promise<Sanction | null> {
+  const q = new URLSearchParams({ account });
+  if (categoryId) q.set('category_id', categoryId);
+  return apiFetch<Sanction | null>(`/mod/sanctions/check?${q}`);
+}
+
+export async function setSlowMode(topicId: string, seconds: number): Promise<void> {
+  await apiFetch(`/topics/${encodeURIComponent(topicId)}/slow-mode`, {
+    method: 'PUT',
+    body: JSON.stringify({ seconds }),
+  });
+}
+
+export async function setFederationScope(topicId: string, scope: 'public' | 'local' | 'unlisted'): Promise<void> {
+  await apiFetch(`/topics/${encodeURIComponent(topicId)}/federation-scope`, {
+    method: 'PUT',
+    body: JSON.stringify({ scope }),
+  });
+}
+
+export async function featurePost(postId: string): Promise<void> {
+  await apiFetch(`/posts/${encodeURIComponent(postId)}/feature`, { method: 'POST' });
 }
 
 /** Get the acting pseud's private notes for a subject. */
@@ -2160,6 +2350,14 @@ export interface ForumTopic {
   author_handle?: string;
   created_at: string;
   locked: boolean;
+  /** Thread mode: 'plain', 'reading_group', 'critique_circle', 'wiki_pin', 'prompt'. */
+  mode: string;
+  /** Chapter to which spoiler scope is limited (null = whole topic). */
+  spoiler_scope_chapter?: number | null;
+  /** Seconds between posts (slow mode). */
+  slow_mode_seconds?: number;
+  /** Federation scope: 'public', 'local', 'unlisted'. */
+  federation_scope?: string;
 }
 
 /** One reply inside a topic thread. */

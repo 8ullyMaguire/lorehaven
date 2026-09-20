@@ -257,6 +257,18 @@ pub struct TtsConfig {
     pub monthly_spend_cap_cents: Option<u64>,
 }
 
+impl Default for TtsConfig {
+    fn default() -> Self {
+        Self {
+            engine: "silent".into(),
+            piper_path: None,
+            piper_voice_model: None,
+            default_voice: None,
+            monthly_spend_cap_cents: None,
+        }
+    }
+}
+
 /// Export retention settings (spec §38).
 #[derive(Debug, Clone)]
 pub struct ExportsConfig {
