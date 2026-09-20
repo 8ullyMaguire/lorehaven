@@ -6052,3 +6052,122 @@ Environment variables (all prefixed `LOHAVEN_BOT_`):
   tier.
 - **No platform lock-in.** A reader who uses the bot on Discord can switch
   to Telegram without losing their linked account or preferences.
+
+
+---
+
+# 38. Instance Configuration — The Self-Hosted Contract
+
+> **2026-09-20 addition.** Lorehaven is self-hosted. The operator — not the
+> codebase — decides how their instance behaves. This section codifies that
+> principle: every tunable value is admin-configurable via `lorehaven.toml`,
+> with sensible defaults that let a fresh instance run without touching a
+> single config line.
+
+## 38.1 The principle
+
+1. **No hardcoded magic numbers.** If a value affects behavior (timeouts,
+   limits, thresholds, retention windows, budgets, taxonomies), it lives in
+   `Config`, not a `const` in application code.
+2. **Defaults are safe, not restrictive.** A fresh `lorehaven.toml` with
+   every section omitted must produce a working instance. Defaults favor
+   development-friendliness; production hardening is opt-in.
+3. **Every config key has a documented default.** The operator can see what
+   the default is without reading source code.
+4. **Validation at startup, not at use.** A malformed config key refuses to
+   start with a clear error message. No silent fallbacks to arbitrary values.
+5. **Environment overrides file.** `LOREHAVEN_*` environment variables take
+   precedence over the file, so containerized deployments can inject secrets
+   and tune values without rewriting the file.
+
+## 38.2 Currently configurable (verified against `Config`)
+
+| Section | Key | Default | Purpose |
+|---------|-----|---------|---------|
+| `[site]` | `name` | `"Lorehaven"` | Instance display name |
+| `[site]` | `base_url` | auto from bind+port | Canonical URL |
+| `[site]` | `contact_email` | `None` | Admin contact |
+| `[site]` | `topics` | `[]` | Public discovery topics |
+| `[server]` | `bind` | `"127.0.0.1"` | Listen address |
+| `[server]` | `port` | `8080` | Listen port |
+| `[server]` | `max_body_bytes` | `2097152` (2 MiB) | Max request body |
+| `[server]` | `request_timeout_secs` | `30` | Request timeout |
+| `[database]` | `url` | `sqlite://./data/lorehaven.sqlite` | DB connection string |
+| `[database]` | `max_connections` | `5` (dev) / `10` (prod) | Connection pool size |
+| `[database]` | `acquire_timeout_secs` | `10` | Pool acquire timeout |
+| `[storage]` | `root` | `"./data"` (dev) / `"/var/lib/lorehaven"` (prod) | Blob storage root |
+| `[security]` | `cookie_secure` | `false` (dev) / `true` (prod) | Secure cookie flag |
+| `[security]` | `session_ttl_days` | `30` | Session lifetime |
+| `[security]` | `csrf_required` | `true` | CSRF protection |
+| `[security]` | `trust_proxy` | `false` | Trust `X-Forwarded-*` |
+| `[logging]` | `filter` | `"info,lorehaven_app=debug"` | Log filter |
+| `[logging]` | `format` | `"pretty"` (dev) / `"json"` (prod) | Log format |
+| `[accounts]` | `registration_open` | `true` | Allow new registrations |
+| `[age]` | `threshold` | `14` | Age of consent threshold |
+| `[age]` | `guardian_workflow_enabled` | `false` | Guardian authorization |
+| `[rate_limits]` | `auth.burst`, `auth.per_minute` | `5`, `20` | Auth rate limit |
+| `[rate_limits]` | `write.burst`, `write.per_minute` | `10`, `60` | Write rate limit |
+| `[rate_limits]` | `search.burst`, `search.per_minute` | `20`, `120` | Search rate limit |
+| `[rate_limits]` | `export.burst`, `export.per_minute` | `3`, `10` | Export rate limit |
+| `[rate_limits]` | `default.burst`, `default.per_minute` | `30`, `180` | Default rate limit |
+| `[imports]` | `solver_url` | `None` | CAPTCHA solver URL |
+| `[imports]` | `archive_fallback` | `false` | Fallback to archive.org |
+| `[imports]` | `honour_robots` | `true` | Respect robots.txt |
+| `[tts]` | `engine` | `"silent"` | TTS engine |
+| `[tts]` | `piper_path` | `None` | Piper binary path |
+| `[tts]` | `piper_voice_model` | `None` | Piper voice model |
+| `[tts]` | `default_voice` | `None` | Default voice |
+| `[tts]` | `monthly_spend_cap_cents` | `None` | Monthly TTS spend cap |
+| `[forum]` | `vote_budget` | `[(1,10),(3,30),(5,60)]` | Vote budget per TL |
+| `[forum]` | `karma_decay_percent` | `5` | Monthly karma decay % |
+| `[forum]` | `meta_mod_points` | `1` | Points per meta-mod verdict |
+| `[forum]` | `meta_mod_min_verdicts` | `3` | Min verdicts to elect moderator |
+| `[forum]` | `min_vote_weight_bp` | `100` | Min vote weight in basis points |
+| `[forum]` | `work_discussion_default` | `"thread_only"` | Default discussion mode |
+
+## 38.3 Hardcoded values that MUST become configurable
+
+These are currently `const` values in application code. They must be moved to
+`Config` with defaults and TOML keys.
+
+| Current location | Constant | Proposed key | Default |
+|------------------|----------|--------------|---------|
+| `crates/app/src/exports.rs` | `RETENTION_DAYS = 7` | `[exports] retention_days` | `0` (forever) |
+| `crates/app/src/exports.rs` | `GRANT_TTL_SECONDS = 3600` | `[exports] grant_ttl_secs` | `3600` |
+| `crates/app/src/revisions.rs` | `REVISION_TTL_SECONDS = 604800` | `[revisions] ttl_secs` | `604800` |
+| `crates/app/src/worker.rs` | `TERMINAL_JOB_RETENTION = 30d` | `[jobs] terminal_retention_days` | `30` |
+| `crates/app/src/bulk_export.rs` | `DEFAULT_MAX_ITEMS = 50` | `[bulk_export] max_items` | `50` |
+| `crates/app/src/bulk_export.rs` | `DEFAULT_MAX_BYTES = 1GiB` | `[bulk_export] max_bytes` | `1073741824` |
+| `crates/domain/src/library.rs` | `UPDATE_CHECK_RETENTION_DAYS = 90` | `[library] update_check_retention_days` | `90` |
+| `crates/app/src/library_updates.rs` | `CHECK_BATCH = 50` | `[library] check_batch` | `50` |
+| `crates/app/src/administration.rs` | `webhook_timeout_secs = 10` | `[administration] webhook_timeout_secs` | `10` |
+| `crates/app/src/administration.rs` | `webhook_max_attempts = 5` | `[administration] webhook_max_attempts` | `5` |
+| `crates/app/src/administration.rs` | `webhook_base_delay_ms = 500` | `[administration] webhook_base_delay_ms` | `500` |
+
+## 38.4 Migration path
+
+1. Add new fields to the relevant `*Config` struct with `serde::Deserialize`.
+2. Add defaults to `*Config::default()`.
+3. Read values in `Config::load()` from the TOML file.
+4. Replace `const` references with `config.xxx` calls.
+5. Update `docs/spec.md` §38.2 and §38.3.
+6. Update `docs/config-reference.md` (create if missing).
+
+## 38.5 Acceptance
+
+- Every hardcoded value in §38.3 has a corresponding `[section] key` in
+  `lorehaven.toml`.
+- `lorehaven.toml` with all defaults omitted produces a working instance.
+- Setting `retention_days = 0` disables export cleanup entirely.
+- A malformed config value (e.g., `retention_days = -1`) refuses to start
+  with a clear error.
+- All existing tests pass with default config values.
+
+## 38.6 What this section deliberately does not do
+
+- **No runtime reload.** Config changes require a restart. (Future: SIGHUP
+  reload, but not now.)
+- **No per-user overrides.** Instance config is global. User preferences are
+  in `privacy_settings` and `reader_settings`.
+- **No feature flags.** This is about tuning values, not toggling features.
+  Feature gating is done at compile time or via Cargo features.

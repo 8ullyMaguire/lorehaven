@@ -3332,6 +3332,57 @@ and the terminal (REPL + TUI + download).
 
 ---
 
+## 15d. Milestone 38 (repo) — Instance Configuration
+Spec §38. Depends on: none (infrastructure).
+
+**Goal**: Every hardcoded `const` in application code becomes a `Config` field
+with a TOML key, documented default, and startup validation.
+
+**Migration path** (per value):
+1. Add field to `*Config` struct with `serde::Deserialize`.
+2. Add default to `*Config::default()`.
+3. Read in `Config::load()` from TOML.
+4. Replace `const` reference with `config.xxx`.
+5. Update spec §38.2/§38.3.
+
+**Values to migrate** (from spec §38.3):
+
+| Constant | Proposed key | Default |
+|----------|--------------|---------|
+| `RETENTION_DAYS = 7` | `[exports] retention_days` | `0` (forever) |
+| `GRANT_TTL_SECONDS = 3600` | `[exports] grant_ttl_secs` | `3600` |
+| `REVISION_TTL_SECONDS = 604800` | `[revisions] ttl_secs` | `604800` |
+| `TERMINAL_JOB_RETENTION = 30d` | `[jobs] terminal_retention_days` | `30` |
+| `DEFAULT_MAX_ITEMS = 50` | `[bulk_export] max_items` | `50` |
+| `DEFAULT_MAX_BYTES = 1GiB` | `[bulk_export] max_bytes` | `1073741824` |
+| `UPDATE_CHECK_RETENTION_DAYS = 90` | `[library] update_check_retention_days` | `90` |
+| `CHECK_BATCH = 50` | `[library] check_batch` | `50` |
+| `webhook_timeout_secs = 10` | `[administration] webhook_timeout_secs` | `10` |
+| `webhook_max_attempts = 5` | `[administration] webhook_max_attempts` | `5` |
+| `webhook_base_delay_ms = 500` | `[administration] webhook_base_delay_ms` | `500` |
+
+**New config structs**:
+- `ExportsConfig` — `retention_days`, `grant_ttl_secs`
+- `RevisionsConfig` — `ttl_secs`
+- `JobsConfig` — `terminal_retention_days`
+- `BulkExportConfig` — already exists; add `max_items`, `max_bytes`
+- `LibraryConfig` — `update_check_retention_days`, `check_batch`
+- `AdministrationConfig` — already exists; add webhook fields
+
+**Acceptance tests** (`milestone_38.rs`):
+- `retention_zero_disables_cleanup` — `retention_days = 0` → sweep removes nothing
+- `retention_seven_sweeps_old` — `retention_days = 7` → old exports purged
+- `grant_ttl_respected` — grant expires after configured seconds
+- `revision_ttl_respected` — revision discarded after configured seconds
+- `terminal_job_retention_respected` — old terminal jobs purged
+- `bulk_export_max_items_enforced` — bulk export capped at `max_items`
+- `bulk_export_max_bytes_enforced` — bulk export capped at `max_bytes`
+- `malformed_config_rejected` — bad value → startup error with clear message
+- `defaults_produce_working_instance` — empty config → server starts
+- `all_existing_tests_pass` — full suite green with default config
+
+---
+
 ## 16. Cross-cutting sign-off checklist (run at every milestone tag)
 
 - [ ] Ledger: rows added **before** code; flipped after evidence; `M<repo>-NN`
