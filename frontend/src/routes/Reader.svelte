@@ -33,7 +33,7 @@
     writeTypographyPrefs,
   } from '../lib/reading';
   import { handleLinkClick } from '../lib/router';
-  import { session } from '../lib/session.svelte';
+  import { session } from '../lib/session.svelte.ts';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import NotePanel from '../lib/components/NotePanel.svelte';
   import ReaderSettings from '../lib/components/ReaderSettings.svelte';

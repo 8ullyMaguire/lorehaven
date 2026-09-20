@@ -46,7 +46,7 @@
     type StorageUsage,
   } from '../lib/api';
   import { handleLinkClick, navigate } from '../lib/router';
-  import { session } from '../lib/session.svelte';
+  import { session } from '../lib/session.svelte.ts';
   import Button from '../lib/components/Button.svelte';
   import EmptyState from '../lib/components/EmptyState.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';

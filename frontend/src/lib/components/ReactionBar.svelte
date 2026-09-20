@@ -9,9 +9,9 @@
     fetchReactions,
     postReaction,
     type ReactionsResponse,
-  } from '../lib/api';
-  import { describeReactionType, reactionGlyph } from '../lib/labels';
-  import { session } from '../lib/session.svelte';
+  } from '../api';
+  import { describeReactionType, reactionGlyph } from '../labels';
+  import { session } from '../session.svelte.ts';
 
   interface Props {
     workId: string;

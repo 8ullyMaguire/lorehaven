@@ -5,7 +5,7 @@
    * Lets a reader set their default action (blur or show) for each
    * warning type. Applies site-wide across all forum posts.
    */
-  import { getWarningPrefs, setWarningPref, type WarningPref } from '../lib/api';
+  import { getWarningPrefs, setWarningPref, type WarningPref } from '../api';
 
   let prefs = $state<WarningPref[]>([]);
   let loading = $state(true);

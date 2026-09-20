@@ -5,7 +5,7 @@
    * Shows a topic's critique circle queue. Readers can join the queue
    * and are assigned a position. Used on topics with mode=critique_circle.
    */
-  import { getCritiqueQueue, joinCritique, type CritiqueEntry } from '../lib/api';
+  import { getCritiqueQueue, joinCritique, type CritiqueEntry } from '../api';
 
   let { topicId, isModerator }: { topicId: string; isModerator: boolean } = $props();
 

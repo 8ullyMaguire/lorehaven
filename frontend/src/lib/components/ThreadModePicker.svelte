@@ -6,8 +6,8 @@
    * a plain topic is unaffected, and a reading-group topic gets a schedule of
    * sections. Only the topic author or a moderator can change the mode.
    */
-  import { fetchTopic, setTopicMode } from '../lib/api';
-  import { session } from '../lib/session.svelte';
+  import { fetchTopic, setTopicMode } from '../api';
+  import { session } from '../session.svelte.ts';
   import ErrorSummary from './ErrorSummary.svelte';
 
   let { topicId, mode: currentMode }: { topicId: string; mode: string } = $props();

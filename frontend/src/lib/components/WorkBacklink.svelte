@@ -5,8 +5,8 @@
    * Shown on the topic page when the topic was created as a work-linked
    * thread. Lets a reader jump from the discussion back to the work.
    */
-  import { fetchLinkedWork, type LinkedWorkResponse } from '../lib/api';
-  import { handleLinkClick } from '../lib/router';
+  import { fetchLinkedWork, type LinkedWorkResponse } from '../api';
+  import { handleLinkClick } from '../router';
 
   interface Props {
     topicId: string;
