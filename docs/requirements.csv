@@ -141,9 +141,9 @@ DS-01,platform,Decision-service contract - declared answer set with calibrated c
 DS-02,platform,Pluggable optional decision provider with deterministic fallback disclosed on /api/v1/meta,cross-cutting,implemented-locally-tested,docs/spec.md §34.2,Spec-only; self-host constraint - no task may require a third party
 DS-03,platform,Thresholds with named tail owners plus the never-decided list,cross-cutting,implemented-locally-tested,docs/spec.md §34.3,Spec-only
 DS-04,platform,Decision audit records operator-only with hashes rather than copied text,cross-cutting,implemented-locally-tested,docs/spec.md §34.6,Spec-only
-M31-01,community,Work discussion mode per work and instance default (ThreadOnly/CommentsOnly/Both),M31,specified,docs/spec.md §35.0,
-M31-02,community,Typed-vote reaction bar on work page with one vote per pseud,M31,specified,docs/spec.md §35.1,
-M31-03,community,Work-linked forum topics with backlink cards and Discuss button,M31,specified,docs/spec.md §35.1,
-M31-04,community,Chapter publish auto-creates or prompts linked topic exactly once,M31,specified,docs/spec.md §35.1,
-M31-05,community,Batch comment-to-topic migration preserving authorship and timestamps,M31,specified,docs/spec.md §35.1,
-M31-06,community,ThreadOnly work page renders no comment form,M31,specified,docs/spec.md §35.0,
+M31-01,community,Work discussion mode per work and instance default (ThreadOnly/CommentsOnly/Both),M31,implemented-locally-tested,crates/app/tests/milestone_31.rs (6/6 pass),
+M31-02,community,Typed-vote reaction bar on work page with one vote per pseud,M31,implemented-locally-tested,crates/app/tests/milestone_31.rs (6/6 pass),
+M31-03,community,Work-linked forum topics with backlink cards and Discuss button,M31,implemented-locally-tested,crates/app/tests/milestone_31.rs (6/6 pass),
+M31-04,community,Chapter publish auto-creates or prompts linked topic exactly once,M31,implemented-locally-tested,crates/app/tests/milestone_31.rs (6/6 pass),
+M31-05,community,Batch comment-to-topic migration preserving authorship and timestamps,M31,implemented-locally-tested,crates/app/tests/milestone_31.rs (6/6 pass),
+M31-06,community,ThreadOnly work page renders no comment form,M31,implemented-locally-tested,crates/app/tests/milestone_31.rs (6/6 pass),
