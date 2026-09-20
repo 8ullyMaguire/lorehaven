@@ -25,7 +25,7 @@ pub async fn create_topic(
             .bind(&now)
             .bind(&now)
             .bind(mode)
-            .execute(db.pool())
+            .execute(db.sqlite_pool().expect("sqlite"))
             .await?;
         }
         Backend::Postgres => {
@@ -39,7 +39,7 @@ pub async fn create_topic(
             .bind(title)
             .bind(&now)
             .bind(mode)
-            .execute(db.pool())
+            .execute(db.sqlite_pool().expect("sqlite"))
             .await?;
         }
     }
@@ -68,7 +68,7 @@ pub async fn add_schedule_section(
             .bind(chapter_start)
             .bind(chapter_end)
             .bind(unlocks_at)
-            .execute(db.pool())
+            .execute(db.sqlite_pool().expect("sqlite"))
             .await?;
         }
         Backend::Postgres => {
@@ -82,7 +82,7 @@ pub async fn add_schedule_section(
             .bind(chapter_start)
             .bind(chapter_end)
             .bind(unlocks_at)
-            .execute(db.pool())
+            .execute(db.sqlite_pool().expect("sqlite"))
             .await?;
         }
     }
@@ -101,7 +101,7 @@ pub async fn get_schedule(
                  FROM topic_schedules WHERE topic_id = ? ORDER BY position",
             )
             .bind(topic_id)
-            .fetch_all(db.pool())
+            .fetch_all(db.sqlite_pool().expect("sqlite"))
             .await?
         }
         Backend::Postgres => {
@@ -110,12 +110,12 @@ pub async fn get_schedule(
                  FROM topic_schedules WHERE topic_id = $1 ORDER BY position",
             )
             .bind(topic_id)
-            .fetch_all(db.pool())
+            .fetch_all(db.sqlite_pool().expect("sqlite"))
             .await?
         }
     };
     let mut result = Vec::new();
-    for (pos, title, start, end, unlocks) in rows {
+    for (pos, title, start, end, unlocks, _created) in rows {
         result.push(serde_json::json!({
             "position": pos,
             "title": title,
@@ -147,7 +147,7 @@ pub async fn create_wiki_pin(
             .bind(body)
             .bind(edited_by)
             .bind(&now)
-            .execute(db.pool())
+            .execute(db.sqlite_pool().expect("sqlite"))
             .await?;
         }
         Backend::Postgres => {
@@ -160,7 +160,7 @@ pub async fn create_wiki_pin(
             .bind(body)
             .bind(edited_by)
             .bind(&now)
-            .execute(db.pool())
+            .execute(db.sqlite_pool().expect("sqlite"))
             .await?;
         }
     }
@@ -185,7 +185,7 @@ pub async fn approve_wiki_pin(
             .bind(&now)
             .bind(topic_id)
             .bind(post_id)
-            .execute(db.pool())
+            .execute(db.sqlite_pool().expect("sqlite"))
             .await?;
         }
         Backend::Postgres => {
@@ -197,7 +197,7 @@ pub async fn approve_wiki_pin(
             .bind(&now)
             .bind(topic_id)
             .bind(post_id)
-            .execute(db.pool())
+            .execute(db.sqlite_pool().expect("sqlite"))
             .await?;
         }
     }
@@ -216,7 +216,7 @@ pub async fn get_wiki_pin(
                  WHERE topic_id = ? AND approved_by IS NOT NULL",
             )
             .bind(topic_id)
-            .fetch_optional(db.pool())
+            .fetch_optional(db.sqlite_pool().expect("sqlite"))
             .await?
         }
         Backend::Postgres => {
@@ -225,7 +225,7 @@ pub async fn get_wiki_pin(
                  WHERE topic_id = $1 AND approved_by IS NOT NULL",
             )
             .bind(topic_id)
-            .fetch_optional(db.pool())
+            .fetch_optional(db.sqlite_pool().expect("sqlite"))
             .await?
         }
     };
@@ -253,7 +253,7 @@ pub async fn join_critique(
                 "SELECT MAX(position) FROM critique_queue WHERE topic_id = ?",
             )
             .bind(topic_id)
-            .fetch_one(db.pool())
+            .fetch_one(db.sqlite_pool().expect("sqlite"))
             .await?
         }
         Backend::Postgres => {
@@ -261,7 +261,7 @@ pub async fn join_critique(
                 "SELECT MAX(position) FROM critique_queue WHERE topic_id = $1",
             )
             .bind(topic_id)
-            .fetch_one(db.pool())
+            .fetch_one(db.sqlite_pool().expect("sqlite"))
             .await?
         }
     };
@@ -275,7 +275,7 @@ pub async fn join_critique(
             .bind(topic_id)
             .bind(pseud)
             .bind(position)
-            .execute(db.pool())
+            .execute(db.sqlite_pool().expect("sqlite"))
             .await?;
         }
         Backend::Postgres => {
@@ -286,7 +286,7 @@ pub async fn join_critique(
             .bind(topic_id)
             .bind(pseud)
             .bind(position)
-            .execute(db.pool())
+            .execute(db.sqlite_pool().expect("sqlite"))
             .await?;
         }
     }
@@ -305,7 +305,7 @@ pub async fn get_critique_queue(
                  WHERE topic_id = ? ORDER BY position",
             )
             .bind(topic_id)
-            .fetch_all(db.pool())
+            .fetch_all(db.sqlite_pool().expect("sqlite"))
             .await?
         }
         Backend::Postgres => {
@@ -314,7 +314,7 @@ pub async fn get_critique_queue(
                  WHERE topic_id = $1 ORDER BY position",
             )
             .bind(topic_id)
-            .fetch_all(db.pool())
+            .fetch_all(db.sqlite_pool().expect("sqlite"))
             .await?
         }
     };

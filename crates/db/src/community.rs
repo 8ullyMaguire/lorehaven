@@ -971,6 +971,7 @@ impl From<ForumTopicRow> for ForumTopic {
             created_at: r.created_at,
             last_post_at: r.last_post_at,
             locked: r.locked != 0,
+            mode: r.mode,
         }
     }
 }

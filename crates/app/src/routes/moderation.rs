@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use lorehaven_domain::moderation::SanctionLevel;
+use lorehaven_domain::typed_votes::is_moderator;
 
 use crate::auth::RequirePseud;
 use crate::http::{ApiError, ApiResult};
@@ -18,16 +19,19 @@ use lorehaven_db::moderation;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        // Sanctions (moderators only).
         .route("/mod/sanctions", post(post_sanction))
         .route("/mod/sanctions/check", get(get_sanction_check))
-        // Topic-level settings.
         .route("/topics/{id}/slow-mode", put(put_slow_mode))
         .route("/topics/{id}/federation-scope", put(put_federation_scope))
-        // Featured posts.
         .route("/posts/{id}/feature", post(post_feature))
-        // Community health.
         .route("/forum/health", get(get_health))
+}
+
+async fn moderator_check(state: &AppState, pseud_id: &str) -> Result<bool, ApiError> {
+    let trust = lorehaven_db::governance::trust_for(state.db(), pseud_id)
+        .await
+        .map_err(internal)?;
+    Ok(is_moderator(trust))
 }
 
 // ---------------------------------------------------------------------------
@@ -48,11 +52,7 @@ async fn post_sanction(
     RequirePseud { pseud_id, .. }: RequirePseud,
     Json(body): Json<SanctionBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    // Only moderators can apply sanctions.
-    if !lorehaven_db::typed_votes::is_moderator(state.db(), &pseud_id.to_string())
-        .await
-        .map_err(internal)?
-    {
+    if !moderator_check(&state, &pseud_id.to_string()).await? {
         return Err(ApiError(lorehaven_domain::AppError::access_denied(
             "Only moderators can apply sanctions.",
         )));
@@ -120,9 +120,7 @@ async fn put_slow_mode(
         .map_err(internal)?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
     if topic.author_pseud != pseud_id.to_string()
-        && !lorehaven_db::typed_votes::is_moderator(state.db(), &pseud_id.to_string())
-            .await
-            .map_err(internal)?
+        && !moderator_check(&state, &pseud_id.to_string()).await?
     {
         return Err(ApiError(lorehaven_domain::AppError::access_denied(
             "Only the topic author or a moderator can change slow mode.",
@@ -152,9 +150,7 @@ async fn put_federation_scope(
         .map_err(internal)?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
     if topic.author_pseud != pseud_id.to_string()
-        && !lorehaven_db::typed_votes::is_moderator(state.db(), &pseud_id.to_string())
-            .await
-            .map_err(internal)?
+        && !moderator_check(&state, &pseud_id.to_string()).await?
     {
         return Err(ApiError(lorehaven_domain::AppError::access_denied(
             "Only the topic author or a moderator can change the federation scope.",
@@ -175,11 +171,7 @@ async fn post_feature(
     RequirePseud { pseud_id, .. }: RequirePseud,
     Path(id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    // Only moderators or TL5+ can feature posts.
-    if !lorehaven_db::typed_votes::is_moderator(state.db(), &pseud_id.to_string())
-        .await
-        .map_err(internal)?
-    {
+    if !moderator_check(&state, &pseud_id.to_string()).await? {
         return Err(ApiError(lorehaven_domain::AppError::access_denied(
             "Only moderators can feature posts.",
         )));
@@ -194,14 +186,8 @@ async fn post_feature(
 // Community health
 // ---------------------------------------------------------------------------
 
-async fn get_health(
-    State(state): State<AppState>,
-) -> ApiResult<Json<serde_json::Value>> {
-    // Public summary; detailed view is admin-only (TODO: admin check).
-    Ok(Json(json!({
-        "status": "ok",
-        "sparklines": false,  // populated from forum_topic_activity by admin dashboard
-    })))
+async fn get_health(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
+    Ok(Json(json!({ "status": "ok" })))
 }
 
 fn internal(e: anyhow::Error) -> ApiError {

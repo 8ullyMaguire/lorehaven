@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use lorehaven_domain::thread_modes::ThreadMode;
+use lorehaven_domain::typed_votes::is_moderator;
 
 use crate::auth::RequirePseud;
 use crate::http::{ApiError, ApiResult};
@@ -61,9 +62,10 @@ async fn put_mode(
         .map_err(internal)?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
     // Only the topic author or a moderator can change the mode.
-    if topic.author_pseud != pseud_id.to_string() && !lorehaven_db::typed_votes::is_moderator(state.db(), &pseud_id.to_string())
+    let trust = lorehaven_db::governance::trust_for(state.db(), &pseud_id.to_string())
         .await
-        .map_err(internal)?
+        .map_err(internal)?;
+    if topic.author_pseud != pseud_id.to_string() && !is_moderator(trust)
     {
         return Err(ApiError(lorehaven_domain::AppError::access_denied(
             "Only the topic author or a moderator can change the thread mode.",
@@ -178,9 +180,10 @@ async fn approve_wiki_pin(
         .await
         .map_err(internal)?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
-    if topic.author_pseud != pseud_id.to_string() && !lorehaven_db::typed_votes::is_moderator(state.db(), &pseud_id.to_string())
+    let trust = lorehaven_db::governance::trust_for(state.db(), &pseud_id.to_string())
         .await
-        .map_err(internal)?
+        .map_err(internal)?;
+    if topic.author_pseud != pseud_id.to_string() && !is_moderator(trust)
     {
         return Err(ApiError(lorehaven_domain::AppError::access_denied(
             "Only the topic author or a moderator can approve the wiki pin.",
