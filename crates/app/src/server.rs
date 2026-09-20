@@ -449,6 +449,13 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // Moderation and community health (spec 35.5, M35): sanctions,
+        // slow mode, federation scope, featured posts.
+        .merge(classified(
+            routes::moderation::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Events (collections, challenges, requests, wishlists, events) — M13.
         .merge(classified(
             routes::events::router(),
