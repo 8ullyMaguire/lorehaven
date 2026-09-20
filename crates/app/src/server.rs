@@ -401,6 +401,12 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // Recommendation transparency (M29): "why am I seeing this" explanations.
+        .merge(classified(
+            routes::recommendation_transparency::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // Taxonomy (nodes, aliases, tags) — M10. Every route needs a session and
         // most write, so it sits under the writers' class.
         .merge(classified(

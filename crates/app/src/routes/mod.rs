@@ -27,6 +27,7 @@ pub mod narration;
 pub mod notifications;
 pub mod pseuds;
 pub mod reading;
+pub mod recommendation_transparency;
 pub mod rating_integrity;
 pub mod search;
 pub mod settings;
