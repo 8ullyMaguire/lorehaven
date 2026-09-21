@@ -110,6 +110,67 @@ pub struct EpubChapter<'a> {
     pub body: &'a str,
 }
 
+/// Where the instance CTA goes in an export (spec §42.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CtaPlacement {
+    /// After every chapter (the default).
+    #[default]
+    PerChapter,
+    /// After the final chapter only.
+    PerWork,
+    /// Nowhere.
+    Off,
+}
+
+impl CtaPlacement {
+    /// Parse the TOML value. `None` for anything unrecognised so config
+    /// validation can name the bad value rather than silently defaulting.
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "per_chapter" => Some(Self::PerChapter),
+            "per_work" => Some(Self::PerWork),
+            "off" => Some(Self::Off),
+            _ => None,
+        }
+    }
+
+    /// The TOML value.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::PerChapter => "per_chapter",
+            Self::PerWork => "per_work",
+            Self::Off => "off",
+        }
+    }
+
+    /// Whether the chapter at `ordinal` (1-based) of `total` carries the
+    /// CTA under this placement.
+    #[must_use]
+    pub fn carries_on(&self, ordinal: u32, total: u32) -> bool {
+        match self {
+            Self::PerChapter => true,
+            Self::PerWork => ordinal == total,
+            Self::Off => false,
+        }
+    }
+}
+
+/// The instance CTA to embed (spec §42.1). `html` must already be a
+/// sanitized XHTML fragment — the builder embeds it verbatim and the
+/// config layer sanitizes before constructing this.
+#[derive(Debug, Clone, Copy)]
+pub struct EpubCta<'a> {
+    pub placement: CtaPlacement,
+    /// Sanitized XHTML fragment.
+    pub html: &'a str,
+}
+
+impl EpubCta<'_> {
+    /// The class every rendered CTA block carries, so `validate` can find
+    /// them again and tests can assert placement from the parsed bytes.
+    pub const CLASS: &'static str = "instance-cta";
+}
+
 /// Where the work came from (spec §13.2: "source provenance"), and on what terms
 /// it may be passed on.
 #[derive(Debug, Clone, Copy)]
@@ -143,6 +204,9 @@ pub struct EpubInput<'a> {
     pub chapters: &'a [EpubChapter<'a>],
     /// Provenance and permission, when the work has any to state.
     pub provenance: Option<EpubProvenance<'a>>,
+    /// The instance CTA (spec §42), when the placement is not `off` and
+    /// the work is not exempt (§42.2).
+    pub cta: Option<EpubCta<'a>>,
 }
 
 /// What [`validate`] established about an archive.
@@ -158,6 +222,8 @@ pub struct EpubFacts {
     pub title: String,
     /// `dc:language`.
     pub language: String,
+    /// Which chapter ordinals carry the instance CTA (spec §42.3).
+    pub cta_chapters: Vec<u32>,
     /// `dc:creator`, which attribution requires.
     pub author: String,
     /// Chapter titles, in spine order.
@@ -451,6 +517,18 @@ fn chapter_xhtml(input: &EpubInput<'_>, chapter: &EpubChapter<'_>) -> String {
     }
     // The body is already an allow-listed XHTML fragment (see the module docs).
     out.push_str(chapter.body);
+    // The instance CTA (spec §42): appended after the last paragraph, never
+    // interleaved, and never inside the attribution block — attribution is
+    // legal notice, not growth surface (§42.3).
+    if let Some(cta) = input.cta {
+        if cta.placement.carries_on(chapter.ordinal, input.chapters.len() as u32) {
+            out.push_str(&format!(
+                "\n<div class=\"{}\">{}</div>\n",
+                EpubCta::CLASS,
+                cta.html
+            ));
+        }
+    }
     out.push_str("\n</body>\n</html>\n");
     out
 }
@@ -602,6 +680,7 @@ pub fn validate(bytes: &[u8]) -> Result<EpubFacts, EpubError> {
         .ok_or_else(|| EpubError::Invalid("the package has no manifest".to_owned()))?;
 
     let mut chapter_titles = Vec::with_capacity(spine_ids.len());
+    let mut cta_chapters = Vec::new();
     let mut previous: Option<u32> = None;
     for idref in &spine_ids {
         // The manifest maps the id to the file, which is the join a reader makes.
@@ -655,6 +734,12 @@ pub fn validate(bytes: &[u8]) -> Result<EpubFacts, EpubError> {
             }
         }
         previous = Some(ordinal);
+
+        // Which chapters carry the instance CTA (spec §42.3): reported from
+        // the parsed bytes so tests assert placement, not the builder's intent.
+        if body.contains(&format!("class=\"{}\"", EpubCta::CLASS)) {
+            cta_chapters.push(ordinal);
+        }
     }
 
     // 6. Non-code-unit text: the metadata and every chapter had to decode as
@@ -678,6 +763,7 @@ pub fn validate(bytes: &[u8]) -> Result<EpubFacts, EpubError> {
         language,
         author,
         chapter_titles,
+        cta_chapters,
         has_navigation,
         has_provenance,
         has_permission,
@@ -1096,8 +1182,92 @@ mod tests {
                 source_key: Some("1"),
                 permission: Some("The author permits redistribution of unaltered copies."),
             }),
+            cta: None,
         }
     }
+
+    // --- CTA placement (spec §42) -----------------------------------------
+
+    fn input_with_cta<'a>(
+        chapters: &'a [EpubChapter<'a>],
+        placement: CtaPlacement,
+    ) -> EpubInput<'a> {
+        EpubInput {
+            cta: Some(EpubCta {
+                placement,
+                html: "<p>If you enjoyed this, <strong>leave a comment</strong> or <strong>share</strong> with a friend.</p>",
+            }),
+            ..input(chapters)
+        }
+    }
+
+    #[test]
+    fn cta_default_is_per_chapter_on_every_chapter() {
+        let chapters = chapters();
+        let bytes = build(&input_with_cta(&chapters, CtaPlacement::PerChapter)).expect("build");
+        let facts = validate(&bytes).expect("validate");
+        assert_eq!(facts.cta_chapters, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn cta_per_work_lands_on_the_last_chapter_only() {
+        let chapters = chapters();
+        let bytes = build(&input_with_cta(&chapters, CtaPlacement::PerWork)).expect("build");
+        let facts = validate(&bytes).expect("validate");
+        assert_eq!(facts.cta_chapters, vec![3]);
+    }
+
+    #[test]
+    fn cta_off_places_nothing_anywhere() {
+        let chapters = chapters();
+        let bytes = build(&input_with_cta(&chapters, CtaPlacement::Off)).expect("build");
+        let facts = validate(&bytes).expect("validate");
+        assert!(facts.cta_chapters.is_empty());
+    }
+
+    #[test]
+    fn cta_absent_leaves_the_export_untouched() {
+        let chapters = chapters();
+        let bytes = build(&input(&chapters)).expect("build");
+        let facts = validate(&bytes).expect("validate");
+        assert!(facts.cta_chapters.is_empty());
+    }
+
+    #[test]
+    fn cta_never_reaches_the_attribution_block() {
+        let chapters = chapters();
+        let bytes = build(&input_with_cta(&chapters, CtaPlacement::PerChapter)).expect("build");
+        // The attribution section is a separate document; the CTA class must
+        // appear in no document other than the chapters (§42.3).
+        let archive = Archive::read(&bytes).expect("archive");
+        for entry in &archive.entries {
+            if entry.name.starts_with("OEBPS/text/chapter-") {
+                continue;
+            }
+            let text = archive.text(&entry.name).unwrap_or_default();
+            assert!(
+                !text.contains(EpubCta::CLASS),
+                "CTA leaked into {}",
+                entry.name
+            );
+        }
+    }
+
+    #[test]
+    fn cta_placement_parses_and_round_trips() {
+        assert_eq!(CtaPlacement::parse("per_chapter"), Some(CtaPlacement::PerChapter));
+        assert_eq!(CtaPlacement::parse("per_work"), Some(CtaPlacement::PerWork));
+        assert_eq!(CtaPlacement::parse("off"), Some(CtaPlacement::Off));
+        assert_eq!(CtaPlacement::parse("everywhere"), None);
+        assert_eq!(CtaPlacement::default().as_str(), "per_chapter");
+        // carries_on: the placement rule, stated directly.
+        assert!(CtaPlacement::PerChapter.carries_on(1, 3));
+        assert!(CtaPlacement::PerChapter.carries_on(3, 3));
+        assert!(!CtaPlacement::PerWork.carries_on(1, 3));
+        assert!(CtaPlacement::PerWork.carries_on(3, 3));
+        assert!(!CtaPlacement::Off.carries_on(3, 3));
+    }
+
 
     #[test]
     fn an_epub_export_opens_and_contains_every_chapter() {

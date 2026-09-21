@@ -8,6 +8,8 @@ pub mod community;
 pub mod dashboard;
 pub mod decision_service;
 pub mod derivative;
+pub mod cta;
+pub mod directory;
 pub mod discovery;
 pub mod economy;
 pub mod events;

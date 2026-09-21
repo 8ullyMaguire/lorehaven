@@ -34,6 +34,8 @@ use serde_json::{json, Value};
 
 use crate::state::AppState;
 use crate::worker::HandlerError;
+use lorehaven_db::exports::{cta_exemption, mark_cta, retract_cta_mark};
+use lorehaven_domain::exports::{CtaPlacementSerde, InstanceCta};
 
 /// A repository fault: the attempt may be retried.
 ///
@@ -439,8 +441,9 @@ pub async fn produce(state: &AppState, row: &ExportJob) -> Result<Artifact, Expo
     let format = ExportFormat::parse(&row.format).ok_or_else(|| {
         ExportFailure::Unsupported(format!("{:?} is not an export format", row.format))
     })?;
-    let options = ExportOptions::from_json(row.options_json.as_deref());
+    let mut options = ExportOptions::from_json(row.options_json.as_deref());
     let work = load_subject(state, &row.account_id, &row.subject_type, &row.subject_id).await?;
+    apply_instance_cta(state, &row.subject_id, &mut options).await?;
 
     if format.is_builtin() {
         let bytes = render(&work, format, &options).map_err(|error| match error {
@@ -937,4 +940,39 @@ pub async fn sweep(state: &AppState) -> Result<usize, HandlerError> {
         .await
         .map_err(transient)?;
     Ok(removed)
+}
+
+
+// ---------------------------------------------------------------------------
+// CTA injection (spec §42)
+// ---------------------------------------------------------------------------
+
+/// Apply the instance CTA to export options unless the work is exempt (§42.2).
+/// Evaluated on every export from live marks — never cached — so a retraction
+/// takes effect on the next export.
+async fn apply_instance_cta(
+    state: &AppState,
+    work_id: &str,
+    options: &mut ExportOptions,
+) -> Result<(), ExportFailure> {
+    let config = state.config();
+    let placement = match config.exports.cta_placement.as_str() {
+        "per_chapter" => CtaPlacementSerde::PerChapter,
+        "per_work" => CtaPlacementSerde::PerWork,
+        "off" => CtaPlacementSerde::Off,
+        _ => return Err(ExportFailure::Storage("invalid cta_placement config".to_owned())),
+    };
+    let quorum = config.exports.cta_quorum as usize;
+
+    let exempt = cta_exemption(state.db(), work_id, quorum)
+        .await
+        .map_err(|e| ExportFailure::Storage(e.to_string()))?;
+
+    if !exempt && !matches!(placement, CtaPlacementSerde::Off) {
+        options.instance_cta = Some(InstanceCta {
+            placement,
+            html: config.exports.cta_html.clone(),
+        });
+    }
+    Ok(())
 }

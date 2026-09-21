@@ -136,6 +136,8 @@ pub struct Config {
     pub bulk_export: BulkExportConfig,
     /// Forum settings (spec 35).
     pub forum: ForumConfig,
+    /// Resource directory settings (spec §39).
+    pub directory: DirectoryConfig,
     /// Export retention settings (spec §38).
     pub exports: ExportsConfig,
     /// Where the configuration file was read from, if any.
@@ -179,6 +181,56 @@ pub struct DiscoveryConfig {
     pub per_fandom_cap: usize,
     /// Fraction of the feed reserved for exploration (new fandoms).
     pub exploration_rate: f64,
+}
+
+/// Resource directory settings (spec §39).
+#[derive(Debug, Clone)]
+pub struct DirectoryConfig {
+    /// Extra categories beyond the seed set (§39.2). Operators extend the
+    /// directory through the config file; nothing is hardcoded here.
+    pub extra_categories: Vec<String>,
+    /// How votes are weighted (§39.4).
+    pub weighting: String,
+    /// Trust multipliers per rung of the §19.1 ladder (TL0..TL6).
+    pub trust_vote_weights: [f64; 7],
+    /// Floor/ceiling the taste affinity maps onto.
+    pub taste_floor: f64,
+    pub taste_ceiling: f64,
+}
+
+impl DirectoryConfig {
+    /// The full category set: seed categories plus configured extras.
+    pub fn categories(&self) -> Vec<String> {
+        let mut out: Vec<String> = lorehaven_domain::directory::SEED_CATEGORIES
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        for extra in &self.extra_categories {
+            let e = extra.trim().to_lowercase();
+            if !e.is_empty() && !out.contains(&e) {
+                out.push(e);
+            }
+        }
+        out
+    }
+
+    /// The parsed weighting mode.
+    pub fn weighting_mode(&self) -> lorehaven_domain::directory::VoteWeighting {
+        lorehaven_domain::directory::VoteWeighting::parse(&self.weighting)
+            .unwrap_or(lorehaven_domain::directory::VoteWeighting::TrustAndTaste)
+    }
+}
+
+impl Default for DirectoryConfig {
+    fn default() -> Self {
+        Self {
+            extra_categories: Vec::new(),
+            weighting: "trust_and_taste".to_owned(),
+            trust_vote_weights: lorehaven_domain::directory::DEFAULT_TRUST_VOTE_WEIGHTS,
+            taste_floor: lorehaven_domain::directory::DEFAULT_TASTE_FLOOR,
+            taste_ceiling: lorehaven_domain::directory::DEFAULT_TASTE_CEILING,
+        }
+    }
 }
 
 /// TTS narration settings (M26 / spec §32.5).
@@ -283,6 +335,14 @@ pub struct ExportsConfig {
     /// who owns the export can always be given another one, so a leaked URL
     /// has a small window.
     pub grant_ttl_secs: i64,
+    /// CTA placement in exported ebooks (spec §42): per-chapter (default),
+    /// per-work (last chapter only), or off.
+    pub cta_placement: String,
+    /// The CTA HTML, sanitized by the instance. The reader does not set this.
+    pub cta_html: String,
+    /// Quorum of agreeing curator marks before a work is exempt from the
+    /// instance CTA (spec §42.2).
+    pub cta_quorum: i64,
 }
 
 impl Default for ExportsConfig {
@@ -290,6 +350,9 @@ impl Default for ExportsConfig {
         Self {
             retention_days: 0,
             grant_ttl_secs: 3600,
+            cta_placement: "per_chapter".to_string(),
+            cta_html: "<p>If you enjoyed this work, show the author some love — <strong>leave a comment</strong>, <strong>share it</strong>, or <strong>start a discussion</strong>.</p>".to_string(),
+            cta_quorum: 3,
         }
     }
 }
@@ -877,6 +940,30 @@ impl Config {
         let exports = ExportsConfig {
             retention_days: exports_file.retention_days.unwrap_or_else(|| ExportsConfig::default().retention_days),
             grant_ttl_secs: exports_file.grant_ttl_secs.unwrap_or_else(|| ExportsConfig::default().grant_ttl_secs),
+            cta_placement: exports_file.cta_placement.unwrap_or_else(|| ExportsConfig::default().cta_placement),
+            cta_html: exports_file.cta_html.unwrap_or_else(|| ExportsConfig::default().cta_html),
+            cta_quorum: exports_file.cta_quorum.unwrap_or_else(|| ExportsConfig::default().cta_quorum),
+        };
+
+        // --- directory -----------------------------------------------------
+        let directory = match file.directory {
+            Some(d) => {
+                let defaults = DirectoryConfig::default();
+                let mut weights = defaults.trust_vote_weights;
+                if let Some(w) = d.trust_vote_weights {
+                    if w.len() == 7 {
+                        weights = w.try_into().expect("seven weights");
+                    }
+                }
+                DirectoryConfig {
+                    extra_categories: d.extra_categories.unwrap_or_default(),
+                    weighting: d.weighting.unwrap_or(defaults.weighting),
+                    trust_vote_weights: weights,
+                    taste_floor: d.taste_floor.unwrap_or(defaults.taste_floor),
+                    taste_ceiling: d.taste_ceiling.unwrap_or(defaults.taste_ceiling),
+                }
+            }
+            None => DirectoryConfig::default(),
         };
 
         let config = Self {
@@ -905,6 +992,7 @@ impl Config {
             bulk_export: BulkExportConfig::default(),
             forum,
             exports,
+            directory,
             config_path,
         };
 
@@ -971,6 +1059,7 @@ impl Config {
             bulk_export: BulkExportConfig::default(),
             forum: ForumConfig::default(),
             exports: ExportsConfig::default(),
+            directory: DirectoryConfig::default(),
             config_path: None,
         }
     }
@@ -1052,6 +1141,19 @@ impl Config {
         if self.exports.grant_ttl_secs <= 0 {
             anyhow::bail!("exports.grant_ttl_secs must be > 0, got {}", self.exports.grant_ttl_secs);
         }
+        let cta_placement = &self.exports.cta_placement;
+        if cta_placement != "per_chapter" && cta_placement != "per_work" && cta_placement != "off" {
+            anyhow::bail!(
+                "exports.cta_placement must be per_chapter, per_work, or off, got {}",
+                cta_placement
+            );
+        }
+        if self.exports.cta_quorum < 0 {
+            anyhow::bail!(
+                "exports.cta_quorum must be >= 0, got {}",
+                self.exports.cta_quorum
+            );
+        }
         // Checked here rather than at the first challenged chapter: a solver URL
         // that does not parse is an operator's typo, and a typo should stop the
         // instance rather than surface hours later as an import that cannot read
@@ -1115,6 +1217,7 @@ struct FileConfig {
     tts: Option<TtsSection>,
     forum: Option<ForumSection>,
     exports: Option<ExportsSection>,
+    directory: Option<DirectorySection>,
 }
 
 /// The `[tts]` table: which engine narrates, and how an operator configured it
@@ -1166,6 +1269,26 @@ struct ExportsSection {
     retention_days: Option<i64>,
     /// How long a download grant lives, in seconds.
     grant_ttl_secs: Option<i64>,
+    /// CTA placement: per_chapter (default), per_work, or off (spec §42).
+    cta_placement: Option<String>,
+    /// The CTA HTML, sanitized by the instance. The reader does not set this.
+    cta_html: Option<String>,
+    /// Quorum of agreeing curator marks before a work is exempt from the CTA.
+    cta_quorum: Option<i64>,
+}
+
+/// `[directory]` — the resource directory (spec §39.2, §39.4).
+#[derive(Debug, Default, Deserialize)]
+struct DirectorySection {
+    /// Extra categories beyond the seed set.
+    extra_categories: Option<Vec<String>>,
+    /// `flat`, `trust` or `trust_and_taste` (the default).
+    weighting: Option<String>,
+    /// Seven trust multipliers, TL0..TL6.
+    trust_vote_weights: Option<Vec<f64>>,
+    /// Floor/ceiling the taste affinity maps onto.
+    taste_floor: Option<f64>,
+    taste_ceiling: Option<f64>,
 }
 
 #[derive(Debug, Default, Deserialize)]

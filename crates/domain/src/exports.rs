@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::document::{escape_text, Block, Document, Inline, Mark};
 
-pub use epub::{EpubChapter, EpubError, EpubFacts, EpubInput, EpubProvenance};
+pub use epub::{CtaPlacement, EpubChapter, EpubCta, EpubError, EpubFacts, EpubInput, EpubProvenance};
 
 /// A format a work can be exported to (spec §13.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -221,7 +221,7 @@ impl ExportFormat {
 }
 
 /// Per-export choices (spec §13.2: "user-selected typography where supported").
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct ExportOptions {
     /// Whether the rendered file opens with a title page.
@@ -237,6 +237,41 @@ pub struct ExportOptions {
     pub font_family: Option<String>,
     /// A base font size in points, for formats that carry one.
     pub font_size_pt: Option<u16>,
+    /// The instance CTA (spec §42): sanitized XHTML plus placement. `None`
+    /// means no CTA — either the instance configured `off` or the work is
+    /// exempt (§42.2). Not user-selected: the instance sets it and the
+    /// exemption is curator state, so it rides the options struct rather
+    /// than the request, and `deny_unknown_fields` still guards the rest.
+    pub instance_cta: Option<InstanceCta>,
+}
+
+/// The instance CTA attached to an export (spec §42.1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InstanceCta {
+    /// Placement: every chapter, the last chapter only, or nowhere.
+    pub placement: CtaPlacementSerde,
+    /// Sanitized XHTML fragment.
+    pub html: String,
+}
+
+/// Serde-friendly mirror of [`epub::CtaPlacement`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CtaPlacementSerde {
+    #[default]
+    PerChapter,
+    PerWork,
+    Off,
+}
+
+impl From<CtaPlacementSerde> for epub::CtaPlacement {
+    fn from(value: CtaPlacementSerde) -> Self {
+        match value {
+            CtaPlacementSerde::PerChapter => Self::PerChapter,
+            CtaPlacementSerde::PerWork => Self::PerWork,
+            CtaPlacementSerde::Off => Self::Off,
+        }
+    }
 }
 
 impl ExportOptions {
@@ -249,6 +284,7 @@ impl ExportOptions {
             chapter_headings: true,
             font_family: None,
             font_size_pt: None,
+            instance_cta: None,
         }
     }
 
@@ -534,6 +570,10 @@ pub fn render(
                 source_key: provenance.source_key.as_deref(),
                 permission: provenance.permission.as_deref(),
             });
+            let cta = options.instance_cta.as_ref().map(|cta| EpubCta {
+                placement: cta.placement.into(),
+                html: cta.html.as_str(),
+            });
             epub::build(&EpubInput {
                 identifier: &work.identifier,
                 title: &work.title,
@@ -542,6 +582,7 @@ pub fn render(
                 modified: &work.modified,
                 chapters: &chapters,
                 provenance,
+                cta,
             })?
         }
         ExportFormat::Pdf | ExportFormat::Azw3 | ExportFormat::Mobi => {
@@ -1520,3 +1561,4 @@ mod tests {
         assert_eq!(facts.chapter_titles, ["One", "Chapter 2"]);
     }
 }
+

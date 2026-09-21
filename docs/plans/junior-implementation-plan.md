@@ -3926,3 +3926,39 @@ fix this plan and note the correction in the commit message.
 
 
 ---
+
+
+## 15h. Milestone 42 (repo) — Export CTAs (spec §42)
+
+Instance-configurable CTA in exported EPUBs with a curator-quorum
+author-CTA exemption.
+
+**Domain** (`crates/domain/src/exports/epub.rs`):
+- `CtaPlacement` enum: `PerChapter`, `PerWork`, `Off`; `FromStr`/`as_str`.
+- `EpubInput` gains `cta: Option<&EpubCta>` where `EpubCta { html: &str }`.
+- `chapter_xhtml` appends the CTA when placement says so for that ordinal
+  (every chapter for `PerChapter`, last only for `PerWork`).
+- `EpubFacts` gains `cta_chapters: Vec<u32>`; `validate()` extracts them.
+- Unit tests: default per-chapter, per-work last-only, off, exemption
+  suppresses everywhere, sanitize refuses `<script>`.
+
+**Config** (`crates/app/src/config.rs`):
+- `[exports] cta_placement` (default `per_chapter`), `cta_html`
+  (default: link to base_url), `cta_quorum` (default 2).
+- `cta_html` sanitized through `document::Document::to_sanitized_html` at
+  load; unsanitizable input fails validation with a named error.
+
+**DB** (`crates/db/src/exports.rs` + migration 0048):
+- `cta_marks` table: `work_id, curator, has_own_cta, marked_at`, PK
+  `(work_id, curator)`.
+- `mark_cta`, `retract_cta_mark`, `cta_exemption(db, work_id, quorum) ->
+  bool` (agreeing true-marks >= quorum), both dialects.
+
+**Routes** (`crates/app/src/routes/exports.rs`):
+- `POST /works/{id}/cta-mark {has_own_cta: bool}` — TL3+ only.
+- `GET /works/{id}/cta-mark` — the current marks and exemption state.
+- Export job passes `cta: None` when exempt, else the configured CTA.
+
+**Tests** (`crates/app/tests/milestone_42.rs`):
+- Full-stack: placement modes, exemption via quorum, retraction restores,
+  TL2 refused, malformed CTA refused at config load.

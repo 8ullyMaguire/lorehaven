@@ -960,3 +960,132 @@ pub async fn bulk_items_for_export(
     };
     Ok(rows)
 }
+
+
+// ---------------------------------------------------------------------------
+// CTA marks (spec §42.2) — curator quorum on "this work already carries
+// its author's own CTA", which exempts the work from the instance CTA.
+// ---------------------------------------------------------------------------
+
+/// One curator's mark on a work.
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct CtaMark {
+    pub work_id: String,
+    pub curator: String,
+    pub has_own_cta: bool,
+    pub marked_at: String,
+}
+
+/// Record or replace a curator's mark. Idempotent: marking again replaces
+/// the previous mark (the PK is work+curator).
+pub async fn mark_cta(
+    db: &Database,
+    work_id: &str,
+    curator: &str,
+    has_own_cta: bool,
+) -> Result<()> {
+    let now = now_rfc3339();
+    let sql = db.sql(
+        "INSERT INTO cta_marks (work_id, curator, has_own_cta, marked_at) VALUES (?, ?, ?, ?) \
+         ON CONFLICT(work_id, curator) DO UPDATE SET has_own_cta=excluded.has_own_cta, marked_at=excluded.marked_at",
+        "INSERT INTO cta_marks (work_id, curator, has_own_cta, marked_at) VALUES (?, ?, ?, ?) \
+         ON CONFLICT(work_id, curator) DO UPDATE SET has_own_cta=excluded.has_own_cta, marked_at=excluded.marked_at",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(work_id)
+                .bind(curator)
+                .bind(has_own_cta)
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(work_id)
+                .bind(curator)
+                .bind(has_own_cta)
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Retract a curator's mark. Returns false when there was none.
+pub async fn retract_cta_mark(db: &Database, work_id: &str, curator: &str) -> Result<bool> {
+    let sql = db.sql(
+        "DELETE FROM cta_marks WHERE work_id = ? AND curator = ?",
+        "DELETE FROM cta_marks WHERE work_id = ? AND curator = ?",
+    );
+    let affected = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(work_id)
+                .bind(curator)
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+                .rows_affected()
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(work_id)
+                .bind(curator)
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?
+                .rows_affected()
+        }
+    };
+    Ok(affected > 0)
+}
+
+/// All marks on a work, newest first.
+pub async fn cta_marks_for(db: &Database, work_id: &str) -> Result<Vec<CtaMark>> {
+    let sql = db.sql(
+        "SELECT work_id, curator, has_own_cta, marked_at FROM cta_marks WHERE work_id = ? ORDER BY marked_at DESC",
+        "SELECT work_id, curator, has_own_cta, marked_at FROM cta_marks WHERE work_id = ? ORDER BY marked_at DESC",
+    );
+    let rows: Vec<CtaMark> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(work_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(work_id)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(rows)
+}
+
+/// Whether the work is exempt from the instance CTA (spec §42.2):
+/// `quorum` or more curators agree the work carries its own CTA.
+/// Evaluated from live marks — never cached — so a retraction takes
+/// effect on the next export.
+pub async fn cta_exemption(db: &Database, work_id: &str, quorum: usize) -> Result<bool> {
+    let sql = db.sql(
+        "SELECT COUNT(*) FROM cta_marks WHERE work_id = ? AND has_own_cta = 1",
+        "SELECT COUNT(*) FROM cta_marks WHERE work_id = ? AND has_own_cta = 1",
+    );
+    let (count,): (i64,) = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(work_id)
+                .fetch_one(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(work_id)
+                .fetch_one(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(count as usize >= quorum)
+}

@@ -125,3 +125,10 @@ M40-03,works,Statement enforcement at fork/translation/narration doors,M40,plann
 M41-01,discovery,Half-life job writing half_life_bp as silent ranking multiplier,M41,planned,--,"Spec §41.1. Nightly job on reading_events; basis points; silent-reordering contract §16.3. Planned in §15g."
 M41-02,community,Warmth accumulation hooks with config-driven tier thresholds,M41,planned,--,"Spec §41.2. Reading/reacting/commenting accumulate warmth_bp between account pairs. Planned in §15g."
 M41-03,community,Author-facing aggregate tier panel with no per-reader exposure,M41,planned,--,"Spec §41.2–41.3. Aggregate counts only; no reader-facing surface anywhere. Planned in §15g."
+M42-01,exports,CTA placement config per_chapter/per_work/off with default per_chapter,M42,planned,--,"Spec §42.1. TOML [exports] cta_placement; sanitized cta_html."
+M42-02,exports,EPUB builder appends CTA per placement and reports cta_chapters in validate,M42,planned,--,"Spec §42.1, §42.3. EpubInput.cta; EpubFacts.cta_chapters."
+M42-03,exports,cta_marks table with mark/retract and quorum-based exemption,M42,planned,--,"Spec §42.2. Migration 0048; both dialects."
+M42-04,exports,TL3+ curator routes to mark works has_own_cta,M42,planned,--,"Spec §42.2. POST/GET /works/{id}/cta-mark."
+M42-05,exports,Export job suppresses CTA for exempt works,M42,planned,--,"Spec §42.2. Evaluated at export time, never cached."
+M42-06,exports,Milestone 42 integration tests,M42,planned,--,"Spec §42.4. milestone_42.rs: modes, quorum, retraction, TL2 refused, sanitize."
+
