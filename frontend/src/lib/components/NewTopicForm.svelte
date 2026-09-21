@@ -44,8 +44,8 @@
 
 <form onsubmit={start} class="new-topic-form">
   <h2>Start a topic</h2>
-  <label for="ntf-title">Title</label>
-  <input id="ntf-title" bind:value={title} required maxlength={200} />
+  <label for="topic-title">Title</label>
+  <input id="topic-title" bind:value={title} required maxlength={200} />
   <fieldset class="mode-picker">
     <legend>Thread mode</legend>
     {#each modes as m}
