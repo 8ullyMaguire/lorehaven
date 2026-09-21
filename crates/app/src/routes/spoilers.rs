@@ -68,10 +68,10 @@ async fn put_spoiler_scope(
 
 async fn get_progress(
     State(state): State<AppState>,
-    RequirePseud { pseud_id, .. }: RequirePseud,
+    RequirePseud { user, .. }: RequirePseud,
     Path(id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let progress = spoilers::get_reader_progress(state.db(), &pseud_id.to_string(), &id)
+    let progress = spoilers::get_reader_progress(state.db(), &user.account_id.to_string(), &id)
         .await
         .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "last_chapter": progress.unwrap_or(0) })))
@@ -84,11 +84,11 @@ struct ProgressBody {
 
 async fn put_progress(
     State(state): State<AppState>,
-    RequirePseud { pseud_id, .. }: RequirePseud,
+    RequirePseud { user, .. }: RequirePseud,
     Path(id): Path<String>,
     Json(body): Json<ProgressBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    spoilers::upsert_reader_progress(state.db(), &pseud_id.to_string(), &id, body.last_chapter)
+    spoilers::upsert_reader_progress(state.db(), &user.account_id.to_string(), &id, body.last_chapter)
         .await
         .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "last_chapter": body.last_chapter })))
@@ -154,10 +154,10 @@ async fn post_warning(
 
 async fn get_draft(
     State(state): State<AppState>,
-    RequirePseud { pseud_id, .. }: RequirePseud,
+    RequirePseud { user, .. }: RequirePseud,
     Path(id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let body = spoilers::get_draft(state.db(), &pseud_id.to_string(), &id)
+    let body = spoilers::get_draft(state.db(), &user.account_id.to_string(), &id)
         .await
         .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "body": body.unwrap_or_default() })))
@@ -170,11 +170,11 @@ struct DraftBody {
 
 async fn post_draft(
     State(state): State<AppState>,
-    RequirePseud { pseud_id, .. }: RequirePseud,
+    RequirePseud { user, .. }: RequirePseud,
     Path(id): Path<String>,
     Json(body): Json<DraftBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    spoilers::upsert_draft(state.db(), &pseud_id.to_string(), &id, &body.body)
+    spoilers::upsert_draft(state.db(), &user.account_id.to_string(), &id, &body.body)
         .await
         .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "saved": true })))
@@ -182,10 +182,10 @@ async fn post_draft(
 
 async fn delete_draft(
     State(state): State<AppState>,
-    RequirePseud { pseud_id, .. }: RequirePseud,
+    RequirePseud { user, .. }: RequirePseud,
     Path(id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let deleted = spoilers::delete_draft(state.db(), &pseud_id.to_string(), &id)
+    let deleted = spoilers::delete_draft(state.db(), &user.account_id.to_string(), &id)
         .await
         .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "deleted": deleted })))
@@ -245,9 +245,9 @@ async fn post_publish_scheduled(
 
 async fn get_warning_prefs(
     State(state): State<AppState>,
-    RequirePseud { pseud_id, .. }: RequirePseud,
+    RequirePseud { user, .. }: RequirePseud,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let prefs = spoilers::list_warning_prefs(state.db(), &pseud_id.to_string())
+    let prefs = spoilers::list_warning_prefs(state.db(), &user.account_id.to_string())
         .await
         .map_err(|e| internal(e.into()))?;
     let prefs: Vec<serde_json::Value> = prefs
@@ -267,14 +267,14 @@ struct WarningPrefBody {
 
 async fn put_warning_pref(
     State(state): State<AppState>,
-    RequirePseud { pseud_id, .. }: RequirePseud,
+    RequirePseud { user, .. }: RequirePseud,
     Json(body): Json<WarningPrefBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let warning_type = WarningType::from_str(&body.warning_type)
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::field("warning_type", "unknown type")))?;
     let action = WarningAction::from_str(&body.action)
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::field("action", "must be 'blur' or 'show'")))?;
-    spoilers::set_warning_pref(state.db(), &pseud_id.to_string(), warning_type, action)
+    spoilers::set_warning_pref(state.db(), &user.account_id.to_string(), warning_type, action)
         .await
         .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "set": true })))
