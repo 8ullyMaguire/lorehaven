@@ -47,6 +47,23 @@ fn config_for(dir: &Path) -> Config {
         "sqlite://{}/lorehaven.sqlite?mode=rwc",
         dir.display()
     ));
+    // Raise rate limits for parallel test execution.
+    config.rate_limits.auth = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.write = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.search = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.default = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
     config
 }
 
@@ -1928,7 +1945,7 @@ async fn media_quality_and_date_filters() {
     let uri = "/api/v1/media?quality_kind=editorial_review&quality_min=50";
     let (status, body) = anon.get(uri).await;
     assert_eq!(status, StatusCode::OK, "quality filter failed: {body}");
-    let items = body["items"].as_array().unwrap();
+    let _items = body["items"].as_array().unwrap();
     let uri = "/api/v1/media?quality_kind=editorial_review&quality_min=30";
     let (status, body) = anon.get(uri).await;
     assert_eq!(status, StatusCode::OK, "quality filter failed: {body}");

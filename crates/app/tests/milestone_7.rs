@@ -54,6 +54,23 @@ fn config_for(dir: &Path) -> Config {
         "sqlite://{}/lorehaven.sqlite?mode=rwc",
         dir.display()
     ));
+    // Raise rate limits for parallel test execution.
+    config.rate_limits.auth = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.write = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.search = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.default = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
     config
 }
 
@@ -659,8 +676,13 @@ async fn one_readers_export_is_not_anothers() {
 #[tokio::test]
 async fn the_retention_sweep_removes_the_export_and_its_output() {
     let harness = Harness::new("retention").await;
-    let state = harness.state();
-    let mut client = harness.client();
+    // The development default keeps exports forever (retention_days: 0), so
+    // the sweep would find nothing to do. This test is about the sweep itself,
+    // so it gives the harness the spec §13.2 window.
+    let mut config = config_for(&harness.dir);
+    config.exports.retention_days = 7;
+    let state = AppState::new(config, harness.tdb.db().clone());
+    let mut client = Client::new(server::build_router(state.clone()));
     register(&mut client, "aging@example.org", "aging").await;
     let work = author(&mut client, "An Old Export", &["Words."]).await;
 

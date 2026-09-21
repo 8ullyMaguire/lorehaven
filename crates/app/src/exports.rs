@@ -34,7 +34,7 @@ use serde_json::{json, Value};
 
 use crate::state::AppState;
 use crate::worker::HandlerError;
-use lorehaven_db::exports::{cta_exemption, mark_cta, retract_cta_mark};
+use lorehaven_db::exports::cta_exemption;
 use lorehaven_domain::exports::{CtaPlacementSerde, InstanceCta};
 
 /// A repository fault: the attempt may be retried.

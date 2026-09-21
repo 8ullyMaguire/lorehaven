@@ -112,7 +112,7 @@ where
     D: serde::Deserializer<'de>,
 {
     use serde::de::Error as _;
-    use serde::{Deserialize as _, Serialize as _};
+    use serde::Deserialize as _;
     use serde_json::Value;
 
     let value = Value::deserialize(deserializer)?;

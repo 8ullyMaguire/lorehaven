@@ -31,6 +31,23 @@ fn config_for(dir: &Path) -> Config {
         "sqlite://{}/lorehaven.sqlite?mode=rwc",
         dir.display()
     ));
+    // Raise rate limits for parallel test execution.
+    config.rate_limits.auth = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.write = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.search = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.default = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
     config
 }
 
@@ -117,6 +134,7 @@ impl Client {
     async fn post(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
         self.request("POST", uri, Some(body)).await
     }
+    #[allow(dead_code)]
     async fn put(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
         self.request("PUT", uri, Some(body)).await
     }
@@ -211,7 +229,7 @@ async fn graduated_response_ladder_roundtrip() {
 async fn slow_mode_roundtrip() {
     let harness = Harness::new("slow").await;
     let mut client = harness.client();
-    let (_, pseud) = register(&mut client, "alice@example.com", "alice").await;
+    let (_, _pseud) = register(&mut client, "alice@example.com", "alice").await;
 
     let topic_id = create_topic(&mut client, "general", "Test Topic").await;
 
@@ -227,7 +245,7 @@ async fn slow_mode_roundtrip() {
 async fn federation_scope_roundtrip() {
     let harness = Harness::new("federation").await;
     let mut client = harness.client();
-    let (_, pseud) = register(&mut client, "alice@example.com", "alice").await;
+    let (_, _pseud) = register(&mut client, "alice@example.com", "alice").await;
 
     let topic_id = create_topic(&mut client, "general", "Test Topic").await;
 

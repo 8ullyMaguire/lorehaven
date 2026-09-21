@@ -135,6 +135,7 @@ impl Client {
         self.request("GET", uri, None).await
     }
 
+    #[allow(dead_code)]
     async fn delete(&mut self, uri: &str) -> (StatusCode, Value) {
         self.request("DELETE", uri, None).await
     }
@@ -481,14 +482,14 @@ async fn fork_inherits_parent_tags() {
     let parent_id = create_work(&mut author, "Tagged Work", "yes").await;
 
     // Add tags to parent via DB for test simplicity.
-    lorehaven_db::taxonomy::tag_work(
+    let _ = lorehaven_db::taxonomy::tag_work(
         harness.tdb.db(),
         &parent_id,
         "tag-1",
         1,
     )
     .await;
-    lorehaven_db::taxonomy::tag_work(
+    let _ = lorehaven_db::taxonomy::tag_work(
         harness.tdb.db(),
         &parent_id,
         "tag-2",

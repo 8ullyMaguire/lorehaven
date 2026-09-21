@@ -51,6 +51,23 @@ fn config_for(dir: &Path) -> Config {
         "sqlite://{}/lorehaven.sqlite?mode=rwc",
         dir.display()
     ));
+    // Raise rate limits for parallel test execution.
+    config.rate_limits.auth = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.write = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.search = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.default = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
     config
 }
 

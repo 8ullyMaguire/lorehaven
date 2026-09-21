@@ -47,6 +47,34 @@ fn config_for(dir: &Path) -> Config {
         "sqlite://{}/lorehaven.sqlite?mode=rwc",
         dir.display()
     ));
+    // Raise rate limits for parallel test execution: this test file's 27 tests
+    // share the process-global bucket map at 127.0.0.1, and the default auth
+    // burst of 10 (×4 address multiplier = 40) is exhausted by neighbours.
+    config.rate_limits.auth = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.write = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.search = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.default = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config
+}
+
+/// Config with the development-default tight limits, for the two tests that exist
+/// to trip the limiter. Using `config_for` (above) would give them a 4000-token
+/// address bucket and they would never observe a 429.
+fn tight_config_for(dir: &Path) -> Config {
+    let mut config = config_for(dir);
+    config.rate_limits = lorehaven_app::limiter::Limits::default();
     config
 }
 
@@ -1273,7 +1301,14 @@ async fn requesting_a_second_reset_invalidates_the_first_link() {
 #[tokio::test]
 async fn repeated_login_attempts_are_rate_limited() {
     let harness = Harness::new("ratelimit").await;
-    let mut client = harness.client();
+    // This test exists to trip the limiter, so it needs the tight development
+    // limits (burst 10 → 40-token address bucket) and a clean bucket. The
+    // widened limits used by the rest of the suite would absorb 200 logins
+    // without ever returning 429.
+    lorehaven_app::limiter::clear_buckets();
+    let config = tight_config_for(&harness.dir);
+    let app = server::build_router(AppState::new(config, harness.tdb.db().clone()));
+    let mut client = Client::new(app);
 
     // The auth burst is 10 per account, multiplied by the address multiplier
     // (4 by default) for an anonymous caller, so the address bucket holds 40
@@ -1317,7 +1352,11 @@ async fn the_limiter_refuses_a_route_that_declares_no_class() {
     use lorehaven_app::limiter::{Classified, RouteClass};
 
     let harness = Harness::new("unclassified").await;
-    let config = config_for(&harness.dir);
+    // Tight limits and a clean bucket: this test asserts the limiter *does*
+    // refuse, so a pre-filled bucket from a wide-config neighbour would let
+    // the 600-request loop run to completion without a 429.
+    lorehaven_app::limiter::clear_buckets();
+    let config = tight_config_for(&harness.dir);
     let state = AppState::new(config, harness.tdb.db().clone());
 
     let unclassified: axum::Router<AppState> =

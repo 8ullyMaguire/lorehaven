@@ -299,6 +299,23 @@ fn config_for(dir: &Path) -> Config {
         "sqlite://{}/lorehaven.sqlite?mode=rwc",
         dir.display()
     ));
+    // Raise rate limits for parallel test execution.
+    config.rate_limits.auth = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.write = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.search = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.default = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
     config
 }
 
@@ -1391,10 +1408,11 @@ async fn the_catalogue_reports_capabilities() {
     assert_eq!(ao3["capabilities"]["chapters"], true);
     assert_eq!(ao3["capabilities"]["per_chapter_fetch"], true);
     assert_eq!(ao3["capabilities"]["authentication"], "none");
-    // A source that serves a plain request says so, rather than leaving the
-    // field absent: "needs nothing" and "the build forgot to say" must not look
-    // the same to an operator reading the catalogue.
-    assert_eq!(ao3["capabilities"]["wall"], "none");
+    // The catalogue names the wall rather than leaving the field absent: "needs
+    // a browser fingerprint" and "the build forgot to say" must not look the
+    // same to an operator (spec §11.1). AO3 currently needs a fingerprint
+    // (commit 5549fec: Cloudflare challenge rejects non-browser TLS).
+    assert_eq!(ao3["capabilities"]["wall"], "fingerprint");
     assert_eq!(ao3["enabled"], true);
 
     harness.cleanup().await;
