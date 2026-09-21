@@ -276,7 +276,7 @@ async fn half_life_changes_ranking_with_no_field_changes() {
 async fn warmth_accumulates_and_promotes_tier() {
     let harness = Harness::new("warmth-accumulates").await;
     let mut author_client = harness.client();
-    let (author_account, _author_pseud) =
+    let (_author_account, _author_pseud) =
         register(&mut author_client, "author@example.com", "author").await;
 
     let mut reader_client = harness.client();

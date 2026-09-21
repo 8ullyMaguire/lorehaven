@@ -430,7 +430,7 @@ async fn draft_survives_reload() {
     assert_eq!(body["body"], "Updated thoughts...");
 
     // Delete the draft.
-    let (status, body) = client
+    let (status, _body) = client
         .delete(&format!("/api/v1/topics/{topic_id}/draft"))
         .await;
     assert_eq!(status, StatusCode::OK, "delete draft");

@@ -287,6 +287,23 @@ impl RateLimiter {
     }
 }
 
+/// Drop every rate-limit bucket, returning the limiter to a clean state.
+///
+/// Intended for tests that exercise the limiter itself: parallel test suites share
+/// this process's global buckets, and a bucket pre-filled by a wide-config
+/// neighbour would mask the small burst a limiter test needs to trip. Has no
+/// effect on production because no production code path calls it.
+#[doc(hidden)]
+pub fn clear_buckets() {
+    GLOBAL_BUCKETS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
+    *GLOBAL_LAST_PRUNE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Instant::now();
+}
+
 /// A request that must be rate limited, carrying its class.
 #[derive(Debug, Clone, Copy)]
 pub struct Classified(pub RouteClass);

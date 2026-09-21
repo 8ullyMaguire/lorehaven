@@ -186,7 +186,8 @@ async fn register(client: &mut Client, email: &str, handle: &str) -> (String, St
     (account, pseud)
 }
 
-async fn seed_category(client: &mut Client, category: &str) -> Result<(), sqlx::Error> {
+#[allow(dead_code)]
+async fn seed_category(_client: &mut Client, _category: &str) -> Result<(), sqlx::Error> {
     // We can't access the DB directly from tests, so we just assume the test
     // infrastructure seeds categories, or we insert them via SQL.
     // For now, rely on route returning CREATED or the test just checking behavior.
@@ -354,7 +355,7 @@ async fn critique_circle_queue() {
     assert!(body["position"].as_i64().is_some() || body["joined"].as_bool().unwrap_or(false));
 
     // Read queue.
-    let (status, body) = client
+    let (status, _body) = client
         .get(&format!("/api/v1/topics/{}/critique/queue", topic_id))
         .await;
     assert!(status.is_success() || status == StatusCode::NOT_FOUND, "get critique queue: {}", status);

@@ -34,7 +34,7 @@ use serde_json::{json, Value};
 
 use crate::state::AppState;
 use crate::worker::HandlerError;
-use darkhold_db::exports::{cta_exemption, mark_cta, retract_cta_mark};
+use darkhold_db::exports::cta_exemption;
 use darkhold_domain::exports::{CtaPlacementSerde, InstanceCta};
 
 /// A repository fault: the attempt may be retried.

@@ -439,7 +439,7 @@ async fn visibility_approved_own_pending_operator() {
     let (status, body) = anon.get("/api/v1/directory/entries?list=external-sites").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["items"].as_array().expect("items").len(), 1, "{body}");
-    let (status, body) = operator.get("/api/v1/directory/moderation").await;
+    let (_status, body) = operator.get("/api/v1/directory/moderation").await;
     assert_eq!(body["items"].as_array().expect("items").len(), 0, "{body}");
 }
 
