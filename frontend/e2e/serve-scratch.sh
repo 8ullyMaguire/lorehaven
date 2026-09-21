@@ -20,7 +20,8 @@ SCRATCH="$(pwd)/test-results/scratch"
 "$BIN" \
   --storage-root "$SCRATCH/storage" \
   --database-url "sqlite://$SCRATCH/lorehaven.db?mode=rwc" \
-  --port "$PORT" serve &
+  --port "$PORT" \
+  --with-worker serve &
 SRV=$!
 trap 'kill "$SRV" 2>/dev/null' EXIT
 
