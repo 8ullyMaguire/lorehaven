@@ -96,7 +96,7 @@ pub async fn get_schedule(
 ) -> Result<Vec<serde_json::Value>> {
     let rows = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, (String, i64, String, i64, i64, String)>(
+            sqlx::query_as::<_, (i64, String, i64, i64, String)>(
                 "SELECT position, title, chapter_start, chapter_end, unlocks_at
                  FROM topic_schedules WHERE topic_id = ? ORDER BY position",
             )
@@ -105,17 +105,17 @@ pub async fn get_schedule(
             .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, (String, i64, String, i64, i64, String)>(
+            sqlx::query_as::<_, (i64, String, i64, i64, String)>(
                 "SELECT position, title, chapter_start, chapter_end, unlocks_at
                  FROM topic_schedules WHERE topic_id = $1 ORDER BY position",
             )
             .bind(topic_id)
-            .fetch_all(db.sqlite_pool().expect("sqlite"))
+            .fetch_all(db.postgres_pool().expect("postgres"))
             .await?
         }
     };
     let mut result = Vec::new();
-    for (pos, title, start, end, unlocks, _created) in rows {
+    for (pos, title, start, end, unlocks) in rows {
         result.push(serde_json::json!({
             "position": pos,
             "title": title,
@@ -327,4 +327,29 @@ pub async fn get_critique_queue(
         }));
     }
     Ok(result)
+}
+
+/// Set a topic's thread mode.
+pub async fn set_topic_mode(
+    db: &Database,
+    topic_id: &str,
+    mode: &str,
+) -> Result<()> {
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query("UPDATE forum_topics SET mode = ? WHERE id = ?")
+                .bind(mode)
+                .bind(topic_id)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query("UPDATE forum_topics SET mode = $1 WHERE id = $2")
+                .bind(mode)
+                .bind(topic_id)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?;
+        }
+    }
+    Ok(())
 }
