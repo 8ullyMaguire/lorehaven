@@ -1722,7 +1722,7 @@ async fn canon_and_space_doors_return_scoped_media() {
     let canon_uri = format!("/api/v1/canons/{canon_id}/media");
     let (status, body) = anon.get(&canon_uri).await;
     assert_eq!(status, StatusCode::OK, "canon door failed: {body}");
-    _let items = body["items"].as_array().expect("items array");
+    let items = body["items"].as_array().expect("items array");
     assert_eq!(items.len(), 1, "only published work expected: {body}");
     assert_eq!(items[0]["id"], work_id);
     assert_eq!(body["name"], "Mainline Canon");
@@ -1734,7 +1734,7 @@ async fn canon_and_space_doors_return_scoped_media() {
     let space_uri = format!("/api/v1/spaces/{space_id}/media");
     let (status, body) = anon.get(&space_uri).await;
     assert_eq!(status, StatusCode::OK, "space door failed: {body}");
-    _let items = body["items"].as_array().expect("items array");
+    let items = body["items"].as_array().expect("items array");
     assert_eq!(items.len(), 1, "only published work expected: {body}");
     assert_eq!(items[0]["id"], work_id);
     assert_eq!(body["name"], "Fandom Space");
@@ -1773,7 +1773,7 @@ async fn canon_and_space_doors_return_scoped_media() {
             "anonymous scope leaked: {body}"
         );
         let (_, body) = reader.get(uri).await;
-        _let items = body["items"].as_array().unwrap();
+        let items = body["items"].as_array().unwrap();
         assert_eq!(items.len(), 2, "signed-in scope: {body}");
         assert!(items.iter().any(|item| item["id"] == restricted));
         assert!(!items.iter().any(|item| item["id"] == hidden));
@@ -1921,18 +1921,18 @@ async fn media_quality_and_date_filters() {
     // No filter: all three appear.
     let (status, body) = anon.get("/api/v1/media").await;
     assert_eq!(status, StatusCode::OK, "list failed: {body}");
-    _let items = body["items"].as_array().unwrap();
+    let items = body["items"].as_array().unwrap();
     assert_eq!(items.len(), 3, "all works should list: {body}");
 
     // quality_kind=editorial_review, quality_min=50: only A (80 >= 50), B (40 < 50) excluded, C has no editorial_review signal.
     let uri = "/api/v1/media?quality_kind=editorial_review&quality_min=50";
     let (status, body) = anon.get(uri).await;
     assert_eq!(status, StatusCode::OK, "quality filter failed: {body}");
-    _let items = body["items"].as_array().unwrap();
+    let items = body["items"].as_array().unwrap();
     let uri = "/api/v1/media?quality_kind=editorial_review&quality_min=30";
     let (status, body) = anon.get(uri).await;
     assert_eq!(status, StatusCode::OK, "quality filter failed: {body}");
-    _let items = body["items"].as_array().unwrap();
+    let items = body["items"].as_array().unwrap();
     assert_eq!(
         items.len(),
         2,
@@ -1946,7 +1946,7 @@ async fn media_quality_and_date_filters() {
     let uri = "/api/v1/media?date_from=2026-09-03T00:00:00Z";
     let (status, body) = anon.get(uri).await;
     assert_eq!(status, StatusCode::OK, "date_from filter failed: {body}");
-    _let items = body["items"].as_array().unwrap();
+    let items = body["items"].as_array().unwrap();
     assert!(
         items.iter().any(|i| i["id"] == work_b),
         "work B should appear: {body}"
@@ -1964,7 +1964,7 @@ async fn media_quality_and_date_filters() {
     let uri = "/api/v1/media?date_from=2026-09-03T00:00:00Z&date_to=2026-09-08T00:00:00Z";
     let (status, body) = anon.get(uri).await;
     assert_eq!(status, StatusCode::OK, "date range filter failed: {body}");
-    _let items = body["items"].as_array().unwrap();
+    let items = body["items"].as_array().unwrap();
     assert_eq!(items.len(), 1, "only work B in range Sep 3–8: {body}");
     assert_eq!(items[0]["id"], work_b);
 
@@ -1973,7 +1973,7 @@ async fn media_quality_and_date_filters() {
         "/api/v1/media?quality_kind=editorial_review&quality_min=30&date_to=2026-09-04T00:00:00Z";
     let (status, body) = anon.get(uri).await;
     assert_eq!(status, StatusCode::OK, "combined filter failed: {body}");
-    _let items = body["items"].as_array().unwrap();
+    let items = body["items"].as_array().unwrap();
     assert_eq!(items.len(), 1, "only work A matches quality+date: {body}");
     assert_eq!(items[0]["id"], work_a);
 
