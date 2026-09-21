@@ -151,10 +151,36 @@ async fn post_wiki_pin(
     Json(body): Json<WikiPinBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let post_id = uuid::Uuid::new_v4().to_string();
+    // Create a forum_post first (the wiki pin references it via FK).
+    let now = lorehaven_db::identity::now_rfc3339();
+    match state.db().backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query("INSERT INTO forum_posts (id, topic_id, author_pseud, body, created_at, deleted_at) VALUES (?, ?, ?, ?, ?, NULL)")
+                .bind(&post_id)
+                .bind(&id)
+                .bind(&pseud_id.to_string())
+                .bind(&body.body)
+                .bind(&now)
+                .execute(state.db().sqlite_pool().expect("sqlite"))
+                .await
+                .map_err(|e| internal(e.into()))?;
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query("INSERT INTO forum_posts (id, topic_id, author_pseud, body, created_at, deleted_at) VALUES ($1::uuid, $2::uuid, $3, $4, $5, NULL)")
+                .bind(&post_id)
+                .bind(&id)
+                .bind(&pseud_id.to_string())
+                .bind(&body.body)
+                .bind(&now)
+                .execute(state.db().postgres_pool().expect("postgres"))
+                .await
+                .map_err(|e| internal(e.into()))?;
+        }
+    }
     thread_modes::create_wiki_pin(state.db(), &id, &post_id, &body.body, &pseud_id.to_string())
         .await
         .map_err(|e| internal(e.into()))?;
-    Ok(Json(json!({ "created": true })))
+    Ok(Json(json!({ "created": true, "post_id": post_id })))
 }
 
 #[derive(Debug, Deserialize)]
