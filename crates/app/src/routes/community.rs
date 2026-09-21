@@ -843,7 +843,7 @@ async fn get_presence_stream(
         })
         .collect();
 
-    Ok(Json(serde_json::json!({ "items": results })))
+    Ok(Json(serde_json::json!({ "items": items })))
 }
 
 // ---------------------------------------------------------------------------
