@@ -178,7 +178,7 @@ async fn post_feature(
 // Community health
 // ---------------------------------------------------------------------------
 
-async fn get_health(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
+async fn get_health(State(_state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
     Ok(Json(json!({ "status": "ok" })))
 }
 

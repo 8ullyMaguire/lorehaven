@@ -900,7 +900,7 @@ impl Config {
             tts,
             bulk_export: BulkExportConfig::default(),
             forum,
-            exports: ExportsConfig::default(),
+            exports,
             config_path,
         };
 

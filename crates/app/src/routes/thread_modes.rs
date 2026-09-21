@@ -5,7 +5,7 @@
 //! sections. The routes here manage the mode and its supporting data.
 
 use axum::extract::{Path, State};
-use axum::routing::{get, post, put};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
