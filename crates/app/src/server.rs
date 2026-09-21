@@ -486,16 +486,12 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
-        // Public API, bots, feeds, push, federation, AI — M18.
+        // Public API, bots, feeds, push, AI — M18.
         .merge(classified(
             routes::external::router(),
             RouteClass::Default,
             &state,
         ))
-        // Federation: instance themes, ActivityPub inbox/outbox, similarity — M36.
-        // Merged at the root level (not under /api/v1) so ActivityPub endpoints
-        // are reachable at /federation/inbox, /federation/actor, etc.
-        .merge(routes::federation::routes())
         // Administration — M19.
         .merge(classified(
             routes::admin::router(),
@@ -595,6 +591,10 @@ pub fn build_router(state: AppState) -> Router {
 
     let router: Router<AppState> = Router::new()
         .merge(health)
+        // Federation: instance themes, ActivityPub inbox/outbox, similarity — M36.
+        // Merged at the root level (not under /api/v1) so ActivityPub endpoints
+        // are reachable at /federation/inbox, /federation/actor, etc.
+        .merge(routes::federation::routes())
         .nest("/api/v1", api)
         .fallback(assets::serve)
         .layer(RequestBodyLimitLayer::new(config.server.max_body_bytes))
