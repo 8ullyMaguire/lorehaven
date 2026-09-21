@@ -7,6 +7,7 @@
   import AdminJobs from './routes/AdminJobs.svelte';
   import Community from './routes/Community.svelte';
   import ForumCategory from './routes/ForumCategory.svelte';
+  import ForumSearch from './routes/ForumSearch.svelte';
   import ForumTopic from './routes/ForumTopic.svelte';
   import Discover from './routes/Discover.svelte';
   import Exports from './routes/Exports.svelte';
@@ -279,6 +280,8 @@
     <Community />
   {:else if route.id === 'forum-category'}
     <ForumCategory categoryId={route.params?.categoryId ?? ''} />
+  {:else if route.id === 'forum-search'}
+    <ForumSearch />
   {:else if route.id === 'forum-topic'}
     <ForumTopic topicId={route.params?.topicId ?? ''} />
   {:else if route.id === 'notifications'}
