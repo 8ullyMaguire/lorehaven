@@ -44,6 +44,13 @@ pub fn router() -> Router<AppState> {
         .route("/topics/{id}/unsubscribe", post(unsubscribe_topic))
         .route("/topics/{id}/mark-read", post(mark_topic_read))
         .route("/topics/{id}/unread", get(get_unread_count))
+        // M33: thread modes (spec §35.3)
+        .route("/topics/{id}/mode", get(get_topic_mode).put(put_topic_mode))
+        .route("/topics/{id}/schedule", get(get_schedule).post(post_schedule))
+        .route("/topics/{id}/wiki-pin", post(post_wiki_pin))
+        .route("/topics/{id}/wiki-pin/approve", put(approve_wiki_pin))
+        .route("/topics/{id}/critique/join", post(join_critique))
+        .route("/topics/{id}/critique/queue", get(get_critique_queue))
         // groups
         .route("/groups", get(get_groups).post(post_group))
         .route("/groups/{id}", get(get_group))
@@ -1038,4 +1045,151 @@ async fn forum_search(
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
 
     Ok(Json(serde_json::json!({ "items": results })))
+}
+
+// ---------------------------------------------------------------------------
+// M33: thread mode handlers (spec §35.3)
+// ---------------------------------------------------------------------------
+
+use serde_json::Value;
+
+/// Get a topic's thread mode.
+async fn get_topic_mode(
+    State(state): State<AppState>,
+    RequirePseud { pseud_id, .. }: RequirePseud,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let t = lorehaven_db::community::topic_by_id(state.db(), &id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
+    Ok(Json(serde_json::json!({ "mode": t.mode })))
+}
+
+/// Set a topic's thread mode (author only).
+async fn put_topic_mode(
+    State(state): State<AppState>,
+    RequirePseud { pseud_id, .. }: RequirePseud,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Json<Value>> {
+    let t = lorehaven_db::community::topic_by_id(state.db(), &id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
+    if t.author_pseud.parse::<lorehaven_domain::PseudId>().ok() != Some(pseud_id) {
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
+    }
+    let mode = body["mode"].as_str().unwrap_or("plain");
+    lorehaven_db::thread_modes::set_topic_mode(state.db(), &id, mode)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    Ok(Json(serde_json::json!({ "mode": mode })))
+}
+
+/// Get a reading-group topic's schedule.
+async fn get_schedule(
+    State(state): State<AppState>,
+    RequireSession(_): RequireSession,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let sections = lorehaven_db::thread_modes::get_schedule(state.db(), &id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    Ok(Json(serde_json::json!({ "sections": sections })))
+}
+
+/// Add a schedule section to a reading-group topic.
+async fn post_schedule(
+    State(state): State<AppState>,
+    RequirePseud { pseud_id, .. }: RequirePseud,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Json<Value>> {
+    let t = lorehaven_db::community::topic_by_id(state.db(), &id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
+    if t.author_pseud.parse::<lorehaven_domain::PseudId>().ok() != Some(pseud_id) {
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
+    }
+    let position = body["position"].as_i64().unwrap_or(0);
+    let title = body["title"].as_str().unwrap_or("Untitled");
+    let chapter_start = body["chapter_start"].as_i64().unwrap_or(0);
+    let chapter_end = body["chapter_end"].as_i64().unwrap_or(0);
+    let unlocks_at = body["unlocks_at"].as_str().unwrap_or("");
+    lorehaven_db::thread_modes::add_schedule_section(
+        state.db(), &id, position, title, chapter_start, chapter_end, unlocks_at,
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    Ok(Json(serde_json::json!({ "created": true })))
+}
+
+/// Create a wiki pin.
+async fn post_wiki_pin(
+    State(state): State<AppState>,
+    RequirePseud { pseud_id, .. }: RequirePseud,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Json<Value>> {
+    let t = lorehaven_db::community::topic_by_id(state.db(), &id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
+    if t.author_pseud.parse::<lorehaven_domain::PseudId>().ok() != Some(pseud_id) {
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
+    }
+    let content = body["body"].as_str().unwrap_or("");
+    let pin_id = lorehaven_db::thread_modes::create_wiki_pin(state.db(), &id, &pseud_id.to_string(), content, &pseud_id.to_string())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    Ok(Json(serde_json::json!({ "id": pin_id })))
+}
+
+/// Approve a wiki pin.
+async fn approve_wiki_pin(
+    State(state): State<AppState>,
+    RequirePseud { pseud_id, .. }: RequirePseud,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Json<Value>> {
+    let t = lorehaven_db::community::topic_by_id(state.db(), &id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
+    if t.author_pseud.parse::<lorehaven_domain::PseudId>().ok() != Some(pseud_id) {
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
+    }
+    let post_id = body["post_id"].as_str().ok_or_else(|| {
+        ApiError(lorehaven_domain::AppError::Validation { message: "post_id required".to_owned(), field_errors: std::collections::BTreeMap::new() })
+    })?;
+    lorehaven_db::thread_modes::approve_wiki_pin(state.db(), &id, post_id, &pseud_id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    Ok(Json(serde_json::json!({ "approved": true })))
+}
+
+/// Join the critique queue.
+async fn join_critique(
+    State(state): State<AppState>,
+    RequirePseud { pseud_id, .. }: RequirePseud,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let pos = lorehaven_db::thread_modes::join_critique(state.db(), &id, &pseud_id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    Ok(Json(serde_json::json!({ "position": pos })))
+}
+
+/// Get the critique queue.
+async fn get_critique_queue(
+    State(state): State<AppState>,
+    RequireSession(_): RequireSession,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let queue = lorehaven_db::thread_modes::get_critique_queue(state.db(), &id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    Ok(Json(serde_json::json!({ "queue": queue })))
 }
