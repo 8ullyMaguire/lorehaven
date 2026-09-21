@@ -124,7 +124,7 @@ async fn search_forum_postgres(
         "SELECT 'post' AS kind, fp.id::text AS id, ft.title AS title,
                 left(fp.body, 150) AS snippet,
                 fp.author_pseud AS author_pseud, fp.created_at AS created_at,
-                ts_rank(fp.search_vector, to_tsquery('english', $1))::bigint AS score
+                (ts_rank(fp.search_vector, to_tsquery('english', $1)) * 1000)::bigint AS score
          FROM forum_posts fp
          JOIN forum_topics ft ON ft.id = fp.topic_id
          WHERE fp.deleted_at IS NULL
