@@ -38,6 +38,8 @@ export type RouteId =
   | 'forum-search'
   | 'forum-topic'
   | 'notifications'
+  | 'docs'
+  | 'doc-page'
   | 'planned'
   | 'not-found';
 
@@ -85,6 +87,7 @@ const FIXED_ROUTES: Record<string, RouteId> = {
   '/discover': 'discover',
   '/community': 'community',
   '/notifications': 'notifications',
+  '/docs': 'docs',
 };
 
 export interface RouteMatch {
@@ -169,6 +172,13 @@ export function matchRoute(path: string): RouteMatch {
       path: normalised,
       params: { topicId: decodeURIComponent(topicMatch[1]) },
     };
+  }
+
+  // `/docs/<slug>`: one bundled help page. Slugs are the registry keys in
+  // `lib/docs.ts` (kebab-case filenames); validation happens in the page.
+  if (normalised.startsWith('/docs/')) {
+    const slug = decodeURIComponent(normalised.slice('/docs/'.length));
+    if (slug) return { id: 'doc-page', path: normalised, params: { slug } };
   }
 
   if (normalised === '/community/search') {
