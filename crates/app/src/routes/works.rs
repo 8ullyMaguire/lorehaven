@@ -35,6 +35,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
+use std::collections::BTreeMap;
 use lorehaven_db::collaboration;
 use lorehaven_db::content::{
     self, ContentError, PublicationOutcome, RevisionInput, RevisionSummary, Work, WorkPatch,
@@ -42,9 +43,10 @@ use lorehaven_db::content::{
 use lorehaven_db::identity;
 use lorehaven_db::permission;
 use lorehaven_db::reading;
+use lorehaven_db::taxonomy;
 use lorehaven_domain::content::Contributor;
 use lorehaven_domain::document::Document;
-use lorehaven_domain::permission::{LineageEdge, LineageKind, PermissionStatement};
+use lorehaven_domain::permission::{ExclusionTarget, LineageEdge, LineageKind, Permission, PermissionStatement};
 use lorehaven_domain::policy::{
     can_access_content, AccessPolicy, Actor, ContentFacts, Decision, DenyReason, Lifecycle,
     Visibility,
@@ -76,6 +78,7 @@ pub fn router() -> Router<AppState> {
             get(get_work_permissions).put(put_work_permissions),
         )
         .route("/works/{id}/lineage", get(list_lineage).post(add_lineage))
+        .route("/works/{id}/fork", post(fork_work))
         .route("/chapters/{id}", patch(update_chapter))
         .route("/chapters/{id}/revisions", get(list_revisions))
         .route("/chapters/{id}/restore-revision", post(restore_revision))
@@ -353,7 +356,7 @@ async fn create_work(
     require_participation(&user)?;
 
     let title = validate_title(request.title.as_deref().unwrap_or(""), false)?;
-    let work = content::create_work(state.db(), pseud, &title).await?;
+    let work = content::create_work(state.db(), pseud, &title, None).await?;
 
     let view = author_view(&state, &user, &work).await?;
     Ok((StatusCode::CREATED, Json(view)))
@@ -1536,4 +1539,116 @@ mod tests {
         assert_eq!(parse_visibility("unlisted"), Visibility::Unlisted);
         assert_eq!(parse_visibility("restricted"), Visibility::Restricted);
     }
+}
+
+
+/// Fork a work (spec §40.1). Creates a new empty draft owned by the caller,
+/// linked to the parent through a `remix` lineage edge, inheriting the
+/// parent's tags. No body text is copied — a fork starts empty.
+///
+/// Guards, in order:
+/// 1. Permission statement: parent's `remix` must be `yes` or `unstated`.
+/// 2. Exclusion registry: parent must not be excluded.
+/// 3. Depth limit: lineage chain must be below `max_fork_depth`.
+/// 4. Visibility: fork inherits parent's visibility (never widens it).
+async fn fork_work(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(parent_id): Path<String>,
+) -> ApiResult<(StatusCode, Json<AuthorWorkView>)> {
+    let pseud = acting_pseud(&user)?;
+    require_participation(&user)?;
+
+    let parent_id = parse_work_id(&parent_id)?;
+    let parent_str = parent_id.to_string();
+
+    // The parent must exist and be readable.
+    if let Reading::Denied(error) = reading_for_work(&state, &parent_str, Some(&user)).await? {
+        return Err(ApiError(error));
+    }
+
+    // Guard 1: permission statement — `remix` must allow it.
+    let statement = permission::get_work_permission_statement(state.db(), &parent_str).await?;
+    match statement.remix {
+        Permission::No => {
+            return Err(ApiError(AppError::Validation {
+                message: "the author has declined remixes of this work".to_owned(),
+                field_errors: BTreeMap::from([(
+                    "remix".to_owned(),
+                    "the author's permission statement declines remixes".to_owned(),
+                )]),
+            }));
+        }
+        Permission::Ask => {
+            return Err(ApiError(AppError::Validation {
+                message: "the author requires you to ask before remixing this work".to_owned(),
+                field_errors: BTreeMap::from([(
+                    "remix".to_owned(),
+                    "permission is set to ask — request permission first".to_owned(),
+                )]),
+            }));
+        }
+        Permission::Yes | Permission::Unstated => {}
+    }
+
+    // Guard 2: exclusion registry.
+    if permission::is_excluded(state.db(), ExclusionTarget::Work, &parent_str).await? {
+        return Err(ApiError(AppError::Validation {
+            message: "this work is excluded from forking".to_owned(),
+            field_errors: BTreeMap::new(),
+        }));
+    }
+
+    // Guard 3: depth limit.
+    let depth = permission::lineage_depth(state.db(), &parent_str).await?;
+    let max_depth = state.config().works.max_fork_depth;
+    if depth >= max_depth {
+        return Err(ApiError(AppError::Validation {
+            message: format!(
+                "this work's fork chain has reached the maximum depth of {max_depth}"
+            ),
+            field_errors: BTreeMap::from([(
+                "depth".to_owned(),
+                format!("lineage depth {depth} >= maximum {max_depth}"),
+            )]),
+        }));
+    }
+
+    // Guard 4: visibility — read parent to inherit visibility.
+    let parent_work = content::find_work(state.db(), parent_id.clone())
+        .await?
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "work" }))?;
+
+    // Create the new draft work.
+    let fork_title = format!("Fork of {}", parent_work.title.trim());
+    let fork_visibility = if parent_work.visibility == "public" {
+        None
+    } else {
+        Some(parent_work.visibility.as_str())
+    };
+    let new_work = content::create_work(state.db(), pseud, &fork_title, fork_visibility).await?;
+
+    // Create lineage edge: new_work (child) remixes parent_work.
+    let now = identity::now_rfc3339();
+    let edge = LineageEdge {
+        id: uuid::Uuid::new_v4().to_string(),
+        from_work_id: parent_str.clone(),
+        to_work_id: new_work.id.to_string(),
+        kind: LineageKind::Remix,
+        provenance: format!(
+            "forked by {} at {}",
+            pseud, now
+        ),
+        created_at: now,
+    };
+    permission::insert_lineage_edge(state.db(), &edge).await?;
+
+    // Inherit tags from parent (spec §40.1).
+    let parent_tags = taxonomy::tags_for_work(state.db(), &parent_str).await?;
+    for node_id in parent_tags {
+        let _ = taxonomy::tag_work(state.db(), &new_work.id.to_string(), &node_id, 1).await;
+    }
+
+    let view = author_view(&state, &user, &new_work).await?;
+    Ok((StatusCode::CREATED, Json(view)))
 }

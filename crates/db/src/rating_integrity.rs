@@ -326,7 +326,7 @@ mod tests {
         let pseud = create_pseud(db, account, &handle, "Test User")
             .await
             .map_err(|e| anyhow::anyhow!("create pseud: {e}"))?;
-        let work = create_work(db, pseud, "Test Work")
+        let work = create_work(db, pseud, "Test Work", None)
             .await
             .map_err(|e| anyhow::anyhow!("create work: {e}"))?;
         Ok((work.id, account, pseud))

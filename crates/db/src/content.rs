@@ -449,17 +449,23 @@ fn parse_id<T: std::str::FromStr>(raw: &str, what: &str) -> ContentResult<T> {
 ///
 /// The owner row is inserted in the same transaction: a work with no
 /// contributors would be a work nobody can edit, including its author.
-pub async fn create_work(db: &Database, owner: PseudId, title: &str) -> ContentResult<Work> {
+pub async fn create_work(
+    db: &Database,
+    owner: PseudId,
+    title: &str,
+    visibility: Option<&str>,
+) -> ContentResult<Work> {
     let id = WorkId::new();
     let now = now_rfc3339();
+    let visibility = visibility.unwrap_or("public");
 
     let insert_work = db.sql(
         "INSERT INTO works (id, owner_pseud_id, title, summary, language, rating, visibility,
                             lifecycle, completion, show_public_ratings, created_at, updated_at, version)
-         VALUES (?, ?, ?, '', 'en', 'general', 'public', 'draft', 'in_progress', 1, ?, ?, 1)",
+         VALUES (?, ?, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, ?, ?, 1)",
         "INSERT INTO works (id, owner_pseud_id, title, summary, language, rating, visibility,
                             lifecycle, completion, show_public_ratings, created_at, updated_at, version)
-         VALUES (?::uuid, ?::uuid, ?, '', 'en', 'general', 'public', 'draft', 'in_progress', 1, ?, ?, 1)",
+         VALUES (?::uuid, ?::uuid, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, ?, ?, 1)",
     );
 
     let insert_owner = db.sql(
@@ -477,6 +483,7 @@ pub async fn create_work(db: &Database, owner: PseudId, title: &str) -> ContentR
                 .bind(id.to_string())
                 .bind(owner.to_string())
                 .bind(title)
+                .bind(visibility)
                 .bind(&now)
                 .bind(&now)
                 .execute(&mut *tx)
@@ -496,6 +503,7 @@ pub async fn create_work(db: &Database, owner: PseudId, title: &str) -> ContentR
                 .bind(id.to_string())
                 .bind(owner.to_string())
                 .bind(title)
+                .bind(visibility)
                 .bind(&now)
                 .bind(&now)
                 .execute(&mut *tx)
