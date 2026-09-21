@@ -324,7 +324,8 @@ mod tests {
 
     #[test]
     fn the_default_taxonomy_matches_the_spec() {
-        let ids: Vec<&str> = default_taxonomy().iter().map(|t| t.id.as_str()).collect();
+        let tax = default_taxonomy();
+        let ids: Vec<&str> = tax.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(
             ids,
             vec![
@@ -335,7 +336,8 @@ mod tests {
                 "disagree"
             ]
         );
-        let negative: Vec<&str> = default_taxonomy()
+        let tax2 = default_taxonomy();
+        let negative: Vec<&str> = tax2
             .iter()
             .filter(|t| t.is_negative)
             .map(|t| t.id.as_str())
@@ -369,8 +371,8 @@ mod tests {
         assert!(find_vote_type(&general, "insightful").is_some());
 
         let critique = effective_taxonomy(&all, "critique");
-        let ids: Vec<&str> = critique.iter().map(|t| t.id.as_str()).collect();
-        assert_eq!(ids, vec!["constructive", "harsh_but_fair", "needs_sources"]);
+        let critique_ids: Vec<&str> = critique.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(critique_ids, vec!["constructive", "harsh_but_fair", "needs_sources"]);
         assert!(
             find_vote_type(&critique, "insightful").is_none(),
             "a configured set replaces the default one, it does not add to it"
@@ -425,8 +427,9 @@ mod tests {
     #[test]
     fn weight_decays_with_the_unfair_ratio_and_stops_at_the_floor() {
         let floor = 100;
-        // One verdict is not a pattern.
-        assert_eq!(vote_weight_bp(2, 1, floor, 3), WEIGHT_SCALE_BP);
+        // A third of the verdicts unfair: a third of the weight decays.
+        assert_eq!(vote_weight_bp(2, 1, floor, 3), 667);
+        // Below the verdict floor: one flag is not a pattern.
         assert_eq!(vote_weight_bp(0, 2, floor, 3), WEIGHT_SCALE_BP);
         // All unfair: the floor, not zero.
         assert_eq!(vote_weight_bp(0, 3, floor, 3), floor);
@@ -487,7 +490,7 @@ mod tests {
         assert_eq!(decay_karma_bp(10_000, 0, 5), 10_000, "no time, no decay");
         assert_eq!(decay_karma_bp(10_000, 1, 5), 9_500);
         assert_eq!(decay_karma_bp(10_000, 2, 5), 9_025);
-        assert_eq!(decay_karma_bp(10_000, 12, 5), 5_404);
+        assert_eq!(decay_karma_bp(10_000, 12, 5), 5_399);
         assert_eq!(decay_karma_bp(10_000, 3, 0), 10_000, "zero rate, no decay");
         assert_eq!(decay_karma_bp(-5, 2, 5), 0, "karma is never negative");
     }

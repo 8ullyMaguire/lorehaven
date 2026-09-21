@@ -1667,6 +1667,7 @@ mod tests {
             published_at: None,
             withdrawn_at: None,
             show_public_ratings: true,
+            discussion_mode: "both".to_owned(),
             created_at: String::new(),
             updated_at: String::new(),
             version: 1,

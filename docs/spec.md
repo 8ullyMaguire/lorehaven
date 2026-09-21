@@ -6113,7 +6113,7 @@ Environment variables (all prefixed `LOHAVEN_BOT_`):
 | `[imports]` | `solver_url` | `None` | CAPTCHA solver URL |
 | `[imports]` | `archive_fallback` | `false` | Fallback to archive.org |
 | `[imports]` | `honour_robots` | `true` | Respect robots.txt |
-| `[tts]` | `engine` | `"silent"` | TTS engine |
+| `[tts]` | `engine` | `"piper"` | TTS engine (`silent` for a pipeline check without a synthesizer) |
 | `[tts]` | `piper_path` | `None` | Piper binary path |
 | `[tts]` | `piper_voice_model` | `None` | Piper voice model |
 | `[tts]` | `default_voice` | `None` | Default voice |

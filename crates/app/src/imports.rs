@@ -293,6 +293,7 @@ pub async fn run(
             .iter()
             .map(to_identity)
             .collect(),
+        word_count: None,
     });
     let plan = plan_import(
         held.as_ref(),
@@ -300,6 +301,7 @@ pub async fn run(
             title: work.title.clone(),
             author_text: work.author_text.clone(),
             chapters: work.chapters.iter().map(to_identity_ref).collect(),
+            word_count: None,
         },
     );
 
@@ -560,7 +562,7 @@ fn to_identity(chapter: &imports::ImportChapter) -> ChapterIdentity {
         source_chapter_key: chapter.source_chapter_key.clone(),
         ordinal: u32::try_from(chapter.ordinal).unwrap_or(u32::MAX),
         title: chapter.title.clone(),
-        word_count: chapter.word_count.map(|c| c as u32),
+        word_count: None,
     }
 }
 
