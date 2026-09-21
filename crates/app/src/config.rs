@@ -142,6 +142,8 @@ pub struct Config {
     pub exports: ExportsConfig,
     /// Work permission statements and fork guards (spec §40).
     pub works: WorksConfig,
+    /// Longevity signals: half-life and interaction warmth (spec §41).
+    pub community: CommunityConfig,
     /// Where the configuration file was read from, if any.
     pub config_path: Option<PathBuf>,
 }
@@ -200,6 +202,33 @@ pub struct DiscoveryConfig {
     pub per_fandom_cap: usize,
     /// Fraction of the feed reserved for exploration (new fandoms).
     pub exploration_rate: f64,
+    /// Whether the half-life job runs and scores influence discovery ranking.
+    pub enable_half_life: bool,
+    /// Minimum age in days before a work is eligible for half-life scoring.
+    pub half_life_min_age_days: i64,
+    /// Window size in days for both recent and first-window reader counts.
+    pub half_life_window_days: i64,
+}
+
+/// Community / interaction tier settings (spec §41.2).
+#[derive(Debug, Clone)]
+pub struct CommunityConfig {
+    /// Warmth thresholds in basis points. Default: lurk 0, react 200,
+    /// comment 1000, create 3000.
+    pub warmth_thresholds: serde_json::Value,
+}
+
+impl Default for CommunityConfig {
+    fn default() -> Self {
+        Self {
+            warmth_thresholds: serde_json::json!({
+                "lurk": 0,
+                "react": 200,
+                "comment": 1000,
+                "create": 3000
+            }),
+        }
+    }
 }
 
 /// Resource directory settings (spec §39).
@@ -1018,6 +1047,7 @@ impl Config {
             exports,
             directory,
             works,
+            community: CommunityConfig::default(),
             config_path,
         };
 
@@ -1086,6 +1116,7 @@ impl Config {
             exports: ExportsConfig::default(),
             directory: DirectoryConfig::default(),
             works: WorksConfig::default(),
+            community: CommunityConfig::default(),
             config_path: None,
         }
     }

@@ -86,7 +86,20 @@ async fn get_discovery(
 
     // Merge candidates from all engines deterministically.
     let blended = lorehaven_domain::discovery::blend(&engines);
-    let blended = blended.into_iter().take(limit as usize).collect::<Vec<_>>();
+    let mut blended: Vec<_> = blended.into_iter().take(limit as usize).collect();
+
+    // Apply half-life ranking (silent reordering, spec §41.1).
+    if state.config().discovery.enable_half_life {
+        use lorehaven_db::longevity::half_life_map;
+        let ids: Vec<_> = blended.iter().map(|c| c.work_id.clone()).collect();
+        let half_life_scores = half_life_map(state.db(), &ids)
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e)))?;
+        let half_life_of = |id: &lorehaven_domain::ids::WorkId| -> Option<i64> {
+            half_life_scores.iter().find(|(wid, _)| wid == &id.to_string()).and_then(|(_, bp)| *bp)
+        };
+        lorehaven_domain::longevity::apply_half_life(&mut blended, &half_life_of);
+    }
 
     // Apply operator affinity ranking (silent reordering, no field changes).
     let affinities = lorehaven_db::discovery::list_operator_affinities(state.db())
