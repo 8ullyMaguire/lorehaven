@@ -159,6 +159,7 @@ async fn search_forum_postgres(
     if let Some(to) = date_to {
         q = q.bind(to);
     }
+    q = q.bind(limit);
 
     let rows = q.fetch_all(db.postgres_pool().expect("postgres")).await?;
     Ok(rows.into_iter().map(ForumSearchResult::from).collect())
