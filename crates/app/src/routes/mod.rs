@@ -2,6 +2,7 @@
 
 pub mod account_permissions;
 pub mod admin;
+pub mod audience;
 pub mod auth;
 pub mod collaborators;
 pub mod community;

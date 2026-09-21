@@ -427,6 +427,12 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // Audience warmth panel (spec §41.2).
+        .merge(classified(
+            routes::audience::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // Community (comments, forums, groups, messaging, blocks) — M12 groundwork.
         // Every route needs a session and most write, so writers' class.
         .merge(classified(

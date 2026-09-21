@@ -646,6 +646,25 @@ impl Worker {
                 Ok(())
             }
             "verify_derivatives" => self.verify_derivatives(state, job, &payload).await,
+            // Spec §41.1: nightly half-life recompute for discovery ranking.
+            "recompute_half_life" => {
+                let min_age_days = payload
+                    .get("min_age_days")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(30);
+                let window_days = payload
+                    .get("window_days")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(30);
+                let updated = crate::longevity::recompute_half_life(state, min_age_days, window_days)
+                    .await
+                    .map_err(transient)?;
+                jobs::progress(state.db(), job, 1000, Some("recomputed half-life"))
+                    .await
+                    .map_err(transient)?;
+                tracing::info!(updated, "recomputed half-life scores");
+                Ok(())
+            }
             other => Err(HandlerError::Fatal(format!(
                 "unknown maintenance task {other:?}"
             ))),

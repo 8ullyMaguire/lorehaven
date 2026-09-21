@@ -24,6 +24,7 @@ pub mod keys;
 pub mod library_updates;
 pub mod limiter;
 pub mod logging;
+pub mod longevity;
 pub mod narration;
 pub mod privacy;
 pub mod revisions;
