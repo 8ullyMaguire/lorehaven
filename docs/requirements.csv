@@ -114,3 +114,14 @@ M35-03,community,Federation scope per topic,M35,implemented-locally-tested,crate
 M35-04,community,Featured posts and best-of digest,M35,implemented-locally-tested,crates/db/src/moderation.rs (feature_post),featured column on forum_posts
 M35-05,community,Thread fork audit trail,M35,implemented-locally-tested,migrations/{sqlite,postgres}/0042_forum_m35.sql,original_topic_id preserved on forum_posts
 M35-06,community,Activity sparklines and zero-result search tracking,M35,implemented-locally-tested,crates/db/src/moderation.rs (record_topic_activity, record_search_miss),forum_topic_activity and forum_search_misses tables
+M39-01,directory,Ranked category-browsed directory of external resources,M39,planned,--,"Spec §39.1–39.2. Community-curated links (archives, Discord servers, author platforms, writing tools) ranked by user votes. Planned in docs/plans/junior-implementation-plan.md §15e."
+M39-02,directory,Submission with operator review queue,M39,planned,--,"Spec §39.3. Signed-in submission, operator approval gate (configurable), pending invisible to strangers. Planned in §15e."
+M39-03,directory,One-vote-per-account toggle voting with denormalised score,M39,planned,--,"Spec §39.4. Vote in same transaction as score recompute; weightless by design. Planned in §15e."
+M39-04,directory,URL validation refusing non-http(s) and private addresses,M39,planned,--,"Spec §39.3. SSRF posture shared with webhook verifier. Planned in §15e."
+M39-05,directory,Operator-configurable categories via TOML,M39,planned,--,"Spec §39.2, §38. Seed categories + [directory].extra_categories. Planned in §15e."
+M40-01,works,Fork action: empty draft with lineage edge gated by statements/registry/depth,M40,planned,--,"Spec §40.1. One-click fork; copies tags not bodies; Remixes list on parent. Planned in §15f."
+M40-02,works,Permission statements editable per work with effective-sentence UI,M40,planned,--,"Spec §40.2, §33.1. Six statements (podfic/translation/remix/continuation/redistribution/ai_training), yes|ask|no|unstated, owner-only edits, audited. Planned in §15f."
+M40-03,works,Statement enforcement at fork/translation/narration doors,M40,planned,--,"Spec §40.2. Each refusal names the statement. Planned in §15f."
+M41-01,discovery,Half-life job writing half_life_bp as silent ranking multiplier,M41,planned,--,"Spec §41.1. Nightly job on reading_events; basis points; silent-reordering contract §16.3. Planned in §15g."
+M41-02,community,Warmth accumulation hooks with config-driven tier thresholds,M41,planned,--,"Spec §41.2. Reading/reacting/commenting accumulate warmth_bp between account pairs. Planned in §15g."
+M41-03,community,Author-facing aggregate tier panel with no per-reader exposure,M41,planned,--,"Spec §41.2–41.3. Aggregate counts only; no reader-facing surface anywhere. Planned in §15g."

@@ -74,6 +74,9 @@ tags `v0.05-reader` … `v0.09-library`: they have no rows in
 || M19 | §24 | Administration, statistics, abuse defence, privacy, operations | M14–M18 |
 || M20 | §25 | Hardening and release | everything |
 || M30 | §0.4 | Instance topics — configurable public/private/flags with gamification bonuses | M15 (credits), M11 (leaderboards) |
+|| M39 | §39 | Resource directory — community-curated ranked external resources | M2, M11 |
+|| M40 | §40 + §33.1 | Fork with provenance, permission statements enforceable | M3, migration 0030/0036 |
+|| M41 | §41 | Content half-life ranking signal, interaction warmth tiers | M4, M11, M12 |
 
 The order is a dependency order, not a preference. Three examples, because a
 junior will be tempted to reorder:
@@ -3383,6 +3386,492 @@ with a TOML key, documented default, and startup validation.
 
 ---
 
+## 15e. Milestone 39 (repo) — Resource Directory
+
+Spec §39. Depends on: M2 (accounts), M11 pattern (routes+db+domain split).
+
+**Read first:** spec §39 in full, §38 (self-hosted contract — the directory
+is operator-configurable), and §14.9's SSRF rules (URL validation reuses the
+same posture).
+
+### 39.1 Why this is next
+
+The directory is self-contained: no dependency on any unbuilt milestone, no
+interaction with the work pipeline, and every piece (migration, domain
+validation, repo, routes, page) follows the M11–M12 pattern exactly. It is
+the safest possible milestone for a junior to learn the loop on, and it
+delivers a visible public surface on day one.
+
+### 39.2 Ledger rows (add before any code)
+
+- `M39-01` directory: ranked, category-browsed list of external resources
+  (spec §39.1–39.2)
+- `M39-02` directory: submission with operator review queue (spec §39.3)
+- `M39-03` directory: one-vote-per-account toggle voting with denormalised
+  score (spec §39.4)
+- `M39-04` directory: URL validation refusing non-http(s) and private
+  addresses (spec §39.3)
+- `M39-05` directory: operator-configurable categories via TOML (spec §39.2,
+  §38)
+
+### 39.3 Migration `0046_resource_directory.sql` (both dialects)
+
+```text
+directory_entries(
+  id TEXT PRIMARY KEY,            -- uuid
+  category TEXT NOT NULL,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  submitted_by TEXT NOT NULL,     -- account id, not pseud: votes/submit are account-scoped
+  approved_by TEXT,               -- NULL = pending
+  created_at TEXT NOT NULL,       -- RFC 3339
+  updated_at TEXT NOT NULL,
+  score INTEGER NOT NULL DEFAULT 0  -- denormalised sum of live votes
+)
+index (category, score DESC, created_at)
+index (submitted_by, created_at DESC)
+
+directory_entry_tags(
+  entry_id TEXT NOT NULL,
+  tag TEXT NOT NULL,              -- lowercase, trimmed, ≤ 32 chars
+  PRIMARY KEY (entry_id, tag)
+)
+index (tag)
+
+directory_votes(
+  entry_id TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  vote_value INTEGER NOT NULL CHECK (vote_value IN (-1, 1)),
+  voted_at TEXT NOT NULL,
+  PRIMARY KEY (entry_id, account_id)
+)
+index (entry_id)
+```
+
+SQLite: identical (all TEXT/INTEGER). Postgres: same columns; `id` and
+`entry_id`/`account_id` bind as `TEXT + ?::uuid` per ADR 0004 only where the
+codebase already does so for account ids — follow `crates/db/src/community.rs`'s
+existing convention for account-id columns (plain TEXT is used there).
+
+### 39.4 Domain module `crates/domain/src/directory.rs`
+
+Pure functions, unit tests in-file, no I/O:
+
+- `validate_url(&str) -> Result<(), AppError>`: absolute http(s) only;
+  host must not be `localhost`, `*.localhost`, a loopback IP (v4/v6), a
+  private range (10/8, 172.16/12, 192.168/16, 169.254/16, fd00::/8) or
+  `[::1]`. Return `AppError::Validation` with a named reason. Reuse
+  `crates/domain/src/webhooks.rs`'s URL checks if a shared helper exists
+  there — check before writing a second copy (DRY).
+- `validate_title(&str) -> Result<(), AppError>`: 1–120 chars after trim.
+- `validate_description(&str) -> Result<(), AppError>`: ≤ 500 chars.
+- `normalize_tag(&str) -> Option<String>`: lowercase, trim, collapse
+  whitespace, None if empty or > 32 chars.
+- `normalize_tags(&[String]) -> Vec<String>`: map + dedupe + sort.
+
+Unit tests (in-file, `#[cfg(test)]`): each validator's happy path and each
+refusal; `normalize_tags` dedupes and sorts; a URL with a userinfo trick
+(`http://user@127.0.0.1/`) is refused.
+
+### 39.5 Repository `crates/db/src/directory.rs`
+
+Follow `crates/db/src/discovery.rs` for the Backend match pattern. Functions:
+
+- `submit_entry(db, id, category, title, url, description, submitted_by, now)`
+  — INSERT with `approved_by = NULL`.
+- `approve_entry(db, id, operator_id, now) -> Result<bool>`
+- `remove_entry(db, id) -> Result<bool>` (operator; sets no tombstone — rows
+  stay, but `list_entries` excludes removed via a `removed_at TEXT` column
+  you add to the migration; simpler: hard DELETE. Choose hard DELETE; votes
+  and tags cascade or are left orphaned intentionally — document the choice
+  in the module doc-comment. Prefer: DELETE the entry row, leave
+  votes/tags rows (audit), and make `list_entries` JOIN on entries so
+  orphans are invisible.)
+- `list_entries(db, filter) -> Result<Vec<DirectoryEntryWithScore>>` where
+  `DirectoryEntryFilter { category, tag, q, sort: Top|New, limit, offset,
+  viewer: Option<String>, is_operator: bool }`. Visibility rule in SQL:
+  `(approved_by IS NOT NULL OR submitted_by = ?viewer OR ?is_operator)`.
+  JOIN tags when `tag` is set; LIKE on title/description when `q` is set
+  (lower(title) LIKE '%'||lower(?)||'%' — same pattern as
+  `forum_search`'s SQLite path).
+- `get_entry(db, id, viewer, is_operator) -> Result<Option<DirectoryEntry>>`
+- `set_vote(db, entry_id, account_id, value, now) -> Result<bool>`:
+  same-value DELETE (toggle off), other-value UPDATE, no-row INSERT —
+  then `UPDATE directory_entries SET score = (SELECT COALESCE(SUM(vote_value),0)
+  FROM directory_votes WHERE entry_id = ?) WHERE id = ?` **in the same
+  transaction** (`db.begin()`/commit — follow an existing transactional
+  example in `crates/db/src/` before writing one). Returns true if a live
+  vote remains.
+- `my_vote(db, entry_id, account_id) -> Result<Option<i64>>`
+- `category_counts(db) -> Result<Vec<(String, i64)>>` — approved only.
+- `pending_entries(db) -> Result<Vec<DirectoryEntry>>` — operator queue.
+
+Register `pub mod directory;` in `crates/db/src/lib.rs`.
+
+### 39.6 Config `crates/app/src/config.rs`
+
+```rust
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
+pub struct DirectoryConfig {
+    pub enabled: bool,               // default true
+    pub require_approval: bool,      // default true
+    pub page_size: i64,              // default 50
+    pub extra_categories: Vec<String>,
+}
+```
+
+Add `pub directory: DirectoryConfig` to `Config`, the TOML key
+`[directory]`, and document it in `lorehaven.toml.example`. Seed categories
+are a `const` in the domain module; effective categories = seed +
+`extra_categories` (validated: lowercase snake_case, unique).
+
+### 39.7 Routes `crates/app/src/routes/directory.rs`
+
+```
+GET  /directory?category=&tag=&q=&sort=&limit=&offset=
+GET  /directory/categories
+GET  /directory/{id}
+POST /directory                      (RequireSession) submit
+POST /directory/{id}/vote            (RequireSession) { value: 1 | -1 }
+POST /directory/{id}/approve         (operator gate, same pattern as
+                                      discovery.rs::require_operator)
+DELETE /directory/{id}               (operator gate)
+GET  /directory/pending              (operator gate)
+```
+
+Wire `pub mod directory;` into `routes/mod.rs` and
+`.nest("/directory", directory::router())` in `server.rs`'s API router —
+check how `community.rs` is nested and copy exactly. When
+`config.directory.enabled == false`, every route returns 404 (gate inside
+`router()` construction, same approach `admin_router` uses).
+
+Vote handler: parse `value` (must be 1 or -1), call `set_vote`, return
+`{ "score": <new>, "my_vote": <1|-1|null> }`.
+
+### 39.8 Page `frontend/src/routes/Directory.svelte`
+
+Follow `Discover.svelte`'s structure (loading/error/empty states, session
+import from `../lib/session.svelte.ts`, api from `../lib/api`):
+
+- Category tabs from `GET /directory/categories` (active tab in URL query).
+- Search input (debounced 300ms) + tag chips from the entry list.
+- Entry cards: `<a href={entry.url}>` title, description, score, vote
+  buttons (▲ ▼ with active state from `my_vote`), submitter handle, date.
+- Signed-in: "Submit an entry" opens a form (category select, title, URL,
+  description, tags comma-separated). Pending entries show a
+  "pending review" badge when the viewer submitted them.
+- Load-more button at the list tail (offset += page_size).
+
+Router: add `'directory'` to the route union in
+`frontend/src/lib/router.ts`, match `^/directory$`, add the
+`{:else if route.id === 'directory'}` branch in `App.svelte`, add
+`Directory` to the nav (after Discover) in
+`frontend/src/lib/components/Nav.svelte`.
+
+API functions in `frontend/src/lib/api.ts`:
+`listDirectoryEntries(opts)`, `listDirectoryCategories()`,
+`getDirectoryEntry(id)`, `submitDirectoryEntry(data)`,
+`voteDirectoryEntry(id, value)`.
+
+### 39.9 Hand journey (drive before writing tests)
+
+Run the server locally against SQLite, register two accounts (one is the
+operator via config), and drive: submit → pending invisible to account two →
+operator approves → visible → account two upvotes → score 1 → upvotes again
+→ score 0 → downvotes → score -1. Submit `http://127.0.0.1/x` and watch the
+refusal name the reason. Then write the tests below to encode exactly what
+you drove.
+
+### 39.10 Acceptance tests `crates/app/tests/milestone_39.rs`
+
+Follow `milestone_12.rs`'s test-app harness. Tests:
+
+- `an_entry_can_be_submitted_approved_and_voted_on`
+- `pending_entries_are_invisible_to_strangers`
+- `voting_twice_toggles_and_flipping_changes_the_score`
+- `internal_urls_are_refused_with_a_named_reason`
+- `operators_see_the_pending_queue_and_can_remove`
+- `extra_categories_appear_without_code_changes` (construct Config with an
+  extra category, assert it's in the effective list)
+
+### 39.11 Pitfalls
+
+- **Score drift**: recompute the score in the vote transaction, never in a
+  follow-up query — a crash between them leaves a stale score.
+- **SQL injection in q**: use bound parameters in LIKE patterns, never
+  string interpolation.
+- **Approval leak**: the visibility rule must be in SQL, not filtered in
+  Rust after fetch — pagination counts would disagree with the page.
+- **Category case**: compare categories case-insensitively on input,
+  store lowercase.
+
+---
+
+## 15f. Milestone 40 (repo) — Fork with provenance and permission statements
+
+Spec §40 (and §33.1, which it implements). Depends on: M3 (drafts), §32
+derivative tables (migration 0030), M33.1 permission statement model.
+
+**Read first:** spec §40 and §33.1 in full, §32.3 (orphaning), and
+`migrations/postgres/0030_*.sql` for the existing derivative tables.
+
+### 40.1 Why this is next
+
+The derivative data model has existed since migration 0030 and §33.1 has
+been spec-only. Everything the fork needs is built: drafts (M3), lineage
+edges (0030), permission statements (M33.1). This milestone is pure
+composition — no new subsystems, only an affordance over existing ones.
+
+### 40.2 Ledger rows
+
+- `M40-01` fork action creating an empty draft with lineage edge, gated by
+  permission statement, exclusion registry and depth limit (spec §40.1)
+- `M40-02` permission statements editable per work with effective-sentence
+  UI (spec §40.2)
+- `M40-03` Remixes list on parent, parent link on child, orphan-safe
+  (spec §40.1)
+- `M40-04` statement enforcement at fork, translation request and
+  narration request doors (spec §40.2)
+
+### 40.3 Migration `0047_fork_permissions.sql` (both dialects)
+
+First read migration 0030 and M33.1's migration (0036) — do not duplicate
+tables that exist. What 0030/0036 already provide: derivative lineage edges
+and permission statements. Verify with `grep -rn 'permission' migrations/`
+and `grep -rn 'derivative' migrations/` before writing anything. This
+migration adds only what is missing:
+
+```text
+-- only if 0036 does not already store per-work statements:
+work_permission_statements(
+  work_id TEXT PRIMARY KEY,
+  podfic TEXT NOT NULL DEFAULT 'unstated',        -- yes|ask|no|unstated
+  translation TEXT NOT NULL DEFAULT 'unstated',
+  remix TEXT NOT NULL DEFAULT 'unstated',
+  continuation TEXT NOT NULL DEFAULT 'unstated',
+  redistribution TEXT NOT NULL DEFAULT 'unstated',
+  ai_training TEXT NOT NULL DEFAULT 'unstated',
+  updated_at TEXT NOT NULL
+)
+
+-- only if 0030 does not already carry fork depth:
+-- (check first; if lineage edges exist, depth is computed by walking them,
+-- and no column is needed)
+```
+
+Statement changes audit (append-only):
+
+```text
+work_permission_statement_changes(
+  id TEXT PRIMARY KEY,
+  work_id TEXT NOT NULL,
+  changed_by TEXT NOT NULL,
+  field TEXT NOT NULL,             -- 'remix' etc.
+  was TEXT NOT NULL,
+  now_value TEXT NOT NULL,
+  changed_at TEXT NOT NULL
+)
+```
+
+### 40.4 Domain `crates/domain/src/fork.rs`
+
+Pure functions:
+
+- `check_fork(parent_statements, exclusion_hit, chain_depth, max_depth)
+  -> ForkCheck` where `ForkCheck = Proceed | Refuse { reason: String } |
+  NeedsAsk`. Reasons name the statement ("remix: no") or the limit
+  ("fork depth 3 reached: A → B → C → this work").
+- `effective_sentence(field, value) -> &'static str` — the plain sentences
+  from spec §40.2, unit-tested for all 4 values × 6 fields.
+- `chain_display(chain: &[&str]) -> String` — "A → B → C".
+
+### 40.5 Repository `crates/db/src/fork.rs`
+
+- `statements_for(db, work_id) -> Result<Statements>` (defaults when no row)
+- `set_statement(db, work_id, field, value, changed_by, now)` — upsert +
+  audit row, in one transaction.
+- `lineage_chain(db, work_id) -> Result<Vec<String>>` — walk parent edges to
+  the root (bounded by config max_depth × 2 iterations; a cycle returns the
+  prefix seen — cycles must not hang the walker; unit-test with a fixture).
+- `create_fork(db, parent_work_id, forker_pseud, now) -> Result<ForkOutcome>`
+  — creates a draft work (reuse `content::create_work`), copies tag/fandom/
+  character links (INSERT ... SELECT from the parent's rows), writes the
+  lineage edge (`kind = 'remix'`), all in one transaction.
+- `children_of(db, work_id) -> Result<Vec<ChildRef>>` — for the Remixes list.
+
+### 40.6 Routes
+
+In `crates/app/src/routes/works.rs` (extend, don't create a module — the
+work page owns this surface):
+
+- `POST /works/{id}/fork` (RequirePseud) — runs `check_fork`, then
+  `NeedsAsk` → 422 with `{ "needs_ask": true }`; `Refuse` → 403 with the
+  named reason; `Proceed` → `create_fork`, return the draft's id.
+- `GET /works/{id}/permissions` — statements + effective sentences.
+- `PUT /works/{id}/permissions` (owner only — reuse the existing
+  ownership check in works.rs) — one or more fields, each validated to the
+  4-value enum.
+- `GET /works/{id}/remixes` — children list.
+
+Enforcement hooks (one line each, at the top of the existing handler):
+- translation request creation (M17 routes) checks `translation`.
+- narration request (if M26 routes exist) checks `podfic`.
+
+### 40.7 Pages
+
+`WorkPage.svelte`: a **Sharing & permissions** section in the owner's edit
+view (six selects with the effective sentence under each); a **Fork this
+work** button (signed-in, non-owner) whose click handles the three outcomes
+(proceed → navigate to the new draft; needs_ask → inline "the author will be
+asked" confirmation; refuse → error banner with the named reason); a
+**Remixes** section listing children when non-empty.
+
+### 40.8 Acceptance tests `crates/app/tests/milestone_40.rs`
+
+- `fork_proceeds_on_unstated_and_creates_empty_draft_with_lineage`
+- `fork_refused_when_remix_is_no_and_names_the_statement`
+- `fork_ask_creates_a_request_not_a_draft`
+- `depth_limit_refuses_with_the_chain_displayed`
+- `fork_inherits_tags_but_copies_no_body`
+- `statements_are_editable_by_owner_only_and_audited`
+- `deleting_a_parent_never_deletes_a_child`
+
+### 40.9 Pitfalls
+
+- **Do not re-create lineage tables.** Migration 0030 owns them; read it
+  first. If 0036 already stores statements, this milestone only adds the
+  affordance and the audit table.
+- **Cycle safety.** A lineage chain with a cycle must not hang; bound the
+  walk and unit-test it.
+- **Copy links, not bodies.** A fork with the parent's text is plagiarism
+  tooling; the test `copies_no_body` enforces the empty draft.
+
+---
+
+## 15g. Milestone 41 (repo) — Half-life and interaction tiers
+
+Spec §41. Depends on: M11 (discovery blend), M4 (reading events), M12
+(community routes).
+
+**Read first:** spec §41 in full, §16.3 (the silent-reordering contract),
+§0.2/§0.3 (attention rules — this milestone lives or dies by them).
+
+### 41.1 Why this is next
+
+Both signals consume tables that already exist (`reading_events`,
+`reading_progress`, comments, reactions) and write onto columns this
+milestone adds. The half-life job rides the existing jobs infrastructure
+(M5); warmth hooks ride existing handlers. No new subsystems.
+
+### 41.2 Ledger rows
+
+- `M41-01` half-life job writing `half_life_bp` on eligible works, used as
+  a silent ranking multiplier (spec §41.1)
+- `M41-02` warmth accumulation hooks on reading/reaction/comment with
+  tier thresholds in config (spec §41.2)
+- `M41-03` author-facing aggregate tier panel; no per-reader exposure
+  anywhere (spec §41.2, §41.3)
+
+### 41.3 Migration `0048_longevity_signals.sql` (both dialects)
+
+```text
+-- half-life: INTEGER basis points, never REAL (ADR 0004)
+ALTER TABLE works ADD COLUMN half_life_bp INTEGER;   -- NULL = not yet scored
+
+interaction_warmth(
+  account_id TEXT NOT NULL,        -- the reader
+  author_account TEXT NOT NULL,    -- the author
+  warmth_bp INTEGER NOT NULL DEFAULT 0,
+  tier TEXT NOT NULL DEFAULT 'lurk',   -- lurk|react|comment|create
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (account_id, author_account)
+)
+index (author_account, tier)
+```
+
+### 41.4 Domain `crates/domain/src/longevity.rs`
+
+- `half_life_bp(recent_starts: i64, first_window_starts: i64) -> i64` —
+  basis points, `first_window_starts == 0` → 0; clamp 0..=10000. Unit tests:
+  zero-window, equal windows (10000), half (5000), clamp.
+- `apply_half_life(candidates: Vec<Candidate>, half_life_of: &dyn Fn(&WorkId)
+  -> Option<i64>) -> Vec<Candidate>` — multiplier `1.0 + bp/20000.0` (so
+  10000bp = 1.5×, 0bp = 1.0×), score scaled and re-sorted; **no field added,
+  no reason changed** — the §16.3 silent contract. Unit test asserts field
+  equality apart from score.
+- `warmth_delta(action) -> i64` — reading a chapter 100, finishing 500,
+  reacting 200, commenting 400 (basis points).
+- `tier_for(warmth_bp, thresholds) -> &'static str` — thresholds from
+  config `[community].warmth_thresholds` (lurk 0, react 200, comment 1000,
+  create 3000 defaults); unit tests at each boundary.
+- `aggregate_tiers(counts) -> Aggregates` — the author panel shape.
+
+### 41.5 Repository `crates/db/src/longevity.rs`
+
+- `recompute_half_life(db, now) -> Result<u64>` — for each work published
+  ≥ `min_age_days` ago: count starts in the trailing `window_days` and in
+  the first `window_days` after publication, compute via domain, write
+  `half_life_bp`. Idempotent by construction (pure overwrite).
+- `record_warmth(db, reader, author, delta, now)` — upsert by pair,
+  accumulate, recompute tier, one transaction.
+- `author_tier_aggregates(db, author, window_days) -> Result<Aggregates>` —
+  counts by tier for authors the viewer owns.
+
+### 41.6 Job + hooks
+
+- Job `crates/app/src/jobs/half_life.rs` (follow an existing job module's
+  shape): scheduled nightly when `config.discovery.enable_half_life`;
+  calls `recompute_half_life`.
+- Hooks (one call each, at the end of the existing handler, inside its
+  transaction): `record_reading_progress` (resolve the work's owner —
+  skip silently when unresolvable), quick-reaction POST, comment POST.
+  A hook failure logs and continues — warmth must never fail a read.
+
+### 41.7 Discovery integration
+
+In `discovery.rs::get_discovery`, after `blend()` and before affinity
+ranking, when `enable_half_life`: `apply_half_life(blended, &|id|
+half_life_lookup(id))`. Fetch `half_life_bp` for the page's candidates in
+one query (`SELECT id, half_life_bp FROM works WHERE id IN (...)`).
+
+### 41.8 Routes + page
+
+- `GET /works/mine/{id}/audience` (owner only) — tier aggregates for one
+  work; plus `GET /me/audience` for all the author's works. Both refuse
+  non-owners with 404.
+- `WorkPage.svelte` owner view: an **Audience** panel (four tier counts,
+  this month). No reader-facing surface at all — no route, no UI, no API
+  that takes a reader parameter.
+
+### 41.9 Acceptance tests `crates/app/tests/milestone_41.rs`
+
+- `half_life_job_scores_evergreen_above_forgotten` — fixture: work A with
+  recent starts, work B without; job; A's bp > B's bp.
+- `half_life_changes_ranking_with_no_field_changes` — two candidates, one
+  with bp 10000; assert order flips and every field except score is equal.
+- `half_life_job_is_idempotent` — run twice, second run changes nothing.
+- `warmth_accumulates_and_promotes_tier` — read+react+comment; tier moves.
+- `warmth_is_never_exposed_per_reader` — every public route on the work and
+  author surfaces is asserted to contain no per-reader warmth value (grep
+  the response bodies in the test).
+- `failed_interaction_writes_no_warmth` — a rejected comment leaves warmth
+  unchanged.
+
+### 41.10 Pitfalls
+
+- **INTEGER, never REAL** for both `half_life_bp` and `warmth_bp` — ADR 0004.
+- **The silent contract.** `apply_half_life` must not touch `reason` or add
+  fields; the test enforces it, because a future refactor will want to
+  "helpfully" annotate.
+- **Hook failure isolation.** Warmth hooks log-and-continue; a warmth bug
+  must never make reading fail.
+- **No reader-facing anything.** If a route name starts looking like
+  "my warmth" — stop; the spec forbids it (§41.4).
+
+---
+
 ## 16. Cross-cutting sign-off checklist (run at every milestone tag)
 
 - [ ] Ledger: rows added **before** code; flipped after evidence; `M<repo>-NN`
@@ -3434,3 +3923,6 @@ spec's own header says it is the single source of truth; this plan exists so
 a junior never has to re-derive the current state from git archaeology).
 If you find this plan contradicting `docs/requirements.csv`, the CSV wins —
 fix this plan and note the correction in the commit message.
+
+
+---

@@ -6171,3 +6171,253 @@ These are currently `const` values in application code. They must be moved to
   in `privacy_settings` and `reader_settings`.
 - **No feature flags.** This is about tuning values, not toggling features.
   Feature gating is done at compile time or via Cargo features.
+
+# 39. Resource Directory — a community-curated map of the fandom ecosystem
+
+> **2026-09-21 addition.** Lorehaven is one node in a fandom ecosystem that
+> spans archives, Discord servers, author platforms, writing tools and
+> communities. Readers arriving at a fresh instance have no map of that
+> ecosystem; this section gives them one, ranked by the people who use it.
+> The design borrows the shape of a well-known "list-of-sites" directory:
+> many categories, one ranked list per category, ranked by users — but every
+> ranking input is a named community vote, never traffic, never money, and
+> never the administrator's private taste (§0.3).
+
+## 39.1 Scope
+
+The directory lists **external resources** — things that are not works and do
+not live on this instance. A Lorehaven work has authors, chapters, comments
+and reading progress; a directory entry has none of those. It is a curated
+link with a title, a description, tags and a score. Nothing in this section
+touches the work pipeline.
+
+What may be listed: fanfiction archives, Discord servers, author platforms
+and homepages, writing tools, communities (subreddits, Tumblr tags, forums),
+podcasts and newsletters, and other Lorehaven instances (which also appear in
+the §36.15 instance directory; the resource directory links to that record
+rather than duplicating its stats).
+
+## 39.2 The surface
+
+`/directory` with:
+
+- **Category tabs**, one ranked list per category, ordered by score
+  descending, ties broken by submission date (older first).
+- **Entry cards**: title (linked), one-line description, tags, score, vote
+  controls, submitter handle, submission date. An entry the viewer has already
+  voted on shows its state.
+- **Search** across title, description and tags, per category or global.
+- **Tag filter**: clicking a tag narrows the list to entries carrying it.
+- **Pagination** with a page size set by `[directory].page_size` (default 50).
+
+Categories are seeded (`fanfiction_archive`, `discord_server`,
+`author_platform`, `writing_tool`, `community`, `podcast_newsletter`,
+`lorehaven_instance`, `other`) and the operator may add more through
+`[directory].extra_categories` — the self-hosted contract (§38) applies: the
+category list is instance configuration, not code.
+
+## 39.3 Submission and review
+
+Any signed-in account may submit an entry: category, title, URL, description
+(≤ 500 characters), optional tags. The URL must be absolute http(s) and must
+not resolve to a private or loopback address (the same SSRF rules the
+§14.9 webhook verifier follows).
+
+Review is operator-configurable:
+
+- `[directory].require_approval = true` (default): a submission is **pending**
+  and invisible to everyone except its submitter and the operator until the
+  operator approves it. Approval is one click from the operator's queue and
+  is recorded with approver and timestamp.
+- `require_approval = false`: submissions are visible immediately. The
+  operator may still remove an entry, and removal is recorded.
+
+An entry may be edited by its submitter while pending; after approval, only
+the operator may edit or remove. Removal never cascades to votes — a removed
+entry's rows stay for audit and a resubmission of the same URL starts at
+zero.
+
+## 39.4 Voting and ranking
+
+One vote per account per entry, `+1` or `-1`, toggleable (voting the same
+value again removes the vote; voting the other value flips it). The score is
+the sum of live vote values, denormalised onto the entry row and recomputed
+inside the same transaction as the vote so the list never shows a stale
+score.
+
+Votes are weightless by design: no trust weighting, no karma weighting, no
+decay. The directory answers "what does this community recommend", not "what
+does the algorithm elevate". A vote on a directory entry is public in the
+aggregate (the score) and private in the individual (no voter list, no
+per-voter attribution — the same rule ratings follow, §33.2).
+
+## 39.5 Acceptance
+
+- An anonymous reader sees only approved entries, ranked by score, and can
+  search and filter by category and tag.
+- A signed-in reader can submit an entry, and with `require_approval = true`
+  sees their own pending entry with a visible "pending review" state.
+- Voting twice with the same value removes the vote; voting the other value
+  flips it; the score the list shows reflects the change immediately.
+- A URL that is not absolute http(s), or that points at a loopback or private
+  address, is refused with a named reason.
+- The operator's queue lists pending entries with submitter and date;
+  approval makes the entry visible to everyone in the same request.
+- A category added through `[directory].extra_categories` appears on the
+  surface after a restart with no code change.
+
+## 39.6 What this section deliberately does not do
+
+- **No paid placement, no affiliate links, no sponsored entries.** Money
+  never touches the directory (§0.3).
+- **No traffic or uptime probing.** The instance does not fetch listed URLs
+  on a schedule; a dead link is reported by users, not detected by bots.
+- **No federation of the directory itself.** Entries are local to this
+  instance. Sharing curated lists between instances is a future concern and
+  would ride §36.15's discovery records, not this table.
+- **No per-entry comment threads.** The forum (§17) is where discussion
+  belongs; an entry links out, it does not host.
+
+---
+
+# 40. Remix — fork with provenance, and permission statements made enforceable
+
+> **2026-09-21 addition.** Spec §33.1 defined permission statements and
+> derivative lineage as a draft. This section schedules their implementation
+> and adds the one thing §33.1 described only as data: the *affordance*. A
+> derivative edge nobody can create is a schema, not a feature.
+
+## 40.1 The fork affordance
+
+A **Fork this work** action on every eligible work page. One click creates a
+new draft owned by the forker, linked to its parent through the §33.1
+derivative lineage edge (`kind = remix` by default), inheriting the parent's
+tags, fandoms, characters and relationships, and copying no body text — a
+fork starts empty, because the forker's words are the point.
+
+Guards, in order:
+
+1. **Permission statement.** The parent's `remix` statement is checked: `no`
+   refuses with the statement named in the refusal; `ask` routes to a
+   request the author answers (never auto-approved); `unstated` and `yes`
+   proceed. The refusal names the statement, per §33.1.
+2. **Exclusion registry.** A parent on the exclusion registry is refused by
+   name.
+3. **Depth limit.** `[works].max_fork_depth` (default 3): a work whose
+   lineage chain is already that deep refuses with the chain shown. Fork
+   chains that go forever are how low-effort copies drown a platform.
+4. **Visibility.** A fork of a private work is private; a fork never widens
+   the parent's audience.
+
+The parent's page lists its children under a **Remixes** heading, each with
+its lineage kind and a link. The child's page names its parent the same way.
+The edge survives orphaning (§32.3) and deleting a parent never deletes a
+child.
+
+## 40.2 Permission statements, implemented
+
+The §33.1 statement model becomes real on every work: `podfic`,
+`translation`, `remix`, `continuation`, `redistribution`, `ai_training` —
+each `yes | ask | no | unstated`, defaulting to `unstated`, editable only by
+the owner, surviving orphaning and account deletion. The work editor grows a
+**Sharing & permissions** panel with one control per statement and a plain
+sentence under each ("Readers may translate this work without asking" /
+"Readers must ask first" / "Readers may not translate this work").
+
+Enforcement doors, each naming the statement in its refusal:
+
+- Fork (§40.1) checks `remix`.
+- The translation pipeline (M17) checks `translation` before a request is
+  created.
+- Narration/TTS (M26) checks `podfic`.
+- The import adapters (M6) carry a source-published statement through with
+  provenance and never upgrade `unstated` to `yes`.
+
+## 40.3 Acceptance
+
+- The fork button on a work whose statement is `remix: no` refuses and names
+  the statement; `ask` creates a request; `yes` and `unstated` create a
+  draft.
+- A fork inherits tags and lineage, copies no body text, and appears in its
+  parent's Remixes list.
+- A chain at `max_fork_depth` refuses with the chain shown.
+- Every statement is editable by the owner only, and the editor shows the
+  effective sentence for each.
+- A statement change is recorded with its before and after values.
+
+## 40.4 What this section deliberately does not do
+
+- **No automatic enforcement of external platforms' rules.** The statement is
+  the author's declaration; chasing violations off-instance is the author's
+  choice, not the instance's job.
+- **No licence generation.** The statement is not a legal licence (§32 owns
+  rights); it is a machine-readable social contract.
+- **No retroactivity.** Statements gate new derivatives; existing ones stand.
+
+---
+
+# 41. Longevity and ambient social signals
+
+> **2026-09-21 addition.** Two Gravity-derived signals, adopted because they
+> serve the priority stack's first item — maximise high-quality fiction —
+> without optimising for engagement (§0.3's vital-sign rule).
+
+## 41.1 Content half-life
+
+A work's **half-life** is how long it keeps being read after publication.
+Freshness (§16.14) biases recency; completion rates (§9.8) measure the first
+read. Neither answers the question a reader actually asks: *is this still
+worth reading now?* A work still being finished and discussed two years on
+is evergreen quality — the thing the priority stack names first.
+
+Computation, nightly, per work published more than `[discovery].half_life_min_age_days`
+(default 30) days ago: from `reading_events`, the ratio of readers who
+started the work in the last 30 days to those who started it in its first 30,
+expressed in basis points (`half_life_bp`, `INTEGER`, house binding rules).
+The score is written onto the work row by a scheduled job and is **never
+shown to readers as a number** — it is a ranking input, consumed by the
+discovery engines as a multiplier on `Candidate.score` (§16.3's blend), the
+same silent-reordering contract operator affinity follows.
+
+Configuration: `[discovery].enable_half_life` (default `false` until the job
+proves itself), `half_life_min_age_days`, `half_life_window_days` (default 30).
+
+## 41.2 Interaction tiers — ambient warmth
+
+Most readers never comment (§17's positivity model shapes comments; it has
+nothing for the silent majority). Interaction tiers give a shy reader a
+graded way to matter: every interaction with an author's works — reading a
+chapter, finishing a work, reacting, commenting — accumulates a private
+**warmth** value between the reader's account and the author's. Warmth
+crosses thresholds (`lurk < react < comment < create`, the thresholds in
+basis points under `[community].warmth_thresholds`) and the resulting tier
+is shown to the author as an aggregate only: "this month, 34 lurkers, 12
+reactors, 4 commenters, 2 creators engaged with your works." Never a list of
+names, never a per-reader value, never shown to the reader themselves — the
+reader sees nothing, because a warmth meter on your own reading is a
+streak-shaped dark pattern (§0.2 attention rules).
+
+Recording hooks: `record_reading_progress`, quick reactions, comments. Each
+hook writes one row (upsert by pair, accumulate the delta, recompute tier)
+inside the same transaction as the interaction it accompanies.
+
+## 41.3 Acceptance
+
+- With `enable_half_life = true`, the nightly job writes `half_life_bp` on
+  eligible works and a changed score reorders discovery output with no field
+  changes (the §16.3 silent rule).
+- A work with no recent readers has a lower half-life score than one still
+  being finished; the job is idempotent — running twice changes nothing.
+- An author's aggregate panel shows tier counts; a test asserts no endpoint
+  exposes a per-reader warmth value or a reader list.
+- Warmth accumulates across interactions within one transaction; a failed
+  interaction writes no warmth.
+
+## 41.4 What this section deliberately does not do
+
+- **No public half-life badge.** The score is a ranking input, not a label;
+  publishing it would make recency-of-attention a target.
+- **No reader-facing warmth.** The reader never sees their own tier or
+  progress toward one — the anti-streak rule is absolute.
+- **No warmth in ranking.** Warmth describes a reader-author relationship;
+  it never feeds discovery, search or any public ordering.
