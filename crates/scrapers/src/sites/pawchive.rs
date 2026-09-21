@@ -96,12 +96,57 @@ struct ApiPost {
     user: String,
     title: String,
     content: String,
-    #[serde(default)]
-    tags: Option<Vec<String>>,
+    /// The site returns either an array of tag names or — for posts with a
+    /// single tag — the string form `"{TagName}"`. Both shapes are accepted.
+    #[serde(default, deserialize_with = "deserialize_tags")]
+    tags: Vec<String>,
     #[serde(default)]
     published: Option<String>,
     #[serde(default)]
     attachments: Option<Vec<serde_json::Value>>,
+}
+
+/// Accept `["a", "b"]`, `"{a}"` (string form), `null` and absence.
+fn deserialize_tags<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error as _;
+    use serde::{Deserialize as _, Serialize as _};
+    use serde_json::Value;
+
+    let value = Value::deserialize(deserializer)?;
+    match value {
+        Value::Null => Ok(Vec::new()),
+        Value::Array(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    Value::String(s) => out.push(s),
+                    other => {
+                        return Err(D::Error::custom(format!(
+                            "a tag list entry must be a string, got {}",
+                            Value::to_string(&other)
+                        )))
+                    }
+                }
+            }
+            Ok(out)
+        }
+        Value::String(s) => {
+            // "{Magiscape}" -> "Magiscape"; a bare name passes through too.
+            let trimmed = s.trim().trim_matches('{').trim_matches('}').to_owned();
+            if trimmed.is_empty() {
+                Ok(Vec::new())
+            } else {
+                Ok(vec![trimmed])
+            }
+        }
+        other => Err(D::Error::custom(format!(
+            "tags must be an array or a string, got {}",
+            Value::to_string(&other)
+        ))),
+    }
 }
 
 /// The JSON list response is just an array of posts.
@@ -161,9 +206,16 @@ impl SourceAdapter for Pawchive {
             return Err(SourceError::NotFound);
         }
 
-        // Count posts with real content (chapters) vs links-only.
+        // Count posts with real content (chapters) vs links-only, and collect
+        // the union of post tags for the work's tag list.
         let mut chapters = Vec::new();
+        let mut tag_set: Vec<String> = Vec::new();
         for (ordinal, post) in posts.iter().enumerate() {
+            for tag in &post.tags {
+                if !tag.is_empty() && !tag_set.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+                    tag_set.push(tag.clone());
+                }
+            }
             let text = strip_tags(&post.content);
             let text = text.trim().to_owned();
             // Only include posts that have meaningful chapter text.
@@ -192,7 +244,7 @@ impl SourceAdapter for Pawchive {
             chapters,
             rating_text: None,
             warning_texts: Vec::new(),
-            tags: Vec::new(),
+            tags: tag_set,
         })
     }
 
@@ -284,4 +336,49 @@ fn strip_tags(html: &str) -> String {
 /// Collapse internal whitespace to a single string.
 fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[cfg(test)]
+mod tag_tests {
+    use super::ApiPost;
+
+    fn parse(json: &str) -> Result<ApiPost, serde_json::Error> {
+        serde_json::from_str(json)
+    }
+
+    #[test]
+    fn tags_accept_the_array_form() {
+        let post = parse(
+            r#"{"id":"1","user":"7","title":"t","content":"c","tags":["a","b"]}"#,
+        )
+        .expect("array tags parse");
+        assert_eq!(post.tags, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn tags_accept_the_string_form() {
+        // Pawchive returns "{Magiscape}" for single-tag posts (user 77053790).
+        let post = parse(
+            r#"{"id":"1","user":"7","title":"t","content":"c","tags":"{Magiscape}"}"#,
+        )
+        .expect("string tags parse");
+        assert_eq!(post.tags, vec!["Magiscape"]);
+    }
+
+    #[test]
+    fn tags_accept_absence_null_and_empty_strings() {
+        let base = r#"{"id":"1","user":"7","title":"t","content":"c""#;
+        assert!(parse(&format!("{base}}}")).is_ok());
+        assert!(parse(&format!("{base},\"tags\":null}}")).is_ok());
+        let post = parse(&format!("{base},\"tags\":\"{{}}\"}}")).expect("empty braces parse");
+        assert!(post.tags.is_empty());
+    }
+
+    #[test]
+    fn tags_reject_other_shapes() {
+        let post = parse(
+            r#"{"id":"1","user":"7","title":"t","content":"c","tags":42}"#,
+        );
+        assert!(post.is_err());
+    }
 }
