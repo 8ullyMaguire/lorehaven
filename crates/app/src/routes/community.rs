@@ -37,7 +37,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/topics/{id}/lock", post(lock_topic))
         // forum search (spec §17.4)
-        .route("/search", get(forum_search))
+        .route("/forum-search", get(forum_search))
         // groups
         .route("/groups", get(get_groups).post(post_group))
         .route("/groups/{id}", get(get_group))
