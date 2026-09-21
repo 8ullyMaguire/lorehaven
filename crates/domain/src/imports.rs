@@ -83,6 +83,8 @@ pub struct ImportedWork {
     pub author_text: String,
     /// The chapters, in the order the source lists them.
     pub chapters: Vec<ChapterIdentity>,
+    /// Total word count, if the source reports one. None means unknown.
+    pub word_count: Option<u32>,
 }
 
 impl ImportedWork {
@@ -93,6 +95,7 @@ impl ImportedWork {
             title: title.into(),
             author_text: author_text.into(),
             chapters: Vec::new(),
+            word_count: None,
         }
     }
 

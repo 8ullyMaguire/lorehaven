@@ -25,7 +25,7 @@ CREATE TABLE instance_fingerprints (
     created_at          TEXT NOT NULL
 );
 CREATE INDEX idx_instance_fingerprints_host ON instance_fingerprints(instance_host, valid_until DESC);
-CREATE INDEX idx_instance_fingerprints_valid ON instance_fingerprints(valid_until) WHERE valid_until > datetime('now');
+CREATE INDEX idx_instance_fingerprints_valid ON instance_fingerprints(valid_until);
 
 -- ActivityPub actors (mapped to lorehaven users/instances)
 CREATE TABLE ap_actors (

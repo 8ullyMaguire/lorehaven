@@ -260,7 +260,11 @@ pub struct TtsConfig {
 impl Default for TtsConfig {
     fn default() -> Self {
         Self {
-            engine: "silent".into(),
+            // Local-first is the decision (spec §38.2, lorehaven.toml.example):
+            // an instance narrates with the binary on its own machine rather
+            // than sending a reader's text to a service. `silent` remains a
+            // valid explicit choice for hosts with no synthesizer.
+            engine: "piper".into(),
             piper_path: None,
             piper_voice_model: None,
             default_voice: None,

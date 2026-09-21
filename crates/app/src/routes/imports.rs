@@ -574,9 +574,10 @@ async fn preview_import(
                 source_chapter_key: chapter.source_chapter_key.clone(),
                 ordinal: u32::try_from(chapter.ordinal).unwrap_or(u32::MAX),
                 title: chapter.title.clone(),
-                word_count: chapter.word_count.map(|c| c as u32),
+                word_count: None,
             })
             .collect(),
+        word_count: None,
     });
 
     let plan = plan_import(
@@ -588,12 +589,13 @@ async fn preview_import(
                 .chapters
                 .iter()
                 .map(|chapter| ChapterIdentity {
-                    word_count: chapter.word_count,
+                    word_count: None,
                     source_chapter_key: chapter.source_chapter_key.clone(),
-                    ordinal: chapter.ordinal,
+                    ordinal: chapter.ordinal as u32,
                     title: chapter.title.clone(),
                 })
                 .collect(),
+            word_count: None,
         },
     );
 
@@ -641,6 +643,7 @@ async fn find_duplicate(
         title: work.title.clone(),
         author_text: work.author_text.clone(),
         chapters: Vec::new(),
+        word_count: None,
     };
     for item in items {
         if item.source_key == work.source_key.as_str()
@@ -652,6 +655,7 @@ async fn find_duplicate(
             title: item.title.clone(),
             author_text: item.author_text.clone(),
             chapters: Vec::new(),
+            word_count: None,
         };
         if lorehaven_domain::imports::looks_like_a_duplicate(&candidate, &held) {
             return Ok(Some(format!(
@@ -870,11 +874,12 @@ async fn start_import(
                     .iter()
                     .map(|chapter| ChapterIdentity {
                         source_chapter_key: chapter.source_chapter_key.clone(),
-                        ordinal: chapter.ordinal,
-                        word_count: chapter.word_count,
+                        ordinal: chapter.ordinal as u32,
+                        word_count: None,
                         title: chapter.title.clone(),
                     })
                     .collect(),
+                word_count: None,
             },
         );
         if describe_plan(&plan).plan != *expected {
@@ -1160,10 +1165,11 @@ async fn held_work(
             .map(|chapter| ChapterIdentity {
                 source_chapter_key: chapter.source_chapter_key.clone(),
                 ordinal: u32::try_from(chapter.ordinal).unwrap_or(u32::MAX),
-                word_count: chapter.word_count.map(|c| c as u32),
                 title: chapter.title.clone(),
+                word_count: None,
             })
             .collect(),
+        word_count: None,
     }))
 }
 
@@ -1971,3 +1977,4 @@ fn shelf_import_input(
         provenance_json: item.provenance_json.clone(),
     }
 }
+

@@ -55,6 +55,12 @@ pub enum WarningAction {
     Show,
 }
 
+impl fmt::Display for WarningAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 impl WarningAction {
     pub fn as_str(&self) -> &'static str {
         match self {

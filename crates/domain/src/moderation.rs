@@ -46,7 +46,8 @@ impl SanctionLevel {
         )
     }
 
-    /// True if the user may read the forum at all.
+    /// True if the user may read the forum at all. A forum ban that left
+    /// reading open would be the same sanction as read-only.
     pub fn blocks_reading_fine(&self) -> bool {
         matches!(self, Self::ForumBan | Self::SiteBan)
     }
@@ -151,7 +152,7 @@ mod tests {
         assert!(SanctionLevel::ForumBan.blocks_posting());
         assert!(SanctionLevel::SiteBan.blocks_posting());
 
-        assert!(!SanctionLevel::ForumBan.blocks_reading_fine());
+        assert!(SanctionLevel::ForumBan.blocks_reading_fine());
         assert!(SanctionLevel::SiteBan.blocks_reading_fine());
     }
 
