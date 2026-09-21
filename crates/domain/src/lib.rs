@@ -8,6 +8,7 @@ pub mod charging;
 pub mod community;
 pub mod content;
 pub mod derivative;
+pub mod directory;
 pub mod discovery;
 pub mod document;
 pub mod economy;

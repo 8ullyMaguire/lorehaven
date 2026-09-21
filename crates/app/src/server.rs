@@ -340,6 +340,11 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        .merge(classified(
+            routes::directory::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // The reader's library: shelves, bookmarks, private tags, reading
         // statuses, saved views, storage and the update check. Every route
         // needs a session and most of them write, so the whole tree sits under
@@ -399,6 +404,14 @@ pub fn build_router(state: AppState) -> Router {
         .merge(classified(
             routes::rating_integrity::router(),
             RouteClass::Default,
+            &state,
+        ))
+        // CTA marks (spec §42.2) — curators record whether a work carries its
+        // own CTA. Write class: mark and retract mutate; list is read but
+        // should be authenticated (who marked what).
+        .merge(classified(
+            routes::cta::router(),
+            RouteClass::Write,
             &state,
         ))
         // Recommendation transparency (M29): "why am I seeing this" explanations.
