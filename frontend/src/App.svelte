@@ -6,6 +6,8 @@
   import Account from './routes/Account.svelte';
   import AdminJobs from './routes/AdminJobs.svelte';
   import Community from './routes/Community.svelte';
+  import Docs from './routes/Docs.svelte';
+  import DocsSearch from './lib/components/DocsSearch.svelte';
   import ForumCategory from './routes/ForumCategory.svelte';
   import ForumSearch from './routes/ForumSearch.svelte';
   import ForumTopic from './routes/ForumTopic.svelte';
@@ -52,12 +54,14 @@
     { href: '/exports', label: 'Exports', primary: false },
     { href: '/write', label: 'Write', primary: true },
     { href: '/community', label: 'Community', primary: false },
+    { href: '/docs', label: 'Help', primary: false },
     { href: '/notifications', label: 'Notifications', primary: false },
     { href: '/pseud', label: 'Pseud', primary: false },
   ];
 
   let path = $state(window.location.pathname);
   let moreOpen = $state(false);
+  let docsSearchOpen = $state(false);
   let route = $derived(matchRoute(path));
 
   let preference = $state<ThemePreference>(readPreference(window.localStorage));
@@ -92,6 +96,17 @@
     };
     window.addEventListener('popstate', onPopState);
 
+    // Ctrl+K / Cmd+K opens the docs search from anywhere. The Docs page
+    // registers its own listener too; the dialog ignores re-opens, so the
+    // double-fire on that page is harmless.
+    const onKeydown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        docsSearchOpen = true;
+      }
+    };
+    window.addEventListener('keydown', onKeydown);
+
     const onSystemChange = () => {
       if (preference === 'system') {
         applyTheme(resolveTheme('system', darkQuery?.matches ?? false), document.documentElement);
@@ -101,6 +116,7 @@
 
     return () => {
       window.removeEventListener('popstate', onPopState);
+      window.removeEventListener('keydown', onKeydown);
       darkQuery?.removeEventListener('change', onSystemChange);
     };
   });
@@ -278,6 +294,10 @@
     <Discover />
   {:else if route.id === 'community'}
     <Community />
+  {:else if route.id === 'docs'}
+    <Docs />
+  {:else if route.id === 'doc-page'}
+    <Docs slug={route.params?.slug ?? ''} />
   {:else if route.id === 'forum-category'}
     <ForumCategory categoryId={route.params?.categoryId ?? ''} />
   {:else if route.id === 'forum-search'}
@@ -292,6 +312,8 @@
     <NotFound path={route.path} />
   {/if}
 </main>
+
+<DocsSearch open={docsSearchOpen} onclose={() => (docsSearchOpen = false)} />
 
 <footer class="site-footer">
   <div class="container">

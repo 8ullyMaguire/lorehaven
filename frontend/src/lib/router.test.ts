@@ -144,3 +144,25 @@ describe('Milestone 2 routes', () => {
     expect(matchRoute('/pseud//').id).toBe('pseuds');
   });
 });
+
+describe('docs routes', () => {
+  it('resolves the docs index', () => {
+    const match = matchRoute('/docs');
+    expect(match.id).toBe('docs');
+  });
+
+  it('resolves one doc page with its slug as a param', () => {
+    const match = matchRoute('/docs/keyboard-shortcuts');
+    expect(match.id).toBe('doc-page');
+    expect(match.params?.slug).toBe('keyboard-shortcuts');
+  });
+
+  it('decodes an escaped doc slug', () => {
+    expect(matchRoute('/docs/the-forum-explained').params?.slug).toBe('the-forum-explained');
+  });
+
+  it('does not treat an empty slug as a doc page', () => {
+    expect(matchRoute('/docs/').id).toBe('docs');
+    expect(matchRoute('/docs//').id).toBe('docs');
+  });
+});

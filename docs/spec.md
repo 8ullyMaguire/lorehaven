@@ -6118,6 +6118,13 @@ Environment variables (all prefixed `LOHAVEN_BOT_`):
 | `[tts]` | `piper_voice_model` | `None` | Piper voice model |
 | `[tts]` | `default_voice` | `None` | Default voice |
 | `[tts]` | `monthly_spend_cap_cents` | `None` | Monthly TTS spend cap |
+| `[directory]` | `page_size` | `50` | Entries per page |
+| `[directory]` | `require_approval` | `true` | Submissions need operator approval before becoming visible |
+| `[directory]` | `extra_categories` | `[]` | Operator-added categories beyond the seeded eight |
+| `[directory]` | `vote_weighting` | `"trust_and_taste"` | `flat`, `trust`, or `trust_and_taste` |
+| `[directory]` | `trust_vote_weights` | `"0.5,0.75,1.0,1.25,1.5,1.75,2.0"` | Multiplier per trust level TL0–TL6 |
+| `[directory]` | `taste_vote_floor` | `0.75` | Vote multiplier at taste affinity 0 |
+| `[directory]` | `taste_vote_ceiling` | `1.25` | Vote multiplier at taste affinity 1 |
 | `[forum]` | `vote_budget` | `[(1,10),(3,30),(5,60)]` | Vote budget per TL |
 | `[forum]` | `karma_decay_percent` | `5` | Monthly karma decay % |
 | `[forum]` | `meta_mod_points` | `1` | Points per meta-mod verdict |
@@ -6183,19 +6190,37 @@ These are currently `const` values in application code. They must be moved to
 > ranking input is a named community vote, never traffic, never money, and
 > never the administrator's private taste (§0.3).
 
-## 39.1 Scope
+## 39.1 Scope — lists and their entries
 
-The directory lists **external resources** — things that are not works and do
-not live on this instance. A Lorehaven work has authors, chapters, comments
-and reading progress; a directory entry has none of those. It is a curated
-link with a title, a description, tags and a score. Nothing in this section
-touches the work pipeline.
+The surface is a set of **curated lists**. A list is a ranked collection of
+**entries**, and an entry is one of two kinds:
 
-What may be listed: fanfiction archives, Discord servers, author platforms
-and homepages, writing tools, communities (subreddits, Tumblr tags, forums),
-podcasts and newsletters, and other Lorehaven instances (which also appear in
-the §36.15 instance directory; the resource directory links to that record
-rather than duplicating its stats).
+- **External resources** — things that do not live on this instance: fanfiction
+  archives, Discord servers, author platforms and homepages, writing tools,
+  communities (subreddits, Tumblr tags, forums), podcasts and newsletters, and
+  other Lorehaven instances (which also appear in the §36.15 instance
+  directory; a list entry links to that record rather than duplicating its
+  stats).
+- **Internal references** — works, authors (pseuds), tags and fandoms **on this
+  instance**. An internal entry stores the referenced id, not a copy: a work
+  entry renders from the live work row, so a list never goes stale and never
+  widens what the reference alone may show (an ineligible work is refused at
+  submission, and an entry whose work later becomes private is hidden from
+  everyone but its curator until it is public again).
+
+Every list has a **kind** — `external`, `works`, `authors`, `mixed` — and the
+kind gates what an entry may reference: a `works` list accepts only work ids,
+an `authors` list only pseud ids, `mixed` and `external` accept any external
+resource (internal references only in `mixed`). Categories from §39.2 apply
+to external entries inside any list.
+
+**Instance lists.** Any list may be marked by the operator as an **instance
+list** — the curated face of this instance, shown on the landing page and in
+the site header ("Start here", "This month's picks", "The archives we read").
+Instance lists are the operator's editorial surface: the operator picks which
+lists represent the instance and in what order; the ranking inside each list
+is still the community's votes (§39.4). An instance list is read-only to
+everyone but its curator and the operator.
 
 ## 39.2 The surface
 
@@ -6241,15 +6266,46 @@ zero.
 
 One vote per account per entry, `+1` or `-1`, toggleable (voting the same
 value again removes the vote; voting the other value flips it). The score is
-the sum of live vote values, denormalised onto the entry row and recomputed
-inside the same transaction as the vote so the list never shows a stale
-score.
+the sum of live weighted votes, denormalised onto the entry row and
+recomputed inside the same transaction as the vote so the list never shows a
+stale score.
 
-Votes are weightless by design: no trust weighting, no karma weighting, no
-decay. The directory answers "what does this community recommend", not "what
-does the algorithm elevate". A vote on a directory entry is public in the
-aggregate (the score) and private in the individual (no voter list, no
-per-voter attribution — the same rule ratings follow, §33.2).
+**Vote weight.** A vote carries a weight — the directory is the instance's
+curated front door, and whose recommendation counts more is operator policy:
+
+```text
+vote_weight = trust_multiplier(voter_trust_level)
+            × taste_multiplier(voter_admin_taste_affinity)
+```
+
+- **Trust multiplier** scales with the §19.1 ladder. Defaults:
+  TL0 0.5, TL1 0.75, TL2 1.0, TL3 1.25, TL4 1.5, TL5 1.75, TL6 2.0 —
+  a reviewed trusted regular's recommendation counts for more than a
+  day-old account's, and the operator can retune every rung through
+  `[directory].trust_vote_weights` (seven comma-separated multipliers).
+- **Taste multiplier** scales with the voter's affinity to the
+  administrator's taste profile — the same `aggregate_affinities` signal the
+  §9.7.4 demand multiplier uses, applied to a voter instead of a work.
+  Affinity 0 maps to `[directory].taste_vote_floor` (default 0.75) and
+  affinity 1 maps to `[directory].taste_vote_ceiling` (default 1.25).
+
+Weighting is operator-configurable: `[directory].vote_weighting` is one of
+`flat` (every vote weighs 1 — the weightless directory), `trust` (trust
+multiplier only), `trust_and_taste` (both; the default). `flat` is always
+available as the off switch.
+
+**Silence is the contract (§0.3).** Weights are applied, never shown: no
+voter list, no per-voter attribution, no weight breakdown, no user-facing
+label that taste influenced anything. A reader sees a score; nothing about
+the score reveals the administrator's taste profile or any individual's
+affinity to it. The same rule ratings follow (§33.2) applies to the
+individual vote; the same rule the demand multiplier follows (§9.7.4)
+applies to the taste signal.
+
+A vote on a directory entry is public in the aggregate (the score) and
+private in the individual. Weight recomputation is triggered by trust-level
+changes and nightly taste-refresh jobs, folded into the denormalised score
+in the same transaction as the change.
 
 ## 39.5 Acceptance
 
@@ -6259,6 +6315,12 @@ per-voter attribution — the same rule ratings follow, §33.2).
   sees their own pending entry with a visible "pending review" state.
 - Voting twice with the same value removes the vote; voting the other value
   flips it; the score the list shows reflects the change immediately.
+- With `vote_weighting = "trust_and_taste"`, a TL4 vote moves the score more
+  than a TL0 vote on the same entry; with `vote_weighting = "flat"` they move
+  it equally.
+- No surface, API response or error message reveals a voter's weight, the
+  taste component of any score, or the administrator's affinity to any
+  voter.
 - A URL that is not absolute http(s), or that points at a loopback or private
   address, is refused with a named reason.
 - The operator's queue lists pending entries with submitter and date;
@@ -6270,6 +6332,8 @@ per-voter attribution — the same rule ratings follow, §33.2).
 
 - **No paid placement, no affiliate links, no sponsored entries.** Money
   never touches the directory (§0.3).
+- **No weight disclosure.** Vote weights — trust or taste — are never
+  surfaced, exported or explained per voter (§0.3).
 - **No traffic or uptime probing.** The instance does not fetch listed URLs
   on a schedule; a dead link is reported by users, not detected by bots.
 - **No federation of the directory itself.** Entries are local to this
