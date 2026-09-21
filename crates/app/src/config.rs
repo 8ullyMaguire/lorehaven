@@ -140,9 +140,28 @@ pub struct Config {
     pub directory: DirectoryConfig,
     /// Export retention settings (spec §38).
     pub exports: ExportsConfig,
+    /// Work permission statements and fork guards (spec §40).
+    pub works: WorksConfig,
     /// Where the configuration file was read from, if any.
     pub config_path: Option<PathBuf>,
 }
+
+/// Work permission settings (spec §40).
+#[derive(Debug, Clone)]
+pub struct WorksConfig {
+    /// Maximum fork chain depth. A work whose lineage chain is already this
+    /// deep refuses to fork. Default 3.
+    pub max_fork_depth: u32,
+}
+
+impl Default for WorksConfig {
+    fn default() -> Self {
+        Self {
+            max_fork_depth: 3,
+        }
+    }
+}
+
 
 /// Operator-only settings.
 ///
@@ -966,6 +985,11 @@ impl Config {
             None => DirectoryConfig::default(),
         };
 
+        // --- works (spec §40) ----------------------------------------------
+        let works = WorksConfig {
+            max_fork_depth: file.works.as_ref().and_then(|w| w.max_fork_depth).unwrap_or(3),
+        };
+
         let config = Self {
             environment,
             site,
@@ -993,6 +1017,7 @@ impl Config {
             forum,
             exports,
             directory,
+            works,
             config_path,
         };
 
@@ -1060,6 +1085,7 @@ impl Config {
             forum: ForumConfig::default(),
             exports: ExportsConfig::default(),
             directory: DirectoryConfig::default(),
+            works: WorksConfig::default(),
             config_path: None,
         }
     }
@@ -1218,6 +1244,15 @@ struct FileConfig {
     forum: Option<ForumSection>,
     exports: Option<ExportsSection>,
     directory: Option<DirectorySection>,
+    works: Option<WorksSection>,
+}
+
+/// The `[works]` table (spec §40): fork and permission statement settings.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorksSection {
+    /// Maximum fork chain depth (default 3).
+    max_fork_depth: Option<u32>,
 }
 
 /// The `[tts]` table: which engine narrates, and how an operator configured it

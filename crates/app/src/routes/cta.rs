@@ -22,10 +22,10 @@ pub struct CtaMarkRequest {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route(
-            "/works/:id/cta_marks",
+            "/works/{id}/cta_marks",
             axum::routing::post(mark).get(list),
         )
-        .route("/works/:id/cta_marks/me", axum::routing::delete(retract))
+        .route("/works/{id}/cta_marks/me", axum::routing::delete(retract))
 }
 
 fn bad_request(detail: impl Into<String>) -> Response {

@@ -346,3 +346,26 @@ pub async fn tag_work(db: &Database, work_id: &str, node_id: &str, weight: i64) 
         added_at: now,
     })
 }
+
+/// Get all node_ids tagged on a work, in insertion order.
+pub async fn tags_for_work(db: &Database, work_id: &str) -> Result<Vec<String>> {
+    let sql = db.sql(
+        "SELECT node_id FROM work_tags WHERE work_id = ? ORDER BY added_at",
+        "SELECT node_id FROM work_tags WHERE work_id = $1::uuid ORDER BY added_at",
+    );
+    let rows: Vec<String> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar(&sql)
+                .bind(work_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar(&sql)
+                .bind(work_id)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(rows)
+}
