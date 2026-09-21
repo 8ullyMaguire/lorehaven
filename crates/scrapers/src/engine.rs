@@ -425,7 +425,7 @@ impl BodyGuard {
 /// the phrase `Just a moment` is a page about a moment, not a wall.
 #[must_use]
 pub fn is_bot_challenge(status: u16, headers: &[(&str, String)], body: &str) -> bool {
-    let refused = matches!(status, 403 | 429 | 503);
+    let refused = matches!(status, 403 | 429 | 503 | 525);
     if !refused {
         return false;
     }

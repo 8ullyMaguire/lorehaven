@@ -155,7 +155,6 @@ pub async fn set_theme_visibility(
 async fn compute_theme_from_engagement(
     db: &lorehaven_db::Database,
 ) -> anyhow::Result<Value> {
-    use sqlx::Row;
     let mut weights: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
 
     // Tags from bookmarks (weight 3.0 each)
