@@ -412,7 +412,7 @@ pub async fn ap_actor(State(state): State<AppState>) -> ApiResult<Json<Value>> {
         "publicKey": {
             "id": format!("{}/federation/actor#main-key", base),
             "owner": format!("{}/federation/actor", base),
-            "publicKeyPem": "placeholder-pubkey"
+            "publicKeyPem": crate::keys::load_public_key_pem()
         }
     })))
 }

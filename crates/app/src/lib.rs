@@ -20,6 +20,7 @@ pub mod doctor;
 pub mod exports;
 pub mod http;
 pub mod imports;
+pub mod keys;
 pub mod library_updates;
 pub mod limiter;
 pub mod logging;
