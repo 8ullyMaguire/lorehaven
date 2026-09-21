@@ -2422,6 +2422,42 @@ export async function createReply(topicId: string, body: string): Promise<ForumP
   });
 }
 
+export interface ForumSearchResult {
+  kind: string;
+  id: string;
+  title: string;
+  snippet: string;
+  author_pseud: string;
+  created_at: string;
+  score: number;
+}
+
+/** Search forum posts and topics (spec §17.4). */
+export async function searchForum(
+  params: {
+    q: string;
+    category?: string;
+    author?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+  },
+  signal?: AbortSignal,
+): Promise<ForumSearchResult[]> {
+  const sp = new URLSearchParams();
+  sp.set('q', params.q);
+  if (params.category) sp.set('category', params.category);
+  if (params.author) sp.set('author', params.author);
+  if (params.from) sp.set('from', params.from);
+  if (params.to) sp.set('to', params.to);
+  if (params.limit) sp.set('limit', String(params.limit));
+  const page = await apiFetch<{ items: ForumSearchResult[] }>(
+    `/search?${sp.toString()}`,
+    { signal },
+  );
+  return page.items;
+}
+
 export async function fetchGroups(signal?: AbortSignal): Promise<Group[]> {
   const page = await apiFetch<{ items: Group[] }>('/groups', { signal });
   return page.items;
