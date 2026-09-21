@@ -90,6 +90,13 @@ topics = [
 
 Each entry: `name: String`, `public: bool`, `bonus_credits: i64` (default 0).
 
+## 0.4.5 Monetization disclosure
+
+`/api/v1/meta` also surfaces the instance's monetization state — pool
+sizes, cap, median, fee range, weights — exactly as §20.10.7 specifies.
+The disclosure is the anti-corruption mechanism: public, always visible,
+and never optional when billing is enabled.
+
 ---
 
 # 1. Ground Rules for Implementation
@@ -162,6 +169,8 @@ Store decisions in `docs/adr/`:
 0016-presence-and-typing-indicators.md
 0017-work-monetization.md
 0018-ai-crawler-posture.md
+0019-media-entity-model.md
+0020-redistribution-floor.md
 ```
 
 ## 1.5 Features do not override foundational protections
@@ -220,7 +229,7 @@ Every optional integration also has disabled, unavailable, misconfigured, and fa
 | Reverse proxy | Caddy |
 | Service management | systemd |
 | Default storage | Local filesystem |
-| Optional billing | Stripe adapter, with billing-disabled operation |
+| Optional billing | Payment processor adapter (operator-chosen), with billing-disabled operation |
 | Optional AI (translation, summarization, classification) | Provider interface with pluggable adapters including Ollama |
 | Optional caching | Redis, with in-process fallback |
 
@@ -282,6 +291,13 @@ Optional integrations:
 - Redis.
 
 Core reading, writing, publishing, private importing, and basic community must remain functional without optional cloud services.
+
+**Payment processor compatibility.** The operator chooses the payment
+processor adapter and owns its compatibility with the content the instance
+hosts: mainstream processors restrict adult content in their terms of
+service and freeze accounts that host it. The spec names no processor; the
+operator must select one whose content policy matches the instance's
+(§20.9). This is an operator compliance concern, not a platform feature.
 
 ## 2.3 Repository structure
 
@@ -588,7 +604,7 @@ Alias uniqueness is scoped by type and namespace. Relationship participant sets 
 | Collections | collections, collection_roles, collection_submissions, collection_entries |
 | Writing events | challenges, prompts, signups, assignments, claims, fulfillments, mentorships, sprints, wishlist_items, wishlist_votes, request_candidates |
 | Governance | trust_policies, trust_history, expertise, role_assignments, reports, cases, proposals, votes, sanctions, appeals, audit_events, process_feedback, quorum_records, shadowban_actions |
-| Economy | wallets, ledger_transactions, ledger_entries, credit_holds, subscriptions, payment_events, bounties, entitlements, work_pricing, work_entitlements, author_earnings_ledger, payouts, monetization_assertions |
+| Economy | wallets, ledger_transactions, ledger_entries, credit_holds, subscriptions, payment_events, bounties, entitlements, work_pricing, work_entitlements, author_earnings_ledger, payouts, monetization_assertions, pool_b_distributions, monetization_period_summaries, work_ai_declarations |
 | Extensions | packages, package_versions, manifests, installations, grants, reviews, approvals, execution_usage, revocations, extension_purchases, extension_ratings, webhook_subscriptions |
 | Discovery | user_preferences, taste_profiles, taste_profile_versions, permitted_signals, exposure_events, aggregate_affinities, similarity_suggestions, similarity_votes, recommendation_recipes, recipe_versions, diversity_budgets, editorial_picks |
 | Interface | dashboard_layouts, widget_instances, user_locale_preferences, navigation_customizations |
@@ -3115,6 +3131,19 @@ entirely.
 
 No unlimited compute, no purchased trust, no search-ranking advantage, no moderation authority, no positivity filter bypass.
 
+### 20.6.1 Subscription revenue attribution
+
+When the operator enables it, subscription revenue is attributed to authors
+by reading time: each subscriber's fee distributes across the authors they
+actually read that calendar month, weighted by time spent on their works —
+never by word count, which rewards padding. Attribution reuses the
+time-on-page infrastructure (§9.7.8, §9.8) and inherits its anti-gaming
+thresholds: minimum time-on-page, deduplication within a window, and
+exclusion of the subscriber's own works (§9.7.8's self-dealing rules).
+
+Attribution is a Pool A flow (§20.10.1) and is subject to the earnings cap
+(§20.10.3) like any other direct attribution.
+
 ## 20.7 Marketplace revenue
 
 Paid extensions and themes generate revenue split with developers. Configurable reference split of 85/15 (developer/platform). Operator handles tax and invoicing setup.
@@ -3235,10 +3264,12 @@ chapter.
 | `author_earnings_ledger` | author_account_id, amount_minor, currency, kind, payment_id, idempotency_key |
 | `payouts` | author_account_id, amount_minor, currency, processor_reference, status, initiated_at |
 | `monetization_assertions` | work_id, assertion_kind, policy_version, accepted_at, revoked_at |
+| `work_ai_declarations` | work_id, declaration, declared_at, revised_at |
 
 ```text
 POST   /api/v1/works/:id/pricing
 DELETE /api/v1/works/:id/pricing
+PUT    /api/v1/works/:id/ai-declaration
 POST   /api/v1/works/:id/purchase
 POST   /api/v1/works/:id/tips
 GET    /api/v1/me/entitlements
@@ -3246,6 +3277,233 @@ GET    /api/v1/me/earnings
 POST   /api/v1/me/payouts
 GET    /api/v1/admin/monetization
 ```
+
+### 20.9.4 AI content declaration
+
+Every work carries an AI-usage declaration, set by its author and required
+before monetization is enabled on the work:
+
+```text
+ai_content_declaration: none | assisted | co-written | generated
+```
+
+- **`none`** — no AI assistance.
+- **`assisted`** — grammar, brainstorming, research only.
+- **`co-written`** — substantial AI-generated text, human-directed.
+- **`generated`** — primarily AI-generated.
+
+The declaration is the author's statement on the record, versioned and
+audited like the monetization assertions (§20.9.1). A false declaration is
+a sanctionable offense escalating to permanent monetization ban (§19.6),
+decided by quorum — a classifier may flag suspected undeclared AI for
+review under §34.5's signals-never-verdicts contract, never decide it.
+
+The declaration sets the work's Pool B multiplier (§20.10.4): `none` and
+`assisted` at 1.0, `co-written` at 0.3, `generated` at 0 (Pool
+B-ineligible). `generated` works remain fully available and eligible for
+Pool A — tips and subscription attribution from readers who choose to read
+them — because this is an economic boundary, not a content gate. The
+declaration is displayed on the work page and exported with the work.
+
+### 20.9.5 Processor fees
+
+Every monetary transaction records the fee the payment processor deducted
+(`payment_events.processor_fee_minor`). Pool calculations run on amounts
+**after** processor fees: a €10 subscription with a €1.50 processor fee
+contributes €8.50 to the pools (§20.10). The fee range actually paid over
+the trailing 90 days is published on `/api/v1/meta` (§20.10.7) so the
+solidarity arithmetic is transparent about what processing costs.
+
+## 20.10 Redistribution floor
+
+Author-bound revenue is split into two pools with different rules. The
+per-flow split is configurable instance parameter, published on
+`/api/v1/meta`, and changes require 90 days' public notice. The floor is
+optional in the same way §20.9 is: a billing-disabled instance has none of
+it, and an author who never monetizes sees nothing.
+
+### 20.10.1 Pool A — direct attribution
+
+Money with an obvious owner: tips to a named author, subscription revenue
+attributed by reading time (§20.6.1), bounty payouts, marketplace sales.
+Flows to the named author, subject to the cap (§20.10.3).
+
+### 20.10.2 Pool B — solidarity pool
+
+The overflow from the cap (§20.10.3) plus each revenue flow's Pool B
+contribution (§20.10.6). Distributed to eligible authors by a
+quality-weighted formula (§20.10.4). Pool B is money, never credits: it
+enters the earnings ledger (§20.9.3) like any other author earnings and
+respects the same separate-ledgers rule.
+
+### 20.10.3 The cap
+
+The cap applies to Pool A only. Money above the graduated bands spills into
+Pool B; the author still receives their own Pool B share, because the cap
+never excludes anyone from solidarity.
+
+The reference point is the **active-earner median**: the median Pool A
+income of authors who earned any Pool A income this month — not the median
+of everyone who ever posted. The multiplier is a configurable instance
+parameter (default 10), calculated over a trailing 3-month window to smooth
+spikes and defeat month-end dumping:
+
+```text
+cap = cap_multiplier × median(active-earner Pool A income, trailing 3 months)
+```
+
+The cap is soft and graduated — a damper, not a cliff:
+
+| Pool A income band | Author keeps | Spills to Pool B |
+|---|---|---|
+| up to 5× median | 100% | 0% |
+| 5× – 10× median | 50% of the amount in this band | 50% |
+| above 10× median | 0% | 100% |
+
+Worked example (illustrative numbers): median €10, multiplier 10. An author
+whose Pool A attribution is €60 keeps the first €50 (up to 5×) plus 50% of
+the next €10 — €55 total — and €5 spills to Pool B.
+
+The current median, cap value, overflow amount and the number of authors at
+the cap are published (§20.10.7).
+
+### 20.10.4 Pool B distribution
+
+Pool B distributes proportionally to a per-author **quality score**, never
+by word count, chapter count, or work count. An author with one excellent
+oneshot can out-earn an author posting 50k words of mediocre content per
+month. The quality score (0.0–1.0) is a weighted composite of signals the
+platform already tracks (§9.7.4, §9.8):
+
+```text
+quality_score = 0.30 × completion_rate
+             + 0.20 × reread_rate
+             + 0.20 × positive_feedback_density
+             + 0.15 × bookmark_rate
+             + 0.10 × long_tail_engagement
+             + 0.05 × reader_diversity
+```
+
+Each signal is normalized to 0.0–1.0 over the trailing 90 days. Reader
+diversity counts distinct readers weighted by trust level (§19.1), so
+farmed reads from throwaway accounts carry near-zero weight. The weights
+are operator configuration, published on `/api/v1/meta`, changeable with
+90 days' notice.
+
+An author's Pool B share for a period:
+
+```text
+share = (quality_score × attributed_reading_time × ai_multiplier)
+        / Σ(eligible authors: quality_score × attributed_reading_time × ai_multiplier)
+```
+
+AI content multipliers (§20.9.4) apply per work: a `generated` work
+contributes nothing; a `co-written` work contributes at 0.3×. Pool B is
+recalculated monthly and paid out on the same cadence as Pool A.
+
+### 20.10.5 Eligibility floor
+
+To receive Pool B distributions, an author must meet all of:
+
+- At least one work with N distinct readers (N scales with instance size;
+  default 20).
+- Account age ≥ 30 days.
+- Trust level ≥ TL1 (§19.1) — earned, never purchased (§0.3).
+- Not currently under sanction (§19.6).
+- No unresolved suspected-undeclared-AI flag on their works (§20.9.4).
+
+The floor is fraud prevention, not gatekeeping: it exists so Pool B funds
+real new authors rather than throwaway accounts. An excluded author sees
+the reason and what would change it.
+
+Authors opt into monetization per pseud (§7.2, §20.9):
+
+- Pool A only (tips and subscription attribution, no solidarity).
+- Pool A + Pool B (default).
+- Donate their Pool B share back to the pool.
+- Fully opt out (works remain available; no money flows).
+
+### 20.10.6 Platform economics
+
+All splits are configurable and published on `/api/v1/meta`:
+
+| Flow | Platform cut | Pool B contribution | Author share (Pool A) |
+|---|---|---|---|
+| Subscriptions | 15% infrastructure | 15% | 70% |
+| Tips | 5% | 10% | 85% |
+| Bounties | 10% | — | 90% |
+| Marketplace | 8% | 7% | 85% |
+| Job fees (TTS/translation) | cost + 20% margin | split platform/Pool B | — |
+
+The platform cut covers hosting, moderation, legal, and processor fees —
+which for adult-content-compatible processors run far higher than
+mainstream card rates (§2.2, §20.9.5). Quarterly financials are published;
+surplus flows to Pool B by default unless the operator retains it as
+reserve, disclosed.
+
+### 20.10.7 Transparency
+
+`/api/v1/meta` and a public dashboard publish:
+
+- Total revenue this period, broken down by source.
+- Total Pool A and Pool B sizes.
+- Current active-earner median and cap value.
+- Number of authors receiving Pool A, Pool B, both, neither.
+- An anonymized distribution histogram: €0–10, €10–50, €50–200, €200–500,
+  €500+.
+- Platform infrastructure costs.
+- The quality signal weights — the actual formula (§20.10.4).
+- The processor fee range actually paid, trailing 90 days (§20.9.5).
+- The Pool A/B split parameters and cap multiplier, with pending changes
+  and their effective dates.
+- The payment processor adapter's name — never credentials or account
+  details.
+
+**Never published:** individual author earnings, individual reader
+activity, per-work revenue, supporter identities (§20.9.3's privacy rule).
+
+### 20.10.8 Payout mechanics
+
+- Minimum payout €20; below it the balance rolls forward.
+- Monthly payouts through the instance's payment processor adapter, on the
+  earnings ledger's payout flow (§20.9.3).
+- Full ledger transparency to the author: every read, every attribution,
+  every calculation is visible in their own earnings view.
+- Payouts remain the operator's compliance surface (§20.9.3).
+
+### 20.10.9 Tables
+
+| Table | Important fields |
+|---|---|
+| `pool_b_distributions` | period_start, period_end, author_account_id, amount_minor, currency, quality_score, attributed_reading_time_seconds, ai_multiplier, idempotency_key |
+| `monetization_period_summaries` | period_start, period_end, pool_a_total_minor, pool_b_total_minor, active_earner_median_minor, cap_value_minor, authors_in_pool_a, authors_in_pool_b, authors_capped, processor_fee_min_minor, processor_fee_max_minor |
+| `work_ai_declarations` | work_id, declaration, declared_at, revised_at |
+
+`payment_events` gains `processor_fee_minor` (§20.9.5). Migration 0049,
+both dialects, following the §20.9.3 table conventions.
+
+### 20.10.10 Acceptance
+
+- An author earning 6× the median keeps 5× plus 50% of the band above it;
+  the rest spills to Pool B (worked example: median €10, income €60 →
+  keeps €55, €5 spills).
+- Pool B distribution is quality-weighted, not volume-weighted: an author
+  with one high-completion oneshot out-earns an author with five
+  low-completion works despite fewer total reads.
+- A `generated` work earns its author Pool A (tips, subscription
+  attribution) and contributes nothing to Pool B.
+- A `co-written` work's contribution to the Pool B numerator is multiplied
+  by 0.3.
+- Subscription revenue attributes by reading time: 30 minutes on author X
+  and 10 on author Y splits the attributed fee 75/25.
+- Processor fees are deducted before pool math: €10 with a €1.50 fee
+  contributes €8.50.
+- The eligibility floor excludes a 15-day-old TL0 account, and shows the
+  author why.
+- Self-dealing rules (§9.7.8) hold: same-account pseud tips are refused and
+  an author's own reading never attributes subscription revenue to them.
+- `/api/v1/meta` shows median, cap, pool sizes, fee range, weights, and
+  pending parameter changes with effective dates.
 
 ## Acceptance
 
@@ -3257,6 +3515,7 @@ GET    /api/v1/admin/monetization
 - Credits and monetary marketplace revenue remain distinct ledgers.
 - Subscription tiers do not grant ranking, trust, or moderation authority.
 - Wishlist bounties escrow correctly.
+- Pool B is money on the earnings ledger, never credits; the credit ledger is untouched by redistribution.
 
 ---
 
@@ -3909,6 +4168,12 @@ Automate:
 52. Reader subscribes to a work → author publishes a chapter → verify one notification → verify the author cannot see the subscriber list.
 53. Save a search → enable its alert → a matching work is published → verify the notification names the view and respects the reader's permissions.
 54. Change the accent colour → verify it applies to both layout presets → export the appearance bundle → import it on a second account → verify reader settings and dashboard layout carried across → set custom reader CSS on one work → verify it is scoped to the reading surface and absent elsewhere.
+55. Author earns above the graduated cap bands → verify the overflow lands in Pool B → verify /api/v1/meta shows the median, cap value, and overflow.
+56. Author declares a work `generated` → verify tips still credit Pool A → verify Pool B distributions exclude the work → verify the work page shows the declaration.
+57. Author declares a work `co-written` → verify the Pool B numerator applies the 0.3× multiplier.
+58. Subscriber reads author A for 30 minutes and author B for 10 → verify Pool A attribution splits 75/25 → verify the earnings ledger shows the reading-time weights.
+59. Operator changes the cap multiplier → verify /api/v1/meta shows the pending change and its effective date 90 days out → verify the old multiplier still applies until then.
+60. New account (15 days old, TL0) meets no other exclusion → verify Pool B excludes it → verify the account sees the reason.
 
 ## 25.2 Security tests
 
