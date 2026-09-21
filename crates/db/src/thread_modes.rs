@@ -245,7 +245,7 @@ pub async fn join_critique(
     topic_id: &str,
     pseud: &str,
 ) -> Result<i64> {
-    let now = crate::identity::now_rfc3339();
+    let _now = crate::identity::now_rfc3339();
     // Get current max position
     let max_pos: Option<i64> = match db.backend() {
         Backend::Sqlite => {
