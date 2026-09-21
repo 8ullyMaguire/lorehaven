@@ -38,6 +38,11 @@ pub fn router() -> Router<AppState> {
         .route("/topics/{id}/lock", post(lock_topic))
         // forum search (spec §17.4)
         .route("/forum-search", get(forum_search))
+        // topic subscriptions & unread tracking (spec §17.4, §5.5)
+        .route("/topics/{id}/subscribe", post(subscribe_topic))
+        .route("/topics/{id}/unsubscribe", post(unsubscribe_topic))
+        .route("/topics/{id}/mark-read", post(mark_topic_read))
+        .route("/topics/{id}/unread", get(get_unread_count))
         // groups
         .route("/groups", get(get_groups).post(post_group))
         .route("/groups/{id}", get(get_group))
@@ -838,7 +843,86 @@ async fn get_presence_stream(
         })
         .collect();
 
-    Ok(Json(serde_json::json!({ "items": items })))
+    Ok(Json(serde_json::json!({ "items": results })))
+}
+
+// ---------------------------------------------------------------------------
+// Topic subscriptions & unread tracking (spec §17.4, §5.5)
+// ---------------------------------------------------------------------------
+
+/// Subscribe the current user to a topic.
+async fn subscribe_topic(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    lorehaven_db::community::subscribe_to_topic(
+        state.db(),
+        &user.account_id.to_string(),
+        &id,
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Unsubscribe the current user from a topic.
+async fn unsubscribe_topic(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let removed = lorehaven_db::community::unsubscribe_from_topic(
+        state.db(),
+        &user.account_id.to_string(),
+        &id,
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    Ok(Json(serde_json::json!({ "ok": true, "removed": removed })))
+}
+
+/// Mark a topic as read up to a specific post (or the latest post if none given).
+async fn mark_topic_read(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    body: Option<Json<MarkReadBody>>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let post_id = body
+        .as_ref()
+        .and_then(|b| b.post_id.clone())
+        .unwrap_or_default();
+    lorehaven_db::community::mark_topic_read(
+        state.db(),
+        &user.account_id.to_string(),
+        &id,
+        &post_id,
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MarkReadBody {
+    pub post_id: Option<String>,
+}
+
+/// Get the number of unread posts in a topic for the current user.
+async fn get_unread_count(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let count = lorehaven_db::community::unread_count_in_topic(
+        state.db(),
+        &user.account_id.to_string(),
+        &id,
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    Ok(Json(serde_json::json!({ "unread": count })))
 }
 
 /// Check if a presence record is "active now" (last seen within 5 minutes).

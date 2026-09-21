@@ -1639,3 +1639,180 @@ pub async fn toggle_topic_lock(db: &Database, topic_id: &str) -> Result<bool> {
     };
     Ok(affected > 0)
 }
+
+// ---------------------------------------------------------------------------
+// Topic subscriptions and high-water marks (spec §17.4, §5.5)
+// ---------------------------------------------------------------------------
+
+/// Subscribe a user to a topic. Idempotent: re-subscribing has no effect.
+pub async fn subscribe_to_topic(
+    db: &Database,
+    account_id: &str,
+    topic_id: &str,
+) -> Result<()> {
+    let sql = db.sql(
+        "INSERT INTO forum_topic_subscriptions (account, topic_id, created_at)
+         VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ'))
+         ON CONFLICT (account, topic_id) DO NOTHING",
+        "INSERT INTO forum_topic_subscriptions (account, topic_id, created_at)
+         VALUES ($1, $3, now())
+         ON CONFLICT (account, topic_id) DO NOTHING",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(account_id)
+                .bind(topic_id)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(account_id)
+                .bind(topic_id)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Unsubscribe a user from a topic. Returns true if a row was deleted.
+pub async fn unsubscribe_from_topic(
+    db: &Database,
+    account_id: &str,
+    topic_id: &str,
+) -> Result<bool> {
+    let sql = db.sql(
+        "DELETE FROM forum_topic_subscriptions WHERE account = ? AND topic_id = ?",
+        "DELETE FROM forum_topic_subscriptions WHERE account = $1 AND topic_id = $2",
+    );
+    let affected = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(account_id)
+                .bind(topic_id)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?
+                .rows_affected()
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(account_id)
+                .bind(topic_id)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?
+                .rows_affected()
+        }
+    };
+    Ok(affected > 0)
+}
+
+/// Mark a topic as read up to a specific post. Updates the high-water mark.
+pub async fn mark_topic_read(
+    db: &Database,
+    account_id: &str,
+    topic_id: &str,
+    post_id: &str,
+) -> Result<()> {
+    let sql = db.sql(
+        "UPDATE forum_topic_subscriptions
+         SET last_read_post_id = ?
+         WHERE account = ? AND topic_id = ?",
+        "UPDATE forum_topic_subscriptions
+         SET last_read_post_id = $3
+         WHERE account = $1 AND topic_id = $2",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(post_id)
+                .bind(account_id)
+                .bind(topic_id)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(post_id)
+                .bind(account_id)
+                .bind(topic_id)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Get the number of unread posts in a topic for a given user.
+/// Returns 0 if the user is not subscribed or the topic has no new posts.
+pub async fn unread_count_in_topic(
+    db: &Database,
+    account_id: &str,
+    topic_id: &str,
+) -> Result<i64> {
+    let sql = db.sql(
+        "SELECT COUNT(*) AS unread
+         FROM forum_posts fp
+         LEFT JOIN forum_topic_subscriptions fts ON fts.topic_id = fp.topic_id
+           AND fts.account = ?
+         WHERE fp.topic_id = ?
+           AND fp.deleted_at IS NULL
+           AND (fts.last_read_post_id IS NULL
+                OR fp.created_at > (SELECT created_at FROM forum_posts WHERE id = fts.last_read_post_id))",
+        "SELECT COUNT(*)::bigint AS unread
+         FROM forum_posts fp
+         LEFT JOIN forum_topic_subscriptions fts ON fts.topic_id = fp.topic_id
+           AND fts.account = $1
+         WHERE fp.topic_id = $2
+           AND fp.deleted_at IS NULL
+           AND (fts.last_read_post_id IS NULL
+                OR fp.created_at > (SELECT created_at FROM forum_posts WHERE id = fts.last_read_post_id))",
+    );
+    let count = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar::<_, i64>(&sql)
+                .bind(account_id)
+                .bind(topic_id)
+                .fetch_one(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar::<_, i64>(&sql)
+                .bind(account_id)
+                .bind(topic_id)
+                .fetch_one(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(count)
+}
+
+/// Update the last_post_id cache on a topic when a new post is added.
+pub async fn update_topic_last_post(
+    db: &Database,
+    topic_id: &str,
+    post_id: &str,
+) -> Result<()> {
+    let sql = db.sql(
+        "UPDATE forum_topics SET last_post_id = ?, last_post_at = strftime('%Y-%m-%dT%H:%M:%fZ') WHERE id = ?",
+        "UPDATE forum_topics SET last_post_id = $1, last_post_at = now() WHERE id = $2",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(post_id)
+                .bind(topic_id)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(post_id)
+                .bind(topic_id)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?;
+        }
+    }
+    Ok(())
+}
