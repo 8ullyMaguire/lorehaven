@@ -35,6 +35,7 @@ export type RouteId =
   | 'discover'
   | 'community'
   | 'forum-category'
+  | 'forum-search'
   | 'forum-topic'
   | 'notifications'
   | 'planned'
@@ -168,6 +169,10 @@ export function matchRoute(path: string): RouteMatch {
       path: normalised,
       params: { topicId: decodeURIComponent(topicMatch[1]) },
     };
+  }
+
+  if (normalised === '/community/search') {
+    return { id: 'forum-search', path: normalised };
   }
 
   const planned = PLANNED_ROUTES[normalised];

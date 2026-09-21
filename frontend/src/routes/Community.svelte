@@ -34,6 +34,16 @@
   let error = $state<unknown>(null);
   let loading = $state(true);
 
+  let filterQuery = $state('');
+  let filteredForums = $derived.by(() => {
+    if (!filterQuery.trim()) return forums;
+    const q = filterQuery.toLowerCase();
+    return forums.filter((f) =>
+      f.name.toLowerCase().includes(q) ||
+      (f.description?.toLowerCase().includes(q) ?? false)
+    );
+  });
+
   async function loadForums() {
     try {
       forums = await fetchForums();
@@ -127,8 +137,19 @@
     <Skeleton lines={5} label={`Loading ${activeTab}`} />
   {:else}
     {#if activeTab === 'forums'}
+      <div class="forum-toolbar">
+        <input
+          type="search"
+          placeholder="Filter forums..."
+          class="forum-filter-input"
+          bind:value={filterQuery}
+        />
+        <a href="/community/search" onclick={(e) => handleLinkClick(e, '/community/search')}>
+          <button>Search posts</button>
+        </a>
+      </div>
       <ul class="card-list">
-        {#each forums as forum}
+        {#each filteredForums as forum}
           <li>
             <a
               href={`/community/forums/${encodeURIComponent(forum.id)}`}
