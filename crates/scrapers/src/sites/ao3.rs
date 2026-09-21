@@ -41,7 +41,7 @@ use crate::sanitize::sanitize_fragment;
 use crate::{
     attr_of, collapse_whitespace, html_of, strip_tags, text_of, texts_of, ChapterRef, Credentials,
     Fetcher, SourceAdapter, SourceCapabilities, SourceChapter, SourceError, SourceKey,
-    SourceResult, SourceWork, WorkStatus,
+    SourceResult, SourceWork, Wall, WorkStatus,
 };
 
 /// Hosts this adapter serves.
@@ -374,6 +374,10 @@ impl SourceAdapter for ArchiveSoftware {
             authentication: crate::AuthKind::None,
             min_interval_millis: Some(1_000),
         }
+    }
+    fn wall(&self) -> Wall {
+        // AO3 is behind a Cloudflare challenge that rejects non-browser TLS fingerprints.
+        Wall::Fingerprint
     }
 
     fn can_handle(&self, url: &Url) -> bool {

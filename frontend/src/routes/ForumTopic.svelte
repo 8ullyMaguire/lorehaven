@@ -24,6 +24,7 @@
   import ReadingSchedule from '../lib/components/ReadingSchedule.svelte';
   import CritiqueQueue from '../lib/components/CritiqueQueue.svelte';
   import ModerationPanel from '../lib/components/ModerationPanel.svelte';
+  import ReplyForm from '../lib/components/ReplyForm.svelte';
   import { handleLinkClick } from '../lib/router';
 
   let { topicId }: { topicId: string } = $props();
@@ -130,15 +131,11 @@
     {#if topic.locked}
       <p>This topic is locked; new replies are closed.</p>
     {:else if session.isSignedIn}
-      <form onsubmit={reply}>
-        <h2>Reply</h2>
-        <label for="reply-body">Your reply</label>
-        <textarea id="reply-body" rows="4" bind:value={draft} required></textarea>
-        <button type="submit" disabled={posting || !draft.trim()}>
-          {posting ? 'Posting…' : 'Post reply'}
-        </button>
-        {#if posted}<p class="receipt">Reply posted.</p>{/if}
-      </form>
+      <ReplyForm
+        {topicId}
+        spoilerScopeChapter={topic.spoiler_scope_chapter}
+        onCreated={() => { void load(); }}
+      />
     {:else}
       <p>
         <a href="/sign-in" onclick={(event) => handleLinkClick(event, '/sign-in')}>Sign in</a>
