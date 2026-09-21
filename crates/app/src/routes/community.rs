@@ -7,6 +7,7 @@ use axum::http::StatusCode;
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use lorehaven_domain::blocking::BlockScope;
+use lorehaven_db::community::ForumPost;
 use serde::Deserialize;
 use std::str::FromStr;
 use time::format_description::well_known::Rfc3339;
@@ -484,7 +485,7 @@ async fn filter_blocked_posts(
     state: &AppState,
     viewer_account_id: &str,
     posts: Vec<ForumPost>,
-) -> Result<Vec<ForumPost>> {
+) -> anyhow::Result<Vec<ForumPost>> {
     let mut visible = Vec::with_capacity(posts.len());
     for post in posts {
         if let Ok(author_pseud) = post.author_pseud.parse::<lorehaven_domain::PseudId>() {
