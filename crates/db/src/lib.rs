@@ -27,6 +27,7 @@ pub mod events;
 pub mod exports;
 pub mod external;
 pub mod federation;
+pub mod forum_search;
 pub mod governance;
 pub mod identity;
 pub mod imports;

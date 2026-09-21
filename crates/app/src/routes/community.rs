@@ -36,6 +36,8 @@ pub fn router() -> Router<AppState> {
             get(get_topic_replies).post(post_reply),
         )
         .route("/topics/{id}/lock", post(lock_topic))
+        // forum search (spec §17.4)
+        .route("/search", get(forum_search))
         // groups
         .route("/groups", get(get_groups).post(post_group))
         .route("/groups/{id}", get(get_group))
@@ -850,4 +852,43 @@ fn is_active_now(last_seen_at: &str) -> bool {
 /// Parse an RFC 3339 datetime string.
 fn parse_datetime(s: &str) -> Option<OffsetDateTime> {
     OffsetDateTime::parse(s, &Rfc3339).ok()
+}
+
+// ---------------------------------------------------------------------------
+// Forum search (spec §17.4)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct ForumSearchQuery {
+    pub q: String,
+    pub category: Option<String>,
+    pub author: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    #[serde(default = "default_search_limit")]
+    pub limit: i64,
+}
+
+fn default_search_limit() -> i64 {
+    20
+}
+
+/// Full-text search across forum posts and topics.
+async fn forum_search(
+    State(state): State<AppState>,
+    Query(params): Query<ForumSearchQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let results = lorehaven_db::forum_search::search_forum(
+        state.db(),
+        &params.q,
+        params.category.as_deref(),
+        params.author.as_deref(),
+        params.from.as_deref(),
+        params.to.as_deref(),
+        params.limit,
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+
+    Ok(Json(serde_json::json!({ "items": results })))
 }
