@@ -560,6 +560,7 @@ fn to_identity(chapter: &imports::ImportChapter) -> ChapterIdentity {
         source_chapter_key: chapter.source_chapter_key.clone(),
         ordinal: u32::try_from(chapter.ordinal).unwrap_or(u32::MAX),
         title: chapter.title.clone(),
+        word_count: chapter.word_count.map(|c| c as u32),
     }
 }
 
@@ -569,6 +570,7 @@ fn to_identity_ref(chapter: &lorehaven_scrapers::ChapterRef) -> ChapterIdentity 
         source_chapter_key: chapter.source_chapter_key.clone(),
         ordinal: chapter.ordinal,
         title: chapter.title.clone(),
+        word_count: None, // Preview doesn't count words; grading will be Held until import
     }
 }
 

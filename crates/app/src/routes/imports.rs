@@ -574,6 +574,7 @@ async fn preview_import(
                 source_chapter_key: chapter.source_chapter_key.clone(),
                 ordinal: u32::try_from(chapter.ordinal).unwrap_or(u32::MAX),
                 title: chapter.title.clone(),
+                word_count: chapter.word_count.map(|c| c as u32),
             })
             .collect(),
     });
@@ -587,6 +588,7 @@ async fn preview_import(
                 .chapters
                 .iter()
                 .map(|chapter| ChapterIdentity {
+                    word_count: chapter.word_count,
                     source_chapter_key: chapter.source_chapter_key.clone(),
                     ordinal: chapter.ordinal,
                     title: chapter.title.clone(),
@@ -869,6 +871,7 @@ async fn start_import(
                     .map(|chapter| ChapterIdentity {
                         source_chapter_key: chapter.source_chapter_key.clone(),
                         ordinal: chapter.ordinal,
+                        word_count: chapter.word_count,
                         title: chapter.title.clone(),
                     })
                     .collect(),
@@ -1157,6 +1160,7 @@ async fn held_work(
             .map(|chapter| ChapterIdentity {
                 source_chapter_key: chapter.source_chapter_key.clone(),
                 ordinal: u32::try_from(chapter.ordinal).unwrap_or(u32::MAX),
+                word_count: chapter.word_count.map(|c| c as u32),
                 title: chapter.title.clone(),
             })
             .collect(),
