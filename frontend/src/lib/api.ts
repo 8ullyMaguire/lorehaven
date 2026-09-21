@@ -1105,6 +1105,135 @@ export function postReaction(
   });
 }
 
+// M32 — Typed votes, budgets, meta-moderation, karma (spec §35.2)
+
+export interface CategoryVoteType {
+  id: string;
+  label: string;
+  weight: number;
+  cost: number;
+  is_negative: boolean;
+}
+
+export interface VoteCounts {
+  vote_type: string;
+  count: number;
+}
+
+export interface PostVotesResponse {
+  counts: VoteCounts[];
+  total: number;
+  weighted_bp: number;
+  transparency: 'aggregate' | 'authors_only' | 'individual_votes';
+  author_opted_in: boolean;
+  mine: string | null;
+  votes: { id: string; pseud: string; vote_type: string; created_at: string }[] | null;
+}
+
+export interface VoteBudgetResponse {
+  trust: number;
+  window_hours: number;
+  limit: number;
+  spent: number;
+  remaining: number;
+  exhausted: boolean;
+  resets_at: string | null;
+}
+
+export interface KarmaResponse {
+  pseud: string;
+  karma_bp: number;
+  karma: number;
+  votes_received: number;
+  weighted_received_bp: number;
+  updated_at: string | null;
+}
+
+/** The taxonomy a category offers. */
+export async function getCategoryVoteTypes(
+  categoryId: string,
+  signal?: AbortSignal,
+): Promise<{ category_id: string; items: CategoryVoteType[] }> {
+  return apiFetch<{ category_id: string; items: CategoryVoteType[] }>(
+    `/forum/categories/${encodeURIComponent(categoryId)}/vote-types`,
+    { signal },
+  );
+}
+
+/** The votes on a post: aggregates to anyone, names per transparency tier. */
+export async function getPostVotes(
+  postId: string,
+  signal?: AbortSignal,
+): Promise<PostVotesResponse> {
+  return apiFetch<PostVotesResponse>(`/forum/posts/${encodeURIComponent(postId)}/votes`, {
+    signal,
+  });
+}
+
+/** Cast or change a typed vote. Omit voteType (null) to retract. */
+export async function castVote(postId: string, voteType: string | null): Promise<{
+  outcome: string;
+  vote_type: string;
+  weight_bp: number;
+  budget: { limit: number; spent: number; remaining: number };
+}> {
+  if (voteType === null) {
+    return apiFetch(`/forum/posts/${encodeURIComponent(postId)}/vote`, {
+      method: 'DELETE',
+    });
+  }
+  return apiFetch(`/forum/posts/${encodeURIComponent(postId)}/vote`, {
+    method: 'POST',
+    body: JSON.stringify({ vote_type: voteType }),
+  });
+}
+
+/** Retract the caller's vote on a post (idempotent). */
+export async function retractVote(
+  postId: string,
+): Promise<{ outcome: string; removed: boolean }> {
+  return apiFetch(`/forum/posts/${encodeURIComponent(postId)}/vote`, {
+    method: 'DELETE',
+  });
+}
+
+/** The author's opt-in to revealing who voted. */
+export async function setVoteVisibility(postId: string, visible: boolean): Promise<void> {
+  await apiFetch(`/forum/posts/${encodeURIComponent(postId)}/vote-visibility`, {
+    method: 'PUT',
+    body: JSON.stringify({ visible }),
+  });
+}
+
+/** Meta-moderation: a TL4+ verdict on a vote. */
+export async function postMetaVote(
+  voteId: string,
+  fair: boolean,
+): Promise<{ outcome: string }> {
+  return apiFetch(`/forum/votes/${encodeURIComponent(voteId)}/meta`, {
+    method: 'POST',
+    body: JSON.stringify({ fair }),
+  });
+}
+
+/** The caller's rolling vote allowance. */
+export async function getVoteBudget(signal?: AbortSignal): Promise<VoteBudgetResponse> {
+  return apiFetch<VoteBudgetResponse>('/me/vote-budget', { signal });
+}
+
+/** The caller's own karma. */
+export async function getOwnKarma(signal?: AbortSignal): Promise<KarmaResponse> {
+  return apiFetch<KarmaResponse>('/forum/karma', { signal });
+}
+
+/** A pseud's public karma. */
+export async function getKarma(
+  pseud: string,
+  signal?: AbortSignal,
+): Promise<KarmaResponse> {
+  return apiFetch<KarmaResponse>(`/forum/karma/${encodeURIComponent(pseud)}`, { signal });
+}
+
 /** The work's linked discussion topic. */
 export interface ThreadResponse {
   topic_id: string;
