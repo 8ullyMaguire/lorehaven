@@ -43,6 +43,8 @@ pub struct ChapterIdentity {
     pub ordinal: u32,
     /// The chapter's title as the source shows it.
     pub title: String,
+    /// The chapter's word count, if the source reports one.
+    pub word_count: Option<u32>,
 }
 
 impl ChapterIdentity {
@@ -53,7 +55,15 @@ impl ChapterIdentity {
             source_chapter_key: key.into(),
             ordinal,
             title: title.into(),
+            word_count: None,
         }
+    }
+
+    /// Set the word count.
+    #[must_use]
+    pub fn with_word_count(mut self, count: u32) -> Self {
+        self.word_count = Some(count);
+        self
     }
 }
 
@@ -92,6 +102,62 @@ impl ImportedWork {
         self.chapters.push(chapter);
         self
     }
+
+    /// Classify this imported work's quality (spec §11.14).
+    ///
+    /// - `accepted` — a real title, a real author, a non-zero length.
+    /// - `rejected` — certainly not a work: empty or placeholder title/author.
+    /// - `held` — no confident call could be made.
+    ///
+    /// A zero word count is held, not rejected. Classification is a pure
+    /// function of the fetched metadata.
+    #[must_use]
+    pub fn classify_quality(&self) -> ImportQuality {
+        let title = self.title.trim();
+        if title.is_empty() || is_placeholder_title(title) {
+            return ImportQuality::Rejected {
+                reason: "empty or placeholder title".into(),
+            };
+        }
+
+        if self.author_text.trim().is_empty() {
+            return ImportQuality::Rejected {
+                reason: "empty author".into(),
+            };
+        }
+
+        let total_words: u32 = self.chapters.iter().filter_map(|c| c.word_count).sum();
+        if total_words == 0 {
+            return ImportQuality::Held {
+                reason: "no word count: cannot determine if content is real".into(),
+            };
+        }
+
+        ImportQuality::Accepted
+    }
+}
+
+/// Check if a title looks like placeholder text (spec §11.14).
+fn is_placeholder_title(title: &str) -> bool {
+    let lower = title.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "untitled" | "no title" | "unknown" | "title tbd" | "work" | "story"
+    ) || lower.starts_with("chapter ")
+        || lower.starts_with("work ")
+        || lower.trim().is_empty()
+}
+
+/// Quality classification for an imported work (spec §11.14).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "verdict", rename_all = "snake_case")]
+pub enum ImportQuality {
+    /// A real work — real title, real author, non-zero length.
+    Accepted,
+    /// Certainly not a work; carries the reason.
+    Rejected { reason: String },
+    /// No confident call could be made; held for a person.
+    Held { reason: String },
 }
 
 /// One difference between what we hold and what the source now offers.
@@ -608,5 +674,87 @@ mod tests {
         assert_eq!(normalize_title("Bokura no"), "bokura no");
         assert_eq!(normalize_title("悪魔城ドラキュラ"), "悪魔城ドラキュラ");
         assert_eq!(normalize_title("Æon — Flux"), "æon flux");
+    }
+
+    // --- ImportQuality tests (spec §11.14) ---
+
+    #[test]
+    fn classify_accepted_real_work() {
+        let work = ImportedWork::new("A Real Title", "Some Author")
+            .with_chapter(ChapterIdentity::new("1", 1, "Chapter One").with_word_count(500));
+        assert_eq!(work.classify_quality(), ImportQuality::Accepted);
+    }
+
+    #[test]
+    fn classify_rejected_empty_title() {
+        let work = ImportedWork::new("", "Author")
+            .with_chapter(ChapterIdentity::new("1", 1, "Ch").with_word_count(100));
+        assert_eq!(
+            work.classify_quality(),
+            ImportQuality::Rejected {
+                reason: "empty or placeholder title".into()
+            }
+        );
+    }
+
+    #[test]
+    fn classify_rejected_placeholder_title() {
+        for title in &["untitled", "no title", "unknown", "title tbd", "chapter 1", "work"] {
+            let work = ImportedWork::new(*title, "Author")
+                .with_chapter(ChapterIdentity::new("1", 1, "Ch").with_word_count(100));
+            assert_eq!(
+                work.classify_quality(),
+                ImportQuality::Rejected {
+                    reason: "empty or placeholder title".into()
+                },
+                "title: {}",
+                title
+            );
+        }
+    }
+
+    #[test]
+    fn classify_rejected_empty_author() {
+        let work = ImportedWork::new("Title", "")
+            .with_chapter(ChapterIdentity::new("1", 1, "Ch").with_word_count(100));
+        assert_eq!(
+            work.classify_quality(),
+            ImportQuality::Rejected {
+                reason: "empty author".into()
+            }
+        );
+    }
+
+    #[test]
+    fn classify_held_zero_word_count() {
+        let work = ImportedWork::new("Title", "Author")
+            .with_chapter(ChapterIdentity::new("1", 1, "Ch"));
+        assert_eq!(
+            work.classify_quality(),
+            ImportQuality::Held {
+                reason: "no word count: cannot determine if content is real".into()
+            }
+        );
+    }
+
+    #[test]
+    fn classify_held_no_chapters() {
+        let work = ImportedWork::new("Title", "Author");
+        assert_eq!(
+            work.classify_quality(),
+            ImportQuality::Held {
+                reason: "no word count: cannot determine if content is real".into()
+            }
+        );
+    }
+
+    #[test]
+    fn classify_quality_is_pure() {
+        // Same input always produces same output.
+        let work = ImportedWork::new("Story", "Writer")
+            .with_chapter(ChapterIdentity::new("1", 1, "One").with_word_count(100));
+        let first = work.classify_quality();
+        let second = work.classify_quality();
+        assert_eq!(first, second);
     }
 }
