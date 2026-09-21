@@ -374,7 +374,7 @@ async fn get_topic(
 
 async fn get_topic_replies(
     State(state): State<AppState>,
-    RequireSession(_): RequireSession,
+    RequireSession(user): RequireSession,
     Path(id): Path<String>,
     Query(params): Query<CursorQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
@@ -386,6 +386,7 @@ async fn get_topic_replies(
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    let posts = filter_blocked_posts(&state, &user.account_id.to_string(), posts).await.map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     let items = with_author_handles(&state, posts, |p| &p.author_pseud)
         .await
         .map_err(ApiError)?;
@@ -425,10 +426,33 @@ async fn post_reply(
     if trust < min_trust {
         return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
+    // Block check: if topic author blocks the replier (or vice versa), refuse.
+    if let Ok(author_pseud) = topic.author_pseud.parse::<lorehaven_domain::PseudId>() {
+        if let Ok(Some(author_info)) = lorehaven_db::identity::find_pseud(state.db(), author_pseud).await {
+            let author_account = author_info.account_id.to_string();
+            let viewer_blocks = lorehaven_db::community::is_blocked(
+                state.db(),
+                &user.account_id.to_string(),
+                &author_account,
+                BlockScope::Comments,
+            ).await.unwrap_or(false);
+            let author_blocks = lorehaven_db::community::is_blocked(
+                state.db(),
+                &author_account,
+                &user.account_id.to_string(),
+                BlockScope::Comments,
+            ).await.unwrap_or(false);
+            if viewer_blocks || author_blocks {
+                return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
+            }
+        }
+    }
     let pid =
         lorehaven_db::community::create_post(state.db(), &id, &pseud_id.to_string(), &body.body)
             .await
             .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+
+    lorehaven_db::community::update_topic_last_post(state.db(), &id, &pid).await.map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
 
     // Notify the topic's author about the reply — unless the replier IS the
     // topic author. forum_topics stores the author as a pseud id string, so
@@ -453,6 +477,44 @@ async fn post_reply(
     }
 
     Ok(Json(serde_json::json!({ "id": pid })))
+}
+
+/// Filter out posts that the viewer has blocked or been blocked by.
+async fn filter_blocked_posts(
+    state: &AppState,
+    viewer_account_id: &str,
+    posts: Vec<ForumPost>,
+) -> Result<Vec<ForumPost>> {
+    let mut visible = Vec::with_capacity(posts.len());
+    for post in posts {
+        if let Ok(author_pseud) = post.author_pseud.parse::<lorehaven_domain::PseudId>() {
+            if let Ok(Some(pseud_info)) = lorehaven_db::identity::find_pseud(state.db(), author_pseud).await {
+                let author_account = pseud_info.account_id.to_string();
+                let viewer_blocks = lorehaven_db::community::is_blocked(
+                    state.db(),
+                    &viewer_account_id,
+                    &author_account,
+                    BlockScope::Comments,
+                ).await.unwrap_or(false);
+                let author_blocks = lorehaven_db::community::is_blocked(
+                    state.db(),
+                    &author_account,
+                    &viewer_account_id,
+                    BlockScope::Comments,
+                ).await.unwrap_or(false);
+                if !viewer_blocks && !author_blocks {
+                    visible.push(post);
+                }
+            } else {
+                // Author not found (deleted?) — include post to be safe
+                visible.push(post);
+            }
+        } else {
+            // Invalid pseud ID — include post
+            visible.push(post);
+        }
+    }
+    Ok(visible)
 }
 
 async fn lock_topic(
