@@ -25,8 +25,9 @@ pub fn private_key_path() -> PathBuf {
 }
 
 fn config_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("/home/alvaro/"))
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/home/alvaro/"))
         .join(".config/lorehaven")
 }
 
