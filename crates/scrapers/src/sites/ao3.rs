@@ -377,7 +377,7 @@ impl SourceAdapter for ArchiveSoftware {
     }
     fn wall(&self) -> Wall {
         // AO3 is behind a Cloudflare challenge that rejects non-browser TLS fingerprints.
-        Wall::Fingerprint
+        Wall::None
     }
 
     fn can_handle(&self, url: &Url) -> bool {
