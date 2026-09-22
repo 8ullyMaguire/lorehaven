@@ -3125,6 +3125,65 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Public,
     },
     // ------------------------------------------------------------------
+    // Mirror admin & IPFS (spec §32.7.6)
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "mirror_admin.rs",
+        handler: "add_local_mirror",
+        method: "POST",
+        path: "/admin/local-mirrors",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "mirror_admin.rs",
+        handler: "deactivate_local_mirror",
+        method: "DELETE",
+        path: "/admin/local-mirrors/{mirror_id}",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "mirror_admin.rs",
+        handler: "list_local_mirrors",
+        method: "GET",
+        path: "/media/references/{reference_id}/mirrors",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "mirror_admin.rs",
+        handler: "file_dmca_takedown",
+        method: "POST",
+        path: "/admin/dmca-takedowns",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "mirror_admin.rs",
+        handler: "list_dmca_takedowns",
+        method: "GET",
+        path: "/admin/dmca-takedowns",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "mirror_admin.rs",
+        handler: "resolve_dmca_takedown",
+        method: "PUT",
+        path: "/admin/dmca-takedowns/{takedown_id}",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "mirror_admin.rs",
+        handler: "add_ipfs_pin",
+        method: "POST",
+        path: "/media/references/{reference_id}/ipfs-pins",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "mirror_admin.rs",
+        handler: "list_ipfs_pins",
+        method: "GET",
+        path: "/media/references/{reference_id}/ipfs-pins",
+        audience: Audience::Public,
+    },
+    // ------------------------------------------------------------------
     // Discovery — additional routes not in main table (spec §16)
     // ------------------------------------------------------------------
     RouteEntry {

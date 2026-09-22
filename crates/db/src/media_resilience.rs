@@ -1094,3 +1094,365 @@ pub async fn list_targeted_bounties_for_work(
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4 (§32.7.6): Advanced mirroring — local mirrors, IPFS, federation
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct LocalMirror {
+    pub id: String,
+    pub media_reference_id: String,
+    pub storage_path: String,
+    pub original_url: String,
+    pub file_size_bytes: i64,
+    pub content_type: String,
+    pub checksum_sha256: String,
+    pub mirrored_by: String,
+    pub status: String,
+    pub mirrored_at: String,
+}
+
+/// Record a new local mirror.
+pub async fn insert_local_mirror(
+    db: &Database,
+    id: &str,
+    media_reference_id: &str,
+    storage_path: &str,
+    original_url: &str,
+    file_size: i64,
+    content_type: &str,
+    checksum: &str,
+    mirrored_by: &str,
+) -> Result<(), sqlx::Error> {
+    let now = crate::identity::now_rfc3339();
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            sqlx::query(
+                "INSERT INTO local_mirrors
+                    (id, media_reference_id, storage_path, original_url, file_size_bytes,
+                     content_type, checksum_sha256, mirrored_by, status, mirrored_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)",
+            )
+            .bind(id)
+            .bind(media_reference_id)
+            .bind(storage_path)
+            .bind(original_url)
+            .bind(file_size)
+            .bind(content_type)
+            .bind(checksum)
+            .bind(mirrored_by)
+            .bind(&now)
+            .execute(pool)
+            .await?;
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            sqlx::query(
+                "INSERT INTO local_mirrors
+                    (id, media_reference_id, storage_path, original_url, file_size_bytes,
+                     content_type, checksum_sha256, mirrored_by, status, mirrored_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9)",
+            )
+            .bind(id)
+            .bind(media_reference_id)
+            .bind(storage_path)
+            .bind(original_url)
+            .bind(file_size)
+            .bind(content_type)
+            .bind(checksum)
+            .bind(mirrored_by)
+            .bind(&now)
+            .execute(pool)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// List active local mirrors for a media reference.
+pub async fn list_local_mirrors(
+    db: &Database,
+    media_reference_id: &str,
+) -> Result<Vec<LocalMirror>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            let rows = sqlx::query(
+                "SELECT id, media_reference_id, storage_path, original_url, file_size_bytes,
+                        content_type, checksum_sha256, mirrored_by, status, mirrored_at
+                 FROM local_mirrors WHERE media_reference_id = ? AND status = 'active'
+                 ORDER BY mirrored_at DESC",
+            )
+            .bind(media_reference_id)
+            .fetch_all(pool)
+            .await?;
+            Ok(rows.iter().map(|r| LocalMirror {
+                id: r.get::<String, _>("id"),
+                media_reference_id: r.get::<String, _>("media_reference_id"),
+                storage_path: r.get::<String, _>("storage_path"),
+                original_url: r.get::<String, _>("original_url"),
+                file_size_bytes: r.get::<i64, _>("file_size_bytes"),
+                content_type: r.get::<String, _>("content_type"),
+                checksum_sha256: r.get::<String, _>("checksum_sha256"),
+                mirrored_by: r.get::<String, _>("mirrored_by"),
+                status: r.get::<String, _>("status"),
+                mirrored_at: r.get::<String, _>("mirrored_at"),
+            }).collect())
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            let rows = sqlx::query(
+                "SELECT id, media_reference_id, storage_path, original_url, file_size_bytes,
+                        content_type, checksum_sha256, mirrored_by, status, mirrored_at
+                 FROM local_mirrors WHERE media_reference_id = $1 AND status = 'active'
+                 ORDER BY mirrored_at DESC",
+            )
+            .bind(media_reference_id)
+            .fetch_all(pool)
+            .await?;
+            Ok(rows.iter().map(|r| LocalMirror {
+                id: r.get::<String, _>("id"),
+                media_reference_id: r.get::<String, _>("media_reference_id"),
+                storage_path: r.get::<String, _>("storage_path"),
+                original_url: r.get::<String, _>("original_url"),
+                file_size_bytes: r.get::<i64, _>("file_size_bytes"),
+                content_type: r.get::<String, _>("content_type"),
+                checksum_sha256: r.get::<String, _>("checksum_sha256"),
+                mirrored_by: r.get::<String, _>("mirrored_by"),
+                status: r.get::<String, _>("status"),
+                mirrored_at: r.get::<String, _>("mirrored_at"),
+            }).collect())
+        }
+    }
+}
+
+/// Mark a local mirror as removed (DMCA takedown or expiry).
+pub async fn deactivate_local_mirror(db: &Database, mirror_id: &str) -> Result<(), sqlx::Error> {
+    let now = crate::identity::now_rfc3339();
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            sqlx::query("UPDATE local_mirrors SET status = 'removed', expires_at = ? WHERE id = ?")
+                .bind(&now)
+                .bind(mirror_id)
+                .execute(pool)
+                .await?;
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            sqlx::query("UPDATE local_mirrors SET status = 'removed', expires_at = $1 WHERE id = $2")
+                .bind(&now)
+                .bind(mirror_id)
+                .execute(pool)
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 (§32.7.6): IPFS pin tracking
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct IpfsPin {
+    pub id: String,
+    pub media_reference_id: String,
+    pub cid: String,
+    pub pin_service: String,
+    pub status: String,
+    pub file_size_bytes: i64,
+    pub pinned_at: String,
+}
+
+/// Record an IPFS pin.
+pub async fn insert_ipfs_pin(
+    db: &Database,
+    id: &str,
+    media_reference_id: &str,
+    cid: &str,
+    pin_service: &str,
+    file_size: i64,
+) -> Result<(), sqlx::Error> {
+    let now = crate::identity::now_rfc3339();
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            sqlx::query(
+                "INSERT INTO ipfs_pins
+                    (id, media_reference_id, cid, pin_service, status, file_size_bytes, pinned_at)
+                 VALUES (?, ?, ?, ?, 'pinned', ?, ?)",
+            )
+            .bind(id)
+            .bind(media_reference_id)
+            .bind(cid)
+            .bind(pin_service)
+            .bind(file_size)
+            .bind(&now)
+            .execute(pool)
+            .await?;
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            sqlx::query(
+                "INSERT INTO ipfs_pins
+                    (id, media_reference_id, cid, pin_service, status, file_size_bytes, pinned_at)
+                 VALUES ($1, $2, $3, $4, 'pinned', $5, $6)",
+            )
+            .bind(id)
+            .bind(media_reference_id)
+            .bind(cid)
+            .bind(pin_service)
+            .bind(file_size)
+            .bind(&now)
+            .execute(pool)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// List IPFS pins for a media reference.
+pub async fn list_ipfs_pins(
+    db: &Database,
+    media_reference_id: &str,
+) -> Result<Vec<IpfsPin>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            let rows = sqlx::query(
+                "SELECT id, media_reference_id, cid, pin_service, status, file_size_bytes, pinned_at
+                 FROM ipfs_pins WHERE media_reference_id = ? AND status = 'pinned'
+                 ORDER BY pinned_at DESC",
+            )
+            .bind(media_reference_id)
+            .fetch_all(pool)
+            .await?;
+            Ok(rows.iter().map(|r| IpfsPin {
+                id: r.get::<String, _>("id"),
+                media_reference_id: r.get::<String, _>("media_reference_id"),
+                cid: r.get::<String, _>("cid"),
+                pin_service: r.get::<String, _>("pin_service"),
+                status: r.get::<String, _>("status"),
+                file_size_bytes: r.get::<i64, _>("file_size_bytes"),
+                pinned_at: r.get::<String, _>("pinned_at"),
+            }).collect())
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            let rows = sqlx::query(
+                "SELECT id, media_reference_id, cid, pin_service, status, file_size_bytes, pinned_at
+                 FROM ipfs_pins WHERE media_reference_id = $1 AND status = 'pinned'
+                 ORDER BY pinned_at DESC",
+            )
+            .bind(media_reference_id)
+            .fetch_all(pool)
+            .await?;
+            Ok(rows.iter().map(|r| IpfsPin {
+                id: r.get::<String, _>("id"),
+                media_reference_id: r.get::<String, _>("media_reference_id"),
+                cid: r.get::<String, _>("cid"),
+                pin_service: r.get::<String, _>("pin_service"),
+                status: r.get::<String, _>("status"),
+                file_size_bytes: r.get::<i64, _>("file_size_bytes"),
+                pinned_at: r.get::<String, _>("pinned_at"),
+            }).collect())
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 (§32.7.6): DMCA takedowns
+// ---------------------------------------------------------------------------
+
+/// File a DMCA takedown for a local mirror.
+pub async fn file_dmca_takedown(
+    db: &Database,
+    id: &str,
+    mirror_id: &str,
+    claimant_name: &str,
+    claimant_email: &str,
+    work_description: &str,
+    complaint: &str,
+) -> Result<(), sqlx::Error> {
+    let now = crate::identity::now_rfc3339();
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            sqlx::query(
+                "INSERT INTO dmca_takedowns
+                    (id, local_mirror_id, claimant_name, claimant_email,
+                     original_work_description, complaint_text, status, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)",
+            )
+            .bind(id)
+            .bind(mirror_id)
+            .bind(claimant_name)
+            .bind(claimant_email)
+            .bind(work_description)
+            .bind(complaint)
+            .bind(&now)
+            .execute(pool)
+            .await?;
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            sqlx::query(
+                "INSERT INTO dmca_takedowns
+                    (id, local_mirror_id, claimant_name, claimant_email,
+                     original_work_description, complaint_text, status, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)",
+            )
+            .bind(id)
+            .bind(mirror_id)
+            .bind(claimant_name)
+            .bind(claimant_email)
+            .bind(work_description)
+            .bind(complaint)
+            .bind(&now)
+            .execute(pool)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Resolve a DMCA takedown (approve = remove mirror, reject = restore).
+pub async fn resolve_dmca_takedown(
+    db: &Database,
+    takedown_id: &str,
+    approved: bool,
+    resolved_by: &str,
+) -> Result<(), sqlx::Error> {
+    let now = crate::identity::now_rfc3339();
+    let status = if approved { "approved" } else { "rejected" };
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            sqlx::query(
+                "UPDATE dmca_takedowns SET status = ?, resolved_at = ?, resolved_by = ? WHERE id = ?",
+            )
+            .bind(status)
+            .bind(&now)
+            .bind(resolved_by)
+            .bind(takedown_id)
+            .execute(pool)
+            .await?;
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            sqlx::query(
+                "UPDATE dmca_takedowns SET status = $1, resolved_at = $2, resolved_by = $3 WHERE id = $4",
+            )
+            .bind(status)
+            .bind(&now)
+            .bind(resolved_by)
+            .bind(takedown_id)
+            .execute(pool)
+            .await?;
+        }
+    }
+    Ok(())
+}
