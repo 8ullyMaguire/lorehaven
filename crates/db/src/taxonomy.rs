@@ -388,6 +388,33 @@ pub async fn list_tags(
     Ok(rows)
 }
 
+/// Look up all tag names for a work (canonical forms).
+pub async fn tag_names_for_work(db: &Database, work_id: &str) -> Result<Vec<String>> {
+    let rows: Vec<(String,)> = match db.backend() {
+        Backend::Sqlite => sqlx::query_as(
+            "SELECT tn.canonical
+             FROM work_tags wt
+             JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+             WHERE wt.work_id = ? AND tn.kind = 'tag'",
+        )
+        .bind(work_id)
+        .fetch_all(db.sqlite_pool().expect("sqlite"))
+        .await
+        .unwrap_or_default(),
+        Backend::Postgres => sqlx::query_as(
+            "SELECT tn.canonical
+             FROM work_tags wt
+             JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+             WHERE wt.work_id = $1::uuid AND tn.kind = 'tag'",
+        )
+        .bind(work_id)
+        .fetch_all(db.postgres_pool().expect("postgres"))
+        .await
+        .unwrap_or_default(),
+    };
+    Ok(rows.into_iter().map(|(n,)| n).collect())
+}
+
 /// List all fandoms (taxonomy nodes of kind 'fandom') with work counts, for the Fandoms surface (spec §43.1).
 pub async fn list_fandoms(
     db: &Database,

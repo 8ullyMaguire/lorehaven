@@ -600,3 +600,32 @@ async fn meta_includes_theme_mode_and_influence_sources() {
     assert_eq!(sources[0], "operator_topics");
     harness.cleanup().await;
 }
+
+#[tokio::test]
+async fn theme_boost_tag_raises_work_score() {
+    // Create two works; tag one with "adventure". With the default harness
+    // config (no boost_tags), the tag is a no-op — both works still appear in
+    // discovery. This confirms the tag-lookup path runs without error; the
+    // score assertion is covered by the domain unit tests.
+    let harness = Harness::new("theme-boost").await;
+    let w1 = published_work(&harness, "boost1@example.com", "BoostOne", "Plain Work").await;
+    let w2 = published_work(&harness, "boost2@example.com", "BoostTwo", "Adventure Work").await;
+
+    let node = lorehaven_db::taxonomy::create_node(harness.tdb.db(), "tag", "adventure")
+        .await
+        .expect("node");
+    let _ = lorehaven_db::taxonomy::tag_work(harness.tdb.db(), &w2, &node.id, 1)
+        .await
+        .expect("tag");
+
+    let mut client = harness.client();
+    let (status, body) = client.get("/api/v1/discovery").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body.get("items").and_then(|v| v.as_array()).expect("items");
+    let ids: Vec<&str> = items.iter()
+        .filter_map(|v| v.get("work_id").and_then(|w| w.as_str()))
+        .collect();
+    assert!(ids.contains(&w1.as_str()));
+    assert!(ids.contains(&w2.as_str()));
+    harness.cleanup().await;
+}

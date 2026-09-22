@@ -136,19 +136,35 @@ async fn get_discovery(
     let ranked = match theme.mode.as_str() {
         "generic" => ranked,
         "thematic" | "adaptive" => {
-            // Compute topic nudge: works matching any public topic get a uniform
-            // gravity bonus. Adaptive mode would use a per-work drift vector;
-            // for now, both modes use the topic-match nudge as the anchor.
-            let topics: Vec<String> = state.config().site.topics.iter()
-                .filter(|t| t.public)
-                .map(|t| t.name.clone())
-                .collect();
-            if topics.is_empty() {
+            let boost: Vec<String> = theme.boost_tags.iter().map(|s| s.to_lowercase()).collect();
+            let suppress: Vec<String> = theme.suppress_tags.iter().map(|s| s.to_lowercase()).collect();
+            if boost.is_empty() && suppress.is_empty() && theme.tag_gravity_bp.is_empty() {
                 ranked
             } else {
-                // Placeholder: per-work tag lookup will replace this with
-                // topic-matched gravity. For now, no nudge is applied.
-                let work_nudge = |_id: &WorkId| -> i64 { 0 };
+                // Pre-fetch tag gravity for all candidates.
+                let mut gravity_map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+                for c in &ranked {
+                    let tags = lorehaven_db::taxonomy::tag_names_for_work(state.db(), &c.work_id.to_string())
+                        .await
+                        .map_err(|e| ApiError(AppError::Internal(e)))?
+                        .iter()
+                        .map(|t| t.to_lowercase())
+                        .collect::<Vec<_>>();
+                    let mut total_bp: i64 = 0;
+                    for tag in &tags {
+                        if let Some(&bp) = theme.tag_gravity_bp.get(tag) {
+                            total_bp += bp;
+                        } else if boost.iter().any(|b| tag.contains(b)) {
+                            total_bp += 1000;
+                        } else if suppress.iter().any(|s| tag.contains(s)) {
+                            total_bp -= 2000;
+                        }
+                    }
+                    gravity_map.insert(c.work_id.to_string(), total_bp);
+                }
+                let work_nudge = |id: &WorkId| -> i64 {
+                    gravity_map.get(&id.to_string()).copied().unwrap_or(0)
+                };
                 lorehaven_domain::discovery::apply_theme_gravity(ranked, &work_nudge)
             }
         }
