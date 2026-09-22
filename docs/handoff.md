@@ -1,31 +1,18 @@
-# Handoff — M32/M33 frontend complete, E2E 70/73 passing
+# Handoff — M43 browse ordering vocabulary complete, E2E 71/73 passing
 
 Date: 2026-09-22. Read with `docs/plans/junior-implementation-plan.md` and `docs/spec.md`.
 
 ## What just happened
 
-M32/M33 frontend is built and deployed to production. E2E test suite improved
-from 60 passed / 13 failed → 70 passed / 3 failing (subscription test fix just
-deployed, awaiting final rerun).
+M43 browse ordering vocabulary deployed. Shared `Sort` enum (for-you, new, updated, top, trending, best-match, az) with per-pseud stickiness (`GET/PUT/DELETE /browse/sort/{surface}`) and `?sort=` query param on `/discovery`. E2E: 71 passed, 3 failed (pre-existing).
 
 ### Commits (newest first)
 
+- `da3bd20` feat: wire ?sort= query param to /discovery (spec §43.2, §43.4)
+- `b5cce1b` feat: M43 browse ordering vocabulary — shared Sort enum, per-pref stickiness API
+- `d887500` spec: add §43 recommendation-first browsing, ADRs 0021/0022, gamification updates
 - `b8fbbba` fix: E2E wait for Topics heading before filling form
 - `dcb6d87` fix: E2E navigate directly to category URL for subscription test
-- `214c03e` fix: E2E navigate to category page for topic creation
-- `f6a40ea` fix: E2E topic-title ID, work page assertions, docs sections
-- `8141054` feat: M32/M33 frontend — ForumVoteBar, VoteBudget, KarmaBadge + typed-vote API
-- `7ee7ffd` M2 rate-limit fix + widen all test rate limits; fix M6 AO3 wall + M7 retention default
-- `e660da1` docs: update handoff — M34/M39/M40/M41/M42 complete
-- `72ac970` M15/ADR 0020: redistribution floor
-- `457a4e7` M34: spoilers, warnings, readability — 7 tests + account_id fix
-- `449f5c9` M41: longevity signals — half-life scoring + warmth tiers (4 tests)
-- `14dba1a` M40: fork with provenance and permission statements (9 tests)
-- `c743123` M42: export CTAs with curator quorum exemption
-- `53c1318` M31: work-linked threads and reaction bar
-- `6c23e3f` M32: typed votes with budgets and meta-moderation
-- `43f7ed9` M33: thread modes (AMA, reading group, critique, wiki pin, collab, prompt, character voice)
-- (M35 discovery/health — committed earlier)
 
 ## State
 
