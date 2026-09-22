@@ -248,7 +248,7 @@ async fn apply_one(database: &Database, migration: &Migration) -> Result<()> {
                 .await
                 .context("executing migration SQL")?;
             sqlx::query(
-                "INSERT INTO _migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO _migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, ?)",
             )
             .bind(migration.version)
             .bind(migration.name)
@@ -267,7 +267,7 @@ async fn apply_one(database: &Database, migration: &Migration) -> Result<()> {
                 .await
                 .context("executing migration SQL")?;
             sqlx::query(
-                "INSERT INTO _migrations (version, name, checksum, applied_at) VALUES ($1, $2, $3, $4)",
+                "INSERT INTO _migrations (version, name, checksum, applied_at) VALUES ($1, $2, $3, $4) ON CONFLICT (version) DO NOTHING",
             )
             .bind(migration.version)
             .bind(migration.name)

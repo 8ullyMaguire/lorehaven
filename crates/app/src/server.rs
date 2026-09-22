@@ -540,6 +540,11 @@ pub fn build_router(state: AppState) -> Router {
             &state,
         ))
         .merge(classified(
+            routes::monetization::transparency_router(),
+            RouteClass::Default,
+            &state,
+        ))
+        .merge(classified(
             routes::subscriptions::router(),
             RouteClass::Write,
             &state,

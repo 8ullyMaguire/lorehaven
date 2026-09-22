@@ -752,7 +752,7 @@ pub async fn total_platform_revenue(db: &Database) -> Result<i64, sqlx::Error> {
 /// Total pending payouts (sum of amount_minor across payouts not yet processed).
 pub async fn pending_payout_total(db: &Database) -> Result<i64, sqlx::Error> {
     let sql =
-        "SELECT COALESCE(SUM(amount_minor), 0) FROM monetization_payouts WHERE status = 'pending'";
+        "SELECT COALESCE(SUM(amount_minor), 0) FROM payouts WHERE status = 'initiated'";
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query_scalar(sql)
@@ -786,7 +786,7 @@ pub async fn active_earning_authors(db: &Database) -> Result<i64, sqlx::Error> {
 
 /// Count of distinct purchasing account IDs that hold at least one entitlement.
 pub async fn active_purchaser_count(db: &Database) -> Result<i64, sqlx::Error> {
-    let sql = "SELECT COUNT(DISTINCT account_id) FROM monetization_entitlements";
+    let sql = "SELECT COUNT(DISTINCT account_id) FROM work_entitlements";
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query_scalar(sql)
@@ -813,4 +813,89 @@ pub async fn is_work_priced(db: &Database, work_id: &str) -> Result<bool, sqlx::
                 .bind(work_id).fetch_one(db.postgres_pool().expect("postgres")).await
         }
     }
+}
+
+/// Set or update the AI declaration for a work.
+pub async fn set_ai_declaration(
+    db: &Database,
+    work_id: &str,
+    declaration: &str,
+) -> Result<(), sqlx::Error> {
+    let now = crate::identity::now_rfc3339();
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(
+                "INSERT INTO work_ai_declarations (work_id, declaration, declared_at)
+                 VALUES (?, ?, ?)
+                 ON CONFLICT(work_id) DO UPDATE SET declaration = ?, revised_at = ?"
+            )
+            .bind(work_id).bind(declaration).bind(&now)
+            .bind(declaration).bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite")).await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(
+                "INSERT INTO work_ai_declarations (work_id, declaration, declared_at)
+                 VALUES ($1::uuid, $2, $3)
+                 ON CONFLICT(work_id) DO UPDATE SET declaration = $2, revised_at = $3"
+            )
+            .bind(work_id).bind(declaration).bind(&now)
+            .execute(db.postgres_pool().expect("postgres")).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Get the AI declaration for a work (if any).
+pub async fn get_ai_declaration(db: &Database, work_id: &str) -> Result<Option<String>, sqlx::Error> {
+    let sql = "SELECT declaration FROM work_ai_declarations WHERE work_id = ?";
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar(sql)
+                .bind(work_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite")).await
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar("SELECT declaration FROM work_ai_declarations WHERE work_id = $1::uuid")
+                .bind(work_id)
+                .fetch_optional(db.postgres_pool().expect("postgres")).await
+        }
+    }
+}
+
+/// Record a payment event with processor fee.
+pub async fn record_payment_event(
+    db: &Database,
+    kind: &str,
+    account_id: Option<&str>,
+    work_id: Option<&str>,
+    author_account: Option<&str>,
+    amount_minor: i64,
+    processor_fee_minor: i64,
+    currency: &str,
+) -> Result<String, sqlx::Error> {
+    let id = Uuid::new_v4().to_string();
+    let now = crate::identity::now_rfc3339();
+    let net = amount_minor - processor_fee_minor;
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(
+                "INSERT INTO payment_events (id, kind, account_id, work_id, author_account, amount_minor, processor_fee_minor, currency, net_minor, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            )
+            .bind(&id).bind(kind).bind(account_id).bind(work_id).bind(author_account)
+            .bind(amount_minor).bind(processor_fee_minor).bind(currency).bind(net).bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite")).await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(
+                "INSERT INTO payment_events (id, kind, account_id, work_id, author_account, amount_minor, processor_fee_minor, currency, net_minor, created_at)
+                 VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9, $10)"
+            )
+            .bind(&id).bind(kind).bind(account_id).bind(work_id).bind(author_account)
+            .bind(amount_minor).bind(processor_fee_minor).bind(currency).bind(net).bind(&now)
+            .execute(db.postgres_pool().expect("postgres")).await?;
+        }
+    }
+    Ok(id)
 }
