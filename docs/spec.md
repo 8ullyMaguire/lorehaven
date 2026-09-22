@@ -6664,6 +6664,9 @@ Environment variables (all prefixed `LOHAVEN_BOT_`):
 | `[theme]` | `theme_dial_floor_bp` | `1000` | Dial lower bound (basis points) when opt-out is locked |
 | `[theme]` | `adaptive_max_drift_bp` | `0` | Maximum adaptive drift in basis points (0 = no drift) |
 | `[theme]` | `influence_sources` | `[{ kind = "operator_topics" }]` | Ordered influence sources (§0.4.6) |
+| `[theme]` | `boost_tags` | `[]` | Tag substrings that boost discovery rank |
+| `[theme]` | `suppress_tags` | `[]` | Tag substrings that suppress discovery rank |
+| `[theme]` | `tag_gravity_bp` | `{}` | Per-tag gravity in basis points (overrides boost/suppress) |
 | `[tts]` | `engine` | `"piper"` | TTS engine (`silent` for a pipeline check without a synthesizer) |
 | `[tts]` | `piper_path` | `None` | Piper binary path |
 | `[tts]` | `piper_voice_model` | `None` | Piper voice model |

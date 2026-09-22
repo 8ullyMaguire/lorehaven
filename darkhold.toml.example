@@ -137,6 +137,10 @@ format = "pretty"
 #   { kind = "admin_taste" },
 #   { kind = "long_term_users", min_tenure_days = 90, min_contributions = 5 },
 # ]
+#
+# boost_tags = ["adventure", "fantasy"]
+# suppress_tags = ["explicit"]
+# tag_gravity_bp = { "space opera" = 2500 }
 
 [tts]
 # Which engine narrates a work when an author asks for a machine recording.

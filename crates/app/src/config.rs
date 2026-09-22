@@ -254,7 +254,7 @@ pub struct ThemeConfig {
     #[serde(default = "default_theme_mode")]
     pub mode: String,
     /// Whether the §16.5 dial can reach zero for theme influence.
-    /// When false, `theme_dial_floor` is the dial's lower bound.
+    /// When false, `theme_dial_floor_bp` is the dial's lower bound.
     #[serde(default = "true_bool")]
     pub allow_user_opt_out: bool,
     /// Lower bound for the §16.5 dial when opt-out is locked (in basis points).
@@ -266,6 +266,15 @@ pub struct ThemeConfig {
     /// Ordered influence sources that shape instance taste.
     #[serde(default = "default_influence_sources")]
     pub influence_sources: Vec<InfluenceSourceConfig>,
+    /// Tag names that increase topic gravity when a work matches (case-insensitive).
+    #[serde(default)]
+    pub boost_tags: Vec<String>,
+    /// Tag names that decrease topic gravity when a work matches (case-insensitive).
+    #[serde(default)]
+    pub suppress_tags: Vec<String>,
+    /// Per-tag gravity overrides in basis points (tag -> bp).
+    #[serde(default)]
+    pub tag_gravity_bp: std::collections::HashMap<String, i64>,
 }
 
 fn default_theme_mode() -> String {
@@ -296,6 +305,9 @@ impl Default for ThemeConfig {
             theme_dial_floor_bp: default_theme_dial_floor_bp(),
             adaptive_max_drift_bp: 0,
             influence_sources: default_influence_sources(),
+            boost_tags: Vec::new(),
+            suppress_tags: Vec::new(),
+            tag_gravity_bp: std::collections::HashMap::new(),
         }
     }
 }
@@ -1217,6 +1229,9 @@ impl Config {
                     theme_dial_floor_bp: t.theme_dial_floor_bp.unwrap_or_else(default_theme_dial_floor_bp),
                     adaptive_max_drift_bp: t.adaptive_max_drift_bp.unwrap_or(0),
                     influence_sources: t.influence_sources.unwrap_or_else(default_influence_sources),
+            boost_tags: t.boost_tags.unwrap_or_default(),
+            suppress_tags: t.suppress_tags.unwrap_or_default(),
+            tag_gravity_bp: t.tag_gravity_bp.unwrap_or_default(),
                 }
             },
             discovery: DiscoveryConfig::default(),
@@ -1516,6 +1531,9 @@ struct ThemeSection {
     theme_dial_floor_bp: Option<i64>,
     adaptive_max_drift_bp: Option<i64>,
     influence_sources: Option<Vec<InfluenceSourceConfig>>,
+    boost_tags: Option<Vec<String>>,
+    suppress_tags: Option<Vec<String>>,
+    tag_gravity_bp: Option<std::collections::HashMap<String, i64>>,
 }
 
 /// The `[revisions]` table (spec §38): source revision cache settings.
