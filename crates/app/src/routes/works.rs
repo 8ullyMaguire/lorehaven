@@ -418,6 +418,33 @@ async fn update_work(
 
     let updated = reload(&state, work.id).await?;
 
+    // Lifecycle incentives (spec §9.8): a work newly marked complete fires a
+    // one-time completion event; a work revived from abandoned fires a
+    // one-time resurrection event. Both are best-effort — an incentive failure
+    // must never fail the edit.
+    if let Some(completion) = &patch.completion {
+        let work_id = work.id.to_string();
+        if *completion == "complete" && work.completion != "complete" {
+            if let Err(error) =
+                lorehaven_db::engagement::record_lifecycle_event(state.db(), &work_id, "completion")
+                    .await
+            {
+                tracing::warn!(work = %work_id, %error, "failed to record completion event");
+            }
+        }
+        if *completion != "abandoned" && work.completion == "abandoned" {
+            if let Err(error) = lorehaven_db::engagement::record_lifecycle_event(
+                state.db(),
+                &work_id,
+                "resurrection",
+            )
+            .await
+            {
+                tracing::warn!(work = %work_id, %error, "failed to record resurrection event");
+            }
+        }
+    }
+
     // A work that was listed and is no longer listable (or whose rating moved)
     // must leave the surfaces that cached it (spec §8 acceptance). The
     // deindexing is enqueued, not performed here: the request that changes a

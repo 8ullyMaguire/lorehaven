@@ -231,11 +231,15 @@ async fn half_life_changes_ranking_with_no_field_changes() {
             work_id: lorehaven_domain::ids::WorkId::new(),
             score: 100,
             reason: "tags".into(),
+            taste_signal: 0.5,
+            diversity_class: 0.5,
         },
         lorehaven_domain::discovery::Candidate {
             work_id: lorehaven_domain::ids::WorkId::new(),
             score: 100,
             reason: "tags".into(),
+            taste_signal: 0.5,
+            diversity_class: 0.5,
         },
     ];
 

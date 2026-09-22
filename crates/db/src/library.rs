@@ -1526,7 +1526,7 @@ pub struct LibraryPage {
 }
 
 /// `?` repeated `n` times, optionally cast.
-fn placeholders(n: usize, cast: bool) -> String {
+pub fn placeholders(n: usize, cast: bool) -> String {
     let one = if cast { "?::uuid" } else { "?" };
     vec![one; n].join(", ")
 }

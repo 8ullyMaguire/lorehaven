@@ -273,6 +273,12 @@ async fn login(
     let issued =
         auth::issue_session(&state, &account, initial, user_agent(&headers).as_deref()).await?;
 
+    // Record the login for streak tracking (spec §9.7.1). Best-effort: a
+    // streak failure must never block a successful sign-in.
+    if let Err(error) = lorehaven_db::engagement::record_login(state.db(), &account.id.to_string()).await {
+        tracing::warn!(account = %account.id, %error, "failed to record login streak");
+    }
+
     let settings = sessions::content_settings(state.db(), account.id).await?;
     let capabilities = capabilities_for(&state, account.age_state, Some(&settings));
 

@@ -1,4 +1,4 @@
-# Instance Topics — single-page design premise
+# Instance Topics & Taste Gravity — single-page design premise
 
 *A one-page compression of the Lorehaven spec for brainstorming with a chatbot.
 The full, normative spec lives in `docs/spec.md` (§0–§34); this is a map, not the
@@ -26,10 +26,10 @@ invisible. Honest verification only.
 
 ---
 
-## 0.4 Instance Topics (configurable, NEW)
+## 0.4 Instance Topics & Taste Profile (configurable, NEW)
 
 An instance **may** declare the topics it is about — but is never required to.
-An instance whose focus is a kneed not say so.
+An instance whose focus is a kink or sensitive subject does not have to say so.
 
 Each topic has three properties:
 - **`name`** — the operator's own label ("hurt/comfort", "omegaverse", …).
@@ -50,6 +50,26 @@ Gamification effects of public topics: an extra completion-credit row
 ("Finish a work in a public topic") and a per-topic leaderboard category.
 Anti-gaming: the bonus never applies to a work the reader imported or wrote
 themselves.
+
+### 0.4 Taste Profile & Gravity Engine (NEW — taste-gravitational system)
+
+Beyond simple topics, Lorehaven supports a full **taste-gravitational system**
+(`docs/spec-amendments/taste-gravitational-system.md`):
+
+- **Multi-dimensional Taste Profile:** Admin defines dimensions (angst, pacing,
+  prose density, canon compliance, trope preferences, …) each with a target
+  and weight. The admin's taste is a position in this space.
+- **Taste-Weighted Signals:** Every user action (kudos, bookmark, comment,
+  completion) carries a signal weight proportional to that user's alignment
+  with the instance taste profile. A bookmark from a 0.9-aligned user boosts
+  a work's discovery score more than a bookmark from a 0.1-aligned user.
+- **Taste Resonance Score:** Per-user alignment metric (0.0–1.0) computed
+  from bookmark overlap, rating correlation, completion alignment, reading
+  time ratio. Hidden from all users except as a qualitative label.
+- **Signal Weight Mode:** Instance-configurable — `egalitarian` (all equal),
+  `taste_weighted` (proportional to alignment), `admin_only`.
+- **Anti-Echo-Chamber Valve:** X% of discovery slots reserved for taste-distant
+  content. Prevents monoculture. Serves priority 4.
 
 ---
 
@@ -101,25 +121,33 @@ themselves.
 
 ---
 
-## 5. Gamification (spec §9.7) — **now topic-aware**
+## 5. Gamification (spec §9.7) — **taste-aware**
 
 - **Credits** for reading, reacting, reviewing, bookmarking, importing,
   translating, voting. Daily and monthly caps.
-- **Topic bonuses** (NEW): an instance may award extra credits for finishing
+- **Topic bonuses**: an instance may award extra credits for finishing
   works in declared topics; public topics are named, private ones silent.
 - **Quality multiplier** (1.0×–1.8×) from completion rate, positive feedback,
   rereads, bookmarks.
-- **Demand multiplier** (silent, 1.0×–1.5×) folds in admin taste — **never
-  disclosed** in any label or breakdown.
+- **Taste-Weighted Signals** (NEW): the demand multiplier is replaced by a
+  general taste-weighted signal system. Every user action carries a signal
+  weight equal to their resonance score. Aligned users become amplifiers —
+  their collective behavior shapes the recommendation algorithm even on fics
+  the admin hasn't personally read. Config: `signal_weight_mode = egalitarian |
+  taste_weighted | admin_only`.
 - **Leaderboards:** daily/weekly/monthly windows, top-20 per category, opt-out
   available. Plus per-public-topic boards when topics are configured.
 - **Badges:** milestone (one-time), recurring (×N), seasonal. Display is
-  opt-in; no badge gates any feature.
+  opt-in; no badge gates any feature. New: lifecycle badges (Completionist,
+  Resurrectionist), Vanguard, Tastemaker, Herald, Ambassador.
 - **Streaks:** reading and writing, private by default, reset without guilt.
-  Streak freeze for 5 credits.
+  Streak freeze for 5 credits. **Flat milestone bonuses only** (e.g., +5 at
+  7 days, +15 at 30 days) — never a persistent multiplier on per-action credits.
+  (A multiplier amplifies noise as much as signal, diluting the taste-weighted
+  economy.)
 - **Anti-gaming:** time-on-page, alt-account isolation, pseud isolation,
-  unique-source import credits, quorum dedup, min-reader thresholds.
-- **Reading/writing goals:** private, opt-in, grant nothing.
+  unique-source import credits, quorum dedup, min-reader thresholds. Plus
+  resonance gaming protection (taste profile dimensions never exposed).
 
 ---
 
@@ -128,6 +156,13 @@ themselves.
 - Comments through positivity gate; forums (categories, topics, replies);
   groups (open/closed/hidden); 1:1 messaging (block-aware); presence (SSE).
 - **Trust levels** TL0–TL6 from behavior records only — never purchase.
+- **Trust × Taste Coupling** (NEW): optional taste-alignment gate per level.
+  Per-instance matrix. Democratic instances set all to 0.0. Curated boutiques
+  set TL4+ high. Never disclosed to the user.
+- **Taste Vanguard Role** (NEW): top-aligned users become curators. Selection
+  method configurable (resonance_threshold, admin_appointment,
+  community_election, contribution_volume, hybrid). Permissions: pin works,
+  nominate, create clubs, trigger provisional bounties, post at reduced cost.
 - **Reports → quorum review → sanctions** (rate-limit → shadow → suspend).
 - Appeals, independence rules, audit log. Moderator identities hidden from
   reported accounts.
@@ -139,13 +174,42 @@ themselves.
 - **Double-entry ledger** with idempotency keys, balanced transactions.
 - **Quote → reserve → submit → complete → capture** flow for priced jobs.
 - **Fair queues:** priority class + first-come within class; position observable.
-- **Bounties, subscriptions, marketplace** (listings, commissions, gallery).
+- **Bounties** (NEW types): standard, crowdfunded, reverse, vanguard-provisional.
+  Standing bounties auto-create when works match admin criteria. Vanguard
+  provisional flow (3+ vanguard bookmarks → pending admin review, 14-day
+  deadline, fail-closed).
+- **Referral System** (NEW): taste-weighted tiers. Base payouts modest,
+  taste-aligned bonuses generous. Anti-gaming: same-IP clusters flagged.
 - **Negative invariant:** credits/subscriptions/bounties never write to
   trust_levels, operator_role, ranking weights. Tested, not assumed.
 
 ---
 
-## 8. Imports, exports, interop (spec §6, §7, §13, §23)
+## 8. Discovery & engagement (NEW sections)
+
+- **Fic Lifecycle Incentives** (§9.8): completion bonus (2× on final chapter
+  of ≥3-chapter work), resurrection reward (3× on 180+ day stale work),
+  WIP visibility neutral (no penalty, no boost).
+- **Taste-Weighted Notifications** (§9.9): notify aligned users when matching
+  content is published. Batching prevents spam. Max 3 per day. Popularity
+  bypass for >0.9 popularity.
+- **Onboarding Taste Quiz** (§0.4.2): optional quiz on registration. Computes
+  initial taste vector for immediate resonance signal. Skippable.
+- **Taste Probes** (§16.19): admin's discover surfaces works adjacent to but
+  slightly outside their taste vector. Positive engagement expands profile;
+  negative suppresses direction.
+- **Dynamic Tag Gravity** (§0.4.6): tags gain/lose gravity based on admin
+  engagement over 90 days. Admin can manually pin tags regardless.
+- **Instance Presets** (§0.6): bundled config defaults (Curated Boutique,
+  Open Library, Admin's Garden, Genre Haven, Experimental Lab).
+- **Author Matchmaking** (§14.5): hint authors about understaffed areas of
+  high instance demand. Hints, not requirements.
+- **Reading Clubs** (§17.6): manual gravity override for spotlight works.
+  Admin or vanguard creates, 1–14 days, flat participation bonus.
+
+---
+
+## 9. Imports, exports, interop (spec §6, §7, §13, §23)
 
 - Source adapters with hand-off transport (no adapter-owned client), SSRF-safe
   fetcher, `robots.txt` compliance (operator override visible in catalogue).
@@ -156,7 +220,7 @@ themselves.
 
 ---
 
-## 9. Translation & media (spec §22, §23, §25, §26)
+## 10. Translation & media (spec §22, §23, §25, §26)
 
 - Translation jobs with segmentation, memory, glossary, review gates.
 - TTS narration editions (Piper local-first, cloud adapters behind trait).
@@ -166,7 +230,7 @@ themselves.
 
 ---
 
-## 10. Spec-only, no code yet (spec §33, §34)
+## 11. Spec-only, no code yet (spec §33, §34)
 
 - **Milestone 27:** permission statements (podfic/translate/remix/AI),
   derivative lineage, exclusion registry.

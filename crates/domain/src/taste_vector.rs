@@ -235,6 +235,34 @@ pub fn profile_resonance(user: &TasteVector, profile: &TasteProfile) -> f64 {
     resonance_from_distance(distance_to_profile(user, profile))
 }
 
+/// Derive a work's taste vector from its tags and the instance dimensions.
+///
+/// Each dimension starts at neutral 0.5. A tag whose canonical name equals a
+/// dimension key (case-insensitive) shifts that dimension by `weight / 100`
+/// from neutral, clamped to [0,1]. Tag weights are signed (a negative weight
+/// suppresses). Tags matching no dimension are ignored. The returned vector is
+/// ordered by dimension key sort order — callers must sort dimensions the same
+/// way before interpreting positions.
+pub fn work_vector_from_tags(
+    dimensions: &[(String, String, f64, f64)],
+    tags: &[(String, i64)],
+) -> Vec<f64> {
+    let mut sorted: Vec<&(String, String, f64, f64)> = dimensions.iter().collect();
+    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+    sorted
+        .iter()
+        .map(|(key, _label, _target, _weight)| {
+            let mut score = 0.5f64;
+            for (tag, weight) in tags {
+                if tag.to_lowercase() == key.to_lowercase() {
+                    score += *weight as f64 / 100.0;
+                }
+            }
+            score.clamp(0.0, 1.0)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

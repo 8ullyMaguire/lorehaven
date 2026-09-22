@@ -473,10 +473,277 @@ gravity_max_suppress = 0.5    # min multiplier (never zero — content still fin
 | 16 | Author Matchmaking | §14.5 | **Shapes supply** not just demand | S |
 | 17 | Reading Clubs | §17.6 | **Manual gravity override** | S |
 | 18 | Streak flat bonuses | §9.7.1 | **Engagement without diluting signal** | XS |
+| 19 | Meta-Ranking (built-in strategies) | §9.10 | **Self-correcting recommendation** | M |
+| 20 | Marketplace & community algorithms | §9.10.1–10.10 | **Open ecosystem for recommendation strategies** | L |
 
-**M** = medium (multi-file, schema + domain + API), **S** = small (single area), **XS** = trivial.
+**M** = medium, **S** = small, **XS** = trivial, **L** = large (multi-phase, ecosystem).
 
-**Phased order:** 1→2→3 are the foundation (ship together). 4→5→6 are the health layer. 7→8→9 are the engagement layer. 10→11→12→13 are the community layer. 14→15→16→17→18 are incremental improvements.
+**Phased order:** 1→2→3 foundation. 4→5→6 health. 7→8→9 engagement. 10→11→12→13 community. 14→15→16→17→18 incremental. 19 meta-ranker (can ship after foundation, before or alongside engagement). 20 marketplace (after meta-ranker proven).
+
+---
+
+## §9.10 Marketplace & Algorithmic Meta-Ranking (NEW)
+
+### §9.10.1 The Marketplace
+
+Lorehaven instances can install community-contributed extensions from a shared marketplace. The marketplace is itself a Lorehaven-hosted service (or a federated registry), but each instance decides independently what to install. Nothing from the marketplace runs without explicit admin approval.
+
+**Installable extension types:**
+
+| Type | What it does | Sandboxing |
+|------|-------------|------------|
+| **Recommendation algorithms** | A complete strategy that takes context and returns ranked work IDs | WASM sandbox, pure function, no I/O |
+| **Themes** | CSS/layout/skin packages for the frontend | CSS-only, CSP-restricted |
+| **Tag taxonomies** | Pre-built tag hierarchies, synonym maps | Data-only, validated schema |
+| **Badge definitions** | Custom badge triggers and artwork | Declarative DSL |
+| **Bounty templates** | Pre-configured bounty structures | Data-only |
+| **Content classifiers** | Trained models for positivity pipeline, content notes, genre | WASM sandbox |
+| **Onboarding quiz packs** | Curated quiz sets for cold-start taste calibration | Data-only |
+| **Reading club templates** | Pre-built club structures, schedules, prompts | Data-only |
+
+**Marketplace trust model:**
+- Extensions are published with author identity, version, license, and review status
+- Review status: `unreviewed` → `community_reviewed` (quorum) → `admin_verified` (Lorehaven core team)
+- Instances can configure a minimum trust level: `marketplace.min_trust = "community_reviewed"`
+- The instance admin always has final install/uninstall authority — no auto-updates without consent
+
+### §9.10.2 Recommendation Algorithm API
+
+Community-contributed recommendation algorithms are the most powerful and most dangerous extension type. They must be **sandboxed, deterministic, and stateless**.
+
+**Execution model:** WASM modules compiled from Rust, Go, AssemblyScript, or any WASM-targeting language. The Lorehaven host provides a restricted import API:
+
+```
+Host-provided imports (algorithm CAN access):
+- get_work_metadata(work_id) → WorkMetadata (tags, word count, completion, fandom, ratings summary)
+- get_user_public_signals(user_id) → PublicSignals (public bookmarks, kudos, reading time aggregates)
+- get_admin_taste_vector() → TasteVector (instance taste profile: dimensions + targets)
+- get_taste_resonance(user_id) → f64 (requesting user's resonance score)
+- get_vanguard_consensus(work_id) → f64 (vanguard bookmark/rate aggregate)
+- get_topic_scores(work_id) → Vec<(String, f64)> (topic alignment scores)
+- get_recency_score(work_id) → f64 (time-decayed recency)
+- get_popularity_score(work_id) → f64 (aggregate kudos/bookmarks/reads)
+- get_completion_state(work_id) → CompletionState (WIP, completed, abandoned)
+
+Algorithm CANNOT access:
+- Private reading history, drafts, private libraries, user credentials, emails, IPs
+- Database writes of any kind, network calls, filesystem, other users' private data
+```
+
+**Function signature:**
+
+```rust
+#[no_mangle]
+pub fn recommend(
+    context: RecommendationContext,  // requesting user, surface type, limit, seed
+    works: &[WorkCandidate],         // pre-filtered candidate pool
+) -> Vec<ScoredWork>;                // ranked output: (work_id, score 0.0-1.0)
+```
+
+**Resource limits:**
+
+Resource limits for marketplace algorithms vary by the requesting user's subscription tier. A subscriber's feed may run richer, more compute-intensive algorithms; a free-tier user's feed runs lighter variants.
+
+```yaml
+[marketplace.algo_limits.base]            # free / unauthenticated
+timeout_ms = 25
+max_size_mb = 5
+max_api_calls = 500
+
+[marketplace.algo_limits.author]          # Author subscription
+timeout_ms = 50
+max_size_mb = 10
+max_api_calls = 1000
+
+[marketplace.algo_limits.curator]         # Curator / Patron subscription
+timeout_ms = 100
+max_size_mb = 20
+max_api_calls = 2000
+```
+
+- Each instance configures its own tier thresholds (the tier names above are illustrative; map to the instance's subscription model).
+- The algorithm host selects the appropriate limit set at invocation time based on the requesting user's current tier.
+- **Hard global maximum:** regardless of tier, no algorithm may exceed 200ms or 50MB — these are instance safety valves, not subscription targets.
+- **Deterministic:** same inputs + same tier limit → same outputs. The algorithm does not know its own tier; it simply sees its resource budget enforced by the sandbox.
+
+**Rationale:** Taste-aligned algorithms are the core value of the platform. Subscribers — who fund the instance — get the richest recommendation quality. Free users get a taste (lighter algorithms, faster responses) but the full gravity engine requires subscription. This aligns resource cost with revenue.
+
+### §9.10.3 The Meta-Ranker as Marketplace Quality Gate
+
+The meta-ranker is both a recommendation optimizer AND the evaluation engine for the entire algorithm marketplace.
+
+**Candidate lifecycle:**
+
+```
+installed → candidate (2x exploration weight for first 200 impressions)
+         → evaluated (normal exploration weight)
+         → promoted (enters exploitation pool if top-3 after 500 impressions)
+         → demoted (dropped from exploitation if falls below top-5)
+         → disabled (auto or manual, if underperforming or erroring)
+```
+
+**Auto-disable:** `meta_ranking.auto_disable_threshold = 0.3` — disabled if success rate < 30% of the best strategy after 500 impressions. Errors (timeout, crash, invalid output) → immediately disabled, admin notified.
+
+### §9.10.4 Strategy Pool Composition
+
+| Source | Examples | Count |
+|--------|----------|-------|
+| **Built-in** | Taste Gravity, Popularity, Recency, Collaborative, Completion-Boosted, Diversity, Vanguard Consensus, Dynamic Tag Gravity, Lifecycle, Taste Probe | ~12 |
+| **Marketplace-installed** | "SlowBurnFinder", "AngstMaximizer", "CrossFandomBridge" | 0–∞ |
+| **Instance-custom** | Admin-written WASM algorithms | 0–∞ |
+
+**Pool size management:** `meta_ranking.max_active_strategies = 20`. If more installed, pre-selection round picks top 20 candidates.
+
+### §9.10.5 Thompson Sampling Engine
+
+Each strategy maintains a **Beta distribution** over its success rate. On each rebalance:
+
+1. Sample from each strategy's Beta distribution
+2. Rank strategies by sampled value
+3. Top strategy gets `exploitation_percent` of slots
+4. Remaining slots distributed proportional to sample values
+5. Update Beta distributions after impressions are served and outcomes observed
+
+**Cold start:** All strategies begin with uniform prior Beta(1,1). First ~50 impressions are essentially random.
+
+### §9.10.6 Success Metrics
+
+```yaml
+[meta_ranking]
+success_metric = "admin_aligned"  # admin_aligned | engagement | completion | hybrid
+
+# Weights within admin_aligned:
+admin_rating_weight = 0.40              # admin rated the work ≥ 4
+admin_completion_weight = 0.30          # admin read > 80% of the work
+resonance_user_completion_weight = 0.20 # high-resonance users finished it
+resonance_user_bookmark_weight = 0.10    # high-resonance users bookmarked it
+```
+
+- **`admin_aligned` (default):** Strategy scores well when surfaced works are ones the admin (or high-resonance proxies) actually finish and rate highly.
+- **`engagement`:** Raw reads + bookmarks + kudos. For instances optimizing for growth.
+- **`completion`:** Fraction of surfaced works that any reader finishes.
+- **`hybrid`:** Weighted combination (configurable).
+
+### §9.10.7 Marketplace Incentives (serves priority 2)
+
+| Incentive | Trigger | Reward |
+|-----------|---------|--------|
+| **Publication credit** | Algorithm published and passes review | 50 credits |
+| **Install credit** | Another instance installs your algorithm | 10 credits per install |
+| **Performance bonus** | Algorithm reaches "promoted" status | 100 credits per instance |
+| **Dominance bonus** | #1 strategy for 30+ consecutive days | 500 credits + "Top Algorithm" badge |
+| **Adoption milestone** | 10/50/100 instances | Tiered badges |
+
+**Why this serves the admin's goal:** The marketplace creates a competitive ecosystem where authors build strategies that maximize admin-aligned engagement. The best minds compete to figure out what the admin likes.
+
+### §9.10.8 User-Selectable Algorithms (optional, per-instance)
+
+```yaml
+[marketplace]
+user_algorithm_selection = true
+user_surfaces = ["home_feed"]
+admin_surfaces = ["search", "discover", "fandom", "tag", "notifications"]
+```
+
+Users can choose their preferred algorithm for personal feeds. Does not affect admin-controlled public surfaces.
+
+### §9.10.9 Surface-by-Surface Application
+
+| Surface | Meta-Ranking Active? | Notes |
+|---------|---------------------|-------|
+| **Home/Discover** | ✅ Yes | Primary surface |
+| **Search results** | ⚠️ Partial | Only when sort = "Relevance" |
+| **Fandom pages** | ✅ Yes | "Best of" section |
+| **Tag pages** | ✅ Yes | Default ordering |
+| **Author pages** | ❌ No | Chronological or manual |
+| **Notifications** | ✅ Yes | Taste notification candidates |
+| **"Readers Also Enjoyed"** | ✅ Yes | Collaborative strategies compete |
+
+### §9.10.10 Admin Dashboard
+
+The admin sees `/admin/meta-ranking` showing:
+- Current strategy ranking with confidence intervals
+- Impressions and success rates per strategy over time
+- Trending up/down indicators
+- Exploration budget allocation
+- Lock button per strategy (force include/exclude)
+
+**Never disclosed to users.** Users see a seamless feed.
+
+### §9.10.11 Security & Quality Gates
+
+| Layer | Mechanism |
+|-------|-----------|
+| **Sandbox** | WASM execution, no ambient authority |
+| **Resource limits** | Timeout, memory cap, API call limit |
+| **Determinism** | No randomness, no timestamps, no external state |
+| **Review** | Marketplace review (quorum or admin-verified) |
+| **Instance gate** | `marketplace.min_trust` filters installable extensions |
+| **Runtime monitoring** | Error rate tracking; auto-disable on failure |
+| **Admin override** | Lock/disable any algorithm |
+| **No private data** | API never exposes private history, drafts, credentials |
+| **Audit log** | All installations, promotions, demotions, disables |
+
+### §9.10.12 Interaction with Existing Systems
+
+- **Taste-Weighted Signals (§9.7.3):** Algorithms receive resonance/taste via host API. They can use or ignore them.
+- **Anti-Echo-Chamber Valve (§0.4.1):** Diversity floor enforced *after* meta-ranker. Hard constraint.
+- **Taste Probes (§16.19):** Probe frequency is hard config. Probes injected into candidate pool before algorithms see it.
+- **Dynamic Tag Gravity (§0.4.6):** Available to algorithms via `get_admin_taste_vector()` and tag metadata.
+- **Foundational protections:** No private data access. No purchased ranking — reputation earned through performance.
+
+### §9.10.13 Config
+
+```yaml
+[marketplace]
+enabled = true
+registry_url = "https://marketplace.lorehaven.org"
+min_trust = "community_reviewed"
+auto_update = false
+user_algorithm_selection = true
+user_surfaces = ["home_feed"]
+
+[marketplace.algo_limits.base]
+timeout_ms = 25
+max_size_mb = 5
+max_api_calls = 500
+
+[marketplace.algo_limits.author]
+timeout_ms = 50
+max_size_mb = 10
+max_api_calls = 1000
+
+[marketplace.algo_limits.curator]
+timeout_ms = 100
+max_size_mb = 20
+max_api_calls = 2000
+
+[meta_ranking]
+enabled = true
+exploration_percent = 15
+exploitation_percent = 85
+min_impressions_per_strategy = 50
+rebalance_frequency = "daily"
+max_active_strategies = 20
+success_metric = "admin_aligned"
+auto_disable_threshold = 0.3
+candidate_exploration_bonus = 2.0
+candidate_promotion_impressions = 500
+```
+
+### Implementation Phases
+
+The marketplace is large. The meta-ranker ships first with built-in strategies only:
+
+| # | Feature | Effort | Phase |
+|---|---------|--------|-------|
+| 19a | Meta-ranker with built-in strategies (Thompson Sampling) | M | Phase 2.4 (after foundation + signals) |
+| 19b | Admin dashboard | S | Phase 2.4 |
+| 20a | WASM sandbox + algorithm API | M | Phase 5.5 |
+| 20b | Marketplace registry (publish/install/review) | L | Phase 5.5 |
+| 20c | Marketplace incentives | S | Phase 5.6 |
+| 20d | User-selectable algorithms | S | Phase 5.6 |
+| 20e | Non-algorithm marketplace items | M | Phase 5.6 |
 
 ---
 

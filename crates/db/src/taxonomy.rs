@@ -415,6 +415,40 @@ pub async fn tag_names_for_work(db: &Database, work_id: &str) -> Result<Vec<Stri
     Ok(rows.into_iter().map(|(n,)| n).collect())
 }
 
+/// Tag names plus their work-tag weights for a work, ordered by canonical name.
+pub async fn tag_weights_for_work(
+    db: &Database,
+    work_id: &str,
+) -> Result<Vec<(String, i64)>, sqlx::Error> {
+    let sql = db.sql(
+        "SELECT tn.canonical, wt.weight
+         FROM work_tags wt
+         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         WHERE wt.work_id = ? AND tn.kind = 'tag'
+         ORDER BY tn.canonical ASC",
+        "SELECT tn.canonical, wt.weight::bigint
+         FROM work_tags wt
+         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         WHERE wt.work_id = $1::uuid AND tn.kind = 'tag'
+         ORDER BY tn.canonical ASC",
+    );
+    let rows: Vec<(String, i64)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(work_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(work_id)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(rows)
+}
+
 /// List all fandoms (taxonomy nodes of kind 'fandom') with work counts, for the Fandoms surface (spec §43.1).
 pub async fn list_fandoms(
     db: &Database,

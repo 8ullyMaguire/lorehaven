@@ -25,8 +25,46 @@ pub fn router() -> Router<AppState> {
         .route("/operator/taste-profile", get(get_admin_taste_profile).put(update_admin_taste_profile))
         .route("/operator/taste-profile/recompute-all", post(recompute_all_taste_profiles))
         .route("/operator/affinities", post(set_operator_affinity))
+        .route("/me/streak", get(get_my_streak))
         .nest("/recipes", recipe_routes())
         .nest("/dashboard", dashboard_routes())
+}
+
+/// `GET /me/streak` — the signed-in user's streak state (spec §9.7.1).
+async fn get_my_streak(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<serde_json::Value>> {
+    let db = state.db();
+    let row: Option<(i64, i64, Option<String>, i64)> = match db.backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query_as(
+                "SELECT current_streak, longest_streak, last_login_at, streak_freezes_used
+                 FROM streaks WHERE account_id = ?",
+            )
+            .bind(user.account_id.to_string())
+            .fetch_optional(db.sqlite_pool().ok_or(ApiError(AppError::Internal(anyhow::anyhow!("db pool unavailable"))))?)
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query_as(
+                "SELECT current_streak, longest_streak, last_login_at, streak_freezes_used
+                 FROM streaks WHERE account_id = $1::uuid",
+            )
+            .bind(user.account_id.to_string())
+            .fetch_optional(db.postgres_pool().ok_or(ApiError(AppError::Internal(anyhow::anyhow!("db pool unavailable"))))?)
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?
+        }
+    };
+    let (current, longest, last_login_at, freezes_used) = row.unwrap_or((0, 0, None, 0));
+    Ok(Json(serde_json::json!({
+        "current_streak": current,
+        "longest_streak": longest,
+        "last_login_at": last_login_at,
+        "streak_freezes_used": freezes_used,
+    })))
 }
 
 fn recipe_routes() -> Router<AppState> {
@@ -344,7 +382,7 @@ async fn clear_taste_profile(
 }
 
 /// Whether this account may use the operator surface.
-fn require_operator(state: &AppState, user: &crate::auth::SessionUser) -> ApiResult<()> {
+pub fn require_operator(state: &AppState, user: &crate::auth::SessionUser) -> ApiResult<()> {
     let configured = state.config().administration.operator_account_id;
     if configured == Some(user.account_id) {
         return Ok(());
