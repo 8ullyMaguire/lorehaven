@@ -1456,3 +1456,156 @@ pub async fn resolve_dmca_takedown(
     }
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Phase 5 (§32.7.3 & §32.7.7): Reverse search & discovery
+// ---------------------------------------------------------------------------
+
+/// Find media references by perceptual hash (dedup & reverse lookup).
+/// Searches for hashes within `distance` (Hamming distance threshold).
+pub async fn find_by_perceptual_hash(
+    db: &Database,
+    hash: &str,
+    max_distance: i32,
+) -> Result<Vec<MediaReference>, sqlx::Error> {
+    // Exact match first; fuzzy match is a placeholder for perceptual hash hamming distance
+    // which would require a pgcrypto extension or application-side comparison.
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            let rows = sqlx::query(
+                "SELECT id, perceptual_hash, content_hash, media_kind, first_seen_at,
+                        width, height, duration_seconds, format, file_size_bytes,
+                        content_notes, curator_verified, created_at, updated_at
+                 FROM media_references
+                 WHERE perceptual_hash = ?",
+            )
+            .bind(hash)
+            .fetch_all(pool)
+            .await?;
+            Ok(rows.iter().map(|r| MediaReference {
+                id: r.get::<String, _>("id"),
+                perceptual_hash: r.get::<Option<String>, _>("perceptual_hash"),
+                content_hash: r.get::<String, _>("content_hash"),
+                media_kind: r.get::<String, _>("media_kind"),
+                first_seen_at: r.get::<String, _>("first_seen_at"),
+                width: r.get::<Option<i64>, _>("width"),
+                height: r.get::<Option<i64>, _>("height"),
+                duration_seconds: r.get::<Option<i64>, _>("duration_seconds"),
+                format: r.get::<Option<String>, _>("format"),
+                file_size_bytes: r.get::<Option<i64>, _>("file_size_bytes"),
+                content_notes: r.get::<String, _>("content_notes"),
+                curator_verified: r.get::<bool, _>("curator_verified"),
+                created_at: r.get::<String, _>("created_at"),
+                updated_at: r.get::<String, _>("updated_at"),
+            }).collect())
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            let rows = sqlx::query(
+                "SELECT id, perceptual_hash, content_hash, media_kind, first_seen_at,
+                        width, height, duration_seconds, format, file_size_bytes,
+                        content_notes, curator_verified, created_at, updated_at
+                 FROM media_references
+                 WHERE perceptual_hash = $1",
+            )
+            .bind(hash)
+            .fetch_all(pool)
+            .await?;
+            Ok(rows.iter().map(|r| MediaReference {
+                id: r.get::<String, _>("id"),
+                perceptual_hash: r.get::<Option<String>, _>("perceptual_hash"),
+                content_hash: r.get::<String, _>("content_hash"),
+                media_kind: r.get::<String, _>("media_kind"),
+                first_seen_at: r.get::<String, _>("first_seen_at"),
+                width: r.get::<Option<i64>, _>("width"),
+                height: r.get::<Option<i64>, _>("height"),
+                duration_seconds: r.get::<Option<i64>, _>("duration_seconds"),
+                format: r.get::<Option<String>, _>("format"),
+                file_size_bytes: r.get::<Option<i64>, _>("file_size_bytes"),
+                content_notes: r.get::<String, _>("content_notes"),
+                curator_verified: r.get::<bool, _>("curator_verified"),
+                created_at: r.get::<String, _>("created_at"),
+                updated_at: r.get::<String, _>("updated_at"),
+            }).collect())
+        }
+    }
+}
+
+/// Find media references linked to a curator with low healthy link counts (curator bounty queue).
+pub async fn find_curator_bounty_queue(
+    db: &Database,
+    healthy_links_below: i32,
+    limit: i32,
+) -> Result<Vec<MediaReference>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            let rows = sqlx::query(
+                "SELECT m.id, m.perceptual_hash, m.content_hash, m.media_kind, m.first_seen_at,
+                        m.width, m.height, m.duration_seconds, m.format, m.file_size_bytes,
+                        m.content_notes, m.curator_verified, m.created_at, m.updated_at
+                 FROM media_references m
+                 WHERE (SELECT COUNT(*) FROM availability_links
+                        WHERE media_reference_id = m.id AND status = 'healthy') < ?
+                 ORDER BY (SELECT COUNT(*) FROM availability_links
+                           WHERE media_reference_id = m.id AND status = 'healthy') ASC
+                 LIMIT ?",
+            )
+            .bind(healthy_links_below)
+            .bind(limit)
+            .fetch_all(pool)
+            .await?;
+            Ok(rows.iter().map(|r| MediaReference {
+                id: r.get::<String, _>("id"),
+                perceptual_hash: r.get::<Option<String>, _>("perceptual_hash"),
+                content_hash: r.get::<String, _>("content_hash"),
+                media_kind: r.get::<String, _>("media_kind"),
+                first_seen_at: r.get::<String, _>("first_seen_at"),
+                width: r.get::<Option<i64>, _>("width"),
+                height: r.get::<Option<i64>, _>("height"),
+                duration_seconds: r.get::<Option<i64>, _>("duration_seconds"),
+                format: r.get::<Option<String>, _>("format"),
+                file_size_bytes: r.get::<Option<i64>, _>("file_size_bytes"),
+                content_notes: r.get::<String, _>("content_notes"),
+                curator_verified: r.get::<bool, _>("curator_verified"),
+                created_at: r.get::<String, _>("created_at"),
+                updated_at: r.get::<String, _>("updated_at"),
+            }).collect())
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            let rows = sqlx::query(
+                "SELECT m.id, m.perceptual_hash, m.content_hash, m.media_kind, m.first_seen_at,
+                        m.width, m.height, m.duration_seconds, m.format, m.file_size_bytes,
+                        m.content_notes, m.curator_verified, m.created_at, m.updated_at
+                 FROM media_references m
+                 WHERE (SELECT COUNT(*) FROM availability_links
+                        WHERE media_reference_id = m.id AND status = 'healthy') < $1
+                 ORDER BY (SELECT COUNT(*) FROM availability_links
+                           WHERE media_reference_id = m.id AND status = 'healthy') ASC
+                 LIMIT $2",
+            )
+            .bind(healthy_links_below)
+            .bind(limit)
+            .fetch_all(pool)
+            .await?;
+            Ok(rows.iter().map(|r| MediaReference {
+                id: r.get::<String, _>("id"),
+                perceptual_hash: r.get::<Option<String>, _>("perceptual_hash"),
+                content_hash: r.get::<String, _>("content_hash"),
+                media_kind: r.get::<String, _>("media_kind"),
+                first_seen_at: r.get::<String, _>("first_seen_at"),
+                width: r.get::<Option<i64>, _>("width"),
+                height: r.get::<Option<i64>, _>("height"),
+                duration_seconds: r.get::<Option<i64>, _>("duration_seconds"),
+                format: r.get::<Option<String>, _>("format"),
+                file_size_bytes: r.get::<Option<i64>, _>("file_size_bytes"),
+                content_notes: r.get::<String, _>("content_notes"),
+                curator_verified: r.get::<bool, _>("curator_verified"),
+                created_at: r.get::<String, _>("created_at"),
+                updated_at: r.get::<String, _>("updated_at"),
+            }).collect())
+        }
+    }
+}

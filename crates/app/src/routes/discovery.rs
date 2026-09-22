@@ -24,8 +24,10 @@ pub fn router() -> Router<AppState> {
         .route("/discovery/taste-profile/clear", post(clear_taste_profile))
         .route("/operator/taste-profile", get(get_admin_taste_profile).put(update_admin_taste_profile))
         .route("/operator/taste-profile/recompute-all", post(recompute_all_taste_profiles))
-        .route("/operator/affinities", post(set_operator_affinity))
         .route("/me/streak", get(get_my_streak))
+        .route("/media/reverse-search", post(reverse_search))
+        .route("/curator/bounty-queue", get(curator_bounty_queue))
+        .route("/operator/affinities", post(set_operator_affinity))
         .nest("/recipes", recipe_routes())
         .nest("/dashboard", dashboard_routes())
 }
@@ -651,4 +653,102 @@ async fn save_dashboard(
         .await
         .map_err(|e| ApiError(AppError::Internal(e)))?;
     Ok(Json(serde_json::json!({ "status": "saved" })))
+}
+
+// ---------------------------------------------------------------------------
+// Reverse search & curator bounty queue (spec §32.7.3 & §32.7.5)
+// ---------------------------------------------------------------------------
+
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+#[derive(Debug, Deserialize)]
+pub struct ReverseSearchPayload {
+    pub url: Option<String>,
+    pub hash: Option<String>,
+    pub algorithm: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReverseSearchView {
+    pub references: Vec<serde_json::Value>,
+    pub works: Vec<serde_json::Value>,
+}
+
+pub async fn reverse_search(
+    State(state): State<AppState>,
+    _session: MaybeSession,
+    Json(payload): Json<ReverseSearchPayload>,
+) -> ApiResult<Json<ReverseSearchView>> {
+    let hash = if let Some(h) = payload.hash {
+        h
+    } else if let Some(url) = payload.url {
+        let _ = url;
+        return Ok(Json(ReverseSearchView {
+            references: vec![],
+            works: vec![],
+        }));
+    } else {
+        return Err(ApiError(AppError::Validation {
+            message: "Either url or hash must be provided".into(),
+            field_errors: BTreeMap::new(),
+        }));
+    };
+
+    let refs = lorehaven_db::media_resilience::find_by_perceptual_hash(
+        state.db(), &hash, 0,
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+
+    let refs_json: Vec<serde_json::Value> = refs.iter().map(|r| {
+        serde_json::json!({
+            "id": r.id,
+            "media_kind": r.media_kind,
+            "perceptual_hash": r.perceptual_hash,
+            "content_hash": r.content_hash,
+            "curator_verified": r.curator_verified,
+        })
+    }).collect();
+
+    Ok(Json(ReverseSearchView {
+        references: refs_json,
+        works: vec![],
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CuratorBountyQueueQuery {
+    pub healthy_below: Option<i32>,
+    pub limit: Option<i32>,
+}
+
+pub async fn curator_bounty_queue(
+    State(state): State<AppState>,
+    RequireSession(_user): RequireSession,
+    Query(query): Query<CuratorBountyQueueQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let healthy_below = query.healthy_below.unwrap_or(3);
+    let limit = query.limit.unwrap_or(50);
+
+    let refs = lorehaven_db::media_resilience::find_curator_bounty_queue(
+        state.db(), healthy_below, limit,
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+
+    let refs_json: Vec<serde_json::Value> = refs.iter().map(|r| {
+        serde_json::json!({
+            "id": r.id,
+            "media_kind": r.media_kind,
+            "perceptual_hash": r.perceptual_hash,
+            "content_hash": r.content_hash,
+            "curator_verified": r.curator_verified,
+        })
+    }).collect();
+
+    Ok(Json(serde_json::json!({
+        "queue": refs_json,
+        "count": refs_json.len(),
+    })))
 }

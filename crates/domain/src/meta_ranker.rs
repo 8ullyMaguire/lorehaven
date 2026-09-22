@@ -29,6 +29,8 @@ pub enum StrategyKind {
     Diversity,
     /// Recently completed or resurrected works.
     Lifecycle,
+    /// Works linked by shared media references — cross-work discovery via faceclaims/moodboards/playlists.
+    MediaReferenceCollaborative,
 }
 
 impl StrategyKind {
@@ -47,6 +49,7 @@ impl StrategyKind {
             StrategyKind::TasteProbe,
             StrategyKind::Diversity,
             StrategyKind::Lifecycle,
+            StrategyKind::MediaReferenceCollaborative,
         ]
     }
 
@@ -65,6 +68,7 @@ impl StrategyKind {
             StrategyKind::TasteProbe => "probe",
             StrategyKind::Diversity => "diversity",
             StrategyKind::Lifecycle => "lifecycle",
+            StrategyKind::MediaReferenceCollaborative => "media_ref_collab",
         }
     }
 }
@@ -597,7 +601,7 @@ mod tests {
     fn meta_ranker_new_has_all_builtins() {
         let config = MetaRankerConfig::default();
         let ranker = MetaRanker::new(config);
-        assert_eq!(ranker.strategies.len(), 12);
+        assert_eq!(ranker.strategies.len(), 13);
     }
 
     #[test]
@@ -709,7 +713,7 @@ mod tests {
         ranker.record_outcome(StrategyKind::Popularity, false);
 
         let summary = ranker.summary();
-        assert_eq!(summary.len(), 12);
+        assert_eq!(summary.len(), 13);
 
         let tg = summary.iter().find(|s| s.kind == StrategyKind::TasteGravity).unwrap();
         assert_eq!(tg.impressions, 1);
