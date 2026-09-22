@@ -3087,6 +3087,44 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Public,
     },
     // ------------------------------------------------------------------
+    // Author media tools (spec §32.7.8)
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "author_media.rs",
+        handler: "get_preferences",
+        method: "GET",
+        path: "/author/media-preferences",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "author_media.rs",
+        handler: "update_preferences",
+        method: "PUT",
+        path: "/author/media-preferences",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "author_media.rs",
+        handler: "post_targeted_bounty",
+        method: "POST",
+        path: "/author/targeted-bounties",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "author_media.rs",
+        handler: "claim_targeted_bounty",
+        method: "POST",
+        path: "/author/targeted-bounties/claim",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "author_media.rs",
+        handler: "list_targeted_bounties",
+        method: "GET",
+        path: "/works/{work_id}/targeted-bounties",
+        audience: Audience::Public,
+    },
+    // ------------------------------------------------------------------
     // Discovery — additional routes not in main table (spec §16)
     // ------------------------------------------------------------------
     RouteEntry {
