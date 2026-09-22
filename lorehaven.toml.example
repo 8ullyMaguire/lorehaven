@@ -175,3 +175,33 @@ format = "pretty"
 # outside production and false in it; enabling it in production is a startup
 # error.
 seed_enabled = true
+
+# --- Revisions, jobs, library (spec §38) -----------------------------------
+[revisions]
+# How long a cached source revision lives, in seconds. Default 604800 (7 days).
+# ttl_secs = 604800
+
+[jobs]
+# How long terminal jobs are kept, in days. Default 30.
+# terminal_retention_days = 30
+
+[library]
+# How long an update-check record is kept, in days. Default 90.
+# update_check_retention_days = 90
+# How many items one library update job checks. Default 50.
+# check_batch = 50
+
+[bulk_export]
+# How many works a bulk export may bundle. Default 50.
+# max_items = 50
+# How many bytes a bulk export may total. Default 1073741824 (1 GiB).
+# max_bytes = 1073741824
+
+[administration]
+# Account ID of the operator (may access /admin).
+# operator_account_id = 1
+
+# Webhook delivery settings (spec §38).
+# webhook_timeout_secs = 10
+# webhook_max_attempts = 5
+# webhook_base_delay_ms = 500

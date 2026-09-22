@@ -822,11 +822,7 @@ pub async fn request_bulk(
         return Err(fatal("no eligible works matched the query".to_owned()));
     }
 
-    let max_items = state
-        .config()
-        .bulk_export
-        .max_items
-        .unwrap_or(crate::bulk_export::DEFAULT_MAX_ITEMS);
+    let max_items = state.config().bulk_export.max_items;
     if eligible_count > max_items {
         return Err(fatal(format!(
             "query matches {eligible_count} works, exceeding the cap of {max_items}. \

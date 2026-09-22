@@ -507,20 +507,9 @@ pub fn normalise_tag(raw: &str) -> Option<String> {
     }
     Some(collapsed)
 }
-
-/// How long an update-check record is kept, in days (spec §16's retention).
-pub const UPDATE_CHECK_RETENTION_DAYS: i64 = 90;
-
-/// The cutoff before which an update check is expired.
-#[must_use]
-pub fn update_check_retention_cutoff(now: time::OffsetDateTime) -> time::OffsetDateTime {
-    now - time::Duration::days(UPDATE_CHECK_RETENTION_DAYS)
-}
-
-#[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
-    use time::macros::datetime;
 
     #[test]
     fn a_reading_status_round_trips_through_its_stored_form() {
@@ -706,13 +695,6 @@ mod tests {
         let failure = BatchFailure::gone("abc");
         assert_eq!(failure.code, "NOT_FOUND");
         assert!(failure.message.is_none());
-    }
-
-    #[test]
-    fn the_update_check_cutoff_is_ninety_days_back() {
-        let now = datetime!(2026-09-11 12:00 UTC);
-        let cutoff = update_check_retention_cutoff(now);
-        assert_eq!(cutoff, datetime!(2026-06-13 12:00 UTC));
     }
 
     #[test]

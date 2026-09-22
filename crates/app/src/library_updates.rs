@@ -22,17 +22,17 @@
 //!
 //! # Bounded on purpose
 //!
-//! One job checks at most [`CHECK_BATCH`] items, oldest first. A reader with a
-//! thousand imports asking for a check should get an answer in bounded time and
-//! a bounded number of requests to somebody else's server, and the oldest-first
-//! order is what makes the next job continue where this one stopped.
+//! One job checks at most `library.check_batch` items (spec §38, default 50),
+//! oldest first. A reader with a thousand imports asking for a check should get
+//! an answer in bounded time and a bounded number of requests to somebody
+//! else's server, and the oldest-first order is what makes the next job
+//! continue where this one stopped.
 
 use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use lorehaven_db::{imports, library};
-use lorehaven_domain::library::update_check_retention_cutoff;
 use lorehaven_scrapers::{SafeFetcher, SourceKey};
 
 use crate::imports::policy_for;
@@ -41,9 +41,6 @@ use crate::worker::HandlerError;
 
 /// The payload key carrying the account whose library is checked.
 const PAYLOAD_ACCOUNT_ID: &str = "account_id";
-
-/// How many items one job checks.
-pub const CHECK_BATCH: i64 = 50;
 
 fn transient(error: impl std::fmt::Display) -> HandlerError {
     HandlerError::Transient(error.to_string())
@@ -89,17 +86,18 @@ pub async fn run(state: &AppState, payload: &Value) -> Result<(), HandlerError> 
         })?;
 
     // Retention first, so a library that has been checked for years does not
-    // keep its history for ever (spec §16's 90 days). A failure here is logged
-    // and the check continues: the sweep is housekeeping, not the job.
+    // keep its history for ever (spec §16). A failure here is logged and the
+    // check continues: the sweep is housekeeping, not the job.
     let now = OffsetDateTime::now_utc();
-    let cutoff = update_check_retention_cutoff(now)
-        .format(&Rfc3339)
-        .unwrap_or_default();
-    if let Err(error) = library::sweep_update_checks(state.db(), &cutoff).await {
+    let retention_days = state.config().library.update_check_retention_days;
+    let cutoff = now - time::Duration::days(retention_days);
+    let cutoff_str = cutoff.format(&Rfc3339).unwrap_or_default();
+    if let Err(error) = library::sweep_update_checks(state.db(), &cutoff_str).await {
         tracing::warn!(%error, "could not sweep expired update checks");
     }
 
-    let items = library::all_library_items(state.db(), account, CHECK_BATCH)
+    let batch = state.config().library.check_batch;
+    let items = library::all_library_items(state.db(), account, batch)
         .await
         .map_err(transient)?;
     if items.is_empty() {

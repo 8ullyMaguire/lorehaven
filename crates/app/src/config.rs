@@ -144,6 +144,12 @@ pub struct Config {
     pub works: WorksConfig,
     /// Longevity signals: half-life and interaction warmth (spec §41).
     pub community: CommunityConfig,
+    /// Revision caching settings (spec §38).
+    pub revisions: RevisionsConfig,
+    /// Job queue settings (spec §38).
+    pub jobs: JobsConfig,
+    /// Library update-check settings (spec §38).
+    pub library: LibraryConfig,
     /// Where the configuration file was read from, if any.
     pub config_path: Option<PathBuf>,
 }
@@ -231,6 +237,54 @@ impl Default for CommunityConfig {
     }
 }
 
+/// Revision caching settings (spec §38).
+#[derive(Debug, Clone)]
+pub struct RevisionsConfig {
+    /// How long a cached source revision lives, in seconds.
+    pub ttl_secs: i64,
+}
+
+impl Default for RevisionsConfig {
+    fn default() -> Self {
+        Self {
+            ttl_secs: 7 * 24 * 60 * 60,
+        }
+    }
+}
+
+/// Job queue settings (spec §38).
+#[derive(Debug, Clone)]
+pub struct JobsConfig {
+    /// How long terminal jobs are kept after completion/failure, in days.
+    pub terminal_retention_days: i64,
+}
+
+impl Default for JobsConfig {
+    fn default() -> Self {
+        Self {
+            terminal_retention_days: 30,
+        }
+    }
+}
+
+/// Library update-check settings (spec §38).
+#[derive(Debug, Clone)]
+pub struct LibraryConfig {
+    /// How long an update-check record is kept, in days.
+    pub update_check_retention_days: i64,
+    /// How many items one library update job checks.
+    pub check_batch: i64,
+}
+
+impl Default for LibraryConfig {
+    fn default() -> Self {
+        Self {
+            update_check_retention_days: 90,
+            check_batch: 50,
+        }
+    }
+}
+
 /// Resource directory settings (spec §39).
 #[derive(Debug, Clone)]
 pub struct DirectoryConfig {
@@ -287,10 +341,10 @@ impl Default for DirectoryConfig {
 /// Polly) are added later behind the same `TtsEngine` trait.
 #[derive(Debug, Clone)]
 pub struct BulkExportConfig {
-    /// How many works a bulk export may bundle. `None` means the default.
-    pub max_items: Option<i64>,
-    /// How many bytes a bulk export may total. `None` means the default.
-    pub max_bytes: Option<i64>,
+    /// How many works a bulk export may bundle. Default 50.
+    pub max_items: i64,
+    /// How many bytes a bulk export may total. Default 1073741824 (1 GiB).
+    pub max_bytes: i64,
 }
 
 /// Forum settings (spec 35).
@@ -333,8 +387,8 @@ impl Default for ForumConfig {
 impl Default for BulkExportConfig {
     fn default() -> Self {
         Self {
-            max_items: None,
-            max_bytes: None,
+            max_items: 50,
+            max_bytes: 1073741824, // 1 GiB
         }
     }
 }
@@ -836,7 +890,7 @@ impl Config {
         // two), then the file. A malformed id is a startup error rather than a
         // silently missing operator, because the failure mode of the latter is
         // an admin page nobody can open.
-        let administration_file = file.administration.unwrap_or_default();
+        let administration_file = file.administration.clone().unwrap_or_default();
         let operator_account_id = global
             .operator_account_id
             .clone()
@@ -1030,10 +1084,26 @@ impl Config {
             assets,
             administration: AdministrationConfig {
                 operator_account_id,
-                webhook_timeout_secs: 10,
-                webhook_max_attempts: 5,
-                webhook_base_delay_ms: 500,
-                webhook_allowed_hosts: Vec::new(),
+                webhook_timeout_secs: file
+                    .administration
+                    .as_ref()
+                    .and_then(|a| a.webhook_timeout_secs)
+                    .unwrap_or(10),
+                webhook_max_attempts: file
+                    .administration
+                    .as_ref()
+                    .and_then(|a| a.webhook_max_attempts)
+                    .unwrap_or(5),
+                webhook_base_delay_ms: file
+                    .administration
+                    .as_ref()
+                    .and_then(|a| a.webhook_base_delay_ms)
+                    .unwrap_or(500),
+                webhook_allowed_hosts: file
+                    .administration
+                    .as_ref()
+                    .and_then(|a| a.webhook_allowed_hosts.clone())
+                    .unwrap_or_default(),
             },
             dev,
             accounts,
@@ -1042,12 +1112,53 @@ impl Config {
             imports,
             discovery: DiscoveryConfig::default(),
             tts,
-            bulk_export: BulkExportConfig::default(),
+            // --- bulk_export (spec §38) -----------------------------------------
+            bulk_export: BulkExportConfig {
+                max_items: file
+                    .bulk_export
+                    .as_ref()
+                    .and_then(|b| b.max_items)
+                    .unwrap_or_else(|| BulkExportConfig::default().max_items),
+                max_bytes: file
+                    .bulk_export
+                    .as_ref()
+                    .and_then(|b| b.max_bytes)
+                    .unwrap_or_else(|| BulkExportConfig::default().max_bytes),
+            },
             forum,
             exports,
             directory,
             works,
             community: CommunityConfig::default(),
+            // --- revisions (spec §38) -----------------------------------------
+            revisions: RevisionsConfig {
+                ttl_secs: file
+                    .revisions
+                    .as_ref()
+                    .and_then(|r| r.ttl_secs)
+                    .unwrap_or_else(|| RevisionsConfig::default().ttl_secs),
+            },
+            // --- jobs (spec §38) ----------------------------------------------
+            jobs: JobsConfig {
+                terminal_retention_days: file
+                    .jobs
+                    .as_ref()
+                    .and_then(|j| j.terminal_retention_days)
+                    .unwrap_or_else(|| JobsConfig::default().terminal_retention_days),
+            },
+            // --- library (spec §38) --------------------------------------------
+            library: LibraryConfig {
+                update_check_retention_days: file
+                    .library
+                    .as_ref()
+                    .and_then(|l| l.update_check_retention_days)
+                    .unwrap_or_else(|| LibraryConfig::default().update_check_retention_days),
+                check_batch: file
+                    .library
+                    .as_ref()
+                    .and_then(|l| l.check_batch)
+                    .unwrap_or_else(|| LibraryConfig::default().check_batch),
+            },
             config_path,
         };
 
@@ -1117,6 +1228,9 @@ impl Config {
             directory: DirectoryConfig::default(),
             works: WorksConfig::default(),
             community: CommunityConfig::default(),
+            revisions: RevisionsConfig::default(),
+            jobs: JobsConfig::default(),
+            library: LibraryConfig::default(),
             config_path: None,
         }
     }
@@ -1272,10 +1386,50 @@ struct FileConfig {
     rate_limits: Option<RateLimitSection>,
     imports: Option<ImportsSection>,
     tts: Option<TtsSection>,
+    bulk_export: Option<BulkExportSection>,
     forum: Option<ForumSection>,
     exports: Option<ExportsSection>,
     directory: Option<DirectorySection>,
     works: Option<WorksSection>,
+    revisions: Option<RevisionsSection>,
+    jobs: Option<JobsSection>,
+    library: Option<LibrarySection>,
+}
+
+/// The `[revisions]` table (spec §38): source revision cache settings.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RevisionsSection {
+    /// How long a cached source revision lives, in seconds. Default 604800 (7d).
+    ttl_secs: Option<i64>,
+}
+
+/// The `[jobs]` table (spec §38): job queue settings.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JobsSection {
+    /// How long terminal jobs are kept, in days. Default 30.
+    terminal_retention_days: Option<i64>,
+}
+
+/// The `[library]` table (spec §38): library update-check settings.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LibrarySection {
+    /// How long an update-check record is kept, in days. Default 90.
+    update_check_retention_days: Option<i64>,
+    /// How many items one library update job checks. Default 50.
+    check_batch: Option<i64>,
+}
+
+/// The `[bulk_export]` table (spec §38): bulk export limits.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BulkExportSection {
+    /// How many works a bulk export may bundle. Default 50.
+    max_items: Option<i64>,
+    /// How many bytes a bulk export may total. Default 1073741824 (1 GiB).
+    max_bytes: Option<i64>,
 }
 
 /// The `[works]` table (spec §40): fork and permission statement settings.
@@ -1456,8 +1610,14 @@ struct AssetsSection {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[derive(Clone)]
 struct AdministrationSection {
     operator_account_id: Option<String>,
+    /// Webhook delivery settings (spec §38).
+    webhook_timeout_secs: Option<u64>,
+    webhook_max_attempts: Option<u32>,
+    webhook_base_delay_ms: Option<u64>,
+    webhook_allowed_hosts: Option<Vec<String>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1471,6 +1631,28 @@ pub fn ensure_dir(path: &Path) -> Result<()> {
     std::fs::create_dir_all(path)
         .with_context(|| format!("creating directory {}", path.display()))?;
     Ok(())
+}
+
+impl Config {
+    /// Parse a TOML body directly into a `Config` — for tests that need to
+    /// assert config values without building an entire scratch instance.
+    pub fn parse_from_str(body: &str) -> Result<Self> {
+        let dir = std::env::temp_dir().join(format!(
+            "lorehaven-parse-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("lorehaven.toml");
+        std::fs::write(&path, body).expect("write config");
+        Self::load(&GlobalArgs {
+            config: Some(path),
+            ..GlobalArgs::default()
+        })
+    }
 }
 
 #[cfg(test)]
@@ -1584,11 +1766,9 @@ port = 7000
         };
         let config = Config::load(&args).expect("loads");
         assert_eq!(config.server.port, 7001);
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Write a config file and load it, as the other config tests do.
+    #[cfg(test)]
     fn load_from(name: &str, body: &str) -> Result<Config> {
         let dir =
             std::env::temp_dir().join(format!("lorehaven-imports-{}-{name}", std::process::id()));

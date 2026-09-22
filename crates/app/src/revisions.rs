@@ -36,17 +36,15 @@ use lorehaven_scrapers::{
     ConditionalFetch, Fetched, Fetcher, Provenance, RevisionValidators, SourceError, SourceResult,
 };
 
-/// How long a stored revision stays usable as a validator.
-///
-/// Long, and deliberately so. This is not how long a page is considered fresh —
-/// a cached body is only ever served when the *source itself* answers `304`. The
-/// number only decides how long we bother asking conditionally before falling
-/// back to reading the page in full, which is what we would have done anyway.
-/// So a long window costs nothing in correctness and saves a body on every read
-/// for as long as the source keeps honouring its own validator.
-pub const REVISION_TTL_SECONDS: i64 = 7 * 24 * 60 * 60;
-
 /// Wraps a fetcher so every page it reads is remembered and re-asked about.
+///
+/// The TTL is configurable (`[revisions] ttl_secs`, spec §38). Long, and
+/// deliberately so: this is not how long a page is considered fresh — a cached
+/// body is only ever served when the *source itself* answers `304`. The number
+/// only decides how long we bother asking conditionally before falling back to
+/// reading the page in full, which is what we would have done anyway. So a
+/// long window costs nothing in correctness and saves a body on every read for
+/// as long as the source keeps honouring its own validator.
 pub struct CachingFetcher<'a, F> {
     inner: F,
     db: &'a Database,
@@ -54,6 +52,7 @@ pub struct CachingFetcher<'a, F> {
     source_key: String,
     adapter_version: String,
     security_scope: String,
+    ttl_secs: i64,
 }
 
 impl<'a, F> CachingFetcher<'a, F> {
@@ -70,6 +69,7 @@ impl<'a, F> CachingFetcher<'a, F> {
         source_key: &str,
         adapter_version: &str,
         security_scope: &str,
+        ttl_secs: i64,
     ) -> Self {
         Self {
             inner,
@@ -78,6 +78,7 @@ impl<'a, F> CachingFetcher<'a, F> {
             source_key: source_key.to_owned(),
             adapter_version: adapter_version.to_owned(),
             security_scope: security_scope.to_owned(),
+            ttl_secs,
         }
     }
 
@@ -140,7 +141,7 @@ impl<'a, F> CachingFetcher<'a, F> {
             checksum,
             etag: page.etag.clone(),
             last_modified: page.last_modified.clone(),
-            expires_at: lorehaven_db::identity::in_seconds(REVISION_TTL_SECONDS),
+            expires_at: lorehaven_db::identity::in_seconds(self.ttl_secs),
         };
         let key = self.key(url);
         if let Err(error) = revisions::upsert(self.db, &key, &entry).await {
