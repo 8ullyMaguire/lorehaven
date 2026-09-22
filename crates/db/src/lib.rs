@@ -53,6 +53,7 @@ pub mod rating_integrity;
 pub mod reading;
 pub mod bounties;
 pub mod revisions;
+pub mod roles;
 pub mod search;
 pub mod secrets;
 pub mod sessions;

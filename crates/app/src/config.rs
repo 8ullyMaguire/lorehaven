@@ -150,6 +150,8 @@ pub struct Config {
     pub taste: TasteConfig,
     /// Flexible bounty settings (spec §20.3.2).
     pub bounties: BountiesConfig,
+    /// Vanguard role settings (spec §16.18).
+    pub vanguard: VanguardConfig,
     /// Signal weighting settings (spec §9.7.3).
     pub signals: SignalsConfig,
     /// Instance preset (spec §0.6).
@@ -382,6 +384,45 @@ impl Default for BountiesConfig {
             min_amount: 10,
             max_amount: 10_000,
             crowdfund_activation_threshold: 1.0,
+        }
+    }
+}
+
+/// Vanguard role settings (spec §16.18, M18 Phase 4.2).
+#[derive(Debug, Clone)]
+pub struct VanguardConfig {
+    /// Selection method: resonance_threshold, admin_appointment, contribution_volume.
+    pub method: String,
+    /// Threshold percentage for resonance_threshold method.
+    pub threshold_percent: f64,
+    /// Max number of vanguards (for contribution_volume method).
+    pub limit: i64,
+    /// Whether vanguards can pin works.
+    pub can_pin: bool,
+    /// Whether vanguards can nominate works for admin review.
+    pub can_nominate: bool,
+    /// Whether vanguards can create reading clubs.
+    pub can_create_clubs: bool,
+    /// Whether the Vanguard badge is publicly visible.
+    pub public_badge: bool,
+    /// Bounty discount fraction (0.5 = 50% off).
+    pub bounty_discount: f64,
+    /// Default pin duration in days.
+    pub pin_duration_days: i64,
+}
+
+impl Default for VanguardConfig {
+    fn default() -> Self {
+        Self {
+            method: "contribution_volume".to_string(),
+            threshold_percent: 10.0,
+            limit: 25,
+            can_pin: true,
+            can_nominate: true,
+            can_create_clubs: true,
+            public_badge: true,
+            bounty_discount: 0.5,
+            pin_duration_days: 30,
         }
     }
 }
@@ -1404,6 +1445,20 @@ impl Config {
                         .unwrap_or(BountiesConfig::default().crowdfund_activation_threshold),
                 }
             },
+            vanguard: {
+                let v = file.vanguard.clone().unwrap_or_default();
+                VanguardConfig {
+                    method: v.method.unwrap_or_else(|| VanguardConfig::default().method),
+                    threshold_percent: v.threshold_percent.unwrap_or(VanguardConfig::default().threshold_percent),
+                    limit: v.limit.unwrap_or(VanguardConfig::default().limit),
+                    can_pin: v.can_pin.unwrap_or(VanguardConfig::default().can_pin),
+                    can_nominate: v.can_nominate.unwrap_or(VanguardConfig::default().can_nominate),
+                    can_create_clubs: v.can_create_clubs.unwrap_or(VanguardConfig::default().can_create_clubs),
+                    public_badge: v.public_badge.unwrap_or(VanguardConfig::default().public_badge),
+                    bounty_discount: v.bounty_discount.unwrap_or(VanguardConfig::default().bounty_discount),
+                    pin_duration_days: v.pin_duration_days.unwrap_or(VanguardConfig::default().pin_duration_days),
+                }
+            },
             taste: {
                 let t = file.taste.unwrap_or_default();
                 TasteConfig {
@@ -1551,6 +1606,7 @@ impl Config {
             works: WorksConfig::default(),
             community: CommunityConfig::default(),
             bounties: BountiesConfig::default(),
+            vanguard: VanguardConfig::default(),
             taste: TasteConfig::default(),
             signals: SignalsConfig::default(),
             instance: InstanceConfig::default(),
@@ -1726,6 +1782,8 @@ struct FileConfig {
     taste: Option<TasteSection>,
     /// Flexible bounty settings (spec §20.3.2).
     bounties: Option<BountiesSection>,
+    /// Vanguard role settings (spec §16.18).
+    vanguard: Option<VanguardSection>,
     /// Signal weighting settings (spec §9.7.3).
     signals: Option<SignalsSection>,
     /// Instance preset (spec §0.6).
@@ -1767,6 +1825,21 @@ struct BountiesSection {
     min_amount: Option<i64>,
     max_amount: Option<i64>,
     crowdfund_activation_threshold: Option<f64>,
+}
+
+/// The `[vanguard]` table (spec §16.18): vanguard role settings.
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VanguardSection {
+    method: Option<String>,
+    threshold_percent: Option<f64>,
+    limit: Option<i64>,
+    can_pin: Option<bool>,
+    can_nominate: Option<bool>,
+    can_create_clubs: Option<bool>,
+    public_badge: Option<bool>,
+    bounty_discount: Option<f64>,
+    pin_duration_days: Option<i64>,
 }
 
 /// The `[signals]` table (spec §9.7.3): signal weighting settings.

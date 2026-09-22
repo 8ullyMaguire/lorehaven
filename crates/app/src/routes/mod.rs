@@ -45,5 +45,6 @@ pub mod taxonomy;
 pub mod thread_modes;
 pub mod translation;
 pub mod typed_votes;
+pub mod vanguard;
 pub mod work_discussion;
 pub mod works;

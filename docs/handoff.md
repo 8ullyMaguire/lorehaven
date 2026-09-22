@@ -1,4 +1,48 @@
-# Handoff — M43 sort vocabulary surfaces (People/Tags/Fandoms), route-inventory audit fixed
+# Handoff — M18 Phase 4.2 — Taste Vanguard Role (COMPLETE, 5/5 tests pass)
+
+Date: 2026-09-22. Previous handoff was M43 (below). Current work is M18 Phase 4.2.
+
+## Current Work: M18 Phase 4.2 — Taste Vanguard Role (done)
+
+### Root cause of 404 bug (fixed)
+
+The 404 was NOT a routing/merge-ordering problem — it was an authorization bug. The vanguard admin handlers called `crate::routes::discovery::require_operator()`, which only checks `config.administration.operator_account_id`. When the test sets trust level 6 via DB (`set_account_trust_for_tests`), the config field is unset, so `require_operator` returns `NotFound { resource: "page" }` → 404.
+
+Fixed by adding a local `require_operator()` in `vanguard.rs` that uses `lorehaven_db::governance::trust_for() >= 5`, matching the pattern used by `directory.rs`.
+
+Also fixed:
+- Grant/pin now return 201 (CREATED), not 200
+- Test work ID extraction: flat JSON `body["id"]` not `body["work"]["id"]`
+- Revoke test used wrong URI (`/vanguard/status/{account_id}` → `/vanguard/status`)
+
+### Commits (newest first)
+
+- `7d635f3` (tag `M18-Phase4.1`) — Flexible bounties, 5/5 tests pass
+- `f83bd99` (tag `M18-Phase2-3`) — Health + Engagement layers
+- Earlier: M18 Phase 1 (taste vectors)
+
+### What's done (compiles, 5/5 tests pass)
+
+| File | Status |
+|------|--------|
+| `crates/db/src/roles.rs` | ✅ grant/revoke/is_vanguard/list_vanguards/pin/unpin/list_active_pins |
+| `crates/db/src/lib.rs` | ✅ `pub mod roles;` |
+| `migrations/sqlite/0059_vanguard_roles.sql` | ✅ `vanguard_roles` + `vanguard_pins` tables |
+| `migrations/postgres/0059_vanguard_roles.sql` | ✅ same schema |
+| `crates/app/src/config.rs` | ✅ `VanguardConfig`, `VanguardSection` |
+| `crates/app/src/routes/vanguard.rs` | ✅ 7 handlers (local require_operator, 201 status codes) |
+| `crates/app/src/routes/mod.rs` | ✅ `pub mod vanguard;` |
+| `crates/app/src/server.rs` | ✅ registered at line 349 |
+| `crates/app/tests/vanguard.rs` | ✅ 5/5 tests pass |
+
+### Test status
+
+- `cargo test -p lorehaven-app --test vanguard` — **5/5 pass**
+- Pre-existing failures: `route_inventory` (quiz, discovery routes also not in ROUTE_TABLE — not from this work), `migration_dialect` (not from this work)
+
+---
+
+# Previous Handoff — M43 sort vocabulary surfaces (superseded by M18 work above)
 
 Date: 2026-09-22. Read with `docs/plans/junior-implementation-plan.md` and `docs/spec.md`.
 
