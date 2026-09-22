@@ -34,6 +34,7 @@
   import Write from './routes/Write.svelte';
   import Quiz from './routes/Quiz.svelte';
   import Vanguard from './routes/Vanguard.svelte';
+  import Directory from './routes/Directory.svelte';
   import { handleLinkClick, matchRoute } from './lib/router';
   import { session } from './lib/session.svelte';
   import {
@@ -56,6 +57,7 @@
     { href: '/exports', label: 'Exports', primary: false },
     { href: '/write', label: 'Write', primary: true },
     { href: '/community', label: 'Community', primary: false },
+    { href: '/directory', label: 'Directory', primary: false },
     { href: '/docs', label: 'Help', primary: false },
     { href: '/notifications', label: 'Notifications', primary: false },
     { href: '/pseud', label: 'Pseud', primary: false },
@@ -312,6 +314,8 @@
     <Quiz />
   {:else if route.id === 'vanguard'}
     <Vanguard />
+  {:else if route.id === 'directory'}
+    <Directory />
   {:else if route.id === 'planned' && route.planned}
     <Planned route={route.planned} />
   {:else}

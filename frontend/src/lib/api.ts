@@ -2804,3 +2804,133 @@ export function fetchMyStreak(signal?: AbortSignal): Promise<{
 }> {
   return apiFetch('/me/streak', { signal });
 }
+
+// ---------------------------------------------------------------------------
+// Resource Directory (spec §39)
+// ---------------------------------------------------------------------------
+
+export interface DirectoryList {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  kind: string;
+}
+
+export interface DirectoryEntry {
+  id: string;
+  title: string;
+  url: string | null;
+  description: string;
+  category: string;
+  tags: string[];
+  score: number;
+  my_vote: number | null;
+  submitted_by: string;
+  approved_by: string | null;
+}
+
+export interface DirectoryCategory {
+  category: string;
+  approved_count: number;
+}
+
+/** Fetch all directory lists. */
+export function fetchDirectoryLists(signal?: AbortSignal): Promise<{ items: DirectoryList[] }> {
+  return apiFetch<{ items: DirectoryList[] }>('/directory/lists', { signal });
+}
+
+/** Fetch entries in a directory list (public, ranked). */
+export function fetchDirectoryEntries(
+  params: {
+    list?: string;
+    category?: string;
+    q?: string;
+    sort?: 'top' | 'new';
+    limit?: number;
+    offset?: number;
+  },
+  signal?: AbortSignal,
+): Promise<{ items: DirectoryEntry[] }> {
+  const search = new URLSearchParams();
+  if (params.list) search.set('list', params.list);
+  if (params.category) search.set('category', params.category);
+  if (params.q) search.set('q', params.q);
+  if (params.sort) search.set('sort', params.sort);
+  if (params.limit) search.set('limit', String(params.limit));
+  if (params.offset) search.set('offset', String(params.offset));
+  const query = search.toString();
+  return apiFetch<{ items: DirectoryEntry[] }>(`/directory/entries${query ? `?${query}` : ''}`, {
+    signal,
+  });
+}
+
+/** Fetch operator-configured categories. */
+export function fetchDirectoryCategories(
+  signal?: AbortSignal,
+): Promise<{ items: DirectoryCategory[] }> {
+  return apiFetch<{ items: DirectoryCategory[] }>('/directory/categories', { signal });
+}
+
+/** Submit a directory entry (signed-in users). */
+export function submitDirectoryEntry(body: {
+  list: string;
+  kind: 'external' | 'internal';
+  category: string;
+  title: string;
+  url?: string;
+  description?: string;
+  ref_id?: string;
+  tags?: string[];
+}): Promise<{ entry: DirectoryEntry }> {
+  return apiFetch<{ entry: DirectoryEntry }>('/directory/entries', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** Vote on a directory entry (signed-in users, one vote per account). */
+export function voteDirectoryEntry(
+  entryId: string,
+  value: 1 | -1,
+): Promise<{ score: number; my_vote: number | null }> {
+  return apiFetch(`/directory/entries/${encodeURIComponent(entryId)}/vote`, {
+    method: 'POST',
+    body: JSON.stringify({ value }),
+  });
+}
+
+/** Fetch the operator moderation queue. */
+export function fetchModerationQueue(
+  signal?: AbortSignal,
+): Promise<{ items: DirectoryEntry[] }> {
+  return apiFetch<{ items: DirectoryEntry[] }>('/directory/moderation', { signal });
+}
+
+/** Approve a pending directory entry (operator only). */
+export function approveDirectoryEntry(entryId: string): Promise<{ entry: DirectoryEntry }> {
+  return apiFetch<{ entry: DirectoryEntry }>(
+    `/directory/entries/${encodeURIComponent(entryId)}/approve`,
+    { method: 'POST' },
+  );
+}
+
+/** Remove a directory entry (operator only). */
+export function removeDirectoryEntry(entryId: string): Promise<{ removed: boolean }> {
+  return apiFetch<{ removed: boolean }>(`/directory/entries/${encodeURIComponent(entryId)}`, {
+    method: 'DELETE',
+  });
+}
+
+/** Create a new directory list (operator only). */
+export function createDirectoryList(body: {
+  slug: string;
+  title: string;
+  description?: string;
+  kind: 'external' | 'internal';
+}): Promise<{ list: DirectoryList }> {
+  return apiFetch<{ list: DirectoryList }>('/directory/lists', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
