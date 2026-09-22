@@ -1,13 +1,14 @@
-# Handoff — M43 browse ordering vocabulary complete, E2E 71/73 passing
+# Handoff — M38 config migration complete, E2E 71/73 passing
 
 Date: 2026-09-22. Read with `docs/plans/junior-implementation-plan.md` and `docs/spec.md`.
 
 ## What just happened
 
-M43 browse ordering vocabulary deployed. Shared `Sort` enum (for-you, new, updated, top, trending, best-match, az) with per-pseud stickiness (`GET/PUT/DELETE /browse/sort/{surface}`) and `?sort=` query param on `/discovery`. E2E: 71 passed, 3 failed (pre-existing).
+M38 config migration complete. All hardcoded constants from spec §38.3 are now TOML-configurable: `[revisions] ttl_secs`, `[jobs] terminal_retention_days`, `[library] update_check_retention_days`, `[library] check_batch`, `[bulk_export] max_items/max_bytes`, `[administration] webhook_*`. Added `Config::parse_from_str` for integration tests, 16 acceptance tests, and `docs/config-reference.md`.
 
 ### Commits (newest first)
 
+- `649bc76` M38: migrate revisions/jobs/library/bulk_export/administration to config (spec §38)
 - `da3bd20` feat: wire ?sort= query param to /discovery (spec §43.2, §43.4)
 - `b5cce1b` feat: M43 browse ordering vocabulary — shared Sort enum, per-pref stickiness API
 - `d887500` spec: add §43 recommendation-first browsing, ADRs 0021/0022, gamification updates
@@ -53,6 +54,7 @@ M43 browse ordering vocabulary deployed. Shared `Sort` enum (for-you, new, updat
 | milestone_39 | 6 | resource directory |
 | milestone_40 | 9 | fork/provenance |
 | milestone_41 | 4 | longevity signals |
+| milestone_38 | 16 | config migration (spec §38) |
 | **domain lib** | **358** | unit tests |
 
 **Total: ~500+ backend tests passing, zero failures, zero warnings.**
@@ -113,9 +115,10 @@ M43 browse ordering vocabulary deployed. Shared `Sort` enum (for-you, new, updat
 
 ## How to resume
 
-1. Verify E2E subscription test result (just deployed fix — may already be green)
-2. Fix the 2 export E2E failures (worker timing, download verification)
-3. Once all E2E green, decide next scope with user:
+1. Deploy M38 to production (build on thinkcentre, swap binary, restart)
+2. Verify E2E subscription test result (fix deployed — may already be green)
+3. Fix the 2 export E2E failures (worker timing, download verification)
+4. Once all E2E green, decide next scope with user:
    - **A.** Tag release (`v1.0.0`) and deploy to production
    - **B.** Scraper bot adaptation or Obscura integration
    - **C.** 40k rescrape of failed links
