@@ -17,6 +17,7 @@
 
 pub mod admin;
 pub mod analytics;
+pub mod browse;
 pub mod collaboration;
 pub mod community;
 pub mod content;

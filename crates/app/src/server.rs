@@ -341,6 +341,11 @@ pub fn build_router(state: AppState) -> Router {
             &state,
         ))
         .merge(classified(
+            routes::browse::router(),
+            RouteClass::Default,
+            &state,
+        ))
+        .merge(classified(
             routes::directory::router(),
             RouteClass::Default,
             &state,

@@ -13,6 +13,7 @@ pub mod cta;
 pub mod directory;
 pub mod discovery;
 pub mod economy;
+pub mod browse;
 pub mod events;
 pub mod exports;
 pub mod external;
