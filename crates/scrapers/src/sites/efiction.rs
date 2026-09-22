@@ -478,6 +478,7 @@ impl Efiction {
                 title
             },
             content_html: sanitize_fragment(&body, Some(url)),
+            image_urls: crate::sanitize::extract_image_urls(&body, Some(url)),
         })
     }
 }

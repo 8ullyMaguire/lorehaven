@@ -313,6 +313,7 @@ impl Wattpad {
                 .unwrap_or_else(|| ordinal.to_string()),
             title: chapter.map(|entry| entry.title.clone()).unwrap_or_default(),
             content_html: sanitize_fragment(text, base),
+            image_urls: crate::sanitize::extract_image_urls(text, base),
         }
     }
 }

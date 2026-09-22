@@ -353,6 +353,13 @@ pub async fn run(
     };
     let stored = store_chapters(state, &source, job, &row, &item).await?;
 
+    // §32.7.9: rescue media. Every image URL found in the chapters is
+    // deduplicated and queued for archival. A URL already held by any work
+    // returns its existing reference; a new URL creates a reference with a
+    // placeholder hash and an availability link. The health monitor fills in
+    // the hash on its first check.
+    let media_summary = rescue_import_media(state.db(), &item, &stored).await;
+
     finish(
         state,
         &row,
@@ -586,6 +593,8 @@ struct StoredChapter {
     checksum: Option<String>,
     note: Option<String>,
     stored: bool,
+    /// Image URLs found in this chapter's source body, for media rescue (§32.7.9).
+    image_urls: Vec<String>,
 }
 
 /// Everything a chapter-store needs from the source side.
@@ -717,6 +726,7 @@ async fn store_chapters(
                 checksum: None,
                 note: Some("already held from an earlier attempt".to_owned()),
                 stored: true,
+                image_urls: Vec::new(),
             });
             continue;
         }
@@ -750,6 +760,7 @@ async fn store_chapters(
                     checksum: Some(checksum),
                     note: None,
                     stored: true,
+                    image_urls: chapter.image_urls.clone(),
                 });
             }
             Err(error) => {
@@ -779,6 +790,7 @@ async fn store_chapters(
                     checksum: None,
                     note: Some(note),
                     stored: false,
+                    image_urls: chapter.image_urls.clone(),
                 });
                 any_failed = true;
             }
@@ -823,6 +835,63 @@ async fn finish(
             .map_err(transient)?;
     }
     Ok(())
+}
+
+/// §32.7.9: rescue every image URL from an import's chapters.
+///
+/// For each chapter's `image_urls`, deduplicate within the import and call
+/// `upsert_media_reference_for_import`, which checks for an existing
+/// availability link by URL and creates a new reference if none exists. The
+/// summary counts URLs, deduplicated URLs, and new references created.
+async fn rescue_import_media(
+    db: &lorehaven_db::Database,
+    item: &imports::LibraryItem,
+    stored: &[StoredChapter],
+) -> lorehaven_db::media_resilience::ImportMediaSummary {
+    use lorehaven_db::media_resilience;
+
+    let mut total_urls = 0;
+    let mut already_held = 0;
+    let mut new_references = 0;
+    let mut unparseable = 0;
+    let mut seen = std::collections::HashSet::new();
+
+    for chapter in stored {
+        for url in &chapter.image_urls {
+            total_urls += 1;
+            // Deduplicate within the import: a URL that appears in two chapters
+            // of the same work creates one media reference, not two.
+            if !seen.insert(url.clone()) {
+                continue;
+            }
+            match media_resilience::upsert_media_reference_for_import(
+                db,
+                &item.id,
+                Some(&chapter.source_chapter_key),
+                url,
+            )
+            .await
+            {
+                Ok((created, _id)) => {
+                    if created {
+                        new_references += 1;
+                    } else {
+                        already_held += 1;
+                    }
+                }
+                Err(_) => {
+                    unparseable += 1;
+                }
+            }
+        }
+    }
+
+    media_resilience::ImportMediaSummary {
+        total_urls,
+        already_held,
+        new_references,
+        unparseable,
+    }
 }
 
 /// The report, as JSON: what the plan said, and what each chapter ended up as.

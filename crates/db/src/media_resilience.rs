@@ -312,6 +312,98 @@ pub async fn find_work_media_references(
 }
 
 // ---------------------------------------------------------------------------
+// §32.7.9 Import integration — media rescue during imports
+// ---------------------------------------------------------------------------
+
+/// The result of rescuing media for one import.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportMediaSummary {
+    /// Number of image URLs found across all chapters.
+    pub total_urls: usize,
+    /// Number of those URLs already held as media references.
+    pub already_held: usize,
+    /// Number of new media references created.
+    pub new_references: usize,
+    /// Number of URLs that could not be parsed or had a non-http(s) scheme.
+    pub unparseable: usize,
+}
+
+/// Find the media reference for a URL, or create one with its availability link.
+///
+/// Deduplication is by URL string (normalised to the form `http(s)://host/path`).
+/// A URL already seen by any work returns the existing reference; a URL seen
+/// only within this import creates one. A duplicate URL within the import does
+/// not create a second reference.
+pub async fn upsert_media_reference_for_import(
+    db: &Database,
+    work_id: &str,
+    chapter_id: Option<&str>,
+    url: &str,
+) -> Result<(bool, String)> {
+    // Check for an existing availability link with this exact URL. The join
+    // collapses a URL that any work has already rescued to the reference it
+    // belongs to, so an image posted once and imported twice is one row.
+    let existing = sql_owned(
+        db,
+        "SELECT mr.id
+         FROM availability_links al
+         JOIN media_references mr ON al.media_reference_id = mr.id
+         WHERE al.url = ? LIMIT 1".to_string(),
+        "SELECT mr.id
+         FROM availability_links al
+         JOIN media_references mr ON al.media_reference_id = mr.id
+         WHERE al.url = $1 LIMIT 1".to_string(),
+    );
+    let existing_id = match db.backend() {
+        Backend::Sqlite => sqlx::query(&existing).bind(url)
+            .fetch_optional(db.sqlite_pool().expect("sqlite")).await?
+            .map(|row| row.get::<String, _>("id")),
+        Backend::Postgres => sqlx::query(&existing).bind(url)
+            .fetch_optional(db.postgres_pool().expect("postgres")).await?
+            .map(|row| row.get::<String, _>("id")),
+    };
+
+    // A URL already held needs only the work association; a new URL creates
+    // the reference, its source link, and the association.
+    let (created, reference_id) = match existing_id {
+        Some(id) => (false, id),
+        None => {
+            let id = Uuid::new_v4().to_string();
+            // The content hash is not known until the bytes are fetched; a
+            // placeholder keeps the NOT NULL constraint satisfied and marks
+            // the reference as awaiting its first fetch by the health
+            // monitor.
+            insert_media_reference(db, &id, "pending", MediaKind::Image).await?;
+            insert_availability_link(
+                db,
+                &Uuid::new_v4().to_string(),
+                &id,
+                url,
+                LinkProvider::Other,
+                None,
+                1,
+            )
+            .await?;
+            (true, id)
+        }
+    };
+
+    insert_work_media_reference(
+        db,
+        &Uuid::new_v4().to_string(),
+        work_id,
+        chapter_id,
+        &reference_id,
+        MediaContextKind::InlineEmbed,
+        url,
+        None,
+    )
+    .await?;
+
+    Ok((created, reference_id))
+}
+
+// ---------------------------------------------------------------------------
 // Curator rewards
 // ---------------------------------------------------------------------------
 

@@ -77,6 +77,96 @@ const ALLOWED: [(&str, &[&str]); 22] = [
 /// Tags that never have a closing tag.
 const VOID_TAGS: [&str; 4] = ["br", "hr", "img", "wbr"];
 
+/// Extract every `src` attribute from `<img>` tags in `html`, resolved against
+/// `base`.
+///
+/// The sanitiser strips `<img>` tags (they are not on the allow-list), so this
+/// runs **before** sanitisation to rescue the image URLs for the media-rescue
+/// pipeline (spec §32.7.9). Returns the URLs in document order, with
+/// duplicates removed (first occurrence wins).
+pub fn extract_image_urls(html: &str, base: Option<&Url>) -> Vec<String> {
+    let mut urls: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut rest = html;
+
+    while let Some(lt) = rest.find("<img") {
+        let tail = &rest[lt..];
+        let Some(gt) = find_tag_end(tail) else {
+            rest = &tail[4..];
+            continue;
+        };
+        let tag = &tail[..=gt];
+        if let Some(src) = extract_src(tag) {
+            let resolved = resolve_image_url(&src, base);
+            if !resolved.is_empty() && seen.insert(resolved.clone()) {
+                urls.push(resolved);
+            }
+        }
+        rest = &tail[gt + 1..];
+    }
+    urls
+}
+
+/// Extract the `src` attribute value from a single `<img ...>` tag string,
+/// or `None` if the tag has no `src`.
+fn extract_src(tag: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    let src_pos = lower.find("src")?;
+    let after = &tag[src_pos + 3..];
+    let after = after.trim_start();
+    let after = after.strip_prefix('=')?;
+    let after = after.trim_start();
+    if after.starts_with('"') {
+        let after = &after[1..];
+        let end = after.find('"')?;
+        Some(after[..end].to_string())
+    } else if after.starts_with('\'') {
+        let after = &after[1..];
+        let end = after.find('\'')?;
+        Some(after[..end].to_string())
+    } else {
+        let end = after
+            .find(|c: char| c.is_whitespace() || c == '>')
+            .unwrap_or(after.len());
+        Some(after[..end].to_string())
+    }
+}
+
+/// Resolve an image URL against `base`. Returns an empty string for
+/// non-http(s) schemes or unparseable URLs.
+fn resolve_image_url(src: &str, base: Option<&Url>) -> String {
+    let trimmed = src.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if trimmed.starts_with("data:") || trimmed.starts_with("javascript:") {
+        return String::new();
+    }
+    match Url::parse(trimmed) {
+        Ok(url) => {
+            if url.scheme() == "http" || url.scheme() == "https" {
+                url.as_str().to_string()
+            } else {
+                String::new()
+            }
+        }
+        Err(_) => {
+            let Some(base) = base else {
+                return String::new();
+            };
+            base.join(trimmed)
+                .map(|u| {
+                    if u.scheme() == "http" || u.scheme() == "https" {
+                        u.as_str().to_string()
+                    } else {
+                        String::new()
+                    }
+                })
+                .unwrap_or_default()
+        }
+    }
+}
+
 /// Sanitise a fragment of HTML, making links absolute against `base`.
 ///
 /// `base` is the URL the fragment came from. A relative link in the body
@@ -523,5 +613,69 @@ mod tests {
         assert!(out.contains("<blockquote><p>Quoted.</p></blockquote>"));
         assert!(out.contains("<hr />"));
         assert!(out.ends_with("<p>Fin.</p>"));
+    }
+
+    #[test]
+    fn extract_image_urls_finds_absolute_urls() {
+        let html = r#"<p>text</p><img src="https://example.com/a.png"><img src="https://other.example/b.jpg">"#;
+        let urls = extract_image_urls(html, None);
+        assert_eq!(urls, vec![
+            "https://example.com/a.png",
+            "https://other.example/b.jpg",
+        ]);
+    }
+
+    #[test]
+    fn extract_image_urls_resolves_relative_urls_against_base() {
+        let base = Url::parse("https://archive.example/work/123").unwrap();
+        let html = r#"<img src="/uploads/1.png"><img src="https://other.example/2.png">"#;
+        let urls = extract_image_urls(html, Some(&base));
+        assert_eq!(urls, vec![
+            "https://archive.example/uploads/1.png",
+            "https://other.example/2.png",
+        ]);
+    }
+
+    #[test]
+    fn extract_image_urls_deduplicates() {
+        let html = r#"<img src="https://example.com/a.png"><img src="https://example.com/a.png">"#;
+        let urls = extract_image_urls(html, None);
+        assert_eq!(urls, vec!["https://example.com/a.png"]);
+    }
+
+    #[test]
+    fn extract_image_urls_skips_data_and_javascript() {
+        let html = r#"<img src="data:image/png;base64,AAAA"><img src="javascript:void(0)">"#;
+        assert!(extract_image_urls(html, None).is_empty());
+    }
+
+    #[test]
+    fn extract_image_urls_skips_bad_scheme() {
+        let html = r#"<img src="ftp://example.com/a.png">"#;
+        assert!(extract_image_urls(html, None).is_empty());
+    }
+
+    #[test]
+    fn extract_image_urls_returns_empty_for_no_images() {
+        assert!(extract_image_urls("<p>just text</p>", None).is_empty());
+    }
+
+    #[test]
+    fn extract_image_urls_relative_without_base_is_dropped() {
+        let html = r#"<img src="/relative.png">"#;
+        assert!(extract_image_urls(html, None).is_empty());
+    }
+
+    #[test]
+    fn extract_image_urls_ignores_other_tags() {
+        let html = r#"<a href="https://example.com">link</a><video src="https://v.example/m.mp4"></video>"#;
+        assert!(extract_image_urls(html, None).is_empty());
+    }
+
+    #[test]
+    fn extract_image_urls_unquoted_src() {
+        let html = r#"<img src=https://example.com/a.png>"#;
+        let urls = extract_image_urls(html, None);
+        assert_eq!(urls, vec!["https://example.com/a.png"]);
     }
 }
