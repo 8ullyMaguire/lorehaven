@@ -13,7 +13,7 @@ use std::str::FromStr;
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
 
-use crate::auth::{RequirePseud, RequireSession};
+use crate::auth::{MaybeSession, RequirePseud, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -1021,6 +1021,7 @@ fn default_search_limit() -> i64 {
 /// Full-text search across forum posts and topics.
 async fn forum_search(
     State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
     Query(params): Query<ForumSearchQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let results = lorehaven_db::forum_search::search_forum(

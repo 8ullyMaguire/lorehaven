@@ -13,7 +13,7 @@ use serde_json::json;
 use lorehaven_domain::thread_modes::ThreadMode;
 use lorehaven_domain::typed_votes::is_moderator;
 
-use crate::auth::RequirePseud;
+use crate::auth::{MaybeSession, RequirePseud};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 use lorehaven_db::thread_modes;
@@ -33,6 +33,7 @@ pub fn router() -> Router<AppState> {
 
 async fn get_mode(
     State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
     Path(id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let topic = lorehaven_db::community::topic_by_id(state.db(), &id)
@@ -80,6 +81,7 @@ async fn put_mode(
 
 async fn get_schedule(
     State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
     Path(id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let sections = thread_modes::get_schedule(state.db(), &id)
@@ -131,6 +133,7 @@ async fn add_schedule_section(
 
 async fn get_wiki_pin(
     State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
     Path(id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let pin = thread_modes::get_wiki_pin(state.db(), &id)
@@ -228,6 +231,7 @@ async fn join_critique(
 
 async fn get_critique_queue(
     State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
     Path(id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let queue = thread_modes::get_critique_queue(state.db(), &id)

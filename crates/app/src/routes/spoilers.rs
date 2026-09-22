@@ -11,7 +11,7 @@ use serde_json::json;
 
 use lorehaven_domain::spoilers::{WarningAction, WarningType};
 
-use crate::auth::RequirePseud;
+use crate::auth::{MaybeSession, RequirePseud};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 use lorehaven_db::spoilers;
@@ -100,6 +100,7 @@ async fn put_progress(
 
 async fn get_warnings(
     State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
     Path(id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let warnings = spoilers::list_content_warnings(state.db(), &id)
@@ -221,6 +222,7 @@ async fn post_schedule(
 
 async fn get_due_scheduled(
     State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
 ) -> ApiResult<Json<serde_json::Value>> {
     let now = lorehaven_db::identity::now_rfc3339();
     let due = spoilers::list_due_scheduled_posts(state.db(), &now, 50)
@@ -231,6 +233,7 @@ async fn get_due_scheduled(
 
 async fn post_publish_scheduled(
     State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
     Path(id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let published = spoilers::publish_scheduled_post(state.db(), &id)

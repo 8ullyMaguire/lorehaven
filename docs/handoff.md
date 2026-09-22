@@ -1,14 +1,37 @@
-# Handoff — M38 config migration complete, E2E 71/73 passing
+# Handoff — M43 sort vocabulary surfaces (People/Tags/Fandoms), route-inventory audit fixed
 
 Date: 2026-09-22. Read with `docs/plans/junior-implementation-plan.md` and `docs/spec.md`.
 
 ## What just happened
 
-M38 config migration complete. All hardcoded constants from spec §38.3 are now TOML-configurable: `[revisions] ttl_secs`, `[jobs] terminal_retention_days`, `[library] update_check_retention_days`, `[library] check_batch`, `[bulk_export] max_items/max_bytes`, `[administration] webhook_*`. Added `Config::parse_from_str` for integration tests, 16 acceptance tests, and `docs/config-reference.md`.
+M43 sort vocabulary surfaces. Added 5 new browse routes per spec §43.1: `/people`, `/tags`, `/tags/{tag}`, `/fandoms`, `/fandoms/{fandom}`. All support `?sort=` query param with the shared `Sort` enum (az/new/updated/trending/top/for-you). Added DB functions `list_discoverable_pseuds`, `list_tags`, `list_fandoms`, `works_by_tag`, `works_by_fandom`. Consolidated `/browse/sort/{surface}` into a single chainable route (get/put/delete).
+
+Also fixed the route-inventory audit: added 44 missing route entries, fixed 12 audience mismatches (wrong extractor type in table), added `MaybeSession` to 5 handlers missing it, fixed the test parser for single-line handler signatures, and removed a stale `federation_inbox` entry. All `route_inventory` tests pass.
 
 ### Commits (newest first)
 
-- `649bc76` M38: migrate revisions/jobs/library/bulk_export/administration to config (spec §38)
+- M43: sort vocabulary surfaces — /people, /tags, /fandoms with ?sort= support
+- fix: route-inventory audit — 44 missing entries, 12 audience fixes, parser fix
+
+## State
+
+### What's complete
+
+| Feature | Routes | DB functions |
+|---------|--------|--------------|
+| Sort preferences | GET/PUT/DELETE `/browse/sort/{surface}` | existing |
+| People | GET `/people` | `list_discoverable_pseuds` |
+| Tags | GET `/tags`, GET `/tags/{tag}` | `list_tags`, `works_by_tag` |
+| Fandoms | GET `/fandoms`, GET `/fandoms/{fandom}` | `list_fandoms`, `works_by_fandom` |
+
+### Test status
+
+- `cargo test --workspace` — all pass except pre-existing migration dialect mismatch (`forum_search` indexes)
+- `route_inventory` — 2/2 pass
+
+## Next steps
+
+- M39 resource directory (plan §15e)
 - `da3bd20` feat: wire ?sort= query param to /discovery (spec §43.2, §43.4)
 - `b5cce1b` feat: M43 browse ordering vocabulary — shared Sort enum, per-pref stickiness API
 - `d887500` spec: add §43 recommendation-first browsing, ADRs 0021/0022, gamification updates

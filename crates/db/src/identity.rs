@@ -512,6 +512,51 @@ pub async fn pseuds_for_account(db: &Database, account_id: AccountId) -> Result<
     Ok(rows.into_iter().map(decode_pseud).collect())
 }
 
+/// List discoverable pseuds with work counts, for the /people surface (spec §43.1).
+pub async fn list_discoverable_pseuds(
+    db: &Database,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<(String, String, String, i64)>> {
+    let sql = db.sql(
+        "SELECT p.id, p.handle, p.display_name, (
+            SELECT COUNT(*) FROM works w
+            WHERE w.owner_pseud_id = p.id
+            AND w.lifecycle = 'published' AND w.visibility = 'public'
+        ) AS work_count
+         FROM pseuds p
+         WHERE p.discoverability = 'listed' AND p.deleted_at IS NULL
+         ORDER BY p.created_at ASC
+         LIMIT ? OFFSET ?",
+        "SELECT p.id::text, p.handle, p.display_name, (
+            SELECT COUNT(*) FROM works w
+            WHERE w.owner_pseud_id::text = p.id::text
+            AND w.lifecycle = 'published' AND w.visibility = 'public'
+        ) AS work_count
+         FROM pseuds p
+         WHERE p.discoverability = 'listed' AND p.deleted_at IS NULL
+         ORDER BY p.created_at ASC
+         LIMIT $1 OFFSET $2",
+    );
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, (String, String, String, i64)>(&sql)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, (String, String, String, i64)>(&sql)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(rows)
+}
+
 /// Set a privacy policy value, replacing any existing one.
 pub async fn set_privacy(
     db: &Database,

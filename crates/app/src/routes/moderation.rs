@@ -12,7 +12,7 @@ use serde_json::json;
 use lorehaven_domain::moderation::SanctionLevel;
 use lorehaven_domain::typed_votes::is_moderator;
 
-use crate::auth::RequirePseud;
+use crate::auth::{MaybeSession, RequirePseud};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 use lorehaven_db::moderation;
@@ -79,6 +79,7 @@ struct SanctionCheckQuery {
 
 async fn get_sanction_check(
     State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
     axum::extract::Query(query): axum::extract::Query<SanctionCheckQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let sanction = moderation::check_sanction(
@@ -178,7 +179,7 @@ async fn post_feature(
 // Community health
 // ---------------------------------------------------------------------------
 
-async fn get_health(State(_state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
+async fn get_health(State(_state): State<AppState>, MaybeSession(_session): MaybeSession) -> ApiResult<Json<serde_json::Value>> {
     Ok(Json(json!({ "status": "ok" })))
 }
 
