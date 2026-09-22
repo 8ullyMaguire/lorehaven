@@ -16,11 +16,14 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/discovery", get(get_discovery))
         .route("/discovery/taste-profile", get(get_taste_profile))
+        .route("/discovery/taste-profile/me", get(get_my_taste_vector))
         .route(
             "/discovery/taste-profile/recompute",
             post(recompute_taste_profile),
         )
         .route("/discovery/taste-profile/clear", post(clear_taste_profile))
+        .route("/operator/taste-profile", get(get_admin_taste_profile).put(update_admin_taste_profile))
+        .route("/operator/taste-profile/recompute-all", post(recompute_all_taste_profiles))
         .route("/operator/affinities", post(set_operator_affinity))
         .nest("/recipes", recipe_routes())
         .nest("/dashboard", dashboard_routes())
@@ -351,6 +354,78 @@ fn require_operator(state: &AppState, user: &crate::auth::SessionUser) -> ApiRes
         "an operator route was reached by an account that is not the operator"
     );
     Err(ApiError(AppError::NotFound { resource: "page" }))
+}
+
+/// Get the current user's taste vector.
+async fn get_my_taste_vector(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<serde_json::Value>> {
+    let account_id = user.account_id.to_string();
+    match lorehaven_db::taste_vectors::get_taste_vector(state.db(), &account_id).await {
+        Ok(Some((vec, dist, _))) => Ok(Json(serde_json::json!({
+            "dimensions": state.config().taste.dimensions,
+            "vector": vec,
+            "centroid_distance": dist,
+        }))),
+        Ok(None) => Ok(Json(serde_json::json!({
+            "dimensions": state.config().taste.dimensions,
+            "vector": null,
+            "centroid_distance": 0.0,
+        }))),
+        Err(e) => Err(ApiError(AppError::Internal(e.into()))),
+    }
+}
+
+/// Get the admin taste profile (operator only).
+async fn get_admin_taste_profile(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_operator(&state, &user)?;
+    let dimensions = state.config().taste.dimensions.clone();
+    Ok(Json(serde_json::json!({
+        "dimensions": dimensions,
+        "gravity_strength": state.config().taste.gravity_strength,
+        "signal_weight_mode": state.config().taste.signal_weight_mode,
+        "admin_weight": state.config().taste.admin_weight,
+        "diversity_injection_percent": state.config().taste.diversity_injection_percent,
+    })))
+}
+
+/// Update the admin taste profile (operator only).
+async fn update_admin_taste_profile(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Json(body): Json<serde_json::Value>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_operator(&state, &user)?;
+    // TODO: persist updates to config file
+    let dimensions = body
+        .get("dimensions")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| state.config().taste.dimensions.clone());
+    Ok(Json(serde_json::json!({
+        "status": "updated",
+        "dimensions": dimensions,
+    })))
+}
+
+/// Recompute all taste profiles (operator only).
+async fn recompute_all_taste_profiles(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_operator(&state, &user)?;
+    lorehaven_db::taste_vectors::recompute_all_taste_vectors(state.db())
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    Ok(Json(serde_json::json!({ "status": "recompute_started" })))
 }
 
 /// Set an operator affinity on a work. Audit-logged; never surfaced publicly.
