@@ -1701,3 +1701,208 @@ pub async fn find_curator_bounty_queue(
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Admin dashboard metrics (§32.7.11)
+// ---------------------------------------------------------------------------
+
+/// Count media references that have at least `min_healthy` healthy links.
+pub async fn count_well_mirrored(db: &Database, min_healthy: i64) -> Result<i64> {
+    let sql = sql_owned(
+        db,
+        "SELECT COUNT(*) AS cnt FROM (
+            SELECT m.id FROM media_references m
+            LEFT JOIN availability_links al ON al.media_reference_id = m.id AND al.status = 'healthy'
+            GROUP BY m.id HAVING COUNT(al.id) >= ?
+        )".to_string(),
+        "SELECT COUNT(*) AS cnt FROM (
+            SELECT m.id FROM media_references m
+            LEFT JOIN availability_links al ON al.media_reference_id = m.id AND al.status = 'healthy'
+            GROUP BY m.id HAVING COUNT(al.id) >= $1
+        )".to_string(),
+    );
+    let row: (i64,) = match db.backend() {
+        Backend::Sqlite => sqlx::query_as(&sql).bind(min_healthy)
+            .fetch_one(db.sqlite_pool().expect("sqlite")).await?,
+        Backend::Postgres => sqlx::query_as(&sql).bind(min_healthy)
+            .fetch_one(db.postgres_pool().expect("postgres")).await?,
+    };
+    Ok(row.0)
+}
+
+/// Total number of media references.
+pub async fn count_total_references(db: &Database) -> Result<i64> {
+    let sql = sql_owned(
+        db,
+        "SELECT COUNT(*) AS cnt FROM media_references".to_string(),
+        "SELECT COUNT(*) AS cnt FROM media_references".to_string(),
+    );
+    let row: (i64,) = match db.backend() {
+        Backend::Sqlite => sqlx::query_as(&sql)
+            .fetch_one(db.sqlite_pool().expect("sqlite")).await?,
+        Backend::Postgres => sqlx::query_as(&sql)
+            .fetch_one(db.postgres_pool().expect("postgres")).await?,
+    };
+    Ok(row.0)
+}
+
+/// Link rot: for each provider, how many links went from healthy to non-healthy
+/// since the given datetime (ISO-8601 string). Returns Vec<(provider, rot_count)>.
+pub async fn link_rot_by_provider(
+    db: &Database,
+    since: &str,
+) -> Result<Vec<(String, i64)>> {
+    let sql = sql_owned(
+        db,
+        "SELECT provider, COUNT(*) AS cnt FROM availability_links
+         WHERE updated_at > ? AND status != 'healthy' AND last_healthy_at IS NOT NULL
+         AND last_healthy_at < updated_at
+         GROUP BY provider ORDER BY cnt DESC".to_string(),
+        "SELECT provider, COUNT(*) AS cnt FROM availability_links
+         WHERE updated_at > $1 AND status != 'healthy' AND last_healthy_at IS NOT NULL
+         AND last_healthy_at < updated_at
+         GROUP BY provider ORDER BY cnt DESC".to_string(),
+    );
+    let rows: Vec<(String, i64)> = match db.backend() {
+        Backend::Sqlite => sqlx::query_as(&sql).bind(since)
+            .fetch_all(db.sqlite_pool().expect("sqlite")).await?,
+        Backend::Postgres => sqlx::query_as(&sql).bind(since)
+            .fetch_all(db.postgres_pool().expect("postgres")).await?,
+    };
+    Ok(rows)
+}
+
+/// Count of references below the healthy-link threshold (need rescue).
+pub async fn count_references_below_threshold(db: &Database, min_healthy: i64) -> Result<i64> {
+    let sql = sql_owned(
+        db,
+        "SELECT COUNT(*) AS cnt FROM media_references m
+         WHERE (
+            SELECT COUNT(*) FROM availability_links al
+            WHERE al.media_reference_id = m.id AND al.status = 'healthy'
+         ) < ?".to_string(),
+        "SELECT COUNT(*) AS cnt FROM media_references m
+         WHERE (
+            SELECT COUNT(*) FROM availability_links al
+            WHERE al.media_reference_id = m.id AND al.status = 'healthy'
+         ) < $1".to_string(),
+    );
+    let row: (i64,) = match db.backend() {
+        Backend::Sqlite => sqlx::query_as(&sql).bind(min_healthy)
+            .fetch_one(db.sqlite_pool().expect("sqlite")).await?,
+        Backend::Postgres => sqlx::query_as(&sql).bind(min_healthy)
+            .fetch_one(db.postgres_pool().expect("postgres")).await?,
+    };
+    Ok(row.0)
+}
+
+/// Curator leaderboard: top curators by reward count, with their total amount.
+/// Returns Vec<(account_id, reward_count, total_amount)>.
+pub async fn curator_leaderboard(
+    db: &Database,
+    limit: i64,
+) -> Result<Vec<(String, i64, i64)>> {
+    let sql = sql_owned(
+        db,
+        "SELECT account_id,
+                COUNT(*) AS reward_count,
+                SUM(amount) AS total_amount
+         FROM curator_rewards
+         GROUP BY account_id
+         ORDER BY total_amount DESC
+         LIMIT ?".to_string(),
+        "SELECT account_id,
+                COUNT(*) AS reward_count,
+                SUM(amount) AS total_amount
+         FROM curator_rewards
+         GROUP BY account_id
+         ORDER BY total_amount DESC
+         LIMIT $1".to_string(),
+    );
+    let rows: Vec<(String, i64, i64)> = match db.backend() {
+        Backend::Sqlite => sqlx::query_as(&sql).bind(limit)
+            .fetch_all(db.sqlite_pool().expect("sqlite")).await?,
+        Backend::Postgres => sqlx::query_as(&sql).bind(limit)
+            .fetch_all(db.postgres_pool().expect("postgres")).await?,
+    };
+    Ok(rows)
+}
+
+/// Count of active standing bounties and total amount available.
+pub async fn standing_bounty_status(db: &Database) -> Result<(i64, i64)> {
+    let sql = sql_owned(
+        db,
+        "SELECT COUNT(*) AS cnt, COALESCE(SUM(reward), 0) AS total
+         FROM targeted_bounties WHERE status = 'active'".to_string(),
+        "SELECT COUNT(*) AS cnt, COALESCE(SUM(reward), 0) AS total
+         FROM targeted_bounties WHERE status = 'active'".to_string(),
+    );
+    let row: (i64, i64) = match db.backend() {
+        Backend::Sqlite => sqlx::query_as(&sql)
+            .fetch_one(db.sqlite_pool().expect("sqlite")).await?,
+        Backend::Postgres => sqlx::query_as(&sql)
+            .fetch_one(db.postgres_pool().expect("postgres")).await?,
+    };
+    Ok(row)
+}
+
+/// Local mirror storage consumed: total file size in bytes and count of mirrors.
+pub async fn local_mirror_storage(db: &Database) -> Result<(i64, i64)> {
+    let sql = sql_owned(
+        db,
+        "SELECT COUNT(*) AS cnt, COALESCE(SUM(file_size_bytes), 0) AS total_bytes
+         FROM local_mirrors".to_string(),
+        "SELECT COUNT(*) AS cnt, COALESCE(SUM(file_size_bytes), 0) AS total_bytes
+         FROM local_mirrors".to_string(),
+    );
+    let row: (i64, i64) = match db.backend() {
+        Backend::Sqlite => sqlx::query_as(&sql)
+            .fetch_one(db.sqlite_pool().expect("sqlite")).await?,
+        Backend::Postgres => sqlx::query_as(&sql)
+            .fetch_one(db.postgres_pool().expect("postgres")).await?,
+    };
+    Ok(row)
+}
+
+/// Count of active IPFS pins.
+pub async fn count_active_ipfs_pins(db: &Database) -> Result<i64> {
+    let sql = sql_owned(
+        db,
+        "SELECT COUNT(*) AS cnt FROM ipfs_pins".to_string(),
+        "SELECT COUNT(*) AS cnt FROM ipfs_pins".to_string(),
+    );
+    let row: (i64,) = match db.backend() {
+        Backend::Sqlite => sqlx::query_as(&sql)
+            .fetch_one(db.sqlite_pool().expect("sqlite")).await?,
+        Backend::Postgres => sqlx::query_as(&sql)
+            .fetch_one(db.postgres_pool().expect("postgres")).await?,
+    };
+    Ok(row.0)
+}
+
+/// Provider reliability: ranked by health rate (healthy / total).
+/// Returns Vec<(provider, healthy_count, total_count)>.
+pub async fn provider_reliability(db: &Database) -> Result<Vec<(String, i64, i64)>> {
+    let sql = sql_owned(
+        db,
+        "SELECT provider,
+                SUM(CASE WHEN status = 'healthy' THEN 1 ELSE 0 END) AS healthy,
+                COUNT(*) AS total
+         FROM availability_links
+         GROUP BY provider
+         ORDER BY (healthy * 1.0 / total) DESC".to_string(),
+        "SELECT provider,
+                SUM(CASE WHEN status = 'healthy' THEN 1 ELSE 0 END) AS healthy,
+                COUNT(*) AS total
+         FROM availability_links
+         GROUP BY provider
+         ORDER BY (healthy::float / total) DESC".to_string(),
+    );
+    let rows: Vec<(String, i64, i64)> = match db.backend() {
+        Backend::Sqlite => sqlx::query_as(&sql)
+            .fetch_all(db.sqlite_pool().expect("sqlite")).await?,
+        Backend::Postgres => sqlx::query_as(&sql)
+            .fetch_all(db.postgres_pool().expect("postgres")).await?,
+    };
+    Ok(rows)
+}
