@@ -899,3 +899,135 @@ pub async fn record_payment_event(
     }
     Ok(id)
 }
+
+// ---------------------------------------------------------------------------
+// Pool settlement (spec §20.10)
+// ---------------------------------------------------------------------------
+
+/// Record a Pool B distribution (idempotent via idempotency_key).
+pub async fn record_pool_b_distribution(
+    db: &Database,
+    period_start: &str,
+    period_end: &str,
+    author_account_id: &str,
+    amount_minor: i64,
+    currency: &str,
+    quality_score_bp: i64,
+    attributed_reading_time_seconds: i64,
+    ai_multiplier_bp: i64,
+    idempotency_key: &str,
+) -> Result<String, sqlx::Error> {
+    let id = Uuid::new_v4().to_string();
+    let now = crate::identity::now_rfc3339();
+
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(
+                "INSERT INTO pool_b_distributions
+                 (id, period_start, period_end, author_account_id, amount_minor,
+                  currency, quality_score_bp, attributed_reading_time_seconds,
+                  ai_multiplier_bp, idempotency_key, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(idempotency_key) DO NOTHING"
+            )
+            .bind(&id).bind(period_start).bind(period_end)
+            .bind(author_account_id).bind(amount_minor).bind(currency)
+            .bind(quality_score_bp).bind(attributed_reading_time_seconds)
+            .bind(ai_multiplier_bp).bind(idempotency_key).bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite")).await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(
+                "INSERT INTO pool_b_distributions
+                 (id, period_start, period_end, author_account_id, amount_minor,
+                  currency, quality_score_bp, attributed_reading_time_seconds,
+                  ai_multiplier_bp, idempotency_key, created_at)
+                 VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7, $8, $9, $10, $11)
+                 ON CONFLICT (idempotency_key) DO NOTHING"
+            )
+            .bind(&id).bind(period_start).bind(period_end)
+            .bind(author_account_id).bind(amount_minor).bind(currency)
+            .bind(quality_score_bp).bind(attributed_reading_time_seconds)
+            .bind(ai_multiplier_bp).bind(idempotency_key).bind(&now)
+            .execute(db.postgres_pool().expect("postgres")).await?;
+        }
+    }
+    Ok(id)
+}
+
+/// Upsert a monetization period summary.
+pub async fn upsert_period_summary(
+    db: &Database,
+    period_start: &str,
+    period_end: &str,
+    pool_a_total_minor: i64,
+    pool_b_total_minor: i64,
+    active_earner_median_minor: i64,
+    cap_value_minor: i64,
+    authors_in_pool_a: i64,
+    authors_in_pool_b: i64,
+    authors_capped: i64,
+    processor_fee_min_minor: i64,
+    processor_fee_max_minor: i64,
+) -> Result<String, sqlx::Error> {
+    let id = Uuid::new_v4().to_string();
+    let now = crate::identity::now_rfc3339();
+
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(
+                "INSERT INTO monetization_period_summaries
+                 (id, period_start, period_end, pool_a_total_minor, pool_b_total_minor,
+                  active_earner_median_minor, cap_value_minor, authors_in_pool_a,
+                  authors_in_pool_b, authors_capped, processor_fee_min_minor,
+                  processor_fee_max_minor, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(period_start, period_end) DO UPDATE SET
+                   pool_a_total_minor = excluded.pool_a_total_minor,
+                   pool_b_total_minor = excluded.pool_b_total_minor,
+                   active_earner_median_minor = excluded.active_earner_median_minor,
+                   cap_value_minor = excluded.cap_value_minor,
+                   authors_in_pool_a = excluded.authors_in_pool_a,
+                   authors_in_pool_b = excluded.authors_in_pool_b,
+                   authors_capped = excluded.authors_capped,
+                   processor_fee_min_minor = excluded.processor_fee_min_minor,
+                   processor_fee_max_minor = excluded.processor_fee_max_minor"
+            )
+            .bind(&id).bind(period_start).bind(period_end)
+            .bind(pool_a_total_minor).bind(pool_b_total_minor)
+            .bind(active_earner_median_minor).bind(cap_value_minor)
+            .bind(authors_in_pool_a).bind(authors_in_pool_b)
+            .bind(authors_capped).bind(processor_fee_min_minor)
+            .bind(processor_fee_max_minor).bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite")).await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(
+                "INSERT INTO monetization_period_summaries
+                 (id, period_start, period_end, pool_a_total_minor, pool_b_total_minor,
+                  active_earner_median_minor, cap_value_minor, authors_in_pool_a,
+                  authors_in_pool_b, authors_capped, processor_fee_min_minor,
+                  processor_fee_max_minor, created_at)
+                 VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                 ON CONFLICT (period_start, period_end) DO UPDATE SET
+                   pool_a_total_minor = excluded.pool_a_total_minor,
+                   pool_b_total_minor = excluded.pool_b_total_minor,
+                   active_earner_median_minor = excluded.active_earner_median_minor,
+                   cap_value_minor = excluded.cap_value_minor,
+                   authors_in_pool_a = excluded.authors_in_pool_a,
+                   authors_in_pool_b = excluded.authors_in_pool_b,
+                   authors_capped = excluded.authors_capped,
+                   processor_fee_min_minor = excluded.processor_fee_min_minor,
+                   processor_fee_max_minor = excluded.processor_fee_max_minor"
+            )
+            .bind(&id).bind(period_start).bind(period_end)
+            .bind(pool_a_total_minor).bind(pool_b_total_minor)
+            .bind(active_earner_median_minor).bind(cap_value_minor)
+            .bind(authors_in_pool_a).bind(authors_in_pool_b)
+            .bind(authors_capped).bind(processor_fee_min_minor)
+            .bind(processor_fee_max_minor).bind(&now)
+            .execute(db.postgres_pool().expect("postgres")).await?;
+        }
+    }
+    Ok(id)
+}

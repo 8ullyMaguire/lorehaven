@@ -153,8 +153,8 @@ M15-02,economy,Pool A/Pool B split with per-flow contributions and 90-day notice
 M15-03,economy,Graduated cap on trailing active-earner median with overflow to Pool B,M15,planned,--,Spec §20.10.3. Default multiplier 10; bands 5x/10x; median over 3 months.
 M15-04,economy,Quality-weighted Pool B distribution never by volume,M15,planned,--,Spec §20.10.4. Composite of §9.7.4/§9.8 signals; weights published; AI multipliers apply.
 M15-05,economy,Pool B eligibility floor with visible exclusion reason,M15,planned,--,Spec §20.10.5. Distinct readers/age 30d/TL1/no sanction/no unresolved AI flag.
-M15-06,economy,AI content declaration per work with Pool B multipliers,M15,planned,--,Spec §20.9.4. none/assisted/co-written/generated = 1.0/1.0/0.3/0; false declaration sanctionable.
-M15-07,economy,Processor fees recorded and deducted before pool math,M15,planned,--,Spec §20.9.5. payment_events.processor_fee_minor; trailing fee range on /api/v1/meta.
+M15-06,economy,AI content declaration per work with Pool B multipliers,M15,implemented-locally-tested,crates/app/tests/milestone_15.rs,Spec §20.9.4. none/assisted/co-written/generated = 1.0/1.0/0.3/0; false declaration sanctionable.
+M15-07,economy,Processor fees recorded and deducted before pool math,M15,implemented-locally-tested,crates/app/tests/milestone_15.rs,Spec §20.9.5. payment_events.processor_fee_minor; trailing fee range on /api/v1/meta.
 M15-08,economy,Subscription revenue attributed by reading time,M15,planned,--,Spec §20.6.1. Time-on-page weighted; §9.7.8 anti-gaming inherited; never word count.
-M15-09,economy,Monetization transparency dashboard on /api/v1/meta,M15,planned,--,Spec §20.10.7. Pools/cap/median/histogram/weights/fee range; never individual earnings.
+M15-09,economy,Monetization transparency dashboard on /api/v1/meta,M15,implemented-locally-tested,crates/app/tests/milestone_15.rs,Spec §20.10.7. Pools/cap/median/histogram/weights/fee range; never individual earnings.
 M0-12,platform,Processor-agnostic billing adapter replacing the Stripe reference,M0,planned,--,"Spec §2.1, §2.2. Operator owns processor and content-policy compatibility."

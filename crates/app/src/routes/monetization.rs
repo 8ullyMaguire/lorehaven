@@ -8,12 +8,14 @@
 use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::Json;
-use lorehaven_db::monetization;
+use lorehaven_db::{monetization, Backend};
 use serde::Deserialize;
 use serde_json::json;
+use axum::http::StatusCode;
 use serde_json::Value;
+use uuid::Uuid;
 
-use crate::auth::{MaybeSession, RequireSession};
+use crate::auth::{MaybeSession, RequirePseud, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -698,4 +700,50 @@ pub fn transparency_router() -> axum::Router<AppState> {
     axum::Router::new()
         .route("/works/{work_id}/ai-declaration", post(set_work_ai_declaration).get(get_work_ai_declaration))
         .route("/transparency/monetization", get(get_transparency_dashboard))
+        .route("/works/{work_id}/reading-session", post(record_reading_session))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReadingSessionRequest {
+    pub seconds: i64,
+}
+
+pub async fn record_reading_session(
+    State(state): State<AppState>,
+    Path(work_id): Path<String>,
+    RequirePseud { user, pseud_id }: RequirePseud,
+    Json(body): Json<ReadingSessionRequest>,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    let work_id = work_id
+        .parse::<lorehaven_domain::WorkId>()
+        .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    let now = lorehaven_db::identity::now_rfc3339();
+    let id = Uuid::new_v4().to_string();
+    let session_id = format!("{}-{}-{}", user.account_id, work_id, &id[..8]);
+    match state.db().backend() {
+        Backend::Sqlite => {
+            sqlx::query(
+                "INSERT INTO reading_sessions (id, account_id, work_id, seconds, started_at, ended_at)
+                 VALUES (?, ?, ?, ?, ?, ?)"
+            )
+            .bind(&session_id).bind(&user.account_id.to_string())
+            .bind(&work_id.to_canonical_string()).bind(body.seconds)
+            .bind(&now).bind(&now)
+            .execute(state.db().sqlite_pool().expect("sqlite")).await
+            .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        }
+        Backend::Postgres => {
+            sqlx::query(
+                "INSERT INTO reading_sessions (id, account_id, work_id, seconds, started_at, ended_at)
+                 VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?, ?)"
+            )
+            .bind(&session_id).bind(&user.account_id.to_string())
+            .bind(&work_id.to_canonical_string()).bind(body.seconds)
+            .bind(&now).bind(&now)
+            .execute(state.db().postgres_pool().expect("postgres")).await
+            .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        }
+    }
+    let _ = pseud_id;
+    Ok((axum::http::StatusCode::CREATED, Json(json!({ "status": "recorded" }))))
 }
