@@ -3,6 +3,7 @@
 pub mod anchor;
 pub mod api_scopes;
 pub mod blocking;
+pub mod browse;
 pub mod caps;
 pub mod charging;
 pub mod community;
