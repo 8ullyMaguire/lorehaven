@@ -152,6 +152,8 @@ pub struct Config {
     pub signals: SignalsConfig,
     /// Instance preset (spec §0.6).
     pub instance: InstanceConfig,
+    /// Meta-ranker settings (spec §9.10).
+    pub meta_ranker: MetaRankerConfig,
     /// Revision caching settings (spec §38).
     pub revisions: RevisionsConfig,
     /// Job queue settings (spec §38).
@@ -416,6 +418,38 @@ impl Default for InstanceConfig {
     fn default() -> Self {
         Self {
             preset: "curated_boutique".to_string(),
+        }
+    }
+}
+
+/// Meta-ranker (Thompson Sampling over recommendation strategies) settings (spec §9.10).
+#[derive(Debug, Clone)]
+pub struct MetaRankerConfig {
+    pub enabled: bool,
+    pub exploration_percent: u8,
+    pub exploitation_percent: u8,
+    pub min_impressions_per_strategy: u64,
+    pub rebalance_frequency_hours: u64,
+    pub max_active_strategies: usize,
+    pub success_metric: String,
+    pub auto_disable_threshold: f64,
+    pub candidate_exploration_bonus: f64,
+    pub candidate_promotion_impressions: u64,
+}
+
+impl Default for MetaRankerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            exploration_percent: 15,
+            exploitation_percent: 85,
+            min_impressions_per_strategy: 50,
+            rebalance_frequency_hours: 24,
+            max_active_strategies: 20,
+            success_metric: "admin_aligned".to_string(),
+            auto_disable_threshold: 0.3,
+            candidate_exploration_bonus: 2.0,
+            candidate_promotion_impressions: 500,
         }
     }
 }
@@ -1355,6 +1389,24 @@ impl Config {
                     preset: i.preset.unwrap_or_else(|| "curated_boutique".to_string()),
                 }
             },
+            // --- meta_ranker (spec §9.10) --------------------------------------
+            meta_ranker: {
+                let m = file.meta_ranker.unwrap_or_default();
+                MetaRankerConfig {
+                    enabled: m.enabled.unwrap_or(true),
+                    exploration_percent: m.exploration_percent.unwrap_or(15) as u8,
+                    exploitation_percent: m.exploitation_percent.unwrap_or(85) as u8,
+                    min_impressions_per_strategy: m.min_impressions_per_strategy.unwrap_or(50),
+                    rebalance_frequency_hours: m.rebalance_frequency_hours.unwrap_or(24),
+                    max_active_strategies: m.max_active_strategies.unwrap_or(20),
+                    success_metric: m
+                        .success_metric
+                        .unwrap_or_else(|| "admin_aligned".to_string()),
+                    auto_disable_threshold: m.auto_disable_threshold.unwrap_or(0.3),
+                    candidate_exploration_bonus: m.candidate_exploration_bonus.unwrap_or(2.0),
+                    candidate_promotion_impressions: m.candidate_promotion_impressions.unwrap_or(500),
+                }
+            },
             // --- revisions (spec §38) -----------------------------------------
             revisions: RevisionsConfig {
                 ttl_secs: file
@@ -1457,6 +1509,7 @@ impl Config {
             taste: TasteConfig::default(),
             signals: SignalsConfig::default(),
             instance: InstanceConfig::default(),
+            meta_ranker: MetaRankerConfig::default(),
             revisions: RevisionsConfig::default(),
             jobs: JobsConfig::default(),
             library: LibraryConfig::default(),
@@ -1630,6 +1683,8 @@ struct FileConfig {
     signals: Option<SignalsSection>,
     /// Instance preset (spec §0.6).
     instance: Option<InstanceSection>,
+    /// Meta-ranker settings (spec §9.10).
+    meta_ranker: Option<MetaRankerSection>,
 }
 
 /// The `[theme]` table (spec §0.4.6): theme mode and gravity settings.
@@ -1670,6 +1725,32 @@ struct SignalsSection {
 #[serde(deny_unknown_fields)]
 struct InstanceSection {
     preset: Option<String>,
+}
+
+/// The `[meta_ranker]` table (spec §9.10): meta-ranker settings.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MetaRankerSection {
+    /// Enable the multi-armed bandit meta-ranker.
+    enabled: Option<bool>,
+    /// % of discovery slots filled by randomly selected strategy.
+    exploration_percent: Option<u32>,
+    /// % filled by current best-ranked strategy.
+    exploitation_percent: Option<u32>,
+    /// Don't rank strategy until it has enough impressions.
+    min_impressions_per_strategy: Option<u64>,
+    /// How often strategy weights are recomputed, in hours.
+    rebalance_frequency_hours: Option<u64>,
+    /// Maximum number of active strategies.
+    max_active_strategies: Option<usize>,
+    /// Success metric: admin_aligned, engagement, completion, hybrid.
+    success_metric: Option<String>,
+    /// Auto-disable threshold (success_rate < threshold for N periods).
+    auto_disable_threshold: Option<f64>,
+    /// Bonus multiplier for candidate strategies during exploration.
+    candidate_exploration_bonus: Option<f64>,
+    /// Impressions before a candidate can be promoted.
+    candidate_promotion_impressions: Option<u64>,
 }
 
 /// The `[revisions]` table (spec §38): source revision cache settings.
