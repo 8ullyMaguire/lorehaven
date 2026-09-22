@@ -93,6 +93,77 @@ pub fn apply_theme_gravity(
     results
 }
 
+/// Apply taste gravity to a ranked candidate list (spec §9.7.3).
+///
+/// `strength` controls influence (0.0 = off, 1.0 = full taste gravity).
+/// `mode` determines weighting strategy: "egalitarian" (equal), "taste_weighted"
+/// (multiply score by taste_signal × weight), "admin_only" (only admin-aligned).
+/// `admin_weight` multiplies the final boost for admin-aligned works.
+pub fn apply_taste_gravity(
+    candidates: Vec<Candidate>,
+    strength: f64,
+    mode: &str,
+    admin_weight: f64,
+) -> Vec<Candidate> {
+    if strength <= 0.0 || mode == "egalitarian" {
+        return candidates;
+    }
+    let mut results: Vec<Candidate> = candidates
+        .into_iter()
+        .map(|mut c| {
+            let boost = match mode {
+                "admin_only" => {
+                    if c.taste_signal > 0.5 {
+                        1.0 + (c.taste_signal * admin_weight * strength)
+                    } else {
+                        1.0
+                    }
+                }
+                "taste_weighted" => 1.0 + (c.taste_signal * admin_weight * strength),
+                _ => 1.0,
+            };
+            c.score = (c.score as f64 * boost) as i64;
+            c
+        })
+        .collect();
+    results.sort_by_key(|c| -c.score);
+    results
+}
+
+/// Inject taste-distant content into discovery results (spec §0.4.1).
+///
+/// Reserves `injection_percent` of the final `final_count` slots for content
+/// that is maximally distant from admin taste (diversity_class close to 1.0).
+/// Only candidates meeting a minimum quality threshold are eligible.
+pub fn inject_diversity_by_taste(
+    candidates: &[Candidate],
+    final_count: usize,
+    injection_percent: f64,
+) -> Vec<usize> {
+    let slots = if injection_percent > 0.0 {
+        (injection_percent * final_count as f64).round() as usize
+    } else {
+        0
+    };
+    if slots == 0 {
+        return (0..candidates.len()).collect();
+    }
+    // Sort by diversity_class descending to find the most distant works.
+    let mut indexed: Vec<(usize, &Candidate)> = candidates.iter().enumerate().collect();
+    indexed.sort_by(|a, b| {
+        b.1.diversity_class
+            .partial_cmp(&a.1.diversity_class)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let diverse_indices: Vec<usize> = indexed.iter().take(slots).map(|(i, _)| *i).collect();
+    let mut result: Vec<usize> = (0..candidates.len())
+        .filter(|i| !diverse_indices.contains(i))
+        .collect();
+    result.truncate(final_count.saturating_sub(slots));
+    result.extend(diverse_indices);
+    result
+}
+
 /// Apply per-fandom caps and exploration slots to a ranked candidate list.
 ///
 /// - `per_fandom_cap`: the maximum number of works from the same fandom to
@@ -364,5 +435,88 @@ mod tests {
         let work_nudge = |_w: &WorkId| 1000;
         let result = apply_theme_gravity(candidates, &work_nudge);
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn apply_taste_gravity_egalitarian_noop() {
+        let w1 = WorkId::new();
+        let w2 = WorkId::new();
+        let candidates = vec![
+            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.9, diversity_class: 0.0 },
+            Candidate { work_id: w2, score: 5, reason: "base".into(), taste_signal: 0.1, diversity_class: 0.0 },
+        ];
+        let result = apply_taste_gravity(candidates, 1.0, "egalitarian", 1.0);
+        assert_eq!(result[0].score, 10);
+        assert_eq!(result[1].score, 5);
+    }
+
+    #[test]
+    fn apply_taste_gravity_zero_strength_noop() {
+        let w1 = WorkId::new();
+        let candidates = vec![
+            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.9, diversity_class: 0.0 },
+        ];
+        let result = apply_taste_gravity(candidates, 0.0, "taste_weighted", 1.0);
+        assert_eq!(result[0].score, 10);
+    }
+
+    #[test]
+    fn apply_taste_gravity_boosts_aligned() {
+        let w1 = WorkId::new();
+        let w2 = WorkId::new();
+        let candidates = vec![
+            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.9, diversity_class: 0.0 },
+            Candidate { work_id: w2, score: 10, reason: "base".into(), taste_signal: 0.1, diversity_class: 0.0 },
+        ];
+        let result = apply_taste_gravity(candidates, 1.0, "taste_weighted", 1.0);
+        // w1: 10 * (1 + 0.9 * 1 * 1) = 19
+        // w2: 10 * (1 + 0.1 * 1 * 1) = 11
+        assert_eq!(result[0].work_id, w1);
+        assert_eq!(result[0].score, 19);
+        assert_eq!(result[1].score, 11);
+    }
+
+    #[test]
+    fn apply_taste_gravity_admin_only() {
+        let w1 = WorkId::new();
+        let w2 = WorkId::new();
+        let candidates = vec![
+            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.6, diversity_class: 0.0 },
+            Candidate { work_id: w2, score: 10, reason: "base".into(), taste_signal: 0.3, diversity_class: 0.0 },
+        ];
+        let result = apply_taste_gravity(candidates, 1.0, "admin_only", 1.0);
+        // w1: 10 * (1 + 0.6 * 1 * 1) = 16
+        // w2: 10 (no boost, taste_signal <= 0.5)
+        assert_eq!(result[0].work_id, w1);
+        assert_eq!(result[0].score, 16);
+        assert_eq!(result[1].score, 10);
+    }
+
+    #[test]
+    fn inject_diversity_by_taste_zero_percent() {
+        let w1 = WorkId::new();
+        let w2 = WorkId::new();
+        let candidates = vec![
+            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.0 },
+            Candidate { work_id: w2, score: 5, reason: "base".into(), taste_signal: 0.0, diversity_class: 1.0 },
+        ];
+        let indices = inject_diversity_by_taste(&candidates, 2, 0.0);
+        assert_eq!(indices, vec![0, 1]);
+    }
+
+    #[test]
+    fn inject_diversity_by_taste_reserves_slots() {
+        let w1 = WorkId::new();
+        let w2 = WorkId::new();
+        let w3 = WorkId::new();
+        let candidates = vec![
+            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.0 },
+            Candidate { work_id: w2, score: 8, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.5 },
+            Candidate { work_id: w3, score: 5, reason: "base".into(), taste_signal: 0.0, diversity_class: 1.0 },
+        ];
+        // 50% of 3 = 1 slot reserved for most diverse (w3)
+        let indices = inject_diversity_by_taste(&candidates, 3, 0.5);
+        assert!(indices.contains(&2)); // w3 (most diverse) must be included
+        assert_eq!(indices.len(), 3);
     }
 }
