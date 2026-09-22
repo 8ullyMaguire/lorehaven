@@ -28,6 +28,7 @@ pub mod library;
 pub mod longevity;
 pub mod marketplace;
 pub mod media;
+pub mod meta_ranker;
 pub mod moderation;
 pub mod monetization;
 pub mod orphaning;
