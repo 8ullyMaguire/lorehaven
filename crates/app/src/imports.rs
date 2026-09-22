@@ -247,6 +247,7 @@ pub async fn run(
         &row.source_key,
         &adapter_version,
         &scope,
+        state.config().revisions.ttl_secs,
     );
 
     // Rule 3: preview first, so the plan is a fact before any body is stored.

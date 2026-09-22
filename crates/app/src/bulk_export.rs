@@ -26,11 +26,7 @@ use serde_json::{json, Value};
 use crate::state::AppState;
 use crate::worker::HandlerError;
 
-/// How many works a bulk export may bundle, unless configured otherwise.
-pub const DEFAULT_MAX_ITEMS: i64 = 50;
 
-/// How many bytes a bulk export may total, unless configured otherwise.
-pub const DEFAULT_MAX_BYTES: i64 = 1024 * 1024 * 1024; // 1 GiB
 
 /// Why a bulk-export worker stopped.
 #[derive(Debug)]
@@ -102,16 +98,8 @@ pub async fn run_bulk(state: &AppState, payload: &Value) -> Result<(), HandlerEr
         .unwrap_or_else(|| json!({}));
 
     let account_id = &row.account_id;
-    let max_items = state
-        .config()
-        .bulk_export
-        .max_items
-        .unwrap_or(DEFAULT_MAX_ITEMS);
-    let max_bytes = state
-        .config()
-        .bulk_export
-        .max_bytes
-        .unwrap_or(DEFAULT_MAX_BYTES);
+    let max_items = state.config().bulk_export.max_items;
+    let max_bytes = state.config().bulk_export.max_bytes;
 
     match produce_bulk(state, &row, &query_json, account_id, max_items, max_bytes).await {
         Ok(artifact) => {

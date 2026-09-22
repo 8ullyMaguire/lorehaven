@@ -217,6 +217,7 @@ impl Harness {
             SOURCE,
             adapter,
             scope,
+            604800, // 7 days, same as the default
         )
     }
 }

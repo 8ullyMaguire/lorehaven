@@ -38,9 +38,6 @@ use time::OffsetDateTime;
 
 use crate::state::AppState;
 
-/// How long a terminal job is kept before the maintenance sweep removes it.
-const TERMINAL_JOB_RETENTION: Duration = Duration::from_secs(30 * 24 * 60 * 60);
-
 /// A future the worker awaits; boxed because the handler registry is a map.
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
@@ -283,7 +280,11 @@ impl Worker {
         if requeued > 0 {
             tracing::warn!(requeued, "leases had expired; the jobs are queued again");
         }
-        let purged = jobs::purge_terminal_jobs(state.db(), now - TERMINAL_JOB_RETENTION).await?;
+        let retention = Duration::from_secs(
+            u64::try_from(state.config().jobs.terminal_retention_days * 24 * 60 * 60)
+                .unwrap_or(30 * 24 * 60 * 60),
+        );
+        let purged = jobs::purge_terminal_jobs(state.db(), now - retention).await?;
         if purged > 0 {
             tracing::info!(
                 purged,
@@ -620,9 +621,13 @@ impl Worker {
                 Ok(())
             }
             "reap_jobs" => {
+                let retention = Duration::from_secs(
+                    u64::try_from(state.config().jobs.terminal_retention_days * 24 * 60 * 60)
+                        .unwrap_or(30 * 24 * 60 * 60),
+                );
                 let deleted = jobs::purge_terminal_jobs(
                     state.db(),
-                    OffsetDateTime::now_utc() - TERMINAL_JOB_RETENTION,
+                    OffsetDateTime::now_utc() - retention,
                 )
                 .await
                 .map_err(transient)?;

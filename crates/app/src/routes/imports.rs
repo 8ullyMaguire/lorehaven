@@ -116,7 +116,7 @@ async fn revision_cache_stats(
     let total = revisions::count(state.db()).await?;
     Ok(Json(serde_json::json!({
         "entries": total,
-        "ttl_seconds": crate::revisions::REVISION_TTL_SECONDS,
+        "ttl_seconds": state.config().revisions.ttl_secs,
     })))
 }
 
@@ -442,6 +442,7 @@ async fn caching_fetcher<'a>(
         source_key,
         &adapter_version,
         scope,
+        state.config().revisions.ttl_secs,
     )
 }
 
