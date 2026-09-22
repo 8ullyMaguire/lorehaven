@@ -172,6 +172,37 @@ async fn register(client: &mut Client, email: &str, handle: &str) -> (String, St
 }
 
 #[tokio::test]
+async fn discovery_sort_query_param_overrides_default() {
+    let harness = Harness::new("discovery-sort-query").await;
+    let mut client = harness.client();
+
+    let (status, body) = client.get("/api/v1/discovery?sort=top").await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["sort"], "top");
+}
+
+#[tokio::test]
+async fn discovery_sort_default_for_anonymous() {
+    let harness = Harness::new("discovery-sort-default").await;
+    let mut client = harness.client();
+
+    let (status, body) = client.get("/api/v1/discovery").await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["sort"], "for-you");
+}
+
+#[tokio::test]
+async fn discovery_sort_query_param_unknown_falls_through_to_default() {
+    let harness = Harness::new("discovery-sort-unknown").await;
+    let mut client = harness.client();
+
+    // Unknown sort values should not 400 — they fall through to default (spec §43.4).
+    let (status, body) = client.get("/api/v1/discovery?sort=bogus").await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["sort"], "for-you");
+}
+
+#[tokio::test]
 async fn list_surfaces_returns_all_browse_surfaces() {
     let harness = Harness::new("list-surfaces").await;
     let mut client = harness.client();
