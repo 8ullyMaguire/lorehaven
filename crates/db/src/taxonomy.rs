@@ -347,6 +347,180 @@ pub async fn tag_work(db: &Database, work_id: &str, node_id: &str, weight: i64) 
     })
 }
 
+/// List all tags (taxonomy nodes of kind 'tag') with work counts, for the Tags surface (spec §43.1).
+pub async fn list_tags(
+    db: &Database,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<(String, String, String, i64)>> {
+    let sql = db.sql(
+        "SELECT id, canonical, kind, (
+            SELECT COUNT(*) FROM work_tags wt WHERE wt.node_id = taxonomy_nodes.id
+        ) AS work_count
+         FROM taxonomy_nodes
+         WHERE kind = 'tag'
+         ORDER BY canonical ASC
+         LIMIT ? OFFSET ?",
+        "SELECT id::text, canonical, kind, (
+            SELECT COUNT(*) FROM work_tags wt WHERE wt.node_id = taxonomy_nodes.id
+        ) AS work_count
+         FROM taxonomy_nodes
+         WHERE kind = 'tag'
+         ORDER BY canonical ASC
+         LIMIT $1 OFFSET $2",
+    );
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, (String, String, String, i64)>(&sql)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, (String, String, String, i64)>(&sql)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(rows)
+}
+
+/// List all fandoms (taxonomy nodes of kind 'fandom') with work counts, for the Fandoms surface (spec §43.1).
+pub async fn list_fandoms(
+    db: &Database,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<(String, String, i64)>> {
+    let sql = db.sql(
+        "SELECT id, canonical, (
+            SELECT COUNT(*) FROM work_tags wt WHERE wt.node_id = taxonomy_nodes.id
+        ) AS work_count
+         FROM taxonomy_nodes
+         WHERE kind = 'fandom'
+         ORDER BY canonical ASC
+         LIMIT ? OFFSET ?",
+        "SELECT id::text, canonical, (
+            SELECT COUNT(*) FROM work_tags wt WHERE wt.node_id = taxonomy_nodes.id
+        ) AS work_count
+         FROM taxonomy_nodes
+         WHERE kind = 'fandom'
+         ORDER BY canonical ASC
+         LIMIT $1 OFFSET $2",
+    );
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, (String, String, i64)>(&sql)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, (String, String, i64)>(&sql)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(rows)
+}
+
+/// List works tagged with a specific tag node, for the /tags/:tag surface (spec §43.1).
+pub async fn works_by_tag(
+    db: &Database,
+    tag_canonical: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<(String, String, String, String)>> {
+    let sql = db.sql(
+        "SELECT w.id, w.title, p.handle, w.updated_at
+         FROM works w
+         JOIN work_tags wt ON wt.work_id = w.id
+         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN pseuds p ON p.id = w.owner_pseud_id
+         WHERE tn.norm = ? AND w.lifecycle = 'published' AND w.visibility = 'public'
+         ORDER BY w.updated_at DESC
+         LIMIT ? OFFSET ?",
+        "SELECT w.id::text, w.title, p.handle, w.updated_at
+         FROM works w
+         JOIN work_tags wt ON wt.work_id = w.id
+         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN pseuds p ON p.id = w.owner_pseud_id::text
+         WHERE tn.norm = $1 AND w.lifecycle = 'published' AND w.visibility = 'public'
+         ORDER BY w.updated_at DESC
+         LIMIT $2 OFFSET $3",
+    );
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, (String, String, String, String)>(&sql)
+                .bind(tag_canonical)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, (String, String, String, String)>(&sql)
+                .bind(tag_canonical)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(rows)
+}
+
+/// List works tagged with a specific fandom node, for the /fandoms/:fandom surface (spec §43.1).
+pub async fn works_by_fandom(
+    db: &Database,
+    fandom_canonical: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<(String, String, String, String)>> {
+    let sql = db.sql(
+        "SELECT w.id, w.title, p.handle, w.updated_at
+         FROM works w
+         JOIN work_tags wt ON wt.work_id = w.id
+         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN pseuds p ON p.id = w.owner_pseud_id
+         WHERE tn.norm = ? AND w.lifecycle = 'published' AND w.visibility = 'public'
+         ORDER BY w.updated_at DESC
+         LIMIT ? OFFSET ?",
+        "SELECT w.id::text, w.title, p.handle, w.updated_at
+         FROM works w
+         JOIN work_tags wt ON wt.work_id = w.id
+         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         JOIN pseuds p ON p.id = w.owner_pseud_id::text
+         WHERE tn.norm = $1 AND w.lifecycle = 'published' AND w.visibility = 'public'
+         ORDER BY w.updated_at DESC
+         LIMIT $2 OFFSET $3",
+    );
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, (String, String, String, String)>(&sql)
+                .bind(fandom_canonical)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, (String, String, String, String)>(&sql)
+                .bind(fandom_canonical)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(rows)
+}
+
 /// Get all node_ids tagged on a work, in insertion order.
 pub async fn tags_for_work(db: &Database, work_id: &str) -> Result<Vec<String>> {
     let sql = db.sql(
