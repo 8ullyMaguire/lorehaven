@@ -128,6 +128,8 @@ pub struct Config {
     pub rate_limits: crate::limiter::Limits,
     /// What the importer may do about a source that refuses a plain request.
     pub imports: ImportsConfig,
+    /// Theme mode and gravity settings (spec §0.4.6).
+    pub theme: ThemeConfig,
     /// Discovery feed diversity settings.
     pub discovery: DiscoveryConfig,
     /// TTS narration settings.
@@ -199,6 +201,103 @@ pub struct AccountsConfig {
     /// initial cohort; making that a configuration value rather than a code
     /// change keeps it an operational decision.
     pub registration_open: bool,
+}
+
+/// Who defines instance taste, in priority order (spec §0.4.6, §16.15).
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct InfluenceSourceConfig {
+    /// The kind of influence source.
+    pub kind: InfluenceSourceKind,
+    /// Minimum number of distinct accounts required for cohort/role/long_term sources.
+    #[serde(default = "default_min_members")]
+    pub min_members: usize,
+    /// For `long_term_users`: minimum account age in days.
+    #[serde(default = "default_tenure_days")]
+    pub min_tenure_days: u64,
+    /// For `long_term_users`: minimum contribution events.
+    #[serde(default = "default_min_contributions")]
+    pub min_contributions: u64,
+    /// For `roles`: which roles qualify.
+    #[serde(default)]
+    pub roles: Vec<String>,
+    /// For `cohort`: explicit member pseud ids.
+    #[serde(default)]
+    pub members: Vec<String>,
+}
+
+fn default_min_members() -> usize {
+    5
+}
+fn default_tenure_days() -> u64 {
+    90
+}
+fn default_min_contributions() -> u64 {
+    5
+}
+
+/// The kinds of influence sources (spec §16.15).
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InfluenceSourceKind {
+    /// The operator's declared public topics.
+    OperatorTopics,
+    /// The §16.2 administrator taste profile.
+    AdminTaste,
+    /// Aggregate of long-term contributors (§16.15 `long_term_users`).
+    LongTermUsers,
+}
+
+/// Theme mode and gravity settings (spec §0.4.6).
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct ThemeConfig {
+    /// The instance's discovery posture: `generic`, `thematic`, or `adaptive`.
+    #[serde(default = "default_theme_mode")]
+    pub mode: String,
+    /// Whether the §16.5 dial can reach zero for theme influence.
+    /// When false, `theme_dial_floor` is the dial's lower bound.
+    #[serde(default = "true_bool")]
+    pub allow_user_opt_out: bool,
+    /// Lower bound for the §16.5 dial when opt-out is locked (in basis points).
+    #[serde(default = "default_theme_dial_floor_bp")]
+    pub theme_dial_floor_bp: i64,
+    /// Maximum adaptive drift in basis points (0 = no drift).
+    #[serde(default)]
+    pub adaptive_max_drift_bp: i64,
+    /// Ordered influence sources that shape instance taste.
+    #[serde(default = "default_influence_sources")]
+    pub influence_sources: Vec<InfluenceSourceConfig>,
+}
+
+fn default_theme_mode() -> String {
+    "thematic".to_string()
+}
+fn default_theme_dial_floor_bp() -> i64 {
+    1000
+}
+fn true_bool() -> bool {
+    true
+}
+fn default_influence_sources() -> Vec<InfluenceSourceConfig> {
+    vec![InfluenceSourceConfig {
+        kind: InfluenceSourceKind::OperatorTopics,
+        min_members: 5,
+        min_tenure_days: 90,
+        min_contributions: 5,
+        roles: Vec::new(),
+        members: Vec::new(),
+    }]
+}
+
+impl Default for ThemeConfig {
+    fn default() -> Self {
+        Self {
+            mode: default_theme_mode(),
+            allow_user_opt_out: true,
+            theme_dial_floor_bp: default_theme_dial_floor_bp(),
+            adaptive_max_drift_bp: 0,
+            influence_sources: default_influence_sources(),
+        }
+    }
 }
 
 /// Discovery feed diversity settings.
@@ -1110,6 +1209,16 @@ impl Config {
             age,
             rate_limits,
             imports,
+            theme: {
+                let t = file.theme.unwrap_or_default();
+                ThemeConfig {
+                    mode: t.mode.unwrap_or_else(default_theme_mode),
+                    allow_user_opt_out: t.allow_user_opt_out.unwrap_or(true),
+                    theme_dial_floor_bp: t.theme_dial_floor_bp.unwrap_or_else(default_theme_dial_floor_bp),
+                    adaptive_max_drift_bp: t.adaptive_max_drift_bp.unwrap_or(0),
+                    influence_sources: t.influence_sources.unwrap_or_else(default_influence_sources),
+                }
+            },
             discovery: DiscoveryConfig::default(),
             tts,
             // --- bulk_export (spec §38) -----------------------------------------
@@ -1220,6 +1329,7 @@ impl Config {
             // drove a solver by default would make every test that fetches a page
             // depend on which escalations happened to be configured.
             imports: ImportsConfig::default(),
+            theme: ThemeConfig::default(),
             discovery: DiscoveryConfig::default(),
             tts: TtsConfig::default(),
             bulk_export: BulkExportConfig::default(),
@@ -1394,6 +1504,18 @@ struct FileConfig {
     revisions: Option<RevisionsSection>,
     jobs: Option<JobsSection>,
     library: Option<LibrarySection>,
+    theme: Option<ThemeSection>,
+}
+
+/// The `[theme]` table (spec §0.4.6): theme mode and gravity settings.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ThemeSection {
+    mode: Option<String>,
+    allow_user_opt_out: Option<bool>,
+    theme_dial_floor_bp: Option<i64>,
+    adaptive_max_drift_bp: Option<i64>,
+    influence_sources: Option<Vec<InfluenceSourceConfig>>,
 }
 
 /// The `[revisions]` table (spec §38): source revision cache settings.
@@ -2030,5 +2152,75 @@ port = 7000
 
         config.database.url = "sqlite://:memory:".to_owned();
         assert!(config.sqlite_file().is_none());
+    }
+
+    #[test]
+    fn theme_defaults_to_thematic_with_operator_topics() {
+        // Spec §0.4.6: the default is thematic — an instance that declares
+        // topics is assumed to want them to matter.
+        let config = Config::development_defaults();
+        assert_eq!(config.theme.mode, "thematic");
+        assert!(config.theme.allow_user_opt_out);
+        assert_eq!(config.theme.theme_dial_floor_bp, 1000);
+        assert_eq!(config.theme.adaptive_max_drift_bp, 0);
+        assert_eq!(config.theme.influence_sources.len(), 1);
+        assert_eq!(
+            config.theme.influence_sources[0].kind,
+            InfluenceSourceKind::OperatorTopics
+        );
+    }
+
+    #[test]
+    fn theme_section_is_parsed_from_toml() {
+        let config = load_from(
+            "theme",
+            r#"
+[theme]
+mode = "generic"
+allow_user_opt_out = false
+theme_dial_floor_bp = 2500
+adaptive_max_drift_bp = 500
+
+[[theme.influence_sources]]
+kind = "operator_topics"
+
+[[theme.influence_sources]]
+kind = "long_term_users"
+min_tenure_days = 120
+min_contributions = 8
+"#,
+        )
+        .expect("loads");
+        assert_eq!(config.theme.mode, "generic");
+        assert!(!config.theme.allow_user_opt_out);
+        assert_eq!(config.theme.theme_dial_floor_bp, 2500);
+        assert_eq!(config.theme.adaptive_max_drift_bp, 500);
+        assert_eq!(config.theme.influence_sources.len(), 2);
+        assert_eq!(
+            config.theme.influence_sources[0].kind,
+            InfluenceSourceKind::OperatorTopics
+        );
+        assert_eq!(
+            config.theme.influence_sources[1].kind,
+            InfluenceSourceKind::LongTermUsers
+        );
+        assert_eq!(config.theme.influence_sources[1].min_tenure_days, 120);
+        assert_eq!(config.theme.influence_sources[1].min_contributions, 8);
+    }
+
+    #[test]
+    fn theme_unknown_mode_is_still_loaded_but_named() {
+        // The mode is a string; an unknown value is not a parse error (the
+        // operator may be on a newer spec), but the discovery route treats
+        // anything it does not recognise as generic — no gravity.
+        let config = load_from(
+            "theme-unknown",
+            r#"
+[theme]
+mode = "quantum"
+"#,
+        )
+        .expect("loads");
+        assert_eq!(config.theme.mode, "quantum");
     }
 }

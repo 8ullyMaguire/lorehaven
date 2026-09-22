@@ -583,3 +583,20 @@ async fn dashboard_unknown_widget_ids_do_not_error() {
     assert_eq!(slots[0]["widget"], "totally-unknown");
     harness.cleanup().await;
 }
+
+#[tokio::test]
+async fn meta_includes_theme_mode_and_influence_sources() {
+    let harness = Harness::new("meta-theme").await;
+    let mut client = harness.client();
+    let (status, body) = client.get("/api/v1/meta").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // Theme section is present with defaults: thematic mode, opt-out allowed,
+    // and operator_topics as the default influence source.
+    let theme = body.get("theme").expect("theme section present");
+    assert_eq!(theme["mode"], "thematic", "default mode is thematic");
+    assert_eq!(theme["allow_user_opt_out"], true);
+    let sources = theme["influence_sources"].as_array().expect("sources array");
+    assert!(!sources.is_empty());
+    assert_eq!(sources[0], "operator_topics");
+    harness.cleanup().await;
+}
