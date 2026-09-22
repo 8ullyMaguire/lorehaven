@@ -162,10 +162,45 @@ pub struct Config {
     pub revisions: RevisionsConfig,
     /// Job queue settings (spec §38).
     pub jobs: JobsConfig,
+    /// Media resilience settings (spec §32.7).
+    pub media_resilience: MediaResilienceConfig,
     /// Library update-check settings (spec §38).
     pub library: LibraryConfig,
     /// Where the configuration file was read from, if any.
     pub config_path: Option<PathBuf>,
+}
+
+/// Work permission settings (spec §40).
+#[derive(Debug, Clone)]
+pub struct MediaResilienceConfig {
+    /// Minimum healthy links a media reference should have before alerting.
+    pub min_healthy_links: i64,
+    /// Curator credits awarded for adding a mirror link.
+    pub mirror_add_credits: i64,
+    /// Curator credits awarded for archiving a link.
+    pub archive_add_credits: i64,
+    /// Curator credits awarded for verifying a link.
+    pub verify_credits: i64,
+    /// Max curator credits per account per day.
+    pub daily_credits_cap: i64,
+    /// Number of consecutive failures before marking a link as dead.
+    pub dead_threshold_failures: i64,
+    /// How often to check links (in seconds).
+    pub check_interval_secs: u64,
+}
+
+impl Default for MediaResilienceConfig {
+    fn default() -> Self {
+        Self {
+            min_healthy_links: 2,
+            mirror_add_credits: 15,
+            archive_add_credits: 10,
+            verify_credits: 5,
+            daily_credits_cap: 500,
+            dead_threshold_failures: 5,
+            check_interval_secs: 3600,
+        }
+    }
 }
 
 /// Work permission settings (spec §40).
@@ -1522,6 +1557,8 @@ impl Config {
                     .and_then(|j| j.terminal_retention_days)
                     .unwrap_or_else(|| JobsConfig::default().terminal_retention_days),
             },
+            // --- media_resilience (spec §32.7) -----------------------------------
+            media_resilience: MediaResilienceConfig::default(),
             // --- library (spec §38) --------------------------------------------
             library: LibraryConfig {
                 update_check_retention_days: file
@@ -1613,6 +1650,7 @@ impl Config {
             meta_ranker: MetaRankerConfig::default(),
             revisions: RevisionsConfig::default(),
             jobs: JobsConfig::default(),
+            media_resilience: MediaResilienceConfig::default(),
             library: LibraryConfig::default(),
             config_path: None,
         }

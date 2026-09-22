@@ -2996,6 +2996,45 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Authenticated,
     },
     // ------------------------------------------------------------------
+    // Media resilience — public reads, session writes, curator mirrors
+    // (spec §32.7)
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "media_resilience.rs",
+        handler: "get_media_reference",
+        method: "GET",
+        path: "/media/references/{reference_id}",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "media_resilience.rs",
+        handler: "get_work_media_references",
+        method: "GET",
+        path: "/works/{work_id}/media",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "media_resilience.rs",
+        handler: "add_media_reference",
+        method: "POST",
+        path: "/works/{work_id}/media",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "media_resilience.rs",
+        handler: "report_broken_link",
+        method: "POST",
+        path: "/media/references/{reference_id}/report-broken",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "media_resilience.rs",
+        handler: "add_mirror_link",
+        method: "POST",
+        path: "/media/references/{reference_id}/mirrors",
+        audience: Audience::Pseudonymous,
+    },
+    // ------------------------------------------------------------------
     // Discovery — additional routes not in main table (spec §16)
     // ------------------------------------------------------------------
     RouteEntry {
