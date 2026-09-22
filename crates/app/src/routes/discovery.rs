@@ -75,6 +75,8 @@ async fn get_discovery(
                     work_id: id,
                     score: (limit - idx as i64),
                     reason: "tags".into(),
+                    taste_signal: 0.0,
+                    diversity_class: 0.5,
                 })
                 .collect(),
         );
@@ -92,6 +94,8 @@ async fn get_discovery(
                 work_id: id,
                 score: (limit - idx as i64),
                 reason: "popular".into(),
+                taste_signal: 0.0,
+                diversity_class: 0.5,
             })
             .collect(),
     );
@@ -170,6 +174,15 @@ async fn get_discovery(
         }
         _ => ranked,
     };
+
+    // Apply taste gravity (spec §9.7.3): weight by taste alignment.
+    let taste = &state.config().taste;
+    let ranked = lorehaven_domain::discovery::apply_taste_gravity(
+        ranked,
+        taste.gravity_strength,
+        &taste.signal_weight_mode,
+        taste.admin_weight,
+    );
 
     let mut items: Vec<serde_json::Value> = ranked
         .into_iter()
