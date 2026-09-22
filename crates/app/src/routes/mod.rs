@@ -33,6 +33,7 @@ pub mod monetization;
 pub mod narration;
 pub mod notifications;
 pub mod pseuds;
+pub mod quiz;
 pub mod rating_integrity;
 pub mod reading;
 pub mod recommendation_transparency;

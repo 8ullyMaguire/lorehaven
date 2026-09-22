@@ -111,6 +111,28 @@ async fn store_taste_vector_postgres(
 // Public API
 // ---------------------------------------------------------------------------
 
+/// Store a pre-computed taste vector and centroid distance for an account
+/// (used by the onboarding quiz path, spec §0.4.2).
+pub async fn store_taste_vector_public(
+    db: &Database,
+    account_id: &str,
+    vector: &[f64],
+    distance: f64,
+    computed_at: &str,
+) -> Result<(), sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().ok_or(pool_err())?;
+            store_taste_vector_sqlite(pool, account_id, vector, distance, computed_at).await?
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().ok_or(pool_err())?;
+            store_taste_vector_postgres(pool, account_id, vector, distance, computed_at).await?
+        }
+    }
+    Ok(())
+}
+
 /// Compute and store a user's taste vector from their rated works.
 /// Returns (vector, centroid_distance).
 pub async fn compute_and_store_taste_vector(
