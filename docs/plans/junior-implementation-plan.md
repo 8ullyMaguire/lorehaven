@@ -4079,3 +4079,64 @@ Follow the slice plan in `docs/plans/browse-and-demand-weight.md`. Tests per sli
 ### 43.13 What deliberately ships last
 
 The default `weighting.mode` flips from `flat` only after the guards, the absence tests, and the exposure report are green. Until then `flat` is the honest state, and every paragraph of §16.16 that says "never" is a test before it is a claim.
+
+## 15j. Milestone 44 (repo) — Media Resilience & Availability Guarantee (spec §32.7)
+
+Phase 1 of the §32.7 roadmap. Ships the media reference graph, availability links,
+curator rewards, and the public read API. Later phases (reverse search UI, local
+mirroring, IPFS, import rescue) build on this foundation.
+
+### 44.1 Why this is next
+
+Link rot silently destroys the reading experience over years: fanfic references
+external character art, playlists, moodboards that live on platforms with brutal
+churn rates. §32.7 specifies multi-link redundancy with curated mirrors so a
+reader is always served a working link.
+
+### 44.2 Ledger rows (spec §32.7 acceptance)
+
+| Requirement | Test |
+| --- | --- |
+| §32.7.1 media reference graph exists | media_resilience_config_defaults, media_resilience_insert_and_fetch |
+| §32.7.4 link health monitoring | media_resilience_availability_link, media_resilience_links_needing_check |
+| §32.7.5 curator rewards | media_resilience_curator_rewards |
+| §32.7.7 public read API | media_resilience_get_route, media_resilience_missing_returns_404 |
+
+### 44.3 Migration 0060 — media resilience (both dialects)
+
+`media_references`, `availability_links`, `work_media_references`,
+`curator_standing_bounties`, `curator_rewards`, `link_health_checks` tables with
+matching column/index parity across SQLite and Postgres (guarded by the
+`the_two_dialects_declare_the_same_columns_and_indexes` test).
+
+### 44.4 Domain (`crates/domain/src/media_resilience.rs`)
+
+`MediaKind`, `LinkProvider`, `LinkStatus`, `MediaContext`, `CuratorAction`
+vocabularies with round-trip string conversions and `ALL` lists.
+
+### 44.5 Config additions (`crates/app/src/config.rs`)
+
+`MediaResilienceConfig`: min_healthy_links, mirror_add_credits, archive_add_credits,
+verify_credits, daily_credits_cap, dead_threshold_failures, check_interval_secs.
+
+### 44.6 Routes (`crates/app/src/routes/media_resilience.rs`)
+
+- `GET /media/references/{reference_id}` — public reference + best link
+- `POST /media/references/{reference_id}/report-broken` — reader report
+- `GET /works/{work_id}/media` — list work's media references
+- `POST /works/{work_id}/media` — author adds a reference
+- `POST /media/references/{reference_id}/mirrors` — curator adds a mirror
+
+### 44.7 Acceptance tests (`crates/app/tests/media_resilience.rs`)
+
+7 tests: config defaults, reference CRUD, availability link lifecycle
+(insert → pending_verification → healthy → count), curator rewards, public
+GET route, 404 on missing reference, links-needing-check queue.
+
+### 44.8 What deliberately ships later (per §32.7 phasing)
+
+- Phase 2 (Curation): curator role management, standing bounty matching
+- Phase 3 (Author tools): media health dashboard, insertion UI
+- Phase 4 (Advanced mirroring): local mirror, IPFS, federation
+- Phase 5 (Discovery): reverse image search, MediaReferenceCollaborative strategy
+- Phase 6 (Import rescue): bulk media rescue, aggressive-mirror sources
