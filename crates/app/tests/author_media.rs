@@ -1,0 +1,132 @@
+//! Author media tools (spec §32.7.8): preferences & targeted bounties.
+
+use lorehaven_app::config::Config;
+use lorehaven_app::server::{self, set_trust_proxy};
+use lorehaven_app::state::AppState;
+use lorehaven_db::media_resilience;
+use std::path::PathBuf;
+
+fn scratch_dir(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "lorehaven-am-{tag}-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("create scratch dir");
+    dir
+}
+
+fn config_for(dir: &std::path::Path) -> Config {
+    let mut config = Config::development_defaults();
+    config.storage.root = dir.to_path_buf();
+    config
+}
+
+#[tokio::test]
+async fn author_preferences_crud() {
+    let dir = scratch_dir("prefs");
+    let tdb = test_support::TestDb::connect_with_dir("am-prefs", &dir).await;
+    let db = tdb.db();
+
+    let account_id = "author-001";
+
+    // Upsert preferences
+    media_resilience::upsert_author_preferences(
+        db, account_id,
+        true, true, "immediate", true, 5,
+    )
+    .await
+    .expect("upsert prefs");
+
+    let prefs = media_resilience::get_author_preferences(db, account_id)
+        .await
+        .expect("get prefs");
+    assert_eq!(prefs.auto_submit_to_archive, true);
+    assert_eq!(prefs.prefer_curator_verified, true);
+    assert_eq!(prefs.broken_link_notifications, "immediate");
+    assert_eq!(prefs.allow_curator_edits, true);
+    assert_eq!(prefs.minimum_healthy_links, 5);
+
+    // Update
+    media_resilience::upsert_author_preferences(
+        db, account_id,
+        false, false, "weekly", false, 2,
+    )
+    .await
+    .expect("update prefs");
+
+    let prefs = media_resilience::get_author_preferences(db, account_id)
+        .await
+        .expect("get prefs");
+    assert_eq!(prefs.auto_submit_to_archive, false);
+    assert_eq!(prefs.minimum_healthy_links, 2);
+}
+
+#[tokio::test]
+async fn targeted_bounty_post_and_claim() {
+    let dir = scratch_dir("tb");
+    let tdb = test_support::TestDb::connect_with_dir("am-tb", &dir).await;
+    let db = tdb.db();
+
+    let bounty_id = "tb-001";
+    let work_id = "work-001";
+    let author_id = "author-001";
+
+    // Post a targeted bounty
+    media_resilience::post_targeted_bounty(
+        db, bounty_id, work_id, None, None,
+        author_id, 50, Some("Find a working mirror for the chapter 7 moodboard"),
+    )
+    .await
+    .expect("post bounty");
+
+    let bounties = media_resilience::list_targeted_bounties_for_work(db, work_id)
+        .await
+        .expect("list bounties");
+    assert_eq!(bounties.len(), 1);
+    assert_eq!(bounties[0].reward, 50);
+    assert_eq!(bounties[0].status, "open");
+
+    // Claim it
+    let claimed = media_resilience::claim_targeted_bounty(db, bounty_id, "curator-y")
+        .await
+        .expect("claim bounty");
+    assert!(claimed);
+
+    // Cannot claim again
+    let claimed_again = media_resilience::claim_targeted_bounty(db, bounty_id, "curator-z")
+        .await
+        .expect("claim bounty");
+    assert!(!claimed_again);
+
+    let bounties = media_resilience::list_targeted_bounties_for_work(db, work_id)
+        .await
+        .expect("list bounties");
+    assert_eq!(bounties[0].status, "claimed");
+}
+
+#[tokio::test]
+async fn targeted_bounty_with_chapter() {
+    let dir = scratch_dir("tb-ch");
+    let tdb = test_support::TestDb::connect_with_dir("am-tb-ch", &dir).await;
+    let db = tdb.db();
+
+    let bounty_id = "tb-002";
+    let work_id = "work-002";
+    let chapter_id = "ch-007";
+
+    media_resilience::post_targeted_bounty(
+        db, bounty_id, work_id, Some(chapter_id), None,
+        "author-002", 75, Some("Mirror needed for chapter 7"),
+    )
+    .await
+    .expect("post bounty with chapter");
+
+    let bounties = media_resilience::list_targeted_bounties_for_work(db, work_id)
+        .await
+        .expect("list bounties");
+    assert_eq!(bounties.len(), 1);
+    assert_eq!(bounties[0].chapter_id, Some(chapter_id.to_string()));
+    assert_eq!(bounties[0].reward, 75);
+}

@@ -356,6 +356,11 @@ pub fn build_router(state: AppState) -> Router {
             &state,
         ))
         .merge(classified(
+            routes::author_media::router(),
+            RouteClass::Default,
+            &state,
+        ))
+        .merge(classified(
             routes::vanguard::router(),
             RouteClass::Default,
             &state,

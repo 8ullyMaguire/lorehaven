@@ -788,3 +788,309 @@ pub async fn find_matching_standing_bounties(
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Phase 3 (§32.7.8): Author media preferences
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct AuthorPreferences {
+    pub account_id: String,
+    pub auto_submit_to_archive: bool,
+    pub prefer_curator_verified: bool,
+    pub broken_link_notifications: String,
+    pub allow_curator_edits: bool,
+    pub minimum_healthy_links: i64,
+}
+
+/// Upsert author media preferences.
+pub async fn upsert_author_preferences(
+    db: &Database,
+    account_id: &str,
+    auto_submit: bool,
+    prefer_verified: bool,
+    notifications: &str,
+    allow_edits: bool,
+    min_healthy: i64,
+) -> Result<(), sqlx::Error> {
+    let now = crate::identity::now_rfc3339();
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            sqlx::query(
+                "INSERT INTO author_media_preferences
+                    (account_id, auto_submit_to_archive, prefer_curator_verified,
+                     broken_link_notifications, allow_curator_edits, minimum_healthy_links,
+                     created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(account_id) DO UPDATE SET
+                    auto_submit_to_archive = ?,
+                    prefer_curator_verified = ?,
+                    broken_link_notifications = ?,
+                    allow_curator_edits = ?,
+                    minimum_healthy_links = ?,
+                    updated_at = ?",
+            )
+            .bind(account_id)
+            .bind(auto_submit as i64)
+            .bind(prefer_verified as i64)
+            .bind(notifications)
+            .bind(allow_edits as i64)
+            .bind(min_healthy)
+            .bind(&now)
+            .bind(&now)
+            .bind(auto_submit as i64)
+            .bind(prefer_verified as i64)
+            .bind(notifications)
+            .bind(allow_edits as i64)
+            .bind(min_healthy)
+            .bind(&now)
+            .execute(pool)
+            .await?;
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            sqlx::query(
+                "INSERT INTO author_media_preferences
+                    (account_id, auto_submit_to_archive, prefer_curator_verified,
+                     broken_link_notifications, allow_curator_edits, minimum_healthy_links,
+                     created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+                 ON CONFLICT(account_id) DO UPDATE SET
+                    auto_submit_to_archive = $2,
+                    prefer_curator_verified = $3,
+                    broken_link_notifications = $4,
+                    allow_curator_edits = $5,
+                    minimum_healthy_links = $6,
+                    updated_at = $7",
+            )
+            .bind(account_id)
+            .bind(auto_submit)
+            .bind(prefer_verified)
+            .bind(notifications)
+            .bind(allow_edits)
+            .bind(min_healthy)
+            .bind(&now)
+            .execute(pool)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Get author media preferences.
+pub async fn get_author_preferences(
+    db: &Database,
+    account_id: &str,
+) -> Result<AuthorPreferences, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            let row = sqlx::query(
+                "SELECT account_id, auto_submit_to_archive, prefer_curator_verified,
+                        broken_link_notifications, allow_curator_edits, minimum_healthy_links
+                 FROM author_media_preferences WHERE account_id = ?",
+            )
+            .bind(account_id)
+            .fetch_one(pool)
+            .await?;
+            Ok(AuthorPreferences {
+                account_id: row.get::<String, _>("account_id"),
+                auto_submit_to_archive: row.get::<i64, _>("auto_submit_to_archive") != 0,
+                prefer_curator_verified: row.get::<i64, _>("prefer_curator_verified") != 0,
+                broken_link_notifications: row.get::<String, _>("broken_link_notifications"),
+                allow_curator_edits: row.get::<i64, _>("allow_curator_edits") != 0,
+                minimum_healthy_links: row.get::<i64, _>("minimum_healthy_links"),
+            })
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            let row = sqlx::query(
+                "SELECT account_id, auto_submit_to_archive, prefer_curator_verified,
+                        broken_link_notifications, allow_curator_edits, minimum_healthy_links
+                 FROM author_media_preferences WHERE account_id = $1",
+            )
+            .bind(account_id)
+            .fetch_one(pool)
+            .await?;
+            Ok(AuthorPreferences {
+                account_id: row.get::<String, _>("account_id"),
+                auto_submit_to_archive: row.get::<bool, _>("auto_submit_to_archive"),
+                prefer_curator_verified: row.get::<bool, _>("prefer_curator_verified"),
+                broken_link_notifications: row.get::<String, _>("broken_link_notifications"),
+                allow_curator_edits: row.get::<bool, _>("allow_curator_edits"),
+                minimum_healthy_links: row.get::<i64, _>("minimum_healthy_links"),
+            })
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 (§32.7.8): Targeted bounties (author-funded)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct TargetedBounty {
+    pub id: String,
+    pub work_id: String,
+    pub chapter_id: Option<String>,
+    pub media_reference_id: Option<String>,
+    pub account_id: String,
+    pub reward: i64,
+    pub status: String,
+    pub description: Option<String>,
+    pub claimed_by: Option<String>,
+    pub created_at: String,
+}
+
+/// Post a targeted bounty for a specific work/media reference.
+pub async fn post_targeted_bounty(
+    db: &Database,
+    id: &str,
+    work_id: &str,
+    chapter_id: Option<&str>,
+    media_reference_id: Option<&str>,
+    account_id: &str,
+    reward: i64,
+    description: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    let now = crate::identity::now_rfc3339();
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            sqlx::query(
+                "INSERT INTO targeted_bounties
+                    (id, work_id, chapter_id, media_reference_id, account_id,
+                     reward, status, description, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)",
+            )
+            .bind(id)
+            .bind(work_id)
+            .bind(chapter_id)
+            .bind(media_reference_id)
+            .bind(account_id)
+            .bind(reward)
+            .bind(description)
+            .bind(&now)
+            .bind(&now)
+            .execute(pool)
+            .await?;
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            sqlx::query(
+                "INSERT INTO targeted_bounties
+                    (id, work_id, chapter_id, media_reference_id, account_id,
+                     reward, status, description, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, 'open', $7, $8, $8)",
+            )
+            .bind(id)
+            .bind(work_id)
+            .bind(chapter_id)
+            .bind(media_reference_id)
+            .bind(account_id)
+            .bind(reward)
+            .bind(description)
+            .bind(&now)
+            .execute(pool)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Claim a targeted bounty.
+pub async fn claim_targeted_bounty(
+    db: &Database,
+    bounty_id: &str,
+    claimant: &str,
+) -> Result<bool, sqlx::Error> {
+    let now = crate::identity::now_rfc3339();
+    let rows_affected = match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            let result = sqlx::query(
+                "UPDATE targeted_bounties
+                 SET status = 'claimed', claimed_by = ?, claimed_at = ?, updated_at = ?
+                 WHERE id = ? AND status = 'open'",
+            )
+            .bind(claimant)
+            .bind(&now)
+            .bind(&now)
+            .bind(bounty_id)
+            .execute(pool)
+            .await?;
+            result.rows_affected()
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            let result = sqlx::query(
+                "UPDATE targeted_bounties
+                 SET status = 'claimed', claimed_by = $1, claimed_at = $2, updated_at = $2
+                 WHERE id = $3 AND status = 'open'",
+            )
+            .bind(claimant)
+            .bind(&now)
+            .bind(bounty_id)
+            .execute(pool)
+            .await?;
+            result.rows_affected()
+        }
+    };
+    Ok(rows_affected > 0)
+}
+
+/// List targeted bounties for a work.
+pub async fn list_targeted_bounties_for_work(
+    db: &Database,
+    work_id: &str,
+) -> Result<Vec<TargetedBounty>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            let rows = sqlx::query(
+                "SELECT id, work_id, chapter_id, media_reference_id, account_id,
+                        reward, status, description, claimed_by, created_at
+                 FROM targeted_bounties WHERE work_id = ? ORDER BY created_at DESC",
+            )
+            .bind(work_id)
+            .fetch_all(pool)
+            .await?;
+            Ok(rows.iter().map(|r| TargetedBounty {
+                id: r.get::<String, _>("id"),
+                work_id: r.get::<String, _>("work_id"),
+                chapter_id: r.get::<Option<String>, _>("chapter_id"),
+                media_reference_id: r.get::<Option<String>, _>("media_reference_id"),
+                account_id: r.get::<String, _>("account_id"),
+                reward: r.get::<i64, _>("reward"),
+                status: r.get::<String, _>("status"),
+                description: r.get::<Option<String>, _>("description"),
+                claimed_by: r.get::<Option<String>, _>("claimed_by"),
+                created_at: r.get::<String, _>("created_at"),
+            }).collect())
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            let rows = sqlx::query(
+                "SELECT id, work_id, chapter_id, media_reference_id, account_id,
+                        reward, status, description, claimed_by, created_at
+                 FROM targeted_bounties WHERE work_id = $1 ORDER BY created_at DESC",
+            )
+            .bind(work_id)
+            .fetch_all(pool)
+            .await?;
+            Ok(rows.iter().map(|r| TargetedBounty {
+                id: r.get::<String, _>("id"),
+                work_id: r.get::<String, _>("work_id"),
+                chapter_id: r.get::<Option<String>, _>("chapter_id"),
+                media_reference_id: r.get::<Option<String>, _>("media_reference_id"),
+                account_id: r.get::<String, _>("account_id"),
+                reward: r.get::<i64, _>("reward"),
+                status: r.get::<String, _>("status"),
+                description: r.get::<Option<String>, _>("description"),
+                claimed_by: r.get::<Option<String>, _>("claimed_by"),
+                created_at: r.get::<String, _>("created_at"),
+            }).collect())
+        }
+    }
+}
