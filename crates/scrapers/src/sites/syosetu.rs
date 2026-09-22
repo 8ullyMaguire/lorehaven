@@ -644,6 +644,7 @@ impl Syosetu {
         // relative path on our domain.
         let base = Url::parse(&work.source_url).ok();
         let content_html = sanitize_fragment(&body, base.as_ref());
+        let image_urls = crate::sanitize::extract_image_urls(&body, base.as_ref());
 
         // The key is the work's own key for this ordinal, not a number invented
         // here: a one-shot's chapter is keyed by its ncode, and returning "1"
@@ -661,6 +662,7 @@ impl Syosetu {
             source_chapter_key,
             title,
             content_html,
+            image_urls,
         })
     }
 

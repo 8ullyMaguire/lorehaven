@@ -282,6 +282,7 @@ impl SourceAdapter for Pawchive {
                         source_chapter_key: post.id.clone(),
                         title: post.title.clone(),
                         content_html: text,
+                        image_urls: Vec::new(),
                     });
                 }
             }

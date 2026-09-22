@@ -405,6 +405,7 @@ impl FanFiction {
             source_chapter_key: ordinal.to_string(),
             title: title.to_owned(),
             content_html: sanitize_fragment(&raw, Some(&base)),
+            image_urls: crate::sanitize::extract_image_urls(&raw, Some(&base)),
         })
     }
 }
@@ -581,6 +582,7 @@ impl SourceAdapter for FanFiction {
             source_chapter_key: ordinal.to_string(),
             title,
             content_html: sanitize_fragment(&raw, base.as_ref()),
+            image_urls: crate::sanitize::extract_image_urls(&raw, base.as_ref()),
         }])
     }
 }

@@ -330,6 +330,7 @@ impl ScribbleHub {
             source_chapter_key: chapter_id.to_owned(),
             title: entry.map(|entry| entry.title.clone()).unwrap_or_default(),
             content_html: sanitize_fragment(&body, Url::parse(&work.source_url).ok().as_ref()),
+            image_urls: crate::sanitize::extract_image_urls(&body, Url::parse(&work.source_url).ok().as_ref()),
         })
     }
 

@@ -255,6 +255,12 @@ pub struct SourceChapter {
     /// content: a source's navigation chrome, script tags and tracking images
     /// are noise that no downstream sanitiser can distinguish from prose.
     pub content_html: String,
+    /// Image URLs found in the chapter body, resolved against the page URL.
+    ///
+    /// The sanitiser strips `<img>` tags (they are not on the allow-list), so
+    /// these are collected beforehand for the media-rescue pipeline (spec §32.7.9).
+    /// Empty when the chapter has no images.
+    pub image_urls: Vec<String>,
 }
 
 /// What a preview learned about a work.

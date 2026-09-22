@@ -319,6 +319,7 @@ impl RoyalRoad {
         // dead relative path on our domain.
         let base = Url::parse(&work.source_url).ok();
         let content_html = sanitize_fragment(&body, base.as_ref());
+        let image_urls = crate::sanitize::extract_image_urls(&body, base.as_ref());
 
         // The ordinal, in order of decreasing trust: what the caller asked for,
         // then the work's own list matched by title, then the "17." prefix the
@@ -371,6 +372,7 @@ impl RoyalRoad {
             source_chapter_key,
             title,
             content_html,
+            image_urls,
         })
     }
 }

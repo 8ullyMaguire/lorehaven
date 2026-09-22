@@ -377,6 +377,7 @@ impl Chyoa {
             .ok_or_else(|| SourceError::Parse("chyoa chapter page has no prose container".to_owned()))?;
 
         let content_html = body.inner_html();
+        let image_urls = crate::sanitize::extract_image_urls(&content_html, None);
         let title = text_of(&document, "h1.rd-story-reading-title").unwrap_or_default();
 
         Ok(SourceChapter {
@@ -384,6 +385,7 @@ impl Chyoa {
             source_chapter_key: Self::chapter_url(&work.source_work_key),
             title,
             content_html,
+            image_urls,
         })
     }
 }

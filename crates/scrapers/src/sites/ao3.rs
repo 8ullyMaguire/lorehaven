@@ -317,15 +317,12 @@ impl ArchiveSoftware {
             // tell a site's furniture from its prose.
             let raw_body = html_without_landmarks(body);
 
-            let content_html = sanitize_fragment(
-                &raw_body,
-                Some(
-                    &self
-                        .work_url(&work.source_work_key)
-                        .parse::<Url>()
-                        .expect("our own url"),
-                ),
-            );
+            let work_url = self
+                .work_url(&work.source_work_key)
+                .parse::<Url>()
+                .expect("our own url");
+            let content_html = sanitize_fragment(&raw_body, Some(&work_url));
+            let image_urls = crate::sanitize::extract_image_urls(&raw_body, Some(&work_url));
             if crate::sanitize::is_blank(&content_html) {
                 return Err(SourceError::Parse(format!(
                     "chapter {ordinal} of work {} sanitised to nothing",
@@ -338,6 +335,7 @@ impl ArchiveSoftware {
                 source_chapter_key,
                 title,
                 content_html,
+                image_urls,
             });
         }
 
