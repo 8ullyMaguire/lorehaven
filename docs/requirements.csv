@@ -130,7 +130,7 @@ M42-02,exports,EPUB builder appends CTA per placement and reports cta_chapters i
 M42-03,exports,cta_marks table with mark/retract and quorum-based exemption,M42,implemented-locally-tested,crates/db/src/exports.rs,Spec §42.2. Migration 0048; both dialects.
 M42-04,exports,TL3+ curator routes to mark works has_own_cta,M42,implemented-locally-tested,crates/db/src/exports.rs,Spec §42.2. POST/GET /works/{id}/cta-mark.
 M42-05,exports,Export job suppresses CTA for exempt works,M42,implemented-locally-tested,crates/db/src/exports.rs,"Spec §42.2. Evaluated at export time, never cached."
-M42-06,exports,Milestone 42 integration tests,M42,planned,--,"Spec §42.4. milestone_42.rs: modes, quorum, retraction, TL2 refused, sanitize."
+M42-06,exports,Milestone 42 integration tests,M42,implemented-locally-tested,crates/app/tests/milestone_42.rs,"Spec §42.4. milestone_42.rs: modes, quorum, retraction, TL2 refused, sanitize."
 M43-01,browse,Shared sort vocabulary with for-you default on every browse surface,M43,implemented-locally-tested,crates/app/tests/milestone_m43.rs,Spec §43.2. sort= for-you|new|updated|top|trending|best-match|az.
 M43-02,browse,For-you ordering is a permutation never a filter,M43,implemented-locally-tested,crates/app/tests/milestone_m43.rs,Spec §43.3. Identical reachable sets across sorts; pagination reaches every eligible item.
 M43-03,browse,Per-pseud sticky sort preference with an anonymous neutral default,M43,implemented-locally-tested,crates/app/tests/milestone_m43.rs,Spec §43.4. Neutral on undeclared/private-topic instances.
