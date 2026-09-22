@@ -3184,6 +3184,51 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Public,
     },
     // ------------------------------------------------------------------
+    // Media health dashboard (spec §32.7.11)
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "media_health.rs",
+        handler: "media_health_overview",
+        method: "GET",
+        path: "/admin/media-health/overview",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "media_health.rs",
+        handler: "link_rot_report",
+        method: "GET",
+        path: "/admin/media-health/link-rot",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "media_health.rs",
+        handler: "curator_leaderboard",
+        method: "GET",
+        path: "/admin/media-health/curator-leaderboard",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "media_health.rs",
+        handler: "bounty_status",
+        method: "GET",
+        path: "/admin/media-health/bounty-status",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "media_health.rs",
+        handler: "storage_status",
+        method: "GET",
+        path: "/admin/media-health/storage",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "media_health.rs",
+        handler: "provider_reliability",
+        method: "GET",
+        path: "/admin/media-health/providers",
+        audience: Audience::Authenticated,
+    },
+    // ------------------------------------------------------------------
     // Discovery: reverse search & curator bounty queue (spec §32.7.3, §32.7.5)
     // ------------------------------------------------------------------
     RouteEntry {

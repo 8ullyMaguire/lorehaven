@@ -31,6 +31,7 @@ pub mod author_media;
 pub mod curator;
 pub mod mirror_admin;
 pub mod media_resilience;
+pub mod media_health;
 pub mod meta;
 pub mod moderation;
 pub mod monetization;
