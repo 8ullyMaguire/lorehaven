@@ -1126,6 +1126,44 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Public,
     },
     // ------------------------------------------------------------------
+    // Quiz — onboarding taste quiz (spec §0.4.2)
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "quiz.rs",
+        handler: "get_quiz_works",
+        method: "GET",
+        path: "/quiz/works",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "quiz.rs",
+        handler: "post_quiz_answers",
+        method: "POST",
+        path: "/quiz/answers",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "quiz.rs",
+        handler: "get_my_quiz_answers",
+        method: "GET",
+        path: "/quiz/answers",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "quiz.rs",
+        handler: "skip_quiz",
+        method: "POST",
+        path: "/quiz/skip",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "quiz.rs",
+        handler: "admin_list_quiz_works",
+        method: "GET",
+        path: "/operator/quiz-works",
+        audience: Audience::Authenticated,
+    },
+    // ------------------------------------------------------------------
     // Discovery — nested sub-routers (recipe_routes, dashboard_routes)
     // ------------------------------------------------------------------
     RouteEntry {
@@ -2904,6 +2942,120 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         method: "POST",
         path: "/imports/batch",
         audience: Audience::Pseudonymous,
+    },
+    // ------------------------------------------------------------------
+    // Vanguard — session-scoped admin + role-gated writes (spec §16.18)
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "vanguard.rs",
+        handler: "get_my_vanguard_status",
+        method: "GET",
+        path: "/vanguard/status",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "vanguard.rs",
+        handler: "get_pins_for_work",
+        method: "GET",
+        path: "/vanguard/pins/{work_id}",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "vanguard.rs",
+        handler: "pin_work",
+        method: "POST",
+        path: "/vanguard/pins/{work_id}",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "vanguard.rs",
+        handler: "unpin_work",
+        method: "DELETE",
+        path: "/vanguard/pins/{work_id}",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "vanguard.rs",
+        handler: "list_vanguards",
+        method: "GET",
+        path: "/vanguards",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "vanguard.rs",
+        handler: "grant_vanguard",
+        method: "POST",
+        path: "/vanguards",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "vanguard.rs",
+        handler: "revoke_vanguard",
+        method: "DELETE",
+        path: "/vanguards/{account_id}",
+        audience: Audience::Authenticated,
+    },
+    // ------------------------------------------------------------------
+    // Discovery — additional routes not in main table (spec §16)
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "get_my_taste_vector",
+        method: "GET",
+        path: "/discovery/taste-profile/me",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "get_admin_taste_profile",
+        method: "GET",
+        path: "/operator/taste-profile",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "recompute_all_taste_profiles",
+        method: "POST",
+        path: "/operator/taste-profile/recompute-all",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "get_my_streak",
+        method: "GET",
+        path: "/me/streak",
+        audience: Audience::Authenticated,
+    },
+    // ------------------------------------------------------------------
+    // Monetization — additional routes not in main table (spec §20)
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "monetization.rs",
+        handler: "set_work_ai_declaration",
+        method: "POST",
+        path: "/works/{work_id}/ai-declaration",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "monetization.rs",
+        handler: "get_transparency_dashboard",
+        method: "GET",
+        path: "/transparency/monetization",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "monetization.rs",
+        handler: "record_reading_session",
+        method: "POST",
+        path: "/works/{work_id}/reading-session",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "monetization.rs",
+        handler: "settle_period",
+        method: "POST",
+        path: "/admin/monetization/settle",
+        audience: Audience::Authenticated,
     },
 ];
 
