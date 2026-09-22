@@ -274,7 +274,9 @@ test('forum: a signed-in user subscribes to a topic and sees the unread count', 
   const poster = who('CovPoster21');
   await ensureAccount(page, poster);
   // Navigate to the General discussion category to create a topic.
-  await page.goto('/community/forums/11111111-1111-1111-1111-111111111111');
+  await page.goto('/community');
+  // Find and click the seeded General discussion category link.
+  await page.click('a:has-text("General discussion")');
   await page.fill('#topic-title', 'Subscription test topic');
   await page.click('button:text-is("Start topic")');
   await expect(page.getByText('Subscription test topic').first()).toBeVisible({ timeout: 15_000 });
