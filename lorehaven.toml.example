@@ -105,6 +105,39 @@ format = "pretty"
 # of readers that its author withdrew.
 # archive_fallback = false
 
+# Theme mode and gravity settings (spec §0.4.6).
+#
+# `mode` selects the instance's discovery posture:
+#   `generic`   — no topic gravity; public topics still earn gamification bonuses
+#                 but do not rank works higher for anyone who hasn't opted in.
+#   `thematic` — declared public topics provide a bounded upward nudge in
+#                 discovery (the default).
+#   `adaptive` — the instance's theme drifts toward what its long-term
+#                 contributors actually read and write, bounded by
+#                 `adaptive_max_drift_bp`.
+#
+# `allow_user_opt_out` decides whether the §16.5 dial can reach zero for theme
+# influence. When false, `theme_dial_floor_bp` is the dial's lower bound.
+#
+# `influence_sources` orders who shapes instance taste, strongest first:
+#   `operator_topics` — the declared public topics' tag vectors.
+#   `admin_taste`     — the §16.2 administrator taste profile.
+#   `long_term_users` — aggregate of accounts whose tenure ≥ `min_tenure_days`
+#                       (default 90) and contribution count ≥ `min_contributions`
+#                       (default 5). Uses §16.16.1 contribution events — not logins.
+#                       The §16.15 cohort floor (≥ 5 distinct accounts) applies.
+#
+# mode = "thematic"
+# allow_user_opt_out = true
+# theme_dial_floor_bp = 1000   # 10% floor when opt-out is locked
+# adaptive_max_drift_bp = 0    # no drift in thematic mode
+#
+# influence_sources = [
+#   { kind = "operator_topics" },
+#   { kind = "admin_taste" },
+#   { kind = "long_term_users", min_tenure_days = 90, min_contributions = 5 },
+# ]
+
 [tts]
 # Which engine narrates a work when an author asks for a machine recording.
 #

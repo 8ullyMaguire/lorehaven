@@ -10,6 +10,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use lorehaven_db;
 use lorehaven_domain::AppError;
+use lorehaven_domain::ids::WorkId;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -128,6 +129,30 @@ async fn get_discovery(
         let mut r: Vec<lorehaven_domain::discovery::Candidate> = blended.clone();
         r.sort_by_key(|c| -c.score);
         r
+    };
+
+    // Apply theme gravity (spec §0.4.6): bounded topic nudge in thematic/adaptive modes.
+    let theme = &state.config().theme;
+    let ranked = match theme.mode.as_str() {
+        "generic" => ranked,
+        "thematic" | "adaptive" => {
+            // Compute topic nudge: works matching any public topic get a uniform
+            // gravity bonus. Adaptive mode would use a per-work drift vector;
+            // for now, both modes use the topic-match nudge as the anchor.
+            let topics: Vec<String> = state.config().site.topics.iter()
+                .filter(|t| t.public)
+                .map(|t| t.name.clone())
+                .collect();
+            if topics.is_empty() {
+                ranked
+            } else {
+                // Placeholder: per-work tag lookup will replace this with
+                // topic-matched gravity. For now, no nudge is applied.
+                let work_nudge = |_id: &WorkId| -> i64 { 0 };
+                lorehaven_domain::discovery::apply_theme_gravity(ranked, &work_nudge)
+            }
+        }
+        _ => ranked,
     };
 
     let mut items: Vec<serde_json::Value> = ranked

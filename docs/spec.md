@@ -97,6 +97,32 @@ sizes, cap, median, fee range, weights — exactly as §20.10.7 specifies.
 The disclosure is the anti-corruption mechanism: public, always visible,
 and never optional when billing is enabled.
 
+## 0.4.6 Theme mode semantics
+
+An instance's **theme mode** decides how strongly topic gravity steers discovery:
+
+| Mode | Effect on discovery |
+|------|-------------------|
+| `generic` | No instance-wide topic gravity. Each reader's personal taste and §16's dials apply normally. Public topics still earn §0.4.1 gamification bonuses, but do not rank a work higher for anyone who has not opted into them. |
+| `thematic` | (Default.) The instance's declared public topics provide a bounded upward nudge in §43.2's candidate blend. A reader's §16.5 dial attenuates this nudge; when the dial reaches zero the nudge is neutralised entirely unless the operator has locked the dial (§0.4.6). |
+| `adaptive` | The instance's theme drifts toward what its long-term contributors actually read and write, bounded by `adaptive_max_drift_bp`. The operator's declared topics are the starting anchor; the nudge may never exceed the anchor's strength plus the drift bound. |
+
+The mode is configured under `[theme]`. The default is `thematic` — an instance that declares topics is assumed to want them to matter.
+
+**Dial lock.** When `allow_user_opt_out = false`, the §16.5 dial's lower bound becomes `theme_dial_floor` (default 10%) rather than zero. The reader may attenuate but never neutralise topic gravity. This is the operator's curation prerogative; the landing page states the instance's dial policy when it is locked.
+
+**Influence sources.** The `influence_sources` list orders who shapes instance taste, from strongest to weakest signal:
+
+| Kind | What it contributes |
+|------|-------------------|
+| `operator_topics` | The declared public topics' tag vectors (§0.4). |
+| `admin_taste` | The §16.2 administrator taste profile. |
+| `long_term_users` | A composite of accounts whose tenure ≥ `long_term_tenure_days` (default 90) and contribution count ≥ `long_term_min_contributions` (default 5). Uses §16.16.1 contribution events — not logins. The §16.15 cohort floor (≥ 5 distinct accounts) applies, so a small in-group cannot masquerade as the readership. |
+
+Adaptive mode requires `long_term_users` in `influence_sources`; startup validation refuses a configuration that drifts without a drift source. Each source is independent — an operator may run thematic mode with only `operator_topics`, or add `admin_taste` for a sharper profile.
+
+**Transparency.** `/api/v1/meta` surfaces the mode and influence sources (by kind only, not member identities). Adaptive mode additionally publishes a coarse histogram of topic-pull distribution: decile buckets of works by their topic-gravity score. This is enough to audit drift without enabling per-work gaming.
+
 ---
 
 # 1. Ground Rules for Implementation
@@ -2537,9 +2563,11 @@ sources = [
   { kind = "admin" },
   { kind = "cohort", members = ["pseud-a", "pseud-b", "pseud-c", "pseud-d", "pseud-e"] },
   { kind = "roles", roles = ["tl4+"], min_members = 5 },
+  { kind = "long_term_users", min_members = 5, min_tenure_days = 90, min_contributions = 5 },
 ]
 ```
 
+- **`long_term_users`** — a virtual source derived from accounts meeting all three gates: account age ≥ `min_tenure_days` (default 90), contribution count ≥ `min_contributions` (default 5, using §16.16.1 contribution events — imports, fulfilled bounties, accepted curation, not logins), and the source as a whole must satisfy the same ≥ 5 cohort floor. This prevents an operator's handful of alt accounts from steering discovery. The composite signal is the aggregate reading-writing taste vector of qualifying accounts, recomputed on the same cadence as the admin profile.
 - **Cohort floor.** A cohort or role source needs at least `min_members` (default 5) distinct
   accounts, validated at startup (§38.1). Below that the source is refused with a named reason: a
   small cohort *is* a person, and the operator's taste would be inferable from its public reading,
@@ -6631,6 +6659,11 @@ Environment variables (all prefixed `LOHAVEN_BOT_`):
 | `[imports]` | `solver_url` | `None` | CAPTCHA solver URL |
 | `[imports]` | `archive_fallback` | `false` | Fallback to archive.org |
 | `[imports]` | `honour_robots` | `true` | Respect robots.txt |
+| `[theme]` | `mode` | `"thematic"` | Theme mode: `generic`, `thematic`, `adaptive` (§0.4.6) |
+| `[theme]` | `allow_user_opt_out` | `true` | Whether the §16.5 dial can reach zero for theme influence |
+| `[theme]` | `theme_dial_floor_bp` | `1000` | Dial lower bound (basis points) when opt-out is locked |
+| `[theme]` | `adaptive_max_drift_bp` | `0` | Maximum adaptive drift in basis points (0 = no drift) |
+| `[theme]` | `influence_sources` | `[{ kind = "operator_topics" }]` | Ordered influence sources (§0.4.6) |
 | `[tts]` | `engine` | `"piper"` | TTS engine (`silent` for a pipeline check without a synthesizer) |
 | `[tts]` | `piper_path` | `None` | Piper binary path |
 | `[tts]` | `piper_voice_model` | `None` | Piper voice model |

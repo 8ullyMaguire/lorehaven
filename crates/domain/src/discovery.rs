@@ -58,6 +58,35 @@ pub fn apply_affinity_ranking(
     results
 }
 
+/// Apply theme gravity to candidates (spec §0.4.6).
+///
+/// In `thematic` mode, `nudge_bp` provides a uniform topic bonus to works
+/// matching the instance's public topics. In `adaptive` mode, the nudge is
+/// derived per-work from the current drift vector (computed separately). In
+/// `generic` mode, no nudge is applied.
+///
+/// `work_nudge_bp` returns the additional gravity in basis points for a given
+/// work. When no topic matches, it returns 0.
+pub fn apply_theme_gravity(
+    candidates: Vec<Candidate>,
+    work_nudge_bp: &dyn Fn(&WorkId) -> i64,
+) -> Vec<Candidate> {
+    let mut results: Vec<Candidate> = candidates
+        .into_iter()
+        .map(|mut c| {
+            let nudge = work_nudge_bp(&c.work_id);
+            if nudge != 0 {
+                // Multiplicative nudge: 1000 bp = 1.1x, 2500 bp = 1.25x.
+                let multiplier = 1.0 + (nudge as f64 / 10_000.0);
+                c.score = (c.score as f64 * multiplier) as i64;
+            }
+            c
+        })
+        .collect();
+    results.sort_by_key(|c| -c.score);
+    results
+}
+
 /// Apply per-fandom caps and exploration slots to a ranked candidate list.
 ///
 /// - `per_fandom_cap`: the maximum number of works from the same fandom to
@@ -260,5 +289,60 @@ mod tests {
         let fandoms_of = |_w: &WorkId| Vec::new();
         let result = apply_diversity(vec![w1, w2], &known, 0, 0.0, 10, &fandoms_of);
         assert_eq!(result, vec![w1, w2]);
+    }
+
+    #[test]
+    fn apply_theme_gravity_uniform_nudge() {
+        let w1 = WorkId::new();
+        let w2 = WorkId::new();
+        let candidates = vec![
+            Candidate { work_id: w1, score: 10, reason: "base".into() },
+            Candidate { work_id: w2, score: 10, reason: "base".into() },
+        ];
+        let nudge_bp = 1000; // 1.1x
+        let work_nudge = |_w: &WorkId| nudge_bp;
+        let result = apply_theme_gravity(candidates, &work_nudge);
+        assert_eq!(result[0].score, 11); // 10 * 1.1
+        assert_eq!(result[1].score, 11);
+    }
+
+    #[test]
+    fn apply_theme_gravity_selective_nudge_orders_correctly() {
+        let w1 = WorkId::new();
+        let w2 = WorkId::new();
+        let candidates = vec![
+            Candidate { work_id: w1, score: 10, reason: "base".into() },
+            Candidate { work_id: w2, score: 8, reason: "base".into() },
+        ];
+        // w1 gets a 1.25x nudge (2500 bp); w2 gets nothing.
+        let work_nudge = |w: &WorkId| {
+            if w.to_canonical_string() == w1.to_canonical_string() { 2500 } else { 0 }
+        };
+        let result = apply_theme_gravity(candidates, &work_nudge);
+        assert_eq!(result[0].work_id, w1); // 12 > 8 after nudge
+        assert_eq!(result[0].score, 12);
+        assert_eq!(result[1].score, 8);
+    }
+
+    #[test]
+    fn apply_theme_gravity_zero_nudge_preserves_order() {
+        let w1 = WorkId::new();
+        let w2 = WorkId::new();
+        let candidates = vec![
+            Candidate { work_id: w1, score: 10, reason: "base".into() },
+            Candidate { work_id: w2, score: 5, reason: "base".into() },
+        ];
+        let work_nudge = |_w: &WorkId| 0;
+        let result = apply_theme_gravity(candidates, &work_nudge);
+        assert_eq!(result[0].score, 10);
+        assert_eq!(result[1].score, 5);
+    }
+
+    #[test]
+    fn apply_theme_gravity_empty_candidates() {
+        let candidates: Vec<Candidate> = vec![];
+        let work_nudge = |_w: &WorkId| 1000;
+        let result = apply_theme_gravity(candidates, &work_nudge);
+        assert!(result.is_empty());
     }
 }
