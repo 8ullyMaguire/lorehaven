@@ -955,6 +955,70 @@ pub async fn record_pool_b_distribution(
     Ok(id)
 }
 
+/// Per-author Pool A earnings in a period (for the cap and settlement).
+pub async fn author_pool_a_in_period(
+    db: &Database,
+    start: &str,
+    end: &str,
+) -> Result<Vec<(String, i64)>, sqlx::Error> {
+    let sql = db.sql(
+        "SELECT author_account_id, COALESCE(SUM(amount_minor), 0) AS total
+           FROM author_earnings_ledger
+          WHERE created_at >= ? AND created_at < ? AND kind IN ('sale','tip','attribution')
+          GROUP BY author_account_id",
+        "SELECT author_account_id::text, COALESCE(SUM(amount_minor), 0) AS total
+           FROM author_earnings_ledger
+          WHERE created_at >= ?::text AND created_at < ?::text AND kind IN ('sale','tip','attribution')
+          GROUP BY author_account_id",
+    );
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, (String, i64)>(&sql)
+                .bind(start).bind(end)
+                .fetch_all(db.sqlite_pool().expect("sqlite")).await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, (String, i64)>(&sql)
+                .bind(start).bind(end)
+                .fetch_all(db.postgres_pool().expect("postgres")).await?
+        }
+    };
+    Ok(rows)
+}
+
+/// Per-author attributed reading time in a period.
+pub async fn author_reading_time_in_period(
+    db: &Database,
+    start: &str,
+    end: &str,
+) -> Result<Vec<(String, i64)>, sqlx::Error> {
+    let sql = db.sql(
+        "SELECT w.owner_pseud_id AS author, COALESCE(SUM(rs.seconds), 0) AS secs
+           FROM reading_sessions rs
+           JOIN works w ON rs.work_id = w.id
+           WHERE rs.started_at >= ? AND rs.started_at < ?
+           GROUP BY w.owner_pseud_id",
+        "SELECT w.owner_pseud_id::text AS author, COALESCE(SUM(rs.seconds), 0) AS secs
+           FROM reading_sessions rs
+           JOIN works w ON rs.work_id = w.id::uuid
+           WHERE rs.started_at >= ?::text AND rs.started_at < ?::text
+           GROUP BY w.owner_pseud_id",
+    );
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, (String, i64)>(&sql)
+                .bind(start).bind(end)
+                .fetch_all(db.sqlite_pool().expect("sqlite")).await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, (String, i64)>(&sql)
+                .bind(start).bind(end)
+                .fetch_all(db.postgres_pool().expect("postgres")).await?
+        }
+    };
+    Ok(rows)
+}
+
 /// Upsert a monetization period summary.
 pub async fn upsert_period_summary(
     db: &Database,
