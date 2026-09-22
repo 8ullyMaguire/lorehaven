@@ -146,6 +146,12 @@ pub struct Config {
     pub works: WorksConfig,
     /// Longevity signals: half-life and interaction warmth (spec §41).
     pub community: CommunityConfig,
+    /// Taste gravity settings (spec §0.4, §16.17).
+    pub taste: TasteConfig,
+    /// Signal weighting settings (spec §9.7.3).
+    pub signals: SignalsConfig,
+    /// Instance preset (spec §0.6).
+    pub instance: InstanceConfig,
     /// Revision caching settings (spec §38).
     pub revisions: RevisionsConfig,
     /// Job queue settings (spec §38).
@@ -344,6 +350,72 @@ impl Default for CommunityConfig {
                 "comment": 1000,
                 "create": 3000
             }),
+        }
+    }
+}
+
+/// Taste gravity settings (spec §0.4, §16.17).
+#[derive(Debug, Clone)]
+pub struct TasteConfig {
+    /// Taste gravity strength (0.0 = off, 1.0 = full influence).
+    pub gravity_strength: f64,
+    /// Signal weighting mode.
+    pub signal_weight_mode: String,
+    /// Admin engagement weight multiplier.
+    pub admin_weight: f64,
+    /// Diversity injection percentage (0.0..1.0, 0.0 = monoculture).
+    pub diversity_injection_percent: f64,
+    /// Taste dimensions (names only; vectors are computed at runtime).
+    pub dimensions: Vec<String>,
+}
+
+impl Default for TasteConfig {
+    fn default() -> Self {
+        Self {
+            gravity_strength: 0.0,
+            signal_weight_mode: "taste_weighted".to_string(),
+            admin_weight: 1.0,
+            diversity_injection_percent: 0.1,
+            dimensions: vec![
+                "angst".to_string(),
+                "pacing".to_string(),
+                "prose_density".to_string(),
+                "canon_compliance".to_string(),
+                "trope_diversity".to_string(),
+            ],
+        }
+    }
+}
+
+/// Signal weighting settings (spec §9.7.3).
+#[derive(Debug, Clone)]
+pub struct SignalsConfig {
+    /// Signal weighting mode: egalitarian, taste_weighted, admin_only.
+    pub mode: String,
+    /// Diversity injection percentage (0.0..1.0).
+    pub diversity_injection_percent: f64,
+}
+
+impl Default for SignalsConfig {
+    fn default() -> Self {
+        Self {
+            mode: "taste_weighted".to_string(),
+            diversity_injection_percent: 0.1,
+        }
+    }
+}
+
+/// Instance preset (spec §0.6).
+#[derive(Debug, Clone)]
+pub struct InstanceConfig {
+    /// Preset name: open_library, curated_boutique, admin_garden, genre_haven, experimental_lab, custom.
+    pub preset: String,
+}
+
+impl Default for InstanceConfig {
+    fn default() -> Self {
+        Self {
+            preset: "curated_boutique".to_string(),
         }
     }
 }
@@ -1254,6 +1326,35 @@ impl Config {
             directory,
             works,
             community: CommunityConfig::default(),
+            taste: {
+                let t = file.taste.unwrap_or_default();
+                TasteConfig {
+                    gravity_strength: t.gravity_strength.unwrap_or(0.0),
+                    signal_weight_mode: t.signal_weight_mode.unwrap_or_else(|| "taste_weighted".to_string()),
+                    admin_weight: t.admin_weight.unwrap_or(1.0),
+                    diversity_injection_percent: t.diversity_injection_percent.unwrap_or(0.1),
+                    dimensions: t.dimensions.unwrap_or_else(|| vec![
+                        "angst".to_string(),
+                        "pacing".to_string(),
+                        "prose_density".to_string(),
+                        "canon_compliance".to_string(),
+                        "trope_diversity".to_string(),
+                    ]),
+                }
+            },
+            signals: {
+                let s = file.signals.unwrap_or_default();
+                SignalsConfig {
+                    mode: s.mode.unwrap_or_else(|| "taste_weighted".to_string()),
+                    diversity_injection_percent: s.diversity_injection_percent.unwrap_or(0.1),
+                }
+            },
+            instance: {
+                let i = file.instance.unwrap_or_default();
+                InstanceConfig {
+                    preset: i.preset.unwrap_or_else(|| "curated_boutique".to_string()),
+                }
+            },
             // --- revisions (spec §38) -----------------------------------------
             revisions: RevisionsConfig {
                 ttl_secs: file
@@ -1353,6 +1454,9 @@ impl Config {
             directory: DirectoryConfig::default(),
             works: WorksConfig::default(),
             community: CommunityConfig::default(),
+            taste: TasteConfig::default(),
+            signals: SignalsConfig::default(),
+            instance: InstanceConfig::default(),
             revisions: RevisionsConfig::default(),
             jobs: JobsConfig::default(),
             library: LibraryConfig::default(),
@@ -1520,6 +1624,12 @@ struct FileConfig {
     jobs: Option<JobsSection>,
     library: Option<LibrarySection>,
     theme: Option<ThemeSection>,
+    /// Taste gravity settings (spec §0.4, §16.17).
+    taste: Option<TasteSection>,
+    /// Signal weighting settings (spec §9.7.3).
+    signals: Option<SignalsSection>,
+    /// Instance preset (spec §0.6).
+    instance: Option<InstanceSection>,
 }
 
 /// The `[theme]` table (spec §0.4.6): theme mode and gravity settings.
@@ -1534,6 +1644,32 @@ struct ThemeSection {
     boost_tags: Option<Vec<String>>,
     suppress_tags: Option<Vec<String>>,
     tag_gravity_bp: Option<std::collections::HashMap<String, i64>>,
+}
+
+/// The `[taste]` table (spec §0.4, §16.17): taste gravity settings.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TasteSection {
+    gravity_strength: Option<f64>,
+    signal_weight_mode: Option<String>,
+    admin_weight: Option<f64>,
+    diversity_injection_percent: Option<f64>,
+    dimensions: Option<Vec<String>>,
+}
+
+/// The `[signals]` table (spec §9.7.3): signal weighting settings.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SignalsSection {
+    mode: Option<String>,
+    diversity_injection_percent: Option<f64>,
+}
+
+/// The `[instance]` table (spec §0.6): instance preset.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InstanceSection {
+    preset: Option<String>,
 }
 
 /// The `[revisions]` table (spec §38): source revision cache settings.
