@@ -356,7 +356,7 @@ pub fn build_router(state: AppState) -> Router {
             &state,
         ))
         .merge(classified(
-            routes::author_media::router(),
+            routes::mirror_admin::router(),
             RouteClass::Default,
             &state,
         ))
