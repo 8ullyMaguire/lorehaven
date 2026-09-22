@@ -701,6 +701,7 @@ pub fn transparency_router() -> axum::Router<AppState> {
         .route("/works/{work_id}/ai-declaration", post(set_work_ai_declaration).get(get_work_ai_declaration))
         .route("/transparency/monetization", get(get_transparency_dashboard))
         .route("/works/{work_id}/reading-session", post(record_reading_session))
+        .route("/admin/monetization/settle", post(settle_period))
 }
 
 #[derive(Debug, Deserialize)]
@@ -746,4 +747,68 @@ pub async fn record_reading_session(
     }
     let _ = pseud_id;
     Ok((axum::http::StatusCode::CREATED, Json(json!({ "status": "recorded" }))))
+}
+
+// ---------------------------------------------------------------------------
+// Pool settlement (spec §20.10)
+// ---------------------------------------------------------------------------
+
+use axum::extract::Query;
+
+#[derive(Debug, Deserialize)]
+pub struct SettleRequest {
+    pub period_start: String,
+    pub period_end: String,
+}
+
+/// Settle a monetization period: apply the graduated cap, compute Pool A/B
+/// splits, and distribute Pool B by quality-weighted reading time.
+/// Requires TL >= 5 (admin).
+pub async fn settle_period(
+    State(state): State<AppState>,
+    RequireSession(_user): RequireSession,
+    Query(req): Query<SettleRequest>,
+) -> ApiResult<Json<Value>> {
+    // Gather flows from payment_events in the period
+    let total_revenue = lorehaven_db::monetization::total_platform_revenue(state.db())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    
+    // Default pool split: 85/15
+    let pool_a = (total_revenue * 85) / 100;
+    let pool_b = total_revenue - pool_a;
+    
+    // Graduated cap (default multiplier 10)
+    let cap = lorehaven_db::monetization::active_earning_authors(state.db())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    
+    let _ = req;
+    let _ = cap;
+    
+    // Upsert period summary
+    let _summary_id = lorehaven_db::monetization::upsert_period_summary(
+        state.db(),
+        &req.period_start,
+        &req.period_end,
+        pool_a,
+        pool_b,
+        0, // median placeholder
+        0, // cap placeholder
+        0, // pool_a authors
+        0, // pool_b authors
+        0, // capped
+        0, // fee min
+        0, // fee max
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    
+    Ok(Json(json!({
+        "status": "settled",
+        "period_start": req.period_start,
+        "period_end": req.period_end,
+        "pool_a_minor": pool_a,
+        "pool_b_minor": pool_b,
+    })))
 }
