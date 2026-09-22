@@ -2711,3 +2711,96 @@ export function fetchMyEarnings(signal?: AbortSignal): Promise<EarningsRow[]> {
     (page) => page.earnings,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Vanguard — role status and pinning (spec §16.18)
+// ---------------------------------------------------------------------------
+
+export interface VanguardStatus {
+  is_vanguard: boolean;
+}
+
+export interface Pin {
+  id: string;
+  account_id: string;
+  work_id: string;
+  pin_reason: string;
+  message: string | null;
+  created_at: string;
+}
+
+/** Check whether the acting account holds the Vanguard role. */
+export function fetchVanguardStatus(): Promise<VanguardStatus> {
+  return apiFetch<VanguardStatus>('/vanguard/status');
+}
+
+/** Fetch pins for a work (public). */
+export function fetchPinsForWork(workId: string, signal?: AbortSignal): Promise<{ pins: Pin[] }> {
+  return apiFetch<{ pins: Pin[] }>(`/vanguard/pins/${encodeURIComponent(workId)}`, { signal });
+}
+
+/** Pin a work to the Vanguard Picks shelf (vanguard only). */
+export function pinWork(
+  workId: string,
+  body: { pin_reason: string; message?: string },
+): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>(`/vanguard/pins/${encodeURIComponent(workId)}`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** Unpin a work (vanguard only). */
+export function unpinWork(workId: string): Promise<void> {
+  return apiFetch<void>(`/vanguard/pins/${encodeURIComponent(workId)}`, { method: 'DELETE' });
+}
+
+/** List all vanguards (admin only). */
+export function fetchVanguards(signal?: AbortSignal): Promise<{ vanguards: string[] }> {
+  return apiFetch<{ vanguards: string[] }>('/vanguards', { signal });
+}
+
+// ---------------------------------------------------------------------------
+// Quiz — onboarding taste quiz (spec §0.4.2)
+// ---------------------------------------------------------------------------
+
+export interface QuizAnswer {
+  picked: string[];
+  rejected: string[];
+}
+
+export interface QuizSkipResponse {
+  status: string;
+}
+
+/** Fetch quiz works for onboarding. */
+export function fetchQuizWorks(signal?: AbortSignal): Promise<{ works: DiscoveryItem[] }> {
+  return apiFetch<{ works: DiscoveryItem[] }>('/quiz/works', { signal });
+}
+
+/** Save quiz answers. */
+export function saveQuizAnswers(body: { picked: string[]; rejected?: string[] }): Promise<{
+  status: string;
+  vector_dimensions: number;
+}> {
+  return apiFetch('/quiz/answers', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** Fetch the signed-in user's quiz answers. */
+export function fetchMyQuizAnswers(signal?: AbortSignal): Promise<QuizAnswer> {
+  return apiFetch<QuizAnswer>('/quiz/answers', { signal });
+}
+
+/** Skip the quiz. */
+export function skipQuiz(): Promise<QuizSkipResponse> {
+  return apiFetch<QuizSkipResponse>('/quiz/skip', { method: 'POST' });
+}
+
+/** Check the signed-in user's reading streak (spec §9.7.1). */
+export function fetchMyStreak(signal?: AbortSignal): Promise<{
+  current_streak: number;
+  longest_streak: number;
+  last_read_date: string | null;
+}> {
+  return apiFetch('/me/streak', { signal });
+}

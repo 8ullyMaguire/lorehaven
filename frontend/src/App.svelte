@@ -32,6 +32,8 @@
   import WorkEditor from './routes/WorkEditor.svelte';
   import WorkPage from './routes/WorkPage.svelte';
   import Write from './routes/Write.svelte';
+  import Quiz from './routes/Quiz.svelte';
+  import Vanguard from './routes/Vanguard.svelte';
   import { handleLinkClick, matchRoute } from './lib/router';
   import { session } from './lib/session.svelte';
   import {
@@ -306,6 +308,10 @@
     <ForumTopic topicId={route.params?.topicId ?? ''} />
   {:else if route.id === 'notifications'}
     <Notifications />
+  {:else if route.id === 'quiz'}
+    <Quiz />
+  {:else if route.id === 'vanguard'}
+    <Vanguard />
   {:else if route.id === 'planned' && route.planned}
     <Planned route={route.planned} />
   {:else}
