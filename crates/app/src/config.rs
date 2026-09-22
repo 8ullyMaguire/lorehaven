@@ -148,6 +148,8 @@ pub struct Config {
     pub community: CommunityConfig,
     /// Taste gravity settings (spec §0.4, §16.17).
     pub taste: TasteConfig,
+    /// Flexible bounty settings (spec §20.3.2).
+    pub bounties: BountiesConfig,
     /// Signal weighting settings (spec §9.7.3).
     pub signals: SignalsConfig,
     /// Instance preset (spec §0.6).
@@ -352,6 +354,34 @@ impl Default for CommunityConfig {
                 "comment": 1000,
                 "create": 3000
             }),
+        }
+    }
+}
+
+/// Flexible bounty settings (spec §20.3.2, M18 Phase 4.1).
+#[derive(Debug, Clone)]
+pub struct BountiesConfig {
+    /// Allowed bounty types. Default: standard, crowdfunded, reverse.
+    pub allowed_types: Vec<String>,
+    /// Minimum bounty amount in credits.
+    pub min_amount: i64,
+    /// Maximum bounty amount in credits.
+    pub max_amount: i64,
+    /// Crowdfunded bounty auto-activate threshold (fraction 0.0..1.0).
+    pub crowdfund_activation_threshold: f64,
+}
+
+impl Default for BountiesConfig {
+    fn default() -> Self {
+        Self {
+            allowed_types: vec![
+                "standard".to_string(),
+                "crowdfunded".to_string(),
+                "reverse".to_string(),
+            ],
+            min_amount: 10,
+            max_amount: 10_000,
+            crowdfund_activation_threshold: 1.0,
         }
     }
 }
@@ -1360,6 +1390,20 @@ impl Config {
             directory,
             works,
             community: CommunityConfig::default(),
+            bounties: {
+                let b = file.bounties.clone().unwrap_or_default();
+                BountiesConfig {
+                    allowed_types: match b.allowed_types {
+                        Some(ref types) if !types.is_empty() => types.clone(),
+                        _ => BountiesConfig::default().allowed_types,
+                    },
+                    min_amount: b.min_amount.unwrap_or(BountiesConfig::default().min_amount),
+                    max_amount: b.max_amount.unwrap_or(BountiesConfig::default().max_amount),
+                    crowdfund_activation_threshold: b
+                        .crowdfund_activation_threshold
+                        .unwrap_or(BountiesConfig::default().crowdfund_activation_threshold),
+                }
+            },
             taste: {
                 let t = file.taste.unwrap_or_default();
                 TasteConfig {
@@ -1506,6 +1550,7 @@ impl Config {
             directory: DirectoryConfig::default(),
             works: WorksConfig::default(),
             community: CommunityConfig::default(),
+            bounties: BountiesConfig::default(),
             taste: TasteConfig::default(),
             signals: SignalsConfig::default(),
             instance: InstanceConfig::default(),
@@ -1679,6 +1724,8 @@ struct FileConfig {
     theme: Option<ThemeSection>,
     /// Taste gravity settings (spec §0.4, §16.17).
     taste: Option<TasteSection>,
+    /// Flexible bounty settings (spec §20.3.2).
+    bounties: Option<BountiesSection>,
     /// Signal weighting settings (spec §9.7.3).
     signals: Option<SignalsSection>,
     /// Instance preset (spec §0.6).
@@ -1710,6 +1757,16 @@ struct TasteSection {
     admin_weight: Option<f64>,
     diversity_injection_percent: Option<f64>,
     dimensions: Option<Vec<String>>,
+}
+
+/// The `[bounties]` table (spec §20.3.2): flexible bounty settings.
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BountiesSection {
+    allowed_types: Option<Vec<String>>,
+    min_amount: Option<i64>,
+    max_amount: Option<i64>,
+    crowdfund_activation_threshold: Option<f64>,
 }
 
 /// The `[signals]` table (spec §9.7.3): signal weighting settings.

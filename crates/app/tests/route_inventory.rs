@@ -1712,6 +1712,13 @@ const ROUTE_TABLE: &[RouteEntry] = &[
     },
     RouteEntry {
         file: "economy.rs",
+        handler: "contribute_to_bounty",
+        method: "POST",
+        path: "/bounties/{bounty_id}/contribute",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "economy.rs",
         handler: "get_subscription",
         method: "GET",
         path: "/subscription",
