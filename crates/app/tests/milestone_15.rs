@@ -9,6 +9,7 @@ use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
 use lorehaven_db::DatabaseConfig;
 use serde_json::Value;
+use sqlx::Row;
 use tower::ServiceExt;
 
 // ---------------------------------------------------------------------------
@@ -351,6 +352,184 @@ async fn usage_counters_increment_and_roll_over() {
     assert_eq!(usage.len(), 1);
     assert_eq!(usage[0].0, "read_chapter");
     assert_eq!(usage[0].1, 2);
+
+    harness.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// M15-06 / M15-07 / M15-09 — Monetization endpoints
+// ---------------------------------------------------------------------------
+
+use lorehaven_db::monetization;
+
+async fn register_with_pseud(
+    client: &mut Client,
+    email: &str,
+    handle: &str,
+) {
+    let (status, body) = client
+        .request(
+            "POST",
+            "/api/v1/auth/register",
+            Some(serde_json::json!({
+                "email": email,
+                "password": "Password123!",
+                "password_confirm": "Password123!",
+                "handle": handle,
+                "age_band": "adult",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "register: {body}");
+}
+
+async fn create_work_api(client: &mut Client, title: &str) -> String {
+    let (status, body) = client
+        .request(
+            "POST",
+            "/api/v1/works",
+            Some(serde_json::json!({
+                "title": title,
+                "body": "Test body",
+                "lifecycle": "published",
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "create work: {body}");
+    body["id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn ai_declaration_can_be_set_and_read_back() {
+    let harness = Harness::new("ai-decl").await;
+    let mut client = harness.client();
+
+    register_with_pseud(&mut client, "author@example.com", "testauthor").await;
+    let work_id = create_work_api(&mut client, "AI Test Work").await;
+
+    // Set declaration
+    let (status, body) = client
+        .request(
+            "POST",
+            &format!("/api/v1/works/{}/ai-declaration", work_id),
+            Some(serde_json::json!({ "declaration": "co-written" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "set: {body}");
+    assert_eq!(body["declaration"].as_str().unwrap(), "co-written");
+
+    let (status, body) = client
+        .request("GET", &format!("/api/v1/works/{}/ai-declaration", work_id), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "get: {body}");
+    assert_eq!(body["declaration"].as_str().unwrap(), "co-written");
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn invalid_ai_declaration_is_rejected() {
+    let harness = Harness::new("ai-decl-invalid").await;
+    let mut client = harness.client();
+
+    register_with_pseud(&mut client, "bad@example.com", "badauthor").await;
+    let work_id = create_work_api(&mut client, "Bad AI Work").await;
+
+    let (status, _body) = client
+        .request(
+            "POST",
+            &format!("/api/v1/works/{}/ai-declaration", work_id),
+            Some(serde_json::json!({ "declaration": "ai-generated-mostly" })),
+        )
+        .await;
+    // Rejected: may surface as 400 or 422 depending on the server's error-mapping
+    // for an unknown enum variant. Both mean "the server refused the value".
+    assert!(
+        status == StatusCode::BAD_REQUEST || status == StatusCode::UNPROCESSABLE_ENTITY,
+        "invalid declaration rejected (got {status})"
+    );
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn transparency_dashboard_returns_public_data() {
+    let harness = Harness::new("transparency").await;
+    let mut client = harness.client();
+
+    let (status, body) = client.request("GET", "/api/v1/transparency/monetization", None).await;
+    assert_eq!(status, StatusCode::OK, "dashboard: {body}");
+
+    assert!(body["total_revenue_minor"].is_i64());
+    assert!(body["pending_payout_minor"].is_i64());
+    assert!(body["active_earning_authors"].is_i64());
+    assert!(body["active_purchasers"].is_i64());
+    assert_eq!(body["fee_split_bp"], 1500);
+
+    assert_eq!(body["graduated_cap"]["band1_multiple"], 5);
+    assert_eq!(body["graduated_cap"]["band2_multiple"], 10);
+
+    let w = &body["quality_weights"];
+    let total = w["rating_bp"].as_i64().unwrap()
+        + w["review_bp"].as_i64().unwrap()
+        + w["karma_bp"].as_i64().unwrap()
+        + w["longevity_bp"].as_i64().unwrap();
+    assert_eq!(total, 10_000);
+
+    let ai = &body["ai_multipliers"];
+    assert_eq!(ai["none"], 1.0);
+    assert_eq!(ai["assisted"], 1.0);
+    assert_eq!(ai["co_written"], 0.3);
+    assert_eq!(ai["generated"], 0.0);
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn payment_events_record_processor_fees() {
+    let harness = Harness::new("payment-fees").await;
+    let _client = harness.client();
+
+    let event_id = monetization::record_payment_event(
+        harness.tdb.db(),
+        "purchase",
+        Some("buyer-id"),
+        Some("work-id"),
+        Some("author-id"),
+        10_000,
+        1_500,
+        "EUR",
+    )
+    .await
+    .expect("record payment event");
+    assert!(!event_id.is_empty());
+
+    let pool = match harness.tdb.db().backend() {
+        lorehaven_db::Backend::Sqlite => {
+            let rows = sqlx::query("SELECT amount_minor, processor_fee_minor, net_minor, currency FROM payment_events WHERE id = ?")
+                .bind(&event_id)
+                .fetch_all(harness.tdb.db().sqlite_pool().expect("sqlite"))
+                .await
+                .expect("fetch payment events");
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].get::<i64, _>("amount_minor"), 10_000);
+            assert_eq!(rows[0].get::<i64, _>("processor_fee_minor"), 1_500);
+            assert_eq!(rows[0].get::<i64, _>("net_minor"), 8_500);
+            assert_eq!(rows[0].get::<String, _>("currency"), "EUR");
+        }
+        lorehaven_db::Backend::Postgres => {
+            let rows = sqlx::query("SELECT amount_minor, processor_fee_minor, net_minor, currency FROM payment_events WHERE id = $1")
+                .bind(&event_id)
+                .fetch_all(harness.tdb.db().postgres_pool().expect("postgres"))
+                .await
+                .expect("fetch payment events");
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].get::<i64, _>("amount_minor"), 10_000);
+            assert_eq!(rows[0].get::<i64, _>("processor_fee_minor"), 1_500);
+            assert_eq!(rows[0].get::<i64, _>("net_minor"), 8_500);
+            assert_eq!(rows[0].get::<String, _>("currency"), "EUR");
+        }
+    };
 
     harness.cleanup().await;
 }

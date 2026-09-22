@@ -586,3 +586,116 @@ pub fn gifts_router() -> axum::Router<AppState> {
         .route("/works/{work_id}/gifts", post(create_gift))
         .route("/me/gifts", get(list_gifts))
 }
+
+#[derive(Debug, Deserialize)]
+pub struct AiDeclarationBody {
+    pub declaration: String,
+}
+
+pub async fn set_work_ai_declaration(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(work_id): Path<String>,
+    Json(body): Json<AiDeclarationBody>,
+) -> ApiResult<Json<Value>> {
+    let work_id = work_id
+        .parse::<lorehaven_domain::WorkId>()
+        .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    let declaration = lorehaven_domain::monetization::AiDeclaration::parse(&body.declaration)
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::field(
+            "declaration",
+            "must be none|assisted|co-written|generated",
+        )))?;
+    let work = lorehaven_db::content::find_work(state.db(), work_id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    let pseud = user.pseud_id.ok_or_else(|| {
+        ApiError(lorehaven_domain::AppError::field(
+            "pseud_id",
+            "a pseud must be selected to declare AI involvement",
+        ))
+    })?;
+    if work.owner_pseud_id != pseud {
+        return Err(ApiError(lorehaven_domain::AppError::NotFound {
+            resource: "work",
+        }));
+    }
+    monetization::set_ai_declaration(
+        state.db(),
+        &work_id.to_canonical_string(),
+        declaration.as_str(),
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "status": "set", "declaration": declaration.as_str() })))
+}
+
+pub async fn get_work_ai_declaration(
+    State(state): State<AppState>,
+    Path(work_id): Path<String>,
+    MaybeSession(_user): MaybeSession,
+) -> ApiResult<Json<Value>> {
+    let work_id = work_id
+        .parse::<lorehaven_domain::WorkId>()
+        .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
+    let decl = monetization::get_ai_declaration(
+        state.db(),
+        &work_id.to_canonical_string(),
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({ "declaration": decl })))
+}
+
+pub async fn get_transparency_dashboard(
+    State(state): State<AppState>,
+    MaybeSession(_user): MaybeSession,
+) -> ApiResult<Json<Value>> {
+    let total_revenue = monetization::total_platform_revenue(state.db())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let pending_payouts = monetization::pending_payout_total(state.db())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let active_authors = monetization::active_earning_authors(state.db())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let active_purchasers = monetization::active_purchaser_count(state.db())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    Ok(Json(json!({
+        "total_revenue_minor": total_revenue,
+        "pending_payout_minor": pending_payouts,
+        "active_earning_authors": active_authors,
+        "active_purchasers": active_purchasers,
+        "fee_split_bp": 1500,
+        "graduated_cap": {
+            "band1_multiple": 5,
+            "band2_multiple": 10,
+        },
+        "quality_weights": {
+            "rating_bp": 4000,
+            "review_bp": 2000,
+            "karma_bp": 2000,
+            "longevity_bp": 2000,
+        },
+        "pool_b_floor": {
+            "distinct_readers": 5,
+            "account_age_days": 30,
+            "trust_level": 1,
+        },
+        "ai_multipliers": {
+            "none": 1.0,
+            "assisted": 1.0,
+            "co_written": 0.3,
+            "generated": 0.0,
+        },
+    })))
+}
+
+pub fn transparency_router() -> axum::Router<AppState> {
+    axum::Router::new()
+        .route("/works/{work_id}/ai-declaration", post(set_work_ai_declaration).get(get_work_ai_declaration))
+        .route("/transparency/monetization", get(get_transparency_dashboard))
+}
