@@ -4,6 +4,8 @@ This is a dependency-ordered specification for building the entire platform—no
 
 This document specifies intended behavior. It does not claim that any feature, adapter, integration, or performance target has already been implemented or verified.
 
+**Amendments:** The taste-gravitational system (multi-dimensional taste profile, taste-weighted signals, resonance score, vanguard role, instance presets, and related extensions) is specified in `docs/spec-amendments/taste-gravitational-system.md`, which amends §0.4, §0.4.6, §9.7, §9.8, §9.9, §14.5, §16.2, §16.17–16.19, §17.6, §19, and §20.3. Where this document and the amendment conflict, the amendment governs. Implementation plan: `docs/plans/taste-gravitational-system.md`.
+
 ---
 
 # 0. Site Premise

@@ -58,6 +58,7 @@ pub mod storage;
 pub mod subscriptions;
 pub mod spoilers;
 pub mod taxonomy;
+pub mod taste_vectors;
 pub mod thread_modes;
 pub mod translation;
 pub mod typed_votes;

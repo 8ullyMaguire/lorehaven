@@ -185,11 +185,15 @@ mod tests {
                 work_id: WorkId::new(),
                 score: 100,
                 reason: "tags".into(),
+                taste_signal: 0.0,
+                diversity_class: 0.0,
             },
             Candidate {
                 work_id: WorkId::new(),
                 score: 100,
                 reason: "tags".into(),
+                taste_signal: 0.0,
+                diversity_class: 0.0,
             },
         ];
 

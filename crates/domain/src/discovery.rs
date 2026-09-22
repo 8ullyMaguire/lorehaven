@@ -6,6 +6,10 @@ pub struct Candidate {
     pub work_id: WorkId,
     pub score: i64,
     pub reason: String,
+    /// Taste signal: how strongly this work aligns with the instance taste profile.
+    pub taste_signal: f64,
+    /// Diversity class: 0.0 = aligned with admin taste, 1.0 = maximally distant.
+    pub diversity_class: f64,
 }
 
 /// Blend candidates from multiple engines deterministically.
@@ -19,6 +23,8 @@ pub fn blend(engines: &[Vec<Candidate>]) -> Vec<Candidate> {
                     work_id: candidate.work_id,
                     score: 0,
                     reason: candidate.reason.clone(),
+                    taste_signal: 0.0,
+                    diversity_class: 0.0,
                 });
             entry.score += candidate.score;
         }
@@ -191,17 +197,23 @@ mod tests {
                     work_id: w1,
                     score: 10,
                     reason: "engine1".into(),
+                    taste_signal: 0.0,
+                    diversity_class: 0.0,
                 },
                 Candidate {
                     work_id: w2,
                     score: 5,
                     reason: "engine1".into(),
+                    taste_signal: 0.0,
+                    diversity_class: 0.0,
                 },
             ],
             vec![Candidate {
                 work_id: w1,
                 score: 20,
                 reason: "engine2".into(),
+                taste_signal: 0.0,
+                diversity_class: 0.0,
             }],
         ];
         let result = blend(&engines);
@@ -221,11 +233,15 @@ mod tests {
                 work_id: w1,
                 score: 10,
                 reason: "base".into(),
+                    taste_signal: 0.0,
+                    diversity_class: 0.0,
             },
             Candidate {
                 work_id: w2,
                 score: 20,
                 reason: "base".into(),
+                    taste_signal: 0.0,
+                    diversity_class: 0.0,
             },
         ];
         let mut affinities = std::collections::HashMap::new();
@@ -244,6 +260,8 @@ mod tests {
             work_id: w,
             score: 10,
             reason: "engine-tag".into(),
+                    taste_signal: 0.0,
+                    diversity_class: 0.0,
         }];
         let mut affinities = std::collections::HashMap::new();
         affinities.insert(w.to_canonical_string(), 10_000);
@@ -258,6 +276,8 @@ mod tests {
             work_id: w,
             score: 10,
             reason: "base".into(),
+                    taste_signal: 0.0,
+                    diversity_class: 0.0,
         }];
         let mut affinities = std::collections::HashMap::new();
         affinities.insert(w.to_canonical_string(), -5_000); // 0.5x
@@ -296,8 +316,8 @@ mod tests {
         let w1 = WorkId::new();
         let w2 = WorkId::new();
         let candidates = vec![
-            Candidate { work_id: w1, score: 10, reason: "base".into() },
-            Candidate { work_id: w2, score: 10, reason: "base".into() },
+            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.0 },
+            Candidate { work_id: w2, score: 10, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.0 },
         ];
         let nudge_bp = 1000; // 1.1x
         let work_nudge = |_w: &WorkId| nudge_bp;
@@ -311,8 +331,8 @@ mod tests {
         let w1 = WorkId::new();
         let w2 = WorkId::new();
         let candidates = vec![
-            Candidate { work_id: w1, score: 10, reason: "base".into() },
-            Candidate { work_id: w2, score: 8, reason: "base".into() },
+            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.0 },
+            Candidate { work_id: w2, score: 8, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.0 },
         ];
         // w1 gets a 1.25x nudge (2500 bp); w2 gets nothing.
         let work_nudge = |w: &WorkId| {
@@ -329,8 +349,8 @@ mod tests {
         let w1 = WorkId::new();
         let w2 = WorkId::new();
         let candidates = vec![
-            Candidate { work_id: w1, score: 10, reason: "base".into() },
-            Candidate { work_id: w2, score: 5, reason: "base".into() },
+            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.0 },
+            Candidate { work_id: w2, score: 5, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.0 },
         ];
         let work_nudge = |_w: &WorkId| 0;
         let result = apply_theme_gravity(candidates, &work_nudge);
