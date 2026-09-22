@@ -3960,5 +3960,122 @@ author-CTA exemption.
 - Export job passes `cta: None` when exempt, else the configured CTA.
 
 **Tests** (`crates/app/tests/milestone_42.rs`):
-- Full-stack: placement modes, exemption via quorum, retraction restores,
-  TL2 refused, malformed CTA refused at config load.
+|- Full-stack: placement modes, exemption via quorum, retraction restores,
+|  TL2 refused, malformed CTA refused at config load.
+
+---
+
+## 15i. Milestone 43 (repo) — Recommendation-first browsing: one ordering contract for every surface
+
+Spec §43, ADRs 0021 (browse ordering contract) and 0022 (demand weight). Depends on: M11 (discovery), M39 (vote_weight primitive), M41 (half-life).
+
+**Read first:** spec §43 in full, §16.15 (taste sources), §16.16 (demand weight), ADRs 0021/0022, and `docs/plans/browse-and-demand-weight.md` (the slice-by-slice implementation plan that this milestone follows).
+
+### 43.1 Why this is next
+
+Every browse surface currently invents its own ordering. §43 ends that: one `Sort` vocabulary, one set of defaults, one per-pseud stickiness rule, on every surface from `/discover` to the directory. The demand-weight primitive (§16.16) reuses the vote-weight machinery M39 built and is the last ranking signal before the gamification guards (M43-15, M43-16).
+
+### 43.2 Ledger rows (spec §43 acceptance + §16.15/§16.16)
+
+Full list in `docs/requirements.csv` (M43-01..M43-16). The rows already exist as `planned`; the work here is to flip them to `implemented-locally-tested` as each slice lands.
+
+### 43.3 Migration 0050 — taste sources (both dialects)
+
+```
+taste_sources(
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,          -- admin | cohort | roles | combined
+  name TEXT NOT NULL,
+  min_members INTEGER NOT NULL DEFAULT 5,
+  created_at TEXT NOT NULL
+);
+
+taste_source_members(
+  source_id TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  joined_at TEXT NOT NULL,
+  PRIMARY KEY (source_id, account_id)
+);
+```
+
+Config: `[discovery] taste_sources = [{ kind = "admin" }]`, `taste_source_min_members = 5`. Startup refuses a source below the floor with a named error. Member withdrawal triggers a profile recompute for every remaining source.
+
+### 43.4 Domain (`crates/domain/src/` grows)
+
+- `browse.rs`: `Sort` enum (`ForYou`, `New`, `Updated`, `Top`, `Trending`, `BestMatch`, `Az`), `FromStr` that names the accepted set on failure.
+- `taste_sources.rs`: source kinds, min-membership validation, member transitions.
+- `demand.rs`: promote `vote_weight` to the shared primitive; contribution term (§16.16.1: quality composite, half-life, delivered positive feedback, new-to-instance supply, curatorial labour; never volume/tenure/spend); floor×ceiling `≤ 1.0`; published on `/api/v1/meta`.
+
+### 43.5 Config additions (`crates/app/src/config.rs`)
+
+```toml
+[browse]
+default_sort = "for-you"
+anonymous_sort = "top"
+surface_defaults = {}          # per-surface overrides
+
+[discovery]
+taste_sources = [{ kind = "admin" }]
+taste_source_min_members = 5
+
+[weighting]
+mode = "trust_taste_contribution"   # flat | trust | trust_taste | trust_taste_contribution
+taste_floor = 0.75
+taste_ceiling = 1.25
+contribution_floor = 1.0
+contribution_ceiling = 2.0
+contribution_window_days = 180
+demand_diversity_percent = 20
+```
+
+Validation: `taste_floor * taste_ceiling ≤ 1.0`, `demand_diversity_percent > 0`, unknown `mode` refuses to start.
+
+### 43.6 Routes / surfaces (§43.1)
+
+Every one of: `/discover`, `/fandoms/:id`, `/tags/:tag`, `/moods/:mood`, `/people`, `/authors/:id`, `/collections/:id`, `/series/:id`, `/reading-paths/:id`, library discovery rails, directory lists, challenge/request/wishlist boards, and the email digest takes `?sort=`. The vocabulary is parsed once in the domain; each surface passes the candidate pool through the same resolver.
+
+`for-you` is a **permutation** — a test asserts set equality: for one fixture, the union of pages under `for-you` equals the union under `new`, in both directions, including a work `for-you` ranks last.
+
+Default stickiness: per-pseud `browse_sort_preferences` table. Anonymous on an undeclared/private-topic instance gets the neutral order (§43.4). A no-profile signed-in request equals the baseline byte-for-byte.
+
+### 43.7 Reason degradation (§43.6, §16.16.2)
+
+A `reason` field may name an instance-level term only for a topic declared `public = true`; otherwise it degrades to one undifferentiated line. Applies to `/discover`, saved responses, digests, and the "why am I seeing this" explanations. Test asserts *absence* of theme terms on every surface below public topics.
+
+### 43.8 Per-surface diversity + exposure measurement (§43.5, §43.6)
+
+§16.4's reservations apply per surface, not only `/discover`. Operator-only aggregate counters: what each sort surfaced, the overlap, the first-seen share. No per-reader history exposed to anyone, including the operator.
+
+### 43.9 Demand weight call sites (§18.5, §20.5)
+
+Wishlist votes, bounty visibility/queue position, prompt votes, and "write-next" ordering consume the weight. The contribution term ignores forbidden metrics by construction; a test feeds a forbidden metric (words published, hours online) and asserts it moves nothing.
+
+### 43.10 Guards (§16.16.3)
+
+- `demand_diversity_percent > 0` enforced; surfaced-without-boost accounting.
+- Majority-integrity: compute both weighted and unweighted outcomes; disagreement routes to §19.4 quorum.
+- No weight exposure on any surface, export, or error message (§16.16.2, §39.6).
+- Leaderboard categories reject volume metrics and all-time boards (§9.7.5).
+- No lifetime ladder exists; recognition never gates or governs (asserted across every route and surface).
+
+### 43.11 Pages
+
+A shared sort control component (`SortControl.svelte`) on every §43.1 surface. No new vocabulary — `for-you` is labelled exactly as specced. No surface invents a second label. The weight-blind UI stands free of influence disclosure.
+
+### 43.12 Acceptance tests (`crates/app/tests/milestone_43.rs` and `milestone_44.rs`)
+
+Follow the slice plan in `docs/plans/browse-and-demand-weight.md`. Tests per slice:
+1. Unknown `sort` errors naming the accepted set; exact queries bypass every profile.
+2. Permutation equality test (for-you vs new, union in both directions).
+3. Anonymous gets neutral order on private-topic instance; no-profile signed-in equals baseline.
+4. Taste-source min-membership refusal (3 members), acceptance (5), withdrawal recompute.
+5. Reason degradation: theme terms absent below public topics.
+6. Demand-weight off-switch is identity; forbidden metrics move nothing.
+7. Floor×ceiling validation; both published on `/api/v1/meta`.
+8. Majority-integrity disagreement routes to quorum.
+9. Leaderboard metric-category refusal.
+10. Absence test across every endpoint, export, and log shape.
+
+### 43.13 What deliberately ships last
+
+The default `weighting.mode` flips from `flat` only after the guards, the absence tests, and the exposure report are green. Until then `flat` is the honest state, and every paragraph of §16.16 that says "never" is a test before it is a claim.
