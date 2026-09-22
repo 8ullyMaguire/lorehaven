@@ -139,18 +139,24 @@ pub async fn list_bounties(
     State(state): State<AppState>,
     MaybeSession(_user): MaybeSession,
 ) -> ApiResult<Json<Value>> {
-    let bounties = lorehaven_db::economy::list_bounties(state.db())
+    let bounties = lorehaven_db::bounties::list_flexible_bounties(state.db())
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     Ok(Json(json!({ "bounties": bounties })))
 }
 
-/// Create a bounty.
+/// Create a bounty (any type: standard, crowdfunded, reverse).
 #[derive(Debug, Deserialize)]
 pub struct CreateBountyBody {
     pub job_kind: String,
     pub terms: Value,
     pub amount: i64,
+    #[serde(default = "default_bounty_type")]
+    pub bounty_type: String,
+}
+
+fn default_bounty_type() -> String {
+    "standard".to_string()
 }
 
 pub async fn create_bounty(
@@ -170,18 +176,108 @@ pub async fn create_bounty(
         now.minute(),
         now.second()
     );
-    lorehaven_db::economy::create_bounty(
+
+    let allowed_types = &state.config().bounties.allowed_types;
+    if !allowed_types.contains(&body.bounty_type) {
+        return Err(ApiError(lorehaven_domain::AppError::Validation {
+            message: format!(
+                "bounty type '{}' is not allowed (allowed: {:?})",
+                body.bounty_type, allowed_types
+            ),
+            field_errors: Default::default(),
+        }));
+    }
+
+    if body.amount < state.config().bounties.min_amount
+        || body.amount > state.config().bounties.max_amount
+    {
+        return Err(ApiError(lorehaven_domain::AppError::Validation {
+            message: format!(
+                "bounty amount must be between {} and {}",
+                state.config().bounties.min_amount,
+                state.config().bounties.max_amount
+            ),
+            field_errors: Default::default(),
+        }));
+    }
+
+    let (state_str, funded) = match body.bounty_type.as_str() {
+        "reverse" => ("open", body.amount), // prepaid by creator
+        "crowdfunded" => ("funding", 0),    // starts empty, activates when funded
+        _ => ("open", body.amount),         // standard: escrow in place
+    };
+
+    lorehaven_db::bounties::create_bounty_typed(
         state.db(),
-        &id,
-        &account,
-        &body.job_kind,
-        &body.terms.to_string(),
-        body.amount,
-        &created_at,
+        &lorehaven_db::bounties::Bounty {
+            id: id.clone(),
+            bounty_type: body.bounty_type.clone(),
+            job_kind: body.job_kind,
+            terms: body.terms.to_string(),
+            amount: body.amount,
+            funded_amount: funded,
+            state: state_str.to_string(),
+            created_by: account,
+            created_at,
+            activated_at: None,
+        },
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     Ok(Json(json!({ "id": id, "created": true })))
+}
+
+/// Contribute to a crowdfunded bounty.
+#[derive(Debug, Deserialize)]
+pub struct ContributeBountyBody {
+    pub amount: i64,
+}
+
+pub async fn contribute_to_bounty(
+    State(state): State<AppState>,
+    Path(bounty_id): Path<String>,
+    RequireSession(user): RequireSession,
+    Json(body): Json<ContributeBountyBody>,
+) -> ApiResult<Json<Value>> {
+    let account = user.account_id.to_string();
+    let threshold = state.config().bounties.crowdfund_activation_threshold;
+    let (funded, activated) = lorehaven_db::bounties::contribute_to_bounty(
+        state.db(),
+        &bounty_id,
+        &account,
+        body.amount,
+        threshold,
+    )
+    .await
+    .map_err(|e| match e {
+        lorehaven_db::bounties::FlexibleBountyError::NotFound => {
+            ApiError(lorehaven_domain::AppError::NotFound {
+                resource: "bounty",
+            })
+        }
+        lorehaven_db::bounties::FlexibleBountyError::NotCrowdfunded => {
+            ApiError(lorehaven_domain::AppError::Validation {
+                message: "bounty is not crowdfunded".into(),
+                field_errors: Default::default(),
+            })
+        }
+        lorehaven_db::bounties::FlexibleBountyError::NotFunding => {
+            ApiError(lorehaven_domain::AppError::Validation {
+                message: "bounty is not accepting contributions".into(),
+                field_errors: Default::default(),
+            })
+        }
+        lorehaven_db::bounties::FlexibleBountyError::InvalidAmount => {
+            ApiError(lorehaven_domain::AppError::Validation {
+                message: "contribution must be positive".into(),
+                field_errors: Default::default(),
+            })
+        }
+        lorehaven_db::bounties::FlexibleBountyError::Sql(e) => {
+            ApiError(lorehaven_domain::AppError::Internal(e.into()))
+        }
+    })?;
+    Ok(Json(json!({ "funded_amount": funded, "activated": activated })))
 }
 
 /// Claim a bounty.
@@ -219,5 +315,6 @@ pub fn router() -> axum::Router<AppState> {
         .route("/usage", get(get_usage))
         .route("/bounties", get(list_bounties).post(create_bounty))
         .route("/bounties/{bounty_id}/claim", post(claim_bounty))
+        .route("/bounties/{bounty_id}/contribute", post(contribute_to_bounty))
         .route("/subscription", get(get_subscription))
 }
