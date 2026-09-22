@@ -42,6 +42,7 @@ export type RouteId =
   | 'doc-page'
   | 'quiz'
   | 'vanguard'
+  | 'directory'
   | 'planned'
   | 'not-found';
 
@@ -92,6 +93,7 @@ const FIXED_ROUTES: Record<string, RouteId> = {
   '/docs': 'docs',
   '/quiz': 'quiz',
   '/vanguard': 'vanguard',
+  '/directory': 'directory',
 };
 
 export interface RouteMatch {
