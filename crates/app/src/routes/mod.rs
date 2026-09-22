@@ -27,6 +27,7 @@ pub mod lending;
 pub mod library;
 pub mod marketplace;
 pub mod media;
+pub mod curator;
 pub mod media_resilience;
 pub mod meta;
 pub mod moderation;

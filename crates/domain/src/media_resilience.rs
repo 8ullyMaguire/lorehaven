@@ -177,10 +177,20 @@ mod tests {
     }
 
     #[test]
-    fn link_provider_display() {
+    fn curator_action_display() {
         use std::fmt::Write;
         let mut s = String::new();
-        write!(s, "{}", LinkProvider::InternetArchive).unwrap();
-        assert_eq!(s, "archive.org");
+        write!(s, "{}", CuratorAction::Rescue).unwrap();
+        assert_eq!(s, "rescue");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Phase 2 (§32.7.5): Curator verification types
+// ---------------------------------------------------------------------------
+
+vocabulary!(VerificationType, as_str, {
+    ExactMatch => "exact_match",
+    PerceptualMatch => "perceptual_match",
+    Reverify => "reverify",
+});

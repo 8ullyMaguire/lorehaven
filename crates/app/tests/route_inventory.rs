@@ -3035,6 +3035,58 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Pseudonymous,
     },
     // ------------------------------------------------------------------
+    // Curator role (spec §32.7.5)
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "curator.rs",
+        handler: "opt_in_curator",
+        method: "POST",
+        path: "/curators/opt-in",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "curator.rs",
+        handler: "opt_out_curator",
+        method: "POST",
+        path: "/curators/opt-out",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "curator.rs",
+        handler: "get_my_curator_status",
+        method: "GET",
+        path: "/curators/status",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "curator.rs",
+        handler: "list_curators",
+        method: "GET",
+        path: "/curators",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "curator.rs",
+        handler: "verify_link",
+        method: "POST",
+        path: "/media/references/{reference_id}/verify",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "curator.rs",
+        handler: "get_quorum_status",
+        method: "GET",
+        path: "/media/references/{reference_id}/quorum",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "curator.rs",
+        handler: "get_matching_bounties",
+        method: "GET",
+        path: "/curator/bounties",
+        audience: Audience::Public,
+    },
+    // ------------------------------------------------------------------
     // Discovery — additional routes not in main table (spec §16)
     // ------------------------------------------------------------------
     RouteEntry {

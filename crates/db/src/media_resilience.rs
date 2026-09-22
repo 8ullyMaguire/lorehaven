@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{FromRow, Row};
 use uuid::Uuid;
 
 use lorehaven_domain::media_resilience::{
@@ -467,4 +467,324 @@ pub async fn find_references_below_threshold(
         Backend::Postgres => sqlx::query_as::<_, MediaReference>(&sql).bind(threshold).bind(limit)
             .fetch_all(db.postgres_pool().expect("postgres")).await?,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 (§32.7.5): Curator role management
+// ---------------------------------------------------------------------------
+
+use lorehaven_domain::media_resilience::VerificationType;
+
+/// Opt an account into the curator role.
+pub async fn opt_in_curator(
+    db: &Database,
+    account_id: &str,
+) -> Result<(), sqlx::Error> {
+    let now = crate::identity::now_rfc3339();
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            sqlx::query(
+                "INSERT INTO curator_roles (account_id, opted_in_at, opted_in_by)
+                 VALUES (?, ?, 'self')
+                 ON CONFLICT(account_id)
+                 DO UPDATE SET opted_in_at = ?, opted_out_at = NULL",
+            )
+            .bind(account_id)
+            .bind(&now)
+            .bind(&now)
+            .execute(pool)
+            .await?;
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            sqlx::query(
+                "INSERT INTO curator_roles (account_id, opted_in_at, opted_in_by)
+                 VALUES ($1, $2, 'self')
+                 ON CONFLICT(account_id)
+                 DO UPDATE SET opted_in_at = $2, opted_out_at = NULL",
+            )
+            .bind(account_id)
+            .bind(&now)
+            .execute(pool)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Opt an account out of the curator role.
+pub async fn opt_out_curator(
+    db: &Database,
+    account_id: &str,
+) -> Result<(), sqlx::Error> {
+    let now = crate::identity::now_rfc3339();
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            sqlx::query("UPDATE curator_roles SET opted_out_at = ? WHERE account_id = ?")
+                .bind(&now)
+                .bind(account_id)
+                .execute(pool)
+                .await?;
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            sqlx::query("UPDATE curator_roles SET opted_out_at = $1 WHERE account_id = $2")
+                .bind(&now)
+                .bind(account_id)
+                .execute(pool)
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Check whether an account is an active curator.
+pub async fn is_active_curator(db: &Database, account_id: &str) -> Result<bool, sqlx::Error> {
+    let count: i64 = match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM curator_roles WHERE account_id = ? AND opted_out_at IS NULL",
+            )
+            .bind(account_id)
+            .fetch_one(pool)
+            .await?
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM curator_roles WHERE account_id = $1 AND opted_out_at IS NULL",
+            )
+            .bind(account_id)
+            .fetch_one(pool)
+            .await?
+        }
+    };
+    Ok(count > 0)
+}
+
+/// List all active curators.
+pub async fn list_active_curators(db: &Database) -> Result<Vec<String>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            let rows = sqlx::query(
+                "SELECT account_id FROM curator_roles WHERE opted_out_at IS NULL ORDER BY opted_in_at",
+            )
+            .fetch_all(pool)
+            .await?;
+            Ok(rows.iter().map(|r| r.get::<String, _>("account_id")).collect())
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            let rows = sqlx::query(
+                "SELECT account_id FROM curator_roles WHERE opted_out_at IS NULL ORDER BY opted_in_at",
+            )
+            .fetch_all(pool)
+            .await?;
+            Ok(rows.iter().map(|r| r.get::<String, _>("account_id")).collect())
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 (§32.7.5): Link verifications (quorum)
+// ---------------------------------------------------------------------------
+
+/// Record a curator verification of an availability link.
+pub async fn record_link_verification(
+    db: &Database,
+    id: &str,
+    availability_link_id: &str,
+    media_reference_id: &str,
+    curator_id: &str,
+    verification_type: VerificationType,
+    confidence: f64,
+) -> Result<(), sqlx::Error> {
+    let now = crate::identity::now_rfc3339();
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            sqlx::query(
+                "INSERT INTO link_verifications
+                    (id, availability_link_id, media_reference_id, curator_id,
+                     verification_type, confidence, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(availability_link_id, curator_id) DO UPDATE SET
+                     verification_type = ?, confidence = ?, created_at = ?",
+            )
+            .bind(id)
+            .bind(availability_link_id)
+            .bind(media_reference_id)
+            .bind(curator_id)
+            .bind(verification_type.as_str())
+            .bind(confidence)
+            .bind(&now)
+            .bind(verification_type.as_str())
+            .bind(confidence)
+            .bind(&now)
+            .execute(pool)
+            .await?;
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            sqlx::query(
+                "INSERT INTO link_verifications
+                    (id, availability_link_id, media_reference_id, curator_id,
+                     verification_type, confidence, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 ON CONFLICT(availability_link_id, curator_id) DO UPDATE SET
+                     verification_type = $5, confidence = $6, created_at = $7",
+            )
+            .bind(id)
+            .bind(availability_link_id)
+            .bind(media_reference_id)
+            .bind(curator_id)
+            .bind(verification_type.as_str())
+            .bind(confidence)
+            .bind(&now)
+            .execute(pool)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Count the number of independent curators who verified a specific link.
+pub async fn count_link_verifiers(
+    db: &Database,
+    availability_link_id: &str,
+) -> Result<i64, sqlx::Error> {
+    let count: i64 = match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            sqlx::query_scalar(
+                "SELECT COUNT(DISTINCT curator_id) FROM link_verifications WHERE availability_link_id = ?",
+            )
+            .bind(availability_link_id)
+            .fetch_one(pool)
+            .await?
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            sqlx::query_scalar(
+                "SELECT COUNT(DISTINCT curator_id) FROM link_verifications WHERE availability_link_id = $1",
+            )
+            .bind(availability_link_id)
+            .fetch_one(pool)
+            .await?
+        }
+    };
+    Ok(count)
+}
+
+/// Check whether a link has reached quorum (2+ independent verifications).
+pub async fn has_quorum(
+    db: &Database,
+    availability_link_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let count = count_link_verifiers(db, availability_link_id).await?;
+    Ok(count >= 2)
+}
+
+/// Check whether a specific curator has verified a link (prevents self-verification gaming).
+pub async fn curator_verified_link(
+    db: &Database,
+    curator_id: &str,
+    availability_link_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let count: i64 = match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM link_verifications WHERE curator_id = ? AND availability_link_id = ?",
+            )
+            .bind(curator_id)
+            .bind(availability_link_id)
+            .fetch_one(pool)
+            .await?
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM link_verifications WHERE curator_id = $1 AND availability_link_id = $2",
+            )
+            .bind(curator_id)
+            .bind(availability_link_id)
+            .fetch_one(pool)
+            .await?
+        }
+    };
+    Ok(count > 0)
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 (§32.7.5): Standing bounty matching
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct MatchedBounty {
+    pub bounty_id: String,
+    pub name: String,
+    pub reward: i64,
+    pub provider: Option<String>,
+    pub healthy_links_below: Option<i64>,
+}
+
+/// Find active standing bounties that match a given media reference.
+pub async fn find_matching_standing_bounties(
+    db: &Database,
+    media_reference_id: &str,
+    healthy_count: i64,
+    _admin_rating: i64,
+    has_archive_link: bool,
+) -> Result<Vec<MatchedBounty>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            let rows = sqlx::query(
+                "SELECT id, name, reward, provider, healthy_links_below
+                 FROM curator_standing_bounties
+                 WHERE enabled = 1
+                   AND (healthy_links_below IS NULL OR healthy_links_below > ?)
+                   AND (has_archive_link = 0 OR ? = 0)
+                 ORDER BY reward DESC",
+            )
+            .bind(healthy_count)
+            .bind(if has_archive_link { 1 } else { 0 })
+            .fetch_all(pool)
+            .await?;
+            Ok(rows.iter().map(|r| MatchedBounty {
+                bounty_id: r.get::<String, _>("id"),
+                name: r.get::<String, _>("name"),
+                reward: r.get::<i64, _>("reward"),
+                provider: r.get::<Option<String>, _>("provider"),
+                healthy_links_below: r.get::<Option<i64>, _>("healthy_links_below"),
+            }).collect())
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            let rows = sqlx::query(
+                "SELECT id, name, reward, provider, healthy_links_below
+                 FROM curator_standing_bounties
+                 WHERE enabled = true
+                   AND (healthy_links_below IS NULL OR healthy_links_below > $1)
+                   AND (has_archive_link = false OR $2 = false)
+                 ORDER BY reward DESC",
+            )
+            .bind(healthy_count)
+            .bind(has_archive_link)
+            .fetch_all(pool)
+            .await?;
+            Ok(rows.iter().map(|r| MatchedBounty {
+                bounty_id: r.get::<String, _>("id"),
+                name: r.get::<String, _>("name"),
+                reward: r.get::<i64, _>("reward"),
+                provider: r.get::<Option<String>, _>("provider"),
+                healthy_links_below: r.get::<Option<i64>, _>("healthy_links_below"),
+            }).collect())
+        }
+    }
 }
