@@ -163,7 +163,7 @@ Store decisions in `docs/adr/`:
 0010-translation-pipeline.md
 0011-credit-and-billing-model.md
 0012-analytics-and-retention.md
-0013-no-gamification-decision.md
+0013-gamification-and-quality-metrics.md
 0014-declarative-recipes-vs-scripting.md
 0015-shadowban-policy.md
 0016-presence-and-typing-indicators.md
@@ -171,6 +171,8 @@ Store decisions in `docs/adr/`:
 0018-ai-crawler-posture.md
 0019-media-entity-model.md
 0020-redistribution-floor.md
+0021-browse-ordering-contract.md
+0022-demand-weight.md
 ```
 
 ## 1.5 Features do not override foundational protections
@@ -180,7 +182,7 @@ No feature—including a paid or admin-configured one—may:
 - Reveal hidden pseud linkage.
 - Bypass content eligibility checks.
 - Purchase trust, ranking, or moderation authority.
-- Introduce XP, levels, or reputation scores.
+- Reward output volume, or compound it into a ladder. Leaderboards, badges, bounties, and credits are permitted; their metrics must measure quality and the instance's declared themes (§0.4) — completion, positive feedback, contribution to the body of available fiction — never word count, post count, works published, or time online. Recognition is episodic (a leaderboard period, an achievement) or spendable (a credit), never a lifetime personal total (§9.7.1).
 - Disable meaningful recommendation opt-out.
 - Remove the free core.
 - Publish machine translations as human work.
@@ -606,7 +608,7 @@ Alias uniqueness is scoped by type and namespace. Relationship participant sets 
 | Governance | trust_policies, trust_history, expertise, role_assignments, reports, cases, proposals, votes, sanctions, appeals, audit_events, process_feedback, quorum_records, shadowban_actions |
 | Economy | wallets, ledger_transactions, ledger_entries, credit_holds, subscriptions, payment_events, bounties, entitlements, work_pricing, work_entitlements, author_earnings_ledger, payouts, monetization_assertions, pool_b_distributions, monetization_period_summaries, work_ai_declarations |
 | Extensions | packages, package_versions, manifests, installations, grants, reviews, approvals, execution_usage, revocations, extension_purchases, extension_ratings, webhook_subscriptions |
-| Discovery | user_preferences, taste_profiles, taste_profile_versions, permitted_signals, exposure_events, aggregate_affinities, similarity_suggestions, similarity_votes, recommendation_recipes, recipe_versions, diversity_budgets, editorial_picks |
+| Discovery | user_preferences, taste_profiles, taste_profile_versions, permitted_signals, exposure_events, aggregate_affinities, similarity_suggestions, similarity_votes, recommendation_recipes, recipe_versions, diversity_budgets, editorial_picks, browse_sort_preferences, taste_sources, taste_source_members, demand_weights, demand_weight_history, demand_signal_events, demand_diversity_state |
 | Interface | dashboard_layouts, widget_instances, user_locale_preferences, navigation_customizations |
 | Integrations | notifications, notification_preferences, push_subscriptions, feed_tokens, federation_actors, federation_deliveries, delivery_addresses, bot_links, sitemap_state |
 | Translation | translation_requests, translation_jobs, translation_reviews, translated_works, translation_permissions, translation_memory_entries |
@@ -1175,7 +1177,9 @@ Rules:
 
 - **Never punish inactivity.** Missing a day costs nothing. Streaks reset without guilt messaging.
 - **Never create anxiety.** No "your streak will break" notifications. No loss-framed language.
-- **Reward quality, not volume.** Completion rates and positive feedback multiply author earnings. Raw word count and post count do not.
+- **Reward quality, not volume.** Completion rates and positive feedback multiply author earnings. Raw word count and post count do not. This governs every gamification surface, not only credits: a badge, a leaderboard position, a bounty, or a credit must be earned from quality signals (§9.7.4), reader behavior, and contribution to the body of available fiction — never from output volume, tenure, or spend.
+- **Episodic, never cumulative.** Recognition resets. A leaderboard period closes and a placement expires with it; a badge records that something happened once; a credit is spent. There is no XP bar, no level, no lifetime point total and no cross-surface reputation score, so a past contribution cannot compound into present standing. A per-surface signal that decays on a schedule and confers nothing — §35.2's forum karma is the existing example — is permitted precisely because it neither compounds nor authorizes anything (§9.7.5, §9.7.6, §28.10).
+- **Recognition, never a gate.** A badge, a leaderboard placement, or a credit balance never gates a feature the free core provides (§0.3), never rank-gates participation, and never confers governance authority (§19.1).
 - **Credits and trust are separate.** Earning credits never advances trust level. Trust requires reviewed conduct.
 - **Admin taste is invisible.** The taste multiplier affects author credit amounts silently. No user-facing label, breakdown, or hint reveals the administrator's preferences.
 
@@ -1293,7 +1297,9 @@ No mention of "trending category," "demand bonus," "admin taste," or any label t
 | Top Importers | Works imported from new sources |
 | Top Discoverers | Unique fandoms/moods read |
 
-**Deliberately absent:** most words written, most posts, most kudos given, longest streak, any global XP ranking.
+**Deliberately absent:** most words written, most posts, most kudos given, longest streak, and every ranking whose metric is output volume. A category's metric must be a quality signal (§9.7.4) or a declared public topic (§0.4.1).
+
+**No all-time board.** Every category is windowed — daily, weekly, monthly — and a placement expires with its window. There is no all-time board and no cumulative score, so winning a period is a moment rather than an asset (§9.7.1's episodic rule). A period's reward is paid once and the board starts empty.
 
 **Display:**
 
@@ -1365,6 +1371,7 @@ Seasonal events run for 4–8 weeks with boosted multipliers (1.5x completion cr
 - Users feature up to 6 badges on their profile.
 - Badge catalog at `/badges` with all available badges, conditions, and global counts.
 - No badge gates a feature. No badge grants trust.
+- **Badges are achievements, not levels.** A badge count is never summed into a rank, never orders a leaderboard, and never becomes a lifetime tally: a badge records that something happened once (§9.7.1).
 
 ### 9.7.7 Streaks
 
@@ -2276,7 +2283,7 @@ Sanitize highlighting output. Strip executable markup before indexing. Index rev
 
 ## 15.10 Ranking
 
-Only primary tags add tag-ranking boosts. Secondary tags remain filterable. Exact search is not taste-steered. Document scoring differences between database backends while keeping filtering and authorization consistent.
+Only primary tags add tag-ranking boosts. Secondary tags remain filterable. Exact search is not taste-steered. Ordering on browse surfaces is governed separately by §43: `best-match` and any literal query are exempt from `for-you`, and the quality ordering shown here is what §43 calls `top`. Document scoring differences between database backends while keeping filtering and authorization consistent.
 
 Additional signals for non-exact discovery:
 
@@ -2386,7 +2393,7 @@ All candidates pass shared eligibility rules.
 
 Private bookmark and rating data are not silently pooled. Use explicitly permitted signals, aggregation thresholds, documented retention.
 
-**Feed reason transparency.** Every feed response may include, per item, the recipe reason — which of the reader's own recipe terms matched ("because: fandom:HP, tag:time travel"). This is the `reason` field of the engine contract (§16.1); surfacing it to its owner is the default. It is explicitly distinct from the administrator-influence secrecy rule (§0.3): truth about one's own feed costs nothing, and §16.5's dial governs the part that is not the reader's own.
+**Feed reason transparency.** Every feed response may include, per item, the recipe reason — which of the reader's own recipe terms matched ("because: fandom:HP, tag:time travel"). This is the `reason` field of the engine contract (§16.1); surfacing it to its owner is the default. It is explicitly distinct from the administrator-influence secrecy rule (§0.3): truth about one's own feed costs nothing, and §16.5's dial governs the part that is not the reader's own. A reason may name an *instance-level* term only for a topic declared `public = true` (§0.4); otherwise it degrades to one undifferentiated line (§16.16.2).
 
 ## 16.2 Administrator taste profile
 
@@ -2419,7 +2426,7 @@ Setting:
 
 > Include this instance's evolving discovery preferences alongside your own interests.
 
-The control is a **dial, not a switch**: a weight from zero to the maximum the instance allows. Zero removes administrator influence from candidate generation, ranking, reranking, recipes, dashboard widgets, prompts, challenges, notifications, and cached recommendations. Any weight above zero is stated to the reader in plain words ("a little", "some", "as the operator suggests") without exposing numbers that invite inference.
+The control is a **dial, not a switch**: a weight from zero to the maximum the instance allows. Zero removes administrator influence from candidate generation, ranking, reranking, recipes, dashboard widgets, prompts, challenges, notifications, and cached recommendations. Those surfaces are enumerated in §43.1, and the dial covers every one of them; there is no separate per-surface strength control (§43.4). Any weight above zero is stated to the reader in plain words ("a little", "some", "as the operator suggests") without exposing numbers that invite inference.
 
 Individual recommendations need not carry administrator-specific labels, but explanations must not be fabricated.
 
@@ -2504,7 +2511,7 @@ Curator picks:
 /admin/discovery
 ```
 
-Controls: taste source, signal inclusion, learning pause, influence pause, recency, weights, profile history, reset and rollback, aggregate evaluation, recommendation cache invalidation, diversity budget tuning, temporary boosts, editorial pick slots.
+Controls: taste sources and their membership (§16.15), signal inclusion, learning pause, influence pause, recency, weights, the §16.16 weighting mode and its floor/ceiling bounds, the demand diversity budget, profile history, reset and rollback, aggregate evaluation, recommendation cache invalidation, diversity budget tuning, temporary boosts, editorial pick slots, the browse-sort defaults of §43.4, and the §43.6 per-surface exposure report.
 
 ## 16.13 New voices and the cold start
 
@@ -2517,6 +2524,199 @@ A first work has no readers, and a reader choosing between two unknown works pic
 - **The slot's effect is measured and reported** to the administrator like any other discovery surface, including whether works it surfaced are continued by their authors.
 
 Nothing here overrides a reader's stated preferences, and no reader's discovery is flooded by new works: the slot is bounded, labeled and excludable.
+
+### 16.15 Taste sources
+
+§16.2 defines *a* profile: the administrator's. An instance may instead — or also — steer by one
+or more **taste sources**, so "what this instance is about" can be drawn from the operator, a
+configured subset of users, or a role, without becoming a second mechanism.
+
+```toml
+[discovery.taste_sources]
+sources = [
+  { kind = "admin" },
+  { kind = "cohort", members = ["pseud-a", "pseud-b", "pseud-c", "pseud-d", "pseud-e"] },
+  { kind = "roles", roles = ["tl4+"], min_members = 5 },
+]
+```
+
+- **Cohort floor.** A cohort or role source needs at least `min_members` (default 5) distinct
+  accounts, validated at startup (§38.1). Below that the source is refused with a named reason: a
+  small cohort *is* a person, and the operator's taste would be inferable from its public reading,
+  which §0.3 forbids.
+- **Opt-in and withdrawal.** A cohort member consents before contributing and may withdraw, at
+  which point the source recomputes from what remains. A member never learns *how much* their
+  behaviour moved a result — the §39.4 silence contract.
+- **The §16.2 exclusions are absolute.** Moderation sessions, troubleshooting, import tests and
+  accidental opens are never signals, from any source.
+- **One dial.** §16.5's weight governs the *combined* influence. There is no per-source dial: a
+  per-source control would reveal the source structure the cohort floor exists to hide.
+- **Versioning and rollback.** Each source keeps §16.2's profile version history, so an operator
+  can see what changed, when, and revert it.
+- **Reason fields.** §16.1's `reason` may name an instance term only for a topic declared
+  `public = true` (§0.4). Otherwise it degrades to one undifferentiated line, which is the single
+  shape §16.3 permits for instance influence.
+
+**Acceptance.** A cohort of four accounts is refused at startup and a cohort of five is accepted.
+No member can distinguish "my contribution mattered" from "it did not". Withdrawing a member
+recomputes the profile and changes no other reader's dial value. A private-topic instance never
+emits a theme term in a reason field.
+
+### 16.16 Demand weight — a reader's pull on unwritten content
+
+A reader's **demand** signals — a wishlist vote (§18.5), a bounty's visibility and queue position
+(§20.5), a prompt vote (§18.5), which "write next" opportunity surfaces first (§16.9) — carry a
+weight. That weight decides what this instance asks for next. It never affects a published work's
+search or discovery rank (§15.10), never affects trust or governance (§19.1, §34.3), and is never
+purchased (§0.3).
+
+```text
+demand_weight = trust_multiplier(trust_level)           // safety ramp, §19.1 ladder
+              × taste_multiplier(theme_affinity)        // silent; floor … ceiling
+              × contribution_multiplier(domain_record)  // earned; windowed, decaying
+```
+
+**Every bound is configuration, not a constant:**
+
+```toml
+[weighting]
+mode = "trust_taste_contribution"  # flat | trust | trust_taste | trust_taste_contribution
+taste_floor = 0.75                 # the taste multiplier's floor — operator-configurable
+taste_ceiling = 1.25               # its ceiling — operator-configurable
+contribution_floor = 1.0           # the contribution multiplier's floor
+contribution_ceiling = 2.0         # its ceiling
+contribution_window_days = 180     # how far back contribution is counted
+demand_diversity_percent = 20      # must be > 0 (§16.4's precedent)
+```
+
+`mode = "flat"` is the off switch and is always available: every demand signal weighs 1, exactly
+as `[directory].vote_weighting = "flat"` already does for §39.4. Widening the range is the
+operator's call; what no configuration can do is reverse a plain majority (§16.16.3).
+
+**There is no XP, level, points or reputation value here, and this section deliberately
+introduces no new unit.** The weight is computed when it is used, from signals the instance
+already keeps, and is never accumulated into a number a user owns, earns, or can point at. Where
+recognition is meant to be *visible*, it is episodic — §9.7.5's weekly and monthly leaderboards
+and §9.7.6's badges — and the reader-facing reward for the same behaviours is a badge, a
+placement, or credits.
+
+#### 16.16.1 What the contribution term may count
+
+This list is the specification. A metric outside it is a defect to fix, not a weight to tune.
+
+| May count | Never counts |
+|---|---|
+| Finishing works with strong §9.7.4 quality signals, **in the domain the demand item belongs to** | Chapters read, works published, words written, posts made, hours online, days logged in |
+| Bringing the instance works it did not have: a new-to-instance import, a first translation, a first narration edition (§11, §22, §24) | Re-importing a work the instance already had |
+| Fulfilling demand: a wishlist item or a bounty, requester-confirmed (§9.7.2) | Fulfilling one's own request, or a request from an account with the same owner |
+| Curatorial labour that survived review: accepted canonicalisation (§15.11), approved quorum decisions (§19.4), §33.3's tag-wrangling queue | Votes or reports filed without review; sanctions issued; proposals rejected |
+| Positive feedback *delivered*: a comment that passed §12 and reached its author; a constructive review where the author opted in | Reactions alone, ratings alone, private bookmarks |
+| Recency-weighted quality: §41.1's half-life on the works involved | Account age, credit balance, subscription tier, bounty size, follower count |
+
+Two clarifications, because both are easy to get wrong:
+
+- **The term is domain-scoped and windowed.** Contribution to fandom A does not lift a reader's
+  weight on a demand item in fandom B, and it decays on a documented half-life over
+  `contribution_window_days`, so a weight reflects recent work rather than a historical high-water
+  mark. Otherwise an instance's early contributors would hold the demand queue permanently.
+- **Quality is uncontested quality.** A work §33.2 marks `contested` contributes nothing until a
+  quorum clears it, and the §9.7.8 anti-gaming rules (time-on-page, unique accounts, pseud
+  isolation, self-action exclusion) apply unchanged.
+
+#### 16.16.2 What is visible
+
+| Instance declares | Mechanism documented? | A reader may see their own weight? | Reason fields may cite theme terms? |
+|---|---|---|---|
+| ≥1 topic `public = true` | yes — plain words, no numbers | yes, in coarse buckets ("a little", "some", "as the operator suggests") | yes, for public topics only |
+| only `public = false` topics | mechanism documented, **components never** | **no, never** | no — one undifferentiated line |
+| no topics declared (the default) | mechanism documented, **components never** | **no, never** | no — one undifferentiated line |
+
+The mechanism is always documented; the *components* are what silence protects. §0.4.3's default —
+"Kink-focused instances are the default; declaring anything is the deliberate act" — therefore puts
+the default in the silent column, which is the safe direction. No weight appears in any API
+response, export, error message or log line, and a test asserts the absence rather than trusting
+the review (§41.3's pattern).
+
+#### 16.16.3 The guards
+
+Three properties hold under every configuration, and the first two close gaps that exist in §39.4
+today:
+
+1. **The floor is relative to the ceiling.** `taste_floor × taste_ceiling ≤ 1.0` must hold, so a
+   single aligned vote can never outweigh two unaligned votes of equal trust. Startup refuses a
+   configuration that breaks it, and the effective floor and ceiling are published on
+   `/api/v1/meta` beside the instance's other operator-policy disclosures (§0.4.3, §20.10.7).
+2. **Majority integrity.** A weighted bloc may **reorder** demand; it may never **reverse** a
+   plain majority. Concretely: while `mode ≠ flat`, a demand outcome follows the weighted score
+   only while the unweighted (one-account-one-vote) outcome agrees; if the two disagree on the
+   outcome — which item surfaces first, which bounty is promoted, which proposal passes — the
+   decision routes to §19.4 quorum review instead of resolving on weights. This is the property
+   that keeps a taste-weighted queue from becoming a taste-filtered one.
+3. **A demand diversity budget.** `demand_diversity_percent` (default 20, must be `> 0`) of the
+   demand the instance surfaces must carry **no** boost from any term — the §16.4 diversity budget
+   applied to supply rather than to display. §16.4 already establishes the shape: configurable,
+   default non-zero, and the mechanism that keeps an instance from becoming monothematic.
+
+#### 16.16.4 What demand weight never does
+
+1. **It never ranks published works.** A work's search or discovery position is decided by §15.10,
+   never by its author's or its voters' weight; otherwise an aligned reader becomes a marketing
+   channel and §0.3's ban on purchased ranking acquires an alignment-shaped loophole.
+2. **It never converts money into influence.** Bounty size buys fulfillment priority — that is what
+   escrow is for — and contributes **zero** to the weight. §33.2's rule for rating weights ("from
+   trust alone, never from credits, subscriptions, bounties or marketplace revenue") applies here
+   unchanged, and now explicitly includes any future gamification unit.
+3. **It never touches trust, moderation, quorum or sanctions** (§19.1, §19.2, §34.3). It is a
+   demand signal; it is not a safety signal.
+4. **It never obligates an author.** §18.5 stands: votes surface demand and do not obligate
+   anyone; §16.9's rule against inventing human sponsors, commissions or community demand stands
+   too.
+
+#### 16.16.5 Tables
+
+| Table | Important fields |
+|---|---|
+| `taste_sources` | id, kind (admin/cohort/roles), config_json, min_members, created_at, disabled_at |
+| `taste_source_members` | source_id, account_id, consent_at, withdrawn_at |
+| `demand_weights` | account_id, domain_key (fandom/tag scope), weight_bp, trust_component_bp, taste_component_bp, contribution_component_bp, computed_at, expires_at |
+| `demand_weight_history` | id, account_id, domain_key, weight_bp, reason, computed_at |
+| `demand_signal_events` | id, account_id, domain_key, signal_kind, reference_id, weight_bp, created_at, expires_at |
+| `demand_diversity_state` | period, surfaced_with_boost, surfaced_without_boost, budget_percent |
+
+`demand_weights` is ciphertext-of-intent — a computed number kept for audit and recomputation —
+and no endpoint serialises it (§16.16.2).
+
+**Acceptance.**
+
+- With `mode = "flat"`, every demand signal weighs 1 and the ordering is identical to the
+  unweighted one.
+- A TL4 vote and a TL0 vote on the same wishlist item move its demand score by different amounts
+  under `trust_taste_contribution`, and by the same amount under `flat`.
+- Two readers with identical contribution records but disjoint domains have different weights on a
+  demand item in fandom A, and identical weights on an item in neither.
+- A configuration with `taste_floor × taste_ceiling > 1.0` is refused at startup with a named
+  reason; the effective bounds are readable on `/api/v1/meta`.
+- Twenty aligned high-weight accounts and two hundred unaligned voters reach opposite outcomes only
+  by routing to §19.4 quorum review; the weighted result never silently overturns the unweighted
+  one.
+- A funded bounty raises its own fulfillment priority and changes the funder's weight by zero.
+- At least `demand_diversity_percent` of surfaced demand carries no boost; setting the value to
+  zero is refused.
+- No endpoint, export, error message or log line contains a weight, a component, or a reason
+  naming a private topic; the absence is asserted by test.
+- Removing a cohort member recomputes the affected profiles, and no remaining reader's dial value
+  changes.
+
+#### 16.16.6 What this section deliberately does not do
+
+- **No new unit.** No XP, levels, points, reputation or "standing" — the weight is a computation, not an asset (§9.7.1's episodic rule, §28.10). §35.2's forum karma is neither extended nor reused for this.
+- **No reader-facing progress toward influence.** A progress bar toward power over what others
+  write is a streak-shaped dark pattern (§0.2). Recognition is where progress lives: a badge, a
+  leaderboard period, a credit balance.
+- **No obligation, no commission, no promise.** A high weight makes a request louder, never more
+  likely to be fulfilled than an author decides.
+- **No second dial.** §16.5's single weight governs instance influence everywhere; this section
+  adds none.
 
 ## 16.14 Freshness
 
@@ -2539,6 +2739,9 @@ Recency is already an input to ranking; freshness is the reader-facing statement
 - Recipes cannot execute arbitrary code.
 - Dashboard reset works even with a broken widget.
 - Taste alignment never affects governance or trust.
+- Taste alignment never adds to a recognition a user can see; the leaderboards and badges of §9.7.5–§9.7.6 are earned from quality signals alone (§16.16.1).
+- A reason names an instance term only when the topic is public (§16.15, §16.16.2).
+- A demand outcome is never reversed by weights against a plain unweighted majority (§16.16.3).
 - Diversity budgets are honored under load.
 - Request candidates only scan the requesting user's own content.
 
@@ -2692,7 +2895,7 @@ claim, deadline and reveal machinery, not a hard-coded event type.
 
 **Finished-work reading challenges:** "Read 5 completed fics under 10k words this month." Encourages completed-work reading.
 
-Reading challenge completion is private by default and grants a recurring badge plus its credit bonus (9.7.6). It produces no public ranking, no XP, and no trust reward.
+Reading challenge completion is private by default and grants a recurring badge plus its credit bonus (9.7.6). It produces no public ranking and no trust reward.
 
 ## 18.3 Mentorship and beta-reading
 
@@ -2721,7 +2924,7 @@ Wishlists are public boards where anyone can post "I'd love a fic where X." Othe
 
 Admin wishlist items are marked as such but do not receive preferential featuring.
 
-Wishlist voting surfaces demand. Vote counts are visible to all users and to potential fulfillers. Votes do not obligate authors.
+Wishlist voting surfaces demand, weighted by §16.16's demand weight. Vote counts are visible to all users and to potential fulfillers as an aggregate; a per-user weight is never shown to anyone (§16.16.2). Votes do not obligate authors.
 
 ## 18.6 Editorial curator picks
 
@@ -2828,6 +3031,11 @@ Trust is not calculated from XP, post count, kudos received, credits earned, or 
 ## 19.2 Effects
 
 Trust may increase rate limits, batch sizes, proposal eligibility, curator eligibility, extension resource ceilings, gift/bounty limits, moderation queue eligibility, wishlist claim priority, invite-code issuance quota.
+
+Trust is also the *safety ramp* of §16.16's demand weight: a week-old account's demand counts for
+less, which is the same question §9.7.8 answers for author credits. That is trust used as an input,
+never trust computed from an input — no trust level is derived from a demand weight, and no demand
+weight grants trust.
 
 It does not automatically grant private-message access or administrator powers.
 
@@ -3110,6 +3318,11 @@ Alternatives: `expired | disputed | refunded | canceled`.
 Define deadlines, evidence, disputes, and acceptance authority before enabling transfers.
 
 Wishlist items may optionally be funded with a bounty. Non-funded wishlist items remain valid.
+
+A bounty's size buys fulfillment priority for its own request and nothing else: it contributes zero
+to its funder's §16.16 demand weight, so money can never become influence over what the instance
+asks for next. Before bounties are enabled, the operator states deadlines, evidence, disputes and
+acceptance authority (§20.5), and the §16.16 weighting mode is visible on `/api/v1/meta`.
 
 ## 20.6 Subscriptions
 
@@ -4174,6 +4387,39 @@ Automate:
 58. Subscriber reads author A for 30 minutes and author B for 10 → verify Pool A attribution splits 75/25 → verify the earnings ledger shows the reading-time weights.
 59. Operator changes the cap multiplier → verify /api/v1/meta shows the pending change and its effective date 90 days out → verify the old multiplier still applies until then.
 60. New account (15 days old, TL0) meets no other exclusion → verify Pool B excludes it → verify the account sees the reason.
+61. Browse `/fandoms/HP` → `for-you` first → switch to `new` → paginate to the last page → the last
+    page contains a work `for-you` ranked 500th → verify the reachable set and both counts are
+    identical under the two sorts.
+62. Anonymous visitor on an instance with undeclared topics → verify the browse default is neutral
+    and no reason field names a theme term.
+63. Operator declares one public topic → verify `/api/v1/meta` names it, the mechanism becomes
+    documented, and a reader may see a coarse bucket for their own weight; declare it private
+    instead → verify the bucket disappears and reasons degrade to one undifferentiated line.
+64. Operator configures a cohort taste source of 3 accounts → verify startup refuses with a named
+    reason; configure 5 → verify the source is accepted, and after one member withdraws the profile
+    recomputes and no other reader's dial value changes.
+65. Two readers (one aligned, one not) upvote the same wishlist item → verify the demand score moves
+    differently for each → verify neither reader can see any weight, component or attribution.
+66. Twenty aligned accounts upvote one bounty while two hundred readers upvote another → verify the
+    unweighted majority is not reversed, and the disagreement routes to §19.4 quorum review.
+67. Operator funds a large bounty with purchased credits → verify the bounty's fulfillment priority
+    rises and its funder's demand weight does not move at all.
+68. Operator sets `demand_diversity_percent` to 20 → verify at least 20% of surfaced demand carried
+    no boost; set it to 0, or set `taste_floor × taste_ceiling > 1.0` → verify startup refuses both.
+69. Two readers with identical contribution records in disjoint fandoms vote on the same item in
+    fandom A → verify their weights differ there and match on an item in neither fandom.
+70. One author publishes twelve mediocre works, another publishes one excellent work → verify the
+    §9.7.4 quality signals separate them and the excellent work wins `top`, and no surface ranks the
+    twelve by count.
+71. Operator attempts a leaderboard category whose metric is words written or hours online, or an
+    all-time placement → verify neither can be configured (§9.7.5, §28.10).
+72. Reader contributes heavily, then stops for six months → verify their demand weight decays below
+    a currently-contributing reader's, and that nothing anywhere accrued a lifetime tally.
+73. Reader wins first place in a weekly leaderboard category → verify the reward is paid once, the
+    next period starts empty, and no level, XP or all-time board exists to display the win.
+74. Every §43.1 surface is probed with an unknown `sort` value, then with `for-you` while signed out
+    on a private-topic instance → verify a named error in the first case and a neutral order in the
+    second.
 
 ## 25.2 Security tests
 
@@ -4442,9 +4688,9 @@ The tutorial, contextual help, API documentation, and operator documentation des
 
 ## 28.10 Deliberately not adopted
 
-- **XP and level progression.** No 100-level system, no XP bars, no rank-gated features. Gamification uses flat credit rewards, quality multipliers, and badges — not cumulative progression ladders.
-- **Volume-based leaderboards.** No "most words written," "most posts," or "most kudos given" categories. Leaderboards reward completion, quality, and contribution.
-- **Reputation scores.** No visible score derived from activity volume that determines trust or governance authority. Trust requires reviewed conduct.
+- **XP and level progression.** Not adopted. A lifetime personal counter — XP, levels, points — is refused for the same reason this section's metric rule exists: it compounds, so it ends up rewarding tenure and volume, it demands a source for every action, and it turns recognition into a race (§9.7.1). What replaces it is episodic and needs no new vocabulary: weekly and monthly leaderboards (§9.7.5) and badges (§9.7.6).
+- **Volume-based leaderboards.** No "most words written," "most posts," or "most kudos given" categories, and no operator-added category whose metric is volume — for every category, including a per-public-topic one (§0.4.1), the metric is a quality or theme signal. A volume metric in a leaderboard is a specification error, not a configuration choice. No category is all-time: a placement expires with its window (§9.7.5).
+- **Reputation scores.** Not adopted. Three things are refused: a lifetime personal total (XP, levels, points); a score that spans surfaces and compounds; and any score at all — visible or not — that determines trust or governance authority. A per-surface signal that decays on a schedule, confers nothing and weights nothing — §35.2's forum karma — is the boundary case, and it stays what it already is: it displays and does nothing.
 - **Coercive streak mechanics.** No guilt-framed loss notifications, no streak-length credit multipliers, no "your streak will break" push notifications. Streaks are cosmetic with optional freezes.
 - **Purchased trust or governance authority.** Credits buy compute priority, not moderation power or search ranking.
 - **Visible admin taste influence.** The demand multiplier affecting author credits is never labeled, broken down, or hinted at in any user-facing surface. Authors see quality bonuses based on reader behavior only.
@@ -4500,6 +4746,12 @@ The tutorial, contextual help, API documentation, and operator documentation des
 - [ ] Credit earnings never affect trust level.
 - [ ] Same-account pseuds cannot farm each other's author credits.
 - [ ] New/low-trust accounts cannot farm author credits through reactions.
+- [ ] No XP, level, lifetime point total or cross-surface reputation score exists on any surface; the only permitted per-surface signal is one that decays and confers nothing (§9.7.1, §35.2).
+- [ ] No leaderboard category's metric is volume, and no category is all-time (§9.7.5, §28.10).
+- [ ] A badge count never sums into a rank, gates a feature or orders a leaderboard (§9.7.6).
+- [ ] Under every `sort` value, the reachable set for one filter is identical (§43.3).
+- [ ] No demand weight, weight component or weight-derived label appears in any response, export, error or log line (§16.16.2).
+- [ ] A weighted demand result never silently overturns the unweighted one (§16.16.3).
 
 ## 28.12 Community roadmap
 
@@ -5668,8 +5920,8 @@ prior 7-day window not used in the prior 30 days.
 
 **Adoption.** A user may "adopt" a prompt — a public commitment to write
 for it. An adopted prompt shows the adopting pseud's name and an optional
-accountability timer. Adopting earns XP; completing (publishing a linked
-work) earns more.
+accountability timer. Adopting earns credits; completing (publishing a linked
+work) earns more and a badge (§9.7.6).
 
 **Response feed.** Every prompt page shows a feed of linked works, ordered
 by publication date. A work is linked when the author selects the prompt
@@ -5678,7 +5930,7 @@ at publication time or adds it later via the work editor.
 **Acceptance.**
 - A prompt submitted by a user appears in the voting feed.
 - The daily prompt is the highest-voted unused prompt in the prior 24h.
-- Adopting a prompt earns XP; publishing a linked work earns more XP.
+- Adopting a prompt earns credits; publishing a linked work earns more and a badge.
 - A work linked to the prompt appears in the prompt's response feed.
 - A user who submits four prompts in 24 hours is rate-limited on the
   fourth.
@@ -5757,9 +6009,10 @@ useful? The rating is visible to future authors considering that beta
 reader. Ratings are never anonymous — a pseud is always attached to a
 rating.
 
-**XP.** The beta reader earns XP for completing a beta. The author earns
-XP for leaving a rating. A beta reader who completes five betas with an
-average rating above a threshold earns a "Reliable Beta" badge.
+**Recognition.** The beta reader earns credits for completing a beta and the
+author earns credits for leaving a rating (§20.3); neither accrues a lifetime
+tally (§9.7.1). A beta reader who completes five betas with an average rating
+above a threshold earns a "Reliable Beta" badge.
 
 **Acceptance.**
 - An author with a work can post a beta request.
@@ -6016,7 +6269,7 @@ directory entry and, with one click, begin account creation there.
 
 **Migration.** A reader may migrate their account from one instance to
 another. Migration exports the reader's works, bookmarks, reading
-history, follows, achievements, XP, and pseud identity, and imports them
+history, follows, achievements, and pseud identity, and imports them
 on the destination instance. The destination instance creates the account,
 imports the data, and redirects followers. The source instance marks the
 account as migrated and stops serving it. Migration is a background job
@@ -6396,6 +6649,18 @@ Environment variables (all prefixed `LOHAVEN_BOT_`):
 | `[forum]` | `meta_mod_min_verdicts` | `3` | Min verdicts to elect moderator |
 | `[forum]` | `min_vote_weight_bp` | `100` | Min vote weight in basis points |
 | `[forum]` | `work_discussion_default` | `"thread_only"` | Default discussion mode |
+| `[browse]` | `default_sort` | `"for-you"` | Ordering for a signed-in reader with a profile (§43.4) |
+| `[browse]` | `anonymous_sort` | `"top"` | Neutral ordering for anonymous traffic (§43.4) |
+| `[browse]` | `surface_defaults` | unset | Per-surface overrides of `default_sort` |
+| `[weighting]` | `mode` | `"trust_taste_contribution"` | `flat \| trust \| trust_taste \| trust_taste_contribution` (§16.16) |
+| `[weighting]` | `taste_floor` | `0.75` | Taste multiplier floor; `taste_floor × taste_ceiling ≤ 1.0` enforced |
+| `[weighting]` | `taste_ceiling` | `1.25` | Taste multiplier ceiling |
+| `[weighting]` | `contribution_floor` | `1.0` | Contribution multiplier floor |
+| `[weighting]` | `contribution_ceiling` | `2.0` | Contribution multiplier ceiling |
+| `[weighting]` | `contribution_window_days` | `180` | How far back contribution is counted |
+| `[weighting]` | `demand_diversity_percent` | `20` | Fraction of surfaced demand with no boost; must be `> 0` |
+| `[discovery]` | `taste_sources` | `[{ kind = "admin" }]` | Taste sources and their members (§16.15) |
+| `[discovery]` | `taste_source_min_members` | `5` | Cohort-size floor enforced at startup |
 
 ## 38.3 Hardcoded values that MUST become configurable
 
@@ -6817,3 +7082,121 @@ trust level ≥ 3 — through a quorum vote:
 - Malformed `cta_html` (e.g. `<script>`) is sanitized or refused, never
   embedded raw.
 - The CTA does not appear in the attribution section of any export.
+
+---
+
+# 43. Recommendation-first browsing — one ordering contract for every surface
+
+> **2026-09-21 addition.** §16 defines the engines, §16.5 promises the reader's dial applies to
+> "all surfaces", and §16's acceptance says exact and chronological sorts stay exact — but no
+> section ever named the surfaces or defined how a browse page chooses an order. In practice each
+> route author chose, and this section says otherwise: a reader who has told the instance what they
+> like gets that taken into account *wherever they browse*, and every other ordering remains one tap
+> away. This section is the contract; §16 is the mechanism.
+
+## 43.1 Surfaces
+
+Every one of these takes the §43.2 vocabulary, and each has a configured default:
+
+`/discover`, `/fandoms/:id`, `/tags/:tag`, `/moods/:mood`, `/people`, `/authors/:id`,
+`/collections/:id`, `/series/:id`, `/reading-paths/:id` (§18.9), the discovery rails inside
+`/library`, directory lists (§39), the challenge, request and wishlist boards (§18.2, §18.5), and
+the e-mail digest.
+
+A surface added later inherits this contract rather than inventing an order; §26's route ownership
+table names the owning module, and a new surface without a `sort` parameter is a defect.
+
+## 43.2 The vocabulary
+
+One enum, everywhere, documented and translated once:
+
+| `sort` | Meaning | Exactness |
+|---|---|---|
+| `for-you` | the §16 engine blend and the reader's recipe | a permutation (see 43.3) |
+| `new` | publication or update event order, from the §4.3 event log rather than a row timestamp | exact |
+| `updated` | last publication event | exact |
+| `top` | §15.10's quality signals: completion rate, positive-feedback ratio, recency and update velocity, bibliography quality | exact, never taste-steered |
+| `trending` | time-windowed with §16.14's decay | exact |
+| `best-match` | literal query relevance; search only | **never taste-steered (§15.10)** |
+| `az` | alphabetical; people, tags, collections | exact |
+
+An unknown value is a validation error naming the accepted set, never a silent fallback.
+
+## 43.3 `for-you` is a permutation, never a filter
+
+The reachable set for a given filter is **identical under every `sort` value**. `for-you` changes
+the order of results and the page they appear on; it never removes one, never truncates the last
+page, and never changes a count. Pagination must be able to walk to the final item of the
+underlying set under `for-you` exactly as it can under `new`.
+
+This is the section's load-bearing rule. A taste-skewed default that quietly reduces reachability is
+a shadowban (§19.7) applied by ranking instead of by moderation — invisible by construction, because
+§0.3 forbids explaining the order, and unaccountable for the same reason. A test asserts set
+equality: for one fixture, the union of pages under `for-you` equals the union under `new`, in both
+directions, including for a work `for-you` ranks last.
+
+## 43.4 Defaults
+
+- **Signed in with a profile:** `for-you`, unless the operator configures otherwise per surface.
+- **Signed in with no profile:** `for-you` must be indistinguishable from the baseline order. §16's
+  acceptance already requires the fallback; this makes it observable.
+- **Anonymous:** the surface's neutral order (`top`, `new` or `trending`). `for-you` is refused for
+  anonymous traffic while the instance's declared topics are empty or all `public = false`, because
+  the *ordering itself* would publish a private theme on the front page (§0.4.3, §16.16.2). With at
+  least one public topic, a taste-skewed default for anonymous readers is permitted and the
+  mechanism may be documented.
+- **Stickiness:** the choice is per-pseud and remembered across sessions, mirroring §16.8's
+  per-pseud dashboard layouts. It is a *sort choice*, not a dial — §16.5's weight remains the only
+  influence control, and there is no per-surface strength setting.
+
+## 43.5 Composition rules
+
+A `for-you` page is assembled in the order the implementation already uses for `/discovery`
+(`crates/app/src/routes/discovery.rs`): shared candidate fetch → blend → silent reordering
+(half-life §41.1, operator affinity §16.3) → diversity reservations → paginate. Consequences:
+
+- **Rank after the shared fetch.** Per-reader ordering is never part of a shared cache key; the
+  candidate pool stays cacheable and only the ordering is per-reader (§10.4's cache boundaries).
+- **§16.4's diversity budget applies per surface**, not only on `/discover`. A reservation that
+  holds on one page and not the next just moves the collapse it prevents.
+- **Every candidate still passes §16.1's shared eligibility rules.** Ordering is the last step, not
+  a bypass.
+- **The `reason` field travels with `for-you` items** (§16.1) and obeys §16.16.2: a reason may name
+  the reader's own terms, and instance terms only for a topic declared `public = true`.
+
+## 43.6 Measurement
+
+The operator's discovery page reports, per surface and per period: what `for-you` surfaced, what
+each explicit sort surfaced, the overlap between them, and the share of surfaced items that had
+never been surfaced before. This is §16.13's "the slot's effect is measured and reported" extended
+to every browse page, and it is the only way an operator can see `for-you` collapse into the same
+forty works on every page. Measurements are aggregate; no per-reader ordering history is exposed to
+anyone, including the operator (§3.7).
+
+## 43.7 Acceptance
+
+- Every §43.1 surface accepts the §43.2 vocabulary and answers an unknown value with a named error.
+- Under two different `sort` values, the reachable set for one filter is identical, counts included.
+- `for-you` with no profile matches the baseline order exactly.
+- An anonymous reader on an instance with no public topic is never served a taste-skewed default,
+  and no reason field names a theme term on any anonymous page.
+- An exact or literal query is not reordered by any profile, at any weight (§15.10).
+- The sort choice survives a new session and does not leak across pseuds.
+- Per-surface diversity reservations hold under the §25.4 load profile.
+- A `for-you` page lands within the timing budget of the same surface's `new` page; ranking happens
+  once per page over a bounded candidate pool, not once per item.
+
+## 43.8 What this section deliberately does not do
+
+- **No taste-steering of exact search.** §15.10's rule is untouched; `for-you` is an ordering among
+  eligible results, and a literal query is not a recommendation request.
+- **No per-surface influence dial.** One dial (§16.5) governs instance influence; this section
+  governs display order only.
+- **No new privacy setting.** Defaults follow §0.4.3's existing topic-visibility rule. This section
+  introduces no separate "recommendations on browse pages" consent, because the reader's existing
+  dial and sort choice already cover it.
+- **No reordering of a path, series or curated list.** §18.9 is explicit that a path never reorders
+  its stops: `for-you` orders the *list of paths*, never the contents of one.
+- **No change to `top`.** The quality ordering stays as §15.10 defines it; `for-you` sits beside it
+  rather than replacing it.
+
