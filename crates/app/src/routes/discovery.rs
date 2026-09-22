@@ -5,7 +5,7 @@
 use crate::auth::{MaybeSession, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use lorehaven_db;
@@ -39,12 +39,23 @@ fn dashboard_routes() -> Router<AppState> {
         .route("/", post(save_dashboard))
 }
 
+/// Query params for `GET /discovery` (spec §43.2).
+#[derive(Debug, serde::Deserialize)]
+pub struct DiscoveryQuery {
+    #[serde(default)]
+    sort: Option<String>,
+}
+
 async fn get_discovery(
     State(state): State<AppState>,
     MaybeSession(session): MaybeSession,
+    Query(params): Query<DiscoveryQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let limit = 20;
     let account_id: Option<String> = session.as_ref().map(|s| s.account_id.to_string());
+
+    // Resolve the effective sort (spec §43.4): query param > stored preference > default.
+    let effective_sort = resolve_sort(&state, session.as_ref(), params.sort.as_deref(), "discover").await;
 
     // Build candidate lists from each recommendation engine, then blend.
     let mut engines: Vec<Vec<lorehaven_domain::discovery::Candidate>> = Vec::new();
@@ -185,7 +196,58 @@ async fn get_discovery(
         }
     }
 
-    Ok(Json(serde_json::json!({ "items": items })))
+    Ok(Json(serde_json::json!({
+        "items": items,
+        "sort": effective_sort,
+    })))
+}
+
+/// Resolve the effective sort for a surface (spec §43.4).
+///
+/// Priority: query param > stored preference > per-surface default.
+async fn resolve_sort(
+    state: &AppState,
+    session: Option<&crate::auth::SessionUser>,
+    query_sort: Option<&str>,
+    surface: &str,
+) -> String {
+    // 1. Query param takes precedence.
+    if let Some(sort_str) = query_sort {
+        if let Some(sort) = lorehaven_domain::browse::Sort::parse(sort_str) {
+            return sort.as_str().to_string();
+        }
+    }
+
+    // 2. Stored preference (if there's a session with a pseud).
+    if let Some(user) = session {
+        if let Some(pseud_id) = &user.pseud_id {
+            if let Ok(pref) = lorehaven_db::browse::get_sort_preference(
+                state.db(),
+                &pseud_id.to_string(),
+                surface,
+            )
+            .await
+            {
+                if let Some(pref) = pref {
+                    if let Some(sort) = lorehaven_domain::browse::Sort::parse(&pref.sort_value) {
+                        return sort.as_str().to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Default for the surface.
+    default_for_surface(surface).to_string()
+}
+
+fn default_for_surface(surface: &str) -> lorehaven_domain::browse::Sort {
+    match surface {
+        "discover" => lorehaven_domain::browse::Sort::ForYou,
+        "people" | "tags" | "fandoms" | "authors" | "moods" => lorehaven_domain::browse::Sort::Az,
+        "library" | "collections" | "series" | "reading-paths" => lorehaven_domain::browse::Sort::New,
+        _ => lorehaven_domain::browse::Sort::New,
+    }
 }
 
 async fn get_taste_profile(
