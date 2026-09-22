@@ -453,6 +453,25 @@ async fn invalid_ai_declaration_is_rejected() {
 }
 
 #[tokio::test]
+async fn reading_session_records_time() {
+    let harness = Harness::new("reading-session").await;
+    let mut client = harness.client();
+
+    // Need to auth first
+    register_with_pseud(&mut client, "reader@e.com", "reader").await;
+
+    // Create a work to read
+    let work_id = create_work_api(&mut client, "Reading Session Test").await;
+
+    let (status, body) = client.request(
+        "POST",
+        &format!("/api/v1/works/{}/reading-session", work_id),
+        Some(serde_json::json!({ "seconds": 180 })),
+    ).await;
+    assert_eq!(status, StatusCode::CREATED, "reading session: {body}");
+}
+
+#[tokio::test]
 async fn transparency_dashboard_returns_public_data() {
     let harness = Harness::new("transparency").await;
     let mut client = harness.client();
