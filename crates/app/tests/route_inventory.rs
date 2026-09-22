@@ -3184,6 +3184,23 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Public,
     },
     // ------------------------------------------------------------------
+    // Discovery: reverse search & curator bounty queue (spec §32.7.3, §32.7.5)
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "reverse_search",
+        method: "POST",
+        path: "/media/reverse-search",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "curator_bounty_queue",
+        method: "GET",
+        path: "/curator/bounty-queue",
+        audience: Audience::Authenticated,
+    },
+    // ------------------------------------------------------------------
     // Discovery — additional routes not in main table (spec §16)
     // ------------------------------------------------------------------
     RouteEntry {
