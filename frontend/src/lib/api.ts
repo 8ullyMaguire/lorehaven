@@ -3003,3 +3003,31 @@ export function fetchStorageStatus(): Promise<StorageStatus> {
 export function fetchProviderReliability(): Promise<{ providers: ProviderReliability[] }> {
   return apiFetch<{ providers: ProviderReliability[] }>('/admin/media-health/providers');
 }
+
+// ---------------------------------------------------------------------------
+// Reader media references (spec §32.7.7)
+// ---------------------------------------------------------------------------
+
+export interface WorkMediaReferenceView {
+  id: string;
+  work_id: string;
+  chapter_id: string | null;
+  context: string;
+  display_url: string;
+  author_note: string | null;
+  inserted_at: string;
+  healthy_links: number;
+  total_links: number;
+  best_url: string | null;
+}
+
+export function fetchWorkMediaReferences(workId: string): Promise<{ items: WorkMediaReferenceView[] }> {
+  return apiFetch<{ items: WorkMediaReferenceView[] }>(`/works/${encodeURIComponent(workId)}/media`);
+}
+
+export function reportBrokenLink(referenceId: string, reason?: string): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>(
+    `/media/references/${encodeURIComponent(referenceId)}/report-broken`,
+    { method: 'POST', body: JSON.stringify({ reason }) },
+  );
+}

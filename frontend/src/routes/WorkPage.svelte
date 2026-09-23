@@ -17,11 +17,13 @@
     fetchReviews,
     fetchThread,
     fetchWork,
+    fetchWorkMediaReferences,
     fetchWorkPricing,
     getProgress,
     isAuthorWork,
     postReaction,
     purchaseWork,
+    reportBrokenLink,
     setDiscussionMode,
     upsertReview,
     type AuthorWork,
@@ -32,6 +34,7 @@
     type ReactionsResponse,
     type ReviewView,
     type ThreadResponse,
+    type WorkMediaReferenceView,
   } from '../lib/api';
   import { ApiError } from '../lib/api';
   import { describeCompletion, describeDiscussionMode, describeLifecycle, describeRating, describeReactionType, describeVisibility, reactionGlyph } from '../lib/labels';
@@ -104,6 +107,7 @@
         discussionMode = null;
       }
       void loadGallery();
+      void loadMediaRefs();
     } catch (failure) {
       // Paywall: a priced work returns 403 CONTENT_RESTRICTED for non-buyers.
       // Fetch public pricing so we can render a buy screen.
@@ -132,7 +136,37 @@
     }
   }
 
+  /** Load media references (§32.7.7) — the reader-facing best-link view. */
+  async function loadMediaRefs() {
+    try {
+      const res = await fetchWorkMediaReferences(workId);
+      mediaRefs = res.items;
+    } catch {
+      mediaRefs = null;
+    }
+  }
+
+  /** Report a broken link (§32.7.7) — one click, tracked per reference. */
+  async function reportMediaBroken(referenceId: string) {
+    brokenReportBusy = new Set([...brokenReportBusy, referenceId]);
+    try {
+      await reportBrokenLink(referenceId);
+      brokenReports = new Set([...brokenReports, referenceId]);
+    } catch {
+      // A failed report is not worth interrupting the page for; the button
+      // stays available so a retry is possible.
+    } finally {
+      const next = new Set(brokenReportBusy);
+      next.delete(referenceId);
+      brokenReportBusy = next;
+    }
+  }
+
   let gallery = $state<GalleryItem[] | null>(null);
+  /** Media references from the media-resilience graph (§32.7.7). */
+  let mediaRefs = $state<WorkMediaReferenceView[] | null>(null);
+  let brokenReports = $state<Set<string>>(new Set());
+  let brokenReportBusy = $state<Set<string>>(new Set());
   let reviewReceipt = $state<string | null>(null);
   // Discussion surface state (spec §35): the effective mode for this work.
   let discussionMode = $state<DiscussionModeResponse | null>(null);
@@ -260,6 +294,44 @@
               <figcaption>{item.alt_text}</figcaption>
             {/if}
           </figure>
+        </li>
+      {/each}
+    </ul>
+  {/if}
+
+  {#if mediaRefs && mediaRefs.length > 0}
+    <h2>Media references</h2>
+    <ul class="media-refs">
+      {#each mediaRefs as ref (ref.id)}
+        <li class="media-ref">
+          {#if ref.best_url}
+            <a href={ref.best_url} target="_blank" rel="noopener noreferrer">
+              <img src={ref.best_url} alt={ref.author_note ?? ''} loading="lazy" />
+            </a>
+          {:else}
+            <div class="media-ref-unavailable" role="status">
+              This media is currently unavailable.
+            </div>
+          {/if}
+          <div class="media-ref-meta">
+            {#if ref.author_note}
+              <span class="media-ref-note">{ref.author_note}</span>
+            {/if}
+            <span class="media-ref-health" class:healthy={ref.healthy_links >= 3} class:warn={ref.healthy_links < 3 && ref.healthy_links > 0} class:dead={ref.healthy_links === 0}>
+              {ref.healthy_links}/{ref.total_links} healthy
+            </span>
+            {#if session.isSignedIn && ref.total_links > 0}
+              {#if brokenReports.has(ref.id)}
+                <span class="media-ref-reported">reported</span>
+              {:else if brokenReportBusy.has(ref.id)}
+                <span class="media-ref-reporting">reporting…</span>
+              {:else}
+                <button type="button" class="link-button" onclick={() => void reportMediaBroken(ref.id)}>
+                  report broken
+                </button>
+              {/if}
+            {/if}
+          </div>
         </li>
       {/each}
     </ul>
@@ -440,6 +512,58 @@
     border: 1px solid var(--color-border);
     border-radius: 8px;
     overflow: hidden;
+  }
+
+  .media-refs {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .media-ref {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .media-ref img {
+    max-width: 100%;
+    border-radius: var(--radius-sm);
+  }
+
+  .media-ref-unavailable {
+    padding: var(--space-4);
+    background: var(--color-bg-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--color-muted);
+    text-align: center;
+  }
+
+  .media-ref-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    align-items: center;
+    font-size: var(--text-sm);
+  }
+
+  .media-ref-health.healthy {
+    color: var(--color-success);
+  }
+
+  .media-ref-health.warn {
+    color: var(--color-warning);
+  }
+
+  .media-ref-health.dead {
+    color: var(--color-danger);
+  }
+
+  .media-ref-reported,
+  .media-ref-reporting {
+    color: var(--color-muted);
   }
 
   .gallery img {
