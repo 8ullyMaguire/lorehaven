@@ -498,6 +498,17 @@ mod tests {
             );
 
             for (name, columns) in &a {
+                // Full-text search is engine-specific by design: PostgreSQL
+                // indexes a generated tsvector (search_vector) with GIN while
+                // SQLite falls back to LIKE on the raw column. The index names
+                // must match (checked above); their columns legitimately differ.
+                const ENGINE_SPECIFIC_SEARCH_INDEXES: &[&str] = &[
+                    "index:forum_topics_search_idx",
+                    "index:forum_posts_search_idx",
+                ];
+                if ENGINE_SPECIFIC_SEARCH_INDEXES.contains(&name.as_str()) {
+                    continue;
+                }
                 assert_eq!(
                     columns,
                     &b[name],
