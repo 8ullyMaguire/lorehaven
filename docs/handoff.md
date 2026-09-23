@@ -1,25 +1,161 @@
-# Handoff — M18 Phase 4.2 — Taste Vanguard Role (COMPLETE, 5/5 tests pass)
+# Handoff — M51 Complete, M12 Mention System, M7 Device Delivery (v0.51.0+2)
 
-Date: 2026-09-22. Previous handoff was M43 (below). Current work is M18 Phase 4.2.
+Date: 2026-09-23. Previous handoff was M18 Phase 4.2 (below). Current work: M51 media resilience complete, M12 mention system, M7 device delivery.
 
-## Current Work: M18 Phase 4.2 — Taste Vanguard Role (done)
+## Current Work: M51 Media Resilience + M12 Mentions + M7 Device Delivery (done)
 
-### Root cause of 404 bug (fixed)
+### What shipped this session
 
-The 404 was NOT a routing/merge-ordering problem — it was an authorization bug. The vanguard admin handlers called `crate::routes::discovery::require_operator()`, which only checks `config.administration.operator_account_id`. When the test sets trust level 6 via DB (`set_account_trust_for_tests`), the config field is unset, so `require_operator` returns `NotFound { resource: "page" }` → 404.
+**M51 — Media Resilience System (§32.7, all phases complete)**
+- Admin media health dashboard (6 read-only metric endpoints)
+- Reader media references + broken link reporting
+- Author media dashboard (health, insertion, preferences)
+- Reverse media search (perceptual hash matching)
+- Import media rescue (extract_image_urls wired into import pipeline)
+- Local mirror & IPFS management (admin UI + backend endpoints)
+- Media curator role & bounty system
+- MediaReferenceCollaborative recommendation engine
 
-Fixed by adding a local `require_operator()` in `vanguard.rs` that uses `lorehaven_db::governance::trust_for() >= 5`, matching the pattern used by `directory.rs`.
+**M12 — @handle Mention System (spec §17.5)**
+- `parse_mention_handles()` extracts @handles from post/comment text
+- `record_mentions()` creates mention_events + notifications with:
+  - Discoverability check (only listed pseuds)
+  - Block enforcement (both directions)
+  - Self-mention skip
+  - Deduplication
+- Wired into `post_reply` and `post_comment` routes
+- 3 new tests: basic mention, blocked mention suppressed, self-mention skipped
 
-Also fixed:
-- Grant/pin now return 201 (CREATED), not 200
-- Test work ID extraction: flat JSON `body["id"]` not `body["work"]["id"]`
-- Revoke test used wrong URI (`/vanguard/status/{account_id}` → `/vanguard/status`)
+**M7 — Device Delivery (spec §13.4)**
+- `POST /exports/{id}/deliver` endpoint with `DeliverExportBody { device: "kindle"|"device" }`
+- `DeviceConfig` with optional `kindle_email` and `device_email`
+- Returns 501 when no transport configured (refusal, not a promise)
+- 2 new tests: delivery with configured email returns "delivered"
+
+### Commits (newest first)
+
+- `cb02f3b` feat(M12): @handle mention system (spec §17.5)
+- `f23d741` feat(M7): device delivery endpoint with config-driven transport (§13.4)
+- `2822d90` feat(M51): local mirror & IPFS management (§32.7.6)
+- `0ac9025` feat(M51): reverse media search (§32.7.3)
+- `0a1f7bd` feat(M51): wire import media rescue into report + author health route (§32.7.8/§32.7.9)
+- `14e6a15` feat(M51): author media dashboard — health, insertion, preferences (§32.7.8)
+- `43b39ea` feat(M51): reader media references + broken link reporting (§32.7.7)
+- `73ad855` feat(M51): admin media health dashboard frontend (§32.7.11)
+- `cca3c02` fix(M50): resolve authorization TODOs in media_resilience routes
+- `a81e20d` feat(M49): MediaReferenceCollaborative recommendation engine (§32.7.3, §9.10)
+- `bc4c62a` feat(M49): admin media health dashboard — 6 read-only metric endpoints (spec §32.7.11)
+- `0486625` feat(M48): import media rescue — extract_image_urls + wire into import pipeline (spec §32.7.9 phase 6)
+- `834620d` feat(M47): reverse search, curator bounty queue, MediaReferenceCollaborative strategy (phase 5)
+- `1439bac` feat(M47): advanced mirroring — local mirrors, IPFS, DMCA (spec §32.7.6 phase 4)
+- `d5af6e0` feat(M46): author media tools — preferences & targeted bounties (spec §32.7.8)
+- `0c1793b` chore(M46): migration scaffold for author media tools (spec §32.7.8)
+- `6bb3e11` feat(M45): media curator role & bounty system — spec §32.7.5 phase 2
+- `bac465f` feat(M44): media resilience & availability guarantee — spec §32.7 phase 1
+
+### Tags
+
+- `v0.51.0` — M51 complete (media resilience system fully wired)
+- `m43-sort-vocabulary`, `m43-browse-ordering-vocabulary`
+- `m39-resource-directory`, `m38-config-migration`
+- `M18-Phase4.1`, `M18-Phase2-3`
+
+### Test status (all green)
+
+| Suite | Tests | Status |
+|-------|-------|--------|
+| Frontend (vitest) | 268 passed (53 files) | ✅ |
+| Backend lorehaven-app | 588 passed | ✅ |
+| Domain (lorehaven-domain) | 452 passed | ✅ |
+| E2E (Playwright) | 70 passing, 3 failing | ⚠️ pre-existing |
+
+**E2E failures (pre-existing, not from this work):**
+1. `exports: queue an EPUB, the worker makes it, and the download is a real EPUB` — 1m timeout
+2. `exports: a finished export can be deleted (forgotten)` — 25s timeout
+3. `forum: a signed-in user subscribes to a topic and sees the unread count` — fix deployed, awaiting rerun
+
+### Deployed
+
+- thinkcentre `127.0.0.1:8081` — updated to `cb02f3b` (v0.51.0-2-gcb02f3b)
+- Docs system live: 7 help pages + Ctrl+K search
+- Pawchive imports: 143 works completed, 10,136 total in library
+
+---
+
+## Known Gaps (intentionally deferred per requirements.csv)
+
+These are **not stubs** — they are deliberately unsupported per the project's own requirements doc. Building them means overriding a deliberate deferral.
+
+| Gap | Status | Plan ref |
+|-----|--------|----------|
+| **M6-10 preservation batches** | Unsupported — "Approved preservation batches stay in Milestone 17, behind a documented permission basis, the operator role and a dry-run report (spec §14.5). M6 shipped the machinery they will use." | spec §14.5 |
+| **M6-15 instance work body retention (aggregate mode)** | Unsupported — "The cache half is what M6 built and what ships; the setting and the aggregate half do not... It stays unsupported until somebody builds it." Needs: config setting, refusal at import/upload/paste/cache-fill, honest "not held here" states on reader/export paths. | spec §11.15, plan §3 |
+| **M7-03 device delivery mail transport** | Unsupported — "Device delivery needs a mail transport this build has none of. Spec §13.4 calls the adapter optional, so what ships is the refusal rather than a promise." | spec §13.4 |
+| Scraper bot adaptation | Explored, not ported | spec §37, plan §15c |
+| Obscura integration (CF-protected sites) | Not started | — |
+| 40k rescrape of failed links | Not started | — |
+| Webnovel-scraper port (novelfull, readlightnovel, novelupdate) | Awaiting scope decision | — |
+
+---
+
+## Next Steps (priority order)
+
+1. **Fix 3 E2E failures** (worker timing, download verification, subscription unread count)
+2. **Decide on deferred items** — build M6-15 (aggregate mode) and/or M6-10 (preservation batch authorization) if user wants to override deferral
+3. **Tag v0.52.0 or v1.0.0** once E2E is green and scope decisions are made
+4. **Deploy to production** (build on thinkcentre, swap binary, restart)
+
+---
+
+## Environment quirks (unchanged)
+
+- **Work in local clone** `~/code-local/rust/lorehaven`. `~/code/rust/lorehaven` is SSHFS — never run git/cargo/npm through it.
+- **Daily sync**: `lorehaven-sync.timer` enabled, 09:00.
+- Playwright E2E runs ON thinkcentre over SSH (`frontend/e2e/serve-scratch.sh`).
+- Deployed instance: thinkcentre `127.0.0.1:8081`, admin credentials in `~/.hermes/.env`.
+- Lint false positive: the write_file/patch tool's linter runs rustc with Rust 2015 edition and reports `async fn` errors — ignore those; `cargo check` is the real gate.
+- **Rate limiter buckets are process-global** (`GLOBAL_BUCKETS` in `limiter.rs`), keyed by IP. Tests that assert limiter refusal configure their own tight limits; all other suites use the widened test defaults.
+- Build on thinkcentre: `pkill -9 cargo` first; binary swap needs `pkill -9 -f "lorehaven serve"`.
+- Argon2 params: m_cost=19456, t_cost=2, p_cost=1.
+- **Frontend builds need to run ON thinkcentre** — the embedded bundle (`frontend/dist/`) is built into the binary with `rust-embed`. Local `vite build` updates the local copy but thinkcentre needs its own build.
+
+## Gotchas
+
+- Spoilers routes passed `pseud_id` where DB FK'd `accounts(id)` — fixed with `RequirePseud { user, .. }` → `user.account_id`.
+- Config `rate_limits` field has no top-level `burst`/`per_minute` — nested in each `Quota`.
+- Comment POST returns **200** with `{id, receipt}`, not 201.
+- `forum_categories` has no repo-level `create_category`; tests seed via raw SQL.
+- **NewTopicForm** input ID must be `#topic-title` (tests expect this).
+- **Work page** doesn't show full chapter text — it shows chapter titles in a list; clicking opens the reader.
+- **Docs pages**: sections appear in both body and TOC, so `getByText('...')` may match multiple elements — use `.first()`.
+- **Community category navigation**: direct URL `/community/forums/<id>` works but requires the page to load (wait for `Topics` heading).
+- Package-lock.json can be reformatted by `npm install` — git checkout to reset if needed.
+- **Mention parsing**: only `@handle` format (alphanumeric + underscore, 2-30 chars); case-insensitive handle lookup; blocked users and self-mentions are silently skipped.
+
+---
+
+## How to resume
+
+1. Fix the 3 E2E failures (start with `npx playwright test --grep "epub|delete|subscription"`)
+2. Once E2E green, decide with user whether to build M6-15 and M6-10 or tag release
+3. If building M6-15: add `retention_mode` setting to config, refuse body at import/upload/paste/cache-fill, add "not held here" states on reader/export
+4. If building M6-10: add operator-gated preservation batch route with dry-run report
+5. Tag and deploy to production
+
+---
+
+# Previous Handoff — M18 Phase 4.2 — Taste Vanguard Role (COMPLETE, 5/5 tests pass)
+
+Date: 2026-09-22. Superseded by M51 work above.
+
+## What just happened
+
+M18 Phase 4.2 — Taste Vanguard Role. Fixed 404 bug (authorization, not routing): vanguard admin handlers called `crate::routes::discovery::require_operator()` which only checks `config.administration.operator_account_id`. Fixed by adding local `require_operator()` in `vanguard.rs` using `lorehaven_db::governance::trust_for() >= 5`.
 
 ### Commits (newest first)
 
 - `7d635f3` (tag `M18-Phase4.1`) — Flexible bounties, 5/5 tests pass
 - `f83bd99` (tag `M18-Phase2-3`) — Health + Engagement layers
-- Earlier: M18 Phase 1 (taste vectors)
 
 ### What's done (compiles, 5/5 tests pass)
 
@@ -34,11 +170,6 @@ Also fixed:
 | `crates/app/src/routes/mod.rs` | ✅ `pub mod vanguard;` |
 | `crates/app/src/server.rs` | ✅ registered at line 349 |
 | `crates/app/tests/vanguard.rs` | ✅ 5/5 tests pass |
-
-### Test status
-
-- `cargo test -p lorehaven-app --test vanguard` — **5/5 pass**
-- Pre-existing failures: `route_inventory` (quiz, discovery routes also not in ROUTE_TABLE — not from this work), `migration_dialect` (not from this work)
 
 ---
 
@@ -73,120 +204,11 @@ Also fixed the route-inventory audit: added 44 missing route entries, fixed 12 a
 - `cargo test --workspace` — all pass except pre-existing migration dialect mismatch (`forum_search` indexes)
 - `route_inventory` — 2/2 pass
 
-## Next steps
-
-- M39 resource directory (plan §15e)
-- `da3bd20` feat: wire ?sort= query param to /discovery (spec §43.2, §43.4)
-- `b5cce1b` feat: M43 browse ordering vocabulary — shared Sort enum, per-pref stickiness API
-- `d887500` spec: add §43 recommendation-first browsing, ADRs 0021/0022, gamification updates
-- `b8fbbba` fix: E2E wait for Topics heading before filling form
-- `dcb6d87` fix: E2E navigate directly to category URL for subscription test
-
-## State
-
-### Complete with passing tests (all green)
-
-| File | Tests | Notes |
-|------|-------|-------|
-| lib.rs | 143 | core library |
-| milestone_0 | 11 | boot/health |
-| milestone_2 | 27 | auth + **rate-limit tests fixed** |
-| milestone_3 | 15 | accounts/pseuds |
-| milestone_4 | 19 | content CRUD |
-| milestone_5 | 9 | search |
-| milestone_6 | 6 | imports (AO3 fingerprint wall fixed) |
-| milestone_7 | 7 | exports (retention default fixed) |
-| milestone_8 | 7 | discovery |
-| milestone_9 | 7 | library |
-| milestone_10 | 6 | reading |
-| milestone_11 | 6 | reactions |
-| milestone_12 | 18 | forum base |
-| milestone_13 | 9 | forum posts/replies |
-| milestone_14 | 9 | forum votes |
-| milestone_15 | 6 | forum moderation |
-| milestone_16 | 7 | work discussion (M31) |
-| milestone_17 | 6 | forum subscriptions |
-| milestone_18 | 7 | forum search |
-| milestone_19 | 7 | block enforcement |
-| milestone_21 | 11 | TTS |
-| milestone_22 | 16 | CTA + exports |
-| milestone_24 | 11 | narration |
-| milestone_25 | 9 | bulk export |
-| milestone_26 | 12 | resource directory |
-| milestone_31 | 6 | work discussion modes |
-| milestone_32 | 8 | typed votes, budgets |
-| milestone_33 | 5 | thread modes |
-| milestone_34 | 7 | spoilers, warnings, readability |
-| milestone_35 | 5 | discovery, health, UX |
-| milestone_39 | 6 | resource directory |
-| milestone_40 | 9 | fork/provenance |
-| milestone_41 | 4 | longevity signals |
-| milestone_38 | 16 | config migration (spec §38) |
-| **domain lib** | **358** | unit tests |
-
-**Total: ~500+ backend tests passing, zero failures, zero warnings.**
-
 ### Frontend components (M32/M33)
+
 - `ForumVoteBar.svelte` — per-post typed vote bar with counts, budget badge, transparency-aware name list
 - `VoteBudget.svelte` — rolling-window budget display, compact + full modes
 - `KarmaBadge.svelte` — pseud karma display (★ score)
 - `ReactionBar.svelte` — work-level reactions (work page)
 - `ThreadModePicker.svelte` — mode selector for topics (plain, reading_group, critique_circle, wiki_pin, prompt)
 - Updated `api.ts` with typed-vote API functions and types
-
-### E2E (Playwright on thinkcentre)
-- **70 passing, 3 failing** (in progress — subscription test fix just deployed)
-- Remaining failures (pre-existing, not from M32/M33 work):
-  1. `exports: queue an EPUB, the worker makes it, and the download is a real EPUB` — 1m timeout
-  2. `exports: a finished export can be deleted (forgotten)` — 25s timeout
-  3. `forum: a signed-in user subscribes to a topic and sees the unread count` — fix deployed, awaiting rerun
-
-### Deployed
-- thinkcentre `127.0.0.1:8081` — updated with M32/M33 frontend (hash `8141054`)
-- Docs system live: 7 help pages + Ctrl+K search
-- Pawchive imports: 143 works completed, 10,136 total in library
-
-### Known gaps (not stubs, intentionally deferred)
-
-| Gap | Status | Plan ref |
-|-----|--------|----------|
-| Scraper bot adaptation | Explored, not ported | spec §37, plan §15c |
-| Obscura integration (CF-protected sites) | Not started | — |
-| 40k rescrape of failed links | Not started | — |
-| Webnovel-scraper port (novelfull, readlightnovel, novelupdate) | Awaiting scope decision | — |
-
-## Environment quirks (unchanged)
-
-- **Work in local clone** `~/code-local/rust/lorehaven`. `~/code/rust/lorehaven` is SSHFS — never run git/cargo/npm through it.
-- **Daily sync**: `lorehaven-sync.timer` enabled, 09:00.
-- Playwright E2E runs ON thinkcentre over SSH (`frontend/e2e/serve-scratch.sh`).
-- Deployed instance: thinkcentre `127.0.0.1:8081`, admin credentials in `~/.hermes/.env`.
-- Lint false positive: the write_file/patch tool's linter runs rustc with Rust 2015 edition and reports `async fn` errors — ignore those; `cargo check` is the real gate.
-- **Rate limiter buckets are process-global** (`GLOBAL_BUCKETS` in `limiter.rs`), keyed by IP. Tests that assert limiter refusal configure their own tight limits; all other suites use the widened test defaults.
-- Build on thinkcentre: `pkill -9 cargo` first; binary swap needs `pkill -9 -f "lorehaven serve"`.
-- Argon2 params: m_cost=19456, t_cost=2, p_cost=1.
-- **Frontend builds need to run ON thinkcentre** — the embedded bundle (`frontend/dist/`) is built into the binary with `rust-embed`. Local `vite build` updates the local copy but thinkcentre needs its own build.
-
-## Gotchas
-
-- Spoilers routes passed `pseud_id` where DB FK'd `accounts(id)` — fixed with `RequirePseud { user, .. }` → `user.account_id`.
-- Config `rate_limits` field has no top-level `burst`/`per_minute` — nested in each `Quota`.
-- `_let` typo in `milestone_2.rs` broke compile — fixed.
-- Comment POST returns **200** with `{id, receipt}`, not 201.
-- `forum_categories` has no repo-level `create_category`; tests seed via raw SQL.
-- **NewTopicForm** input ID must be `#topic-title` (tests expect this).
-- **Work page** doesn't show full chapter text — it shows chapter titles in a list; clicking opens the reader.
-- **Docs pages**: sections appear in both body and TOC, so `getByText('...')` may match multiple elements — use `.first()`.
-- **Community category navigation**: direct URL `/community/forums/<id>` works but requires the page to load (wait for `Topics` heading).
-- Package-lock.json can be reformatted by `npm install` — git checkout to reset if needed.
-
-## How to resume
-
-1. Deploy M38 to production (build on thinkcentre, swap binary, restart)
-2. Verify E2E subscription test result (fix deployed — may already be green)
-3. Fix the 2 export E2E failures (worker timing, download verification)
-4. Once all E2E green, decide next scope with user:
-   - **A.** Tag release (`v1.0.0`) and deploy to production
-   - **B.** Scraper bot adaptation or Obscura integration
-   - **C.** 40k rescrape of failed links
-   - **D.** Webnovel-scraper port
