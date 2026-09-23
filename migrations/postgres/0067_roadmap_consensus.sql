@@ -24,7 +24,7 @@ CREATE INDEX IF NOT EXISTS idx_roadmap_cards_stage ON roadmap_cards (stage);
 
 CREATE TABLE IF NOT EXISTS roadmap_suggestions (
     id          TEXT PRIMARY KEY,
-    account_id  TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    account_id  UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     raw_text    TEXT NOT NULL,
     card_id     TEXT REFERENCES roadmap_cards(id) ON DELETE SET NULL,
     created_at  TIMESTAMPTZ NOT NULL
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS roadmap_ballots (
     id           TEXT PRIMARY KEY,
     card_ids     JSONB NOT NULL,
     served_elo   JSONB NOT NULL,
-    account_id   TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    account_id   UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     created_at   TIMESTAMPTZ NOT NULL,
     voted_at     TIMESTAMPTZ
 );
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS roadmap_moves (
     from_stage  TEXT NOT NULL,
     to_stage    TEXT NOT NULL,
     reason      TEXT NOT NULL,
-    moved_by    TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    moved_by    UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     created_at  TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_roadmap_moves_card ON roadmap_moves (card_id, created_at DESC);
