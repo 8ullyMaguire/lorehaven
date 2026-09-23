@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS admin_taste_profile (
 -- Cached per-work taste vectors (spec §16.17). Derived from work tags: a work
 -- scores on a dimension when its tags reference that dimension key.
 CREATE TABLE IF NOT EXISTS work_taste_vectors (
-    work_id     TEXT PRIMARY KEY REFERENCES works (id) ON DELETE CASCADE,
+    work_id     UUID PRIMARY KEY REFERENCES works (id) ON DELETE CASCADE,
     vector      JSONB NOT NULL DEFAULT '[]'::jsonb,  -- JSON array of f64, ordered by dimension key sort
     computed_at TEXT NOT NULL
 );
