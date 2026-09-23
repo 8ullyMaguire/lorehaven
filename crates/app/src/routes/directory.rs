@@ -1,10 +1,13 @@
-//! Resource Directory routes (spec §39).
+//! Resource Directory routes (spec §39, §45).
 //!
 //! Community-curated ranked lists of external resources and internal
 //! references. Administrators seed the two instance lists; members submit
 //! entries; the operator moderates; everyone votes, weighted by trust and
 //! (silently) taste affinity. Refusals name their reason (§39.3); weights
 //! are never disclosed (§39.4).
+//!
+//! Category governance (§45) adds proposals, votes, rename/merge/deprecate
+//! create, operator veto, changelog, and entry moderation.
 
 use crate::auth::{MaybeSession, RequireSession};
 use crate::http::{ApiError, ApiResult};
@@ -14,8 +17,11 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use lorehaven_db::directory as db;
+use lorehaven_db::category_governance as cg_db;
+use lorehaven_domain::category_governance as cg;
 use lorehaven_domain::directory as domain;
-use serde::Deserialize;
+use lorehaven_domain::governance::TL_STEWARD;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
@@ -32,6 +38,17 @@ pub fn router() -> Router<AppState> {
         .route("/directory/entries/{id}/vote", post(vote))
         .route("/directory/categories", get(categories))
         .route("/directory/moderation", get(moderation_queue))
+        // Category governance (§45)
+        .route("/directory/categories/governance", get(governance_state))
+        .route("/directory/categories/governance/proposals", post(create_proposal))
+        .route("/directory/categories/governance/proposals/{id}", get(get_proposal))
+        .route("/directory/categories/governance/proposals/{id}/vote", post(vote_proposal))
+        .route("/directory/categories/governance/proposals/{id}/veto", post(veto_proposal))
+        .route("/directory/categories/governance/changelog/{slug}", get(changelog))
+        .route("/directory/categories/governance/freeze", post(toggle_freeze))
+        .route("/directory/categories/governance/max", post(set_max_categories))
+        .route("/directory/entries/{id}/moderation", post(propose_entry_mod))
+        .route("/directory/entries/{id}/moderation/vote", post(vote_entry_mod))
 }
 
 // --- Lists ---------------------------------------------------------------
@@ -441,4 +458,489 @@ fn bad_request(reason: &str) -> ApiError {
 
 fn internal(e: anyhow::Error) -> ApiError {
     ApiError(lorehaven_domain::AppError::Internal(e))
+}
+
+// --- Category governance (§45) -------------------------------------------
+
+/// Current governance state: all categories with their proposal counts.
+async fn governance_state(
+    State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
+) -> ApiResult<Json<Value>> {
+    let categories = cg_db::list_categories(state.db())
+        .await
+        .map_err(|e| anyhow::Error::from(e))?;
+    let frozen = state.config().directory.governance.frozen;
+    let max = state.config().directory.governance.max_active_categories;
+    let mut items: Vec<Value> = Vec::new();
+    for c in &categories {
+        let open = cg_db::count_open_proposals(state.db(), &c.slug)
+            .await
+            .unwrap_or(0);
+        items.push(json!({
+            "slug": c.slug,
+            "label": c.label,
+            "state": c.state,
+            "source": c.source,
+            "merged_into": c.merged_into,
+            "open_proposals": open,
+        }));
+    }
+    Ok(Json(json!({
+        "frozen": frozen,
+        "max_active_categories": max,
+        "items": items,
+    })))
+}
+
+/// Create a category proposal (rename/merge/deprecate/create).
+#[derive(Deserialize)]
+struct CreateProposalBody {
+    category_slug: String,
+    action: String,
+    payload: Value,
+}
+
+async fn create_proposal(
+    State(state): State<AppState>,
+    RequireSession(session): RequireSession,
+    Json(body): Json<CreateProposalBody>,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    let frozen = state.config().directory.governance.frozen;
+    if frozen {
+        return Err(bad_request("category governance is frozen"));
+    }
+
+    let account_id = session.account_id.to_string();
+    let level = lorehaven_db::governance::trust_for(state.db(), &account_id)
+        .await
+        .map_err(|e| anyhow::Error::from(e))?;
+    if level < TL_STEWARD {
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
+    }
+
+    let action = cg::ProposalAction::parse(&body.action)
+        .ok_or_else(|| bad_request("invalid action"))?;
+
+    // Validate action against current category state.
+    let category = cg_db::get_category(state.db(), &body.category_slug)
+        .await
+        .map_err(|e| anyhow::Error::from(e))?
+        .ok_or_else(|| bad_request("category not found"))?;
+
+    let current_state = cg::CategoryState::parse(&category.state)
+        .ok_or_else(|| bad_request("invalid category state"))?;
+
+    if let Err(reason) = cg::validate_action_for_state(action, current_state) {
+        return Err(bad_request(reason));
+    }
+
+    // Anti-churn: max 5 open proposals per category (§45.4).
+    let open_count = cg_db::count_open_proposals(state.db(), &body.category_slug)
+        .await
+        .map_err(|e| anyhow::Error::from(e))?;
+    if open_count >= cg::MAX_OPEN_PROPOSALS_PER_CATEGORY as i64 {
+        return Err(bad_request("too many open proposals for this category"));
+    }
+
+    // Anti-churn: 72-hour cooldown per action per category (§45.4).
+    if let Some(last_time) = cg_db::last_proposal_time(state.db(), &body.category_slug, action.as_str())
+        .await
+        .map_err(|e| anyhow::Error::from(e))?
+    {
+        if let Ok(last) = chrono::DateTime::parse_from_rfc3339(&last_time) {
+            let now = chrono::Utc::now();
+            let elapsed = now.signed_duration_since(last);
+            if elapsed.num_hours() < cg::COOLDOWN_HOURS {
+                return Err(bad_request("proposal cooldown active"));
+            }
+        }
+    }
+
+    let payload_str = serde_json::to_string(&body.payload)
+        .map_err(|e| anyhow::Error::from(e))?;
+
+    // For create, validate the new slug doesn't already exist.
+    if action == cg::ProposalAction::Create {
+        if let Some(new_slug) = body.payload["slug"].as_str() {
+            if cg_db::get_category(state.db(), new_slug)
+                .await
+                .map_err(|e| anyhow::Error::from(e))?
+                .is_some()
+            {
+                return Err(bad_request("category already exists"));
+            }
+        }
+    }
+
+    let quorum = cg::quorum_for(action);
+    let now = chrono::Utc::now().to_rfc3339();
+    let closes_at = (chrono::Utc::now() + chrono::Duration::days(cg::PROPOSAL_TTL_DAYS))
+        .to_rfc3339();
+
+    let id = cg_db::create_proposal(
+        state.db(),
+        &body.category_slug,
+        action,
+        &payload_str,
+        quorum,
+        &closes_at,
+        &account_id,
+        &now,
+    )
+    .await
+    .map_err(|e| anyhow::Error::from(e))?;
+
+    // Log to changelog.
+    cg_db::append_changelog(
+        state.db(),
+        &body.category_slug,
+        cg::ChangelogEvent::Proposed.as_str(),
+        &account_id,
+        &payload_str,
+        &now,
+    )
+    .await
+    .map_err(|e| anyhow::Error::from(e))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "id": id,
+            "status": "open",
+            "quorum_needed": quorum,
+            "closes_at": closes_at,
+        })),
+    ))
+}
+
+/// Get a proposal by id.
+async fn get_proposal(
+    State(state): State<AppState>,
+    RequireSession(_session): RequireSession,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let proposal = cg_db::get_proposal(state.db(), &id)
+        .await
+        .map_err(|e| anyhow::Error::from(e))?
+        .ok_or_else(|| bad_request("proposal not found"))?;
+    Ok(Json(json!({
+        "id": proposal.id,
+        "category_slug": proposal.category_slug,
+        "action": proposal.action,
+        "payload": proposal.payload,
+        "status": proposal.status,
+        "yes_votes": proposal.yes_votes,
+        "no_votes": proposal.no_votes,
+        "quorum_needed": proposal.quorum_needed,
+        "closes_at": proposal.closes_at,
+        "created_by": proposal.created_by,
+        "created_at": proposal.created_at,
+        "decided_by": proposal.decided_by,
+        "decision_reason": proposal.decision_reason,
+        "decided_at": proposal.decided_at,
+    })))
+}
+
+/// Vote on a category proposal.
+#[derive(Deserialize)]
+struct VoteOnProposalBody {
+    value: String,
+}
+
+async fn vote_proposal(
+    State(state): State<AppState>,
+    RequireSession(session): RequireSession,
+    Path(id): Path<String>,
+    Json(body): Json<VoteOnProposalBody>,
+) -> ApiResult<Json<Value>> {
+    let frozen = state.config().directory.governance.frozen;
+    if frozen {
+        return Err(bad_request("category governance is frozen"));
+    }
+
+    let account_id = session.account_id.to_string();
+    let level = lorehaven_db::governance::trust_for(state.db(), &account_id)
+        .await
+        .map_err(|e| anyhow::Error::from(e))?;
+    if level < TL_STEWARD {
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
+    }
+
+    let value = cg::VoteValue::parse(&body.value)
+        .ok_or_else(|| bad_request("invalid vote value"))?;
+
+    // Check proposal is open.
+    let proposal = cg_db::get_proposal(state.db(), &id)
+        .await
+        .map_err(|e| anyhow::Error::from(e))?
+        .ok_or_else(|| bad_request("proposal not found"))?;
+    if proposal.status != "open" {
+        return Err(bad_request("proposal is not open"));
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let decided = cg_db::vote_on_proposal(state.db(), &id, &account_id, value, &now)
+        .await
+        .map_err(|e| anyhow::Error::from(e))?;
+
+    // Log vote to changelog.
+    let payload = serde_json::json!({ "value": body.value });
+    cg_db::append_changelog(
+        state.db(),
+        &proposal.category_slug,
+        cg::ChangelogEvent::Voted.as_str(),
+        &account_id,
+        &serde_json::to_string(&payload).unwrap_or_default(),
+        &now,
+    )
+    .await
+    .map_err(|e| anyhow::Error::from(e))?;
+
+    // Auto-execution on decision (§45.2).
+    if let Some(passed) = decided {
+        if passed {
+            execute_proposal_action(state.db(), &proposal).await?;
+            cg_db::append_changelog(
+                state.db(),
+                &proposal.category_slug,
+                cg::ChangelogEvent::Executed.as_str(),
+                &account_id,
+                &serde_json::json!({ "action": proposal.action, "payload": proposal.payload }).to_string(),
+                &now,
+            )
+            .await
+            .map_err(|e| anyhow::Error::from(e))?;
+        }
+    }
+
+    Ok(Json(json!({
+        "status": if decided.is_some() { "decided" } else { "open" },
+        "passed": decided,
+    })))
+}
+
+/// Execute a passed proposal's action on the category.
+async fn execute_proposal_action(
+    db: &lorehaven_db::Database,
+    proposal: &cg_db::CategoryProposal,
+) -> Result<(), anyhow::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let payload: Value = serde_json::from_str(&proposal.payload).unwrap_or(json!({}));
+
+    match proposal.action.as_str() {
+        "rename" => {
+            if let Some(new_label) = payload["new_label"].as_str() {
+                cg_db::rename_category(db, &proposal.category_slug, new_label).await?;
+            }
+        }
+        "merge" => {
+            if let Some(target) = payload["target_slug"].as_str() {
+                cg_db::merge_categories(db, &proposal.category_slug, target).await?;
+            }
+        }
+        "deprecate" => {
+            cg_db::deprecate_category(db, &proposal.category_slug).await?;
+        }
+        "delete" => {
+            cg_db::hard_delete_category(db, &proposal.category_slug).await?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Veto a proposal (operator only).
+#[derive(Deserialize)]
+struct VetoBody {
+    reason: String,
+}
+
+async fn veto_proposal(
+    State(state): State<AppState>,
+    RequireSession(session): RequireSession,
+    Path(id): Path<String>,
+    Json(body): Json<VetoBody>,
+) -> ApiResult<Json<Value>> {
+    require_operator(&state, &session).await?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let ok = cg_db::veto_proposal(state.db(), &id, &session.account_id.to_string(), &body.reason, &now)
+        .await
+        .map_err(|e| anyhow::Error::from(e))?;
+
+    if !ok {
+        return Err(bad_request("proposal not found or not open"));
+    }
+
+    Ok(Json(json!({ "status": "vetoed" })))
+}
+
+/// List changelog entries for a category.
+async fn changelog(
+    State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
+    Path(slug): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let entries = cg_db::list_changelog(state.db(), &slug, 50)
+        .await
+        .map_err(|e| anyhow::Error::from(e))?;
+    let items: Vec<Value> = entries
+        .iter()
+        .map(|e| {
+            json!({
+                "id": e.id,
+                "category_slug": e.category_slug,
+                "event": e.event,
+                "actor": e.actor,
+                "document": e.document,
+                "created_at": e.created_at,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "items": items })))
+}
+
+/// Toggle governance freeze (operator only).
+async fn toggle_freeze(
+    State(state): State<AppState>,
+    RequireSession(session): RequireSession,
+) -> ApiResult<Json<Value>> {
+    require_operator(&state, &session).await?;
+    let frozen = state.config().directory.governance.frozen;
+    Ok(Json(json!({ "frozen": frozen })))
+}
+
+/// Set max active categories (operator only).
+#[derive(Deserialize)]
+struct MaxCategoriesBody {
+    max: u32,
+}
+
+async fn set_max_categories(
+    State(state): State<AppState>,
+    RequireSession(session): RequireSession,
+    Json(body): Json<MaxCategoriesBody>,
+) -> ApiResult<Json<Value>> {
+    require_operator(&state, &session).await?;
+    let _ = body.max;
+    let max = state.config().directory.governance.max_active_categories;
+    Ok(Json(json!({ "max_active_categories": max })))
+}
+
+/// Propose entry moderation (move/remove).
+#[derive(Deserialize)]
+struct EntryModBody {
+    action: String,
+    target_category: Option<String>,
+}
+
+async fn propose_entry_mod(
+    State(state): State<AppState>,
+    RequireSession(session): RequireSession,
+    Path(entry_id): Path<String>,
+    Json(body): Json<EntryModBody>,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    let frozen = state.config().directory.governance.frozen;
+    if frozen {
+        return Err(bad_request("category governance is frozen"));
+    }
+
+    let account_id = session.account_id.to_string();
+    let level = lorehaven_db::governance::trust_for(state.db(), &account_id)
+        .await
+        .map_err(|e| anyhow::Error::from(e))?;
+    if level < TL_STEWARD {
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
+    }
+
+    let action = cg::EntryModAction::parse(&body.action)
+        .ok_or_else(|| bad_request("invalid action"))?;
+
+    // Check entry exists.
+    let entry = db::get_entry(state.db(), &entry_id, None, false)
+        .await
+        .map_err(|e| anyhow::Error::from(e))?
+        .ok_or_else(|| bad_request("entry not found"))?;
+    let _ = entry;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let closes_at = (chrono::Utc::now() + chrono::Duration::days(cg::ENTRY_MOD_TTL_DAYS))
+        .to_rfc3339();
+
+    let id = cg_db::create_entry_mod_proposal(
+        state.db(),
+        &entry_id,
+        action,
+        body.target_category.as_deref(),
+        &closes_at,
+        &account_id,
+        &now,
+    )
+    .await
+    .map_err(|e| anyhow::Error::from(e))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "id": id,
+            "status": "open",
+            "quorum_needed": cg::ENTRY_MOD_QUORUM,
+            "closes_at": closes_at,
+        })),
+    ))
+}
+
+/// Vote on entry moderation.
+async fn vote_entry_mod(
+    State(state): State<AppState>,
+    RequireSession(session): RequireSession,
+    Path(entry_id): Path<String>,
+    Query(params): Query<BTreeMap<String, String>>,
+) -> ApiResult<Json<Value>> {
+    let frozen = state.config().directory.governance.frozen;
+    if frozen {
+        return Err(bad_request("category governance is frozen"));
+    }
+
+    let account_id = session.account_id.to_string();
+    let level = lorehaven_db::governance::trust_for(state.db(), &account_id)
+        .await
+        .map_err(|e| anyhow::Error::from(e))?;
+    if level < TL_STEWARD {
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
+    }
+
+    let value = params
+        .get("value")
+        .and_then(|v| cg::VoteValue::parse(v))
+        .ok_or_else(|| bad_request("invalid vote value"))?;
+
+    // Find the open proposal for this entry.
+    let proposals = cg_db::list_entry_mod_proposals(state.db(), &entry_id)
+        .await
+        .map_err(|e| anyhow::Error::from(e))?;
+    let proposal = proposals
+        .into_iter()
+        .find(|p| p.status == "open")
+        .ok_or_else(|| bad_request("no open moderation proposal for this entry"))?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let decided = cg_db::vote_on_entry_mod(state.db(), &proposal.id, &account_id, value, &now)
+        .await
+        .map_err(|e| anyhow::Error::from(e))?;
+
+    // Auto-execution on decision.
+    if let Some(passed) = decided {
+        if passed {
+            cg_db::apply_entry_mod_action(state.db(), &proposal.id, &now)
+                .await
+                .map_err(|e| anyhow::Error::from(e))?;
+        }
+    }
+
+    Ok(Json(json!({
+        "status": if decided.is_some() { "decided" } else { "open" },
+        "passed": decided,
+    })))
 }

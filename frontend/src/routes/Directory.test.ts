@@ -3,16 +3,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Directory from './Directory.svelte';
 
-vi.mock('../lib/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../lib/api')>();
-  return {
-    ...actual,
-    fetchDirectoryEntries: vi.fn(),
-    fetchDirectoryCategories: vi.fn(),
-    submitDirectoryEntry: vi.fn(),
-    fetchModerationQueue: vi.fn(),
-  };
-});
+vi.mock('../lib/api', () => ({
+  fetchDirectoryEntries: vi.fn(),
+  fetchDirectoryCategories: vi.fn(),
+  submitDirectoryEntry: vi.fn(),
+  voteDirectoryEntry: vi.fn(),
+  approveDirectoryEntry: vi.fn(),
+  removeDirectoryEntry: vi.fn(),
+  fetchModerationQueue: vi.fn(),
+}));
+
+// Mock the governance component so the test doesn't need to resolve its
+// transitive imports (which pull in session.svelte.ts and other .svelte files
+// that fail in the test environment).
+vi.mock('../lib/components/DirectoryGovernance.svelte', () => ({
+  default: () => ({}),
+}));
 
 import {
   fetchDirectoryEntries,

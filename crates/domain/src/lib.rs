@@ -5,6 +5,7 @@ pub mod api_scopes;
 pub mod blocking;
 pub mod browse;
 pub mod caps;
+pub mod category_governance;
 pub mod charging;
 pub mod community;
 pub mod consensus;

@@ -522,6 +522,9 @@ struct MeResponse {
     pseuds: Vec<PseudView>,
     active_pseud_id: Option<PseudId>,
     capabilities: Capabilities,
+    /// The account's trust level (spec §19.1). Needed by the frontend to
+    /// gate governance actions (§45) without a round-trip.
+    trust_level: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -554,6 +557,11 @@ async fn me(
         .filter(|id| pseuds.iter().any(|pseud| pseud.id == *id))
         .or_else(|| pseuds.first().map(|pseud| pseud.id));
 
+    let account_id = account.id.to_string();
+    let trust_level = lorehaven_db::governance::trust_for(state.db(), &account_id)
+        .await
+        .unwrap_or(0);
+
     Ok(Json(MeResponse {
         account: account_view(&account, &sessions::now()),
         pseuds: pseuds
@@ -567,6 +575,7 @@ async fn me(
             .collect(),
         active_pseud_id: active,
         capabilities: capabilities_for(&state, account.age_state, Some(&settings)),
+        trust_level,
     }))
 }
 

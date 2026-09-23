@@ -6,7 +6,7 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::auth::RequireSession;
+use crate::auth::{MaybeSession, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 use axum::extract::{Path, State};
@@ -35,7 +35,10 @@ pub fn admin_router() -> Router<AppState> {
 }
 
 /// `GET /api/v1/roadmap` — the full board, grouped by stage.
-pub async fn get_board(State(state): State<AppState>) -> ApiResult<Json<Value>> {
+pub async fn get_board(
+    State(state): State<AppState>,
+    RequireSession(_session): RequireSession,
+) -> ApiResult<Json<Value>> {
     let cards = roadmap::list_cards(state.db(), None)
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
@@ -328,7 +331,10 @@ pub async fn post_move_card(
 }
 
 /// `GET /api/v1/roadmap/changelog` — public feed of stage moves.
-pub async fn get_changelog(State(state): State<AppState>) -> ApiResult<Json<Value>> {
+pub async fn get_changelog(
+    State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
+) -> ApiResult<Json<Value>> {
     let moves = roadmap::list_moves(state.db(), 50, 0)
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;

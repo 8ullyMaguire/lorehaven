@@ -19,6 +19,7 @@ pub mod admin;
 pub mod analytics;
 pub mod bounties;
 pub mod browse;
+pub mod category_governance;
 pub mod collaboration;
 pub mod community;
 pub mod content;

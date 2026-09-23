@@ -1,3 +1,10 @@
+// Mock the governance component so App.test.ts doesn't need to resolve its
+// transitive imports. The real api.ts has no .svelte imports, so mocking
+// the component is sufficient.
+vi.mock('./lib/components/DirectoryGovernance.svelte', () => ({
+  default: () => ({}),
+}));
+
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';

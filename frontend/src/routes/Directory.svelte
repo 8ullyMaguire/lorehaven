@@ -15,6 +15,7 @@
   import Button from '../lib/components/Button.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
+  import DirectoryGovernance from '../lib/components/DirectoryGovernance.svelte';
 
   let entries = $state<DirectoryEntry[]>([]);
   let categories = $state<DirectoryCategory[]>([]);
@@ -187,6 +188,10 @@
       </select>
     </label>
   </div>
+
+  {#if session.isSignedIn && session.me && session.me.trust_level >= 4}
+    <DirectoryGovernance />
+  {/if}
 
   {#if loading}
     <Skeleton height="12rem" />

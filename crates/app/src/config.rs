@@ -607,7 +607,7 @@ impl Default for LibraryConfig {
     }
 }
 
-/// Resource directory settings (spec §39).
+/// Resource directory settings (spec §39, §45).
 #[derive(Debug, Clone)]
 pub struct DirectoryConfig {
     /// Extra categories beyond the seed set (§39.2). Operators extend the
@@ -620,6 +620,26 @@ pub struct DirectoryConfig {
     /// Floor/ceiling the taste affinity maps onto.
     pub taste_floor: f64,
     pub taste_ceiling: f64,
+    /// Category governance settings (§45).
+    pub governance: CategoryGovernanceConfig,
+}
+
+/// Category governance settings (spec §45).
+#[derive(Debug, Clone)]
+pub struct CategoryGovernanceConfig {
+    /// Freeze all category governance: no proposals, no votes (§45.3).
+    pub frozen: bool,
+    /// Operator-raiseable ceiling on active categories (§45.4). Default 32.
+    pub max_active_categories: u32,
+}
+
+impl Default for CategoryGovernanceConfig {
+    fn default() -> Self {
+        Self {
+            frozen: false,
+            max_active_categories: lorehaven_domain::category_governance::MAX_ACTIVE_CATEGORIES,
+        }
+    }
 }
 
 impl DirectoryConfig {
@@ -653,6 +673,7 @@ impl Default for DirectoryConfig {
             trust_vote_weights: lorehaven_domain::directory::DEFAULT_TRUST_VOTE_WEIGHTS,
             taste_floor: lorehaven_domain::directory::DEFAULT_TASTE_FLOOR,
             taste_ceiling: lorehaven_domain::directory::DEFAULT_TASTE_CEILING,
+            governance: CategoryGovernanceConfig::default(),
         }
     }
 }
@@ -1386,12 +1407,19 @@ impl Config {
                         weights = w.try_into().expect("seven weights");
                     }
                 }
+                let governance = d.governance.map(|g| CategoryGovernanceConfig {
+                    frozen: g.frozen.unwrap_or(false),
+                    max_active_categories: g
+                        .max_active_categories
+                        .unwrap_or(defaults.governance.max_active_categories),
+                });
                 DirectoryConfig {
                     extra_categories: d.extra_categories.unwrap_or_default(),
                     weighting: d.weighting.unwrap_or(defaults.weighting),
                     trust_vote_weights: weights,
                     taste_floor: d.taste_floor.unwrap_or(defaults.taste_floor),
                     taste_ceiling: d.taste_ceiling.unwrap_or(defaults.taste_ceiling),
+                    governance: governance.unwrap_or(defaults.governance),
                 }
             }
             None => DirectoryConfig::default(),
@@ -2083,6 +2111,18 @@ struct DirectorySection {
     /// Floor/ceiling the taste affinity maps onto.
     taste_floor: Option<f64>,
     taste_ceiling: Option<f64>,
+    /// Category governance settings (spec §45).
+    governance: Option<CategoryGovernanceSection>,
+}
+
+/// `[directory.governance]` — category governance switches (spec §45.3).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CategoryGovernanceSection {
+    /// Freeze all category governance: no proposals, no votes (§45.3).
+    frozen: Option<bool>,
+    /// Operator-raiseable ceiling on active categories (§45.4). Default 32.
+    max_active_categories: Option<u32>,
 }
 
 #[derive(Debug, Default, Deserialize)]
