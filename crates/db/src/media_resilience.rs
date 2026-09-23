@@ -1873,6 +1873,64 @@ pub async fn find_by_perceptual_hash(
     }
 }
 
+/// §32.7.3: find all works that reference a given media reference ID.
+/// Returns (work_id, work_title, display_url) tuples.
+pub async fn find_works_by_media_reference(
+    db: &Database,
+    media_reference_id: &str,
+) -> Result<Vec<(String, String, Option<String>)>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            let rows = sqlx::query(
+                "SELECT w.id AS work_id, w.title AS work_title, wmr.display_url
+                 FROM work_media_references wmr
+                 JOIN works w ON w.id = wmr.work_id
+                 WHERE wmr.media_reference_id = ?
+                   AND wmr.deleted_at IS NULL
+                 ORDER BY w.title",
+            )
+            .bind(media_reference_id)
+            .fetch_all(pool)
+            .await?;
+            Ok(rows
+                .iter()
+                .map(|r| {
+                    (
+                        r.get::<String, _>("work_id"),
+                        r.get::<String, _>("work_title"),
+                        r.get::<Option<String>, _>("display_url"),
+                    )
+                })
+                .collect())
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            let rows = sqlx::query(
+                "SELECT w.id AS work_id, w.title AS work_title, wmr.display_url
+                 FROM work_media_references wmr
+                 JOIN works w ON w.id = wmr.work_id
+                 WHERE wmr.media_reference_id = $1
+                   AND wmr.deleted_at IS NULL
+                 ORDER BY w.title",
+            )
+            .bind(media_reference_id)
+            .fetch_all(pool)
+            .await?;
+            Ok(rows
+                .iter()
+                .map(|r| {
+                    (
+                        r.get::<String, _>("work_id"),
+                        r.get::<String, _>("work_title"),
+                        r.get::<Option<String>, _>("display_url"),
+                    )
+                })
+                .collect())
+        }
+    }
+}
+
 /// Find media references linked to a curator with low healthy link counts (curator bounty queue).
 pub async fn find_curator_bounty_queue(
     db: &Database,

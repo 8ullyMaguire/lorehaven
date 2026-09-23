@@ -30,6 +30,7 @@
   import Register from './routes/Register.svelte';
   import Search from './routes/Search.svelte';
   import Media from './routes/Media.svelte';
+  import MediaSearch from './routes/MediaSearch.svelte';
   import SignIn from './routes/SignIn.svelte';
   import WorkEditor from './routes/WorkEditor.svelte';
   import WorkPage from './routes/WorkPage.svelte';
@@ -286,6 +287,8 @@
     <Import />
   {:else if route.id === 'media'}
     <Media />
+  {:else if route.id === 'media-search'}
+    <MediaSearch />
   {:else if route.id === 'search'}
     <Search />
   {:else if route.id === 'exports'}
