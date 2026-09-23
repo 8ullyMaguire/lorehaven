@@ -5,6 +5,7 @@
   import Select from './lib/components/Select.svelte';
   import Account from './routes/Account.svelte';
   import AdminJobs from './routes/AdminJobs.svelte';
+  import AdminMediaHealth from './routes/AdminMediaHealth.svelte';
   import Community from './routes/Community.svelte';
   import Docs from './routes/Docs.svelte';
   import DocsSearch from './lib/components/DocsSearch.svelte';
@@ -294,6 +295,8 @@
     <Jobs />
   {:else if route.id === 'admin-jobs'}
     <AdminJobs />
+  {:else if route.id === 'admin-media-health'}
+    <AdminMediaHealth />
   {:else if route.id === 'discover'}
     <Discover />
   {:else if route.id === 'community'}

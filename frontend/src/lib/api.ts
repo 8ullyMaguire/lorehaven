@@ -2934,3 +2934,72 @@ export function createDirectoryList(body: {
     body: JSON.stringify(body),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Admin media health dashboard (spec §32.7.11)
+// ---------------------------------------------------------------------------
+
+export interface MediaHealthOverview {
+  total_references: number;
+  well_mirrored: number;
+  below_threshold: number;
+  health_pct: number;
+  min_healthy_threshold: number;
+  recent_rescues_7d: number;
+  one_week_ago: string;
+}
+
+export interface LinkRotReport {
+  since: string;
+  total_rot: number;
+  by_provider: Array<{ provider: string; dead: number }>;
+}
+
+export interface CuratorLeader {
+  account_id: string;
+  total_rewards: number;
+  actions: number;
+}
+
+export interface BountyStatus {
+  active_bounties: number;
+  total_available: number;
+}
+
+export interface StorageStatus {
+  local_mirrors: number;
+  total_bytes: number;
+  ipfs_pins: number;
+}
+
+export interface ProviderReliability {
+  provider: string;
+  healthy: number;
+  total: number;
+  health_rate: number;
+}
+
+export function fetchMediaHealthOverview(): Promise<MediaHealthOverview> {
+  return apiFetch<MediaHealthOverview>('/admin/media-health/overview');
+}
+
+export function fetchLinkRotReport(since?: string): Promise<LinkRotReport> {
+  const qs = since ? `?since=${encodeURIComponent(since)}` : '';
+  return apiFetch<LinkRotReport>(`/admin/media-health/link-rot${qs}`);
+}
+
+export function fetchCuratorLeaderboard(limit = 10): Promise<{ curators: CuratorLeader[] }> {
+  return apiFetch<{ curators: CuratorLeader[] }>(`/admin/media-health/curator-leaderboard?limit=${limit}`);
+}
+
+export function fetchBountyStatus(): Promise<BountyStatus> {
+  return apiFetch<BountyStatus>('/admin/media-health/bounty-status');
+}
+
+export function fetchStorageStatus(): Promise<StorageStatus> {
+  return apiFetch<StorageStatus>('/admin/media-health/storage');
+}
+
+export function fetchProviderReliability(): Promise<{ providers: ProviderReliability[] }> {
+  return apiFetch<{ providers: ProviderReliability[] }>('/admin/media-health/providers');
+}
