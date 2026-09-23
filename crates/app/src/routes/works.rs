@@ -43,6 +43,7 @@ use lorehaven_db::identity;
 use lorehaven_db::permission;
 use lorehaven_db::reading;
 use lorehaven_db::taxonomy;
+use lorehaven_db::work_metrics;
 use lorehaven_domain::content::Contributor;
 use lorehaven_domain::document::Document;
 use lorehaven_domain::permission::{
@@ -71,6 +72,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/works", get(list_works).post(create_work))
         .route("/works/{id}", patch(update_work))
+        .route("/works/{id}/kudos", post(toggle_kudos))
         .route("/works/{id}/publish", post(publish_work))
         .route("/works/{id}/withdraw", post(withdraw_work))
         .route("/works/{id}/chapters", post(add_chapter))
@@ -229,8 +231,27 @@ struct PublicWorkView {
     /// The public aggregate rating, when the owner allows it and the minimum
     /// count is met. `null` otherwise, including below the threshold.
     rating_summary: Option<PublicRatingSummaryView>,
+    /// Public engagement counts (views, kudos, bookmarks, …). `null` when the
+    /// owner has turned off public rating display, which gates the whole
+    /// metric bar (spec §9.5: "Work owners may disable display of public
+    /// rating aggregates").
+    metrics: Option<PublicWorkMetricsView>,
     authors: Vec<PublicAuthor>,
     chapters: Vec<ChapterView>,
+}
+
+/// Public engagement counts for a work card. Counts, never averages: each
+/// number is "how many readers did X" (spec §9.4 "count once per reader per
+/// target").
+#[derive(Debug, Serialize)]
+struct PublicWorkMetricsView {
+    views: i64,
+    complete_reads: i64,
+    reactions: i64,
+    kudos: i64,
+    bookmarks: i64,
+    collection_adds: i64,
+    reviews: i64,
 }
 
 /// The public aggregate rating, with the count and the method it used.
@@ -383,6 +404,9 @@ async fn read_work(
             // A public reader never receives the editor document, and never
             // receives a chapter that is not currently published.
             let view = public_view(&state, &work).await?;
+            record_view_for_work(&state, &work_id, session.as_ref())
+                .await
+                .ok();
             return Ok(Json(serde_json::to_value(view).map_err(internal)?));
         }
         Reading::Denied(error) => return Err(ApiError(error)),
@@ -1168,6 +1192,23 @@ async fn public_view(state: &AppState, work: &Work) -> ApiResult<PublicWorkView>
         None
     };
 
+    // The same owner preference gates the engagement counters: a work whose
+    // owner has hidden public rating display hides the metric bar too.
+    let metrics = if work.show_public_ratings {
+        let m = work_metrics::get_metrics(state.db(), &work.id).await?;
+        Some(PublicWorkMetricsView {
+            views: m.views,
+            complete_reads: m.complete_reads,
+            reactions: m.reactions,
+            kudos: m.kudos,
+            bookmarks: m.bookmarks,
+            collection_adds: m.collection_adds,
+            reviews: m.reviews,
+        })
+    } else {
+        None
+    };
+
     Ok(PublicWorkView {
         id: work.id,
         title: work.title.clone(),
@@ -1184,6 +1225,7 @@ async fn public_view(state: &AppState, work: &Work) -> ApiResult<PublicWorkView>
             mean_stars: summary.mean_permille as f64 / 1000.0,
             method: MEAN_OF_PUBLIC_RATINGS,
         }),
+        metrics,
         authors,
         chapters: chapters.into_iter().map(ChapterView::from).collect(),
     })
@@ -1193,6 +1235,50 @@ async fn reload(state: &AppState, id: WorkId) -> ApiResult<Work> {
     content::find_work(state.db(), id)
         .await?
         .ok_or_else(|| ApiError(AppError::NotFound { resource: "work" }))
+}
+
+/// Record a deduplicated view for a work. The viewer hash is the account id
+/// when signed in, or `"anon"` when not; `viewed_at` is truncated to the
+/// hour so repeated refreshes do not inflate the counter (spec §10).
+async fn record_view_for_work(
+    state: &AppState,
+    work_id: &WorkId,
+    session: Option<&SessionUser>,
+) -> ApiResult<()> {
+    let viewer_hash = match session {
+        Some(s) => s.account_id.to_string(),
+        None => "anon".to_string(),
+    };
+    let viewed_at = chrono::Utc::now().format("%Y-%m-%dT%H:00:00").to_string();
+    let is_new = work_metrics::record_view(
+        state.db(),
+        &work_id.to_string(),
+        &viewer_hash,
+        &viewed_at,
+        false,
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    if is_new {
+        work_metrics::increment_views(state.db(), &work_id.to_string())
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    }
+    Ok(())
+}
+
+/// Toggle kudos for the signed-in account on a work. Returns the new state.
+async fn toggle_kudos(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let work_id = parse_work_id(&id)?;
+    let kudoed =
+        work_metrics::toggle_kudos(state.db(), &work_id.to_string(), &user.account_id.to_string())
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    Ok(Json(serde_json::json!({ "kudoed": kudoed })))
 }
 
 // ---------------------------------------------------------------------------

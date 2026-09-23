@@ -588,8 +588,21 @@ export interface PublicWork {
   show_public_ratings: boolean;
   /** How discussion happens around this work (thread_only/comments_only/both). */
   discussion_mode: string;
+  /** Public engagement counts (null when the owner opted out). */
+  metrics: WorkMetricsView | null;
   authors: PublicAuthor[];
   chapters: ChapterSummary[];
+}
+
+/** Public engagement counts for a work card. */
+export interface WorkMetricsView {
+  views: number;
+  complete_reads: number;
+  reactions: number;
+  kudos: number;
+  bookmarks: number;
+  collection_adds: number;
+  reviews: number;
 }
 
 /**
@@ -1102,6 +1115,13 @@ export function postReaction(
   return apiFetch<{ outcome: string }>(`/works/${encodeURIComponent(workId)}/reactions`, {
     method: 'POST',
     body: JSON.stringify({ vote_type: voteType }),
+  });
+}
+
+/** Toggle kudos for the signed-in account on a work (spec §9.4). */
+export function toggleKudos(workId: string): Promise<{ kudoed: boolean }> {
+  return apiFetch<{ kudoed: boolean }>(`/works/${encodeURIComponent(workId)}/kudos`, {
+    method: 'POST',
   });
 }
 

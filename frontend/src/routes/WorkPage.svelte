@@ -45,6 +45,7 @@
   import NotePanel from '../lib/components/NotePanel.svelte';
   import Rating from '../lib/components/Rating.svelte';
   import ReactionBar from '../lib/components/ReactionBar.svelte';
+  import KudosButton from '../lib/components/KudosButton.svelte';
   import ResumePrompt from '../lib/components/ResumePrompt.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
@@ -361,6 +362,7 @@
   <!-- Discussion surface (spec §35): reaction bar + Discuss link. -->
   {#if discussionMode?.thread_enabled}
     <ReactionBar workId={workId} />
+    <KudosButton workId={workId} />
     <DiscussLink workId={workId} />
   {/if}
 

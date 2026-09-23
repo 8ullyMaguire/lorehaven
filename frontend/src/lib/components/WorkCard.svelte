@@ -19,6 +19,7 @@
    * they lost.
    */
   import MetadataChip from './MetadataChip.svelte';
+  import type { WorkMetricsView } from '../lib/api';
 
   export interface WorkSummary {
     id: string;
@@ -33,6 +34,8 @@
     centralRelationships?: string[];
     /** Whether the reader has saved this work. */
     bookmarked?: boolean;
+    /** Public engagement counts, when the owner permits them. */
+    metrics?: WorkMetricsView | null;
   }
 
   /** How much of a work to draw. */
@@ -92,6 +95,20 @@
     return `${(count / 1000).toFixed(count < 10000 ? 1 : 0)}k words`;
   }
 
+  /** Format a metric count for display: 1.2k, 3.4k, etc. */
+  function formatCount(n: number): string {
+    if (n < 1000) return `${n}`;
+    return `${(n / 1000).toFixed(n < 10000 ? 1 : 0)}k`;
+  }
+
+  /** Whether the metric bar is worth drawing (any non-zero count). */
+  let hasMetrics = $derived(
+    work.metrics !== null && work.metrics !== undefined
+      && (work.metrics.views > 0 || work.metrics.kudos > 0 || work.metrics.reactions > 0
+        || work.metrics.bookmarks > 0 || work.metrics.complete_reads > 0
+        || work.metrics.collection_adds > 0 || work.metrics.reviews > 0),
+  );
+
   /** Whether anything only a library knows is worth drawing. */
   let hasLibraryFacts = $derived(
     Boolean(readingStatus) || tags.length > 0 || shelves.length > 0,
@@ -145,6 +162,23 @@
       <MetadataChip label={formatWords(work.wordCount)!} />
     {/if}
   </div>
+
+  {#if hasMetrics}
+    <!-- Engagement counts, gated by the owner's public-ratings preference.
+         Drawn in every variant: a number the reader relies on should not
+         vanish at grid density. -->
+    <ul class="metrics" aria-label="Engagement">
+      <li>{formatCount(work.metrics!.views)} views</li>
+      <li>{formatCount(work.metrics!.kudos)} kudos</li>
+      {#if variant === 'full'}
+        <li>{formatCount(work.metrics!.reactions)} reactions</li>
+        <li>{formatCount(work.metrics!.complete_reads)} finished</li>
+        <li>{formatCount(work.metrics!.bookmarks)} bookmarks</li>
+        <li>{formatCount(work.metrics!.collection_adds)} in collections</li>
+        <li>{formatCount(work.metrics!.reviews)} reviews</li>
+      {/if}
+    </ul>
+  {/if}
 
   {#if hasLibraryFacts}
     <!-- The library's own facts, drawn in every variant: a status or a tag that
@@ -286,6 +320,23 @@
   }
 
   .library-facts li {
+    padding: 0 var(--space-2);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-sm);
+  }
+
+  .metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    list-style: none;
+    padding: 0;
+    margin: var(--space-3) 0 0;
+    font-size: var(--text-sm);
+    color: var(--color-muted);
+  }
+
+  .metrics li {
     padding: 0 var(--space-2);
     border: var(--border-width) solid var(--color-border);
     border-radius: var(--radius-sm);
