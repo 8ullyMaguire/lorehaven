@@ -4,11 +4,13 @@
 //! decisions through the single `blocked_between` / `muted_between` domain
 //! functions — ad-hoc block filters are forbidden (plan §6.11).
 
+use crate::identity::find_pseud_by_handle;
 use crate::{Backend, Database};
 use anyhow::Result;
 use lorehaven_domain::blocking::BlockScope;
 use serde::Serialize;
 use sqlx::FromRow;
+use std::collections::HashSet;
 
 // ---------------------------------------------------------------------------
 // Comments
@@ -1814,5 +1816,185 @@ pub async fn update_topic_last_post(
                 .await?;
         }
     }
+    Ok(())
+}
+// ---------------------------------------------------------------------------
+// Mentions (spec §17.5)
+// ---------------------------------------------------------------------------
+
+/// Parse `@handle` references from post/comment body text.
+///
+/// Returns unique handles (lowercased), preserving order of first mention.
+/// Handles must match `[a-zA-Z0-9_]{3,32}` and start with `@`.
+pub fn parse_mention_handles(text: &str) -> Vec<String> {
+    let mut handles = Vec::new();
+    let mut seen = HashSet::new();
+    for word in text.split_whitespace() {
+        if let Some(rest) = word.strip_prefix('@') {
+            // Handle may be followed by punctuation or end of string.
+            let handle = rest.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_');
+            if (3..=32).contains(&handle.len())
+                && handle.chars().all(|c| c.is_alphanumeric() || c == '_')
+                && seen.insert(handle.to_lowercase())
+            {
+                handles.push(handle.to_lowercase());
+            }
+        }
+    }
+    handles
+}
+
+/// Record mention events for a newly created forum post or comment.
+///
+/// Checks visibility (pseud must be discoverable) and blocks (spec §17.5):
+/// no mention event is created when either party has blocked the other.
+/// Mute is checked separately in the notification layer. Best-effort: a
+/// mention failure must never fail the post.
+pub async fn record_mentions(
+    db: &Database,
+    source_type: &str,
+    source_id: &str,
+    author_account_id: &str,
+) -> Result<()> {
+    // Fetch the post body to parse handles. Read from the right table.
+    let body = match source_type {
+        "forum_post" => {
+            let sql = db.sql(
+                "SELECT body FROM forum_posts WHERE id = ?",
+                "SELECT body FROM forum_posts WHERE id = $1",
+            );
+            let row: Option<(String,)> = match db.backend() {
+                Backend::Sqlite => {
+                    sqlx::query_as(&sql)
+                        .bind(source_id)
+                        .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                        .await?
+                }
+                Backend::Postgres => {
+                    sqlx::query_as(&sql)
+                        .bind(source_id)
+                        .fetch_optional(db.postgres_pool().expect("postgres"))
+                        .await?
+                }
+            };
+            match row {
+                Some((body,)) => body,
+                None => return Ok(()),
+            }
+        }
+        "comment" => {
+            let sql = db.sql(
+                "SELECT body FROM comments WHERE id = ?",
+                "SELECT body FROM comments WHERE id = $1",
+            );
+            let row: Option<(String,)> = match db.backend() {
+                Backend::Sqlite => {
+                    sqlx::query_as(&sql)
+                        .bind(source_id)
+                        .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                        .await?
+                }
+                Backend::Postgres => {
+                    sqlx::query_as(&sql)
+                        .bind(source_id)
+                        .fetch_optional(db.postgres_pool().expect("postgres"))
+                        .await?
+                }
+            };
+            match row {
+                Some((body,)) => body,
+                None => return Ok(()),
+            }
+        }
+        _ => return Ok(()),
+    };
+
+    let handles = parse_mention_handles(&body);
+    if handles.is_empty() {
+        return Ok(());
+    }
+
+    let now = crate::identity::now_rfc3339();
+    let mut notified = HashSet::new();
+
+    for handle in handles {
+        let Some(pseud) = find_pseud_by_handle(db, &handle).await? else {
+            continue;
+        };
+        // Skip self-mentions.
+        if pseud.account_id.to_string() == author_account_id {
+            continue;
+        }
+        // Skip duplicates.
+        if !notified.insert(pseud.id.to_string()) {
+            continue;
+        }
+        // Visibility: mentioned pseud must be discoverable.
+        if !matches!(pseud.discoverability, crate::identity::Discoverability::Listed) {
+            continue;
+        }
+        // Block check: if either party has blocked the other, skip.
+        let blocked = is_blocked(
+            db,
+            &pseud.account_id.to_string(),
+            author_account_id,
+            BlockScope::Comments,
+        )
+        .await?
+            || is_blocked(
+                db,
+                author_account_id,
+                &pseud.account_id.to_string(),
+                BlockScope::Comments,
+            )
+            .await?;
+        if blocked {
+            continue;
+        }
+
+        let mention_id = uuid::Uuid::new_v4().to_string();
+        let sql = db.sql(
+            "INSERT INTO mention_events (id, source_type, source_id, mentioned_pseud, mentioned_by, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO mention_events (id, source_type, source_id, mentioned_pseud, mentioned_by, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        );
+        match db.backend() {
+            Backend::Sqlite => {
+                let _ = sqlx::query(&sql)
+                    .bind(&mention_id)
+                    .bind(source_type)
+                    .bind(source_id)
+                    .bind(&pseud.id.to_string())
+                    .bind(author_account_id)
+                    .bind(&now)
+                    .execute(db.sqlite_pool().expect("sqlite"))
+                    .await;
+            }
+            Backend::Postgres => {
+                let _ = sqlx::query(&sql)
+                    .bind(&mention_id)
+                    .bind(source_type)
+                    .bind(source_id)
+                    .bind(&pseud.id.to_string())
+                    .bind(author_account_id)
+                    .bind(&now)
+                    .execute(db.postgres_pool().expect("postgres"))
+                    .await;
+            }
+        }
+
+        // Notify the mentioned account (best-effort).
+        let _ = crate::notifications::notify(
+            db,
+            &pseud.account_id.to_string(),
+            "mention",
+            "You were mentioned",
+            &format!("mentioned you in a {}", source_type.replace('_', " ")),
+            None,
+        )
+        .await;
+    }
+
     Ok(())
 }

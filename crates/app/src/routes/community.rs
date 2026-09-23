@@ -203,6 +203,15 @@ async fn post_comment(
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    // Record @handle mentions in the comment body (spec §17.5). Best-effort.
+    let _ = lorehaven_db::community::record_mentions(
+        state.db(),
+        "comment",
+        &id,
+        &pseud_id.to_string(),
+    )
+    .await;
+
     let stored = match lorehaven_db::positivity::classify_comment(
         state.db(),
         &id,
@@ -454,6 +463,15 @@ async fn post_reply(
             .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
 
     lorehaven_db::community::update_topic_last_post(state.db(), &id, &pid).await.map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+
+    // Record @handle mentions in the post body (spec §17.5). Best-effort.
+    let _ = lorehaven_db::community::record_mentions(
+        state.db(),
+        "forum_post",
+        &pid,
+        &user.account_id.to_string(),
+    )
+    .await;
 
     // Notify the topic's author about the reply — unless the replier IS the
     // topic author. forum_topics stores the author as a pseud id string, so

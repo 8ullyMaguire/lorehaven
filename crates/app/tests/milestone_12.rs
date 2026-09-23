@@ -1030,3 +1030,209 @@ async fn editing_a_public_review_does_not_notify_the_author_again() {
 
     harness.cleanup().await;
 }
+
+// ---------------------------------------------------------------------------
+// Mentions (spec §17.5)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_post_mention_creates_a_mention_event_and_notification() {
+    let harness = Harness::new("mention-basic").await;
+    let mut alice = harness.client();
+    register(&mut alice, "alice@example.com", "Alice").await;
+    let mut bob = harness.client();
+    let (_, bob_pseud) = register(&mut bob, "bob@example.com", "Bob").await;
+
+    // Seed a category.
+    let cat_id = "11111111-1111-1111-1111-111111111111";
+    let sql = harness.tdb.db().sql(
+        "INSERT INTO forum_categories (id, name, position, min_trust) VALUES (?, 'Cat', 0, 0)",
+        "INSERT INTO forum_categories (id, name, position, min_trust) VALUES ($1, 'Cat', 0, 0)",
+    );
+    match harness.tdb.db().backend() {
+        Backend::Sqlite => {
+            sqlx::query(sql.as_ref())
+                .bind(cat_id)
+                .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
+                .await
+                .expect("seed category");
+        }
+        Backend::Postgres => {
+            sqlx::query(sql.as_ref())
+                .bind(cat_id)
+                .execute(harness.tdb.db().postgres_pool().expect("postgres"))
+                .await
+                .expect("seed category");
+        }
+    }
+
+    // Alice creates a topic.
+    let (status, body) = alice
+        .post(
+            &format!("/api/v1/forums/{cat_id}/topics"),
+            json!({ "title": "Hello" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let topic_id = body["id"].as_str().expect("topic id").to_owned();
+
+    // Alice posts a reply mentioning @bob.
+    let (status, body) = alice
+        .post(
+            &format!("/api/v1/topics/{topic_id}/replies"),
+            json!({ "body": "Hey @Bob, check this out!" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Bob should have a notification.
+    let (status, body) = bob.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body["items"]
+        .as_array()
+        .map(|a| a.to_owned())
+        .unwrap_or_default();
+    assert!(
+        items.iter().any(|n| n["kind"] == "mention"),
+        "bob should have a mention notification: {body}"
+    );
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_blocked_mention_creates_no_mention_event() {
+    let harness = Harness::new("mention-blocked").await;
+    let mut alice = harness.client();
+    register(&mut alice, "alice@example.com", "Alice").await;
+    let mut bob = harness.client();
+    let (bob_account, _) = register(&mut bob, "bob@example.com", "Bob").await;
+
+    // Alice blocks Bob in the comments scope.
+    let (status, _) = alice
+        .post(
+            "/api/v1/me/blocks",
+            json!({ "blocked": bob_account, "scope": "comments" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "alice blocks bob");
+
+    // Seed a category.
+    let cat_id = "22222222-2222-2222-2222-222222222222";
+    let sql = harness.tdb.db().sql(
+        "INSERT INTO forum_categories (id, name, position, min_trust) VALUES (?, 'Cat', 0, 0)",
+        "INSERT INTO forum_categories (id, name, position, min_trust) VALUES ($1, 'Cat', 0, 0)",
+    );
+    match harness.tdb.db().backend() {
+        Backend::Sqlite => {
+            sqlx::query(sql.as_ref())
+                .bind(cat_id)
+                .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
+                .await
+                .expect("seed category");
+        }
+        Backend::Postgres => {
+            sqlx::query(sql.as_ref())
+                .bind(cat_id)
+                .execute(harness.tdb.db().postgres_pool().expect("postgres"))
+                .await
+                .expect("seed category");
+        }
+    }
+
+    // Alice creates a topic.
+    let (status, body) = alice
+        .post(
+            &format!("/api/v1/forums/{cat_id}/topics"),
+            json!({ "title": "Hello" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let topic_id = body["id"].as_str().expect("topic id").to_owned();
+
+    // Alice posts a reply mentioning @bob (who she blocked).
+    let (status, body) = alice
+        .post(
+            &format!("/api/v1/topics/{topic_id}/replies"),
+            json!({ "body": "Hey @Bob!" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Bob should NOT have a mention notification (block suppresses it).
+    let (status, body) = bob.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body["items"]
+        .as_array()
+        .map(|a| a.to_owned())
+        .unwrap_or_default();
+    assert!(
+        !items.iter().any(|n| n["kind"] == "mention"),
+        "bob should NOT have a mention notification when blocked: {body}"
+    );
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_self_mention_creates_no_mention_event() {
+    let harness = Harness::new("mention-self").await;
+    let mut alice = harness.client();
+    register(&mut alice, "alice@example.com", "Alice").await;
+
+    // Seed a category.
+    let cat_id = "33333333-3333-3333-3333-333333333333";
+    let sql = harness.tdb.db().sql(
+        "INSERT INTO forum_categories (id, name, position, min_trust) VALUES (?, 'Cat', 0, 0)",
+        "INSERT INTO forum_categories (id, name, position, min_trust) VALUES ($1, 'Cat', 0, 0)",
+    );
+    match harness.tdb.db().backend() {
+        Backend::Sqlite => {
+            sqlx::query(sql.as_ref())
+                .bind(cat_id)
+                .execute(harness.tdb.db().sqlite_pool().expect("sqlite"))
+                .await
+                .expect("seed category");
+        }
+        Backend::Postgres => {
+            sqlx::query(sql.as_ref())
+                .bind(cat_id)
+                .execute(harness.tdb.db().postgres_pool().expect("postgres"))
+                .await
+                .expect("seed category");
+        }
+    }
+
+    // Alice creates a topic.
+    let (status, body) = alice
+        .post(
+            &format!("/api/v1/forums/{cat_id}/topics"),
+            json!({ "title": "Hello" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let topic_id = body["id"].as_str().expect("topic id").to_owned();
+
+    // Alice posts a reply mentioning herself.
+    let (status, body) = alice
+        .post(
+            &format!("/api/v1/topics/{topic_id}/replies"),
+            json!({ "body": "Hey @Alice, remember this." }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Alice should NOT have a mention notification (self-mention).
+    let (status, body) = alice.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body["items"]
+        .as_array()
+        .map(|a| a.to_owned())
+        .unwrap_or_default();
+    assert!(
+        !items.iter().any(|n| n["kind"] == "mention"),
+        "alice should NOT have a self-mention notification: {body}"
+    );
+
+    harness.cleanup().await;
+}
