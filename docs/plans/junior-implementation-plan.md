@@ -4140,3 +4140,160 @@ GET route, 404 on missing reference, links-needing-check queue.
 - Phase 4 (Advanced mirroring): local mirror, IPFS, federation
 - Phase 5 (Discovery): reverse image search, MediaReferenceCollaborative strategy
 - Phase 6 (Import rescue): bulk media rescue, aggressive-mirror sources
+
+## 15k. Milestone 45 (repo) — Roadmap consensus: Elo-ranked feature board (spec §44)
+
+Spec §44, ADR 0023. Depends on: M14 (trust ladder, `trust_levels` table), M0 (workspace layout).
+Ported from FicHub's `fichub-consensus` crate (`~/code/rust/ficnexus/crates/consensus`) — the Elo
+math and MaxDiff→match translation are copied from there; storage is rewritten for Lorehaven's
+dual-backend `Database` (SQLite + Postgres), and the voter gate is `governance::trust_for`.
+
+**Read first:** spec §44 in full; `crates/db/src/governance.rs` (`trust_for`); ADR 0023.
+
+### 45.1 Migration 0066 (both dialects)
+
+`migrations/sqlite/0066_roadmap_consensus.sql` and `migrations/postgres/0066_roadmap_consensus.sql`:
+
+```sql
+CREATE TABLE roadmap_cards (
+    id              TEXT PRIMARY KEY,            -- UUID
+    title           TEXT NOT NULL,
+    category        TEXT NOT NULL DEFAULT 'general',
+    stage           TEXT NOT NULL DEFAULT 'idea'
+                    CHECK (stage IN ('idea','up_next','in_progress','finished',
+                                     'shipped','medium_term','long_term','rejected')),
+    elo_rating      REAL NOT NULL DEFAULT 1500.0,
+    matches_played  INTEGER NOT NULL DEFAULT 0,
+    times_best      INTEGER NOT NULL DEFAULT 0,
+    times_worst     INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL,               -- TIMESTAMPTZ on Postgres
+    updated_at      TEXT NOT NULL
+);
+CREATE INDEX idx_roadmap_cards_stage ON roadmap_cards (stage);
+
+CREATE TABLE roadmap_suggestions (
+    id          TEXT PRIMARY KEY,
+    account_id  TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    raw_text    TEXT NOT NULL,
+    card_id     TEXT REFERENCES roadmap_cards(id) ON DELETE SET NULL,
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE roadmap_ballots (
+    id           TEXT PRIMARY KEY,
+    card_ids     TEXT NOT NULL,   -- JSON array of 4 card ids (JSONB on Postgres)
+    served_elo   TEXT NOT NULL,   -- JSON map card_id → pre-match Elo (JSONB on Postgres)
+    account_id   TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    created_at   TEXT NOT NULL,
+    voted_at     TEXT
+);
+
+CREATE TABLE roadmap_moves (
+    id          TEXT PRIMARY KEY,
+    card_id     TEXT NOT NULL REFERENCES roadmap_cards(id) ON DELETE CASCADE,
+    from_stage  TEXT NOT NULL,
+    to_stage    TEXT NOT NULL,
+    reason      TEXT NOT NULL,
+    moved_by    TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    created_at  TEXT NOT NULL
+);
+```
+
+Postgres dialect: `TEXT` timestamps → `TIMESTAMPTZ`, JSON `TEXT` → `JSONB`, `id TEXT` stays (UUIDs
+stored as text — match §44's `card_id` UUID-as-text; consistent with `roadmap_cards.id TEXT`).
+
+Verify: `cargo run -p lorehaven-app -- migrate` applies 0066 on SQLite; same on Postgres via
+`DATABASE_URL`.
+
+### 45.2 Domain crate: Elo math (TDD, pure functions)
+
+`crates/domain/src/consensus.rs` — port of the pure math from ficnexus
+(`crates/consensus/src/lib.rs` lines 478–500):
+
+```rust
+pub fn expected_score(rating_a: f64, rating_b: f64) -> f64 {
+    1.0 / (1.0 + 10f64.powf((rating_b - rating_a) / 400.0))
+}
+
+pub fn elo_update(rating: f64, opponent_rating: f64, score: f64, k: f64) -> f64 {
+    rating + k * (score - expected_score(rating, opponent_rating))
+}
+
+/// MaxDiff → two virtual 1v1 matches per unchosen card (spec §44.3):
+/// best beats both unchosen, worst loses to both unchosen.
+pub fn maxdiff_elo_updates(
+    best: (i64, f64),
+    worst: (i64, f64),
+    unchosen: &[(i64, f64)],
+    k: f64,
+) -> Vec<(i64, f64)> { /* best +2 wins, worst +2 losses, each unchosen ±1 */ }
+```
+
+Register `pub mod consensus;` in `crates/domain/src/lib.rs`. Test first
+(`crates/domain/src/consensus.rs` `#[cfg(test)]`): expected_score(1500,1500)=0.5;
+elo_update symmetric; best-of-four at equal ratings gains, worst loses; sum of
+updates across the four cards is zero (zero-sum). RED → implement → GREEN → commit.
+
+### 45.3 DB layer: cards, ballots, moves
+
+`crates/db/src/roadmap.rs` — same dual-backend pattern as `governance.rs`
+(`match db.backend() { Backend::Sqlite => …, Backend::Postgres => … }`):
+
+- `upsert_card(db, card) -> Result<()>` — insert or update by id; never
+  downgrades a `shipped` stage (§44.6).
+- `find_card_by_title_normalized(db, title) -> Result<Option<Card>>` —
+  lowercase, collapse whitespace, strip punctuation.
+- `list_cards(db, stage: Option<&str>) -> Result<Vec<Card>>` — Elo DESC,
+  tie-break `matches_played` DESC then `card_id` ASC.
+- `arena_candidates(db, limit) -> Result<Vec<Card>>` — `stage = 'idea'` only,
+  random order (SQLite `RANDOM()`, Postgres `RANDOM()`), limit 4.
+- `create_ballot / fetch_ballot / mark_voted(db, ballot_id, account_id)` —
+  one-vote-per-ballot enforced by `voted_at IS NULL` check + UPDATE … WHERE.
+- `apply_elo_and_counters(db, updates: &[(card_id, new_elo, is_best, is_worst)])`.
+- `record_move(db, card_id, from, to, reason, moved_by)`.
+- `list_moves(db, limit, offset)`.
+
+Register in `crates/db/src/lib.rs`, add migration 0066 to `migrate.rs`'s file list.
+
+### 45.4 Routes
+
+`crates/app/src/routes/roadmap.rs` — follow `vanguard.rs` for auth patterns:
+
+- `pub fn read_router()` — `GET /roadmap`, `GET /roadmap/changelog`:
+  `RouteClass::Default` (anonymous-readable, §44.5).
+- `pub fn router()` — `GET /roadmap/arena`, `POST /roadmap/arena`,
+  `POST /roadmap/suggest`: session + `governance::trust_for(db, account) >= 1`
+  gate, `RouteClass::Write`.
+- `pub fn admin_router()` — `POST /admin/roadmap/move`: operator check per
+  `admin.rs` pattern.
+
+Wire into `server.rs`'s `api` router with `classified(...)` like the others.
+Route inventory test (`route_inventory.rs`) extended with the new paths.
+
+### 45.5 Milestone tests
+
+`crates/app/tests/milestone_45.rs`, patterned on `milestone_43.rs`: seed two
+accounts (TL0, TL2 via `governance::set_trust`), seed cards via the same
+upsert path the script uses, then per §44.7:
+
+- TL0 vote → 403 with named error; TL2 vote → 200, Elo deltas applied, counters
+  incremented, ballot marked voted.
+- Second vote on same ballot → 400 named error.
+- `shipped` card never in `arena_candidates`.
+- Upsert with `shipped` stage on a card the CSV says `idea` → stays `shipped`.
+- Anonymous `GET /roadmap` → 200; anonymous `POST /roadmap/arena` → 401.
+- Move endpoint writes a changelog row; changelog lists it.
+- Elo tie-break ordering stable.
+
+### 45.6 Seed script
+
+`scripts/seed_roadmap.py` (Python, stdlib only): reads `docs/requirements.csv`,
+maps each row → card (§44.6 mapping), connects to the target DB (SQLite file or
+Postgres URL from `--db-url`, default `sqlite://./data/lorehaven.sqlite` or
+`DATABASE_URL`), upserts by normalized title. `--dry-run` prints the plan.
+Never downgrades `shipped`. Idempotent: second run reports all `unchanged`.
+
+### 45.7 Sign-off
+
+Cross-cutting checklist (§16 of this plan) + requirements rows M45-01…M45-07
+(§44.7 acceptance items) + `scripts/seed_roadmap.py --dry-run` output reviewed.

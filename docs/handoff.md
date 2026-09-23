@@ -1,6 +1,50 @@
 # Handoff — M51 Complete, M12 Mention System, M7 Device Delivery (v0.51.0+2)
 
-Date: 2026-09-23. Previous handoff was M18 Phase 4.2 (below). Current work: M51 media resilience complete, M12 mention system, M7 device delivery.
+Date: 2026-09-23 (updated for restart). Previous handoff was M18 Phase 4.2 (below). Current work: M51 media resilience complete, M12 mention system, M7 device delivery. Taste Calibration Arena spec committed. M45 Roadmap Consensus spec+plan+ADR+seed script done, no code yet.
+
+## Current Session State (2026-09-23, for restart)
+
+### Committed this session
+
+- `30b3c25` — docs: Taste Calibration Arena (spec §0.4.2a) — hybrid arena+swipe for dimensional weights
+  - spec amendment §0.4.2a, spec.md first-run experience, plan v2 §2.2a, requirements.csv M45-56
+
+### Uncommitted (must commit or stash before restart)
+
+| File | What | Status |
+|------|------|--------|
+| `crates/domain/src/lib.rs` | Adds `pub mod search;` | Compiles |
+| `crates/domain/src/search.rs` | Search query language parser (531 lines) | Compiles, tests not verified |
+| `docs/plans/junior-implementation-plan.md` | M45 Roadmap Consensus plan (§15k) | Done |
+| `docs/adr/0023-roadmap-consensus.md` | ADR 0023: Roadmap consensus | Done |
+| `scripts/seed_roadmap.py` | Seed roadmap cards from requirements.csv | Done |
+
+### Two uncommitted workstreams
+
+**1. Search parser fix (crates/domain/src/search.rs)**
+- New unified query language parser for cross-entity search (spec §11.5.1)
+- Handles `tag:"enemies to lovers" fandom:"Good Omens" words:>10000 status:complete`
+- Operators: `:`, `>`, `<`, `>=`, `<=`, `..` (range), boolean AND/OR/NOT, grouping
+- Domain compiles clean. Tests not yet verified (cargo test timed out locally — run on thinkcentre).
+- The `-` range lexer bug at line ~135 was the last thing being fixed before interrupt.
+
+**2. M45 Roadmap Consensus (spec §44, plan §15k, ADR 0023)**
+- Spec §44 already exists in docs/spec.md (lines 7702-7806)
+- Plan §15k written (lines 4144-4296): migration 0066, Elo math, DB layer, routes, tests, seed script
+- ADR 0023 written: port FichHub's Elo/MaxDiff consensus engine
+- Seed script done: `scripts/seed_roadmap.py` — maps requirements.csv to roadmap cards
+- **No code yet** — migration, domain, DB, routes, frontend all unwritten
+- Next: implement migration 0066 (both dialects), then domain Elo math, then DB layer
+
+### What's next after restart
+
+1. Commit the uncommitted changes (search parser + M45 plan/ADR/seed script)
+2. Run `cargo test -p lorehaven-domain -- search` on thinkcentre to verify parser
+3. Implement M45 Roadmap Consensus (migration → domain → DB → routes → frontend)
+4. Fix 3 E2E failures (worker timing, download verification, subscription unread count)
+5. Decide on deferred items (M6-15 aggregate mode, M6-10 preservation batches)
+
+---
 
 ## Current Work: M51 Media Resilience + M12 Mentions + M7 Device Delivery (done)
 
