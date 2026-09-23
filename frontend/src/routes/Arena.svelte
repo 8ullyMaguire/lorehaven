@@ -211,7 +211,7 @@
       {/if}
 
       <div class="arena-submit">
-        <Button variant="primary" onclick={submitVote} disabled={voting}>
+        <Button variant="primary" onclick={submitVote} disabled={!bestId || !worstId || voting}>
           {voting ? 'Recording...' : 'Submit & Next Round'}
         </Button>
       </div>
