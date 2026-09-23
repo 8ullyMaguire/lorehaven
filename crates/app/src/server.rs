@@ -372,6 +372,21 @@ pub fn build_router(state: AppState) -> Router {
             &state,
         ))
         .merge(classified(
+            routes::roadmap::read_router(),
+            RouteClass::Default,
+            &state,
+        ))
+        .merge(
+            // TL>=1 + operator routes under /api/v1/roadmap and /api/v1/admin/roadmap.
+            Router::new()
+                .nest("/api/v1", routes::roadmap::router())
+                .nest("/api/v1", classified(
+                    routes::roadmap::admin_router(),
+                    RouteClass::Write,
+                    &state,
+                )),
+        )
+        .merge(classified(
             routes::browse::router(),
             RouteClass::Default,
             &state,
@@ -445,11 +460,7 @@ pub fn build_router(state: AppState) -> Router {
         // CTA marks (spec §42.2) — curators record whether a work carries its
         // own CTA. Write class: mark and retract mutate; list is read but
         // should be authenticated (who marked what).
-        .merge(classified(
-            routes::cta::router(),
-            RouteClass::Write,
-            &state,
-        ))
+        .merge(classified(routes::cta::router(), RouteClass::Write, &state))
         // Recommendation transparency (M29): "why am I seeing this" explanations.
         .merge(classified(
             routes::recommendation_transparency::router(),

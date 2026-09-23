@@ -17,6 +17,7 @@
 
 pub mod admin;
 pub mod analytics;
+pub mod bounties;
 pub mod browse;
 pub mod collaboration;
 pub mod community;
@@ -52,23 +53,23 @@ pub mod permission;
 pub mod positivity;
 pub mod rating_integrity;
 pub mod reading;
-pub mod bounties;
 pub mod revisions;
 pub mod roles;
+pub mod roadmap;
 pub mod search;
 pub mod secrets;
 pub mod sessions;
+pub mod spoilers;
 pub mod storage;
 pub mod subscriptions;
 pub mod taste_health;
-pub mod spoilers;
-pub mod taxonomy;
 pub mod taste_vectors;
+pub mod taxonomy;
 pub mod thread_modes;
 pub mod translation;
 pub mod typed_votes;
-pub mod work_discussion;
 pub mod work_backlink;
+pub mod work_discussion;
 
 use std::borrow::Cow;
 use std::path::Path;
