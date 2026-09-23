@@ -57,3 +57,65 @@ async fn curator_bounty_queue_finds_low_health_references() {
     assert_eq!(queue.len(), 1);
     assert_eq!(queue[0].id, "ref-cbq-1");
 }
+
+#[tokio::test]
+async fn find_works_by_media_reference() {
+    let dir = test_support::scratch_dir("find-wmr");
+    let tdb = test_support::TestDb::connect_with_dir("find-wmr", &dir).await;
+    let db = tdb.db();
+
+    let account_id = "acc-finder";
+    let pseud_id = format!("{}-pseud", account_id);
+
+    match db.backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query("INSERT INTO accounts (id, email, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))")
+                .bind(account_id).bind(format!("{}@test.dev", account_id))
+                .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
+            sqlx::query("INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))")
+                .bind(&pseud_id).bind(account_id).bind(&pseud_id).bind(&pseud_id)
+                .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
+            for wid in ["work-x", "work-y"] {
+                sqlx::query("INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at) VALUES (?, ?, ?, 'published', 'public', datetime('now'), datetime('now'))")
+                    .bind(wid).bind(format!("Title {}", wid)).bind(&pseud_id)
+                    .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
+            }
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query("INSERT INTO accounts (id, email, created_at, updated_at) VALUES ($1, $2, now(), now())")
+                .bind(account_id).bind(format!("{}@test.dev", account_id))
+                .execute(db.postgres_pool().expect("postgres")).await.unwrap();
+            sqlx::query("INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at) VALUES ($1, $2, $3, $4, now(), now())")
+                .bind(&pseud_id).bind(account_id).bind(&pseud_id).bind(&pseud_id)
+                .execute(db.postgres_pool().expect("postgres")).await.unwrap();
+            for wid in ["work-x", "work-y"] {
+                sqlx::query("INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at) VALUES ($1, $2, $3, 'published', 'public', now(), now())")
+                    .bind(wid).bind(format!("Title {}", wid)).bind(&pseud_id)
+                    .execute(db.postgres_pool().expect("postgres")).await.unwrap();
+            }
+        }
+    }
+
+    let (created, reference_id) = media_resilience::upsert_media_reference_for_import(
+        db, "work-x", None, "https://img.example.com/xyz.png",
+    )
+    .await
+    .expect("upsert import");
+    assert!(created);
+
+    // Same URL for work-y — dedup returns false but still inserts the work association.
+    let (created2, _) = media_resilience::upsert_media_reference_for_import(
+        db, "work-y", None, "https://img.example.com/xyz.png",
+    )
+    .await
+    .expect("upsert import 2");
+    assert!(!created2);
+
+    let result = media_resilience::find_works_by_media_reference(db, &reference_id)
+        .await
+        .expect("find works");
+
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].0, "work-x");
+    assert_eq!(result[1].0, "work-y");
+}

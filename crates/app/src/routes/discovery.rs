@@ -738,9 +738,27 @@ pub async fn reverse_search(
         })
     }).collect();
 
+    // §32.7.3: also return the works that use each reference.
+    let mut works_json: Vec<serde_json::Value> = Vec::new();
+    for r in &refs {
+        let work_refs = lorehaven_db::media_resilience::find_works_by_media_reference(
+            state.db(), &r.id,
+        )
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        for (work_id, title, display_url) in work_refs {
+            works_json.push(serde_json::json!({
+                "reference_id": r.id,
+                "work_id": work_id,
+                "work_title": title,
+                "display_url": display_url,
+            }));
+        }
+    }
+
     Ok(Json(ReverseSearchView {
         references: refs_json,
-        works: vec![],
+        works: works_json,
     }))
 }
 

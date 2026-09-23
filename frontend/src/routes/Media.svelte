@@ -63,9 +63,10 @@
   </form>
   <div class="toolbar">
     <p role="status">{loading ? 'Loading media…' : results ? `${results.total} ${results.total === 1 ? 'result' : 'results'}` : ''}</p>
-    <nav aria-label="Subscribe to these results">
-      <a href={`${feed}&format=atom`}>Atom feed</a>
-      <a href={`${feed}&format=rss`}>RSS feed</a>
+    <nav aria-label="Tools">
+      <a href="/media/search">Reverse search</a>
+      <a href={`${feed}&format=atom`}>Atom</a>
+      <a href={`${feed}&format=rss`}>RSS</a>
     </nav>
   </div>
   {#if error}<ErrorSummary {error} onretry={() => load()} />{/if}

@@ -3098,3 +3098,39 @@ export function postTargetedBounty(body: PostTargetedBountyBody): Promise<{ id: 
     body: JSON.stringify(body),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Reverse media search (spec §32.7.3)
+// ---------------------------------------------------------------------------
+
+export interface ReverseSearchBody {
+  hash?: string;
+  url?: string;
+}
+
+export interface ReverseSearchReference {
+  id: string;
+  media_kind: string;
+  perceptual_hash: string | null;
+  content_hash: string;
+  curator_verified: boolean;
+}
+
+export interface ReverseSearchWork {
+  reference_id: string;
+  work_id: string;
+  work_title: string;
+  display_url: string | null;
+}
+
+export interface ReverseSearchView {
+  references: ReverseSearchReference[];
+  works: ReverseSearchWork[];
+}
+
+export function reverseMediaSearch(body: ReverseSearchBody): Promise<ReverseSearchView> {
+  return apiFetch<ReverseSearchView>('/media/reverse-search', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
