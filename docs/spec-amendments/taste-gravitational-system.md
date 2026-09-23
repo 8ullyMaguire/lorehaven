@@ -427,6 +427,101 @@ skippable = true              # user can skip; falls back to egalitarian mode
 
 ---
 
+## §0.4.2a Taste Calibration Arena (extend §0.4.2)
+
+**New section.** The onboarding quiz (§0.4.2) and ongoing taste probes (§16.19) seed a taste profile, but neither answers a sharper question: *which dimensions of taste matter most to this reader?* The Taste Calibration Arena is a complementary interaction that answers exactly that.
+
+**Problem.** Like/dislike swipes capture "is this good?" — a noisy absolute judgment that conflates all dimensions. A fic with gorgeous prose but terrible pacing gets a "like" on Tuesday and a "dislike" on Thursday. When you pick best and worst from 4 cards, you make a **forced tradeoff** that reveals which dimensions you weight most. Psychophysics: "which of these two is brighter?" produces far more consistent answers than "rate this brightness 1-10." Relative > absolute. A single arena round yields ~3.6 bits (partial ranking of 4) vs 1 bit for binary like/dislike.
+
+**What arena does that swipe can't:**
+- Identifies dimensional weights (prose vs pacing vs characterization vs trope execution vs canon fidelity)
+- Forces tradeoffs that expose what you sacrifice to get what you want
+- Higher information density per interaction
+
+**What swipe does that arena can't:**
+- Captures absolute intensity (love vs okay vs skip anchors the scale)
+- Faster, lower cognitive load (5s vs 30-60s per round)
+- Calibrates the absolute "would actually enjoy" threshold for the meta-ranker's `admin_aligned` metric
+
+**Hybrid design — two phases, each doing what it's best at:**
+
+### Phase 1: Arena Calibration (first 20-40 rounds, then monthly mini-rounds)
+
+**Purpose:** Establish dimensional weights.
+
+**Card construction rules:**
+- All 4 cards share at least one major attribute (same fandom, or same genre/mood, or same length bracket) — comparing a 200k epic to a 5k drabble reveals category preference, not taste
+- Cards selected to **maximize variance on exactly 1-2 dimensions** while holding others roughly constant (e.g., 4 fics in the same fandom with similar tags/word counts but very different prose styles)
+- Show a **300-word passage** alongside metadata — prose is the hardest dimension to judge from summaries, and relative comparison shines here
+- Active learning: select cards where the model is most uncertain about the reader's dimensional weights
+
+**Interaction model:**
+- Present 4 cards with metadata + excerpt
+- Reader picks BEST and WORST; middle two are implicitly "okay"
+- Optional "why?" micro-tag after each round: prose / pacing / characters / premise / vibe (2 seconds, accelerates convergence; not required)
+
+**Model: Plackett-Luce** (generalizes Bradley-Terry to partial rankings). Each round updates latent dimensional weights. After 20-40 rounds, a reliable weight vector emerges. Start with Elo for simplicity; upgrade to Plackett-Luce when data volume justifies.
+
+**Frequency:** Full arena on first use (after §0.4.2 quiz or as its replacement). Mini-round (5-10 comparisons) monthly to track drift.
+
+### Phase 2: Swipe Calibration (ongoing, daily)
+
+**Purpose:** Absolute calibration and volume. Feeds the meta-ranker, trains resonance, keeps profile current.
+
+**Interaction:** Single card, 3-point swipe (love / okay / skip), ~5 seconds per card.
+
+**Card selection:** Active learning based on dimensional weights from Phase 1 — show cards where predicted enjoyment is most uncertain (near decision boundary), weighted toward actually-available fics.
+
+### How they compose
+
+```
+Arena (Phase 1)          Swipe (Phase 2)
+     │                        │
+     ▼                        ▼
+Dimensional weights      Absolute enjoyment scores
+"prose matters 3x        "this fic is 4.2/5
+ more than pacing"        for this reader"
+     │                        │
+     └────────┬───────────────┘
+              ▼
+     Taste Profile (§0.4)
+     dimensions: [
+       { key: "prose", weight: 0.35, target: 0.8 },
+       { key: "pacing", weight: 0.12, target: 0.6 },
+       ...
+     ]
+              │
+              ▼
+     Resonance computation (§16.17), signal weighting (§9.7.3),
+     meta-ranker success metric (§9.10), notifications (§9.9)
+```
+
+The arena tells the system *what to look for*. The swipe tells it *what it found*.
+
+### Onboarding quiz replacement
+
+The arena replaces §0.4.2's "pick 3-5 from 15 blurbs" with 3-4 arena rounds. Faster, more informative, immediately communicates archive culture ("this place cares about *quality*, not just tags"). The §0.4.2 quiz remains as a fallback for users who skip the arena.
+
+### Config
+
+```yaml
+[taste_profile.arena]
+enabled = true
+rounds_onboard = 25          # full arena rounds during onboarding
+rounds_monthly = 8          # mini-round for drift tracking
+cards_per_round = 4
+dimensions_per_round = 2    # max dimensions to vary simultaneously
+excerpt_words = 300         # passage length shown alongside metadata
+require_shared_attribute = true  # same fandom, genre, or length bracket
+reason_tags = ["prose", "pacing", "characters", "premise", "vibe"]
+reason_tags_optional = true
+model = "plackett_luce"     # "elo" for simple start, "plackett_luce" for production
+```
+
+**Never disclosed:** The arena is presented as "help us understand what you love" — never "help us calibrate your taste profile dimensions." Dimensional weights are never shown to the user (§0.3).
+
+---
+
 ## Dynamic Tag Gravity (extend §0.4.6 / M11-07..12)
 
 **Modification.** The existing `apply_theme_gravity` (boost/suppress tags) becomes dynamic:
@@ -460,6 +555,7 @@ gravity_max_suppress = 0.5    # min multiplier (never zero — content still fin
 | 3 | Taste Resonance Score | §16.17 | **Foundation** — powers signals, vanguard, trust coupling | M |
 | 4 | Anti-Echo-Chamber Valve | §0.4.1 | **Prevents monoculture** — serves priority 4 | S |
 | 5 | Onboarding Taste Quiz | §0.4.2 | **Solves cold start** — new users get gravity from day 1 | S |
+| 5a | Taste Calibration Arena | §0.4.2a | **Dimensional weights** — forced-tradeoff reveals what dimensions matter most | M |
 | 6 | Taste Probes | §16.19 | **Keeps taste evolving** — prevents ossification | S |
 | 7 | Fic Lifecycle Incentives | §9.8 | **Completion problem** — abandoned fics hurt enjoyment | S |
 | 8 | Taste-Weighted Notifications | §9.9 | **Highest-leverage engagement driver** | M |

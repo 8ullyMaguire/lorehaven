@@ -119,6 +119,43 @@ These three are the foundation — without all three, nothing else works.
 - Quiz vector computation
 - Skippable quiz falls back to egalitarian
 
+### 2.2a Taste Calibration Arena (§0.4.2a)
+
+**Goal:** Complement the onboarding quiz (§2.2) with a forced-tradeoff interaction that identifies *which dimensions of taste matter most to this reader* — the weights the quiz and swipes can't separate.
+
+**Why both:** Like/dislike answers "is this good?" (absolute, 1 bit, noisy). Arena answers "what matters most?" (relative, ~3.6 bits per round, reveals dimensional weights through forced tradeoff). Psychophysics: relative judgments are far more consistent than absolute scoring. The arena calibrates the lens; the swipe feeds the engine.
+
+**Changes:**
+- `crates/domain/src/taste_vector.rs` — new:
+  - `generate_arena_round(profile, works, config) -> Vec<WorkCard>` — pick 4 works sharing ≥1 attribute (fandom/genre/length bracket), maximizing variance on 1-2 target dimensions, with 300-word excerpts
+  - `apply_arena_ballot(weights, round, best, worst, reasons) -> DimensionalWeights` — Plackett-Luce update (Elo-compatible start)
+- `crates/app/src/routes/arena.rs` — new route:
+  - `GET /api/v1/arena/next` — next round of 4 cards (active learning: highest model uncertainty)
+  - `POST /api/v1/arena/vote` — submit best/worst/reason tags, returns updated weight hint (never the raw weights — §0.3)
+  - `POST /api/v1/arena/dismiss` — skip arena (falls back to quiz or egalitarian)
+- `crates/db/src/taste_vectors.rs` — `store_arena_weights(account_id, weights)`, `record_arena_ballot(account_id, round, best, worst, reasons)`
+- `migrations/sqlite/0065_taste_arena.sql` + `migrations/postgres/0065_taste_arena.sql` — `arena_ballots` table (account_id, best_work_id, worst_work_id, reason_tags, created_at)
+- Frontend: ArenaCard component (4-up grid, excerpt, BEST/WORST tap), ReasonTagBar (optional one-tap tags), ArenaIntro (onboarding flow)
+- Config: `[taste_profile.arena]` — enabled, rounds_onboard (25), rounds_monthly (8), cards_per_round (4), dimensions_per_round (2), excerpt_words (300), reason_tags, reason_tags_optional, model ("plackett_luce" | "elo")
+
+**Card construction rules:**
+- Same content rating, same completion state, similar word count (±50%), ≥1 shared tag or fandom
+- Maximize variance on exactly 1-2 dimensions per round (active learning)
+- Show 300-word passage from Chapter 1 (not just metadata — prose is the hardest dimension to judge from summaries)
+
+**Model:** Plackett-Luce (generalizes Bradley-Terry to partial rankings). Each round updates latent dimensional weights. After 20-40 rounds → reliable weight vector. Start with Elo for simplicity; upgrade when data volume justifies. Monthly mini-rounds (5-10 comparisons) track drift.
+
+**Tests:**
+- Arena round generation respects card construction rules (shared attribute, variance maximization)
+- Plackett-Luce converges to known weights from synthetic ballots
+- Elo fallback produces sane rankings
+- Reason tags accelerate convergence (compare rounds-to-convergence with/without)
+- Arena weights feed into resonance computation (§16.17) correctly
+- Dismiss falls back to quiz/egalitarian
+- Weights never exposed in API responses (§0.3)
+
+**Effort:** M (new domain module + route + frontend component; DB touch is one table)
+
 ### 2.3 Taste Probes (§16.19)
 
 **Goal:** Prevent taste profile ossification.

@@ -959,7 +959,7 @@ The flow is short, skippable and resumable:
 - **Choose a few moods or tones** from the taxonomy (§15.8).
 - **Choose a format preference:** written, media, or both (§30).
 - **State the content notes the reader wants surfaced**, drawn from the content-note vocabulary (§15.16), so the first work shown already respects them.
-- **Offer the taste quiz.** A short set of "which of these two would you rather read" comparisons — the arena mechanism of §29.2 applied to works rather than to roadmap cards — which seeds a taste profile before the reader has any history. Skippable.
+- **Offer the taste calibration arena.** A complementary phase that solves a problem like/dislike can't: identifying which dimensions of taste matter most to this reader. Present 4 works sharing at least one major attribute (fandom, genre, or length bracket); the reader picks best and worst. The forced tradeoff reveals dimensional weights (prose vs pacing vs characterization) that absolute swipes conflate. Show a 300-word passage — prose is the hardest dimension to judge from summaries. After 20-40 rounds the system has a reliable weight vector via Plackett-Luce. Optional "why?" reason tags (prose/pacing/characters/premise/vibe) accelerate convergence. The arena runs on signup and monthly mini-rounds track drift; daily 3-point swipes (love/okay/skip) then provide absolute calibration against those weights. Full spec: `docs/spec-amendments/taste-gravitational-system.md` §0.4.2a. Skippable.
 - The reader is then shown a small set of works drawn from what they just said, each with the reason it was chosen stated in plain language.
 
 Rules:
@@ -7683,3 +7683,124 @@ anyone, including the operator (§3.7).
 - **No change to `top`.** The quality ordering stays as §15.10 defines it; `for-you` sits beside it
   rather than replacing it.
 
+
+---
+
+# 44. Roadmap Consensus — an Elo-ranked, community-voted feature board
+
+> **2026-09-23 addition.** Lorehaven's roadmap has so far been decided by the
+> operator alone. This section adds a public roadmap board where the community
+> ranks feature ideas by pairwise consensus, so feature direction becomes a
+> governance surface like any other (§19.13 asks the community about moderation
+> *process*; this asks about *what gets built next*). The design is ported from
+> FicHub's `fichub-consensus` crate (Elo from MaxDiff best/worst choices,
+> kanban stages, trust-gated voting) with Lorehaven's trust ladder (§19.1) as
+> the voter gate. Curation of taste stays invisible (§0.3); **prioritization is
+> public** — the operator always retains the right to move a card regardless of
+> its Elo, and every move is in the public changelog.
+
+## 44.1 Model
+
+A **feature card** is one idea, stated in one sentence. Cards are seeded from
+`docs/requirements.csv` (every requirement row is a card) and from user
+suggestions; a suggestion whose text matches an existing card (normalized
+comparison) attaches to that card instead of creating a duplicate.
+
+| Field | Notes |
+|---|---|
+| `card_id` | UUID |
+| `title` | one sentence, `NOT NULL` |
+| `category` | the requirements.csv `area` (discovery, economy, community, …) |
+| `stage` | kanban stage, §44.2 |
+| `elo_rating` | starts 1500.0 |
+| `matches_played`, `times_best`, `times_worst` | counters |
+| `suggestions` | attached user suggestions, count only |
+
+Cards are **never deleted**; rejected ones move to the `rejected` stage and
+keep their history. A card's stage is the operator's decision; its Elo is the
+community's.
+
+## 44.2 Stages
+
+| Stage | Meaning | Arena-eligible |
+|---|---|---|
+| `idea` | proposed, not yet ranked | yes |
+| `up_next` | operator commits to build next | no (frozen) |
+| `in_progress` | being built | no (frozen) |
+| `finished` | built, not yet deployed | no (frozen) |
+| `shipped` | live on the instance | no (frozen) |
+| `medium_term` | planned within ~3 months | no (frozen) |
+| `long_term` | planned, no date | no (frozen) |
+| `rejected` | decided against, reason recorded | no (frozen) |
+
+Only `idea`-stage cards enter the arena. The default config freezes everything
+else; a config flag may unfreeze `medium_term`/`long_term` for re-voting.
+
+## 44.3 Voting: MaxDiff arena
+
+The arena serves a ballot of **four** `idea` cards. The voter picks the
+**best** and the **worst** of the four. This is one MaxDiff observation,
+translated to two virtual 1v1 matches (best beats the two unchosen; worst
+loses to the two unchosen; best beats worst is implied, not double-counted).
+
+Elo update per match, K-factor 32, expected score
+`E = 1 / (1 + 10^((R_opp − R_self)/400))`:
+
+```text
+R' = R + K × (S − E),  S ∈ {1.0, 0.0}
+```
+
+Ballot selection is uniform-random over `idea` cards (uniform propensity is
+what makes offline evaluation of the ranking unbiased). One ballot per
+request; the served card IDs and their pre-match Elo are logged
+(`consensus_ballots` table) so historical rankings can be reconstructed.
+
+## 44.4 Who may vote
+
+`TrustLevelPolicy`: voting requires TL ≥ 1 (any account past the new-user
+gate). Suggesting a card requires the same. Moving cards between stages is
+operator-only. The trust ladder (§19.1) supplies the level; no separate
+voter table.
+
+## 44.5 Surfaces
+
+- `GET /api/v1/roadmap` — the board: cards grouped by stage, ordered by Elo
+  within a stage. Public: anonymous readers see the board (transparency is the
+  point), no session required.
+- `GET /api/v1/roadmap/arena` — one ballot (4 idea cards + their pre-match
+  Elo). Requires session, TL ≥ 1.
+- `POST /api/v1/roadmap/arena` — `{ ballot_id, best_id, worst_id }`. Requires
+  session, TL ≥ 1. One vote per ballot per account; a second vote on the same
+  ballot is a validation error, not a silent overwrite.
+- `POST /api/v1/roadmap/suggest` — `{ title }`. Requires session, TL ≥ 1.
+  Normalized-text match attaches to an existing card; otherwise creates an
+  `idea` card.
+- `POST /api/v1/admin/roadmap/move` — `{ card_id, stage, reason }`.
+  Operator-only. Records a changelog row.
+- `GET /api/v1/roadmap/changelog` — public feed of stage moves with reasons,
+  newest first, paginated.
+
+## 44.6 Seeding from requirements.csv
+
+`scripts/seed_roadmap.py` reads `docs/requirements.csv`, maps each row to a
+card (`area` → category, status → stage: `implemented-locally-tested` →
+`shipped`, `planned` → the stage named in §44.2 mapping, `unsupported` →
+`rejected`), and upserts by normalized title so re-running is idempotent and
+never duplicates. Cards already present are never downgraded: a `shipped`
+card stays `shipped` even if the CSV row changes.
+
+The script targets the deployed instance's database directly (Postgres on
+thinkcentre) or the API (§44.5 suggest endpoint) — DB path for the operator,
+API path for CI.
+
+## 44.7 Acceptance
+
+- Two votes on the same ballot by one account: second is rejected with a named
+  error.
+- A `shipped` card never appears in an arena ballot.
+- Re-running the seed script changes nothing (idempotence by test).
+- The board is readable anonymously; voting and suggesting are not.
+- A TL0 account's vote is rejected with a named error.
+- Stage moves appear in the changelog with the operator's reason.
+- Elo ordering within a stage is stable across identical ratings (tie-break by
+  `matches_played` then `card_id`).
