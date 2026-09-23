@@ -18,6 +18,7 @@ export type RouteId =
   | 'sign-in'
   | 'password-reset'
   | 'account'
+  | 'author-media'
   | 'pseuds'
   | 'pseud-profile'
   | 'write'
@@ -79,6 +80,7 @@ const FIXED_ROUTES: Record<string, RouteId> = {
   '/sign-in': 'sign-in',
   '/password-reset': 'password-reset',
   '/account': 'account',
+  '/author/media': 'author-media',
   '/pseud': 'pseuds',
   '/write': 'write',
   '/import': 'import',

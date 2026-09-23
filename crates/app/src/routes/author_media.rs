@@ -171,7 +171,21 @@ pub async fn list_targeted_bounties(
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/author/media-preferences", get(get_preferences).put(update_preferences))
+        .route("/author/media-health", get(get_author_media_health))
         .route("/author/targeted-bounties", post(post_targeted_bounty))
         .route("/author/targeted-bounties/claim", post(claim_targeted_bounty))
         .route("/works/{work_id}/targeted-bounties", get(list_targeted_bounties))
+}
+
+/// Get the current user's per-work media health report (§32.7.8).
+pub async fn get_author_media_health(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<Value>> {
+    let account_id = user.account_id.to_string();
+    let report = media_resilience::author_media_health_report(state.db(), &account_id)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+
+    Ok(Json(json!({ "items": report })))
 }

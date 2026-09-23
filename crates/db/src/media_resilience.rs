@@ -2155,3 +2155,105 @@ pub async fn provider_reliability(db: &Database) -> Result<Vec<(String, i64, i64
     };
     Ok(rows)
 }
+
+// ---------------------------------------------------------------------------
+// Author media health report (§32.7.8)
+// ---------------------------------------------------------------------------
+
+/// One row in the per-work author media health report.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AuthorWorkMediaHealth {
+    pub work_id: String,
+    pub work_title: String,
+    pub total_references: i64,
+    pub healthy_references: i64,
+    pub at_risk_references: i64,
+    pub broken_references: i64,
+}
+
+/// Build the media health report for all works owned by an account.
+pub async fn author_media_health_report(
+    db: &Database,
+    account_id: &str,
+) -> Result<Vec<AuthorWorkMediaHealth>> {
+    let sql = sql_owned(
+        db,
+        "SELECT w.id AS work_id,
+                w.title AS work_title,
+                COUNT(wmr.id) AS total_references,
+                SUM(CASE WHEN COALESCE(healthy.cnt, 0) >= 3 THEN 1 ELSE 0 END) AS healthy_references,
+                SUM(CASE WHEN COALESCE(healthy.cnt, 0) BETWEEN 1 AND 2 THEN 1 ELSE 0 END) AS at_risk_references,
+                SUM(CASE WHEN COALESCE(healthy.cnt, 0) = 0 THEN 1 ELSE 0 END) AS broken_references
+         FROM works w
+         JOIN work_media_references wmr ON wmr.work_id = w.id AND wmr.deleted_at IS NULL
+         LEFT JOIN (
+             SELECT al.media_reference_id, COUNT(al.id) AS cnt
+             FROM availability_links al
+             WHERE al.status = 'healthy'
+             GROUP BY al.media_reference_id
+         ) healthy ON healthy.media_reference_id = wmr.media_reference_id
+         WHERE w.owner_account_id = ?
+         GROUP BY w.id, w.title
+         ORDER BY w.title"
+            .to_string(),
+        "SELECT w.id AS work_id,
+                w.title AS work_title,
+                COUNT(wmr.id) AS total_references,
+                SUM(CASE WHEN COALESCE(healthy.cnt, 0) >= 3 THEN 1 ELSE 0 END) AS healthy_references,
+                SUM(CASE WHEN COALESCE(healthy.cnt, 0) BETWEEN 1 AND 2 THEN 1 ELSE 0 END) AS at_risk_references,
+                SUM(CASE WHEN COALESCE(healthy.cnt, 0) = 0 THEN 1 ELSE 0 END) AS broken_references
+         FROM works w
+         JOIN work_media_references wmr ON wmr.work_id = w.id AND wmr.deleted_at IS NULL
+         LEFT JOIN (
+             SELECT al.media_reference_id, COUNT(al.id) AS cnt
+             FROM availability_links al
+             WHERE al.status = 'healthy'
+             GROUP BY al.media_reference_id
+         ) healthy ON healthy.media_reference_id = wmr.media_reference_id
+         WHERE w.owner_account_id = $1
+         GROUP BY w.id, w.title
+         ORDER BY w.title"
+            .to_string(),
+    );
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            sqlx::query(&sql)
+                .bind(account_id)
+                .fetch_all(pool)
+                .await?
+                .iter()
+                .map(|row| {
+                    Ok::<AuthorWorkMediaHealth, anyhow::Error>(AuthorWorkMediaHealth {
+                        work_id: row.get("work_id"),
+                        work_title: row.get("work_title"),
+                        total_references: row.get("total_references"),
+                        healthy_references: row.get("healthy_references"),
+                        at_risk_references: row.get("at_risk_references"),
+                        broken_references: row.get("broken_references"),
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            sqlx::query(&sql)
+                .bind(account_id)
+                .fetch_all(pool)
+                .await?
+                .iter()
+                .map(|row| {
+                    Ok::<AuthorWorkMediaHealth, anyhow::Error>(AuthorWorkMediaHealth {
+                        work_id: row.get("work_id"),
+                        work_title: row.get("work_title"),
+                        total_references: row.get("total_references"),
+                        healthy_references: row.get("healthy_references"),
+                        at_risk_references: row.get("at_risk_references"),
+                        broken_references: row.get("broken_references"),
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        }
+    };
+    Ok(rows)
+}
