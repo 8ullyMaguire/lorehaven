@@ -21,15 +21,15 @@ CREATE TABLE IF NOT EXISTS work_view_log (
 CREATE INDEX IF NOT EXISTS idx_work_view_log_work ON work_view_log (work_id);
 
 CREATE TABLE IF NOT EXISTS work_kudos (
-    work_id    TEXT NOT NULL REFERENCES works(id) ON DELETE CASCADE,
-    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    work_id    UUID NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL,
     PRIMARY KEY (work_id, account_id)
 );
 CREATE INDEX IF NOT EXISTS idx_work_kudos_work ON work_kudos (work_id);
 
 CREATE TABLE IF NOT EXISTS work_metric_aggregates (
-    work_id         TEXT PRIMARY KEY,
+    work_id         UUID PRIMARY KEY,
     views           INTEGER NOT NULL DEFAULT 0,
     complete_reads  INTEGER NOT NULL DEFAULT 0,
     reactions       INTEGER NOT NULL DEFAULT 0,
