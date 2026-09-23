@@ -101,11 +101,23 @@ pub struct AddMediaReferenceBody {
 
 pub async fn add_media_reference(
     State(state): State<AppState>,
-    RequireSession(user): RequireSession,
+    RequirePseud { user, pseud_id }: RequirePseud,
     Path(work_id): Path<String>,
     Json(body): Json<AddMediaReferenceBody>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
-    // TODO: verify user can edit the work
+    // Verify user can edit the work (owner, contributor, or operator).
+    let account_id = user.account_id.to_string();
+    let level = lorehaven_db::governance::trust_for(state.db(), &account_id)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    let is_operator = level >= 5;
+    let can_edit = is_operator
+        || media_resilience::can_edit_work(state.db(), &work_id, &account_id, &pseud_id.to_string())
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    if !can_edit {
+        return Err(ApiError(AppError::AuthRequired));
+    }
     let context: MediaContextKind = body
         .context
         .as_deref()
@@ -206,7 +218,19 @@ pub async fn add_mirror_link(
     Path(reference_id): Path<String>,
     Json(body): Json<AddMirrorBody>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
-    // TODO: check curator role
+    let account_id = user.account_id.to_string();
+    // Check curator role.
+    let is_operator = {
+        let level = lorehaven_db::governance::trust_for(state.db(), &account_id)
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        level >= 5
+    };
+    if !is_operator && !media_resilience::is_active_curator(state.db(), &account_id)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e.into())))? {
+        return Err(ApiError(AppError::AuthRequired));
+    }
     let Some(_reference) = media_resilience::find_media_reference_by_id(state.db(), &reference_id)
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?

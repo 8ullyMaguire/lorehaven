@@ -632,6 +632,79 @@ pub async fn opt_out_curator(
     Ok(())
 }
 
+/// Check whether a given account+pseud can edit a work (owner, contributor,
+/// or operator with trust_level >= 5).
+pub async fn can_edit_work(
+    db: &Database,
+    work_id: &str,
+    account_id: &str,
+    pseud_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let is_operator = {
+        let level: i64 = match db.backend() {
+            Backend::Sqlite => {
+                sqlx::query_scalar("SELECT level FROM trust_levels WHERE account = ?")
+                    .bind(account_id)
+                    .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                    .await?
+                    .unwrap_or(0)
+            }
+            Backend::Postgres => {
+                sqlx::query_scalar("SELECT level FROM trust_levels WHERE account = $1")
+                    .bind(account_id)
+                    .fetch_optional(db.postgres_pool().expect("postgres"))
+                    .await?
+                    .map(|v: i32| v as i64)
+                    .unwrap_or(0)
+            }
+        };
+        level >= 5
+    };
+
+    let is_owner_or_contributor: bool = match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            let count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM works w
+                 WHERE w.id = ? AND (
+                   w.owner_pseud_id = ?
+                   OR EXISTS (
+                     SELECT 1 FROM work_contributors c
+                     WHERE c.work_id = w.id AND c.pseud_id = ?
+                   )
+                 )",
+            )
+            .bind(work_id)
+            .bind(pseud_id)
+            .bind(pseud_id)
+            .fetch_one(pool)
+            .await?;
+            count > 0
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            let count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM works w
+                 WHERE w.id = $1 AND (
+                   w.owner_pseud_id = $2
+                   OR EXISTS (
+                     SELECT 1 FROM work_contributors c
+                     WHERE c.work_id = w.id AND c.pseud_id = $3
+                   )
+                 )",
+            )
+            .bind(work_id)
+            .bind(pseud_id)
+            .bind(pseud_id)
+            .fetch_one(pool)
+            .await?;
+            count > 0
+        }
+    };
+
+    Ok(is_operator || is_owner_or_contributor)
+}
+
 /// Check whether an account is an active curator.
 pub async fn is_active_curator(db: &Database, account_id: &str) -> Result<bool, sqlx::Error> {
     let count: i64 = match db.backend() {
