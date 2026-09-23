@@ -3018,7 +3018,7 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         handler: "add_media_reference",
         method: "POST",
         path: "/works/{work_id}/media",
-        audience: Audience::Authenticated,
+        audience: Audience::Pseudonymous,
     },
     RouteEntry {
         file: "media_resilience.rs",
