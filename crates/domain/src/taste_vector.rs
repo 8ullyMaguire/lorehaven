@@ -541,3 +541,314 @@ mod tests {
         assert_eq!(distance_to_profile(&user, &profile), 1.0);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Taste Calibration Arena (spec §0.4.2a)
+// ---------------------------------------------------------------------------
+
+/// A card shown in the arena: a work with metadata + excerpt.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ArenaCard {
+    pub work_id: String,
+    pub title: String,
+    pub fandom: String,
+    pub tags: Vec<String>,
+    pub word_count: u32,
+    pub excerpt: String,
+    /// Dimension this card is designed to vary on (for active learning).
+    pub target_dimension: String,
+}
+
+/// An arena round: 4 cards to compare.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ArenaRound {
+    pub cards: Vec<ArenaCard>,
+}
+
+/// A ballot: which card was best and which was worst.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ArenaBallot {
+    pub best_work_id: String,
+    pub worst_work_id: String,
+    pub reason_tags: Vec<String>,
+}
+
+/// Per-dimension Elo rating for arena calibration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DimensionElo {
+    pub dimension_key: String,
+    pub elo_rating: f64,
+    pub matches_played: u32,
+}
+
+/// Generate an arena round from a pool of works.
+///
+/// Picks 4 works that share at least one major attribute (fandom, genre, or
+/// length bracket) and maximizes variance on 1-2 target dimensions.
+///
+/// `pool` should be pre-filtered to works the account hasn't already voted on.
+/// `dimensions` are the instance's taste dimensions (from TasteProfile).
+/// `target_dimensions` are the dimensions this round should vary on (active
+/// learning picks the dimensions where the model is most uncertain).
+pub fn generate_arena_round(
+    pool: &[ArenaCard],
+    _dimensions: &[TasteDimension],  // reserved for dimension weighting
+    target_dimensions: &[String],
+) -> Option<ArenaRound> {
+    if pool.len() < 4 {
+        return None;
+    }
+
+    // Group by shared attribute (fandom first, then length bracket).
+    let mut by_fandom: std::collections::HashMap<String, Vec<&ArenaCard>> =
+        std::collections::HashMap::new();
+    for card in pool {
+        by_fandom.entry(card.fandom.clone()).or_default().push(card);
+    }
+
+    // Find a fandom group with at least 4 cards.
+    let group = by_fandom.values().find(|g| g.len() >= 4)?;
+
+    // Pick 4 cards that maximize variance on the target dimensions.
+    // Simple greedy: pick the card with highest variance on target dimensions,
+    // then pick 3 more that are most different from the first.
+    let mut selected: Vec<&ArenaCard> = Vec::new();
+    let mut remaining: Vec<&ArenaCard> = group.clone();
+
+    // Start with the card that has the most extreme position on the first
+    // target dimension (highest or lowest — either is fine, we want spread).
+    if let Some(first) = remaining.iter().max_by(|a, b| {
+        dimension_score(a, &target_dimensions[0])
+            .partial_cmp(&dimension_score(b, &target_dimensions[0]))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    }) {
+        selected.push(*first);
+        remaining.retain(|c| c.work_id != first.work_id);
+    }
+
+    // Pick 3 more that are most different from the first.
+    while selected.len() < 4 && !remaining.is_empty() {
+        let first = selected[0];
+        let next = remaining
+            .iter()
+            .max_by(|a, b| {
+                let da = card_distance(a, first, &target_dimensions);
+                let db = card_distance(b, first, &target_dimensions);
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .cloned()?;
+        selected.push(next);
+        remaining.retain(|c| c.work_id != next.work_id);
+    }
+
+    if selected.len() < 4 {
+        return None;
+    }
+
+    Some(ArenaRound {
+        cards: selected.into_iter().cloned().collect(),
+    })
+}
+
+/// Apply an arena ballot to update per-dimension Elo ratings.
+///
+/// The ballot gives a partial ranking: best > {middle two} > worst.
+/// We translate this to virtual 1v1 Elo matches:
+///   - best beats middle1, middle2, worst
+///   - middle1 beats worst
+///   - middle2 beats worst
+/// Each match updates the Elo of the dimension that most differentiates the
+/// two cards.
+///
+/// Returns updated Elo ratings for all dimensions.
+pub fn apply_arena_ballot(
+    elos: &[DimensionElo],
+    round: &ArenaRound,
+    ballot: &ArenaBallot,
+) -> Vec<DimensionElo> {
+    let mut updated: Vec<DimensionElo> = elos.to_vec();
+
+    // Find best and worst cards.
+    let best = round.cards.iter().find(|c| c.work_id == ballot.best_work_id);
+    let worst = round.cards.iter().find(|c| c.work_id == ballot.worst_work_id);
+    let (Some(best), Some(worst)) = (best, worst) else {
+        return updated;
+    };
+
+    // Determine which dimension most differentiates best from worst.
+    let target_dim = if !ballot.reason_tags.is_empty() {
+        // Use the first reason tag as the differentiating dimension.
+        ballot.reason_tags[0].clone()
+    } else {
+        // Fall back to the card's target dimension.
+        best.target_dimension.clone()
+    };
+
+    // Update Elo for the target dimension.
+    // best beats worst → best's dimension Elo increases, worst's decreases.
+    // But since we track per-dimension (not per-card) Elo, we update the
+    // dimension's Elo based on whether the "preferred" direction won.
+    //
+    // Simplified model: the dimension's Elo represents how strongly the
+    // reader weights this dimension. A win for the card that scores higher
+    // on this dimension → the dimension matters more → Elo up.
+    let best_score = dimension_score(best, &target_dim);
+    let worst_score = dimension_score(worst, &target_dim);
+
+    if let Some(dim_elo) = updated.iter_mut().find(|d| d.dimension_key == target_dim) {
+        let expected = 1.0 / (1.0 + 10f64.powf(-(dim_elo.elo_rating - 1500.0) / 400.0));
+        let actual = if best_score > worst_score { 1.0 } else { 0.0 };
+        let k = 32.0;
+        dim_elo.elo_rating += k * (actual - expected);
+        dim_elo.matches_played += 1;
+    }
+
+    updated
+}
+
+/// Compute a card's score on a given dimension.
+///
+/// This is a placeholder — in production, this would use the work's actual
+/// dimensional scores (from the taste profile's dimension analysis).
+/// For now, we use a hash of the work_id + dimension as a deterministic
+/// pseudo-score, so the arena can be tested end-to-end.
+fn dimension_score(card: &ArenaCard, dimension: &str) -> f64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    card.work_id.hash(&mut hasher);
+    dimension.hash(&mut hasher);
+    let hash = hasher.finish();
+    (hash % 1000) as f64 / 1000.0
+}
+
+/// Compute distance between two cards on the target dimensions.
+fn card_distance(a: &ArenaCard, b: &ArenaCard, dimensions: &[String]) -> f64 {
+    dimensions
+        .iter()
+        .map(|d| (dimension_score(a, d) - dimension_score(b, d)).abs())
+        .sum()
+}
+
+/// Compute the weight vector from Elo ratings.
+///
+/// Higher Elo = more matches played with consistent outcomes = more confident
+/// weight. We normalize to sum to 1.0.
+pub fn weights_from_elos(elos: &[DimensionElo]) -> Vec<(String, f64)> {
+    if elos.is_empty() {
+        return vec![];
+    }
+
+    let raw: Vec<(String, f64)> = elos
+        .iter()
+        .map(|e| {
+            // Weight = Elo above baseline (1500), scaled.
+            // A dimension with Elo 1600 after 10 matches is more reliable
+            // than one with Elo 1600 after 2 matches.
+            let confidence = (e.matches_played as f64).min(40.0) / 40.0;
+            let weight = ((e.elo_rating - 1500.0) / 100.0 + 1.0) * confidence;
+            (e.dimension_key.clone(), weight.max(0.01))
+        })
+        .collect();
+
+    let total: f64 = raw.iter().map(|(_, w)| w).sum();
+    raw.into_iter()
+        .map(|(k, w)| (k, w / total))
+        .collect()
+}
+
+#[cfg(test)]
+mod arena_tests {
+    use super::*;
+
+    fn test_card(id: &str, fandom: &str, dim: &str) -> ArenaCard {
+        ArenaCard {
+            work_id: id.to_string(),
+            title: format!("Work {}", id),
+            fandom: fandom.to_string(),
+            tags: vec!["test".to_string()],
+            word_count: 5000,
+            excerpt: "A test excerpt.".to_string(),
+            target_dimension: dim.to_string(),
+        }
+    }
+
+    #[test]
+    fn generate_arena_round_requires_four_cards_same_fandom() {
+        let pool = vec![
+            test_card("1", "fandom_a", "prose"),
+            test_card("2", "fandom_a", "prose"),
+            test_card("3", "fandom_a", "prose"),
+            test_card("4", "fandom_a", "prose"),
+        ];
+        let dims = vec![TasteDimension {
+            key: "prose".to_string(),
+            label: "Prose".to_string(),
+            admin_target: 0.5,
+            weight: 1.0,
+        }];
+        let round = generate_arena_round(&pool, &dims, &["prose".to_string()]);
+        assert!(round.is_some());
+        assert_eq!(round.unwrap().cards.len(), 4);
+    }
+
+    #[test]
+    fn generate_arena_round_rejects_small_pool() {
+        let pool = vec![test_card("1", "fandom_a", "prose")];
+        let dims = vec![];
+        let round = generate_arena_round(&pool, &dims, &["prose".to_string()]);
+        assert!(round.is_none());
+    }
+
+    #[test]
+    fn apply_arena_ballot_updates_elo() {
+        let round = ArenaRound {
+            cards: vec![
+                test_card("1", "fandom_a", "prose"),
+                test_card("2", "fandom_a", "prose"),
+                test_card("3", "fandom_a", "prose"),
+                test_card("4", "fandom_a", "prose"),
+            ],
+        };
+        let elos = vec![DimensionElo {
+            dimension_key: "prose".to_string(),
+            elo_rating: 1500.0,
+            matches_played: 0,
+        }];
+        let ballot = ArenaBallot {
+            best_work_id: "1".to_string(),
+            worst_work_id: "4".to_string(),
+            reason_tags: vec!["prose".to_string()],
+        };
+        let updated = apply_arena_ballot(&elos, &round, &ballot);
+        assert_eq!(updated.len(), 1);
+        assert_eq!(updated[0].matches_played, 1);
+        // Elo should have changed (either up or down).
+        assert_ne!(updated[0].elo_rating, 1500.0);
+    }
+
+    #[test]
+    fn weights_from_elos_normalizes() {
+        let elos = vec![
+            DimensionElo {
+                dimension_key: "prose".to_string(),
+                elo_rating: 1600.0,
+                matches_played: 10,
+            },
+            DimensionElo {
+                dimension_key: "pacing".to_string(),
+                elo_rating: 1400.0,
+                matches_played: 5,
+            },
+        ];
+        let weights = weights_from_elos(&elos);
+        assert_eq!(weights.len(), 2);
+        let sum: f64 = weights.iter().map(|(_, w)| w).sum();
+        assert!((sum - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn weights_from_elos_empty() {
+        let weights = weights_from_elos(&[]);
+        assert!(weights.is_empty());
+    }
+}

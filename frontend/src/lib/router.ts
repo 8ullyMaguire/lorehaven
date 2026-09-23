@@ -37,6 +37,7 @@ export type RouteId =
   | 'admin-media-health'
   | 'admin-mirror'
   | 'discover'
+  | 'arena'
   | 'community'
   | 'forum-category'
   | 'forum-search'
@@ -96,6 +97,7 @@ const FIXED_ROUTES: Record<string, RouteId> = {
   '/admin/media-health': 'admin-media-health',
   '/admin/mirror': 'admin-mirror',
   '/discover': 'discover',
+  '/arena': 'arena',
   '/community': 'community',
   '/notifications': 'notifications',
   '/docs': 'docs',

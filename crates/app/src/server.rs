@@ -340,6 +340,7 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        .merge(routes::arena::router())
         .merge(classified(
             routes::quiz::router(),
             RouteClass::Default,

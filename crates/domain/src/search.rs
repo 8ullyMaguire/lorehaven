@@ -198,7 +198,7 @@ impl<'a> Parser<'a> {
         self.skip_whitespace();
 
         // Parse value — check for range (value..value).
-        let value_start = self.pos;
+        let _value_start = self.pos;
         let val1 = self.parse_value_text()?;
 
         self.skip_whitespace();

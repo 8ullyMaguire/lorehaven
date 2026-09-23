@@ -35,6 +35,7 @@
   import SignIn from './routes/SignIn.svelte';
   import WorkEditor from './routes/WorkEditor.svelte';
   import WorkPage from './routes/WorkPage.svelte';
+  import Arena from './routes/Arena.svelte';
   import Write from './routes/Write.svelte';
   import Quiz from './routes/Quiz.svelte';
   import Vanguard from './routes/Vanguard.svelte';
@@ -53,6 +54,7 @@
   /** Navigation (Milestone 1). Labels stay plain words, per the theme. */
   const NAV = [
     { href: '/discover', label: 'Discover', primary: true },
+    { href: '/arena', label: 'Arena' },
     { href: '/search', label: 'Search', primary: true },
     { href: '/media', label: 'Media', primary: false },
     { href: '/library', label: 'Library', primary: true },
@@ -308,6 +310,8 @@
     <AuthorMedia />
   {:else if route.id === 'discover'}
     <Discover />
+  {:else if route.id === 'arena'}
+    <Arena />
   {:else if route.id === 'community'}
     <Community />
   {:else if route.id === 'docs'}
