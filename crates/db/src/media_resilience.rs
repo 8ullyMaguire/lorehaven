@@ -61,6 +61,21 @@ pub struct WorkMediaReference {
     pub deleted_at: Option<String>,
 }
 
+/// A media reference as the reader sees it: link counts + best URL.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkMediaReferenceView {
+    pub id: String,
+    pub work_id: String,
+    pub chapter_id: Option<String>,
+    pub context: String,
+    pub display_url: String,
+    pub author_note: Option<String>,
+    pub inserted_at: String,
+    pub healthy_links: i64,
+    pub total_links: i64,
+    pub best_url: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
 pub struct CuratorReward {
     pub id: String,
@@ -703,6 +718,167 @@ pub async fn can_edit_work(
     };
 
     Ok(is_operator || is_owner_or_contributor)
+}
+
+/// Get the best available URL for a media reference, or None if all dead.
+pub async fn get_best_available_link(
+    db: &Database,
+    reference_id: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            let url: Option<String> = sqlx::query_scalar(
+                "SELECT url FROM availability_links
+                 WHERE media_reference_id = ?
+                   AND status != 'dead'
+                   AND last_result != 'failed'
+                 ORDER BY priority DESC
+                 LIMIT 1",
+            )
+            .bind(reference_id)
+            .fetch_optional(pool)
+            .await?;
+            Ok(url)
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            let url: Option<String> = sqlx::query_scalar(
+                "SELECT url FROM availability_links
+                 WHERE media_reference_id = $1
+                   AND status != 'dead'
+                   AND last_result != 'failed'
+                 ORDER BY priority DESC
+                 LIMIT 1",
+            )
+            .bind(reference_id)
+            .fetch_optional(pool)
+            .await?;
+            Ok(url)
+        }
+    }
+}
+
+/// Count total links for a reference.
+pub async fn count_total_links(
+    db: &Database,
+    reference_id: &str,
+) -> Result<i64, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            let count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM availability_links WHERE media_reference_id = ?",
+            )
+            .bind(reference_id)
+            .fetch_one(pool)
+            .await?;
+            Ok(count)
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            let count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM availability_links WHERE media_reference_id = $1",
+            )
+            .bind(reference_id)
+            .fetch_one(pool)
+            .await?;
+            Ok(count)
+        }
+    }
+}
+
+/// List all media references for a work with link counts and best URL.
+pub async fn list_work_media_references(
+    db: &Database,
+    work_id: &str,
+) -> Result<Vec<WorkMediaReferenceView>, sqlx::Error> {
+    // First fetch the rows (dialect-specific), then map to the view.
+    // Avoids the match-arm type mismatch between SqliteRow and PgRow.
+    let mut out = Vec::new();
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            let rows = sqlx::query(
+                "SELECT id, work_id, chapter_id, context, display_url, author_note, inserted_at
+                 FROM work_media_references
+                 WHERE work_id = ? AND deleted_at IS NULL
+                 ORDER BY inserted_at",
+            )
+            .bind(work_id)
+            .fetch_all(pool)
+            .await?;
+            for row in rows {
+                let id: String = row.get("id");
+                let work_id: String = row.get("work_id");
+                let chapter_id: Option<String> = row.get("chapter_id");
+                let context: String = row.get("context");
+                let display_url: String = row.get("display_url");
+                let author_note: Option<String> = row.get("author_note");
+                let inserted_at: String = row.get("inserted_at");
+                let healthy = count_healthy_links(db, &id).await.unwrap_or(0);
+                let total = count_total_links(db, &id).await.unwrap_or(0);
+                let best = get_best_available_link(db, &id).await?;
+                out.push(build_media_ref_view(
+                    id, work_id, chapter_id, context, display_url, author_note, inserted_at, healthy, total, best,
+                ));
+            }
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            let rows = sqlx::query(
+                "SELECT id, work_id, chapter_id, context, display_url, author_note, inserted_at
+                 FROM work_media_references
+                 WHERE work_id = $1 AND deleted_at IS NULL
+                 ORDER BY inserted_at",
+            )
+            .bind(work_id)
+            .fetch_all(pool)
+            .await?;
+            for row in rows {
+                let id: String = row.get("id");
+                let work_id: String = row.get("work_id");
+                let chapter_id: Option<String> = row.get("chapter_id");
+                let context: String = row.get("context");
+                let display_url: String = row.get("display_url");
+                let author_note: Option<String> = row.get("author_note");
+                let inserted_at: String = row.get("inserted_at");
+                let healthy = count_healthy_links(db, &id).await.unwrap_or(0);
+                let total = count_total_links(db, &id).await.unwrap_or(0);
+                let best = get_best_available_link(db, &id).await?;
+                out.push(build_media_ref_view(
+                    id, work_id, chapter_id, context, display_url, author_note, inserted_at, healthy, total, best,
+                ));
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn build_media_ref_view(
+    id: String,
+    work_id: String,
+    chapter_id: Option<String>,
+    context: String,
+    display_url: String,
+    author_note: Option<String>,
+    inserted_at: String,
+    healthy_links: i64,
+    total_links: i64,
+    best_url: Option<String>,
+) -> WorkMediaReferenceView {
+    WorkMediaReferenceView {
+        id,
+        work_id,
+        chapter_id,
+        context,
+        display_url,
+        author_note,
+        inserted_at,
+        healthy_links,
+        total_links,
+        best_url,
+    }
 }
 
 /// Check whether an account is an active curator.

@@ -79,11 +79,11 @@ pub async fn get_work_media_references(
     MaybeSession(_session): MaybeSession,
     Path(work_id): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    let refs = media_resilience::find_work_media_references(state.db(), &work_id)
+    let refs = media_resilience::list_work_media_references(state.db(), &work_id)
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
-    Ok(Json(json!({ "references": refs })))
+    Ok(Json(json!({ "items": refs })))
 }
 
 // ---------------------------------------------------------------------------
