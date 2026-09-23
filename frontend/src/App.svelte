@@ -6,6 +6,7 @@
   import Account from './routes/Account.svelte';
   import AdminJobs from './routes/AdminJobs.svelte';
   import AdminMediaHealth from './routes/AdminMediaHealth.svelte';
+  import AuthorMedia from './routes/AuthorMedia.svelte';
   import Community from './routes/Community.svelte';
   import Docs from './routes/Docs.svelte';
   import DocsSearch from './lib/components/DocsSearch.svelte';
@@ -297,6 +298,8 @@
     <AdminJobs />
   {:else if route.id === 'admin-media-health'}
     <AdminMediaHealth />
+  {:else if route.id === 'author-media'}
+    <AuthorMedia />
   {:else if route.id === 'discover'}
     <Discover />
   {:else if route.id === 'community'}

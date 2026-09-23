@@ -3031,3 +3031,70 @@ export function reportBrokenLink(referenceId: string, reason?: string): Promise<
     { method: 'POST', body: JSON.stringify({ reason }) },
   );
 }
+
+// ---------------------------------------------------------------------------
+// Author media (spec §32.7.8)
+// ---------------------------------------------------------------------------
+
+export interface AuthorMediaHealthRow {
+  work_id: string;
+  work_title: string;
+  total_references: number;
+  healthy_references: number;
+  at_risk_references: number;
+  broken_references: number;
+}
+
+export interface MediaPreferences {
+  account_id: string;
+  auto_submit_to_archive: boolean;
+  prefer_curator_verified: boolean;
+  broken_link_notifications: string;
+  allow_curator_edits: boolean;
+  minimum_healthy_links: number;
+}
+
+export interface AddMediaReferenceBody {
+  work_id: string;
+  url: string;
+  context?: string;
+  chapter_id?: string;
+  author_note?: string;
+}
+
+export interface PostTargetedBountyBody {
+  work_id: string;
+  chapter_id?: string;
+  media_reference_id?: string;
+  reward: number;
+  description?: string;
+}
+
+export function fetchAuthorMediaHealth(): Promise<{ items: AuthorMediaHealthRow[] }> {
+  return apiFetch<{ items: AuthorMediaHealthRow[] }>('/author/media-health');
+}
+
+export function fetchMediaPreferences(): Promise<MediaPreferences> {
+  return apiFetch<MediaPreferences>('/author/media-preferences');
+}
+
+export function putMediaPreferences(body: Partial<MediaPreferences>): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>('/author/media-preferences', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export function postMediaReference(body: AddMediaReferenceBody): Promise<{ id: string; link_id: string; status: string }> {
+  return apiFetch<{ id: string; link_id: string; status: string }>(
+    `/works/${encodeURIComponent(body.work_id)}/media`,
+    { method: 'POST', body: JSON.stringify(body) },
+  );
+}
+
+export function postTargetedBounty(body: PostTargetedBountyBody): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>('/author/targeted-bounties', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
