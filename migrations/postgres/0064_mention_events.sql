@@ -9,7 +9,7 @@
 CREATE TABLE IF NOT EXISTS mention_events (
     id              TEXT PRIMARY KEY,
     source_type     TEXT NOT NULL,             -- 'forum_post' | 'comment'
-    source_id       UUID NOT NULL,
+    source_id       TEXT NOT NULL,
     mentioned_pseud UUID NOT NULL REFERENCES pseuds(id) ON DELETE CASCADE,
     mentioned_by    UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     created_at      TEXT NOT NULL
