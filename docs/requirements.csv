@@ -216,4 +216,7 @@ M45-04,governance,Stage moves operator-only with public changelog and reasons,M4
 M45-05,governance,Seed script maps requirements.csv rows to cards idempotently,M45,implemented-locally-tested,--,Spec §44.6. scripts/seed_roadmap.py; never downgrades shipped.
 M45-06,governance,One vote per ballot per account; second vote is a named error,M45,implemented-locally-tested,--,Spec §44.7.
 M45-07,governance,Suggestion dedup by normalized title attaches to existing card,M45,implemented-locally-tested,--,Spec §44.1.
+M46-01,works,Work card aggregate metrics: views, complete reads, reactions, kudos, bookmarks, collection adds, review count,M46,implemented-locally-tested,crates/db/src/work_metrics.rs + crates/app/tests/work_metrics.rs,"Spec §9.5, §9.4, §10. Counts, not averages. One view per viewer per hour. One kudos per account."
+M46-02,works,Public metric bar gated by work.show_public_ratings,M46,implemented-locally-tested,crates/app/src/routes/works.rs + crates/app/tests/work_metrics.rs,Spec §9.5. Metrics null when owner opts out.
+M46-03,works,One kudos per signed-in account with idempotent toggle,M46,implemented-locally-tested,crates/db/src/work_metrics.rs + crates/app/src/routes/works.rs,Spec §9.4. Server owns count; toggle endpoint returns new state.
 M45-56,discovery,"Taste Calibration Arena: 4-card forced-tradeoff, best+worst, Plackett-Luce dimensional weights",M45,planned,--,"Spec §0.4.2a. Arena reveals dimensional weights (prose/pacing/characters) that absolute swipes conflate. 300-word excerpts. Optional reason tags. Monthly drift mini-rounds."

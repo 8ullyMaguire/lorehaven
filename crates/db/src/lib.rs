@@ -70,6 +70,7 @@ pub mod translation;
 pub mod typed_votes;
 pub mod work_backlink;
 pub mod work_discussion;
+pub mod work_metrics;
 
 use std::borrow::Cow;
 use std::path::Path;
