@@ -211,7 +211,7 @@ M45-53,imports,"Import visibility default: public sees metadata and link, cached
 M45-54,governance,RPF instance policy knob; Spain honor/image rights awareness,M45,planned,--,Gaps review G5. LO 1/1982.
 M45-55,governance,"Built-in compliance tooling: notice forms, SOR templates, DSAR export",M45,planned,--,Gaps review G6. Operators are legally responsible for their own instance.
 M45-01,governance,"Roadmap board: cards grouped by stage, Elo-ordered, anonymously readable",M45,planned,--,"Spec §44.1, §44.5. Ported from fichub-consensus."
-M45-02,governance,"MaxDiff arena: 4-card ballot, best+worst, virtual 1v1 Elo matches K=32",M45,planned,--,Spec §44.3. Only idea-stage cards eligible; ballots log pre-match Elo.
+M45-02,governance,"MaxDiff arena: 4-card ballot, best+worst, virtual 1v1 Elo matches K=32",M45,implemented-locally-tested,crates/app/tests/arena.rs,"Spec §44.3. Merged into M45-56 Taste Calibration Arena implementation."
 M45-03,governance,Voting and suggesting gated at TL>=1 via trust ladder,M45,planned,--,Spec §44.4. governance::trust_for; no separate voter table.
 M45-04,governance,Stage moves operator-only with public changelog and reasons,M45,planned,--,"Spec §44.2, §44.5. Elo is the community's, stage is the operator's."
 M45-05,governance,Seed script maps requirements.csv rows to cards idempotently,M45,planned,--,Spec §44.6. scripts/seed_roadmap.py; never downgrades shipped.
