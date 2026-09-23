@@ -6,8 +6,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
-use darkhold_domain::blocking::BlockScope;
 use darkhold_db::community::ForumPost;
+use darkhold_domain::blocking::BlockScope;
 use serde::Deserialize;
 use std::str::FromStr;
 use time::format_description::well_known::Rfc3339;
@@ -204,13 +204,9 @@ async fn post_comment(
     .await
     .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
     // Record @handle mentions in the comment body (spec §17.5). Best-effort.
-    let _ = darkhold_db::community::record_mentions(
-        state.db(),
-        "comment",
-        &id,
-        &pseud_id.to_string(),
-    )
-    .await;
+    let _ =
+        darkhold_db::community::record_mentions(state.db(), "comment", &id, &pseud_id.to_string())
+            .await;
 
     let stored = match darkhold_db::positivity::classify_comment(
         state.db(),
@@ -396,7 +392,9 @@ async fn get_topic_replies(
     )
     .await
     .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
-    let posts = filter_blocked_posts(&state, &user.account_id.to_string(), posts).await.map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
+    let posts = filter_blocked_posts(&state, &user.account_id.to_string(), posts)
+        .await
+        .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
     let items = with_author_handles(&state, posts, |p| &p.author_pseud)
         .await
         .map_err(ApiError)?;
@@ -438,20 +436,26 @@ async fn post_reply(
     }
     // Block check: if topic author blocks the replier (or vice versa), refuse.
     if let Ok(author_pseud) = topic.author_pseud.parse::<darkhold_domain::PseudId>() {
-        if let Ok(Some(author_info)) = darkhold_db::identity::find_pseud(state.db(), author_pseud).await {
+        if let Ok(Some(author_info)) =
+            darkhold_db::identity::find_pseud(state.db(), author_pseud).await
+        {
             let author_account = author_info.account_id.to_string();
             let viewer_blocks = darkhold_db::community::is_blocked(
                 state.db(),
                 &user.account_id.to_string(),
                 &author_account,
                 BlockScope::Comments,
-            ).await.unwrap_or(false);
+            )
+            .await
+            .unwrap_or(false);
             let author_blocks = darkhold_db::community::is_blocked(
                 state.db(),
                 &author_account,
                 &user.account_id.to_string(),
                 BlockScope::Comments,
-            ).await.unwrap_or(false);
+            )
+            .await
+            .unwrap_or(false);
             if viewer_blocks || author_blocks {
                 return Err(ApiError(darkhold_domain::AppError::AccessDenied));
             }
@@ -462,7 +466,9 @@ async fn post_reply(
             .await
             .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
 
-    darkhold_db::community::update_topic_last_post(state.db(), &id, &pid).await.map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
+    darkhold_db::community::update_topic_last_post(state.db(), &id, &pid)
+        .await
+        .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
 
     // Record @handle mentions in the post body (spec §17.5). Best-effort.
     let _ = darkhold_db::community::record_mentions(
@@ -478,8 +484,7 @@ async fn post_reply(
     // resolve it to its account. Best-effort: a notification failure must
     // not fail the reply.
     if let Ok(author_pseud) = topic.author_pseud.parse::<darkhold_domain::PseudId>() {
-        if let Ok(Some(author)) =
-            darkhold_db::identity::find_pseud(state.db(), author_pseud).await
+        if let Ok(Some(author)) = darkhold_db::identity::find_pseud(state.db(), author_pseud).await
         {
             let _ = darkhold_db::notifications::notify(
                 state.db(),
@@ -505,20 +510,26 @@ async fn filter_blocked_posts(
     let mut visible = Vec::with_capacity(posts.len());
     for post in posts {
         if let Ok(author_pseud) = post.author_pseud.parse::<darkhold_domain::PseudId>() {
-            if let Ok(Some(pseud_info)) = darkhold_db::identity::find_pseud(state.db(), author_pseud).await {
+            if let Ok(Some(pseud_info)) =
+                darkhold_db::identity::find_pseud(state.db(), author_pseud).await
+            {
                 let author_account = pseud_info.account_id.to_string();
                 let viewer_blocks = darkhold_db::community::is_blocked(
                     state.db(),
                     &viewer_account_id,
                     &author_account,
                     BlockScope::Comments,
-                ).await.unwrap_or(false);
+                )
+                .await
+                .unwrap_or(false);
                 let author_blocks = darkhold_db::community::is_blocked(
                     state.db(),
                     &author_account,
                     &viewer_account_id,
                     BlockScope::Comments,
-                ).await.unwrap_or(false);
+                )
+                .await
+                .unwrap_or(false);
                 if !viewer_blocks && !author_blocks {
                     visible.push(post);
                 }
@@ -935,13 +946,9 @@ async fn subscribe_topic(
     RequireSession(user): RequireSession,
     Path(id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    darkhold_db::community::subscribe_to_topic(
-        state.db(),
-        &user.account_id.to_string(),
-        &id,
-    )
-    .await
-    .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
+    darkhold_db::community::subscribe_to_topic(state.db(), &user.account_id.to_string(), &id)
+        .await
+        .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 

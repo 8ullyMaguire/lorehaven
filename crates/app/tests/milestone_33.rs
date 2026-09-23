@@ -281,7 +281,8 @@ async fn reading_group_schedule_round_trip() {
     // Schedule sections return 200 OK (or 201 CREATED) — either is fine.
     assert!(
         status == StatusCode::OK || status == StatusCode::CREATED,
-        "add schedule section: {}", status
+        "add schedule section: {}",
+        status
     );
 
     // Read back.
@@ -312,7 +313,8 @@ async fn wiki_pin_create_and_approve() {
     // Wiki pin returns 200 OK (or 201 CREATED) — either is fine.
     assert!(
         status == StatusCode::OK || status == StatusCode::CREATED,
-        "create wiki pin: {}", status
+        "create wiki pin: {}",
+        status
     );
 
     // Approve it (we don't know the post_id, so we use a dummy — the test just
@@ -358,5 +360,9 @@ async fn critique_circle_queue() {
     let (status, _body) = client
         .get(&format!("/api/v1/topics/{}/critique/queue", topic_id))
         .await;
-    assert!(status.is_success() || status == StatusCode::NOT_FOUND, "get critique queue: {}", status);
+    assert!(
+        status.is_success() || status == StatusCode::NOT_FOUND,
+        "get critique queue: {}",
+        status
+    );
 }

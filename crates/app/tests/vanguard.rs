@@ -266,7 +266,11 @@ async fn revoke_vanguard_role() {
 
     // Confirm no longer vanguard.
     let (status, body) = user.get("/api/v1/vanguard/status").await;
-    assert_eq!(status, StatusCode::OK, "vanguard status after revoke: {body}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "vanguard status after revoke: {body}"
+    );
     assert_eq!(body["is_vanguard"], false);
 }
 

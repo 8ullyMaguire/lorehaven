@@ -961,7 +961,6 @@ pub async fn bulk_items_for_export(
     Ok(rows)
 }
 
-
 // ---------------------------------------------------------------------------
 // CTA marks (spec §42.2) — curator quorum on "this work already carries
 // its author's own CTA", which exempts the work from the instance CTA.
@@ -1021,22 +1020,18 @@ pub async fn retract_cta_mark(db: &Database, work_id: &str, curator: &str) -> Re
         "DELETE FROM cta_marks WHERE work_id = ? AND curator = ?",
     );
     let affected = match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query(&sql)
-                .bind(work_id)
-                .bind(curator)
-                .execute(db.sqlite_pool().expect("sqlite handle"))
-                .await?
-                .rows_affected()
-        }
-        Backend::Postgres => {
-            sqlx::query(&sql)
-                .bind(work_id)
-                .bind(curator)
-                .execute(db.postgres_pool().expect("postgres handle"))
-                .await?
-                .rows_affected()
-        }
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(work_id)
+            .bind(curator)
+            .execute(db.sqlite_pool().expect("sqlite handle"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(work_id)
+            .bind(curator)
+            .execute(db.postgres_pool().expect("postgres handle"))
+            .await?
+            .rows_affected(),
     };
     Ok(affected > 0)
 }

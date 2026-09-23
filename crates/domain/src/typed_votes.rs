@@ -348,7 +348,14 @@ mod tests {
     #[test]
     fn a_category_with_its_own_rows_replaces_the_default_set() {
         let mut all = default_taxonomy();
-        all.push(t("constructive", "Constructive", Some("critique"), 0, 1, false));
+        all.push(t(
+            "constructive",
+            "Constructive",
+            Some("critique"),
+            0,
+            1,
+            false,
+        ));
         all.push(t(
             "harsh_but_fair",
             "Harsh but fair",
@@ -372,7 +379,10 @@ mod tests {
 
         let critique = effective_taxonomy(&all, "critique");
         let critique_ids: Vec<&str> = critique.iter().map(|t| t.id.as_str()).collect();
-        assert_eq!(critique_ids, vec!["constructive", "harsh_but_fair", "needs_sources"]);
+        assert_eq!(
+            critique_ids,
+            vec!["constructive", "harsh_but_fair", "needs_sources"]
+        );
         assert!(
             find_vote_type(&critique, "insightful").is_none(),
             "a configured set replaces the default one, it does not add to it"
@@ -396,7 +406,10 @@ mod tests {
         let types = default_taxonomy();
         let positive = find_vote_type(&types, "insightful").expect("positive type");
         let negative = find_vote_type(&types, "disagree").expect("negative type");
-        assert!(negative.cost > positive.cost, "{negative:?} vs {positive:?}");
+        assert!(
+            negative.cost > positive.cost,
+            "{negative:?} vs {positive:?}"
+        );
     }
 
     #[test]
@@ -404,7 +417,10 @@ mod tests {
         let budget = VoteBudget::new(3, 2);
         assert_eq!(budget.remaining(), 1);
         assert!(budget.can_afford(1));
-        assert!(!budget.can_afford(2), "a negative vote needs two votes' room");
+        assert!(
+            !budget.can_afford(2),
+            "a negative vote needs two votes' room"
+        );
 
         let spent = VoteBudget::new(3, 3);
         assert!(spent.exhausted());

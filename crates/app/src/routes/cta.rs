@@ -1,4 +1,3 @@
-
 // ---------------------------------------------------------------------------
 // CTA marks (spec §42.2): curators record whether a work carries its own CTA
 // ---------------------------------------------------------------------------
@@ -21,10 +20,7 @@ pub struct CtaMarkRequest {
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route(
-            "/works/{id}/cta_marks",
-            axum::routing::post(mark).get(list),
-        )
+        .route("/works/{id}/cta_marks", axum::routing::post(mark).get(list))
         .route("/works/{id}/cta_marks/me", axum::routing::delete(retract))
 }
 

@@ -5,8 +5,8 @@
 
 use crate::{Backend, Database};
 use anyhow::Result;
-use sqlx::FromRow;
 use serde::Serialize;
+use sqlx::FromRow;
 
 /// A single forum search result.
 #[derive(Debug, Clone, Serialize)]
@@ -36,8 +36,12 @@ pub async fn search_forum(
     }
 
     match db.backend() {
-        Backend::Sqlite => search_forum_sqlite(db, query, category_id, author, date_from, date_to, limit).await,
-        Backend::Postgres => search_forum_postgres(db, query, category_id, author, date_from, date_to, limit).await,
+        Backend::Sqlite => {
+            search_forum_sqlite(db, query, category_id, author, date_from, date_to, limit).await
+        }
+        Backend::Postgres => {
+            search_forum_postgres(db, query, category_id, author, date_from, date_to, limit).await
+        }
     }
 }
 

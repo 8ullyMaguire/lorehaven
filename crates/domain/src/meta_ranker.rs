@@ -86,7 +86,10 @@ pub struct BetaDistribution {
 impl BetaDistribution {
     /// Create a new Beta distribution with a uniform prior (Beta(1,1)).
     pub fn new() -> Self {
-        BetaDistribution { alpha: 1.0, beta: 1.0 }
+        BetaDistribution {
+            alpha: 1.0,
+            beta: 1.0,
+        }
     }
 
     /// Create with an informative prior.
@@ -359,11 +362,7 @@ impl MetaRanker {
         }
         let entry = if candidate_bonus {
             // Give new candidates a prior that encourages exploration
-            StrategyEntry::with_prior(
-                kind,
-                1.0 * self.config.candidate_exploration_bonus,
-                1.0,
-            )
+            StrategyEntry::with_prior(kind, 1.0 * self.config.candidate_exploration_bonus, 1.0)
         } else {
             StrategyEntry::new(kind)
         };
@@ -388,11 +387,7 @@ impl MetaRanker {
         }
 
         // Separate active strategies into those with sufficient data and those without
-        let active: Vec<&StrategyEntry> = self
-            .strategies
-            .iter()
-            .filter(|s| !s.disabled)
-            .collect();
+        let active: Vec<&StrategyEntry> = self.strategies.iter().filter(|s| !s.disabled).collect();
 
         if active.is_empty() {
             return vec![];
@@ -429,8 +424,7 @@ impl MetaRanker {
             let total_sample: f64 = samples.iter().map(|(_, s)| s).sum();
             if total_sample > 0.0 {
                 for &(kind, sample) in &samples {
-                    let share =
-                        (exploration_slots as f64 * sample / total_sample).round() as usize;
+                    let share = (exploration_slots as f64 * sample / total_sample).round() as usize;
                     if share > 0 {
                         result.push((kind, share));
                     }
@@ -537,8 +531,8 @@ pub struct StrategySummary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     #[test]
     fn beta_distribution_new_is_uniform() {
@@ -582,7 +576,11 @@ mod tests {
         let sum: f64 = (0..n).map(|_| beta.sample(&mut rng)).sum();
         let mean = sum / n as f64;
         // Should be close to 0.8
-        assert!((mean - 0.8).abs() < 0.01, "sample mean {} not close to 0.8", mean);
+        assert!(
+            (mean - 0.8).abs() < 0.01,
+            "sample mean {} not close to 0.8",
+            mean
+        );
     }
 
     #[test]
@@ -702,7 +700,14 @@ mod tests {
 
         let disabled = ranker.rebalance();
         assert!(!disabled.contains(&StrategyKind::Popularity));
-        assert!(ranker.strategies.iter().find(|s| s.kind == StrategyKind::Popularity).unwrap().locked);
+        assert!(
+            ranker
+                .strategies
+                .iter()
+                .find(|s| s.kind == StrategyKind::Popularity)
+                .unwrap()
+                .locked
+        );
     }
 
     #[test]
@@ -715,11 +720,17 @@ mod tests {
         let summary = ranker.summary();
         assert_eq!(summary.len(), 13);
 
-        let tg = summary.iter().find(|s| s.kind == StrategyKind::TasteGravity).unwrap();
+        let tg = summary
+            .iter()
+            .find(|s| s.kind == StrategyKind::TasteGravity)
+            .unwrap();
         assert_eq!(tg.impressions, 1);
         assert_eq!(tg.successes, 1);
 
-        let pop = summary.iter().find(|s| s.kind == StrategyKind::Popularity).unwrap();
+        let pop = summary
+            .iter()
+            .find(|s| s.kind == StrategyKind::Popularity)
+            .unwrap();
         assert_eq!(pop.impressions, 1);
         assert_eq!(pop.successes, 0);
     }
@@ -800,7 +811,7 @@ mod tests {
                 max_api_calls: 500,
             },
             author: AlgoResourceLimit {
-                timeout_ms: 500, // exceeds 200ms hard cap
+                timeout_ms: 500,  // exceeds 200ms hard cap
                 max_size_mb: 100, // exceeds 50MB hard cap
                 max_api_calls: 1000,
             },

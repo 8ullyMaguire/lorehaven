@@ -165,8 +165,7 @@ impl SourceAdapter for Chyoa {
                 .map_err(|e| SourceError::Network(format!("reading chapter page: {e}")))?;
             let document = Html::parse_document(&page.body);
             // The breadcrumb on a chapter page links back to the story.
-            let breadcrumb_sel =
-                Selector::parse("a[href^='/story/']").expect("static selector");
+            let breadcrumb_sel = Selector::parse("a[href^='/story/']").expect("static selector");
             document
                 .select(&breadcrumb_sel)
                 .next()
@@ -203,10 +202,9 @@ impl SourceAdapter for Chyoa {
         }
         let mut chapters = Vec::with_capacity(work.chapters.len());
         for entry in &work.chapters {
-            let page = fetch
-                .get(&entry.source_chapter_key)
-                .await
-                .map_err(|e| SourceError::Network(format!("reading chapter {}: {e}", entry.ordinal)))?;
+            let page = fetch.get(&entry.source_chapter_key).await.map_err(|e| {
+                SourceError::Network(format!("reading chapter {}: {e}", entry.ordinal))
+            })?;
             chapters.push(self.parse_chapter(&page.body, work, entry.ordinal)?);
         }
         Ok(chapters)
@@ -266,10 +264,8 @@ impl SourceAdapter for Chyoa {
                         .next()
                         .unwrap_or("")
                         .to_owned();
-                    let profile = format!(
-                        "https://chyoa.com{}",
-                        a.value().attr("href").unwrap_or("")
-                    );
+                    let profile =
+                        format!("https://chyoa.com{}", a.value().attr("href").unwrap_or(""));
                     (name, Some(profile))
                 })
                 .unwrap_or((String::new(), None))
@@ -369,12 +365,11 @@ impl Chyoa {
     ) -> SourceResult<SourceChapter> {
         let document = Html::parse_document(html);
 
-        let body_sel = Selector::parse("div.rd-story-prose.chapter-content")
-            .expect("static selector");
-        let body = document
-            .select(&body_sel)
-            .next()
-            .ok_or_else(|| SourceError::Parse("chyoa chapter page has no prose container".to_owned()))?;
+        let body_sel =
+            Selector::parse("div.rd-story-prose.chapter-content").expect("static selector");
+        let body = document.select(&body_sel).next().ok_or_else(|| {
+            SourceError::Parse("chyoa chapter page has no prose container".to_owned())
+        })?;
 
         let content_html = body.inner_html();
         let image_urls = crate::sanitize::extract_image_urls(&content_html, None);

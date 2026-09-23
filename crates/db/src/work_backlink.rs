@@ -44,20 +44,16 @@ pub async fn work_for_topic(db: &Database, topic_id: &str) -> Result<Option<Link
         "SELECT title FROM works WHERE id::text = $1 AND deleted_at IS NULL",
     );
     let title: Option<String> = match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query_scalar(&title_sql)
-                .bind(&work_id)
-                .fetch_optional(db.sqlite_pool().expect("sqlite"))
-                .await?
-                .flatten()
-        }
-        Backend::Postgres => {
-            sqlx::query_scalar(&title_sql)
-                .bind(&work_id)
-                .fetch_optional(db.postgres_pool().expect("postgres"))
-                .await?
-                .flatten()
-        }
+        Backend::Sqlite => sqlx::query_scalar(&title_sql)
+            .bind(&work_id)
+            .fetch_optional(db.sqlite_pool().expect("sqlite"))
+            .await?
+            .flatten(),
+        Backend::Postgres => sqlx::query_scalar(&title_sql)
+            .bind(&work_id)
+            .fetch_optional(db.postgres_pool().expect("postgres"))
+            .await?
+            .flatten(),
     };
     let Some(title) = title else {
         return Ok(None);

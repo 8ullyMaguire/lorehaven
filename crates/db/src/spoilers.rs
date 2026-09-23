@@ -139,10 +139,7 @@ pub async fn add_content_warning(
 }
 
 /// List content warnings for a post.
-pub async fn list_content_warnings(
-    db: &Database,
-    post_id: &str,
-) -> Result<Vec<ContentWarningRow>> {
+pub async fn list_content_warnings(db: &Database, post_id: &str) -> Result<Vec<ContentWarningRow>> {
     let sql = db.sql(
         "SELECT warning_type, severity, custom_text FROM content_warnings WHERE post_id = ?",
         "SELECT warning_type, severity, custom_text FROM content_warnings WHERE post_id = $1",
@@ -172,12 +169,7 @@ pub struct ContentWarningRow {
 }
 
 /// Upsert a post draft (autosave, spec §35.4).
-pub async fn upsert_draft(
-    db: &Database,
-    account: &str,
-    topic_id: &str,
-    body: &str,
-) -> Result<()> {
+pub async fn upsert_draft(db: &Database, account: &str, topic_id: &str, body: &str) -> Result<()> {
     let now = crate::identity::now_rfc3339();
     match db.backend() {
         Backend::Sqlite => {
@@ -213,11 +205,7 @@ pub async fn upsert_draft(
 }
 
 /// Get a draft for an account+topic, if any.
-pub async fn get_draft(
-    db: &Database,
-    account: &str,
-    topic_id: &str,
-) -> Result<Option<String>> {
+pub async fn get_draft(db: &Database, account: &str, topic_id: &str) -> Result<Option<String>> {
     let sql = db.sql(
         "SELECT body FROM post_drafts WHERE account = ? AND topic_id = ?",
         "SELECT body FROM post_drafts WHERE account = $1 AND topic_id = $2",
@@ -242,32 +230,24 @@ pub async fn get_draft(
 }
 
 /// Delete a draft (after successful post or explicit discard).
-pub async fn delete_draft(
-    db: &Database,
-    account: &str,
-    topic_id: &str,
-) -> Result<bool> {
+pub async fn delete_draft(db: &Database, account: &str, topic_id: &str) -> Result<bool> {
     let sql = db.sql(
         "DELETE FROM post_drafts WHERE account = ? AND topic_id = ?",
         "DELETE FROM post_drafts WHERE account = $1 AND topic_id = $2",
     );
     let affected = match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query(&sql)
-                .bind(account)
-                .bind(topic_id)
-                .execute(db.sqlite_pool().expect("sqlite"))
-                .await?
-                .rows_affected()
-        }
-        Backend::Postgres => {
-            sqlx::query(&sql)
-                .bind(account)
-                .bind(topic_id)
-                .execute(db.postgres_pool().expect("postgres"))
-                .await?
-                .rows_affected()
-        }
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(account)
+            .bind(topic_id)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(account)
+            .bind(topic_id)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?
+            .rows_affected(),
     };
     Ok(affected > 0)
 }
@@ -284,7 +264,7 @@ pub async fn set_warning_pref(
             sqlx::query(
                 "INSERT INTO reader_warning_prefs (account, warning_type, action)
                  VALUES (?, ?, ?)
-                 ON CONFLICT(account, warning_type) DO UPDATE SET action = excluded.action"
+                 ON CONFLICT(account, warning_type) DO UPDATE SET action = excluded.action",
             )
             .bind(account)
             .bind(warning_type.as_str())
@@ -296,7 +276,7 @@ pub async fn set_warning_pref(
             sqlx::query(
                 "INSERT INTO reader_warning_prefs (account, warning_type, action)
                  VALUES ($1, $2, $3)
-                 ON CONFLICT(account, warning_type) DO UPDATE SET action = excluded.action"
+                 ON CONFLICT(account, warning_type) DO UPDATE SET action = excluded.action",
             )
             .bind(account)
             .bind(warning_type.as_str())
@@ -333,18 +313,12 @@ pub async fn list_warning_prefs(
     };
     Ok(rows
         .into_iter()
-        .filter_map(|(t, a)| {
-            Some((WarningType::from_str(&t)?, WarningAction::from_str(&a)?))
-        })
+        .filter_map(|(t, a)| Some((WarningType::from_str(&t)?, WarningAction::from_str(&a)?)))
         .collect())
 }
 
 /// Schedule a post for future publication (spec §35.4).
-pub async fn schedule_post(
-    db: &Database,
-    post_id: &str,
-    scheduled_at: &str,
-) -> Result<()> {
+pub async fn schedule_post(db: &Database, post_id: &str, scheduled_at: &str) -> Result<()> {
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query("UPDATE forum_posts SET scheduled_at = ?, published = 0 WHERE id = ?")
@@ -365,11 +339,7 @@ pub async fn schedule_post(
 }
 
 /// List due scheduled posts (spec §35.4). Returns post IDs ready to publish.
-pub async fn list_due_scheduled_posts(
-    db: &Database,
-    now: &str,
-    limit: i64,
-) -> Result<Vec<String>> {
+pub async fn list_due_scheduled_posts(db: &Database, now: &str, limit: i64) -> Result<Vec<String>> {
     let sql = db.sql(
         "SELECT id FROM forum_posts WHERE published = 0 AND scheduled_at IS NOT NULL AND scheduled_at <= ? ORDER BY scheduled_at LIMIT ?",
         "SELECT id FROM forum_posts WHERE published = 0 AND scheduled_at IS NOT NULL AND scheduled_at <= $1 ORDER BY scheduled_at LIMIT $2",
@@ -400,20 +370,16 @@ pub async fn publish_scheduled_post(db: &Database, post_id: &str) -> Result<bool
         "UPDATE forum_posts SET published = 1, scheduled_at = NULL WHERE id = $1 AND published = 0",
     );
     let affected = match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query(&sql)
-                .bind(post_id)
-                .execute(db.sqlite_pool().expect("sqlite"))
-                .await?
-                .rows_affected()
-        }
-        Backend::Postgres => {
-            sqlx::query(&sql)
-                .bind(post_id)
-                .execute(db.postgres_pool().expect("postgres"))
-                .await?
-                .rows_affected()
-        }
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(post_id)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(post_id)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?
+            .rows_affected(),
     };
     Ok(affected > 0)
 }

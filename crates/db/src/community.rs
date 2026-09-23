@@ -1647,11 +1647,7 @@ pub async fn toggle_topic_lock(db: &Database, topic_id: &str) -> Result<bool> {
 // ---------------------------------------------------------------------------
 
 /// Subscribe a user to a topic. Idempotent: re-subscribing has no effect.
-pub async fn subscribe_to_topic(
-    db: &Database,
-    account_id: &str,
-    topic_id: &str,
-) -> Result<()> {
+pub async fn subscribe_to_topic(db: &Database, account_id: &str, topic_id: &str) -> Result<()> {
     let sql = db.sql(
         "INSERT INTO forum_topic_subscriptions (account, topic_id, created_at)
          VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ'))
@@ -1690,22 +1686,18 @@ pub async fn unsubscribe_from_topic(
         "DELETE FROM forum_topic_subscriptions WHERE account = $1 AND topic_id = $2",
     );
     let affected = match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query(&sql)
-                .bind(account_id)
-                .bind(topic_id)
-                .execute(db.sqlite_pool().expect("sqlite"))
-                .await?
-                .rows_affected()
-        }
-        Backend::Postgres => {
-            sqlx::query(&sql)
-                .bind(account_id)
-                .bind(topic_id)
-                .execute(db.postgres_pool().expect("postgres"))
-                .await?
-                .rows_affected()
-        }
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(account_id)
+            .bind(topic_id)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(account_id)
+            .bind(topic_id)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?
+            .rows_affected(),
     };
     Ok(affected > 0)
 }
@@ -1748,11 +1740,7 @@ pub async fn mark_topic_read(
 
 /// Get the number of unread posts in a topic for a given user.
 /// Returns 0 if the user is not subscribed or the topic has no new posts.
-pub async fn unread_count_in_topic(
-    db: &Database,
-    account_id: &str,
-    topic_id: &str,
-) -> Result<i64> {
+pub async fn unread_count_in_topic(db: &Database, account_id: &str, topic_id: &str) -> Result<i64> {
     let sql = db.sql(
         "SELECT COUNT(*) AS unread
          FROM forum_posts fp
@@ -1791,11 +1779,7 @@ pub async fn unread_count_in_topic(
 }
 
 /// Update the last_post_id cache on a topic when a new post is added.
-pub async fn update_topic_last_post(
-    db: &Database,
-    topic_id: &str,
-    post_id: &str,
-) -> Result<()> {
+pub async fn update_topic_last_post(db: &Database, topic_id: &str, post_id: &str) -> Result<()> {
     let sql = db.sql(
         "UPDATE forum_topics SET last_post_id = ?, last_post_at = strftime('%Y-%m-%dT%H:%M:%fZ') WHERE id = ?",
         "UPDATE forum_topics SET last_post_id = $1, last_post_at = now() WHERE id = $2",
@@ -1930,7 +1914,10 @@ pub async fn record_mentions(
             continue;
         }
         // Visibility: mentioned pseud must be discoverable.
-        if !matches!(pseud.discoverability, crate::identity::Discoverability::Listed) {
+        if !matches!(
+            pseud.discoverability,
+            crate::identity::Discoverability::Listed
+        ) {
             continue;
         }
         // Block check: if either party has blocked the other, skip.

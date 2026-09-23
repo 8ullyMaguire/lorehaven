@@ -380,11 +380,10 @@ pub fn build_router(state: AppState) -> Router {
             // TL>=1 + operator routes under /api/v1/roadmap and /api/v1/admin/roadmap.
             Router::new()
                 .nest("/api/v1", routes::roadmap::router())
-                .nest("/api/v1", classified(
-                    routes::roadmap::admin_router(),
-                    RouteClass::Write,
-                    &state,
-                )),
+                .nest(
+                    "/api/v1",
+                    classified(routes::roadmap::admin_router(), RouteClass::Write, &state),
+                ),
         )
         .merge(classified(
             routes::browse::router(),

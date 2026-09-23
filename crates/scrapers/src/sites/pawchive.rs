@@ -349,20 +349,16 @@ mod tag_tests {
 
     #[test]
     fn tags_accept_the_array_form() {
-        let post = parse(
-            r#"{"id":"1","user":"7","title":"t","content":"c","tags":["a","b"]}"#,
-        )
-        .expect("array tags parse");
+        let post = parse(r#"{"id":"1","user":"7","title":"t","content":"c","tags":["a","b"]}"#)
+            .expect("array tags parse");
         assert_eq!(post.tags, vec!["a", "b"]);
     }
 
     #[test]
     fn tags_accept_the_string_form() {
         // Pawchive returns "{Magiscape}" for single-tag posts (user 77053790).
-        let post = parse(
-            r#"{"id":"1","user":"7","title":"t","content":"c","tags":"{Magiscape}"}"#,
-        )
-        .expect("string tags parse");
+        let post = parse(r#"{"id":"1","user":"7","title":"t","content":"c","tags":"{Magiscape}"}"#)
+            .expect("string tags parse");
         assert_eq!(post.tags, vec!["Magiscape"]);
     }
 
@@ -377,9 +373,7 @@ mod tag_tests {
 
     #[test]
     fn tags_reject_other_shapes() {
-        let post = parse(
-            r#"{"id":"1","user":"7","title":"t","content":"c","tags":42}"#,
-        );
+        let post = parse(r#"{"id":"1","user":"7","title":"t","content":"c","tags":42}"#);
         assert!(post.is_err());
     }
 }

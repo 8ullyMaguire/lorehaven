@@ -173,7 +173,10 @@ mod tests {
     fn link_status_as_str() {
         assert_eq!(LinkStatus::Healthy.as_str(), "healthy");
         assert_eq!(LinkStatus::Dead.as_str(), "dead");
-        assert_eq!(LinkStatus::PendingVerification.as_str(), "pending_verification");
+        assert_eq!(
+            LinkStatus::PendingVerification.as_str(),
+            "pending_verification"
+        );
     }
 
     #[test]

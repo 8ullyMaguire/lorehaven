@@ -110,14 +110,13 @@ pub async fn find_card_by_title_normalized(
 ) -> Result<Option<Card>, sqlx::Error> {
     let target = normalize_title(title);
     let cards = list_cards(db, None).await?;
-    Ok(cards.into_iter().find(|c| normalize_title(&c.title) == target))
+    Ok(cards
+        .into_iter()
+        .find(|c| normalize_title(&c.title) == target))
 }
 
 /// List cards, optionally filtered by stage. Elo DESC, tie-break matches_played DESC, card_id ASC.
-pub async fn list_cards(
-    db: &Database,
-    stage: Option<&str>,
-) -> Result<Vec<Card>, sqlx::Error> {
+pub async fn list_cards(db: &Database, stage: Option<&str>) -> Result<Vec<Card>, sqlx::Error> {
     let sql = match stage {
         Some(_) => "SELECT id, title, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at FROM roadmap_cards WHERE stage = ? ORDER BY elo_rating DESC, matches_played DESC, id ASC",
         None => "SELECT id, title, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at FROM roadmap_cards ORDER BY elo_rating DESC, matches_played DESC, id ASC",
@@ -142,7 +141,9 @@ pub async fn list_cards(
                 Some(s) => query.bind(s),
                 None => query,
             };
-            let rows = query.fetch_all(db.postgres_pool().expect("postgres")).await?;
+            let rows = query
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?;
             Ok(rows.iter().map(row_to_card_postgres).collect())
         }
     }
@@ -230,7 +231,8 @@ pub async fn fetch_ballot(
                 let served_elo_json: String = r.get(1);
                 let voted_at: Option<String> = r.get(2);
                 let card_ids: Vec<String> = serde_json::from_str(&card_ids_json).expect("json");
-                let served_elo: Vec<(String, f64)> = serde_json::from_str(&served_elo_json).expect("json");
+                let served_elo: Vec<(String, f64)> =
+                    serde_json::from_str(&served_elo_json).expect("json");
                 (card_ids, served_elo, voted_at)
             }))
         }
@@ -244,7 +246,8 @@ pub async fn fetch_ballot(
                 let served_elo_json: String = r.get(1);
                 let voted_at: Option<String> = r.get(2);
                 let card_ids: Vec<String> = serde_json::from_str(&card_ids_json).expect("json");
-                let served_elo: Vec<(String, f64)> = serde_json::from_str(&served_elo_json).expect("json");
+                let served_elo: Vec<(String, f64)> =
+                    serde_json::from_str(&served_elo_json).expect("json");
                 (card_ids, served_elo, voted_at)
             }))
         }
@@ -252,10 +255,7 @@ pub async fn fetch_ballot(
 }
 
 /// Mark a ballot as voted (atomic one-vote-per-ballot). Returns true if the vote was recorded.
-pub async fn mark_voted(
-    db: &Database,
-    ballot_id: &str,
-) -> Result<bool, sqlx::Error> {
+pub async fn mark_voted(db: &Database, ballot_id: &str) -> Result<bool, sqlx::Error> {
     let now = crate::identity::now_rfc3339();
     match db.backend() {
         Backend::Sqlite => {

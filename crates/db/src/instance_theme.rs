@@ -21,10 +21,7 @@ pub struct InstanceTheme {
 
 /// Compute theme vector from user bookmarks and tags.
 /// Reads works a user has bookmarked/liked and aggregates their tags.
-pub async fn compute_theme_from_bookmarks(
-    db: &Database,
-    _instance_id: &str,
-) -> Result<JsonValue> {
+pub async fn compute_theme_from_bookmarks(db: &Database, _instance_id: &str) -> Result<JsonValue> {
     let rows: Vec<(String,)> = match db.backend() {
         Backend::Sqlite => sqlx::query_as(
             "SELECT t.name
@@ -128,13 +125,15 @@ pub async fn get_local_theme(db: &Database, instance_id: &str) -> Result<Option<
                 .await?
         }
     };
-    Ok(row.map(|(instance_id, tv, public, computed_at, updated_at)| InstanceTheme {
-        instance_id,
-        theme_vector: serde_json::from_str(&tv).unwrap_or_default(),
-        public,
-        computed_at,
-        updated_at,
-    }))
+    Ok(row.map(
+        |(instance_id, tv, public, computed_at, updated_at)| InstanceTheme {
+            instance_id,
+            theme_vector: serde_json::from_str(&tv).unwrap_or_default(),
+            public,
+            computed_at,
+            updated_at,
+        },
+    ))
 }
 
 /// List all public themes (for instance discovery).
@@ -153,13 +152,15 @@ pub async fn list_public_themes(db: &Database) -> Result<Vec<InstanceTheme>> {
     };
     Ok(rows
         .into_iter()
-        .map(|(instance_id, tv, public, computed_at, updated_at)| InstanceTheme {
-            instance_id,
-            theme_vector: serde_json::from_str(&tv).unwrap_or_default(),
-            public,
-            computed_at,
-            updated_at,
-        })
+        .map(
+            |(instance_id, tv, public, computed_at, updated_at)| InstanceTheme {
+                instance_id,
+                theme_vector: serde_json::from_str(&tv).unwrap_or_default(),
+                public,
+                computed_at,
+                updated_at,
+            },
+        )
         .collect())
 }
 

@@ -22,10 +22,7 @@ fn pool_err() -> sqlx::Error {
 /// Design: a streak increments on the first login of each UTC day. If a day is
 /// missed, the streak resets. The streak freeze (5 credits) can be spent via
 /// `use_streak_freeze()` to preserve the streak across a missed day.
-pub async fn record_login(
-    db: &Database,
-    account_id: &str,
-) -> Result<StreakState, sqlx::Error> {
+pub async fn record_login(db: &Database, account_id: &str) -> Result<StreakState, sqlx::Error> {
     let now = crate::identity::now_rfc3339();
     let today = now[..10].to_string();
     // Derive yesterday's date from the system clock.
@@ -61,7 +58,11 @@ pub async fn record_login(
             .await?;
 
             let Some((current, longest, last_login, freezes, _updated)) = state else {
-                return Ok(StreakState { current: 0, longest: 0, last_login_at: None });
+                return Ok(StreakState {
+                    current: 0,
+                    longest: 0,
+                    last_login_at: None,
+                });
             };
 
             let last_date = last_login.as_ref().map(|s| &s[..10]);
@@ -116,7 +117,11 @@ pub async fn record_login(
             .await?;
 
             let Some((current, longest, last_login, freezes, _updated)) = state else {
-                return Ok(StreakState { current: 0, longest: 0, last_login_at: None });
+                return Ok(StreakState {
+                    current: 0,
+                    longest: 0,
+                    last_login_at: None,
+                });
             };
 
             let last_date = last_login.as_ref().map(|s| &s[..10]);
@@ -297,7 +302,7 @@ pub async fn drain_taste_notification_queue(
 
             let rows: Vec<(String, String, f64)> = sqlx::query_as(
                 "SELECT work_id, account_id, taste_score FROM taste_notification_queue
-                 WHERE sent_at = ? ORDER BY queued_at ASC LIMIT ?"
+                 WHERE sent_at = ? ORDER BY queued_at ASC LIMIT ?",
             )
             .bind(&now)
             .bind(limit)
@@ -319,7 +324,7 @@ pub async fn drain_taste_notification_queue(
 
             let rows: Vec<(String, String, f64)> = sqlx::query_as(
                 "SELECT work_id::text, account_id::text, taste_score FROM taste_notification_queue
-                 WHERE sent_at = $1 ORDER BY queued_at ASC LIMIT $2"
+                 WHERE sent_at = $1 ORDER BY queued_at ASC LIMIT $2",
             )
             .bind(&now)
             .bind(limit)

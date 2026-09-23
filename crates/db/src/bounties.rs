@@ -14,8 +14,8 @@
 //! The dual-backend rule applies: every query has a SQLite and a PostgreSQL
 //! form, selected by [`Database::backend`].
 
-use serde_json::json;
 use crate::Database;
+use serde_json::json;
 
 /// A bounty as the API renders it.
 #[derive(Debug, Clone)]
@@ -111,7 +111,11 @@ pub async fn contribute_to_bounty(
 
     let now = crate::identity::now_rfc3339();
     let new_state = if activated { "open" } else { "funding" };
-    let activated_at = if activated { Some(now) } else { bounty.activated_at };
+    let activated_at = if activated {
+        Some(now)
+    } else {
+        bounty.activated_at
+    };
 
     match db.backend() {
         crate::Backend::Sqlite => {
@@ -223,7 +227,18 @@ pub async fn fetch_bounty(db: &Database, id: &str) -> Result<Option<Bounty>, sql
     };
 
     Ok(row.map(
-        |(id, bounty_type, job_kind, terms, amount, funded_amount, state, created_by, created_at, activated_at)| {
+        |(
+            id,
+            bounty_type,
+            job_kind,
+            terms,
+            amount,
+            funded_amount,
+            state,
+            created_by,
+            created_at,
+            activated_at,
+        )| {
             Bounty {
                 id,
                 bounty_type,
@@ -277,7 +292,18 @@ pub async fn list_flexible_bounties(db: &Database) -> Result<Vec<Value>, sqlx::E
     Ok(rows
         .into_iter()
         .map(
-            |(id, bounty_type, job_kind, terms, amount, funded_amount, state, created_by, created_at, activated_at)| {
+            |(
+                id,
+                bounty_type,
+                job_kind,
+                terms,
+                amount,
+                funded_amount,
+                state,
+                created_by,
+                created_at,
+                activated_at,
+            )| {
                 json!({
                     "id": id,
                     "type": bounty_type,

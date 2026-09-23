@@ -92,25 +92,27 @@ async fn get_arena_next(
     // Build ArenaCards from the pool.
     let cards: Vec<ArenaCard> = pool_rows
         .into_iter()
-        .map(|(id, title, summary, fandom, tags, wc)| {
-            ArenaCard {
-                work_id: id,
-                title,
-                fandom,
-                tags,
-                word_count: wc,
-                excerpt: summary,
-                target_dimension: dimensions
-                    .first()
-                    .map(|d| d.key.clone())
-                    .unwrap_or_else(|| "prose".to_string()),
-            }
+        .map(|(id, title, summary, fandom, tags, wc)| ArenaCard {
+            work_id: id,
+            title,
+            fandom,
+            tags,
+            word_count: wc,
+            excerpt: summary,
+            target_dimension: dimensions
+                .first()
+                .map(|d| d.key.clone())
+                .unwrap_or_else(|| "prose".to_string()),
         })
         .collect();
 
     // Generate the arena round.
-    let round = generate_arena_round(&cards, &dimensions, &["prose".to_string()])
-        .ok_or_else(|| ApiError(AppError::Internal(anyhow::anyhow!("not enough works for arena round"))))?;
+    let round =
+        generate_arena_round(&cards, &dimensions, &["prose".to_string()]).ok_or_else(|| {
+            ApiError(AppError::Internal(anyhow::anyhow!(
+                "not enough works for arena round"
+            )))
+        })?;
 
     // Get existing Elo ratings for dimensions.
     let elos = get_dimension_elos(db, &account_id, &dimensions).await?;
@@ -164,9 +166,7 @@ async fn post_arena_vote(
     let elos = get_dimension_elos(db, &account_id, &dimensions).await?;
 
     // Build a synthetic round with best/worst for the ballot.
-    let synthetic_round = ArenaRound {
-        cards: vec![],
-    };
+    let synthetic_round = ArenaRound { cards: vec![] };
 
     let ballot = ArenaBallot {
         best_work_id: req.best_work_id.clone(),

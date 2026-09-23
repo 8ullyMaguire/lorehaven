@@ -135,7 +135,10 @@ impl<'a> Parser<'a> {
             // Check it's not a range like -0.5
             if self.pos + 1 < self.input.len() {
                 let next = self.input[self.pos + 1..].chars().next();
-                if next.map(|c| c.is_alphanumeric() || c == '"' || c == '\'').unwrap_or(false) {
+                if next
+                    .map(|c| c.is_alphanumeric() || c == '"' || c == '\'')
+                    .unwrap_or(false)
+                {
                     self.advance();
                     let inner = self.parse_single_term()?;
                     return Ok(QueryTerm::Negate(Box::new(inner)));
@@ -270,7 +273,9 @@ impl<'a> Parser<'a> {
 
     fn parse_identifier(&mut self) -> Result<String, ParseError> {
         let start = self.pos;
-        while !self.at_eof() && (self.current_char().is_alphanumeric() || self.current_char() == '_') {
+        while !self.at_eof()
+            && (self.current_char().is_alphanumeric() || self.current_char() == '_')
+        {
             self.advance();
         }
         if self.pos == start {
@@ -385,7 +390,10 @@ fn looks_like_date(s: &str) -> bool {
     if s.len() < 4 {
         return false;
     }
-    s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+    s.chars()
+        .next()
+        .map(|c| c.is_ascii_digit())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -494,7 +502,11 @@ mod tests {
     fn parse_complex_query() {
         let input = "tag:\"enemies to lovers\" fandom:\"Good Omens\" words:>10000 status:complete";
         let q = parse_query(input).unwrap();
-        assert!(q.terms.len() >= 4, "expected at least 4 terms, got {}", q.terms.len());
+        assert!(
+            q.terms.len() >= 4,
+            "expected at least 4 terms, got {}",
+            q.terms.len()
+        );
     }
 
     #[test]
@@ -520,11 +532,17 @@ mod tests {
         // >= and <=.
         let q = parse_query("kudos:>=100 replies:<=50").unwrap();
         match &q.terms[0] {
-            QueryTerm::Field { op: Operator::GreaterEq, .. } => {}
+            QueryTerm::Field {
+                op: Operator::GreaterEq,
+                ..
+            } => {}
             _ => panic!("expected >="),
         }
         match &q.terms[1] {
-            QueryTerm::Field { op: Operator::LessEq, .. } => {}
+            QueryTerm::Field {
+                op: Operator::LessEq,
+                ..
+            } => {}
             _ => panic!("expected <="),
         }
     }

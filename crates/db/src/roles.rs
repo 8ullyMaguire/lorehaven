@@ -227,21 +227,19 @@ pub async fn pin_work(
 }
 
 /// Unpin a work (soft delete — keeps the row for audit).
-pub async fn unpin_work(
-    db: &Database,
-    account_id: &str,
-    work_id: &str,
-) -> Result<(), sqlx::Error> {
+pub async fn unpin_work(db: &Database, account_id: &str, work_id: &str) -> Result<(), sqlx::Error> {
     let now = crate::identity::now_rfc3339();
     match db.backend() {
         Backend::Sqlite => {
             let pool = db.sqlite_pool().ok_or(pool_err())?;
-            sqlx::query("UPDATE vanguard_pins SET deleted_at = ? WHERE account_id = ? AND work_id = ?")
-                .bind(&now)
-                .bind(account_id)
-                .bind(work_id)
-                .execute(pool)
-                .await?;
+            sqlx::query(
+                "UPDATE vanguard_pins SET deleted_at = ? WHERE account_id = ? AND work_id = ?",
+            )
+            .bind(&now)
+            .bind(account_id)
+            .bind(work_id)
+            .execute(pool)
+            .await?;
         }
         Backend::Postgres => {
             let pool = db.postgres_pool().ok_or(pool_err())?;
@@ -348,7 +346,10 @@ pub async fn select_by_contribution_volume(
             .bind(limit)
             .fetch_all(pool)
             .await?;
-            Ok(rows.iter().map(|r| r.get::<String, _>("account_id")).collect())
+            Ok(rows
+                .iter()
+                .map(|r| r.get::<String, _>("account_id"))
+                .collect())
         }
         Backend::Postgres => {
             let pool = db.postgres_pool().ok_or(pool_err())?;
@@ -365,7 +366,10 @@ pub async fn select_by_contribution_volume(
             .bind(limit)
             .fetch_all(pool)
             .await?;
-            Ok(rows.iter().map(|r| r.get::<String, _>("account_id")).collect())
+            Ok(rows
+                .iter()
+                .map(|r| r.get::<String, _>("account_id"))
+                .collect())
         }
     }
 }
@@ -377,9 +381,7 @@ pub async fn select_vanguards(
     limit: i64,
 ) -> Result<Vec<String>, sqlx::Error> {
     match method {
-        "contribution_volume" => {
-            select_by_contribution_volume(db, limit).await
-        }
+        "contribution_volume" => select_by_contribution_volume(db, limit).await,
         // resonance_threshold and admin_appointment are handled externally.
         _ => Ok(Vec::new()),
     }

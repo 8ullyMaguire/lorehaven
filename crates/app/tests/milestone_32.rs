@@ -265,7 +265,10 @@ async fn create_topic(client: &mut Client, category: &str, title: &str) -> Strin
 /// A post (reply) in `topic`, authored by `client`.
 async fn create_post(client: &mut Client, topic: &str, body: &str) -> String {
     let (status, created) = client
-        .post(&format!("/api/v1/topics/{topic}/replies"), json!({ "body": body }))
+        .post(
+            &format!("/api/v1/topics/{topic}/replies"),
+            json!({ "body": body }),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "create post: {created}");
     created["id"].as_str().expect("post id").to_owned()
@@ -324,7 +327,6 @@ async fn cast(client: &mut Client, post: &str, vote_type: &str) -> Value {
     assert_eq!(status, StatusCode::OK, "cast {vote_type}: {body}");
     body
 }
-
 
 // ---------------------------------------------------------------------------
 // Casting, changing, retracting
@@ -408,8 +410,6 @@ async fn a_typed_vote_is_one_per_pseud_changeable_and_retractable() {
 
     harness.cleanup().await;
 }
-
-
 
 // ---------------------------------------------------------------------------
 // Budget
@@ -606,7 +606,10 @@ async fn meta_moderation_decays_a_casters_weight_not_their_voice() {
         let (_, votes) = steward
             .get(&format!("/api/v1/forum/posts/{post}/votes"))
             .await;
-        let id = votes["votes"][0]["id"].as_str().expect("vote id").to_owned();
+        let id = votes["votes"][0]["id"]
+            .as_str()
+            .expect("vote id")
+            .to_owned();
         let (status, body) = steward
             .post(
                 &format!("/api/v1/forum/votes/{id}/meta"),
@@ -677,7 +680,10 @@ async fn meta_moderation_decays_a_casters_weight_not_their_voice() {
     let (_, votes) = steward
         .get(&format!("/api/v1/forum/posts/{}/votes", posts[0]))
         .await;
-    let id = votes["votes"][0]["id"].as_str().expect("vote id").to_owned();
+    let id = votes["votes"][0]["id"]
+        .as_str()
+        .expect("vote id")
+        .to_owned();
     let (status, body) = steward
         .post(
             &format!("/api/v1/forum/votes/{id}/meta"),
@@ -693,7 +699,6 @@ async fn meta_moderation_decays_a_casters_weight_not_their_voice() {
     let _ = caster_pseud;
     harness.cleanup().await;
 }
-
 
 // ---------------------------------------------------------------------------
 // Transparency tiers
@@ -865,8 +870,6 @@ async fn karma_follows_weighted_votes_and_decays_on_inactivity() {
     harness.cleanup().await;
 }
 
-
-
 // ---------------------------------------------------------------------------
 // Taxonomy as data
 // ---------------------------------------------------------------------------
@@ -878,12 +881,36 @@ async fn a_category_taxonomy_override_changes_the_surface_without_code_changes()
     let critique = seed_category(&harness, "Critique").await;
 
     // The Critique category's own set, inserted as rows: no code changed.
-    seed_vote_type(&harness, "constructive", "Constructive", &critique, "0", "1", "0").await;
     seed_vote_type(
-        &harness, "harsh_but_fair", "Harsh but fair", &critique, "1", "1", "0",
+        &harness,
+        "constructive",
+        "Constructive",
+        &critique,
+        "0",
+        "1",
+        "0",
     )
     .await;
-    seed_vote_type(&harness, "needs_sources", "Needs sources", &critique, "2", "2", "1").await;
+    seed_vote_type(
+        &harness,
+        "harsh_but_fair",
+        "Harsh but fair",
+        &critique,
+        "1",
+        "1",
+        "0",
+    )
+    .await;
+    seed_vote_type(
+        &harness,
+        "needs_sources",
+        "Needs sources",
+        &critique,
+        "2",
+        "2",
+        "1",
+    )
+    .await;
 
     let mut author = harness.client();
     register(&mut author, "m32-v@t.test", "m32v").await;
@@ -942,7 +969,6 @@ async fn a_category_taxonomy_override_changes_the_surface_without_code_changes()
     harness.cleanup().await;
 }
 
-
 // ---------------------------------------------------------------------------
 // Karma containment (spec §35.2, §0.3)
 // ---------------------------------------------------------------------------
@@ -992,9 +1018,16 @@ fn karma_is_read_by_nothing_but_its_display_surface() {
             }
         }
         let haystack = path.to_string_lossy().to_lowercase();
-        let gated_surface = ["economy", "governance", "search", "query", "ranking", "credits"]
-            .iter()
-            .any(|token| haystack.contains(token));
+        let gated_surface = [
+            "economy",
+            "governance",
+            "search",
+            "query",
+            "ranking",
+            "credits",
+        ]
+        .iter()
+        .any(|token| haystack.contains(token));
         if gated_surface && content.to_lowercase().contains("karma") {
             offenders.push(format!("{path:?} is a gated path that mentions karma"));
         }
@@ -1019,4 +1052,3 @@ fn karma_is_read_by_nothing_but_its_display_surface() {
         offenders.join("\n")
     );
 }
-

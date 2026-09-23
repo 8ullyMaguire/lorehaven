@@ -100,12 +100,16 @@ pub async fn verify_link(
         }));
     };
     if link.added_by.as_deref() == Some(&curator_id) {
-        return Err(validation_err("curators cannot verify links they added themselves"));
+        return Err(validation_err(
+            "curators cannot verify links they added themselves",
+        ));
     }
 
     // Check if curator already verified this link
     let already = media_resilience::curator_verified_link(
-        state.db(), &curator_id, &body.availability_link_id,
+        state.db(),
+        &curator_id,
+        &body.availability_link_id,
     )
     .await
     .map_err(|e| ApiError(AppError::Internal(e.into())))?;
@@ -136,11 +140,10 @@ pub async fn verify_link(
     .await
     .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
-    let verifier_count = media_resilience::count_link_verifiers(
-        state.db(), &body.availability_link_id,
-    )
-    .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    let verifier_count =
+        media_resilience::count_link_verifiers(state.db(), &body.availability_link_id)
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
     let quorum = verifier_count >= 2;
 
     Ok((
@@ -176,7 +179,9 @@ pub async fn get_quorum_status(
         }));
     }
 
-    Ok(Json(json!({ "reference_id": reference_id, "links": link_statuses })))
+    Ok(Json(
+        json!({ "reference_id": reference_id, "links": link_statuses }),
+    ))
 }
 
 /// Find standing bounties matching a media reference.
@@ -185,12 +190,14 @@ pub async fn get_matching_bounties(
     MaybeSession(_session): MaybeSession,
     Query(query): Query<CuratorBountyQuery>,
 ) -> ApiResult<Json<Value>> {
-    let healthy_count = media_resilience::count_healthy_links(state.db(), &query.media_reference_id)
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    let healthy_count =
+        media_resilience::count_healthy_links(state.db(), &query.media_reference_id)
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
     let links = media_resilience::find_availability_links_for_reference(
-        state.db(), &query.media_reference_id,
+        state.db(),
+        &query.media_reference_id,
     )
     .await
     .map_err(|e| ApiError(AppError::Internal(e.into())))?;
@@ -209,15 +216,18 @@ pub async fn get_matching_bounties(
     .await
     .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
-    let bounties_json: Vec<Value> = bounties.iter().map(|b| {
-        json!({
-            "bounty_id": b.bounty_id,
-            "name": b.name,
-            "reward": b.reward,
-            "provider": b.provider,
-            "healthy_links_below": b.healthy_links_below,
+    let bounties_json: Vec<Value> = bounties
+        .iter()
+        .map(|b| {
+            json!({
+                "bounty_id": b.bounty_id,
+                "name": b.name,
+                "reward": b.reward,
+                "provider": b.provider,
+                "healthy_links_below": b.healthy_links_below,
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(Json(json!({
         "media_reference_id": query.media_reference_id,
@@ -234,6 +244,9 @@ pub fn router() -> Router<AppState> {
         .route("/curators/status", get(get_my_curator_status))
         .route("/curators", get(list_curators))
         .route("/media/references/{reference_id}/verify", post(verify_link))
-        .route("/media/references/{reference_id}/quorum", get(get_quorum_status))
+        .route(
+            "/media/references/{reference_id}/quorum",
+            get(get_quorum_status),
+        )
         .route("/curator/bounties", get(get_matching_bounties))
 }

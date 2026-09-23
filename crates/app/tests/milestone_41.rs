@@ -212,7 +212,10 @@ async fn create_work(client: &mut Client, title: &str) -> String {
 /// Publish a work so it's visible.
 async fn publish_work(client: &mut Client, work_id: &str) {
     let (status, body) = client
-        .post(&format!("/api/v1/works/{work_id}/publish"), json!({ "expected_version": 1 }))
+        .post(
+            &format!("/api/v1/works/{work_id}/publish"),
+            json!({ "expected_version": 1 }),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "publish: {body}");
 }
@@ -320,8 +323,7 @@ async fn warmth_accumulates_and_promotes_tier() {
 async fn warmth_is_never_exposed_per_reader() {
     let harness = Harness::new("warmth-privacy").await;
     let mut client = harness.client();
-    let (_account_id, _pseud_id) =
-        register(&mut client, "author@example.com", "author").await;
+    let (_account_id, _pseud_id) = register(&mut client, "author@example.com", "author").await;
 
     let (status, body) = client.get("/api/v1/me/audience").await;
     assert_eq!(status, StatusCode::OK, "audience should succeed");
@@ -336,24 +338,23 @@ async fn warmth_is_never_exposed_per_reader() {
     // Should NOT have any per-reader data
     assert!(!obj.contains_key("readers"), "Should not have readers list");
     assert!(!obj.contains_key("warmth"), "Should not have warmth map");
-    assert!(!obj.contains_key("accounts"), "Should not expose account list");
+    assert!(
+        !obj.contains_key("accounts"),
+        "Should not expose account list"
+    );
 }
 
 #[tokio::test]
 async fn failed_interaction_writes_no_warmth() {
     let harness = Harness::new("warmth-failure").await;
     let mut client = harness.client();
-    let (_account_id, _pseud_id) =
-        register(&mut client, "author@example.com", "author").await;
+    let (_account_id, _pseud_id) = register(&mut client, "author@example.com", "author").await;
 
     // No interaction occurs — audience panel should be empty/zero
     let (status, body) = client.get("/api/v1/me/audience").await;
     assert_eq!(status, StatusCode::OK, "audience should succeed");
 
     let obj = body.as_object().expect("body should be object");
-    let total = obj
-        .get("total")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let total = obj.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
     assert_eq!(total, 0, "Should have 0 warmth with no interactions");
 }

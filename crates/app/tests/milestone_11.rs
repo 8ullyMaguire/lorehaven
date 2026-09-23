@@ -595,7 +595,9 @@ async fn meta_includes_theme_mode_and_influence_sources() {
     let theme = body.get("theme").expect("theme section present");
     assert_eq!(theme["mode"], "thematic", "default mode is thematic");
     assert_eq!(theme["allow_user_opt_out"], true);
-    let sources = theme["influence_sources"].as_array().expect("sources array");
+    let sources = theme["influence_sources"]
+        .as_array()
+        .expect("sources array");
     assert!(!sources.is_empty());
     assert_eq!(sources[0], "operator_topics");
     harness.cleanup().await;
@@ -622,7 +624,8 @@ async fn theme_boost_tag_raises_work_score() {
     let (status, body) = client.get("/api/v1/discovery").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let items = body.get("items").and_then(|v| v.as_array()).expect("items");
-    let ids: Vec<&str> = items.iter()
+    let ids: Vec<&str> = items
+        .iter()
         .filter_map(|v| v.get("work_id").and_then(|w| w.as_str()))
         .collect();
     assert!(ids.contains(&w1.as_str()));

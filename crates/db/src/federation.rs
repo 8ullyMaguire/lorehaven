@@ -136,9 +136,35 @@ pub async fn get_actor_by_ap_id(db: &Database, ap_id: &str) -> Result<Option<ApA
             ).bind(ap_id).fetch_optional(db.postgres_pool().expect("postgres")).await?
         }
     };
-    Ok(row.map(|(id, actor_type, user_id, instance_host, ap_id, inbox_url, outbox_url, followers_url, following_url, public_key, created_at)| {
-        ApActor { id, actor_type, user_id, instance_host, ap_id, inbox_url, outbox_url, followers_url, following_url, public_key, created_at }
-    }))
+    Ok(row.map(
+        |(
+            id,
+            actor_type,
+            user_id,
+            instance_host,
+            ap_id,
+            inbox_url,
+            outbox_url,
+            followers_url,
+            following_url,
+            public_key,
+            created_at,
+        )| {
+            ApActor {
+                id,
+                actor_type,
+                user_id,
+                instance_host,
+                ap_id,
+                inbox_url,
+                outbox_url,
+                followers_url,
+                following_url,
+                public_key,
+                created_at,
+            }
+        },
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -199,11 +225,15 @@ pub async fn accept_follow(db: &Database, follow_id: &str) -> Result<()> {
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query("UPDATE ap_follows SET accepted = TRUE WHERE id = ?")
-                .bind(follow_id).execute(db.sqlite_pool().expect("sqlite")).await?;
+                .bind(follow_id)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?;
         }
         Backend::Postgres => {
             sqlx::query("UPDATE ap_follows SET accepted = TRUE WHERE id = $1::uuid")
-                .bind(follow_id).execute(db.postgres_pool().expect("postgres")).await?;
+                .bind(follow_id)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?;
         }
     }
     Ok(())
@@ -259,7 +289,10 @@ pub async fn regenerate_fingerprint(
 }
 
 /// Get the current valid fingerprint for an instance.
-pub async fn get_fingerprint(db: &Database, instance_host: &str) -> Result<Option<InstanceFingerprint>> {
+pub async fn get_fingerprint(
+    db: &Database,
+    instance_host: &str,
+) -> Result<Option<InstanceFingerprint>> {
     let now = crate::identity::now_rfc3339();
     let row = match db.backend() {
         Backend::Sqlite => {
@@ -273,16 +306,33 @@ pub async fn get_fingerprint(db: &Database, instance_host: &str) -> Result<Optio
             ).bind(instance_host).bind(&now).fetch_optional(db.postgres_pool().expect("postgres")).await?
         }
     };
-    Ok(row.map(|(id, instance_host, fingerprint_version, fp_json, tv, cs, ct, signature, valid_until, created_at)| {
-        InstanceFingerprint {
-            id, instance_host, fingerprint_version,
-            fingerprint_json: serde_json::from_str(&fp_json).unwrap_or_default(),
-            theme_vector: tv.and_then(|s| serde_json::from_str(&s).ok()),
-            cultural_signals: serde_json::from_str(&cs).unwrap_or_default(),
-            content_signals: serde_json::from_str(&ct).unwrap_or_default(),
-            signature, valid_until, created_at,
-        }
-    }))
+    Ok(row.map(
+        |(
+            id,
+            instance_host,
+            fingerprint_version,
+            fp_json,
+            tv,
+            cs,
+            ct,
+            signature,
+            valid_until,
+            created_at,
+        )| {
+            InstanceFingerprint {
+                id,
+                instance_host,
+                fingerprint_version,
+                fingerprint_json: serde_json::from_str(&fp_json).unwrap_or_default(),
+                theme_vector: tv.and_then(|s| serde_json::from_str(&s).ok()),
+                cultural_signals: serde_json::from_str(&cs).unwrap_or_default(),
+                content_signals: serde_json::from_str(&ct).unwrap_or_default(),
+                signature,
+                valid_until,
+                created_at,
+            }
+        },
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -304,10 +354,16 @@ fn extract_theme_tags(fp: &InstanceFingerprint) -> HashSet<String> {
 
 /// Jaccard overlap similarity on theme tags (0.0-1.0).
 fn jaccard_similarity(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
-    if a.is_empty() && b.is_empty() { return 0.0; }
+    if a.is_empty() && b.is_empty() {
+        return 0.0;
+    }
     let intersection = a.intersection(b).count() as f64;
     let union = a.union(b).count() as f64;
-    if union == 0.0 { 0.0 } else { intersection / union }
+    if union == 0.0 {
+        0.0
+    } else {
+        intersection / union
+    }
 }
 
 /// Cultural similarity (0.0-1.0).
@@ -317,9 +373,15 @@ fn cultural_similarity(a: &JsonValue, b: &JsonValue) -> f64 {
     let mut total = 0;
     for key in keys {
         total += 1;
-        if a.get(key) == b.get(key) { matches += 1; }
+        if a.get(key) == b.get(key) {
+            matches += 1;
+        }
     }
-    if total == 0 { 0.5 } else { matches as f64 / total as f64 }
+    if total == 0 {
+        0.5
+    } else {
+        matches as f64 / total as f64
+    }
 }
 
 /// Content similarity (0.0-1.0).
@@ -328,16 +390,26 @@ fn content_similarity(a: &JsonValue, b: &JsonValue) -> f64 {
     let mut sum_diff = 0.0;
     let mut count = 0;
     for key in keys {
-        if let (Some(lv), Some(rv)) = (a.get(key).and_then(|v| v.as_f64()), b.get(key).and_then(|v| v.as_f64())) {
+        if let (Some(lv), Some(rv)) = (
+            a.get(key).and_then(|v| v.as_f64()),
+            b.get(key).and_then(|v| v.as_f64()),
+        ) {
             sum_diff += (lv - rv).abs();
             count += 1;
         }
     }
-    if count == 0 { 0.5 } else { 1.0 - (sum_diff / count as f64) }
+    if count == 0 {
+        0.5
+    } else {
+        1.0 - (sum_diff / count as f64)
+    }
 }
 
 /// Compute multi-dimensional similarity between two fingerprints (0.0-100.0).
-pub fn compute_similarity(local: &InstanceFingerprint, remote: &InstanceFingerprint) -> SimilarityBreakdown {
+pub fn compute_similarity(
+    local: &InstanceFingerprint,
+    remote: &InstanceFingerprint,
+) -> SimilarityBreakdown {
     let local_tags = extract_theme_tags(local);
     let remote_tags = extract_theme_tags(remote);
     let theme = jaccard_similarity(&local_tags, &remote_tags);
@@ -345,7 +417,12 @@ pub fn compute_similarity(local: &InstanceFingerprint, remote: &InstanceFingerpr
     let content = content_similarity(&local.content_signals, &remote.content_signals);
     // Weights: 0.60 theme, 0.25 cultural, 0.15 content
     let overall = (0.60 * theme + 0.25 * cultural + 0.15 * content) * 100.0;
-    SimilarityBreakdown { theme, cultural, content, overall }
+    SimilarityBreakdown {
+        theme,
+        cultural,
+        content,
+        overall,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -380,7 +457,11 @@ pub async fn upsert_peer(
 }
 
 /// List peers above a similarity threshold, ordered by similarity desc.
-pub async fn list_similar_peers(db: &Database, threshold: f64, limit: i64) -> Result<Vec<FederationPeer>> {
+pub async fn list_similar_peers(
+    db: &Database,
+    threshold: f64,
+    limit: i64,
+) -> Result<Vec<FederationPeer>> {
     let rows = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as::<_, (String, String, f64, String, Option<String>, bool, Option<String>, Option<String>)>(
@@ -393,9 +474,23 @@ pub async fn list_similar_peers(db: &Database, threshold: f64, limit: i64) -> Re
             ).bind(threshold).bind(limit).fetch_all(db.postgres_pool().expect("postgres")).await?
         }
     };
-    Ok(rows.into_iter().map(|(id, peer_host, similarity, state, last_checked, auto_federate, set_by, set_at)| {
-        FederationPeer { id, peer_host, similarity, state, last_checked, auto_federate, set_by, set_at }
-    }).collect())
+    Ok(rows
+        .into_iter()
+        .map(
+            |(id, peer_host, similarity, state, last_checked, auto_federate, set_by, set_at)| {
+                FederationPeer {
+                    id,
+                    peer_host,
+                    similarity,
+                    state,
+                    last_checked,
+                    auto_federate,
+                    set_by,
+                    set_at,
+                }
+            },
+        )
+        .collect())
 }
 
 /// List all peers.
@@ -412,16 +507,34 @@ pub async fn list_all_peers(db: &Database) -> Result<Vec<FederationPeer>> {
             ).fetch_all(db.postgres_pool().expect("postgres")).await?
         }
     };
-    Ok(rows.into_iter().map(|(id, peer_host, similarity, state, last_checked, auto_federate, set_by, set_at)| {
-        FederationPeer { id, peer_host, similarity, state, last_checked, auto_federate, set_by, set_at }
-    }).collect())
+    Ok(rows
+        .into_iter()
+        .map(
+            |(id, peer_host, similarity, state, last_checked, auto_federate, set_by, set_at)| {
+                FederationPeer {
+                    id,
+                    peer_host,
+                    similarity,
+                    state,
+                    last_checked,
+                    auto_federate,
+                    set_by,
+                    set_at,
+                }
+            },
+        )
+        .collect())
 }
 
 // ---------------------------------------------------------------------------
 // Federation queue
 // ---------------------------------------------------------------------------
 
-pub async fn enqueue_activity(db: &Database, activity_id: &str, target_inbox: &str) -> Result<String> {
+pub async fn enqueue_activity(
+    db: &Database,
+    activity_id: &str,
+    target_inbox: &str,
+) -> Result<String> {
     let id = Uuid::new_v4().to_string();
     let now = crate::identity::now_rfc3339();
     match db.backend() {
@@ -459,8 +572,13 @@ pub async fn mark_queue_sent(db: &Database, id: &str) -> Result<()> {
     let now = crate::identity::now_rfc3339();
     match db.backend() {
         Backend::Sqlite => {
-            sqlx::query("UPDATE federation_queue SET status = 'sent', processed_at = ? WHERE id = ?")
-                .bind(&now).bind(id).execute(db.sqlite_pool().expect("sqlite")).await?;
+            sqlx::query(
+                "UPDATE federation_queue SET status = 'sent', processed_at = ? WHERE id = ?",
+            )
+            .bind(&now)
+            .bind(id)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
         }
         Backend::Postgres => {
             sqlx::query("UPDATE federation_queue SET status = 'sent', processed_at = $1 WHERE id = $2::uuid")

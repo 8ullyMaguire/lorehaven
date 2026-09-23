@@ -26,8 +26,6 @@ use serde_json::{json, Value};
 use crate::state::AppState;
 use crate::worker::HandlerError;
 
-
-
 /// Why a bulk-export worker stopped.
 #[derive(Debug)]
 pub enum BulkFailure {

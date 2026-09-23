@@ -181,14 +181,13 @@ pub async fn update_taste_vector_incremental(
     work_vector: &[f64],
     work_weight: f64,
 ) -> Result<(Vec<f64>, f64), sqlx::Error> {
-    let admin_centroid = get_admin_centroid(db).await.unwrap_or_else(|| {
-        vec![0.5, 0.5, 0.5, 0.5, 0.5]
-    });
+    let admin_centroid = get_admin_centroid(db)
+        .await
+        .unwrap_or_else(|| vec![0.5, 0.5, 0.5, 0.5, 0.5]);
 
     let current = get_taste_vector(db, account_id).await?;
-    let (mut current_vec, _, _) = current.unwrap_or_else(|| {
-        (vec![0.0; admin_centroid.len()], 0.0, String::new())
-    });
+    let (mut current_vec, _, _) =
+        current.unwrap_or_else(|| (vec![0.0; admin_centroid.len()], 0.0, String::new()));
 
     // Compute old weight sum from stored data (simplified: use count of ratings)
     let old_weight_sum = fetch_user_rating_count(db, account_id).await? as f64;
@@ -208,10 +207,24 @@ pub async fn update_taste_vector_incremental(
     let now = crate::identity::now_rfc3339();
     match db.backend() {
         Backend::Sqlite => {
-            store_taste_vector_sqlite(db.sqlite_pool().ok_or(pool_err())?, &account_id, &current_vec, distance, &now).await?
+            store_taste_vector_sqlite(
+                db.sqlite_pool().ok_or(pool_err())?,
+                &account_id,
+                &current_vec,
+                distance,
+                &now,
+            )
+            .await?
         }
         Backend::Postgres => {
-            store_taste_vector_postgres(db.postgres_pool().ok_or(pool_err())?, &account_id, &current_vec, distance, &now).await?
+            store_taste_vector_postgres(
+                db.postgres_pool().ok_or(pool_err())?,
+                &account_id,
+                &current_vec,
+                distance,
+                &now,
+            )
+            .await?
         }
     }
 
@@ -224,8 +237,12 @@ pub async fn get_taste_vector(
     account_id: &str,
 ) -> Result<Option<(Vec<f64>, f64, String)>, sqlx::Error> {
     match db.backend() {
-        Backend::Sqlite => fetch_taste_vector_sqlite(db.sqlite_pool().ok_or(pool_err())?, account_id).await,
-        Backend::Postgres => fetch_taste_vector_postgres(db.postgres_pool().ok_or(pool_err())?, account_id).await,
+        Backend::Sqlite => {
+            fetch_taste_vector_sqlite(db.sqlite_pool().ok_or(pool_err())?, account_id).await
+        }
+        Backend::Postgres => {
+            fetch_taste_vector_postgres(db.postgres_pool().ok_or(pool_err())?, account_id).await
+        }
     }
 }
 

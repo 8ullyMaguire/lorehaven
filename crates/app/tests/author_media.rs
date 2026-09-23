@@ -33,12 +33,9 @@ async fn author_preferences_crud() {
     let account_id = "author-001";
 
     // Upsert preferences
-    media_resilience::upsert_author_preferences(
-        db, account_id,
-        true, true, "immediate", true, 5,
-    )
-    .await
-    .expect("upsert prefs");
+    media_resilience::upsert_author_preferences(db, account_id, true, true, "immediate", true, 5)
+        .await
+        .expect("upsert prefs");
 
     let prefs = media_resilience::get_author_preferences(db, account_id)
         .await
@@ -50,12 +47,9 @@ async fn author_preferences_crud() {
     assert_eq!(prefs.minimum_healthy_links, 5);
 
     // Update
-    media_resilience::upsert_author_preferences(
-        db, account_id,
-        false, false, "weekly", false, 2,
-    )
-    .await
-    .expect("update prefs");
+    media_resilience::upsert_author_preferences(db, account_id, false, false, "weekly", false, 2)
+        .await
+        .expect("update prefs");
 
     let prefs = media_resilience::get_author_preferences(db, account_id)
         .await
@@ -76,8 +70,14 @@ async fn targeted_bounty_post_and_claim() {
 
     // Post a targeted bounty
     media_resilience::post_targeted_bounty(
-        db, bounty_id, work_id, None, None,
-        author_id, 50, Some("Find a working mirror for the chapter 7 moodboard"),
+        db,
+        bounty_id,
+        work_id,
+        None,
+        None,
+        author_id,
+        50,
+        Some("Find a working mirror for the chapter 7 moodboard"),
     )
     .await
     .expect("post bounty");
@@ -118,8 +118,14 @@ async fn targeted_bounty_with_chapter() {
     let chapter_id = "ch-007";
 
     media_resilience::post_targeted_bounty(
-        db, bounty_id, work_id, Some(chapter_id), None,
-        "author-002", 75, Some("Mirror needed for chapter 7"),
+        db,
+        bounty_id,
+        work_id,
+        Some(chapter_id),
+        None,
+        "author-002",
+        75,
+        Some("Mirror needed for chapter 7"),
     )
     .await
     .expect("post bounty with chapter");
@@ -175,7 +181,10 @@ async fn author_media_health_report_tiers() {
 
     // Work A: one reference (new, so zero healthy links → broken tier).
     let (created_a, _) = media_resilience::upsert_media_reference_for_import(
-        db, "work-a", Some("ch-1"), "https://example.com/a.png",
+        db,
+        "work-a",
+        Some("ch-1"),
+        "https://example.com/a.png",
     )
     .await
     .expect("upsert ref a");
@@ -183,7 +192,10 @@ async fn author_media_health_report_tiers() {
 
     // Work B: one reference (new, so zero healthy links → broken tier).
     let (created_b, _) = media_resilience::upsert_media_reference_for_import(
-        db, "work-b", Some("ch-2"), "https://example.com/b.png",
+        db,
+        "work-b",
+        Some("ch-2"),
+        "https://example.com/b.png",
     )
     .await
     .expect("upsert ref b");
@@ -195,8 +207,14 @@ async fn author_media_health_report_tiers() {
 
     // Both works appear with 1 total reference each.
     assert_eq!(report.len(), 2);
-    let a = report.iter().find(|r| r.work_title == "Work A").expect("work a");
-    let b = report.iter().find(|r| r.work_title == "Work B").expect("work b");
+    let a = report
+        .iter()
+        .find(|r| r.work_title == "Work A")
+        .expect("work a");
+    let b = report
+        .iter()
+        .find(|r| r.work_title == "Work B")
+        .expect("work b");
     assert_eq!(a.total_references, 1);
     assert_eq!(a.healthy_references, 0);
     assert_eq!(b.total_references, 1);

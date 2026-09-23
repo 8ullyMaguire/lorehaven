@@ -100,15 +100,31 @@ pub async fn create_list(
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query(&sql)
-                .bind(id).bind(slug).bind(title).bind(description).bind(kind)
-                .bind(is_instance_list).bind(position).bind(created_by).bind(created_at).bind(created_at)
+                .bind(id)
+                .bind(slug)
+                .bind(title)
+                .bind(description)
+                .bind(kind)
+                .bind(is_instance_list)
+                .bind(position)
+                .bind(created_by)
+                .bind(created_at)
+                .bind(created_at)
                 .execute(db.sqlite_pool().expect("sqlite"))
                 .await?;
         }
         Backend::Postgres => {
             sqlx::query(&sql)
-                .bind(id).bind(slug).bind(title).bind(description).bind(kind)
-                .bind(is_instance_list).bind(position).bind(created_by).bind(created_at).bind(created_at)
+                .bind(id)
+                .bind(slug)
+                .bind(title)
+                .bind(description)
+                .bind(kind)
+                .bind(is_instance_list)
+                .bind(position)
+                .bind(created_by)
+                .bind(created_at)
+                .bind(created_at)
                 .execute(db.postgres_pool().expect("postgres"))
                 .await?;
         }
@@ -126,8 +142,16 @@ pub async fn list_lists(db: &Database) -> Result<Vec<DirectoryList>> {
          FROM directory_lists ORDER BY is_instance_list DESC, position ASC, created_at ASC",
     );
     let rows: Vec<DirectoryList> = match db.backend() {
-        Backend::Sqlite => sqlx::query_as(&sql).fetch_all(db.sqlite_pool().expect("sqlite")).await?,
-        Backend::Postgres => sqlx::query_as(&sql).fetch_all(db.postgres_pool().expect("postgres")).await?,
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
     };
     Ok(rows)
 }
@@ -139,8 +163,18 @@ pub async fn list_by_slug(db: &Database, slug: &str) -> Result<Option<DirectoryL
         "SELECT id, slug, title, description, kind, is_instance_list, position, created_by, created_at FROM directory_lists WHERE slug = ?",
     );
     let row: Option<DirectoryList> = match db.backend() {
-        Backend::Sqlite => sqlx::query_as(&sql).bind(slug).fetch_optional(db.sqlite_pool().expect("sqlite")).await?,
-        Backend::Postgres => sqlx::query_as(&sql).bind(slug).fetch_optional(db.postgres_pool().expect("postgres")).await?,
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(slug)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(slug)
+                .fetch_optional(db.postgres_pool().expect("postgres"))
+                .await?
+        }
     };
     Ok(row)
 }
@@ -171,15 +205,35 @@ pub async fn submit_entry(
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query(&sql)
-                .bind(id).bind(list_id).bind(kind).bind(category).bind(title).bind(url)
-                .bind(description).bind(ref_id).bind(&tags_json).bind(submitted_by).bind(now).bind(now)
+                .bind(id)
+                .bind(list_id)
+                .bind(kind)
+                .bind(category)
+                .bind(title)
+                .bind(url)
+                .bind(description)
+                .bind(ref_id)
+                .bind(&tags_json)
+                .bind(submitted_by)
+                .bind(now)
+                .bind(now)
                 .execute(db.sqlite_pool().expect("sqlite"))
                 .await?;
         }
         Backend::Postgres => {
             sqlx::query(&sql)
-                .bind(id).bind(list_id).bind(kind).bind(category).bind(title).bind(url)
-                .bind(description).bind(ref_id).bind(&tags_json).bind(submitted_by).bind(now).bind(now)
+                .bind(id)
+                .bind(list_id)
+                .bind(kind)
+                .bind(category)
+                .bind(title)
+                .bind(url)
+                .bind(description)
+                .bind(ref_id)
+                .bind(&tags_json)
+                .bind(submitted_by)
+                .bind(now)
+                .bind(now)
                 .execute(db.postgres_pool().expect("postgres"))
                 .await?;
         }
@@ -195,8 +249,20 @@ pub async fn approve_entry(db: &Database, id: &str, operator_id: &str, now: &str
         "UPDATE directory_entries SET approved_by = ?, updated_at = ? WHERE id = ? AND approved_by IS NULL",
     );
     let affected = match db.backend() {
-        Backend::Sqlite => sqlx::query(&sql).bind(operator_id).bind(now).bind(id).execute(db.sqlite_pool().expect("sqlite")).await?.rows_affected(),
-        Backend::Postgres => sqlx::query(&sql).bind(operator_id).bind(now).bind(id).execute(db.postgres_pool().expect("postgres")).await?.rows_affected(),
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(operator_id)
+            .bind(now)
+            .bind(id)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(operator_id)
+            .bind(now)
+            .bind(id)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?
+            .rows_affected(),
     };
     Ok(affected > 0)
 }
@@ -208,8 +274,16 @@ pub async fn remove_entry(db: &Database, id: &str) -> Result<bool> {
         "DELETE FROM directory_entries WHERE id = ?",
     );
     let affected = match db.backend() {
-        Backend::Sqlite => sqlx::query(&sql).bind(id).execute(db.sqlite_pool().expect("sqlite")).await?.rows_affected(),
-        Backend::Postgres => sqlx::query(&sql).bind(id).execute(db.postgres_pool().expect("postgres")).await?.rows_affected(),
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(id)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(id)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?
+            .rows_affected(),
     };
     Ok(affected > 0)
 }
@@ -217,14 +291,20 @@ pub async fn remove_entry(db: &Database, id: &str) -> Result<bool> {
 /// List entries. The visibility rule (approved, or the viewer's own
 /// pending, or everything for the operator — spec §39.3) is expressed in
 /// SQL so pagination counts agree with the page.
-pub async fn list_entries(db: &Database, filter: &DirectoryEntryFilter) -> Result<Vec<DirectoryEntry>> {
+pub async fn list_entries(
+    db: &Database,
+    filter: &DirectoryEntryFilter,
+) -> Result<Vec<DirectoryEntry>> {
     let mut where_parts: Vec<String> = vec!["e.removed_at IS NULL".to_string()];
     if let Some(list_id) = &filter.list_id {
         where_parts.push(format!("e.list_id = '{}'", escape(list_id)));
     }
     if let Some(category) = &filter.category {
         if !category.is_empty() {
-            where_parts.push(format!("lower(e.category) = '{}'", escape(&category.to_lowercase())));
+            where_parts.push(format!(
+                "lower(e.category) = '{}'",
+                escape(&category.to_lowercase())
+            ));
         }
     }
     if let Some(q) = filter.q.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
@@ -253,8 +333,16 @@ pub async fn list_entries(db: &Database, filter: &DirectoryEntryFilter) -> Resul
         filter.offset.max(0)
     );
     let rows: Vec<DirectoryEntry> = match db.backend() {
-        Backend::Sqlite => sqlx::query_as(&sql).fetch_all(db.sqlite_pool().expect("sqlite")).await?,
-        Backend::Postgres => sqlx::query_as(&sql).fetch_all(db.postgres_pool().expect("postgres")).await?,
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
     };
     // Attach the viewer's own vote state without ever exposing weights.
     let mut entries = rows;
@@ -280,13 +368,24 @@ pub async fn get_entry(
          FROM directory_entries WHERE id = ? AND removed_at IS NULL",
     );
     let row: Option<DirectoryEntry> = match db.backend() {
-        Backend::Sqlite => sqlx::query_as(&sql).bind(id).fetch_optional(db.sqlite_pool().expect("sqlite")).await?,
-        Backend::Postgres => sqlx::query_as(&sql).bind(id).fetch_optional(db.postgres_pool().expect("postgres")).await?,
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(id)
+                .fetch_optional(db.postgres_pool().expect("postgres"))
+                .await?
+        }
     };
-    let Some(mut entry) = row else { return Ok(None) };
-    let visible = entry.approved_by.is_some()
-        || is_operator
-        || viewer == Some(entry.submitted_by.as_str());
+    let Some(mut entry) = row else {
+        return Ok(None);
+    };
+    let visible =
+        entry.approved_by.is_some() || is_operator || viewer == Some(entry.submitted_by.as_str());
     if !visible {
         return Ok(None);
     }
@@ -303,8 +402,20 @@ pub async fn my_vote(db: &Database, entry_id: &str, account_id: &str) -> Result<
         "SELECT vote_value FROM directory_votes WHERE entry_id = ? AND account_id = ?",
     );
     let row: Option<(i64,)> = match db.backend() {
-        Backend::Sqlite => sqlx::query_as(&sql).bind(entry_id).bind(account_id).fetch_optional(db.sqlite_pool().expect("sqlite")).await?,
-        Backend::Postgres => sqlx::query_as(&sql).bind(entry_id).bind(account_id).fetch_optional(db.postgres_pool().expect("postgres")).await?,
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(entry_id)
+                .bind(account_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(entry_id)
+                .bind(account_id)
+                .fetch_optional(db.postgres_pool().expect("postgres"))
+                .await?
+        }
     };
     Ok(row.map(|(v,)| v))
 }
@@ -312,7 +423,6 @@ pub async fn my_vote(db: &Database, entry_id: &str, account_id: &str) -> Result<
 /// Set, toggle or flip a vote and recompute the score in the SAME
 /// transaction (spec §39.4: the list never shows a stale score).
 /// Returns the new score and whether a live vote remains.
-
 
 /// The transactional core of [`set_vote`]. A macro because sqlx queries
 /// are typed per-dialect: the same SQL runs against both executors.
@@ -400,8 +510,18 @@ pub async fn entry_score(db: &Database, entry_id: &str) -> Result<f64> {
         "SELECT score FROM directory_entries WHERE id = ?",
     );
     let row: Option<(f64,)> = match db.backend() {
-        Backend::Sqlite => sqlx::query_as(&sql).bind(entry_id).fetch_optional(db.sqlite_pool().expect("sqlite")).await?,
-        Backend::Postgres => sqlx::query_as(&sql).bind(entry_id).fetch_optional(db.postgres_pool().expect("postgres")).await?,
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(entry_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(entry_id)
+                .fetch_optional(db.postgres_pool().expect("postgres"))
+                .await?
+        }
     };
     Ok(row.map(|(s,)| s).unwrap_or(0.0))
 }
@@ -413,8 +533,16 @@ pub async fn category_counts(db: &Database) -> Result<Vec<(String, i64)>> {
         "SELECT category, COUNT(*) FROM directory_entries WHERE approved_by IS NOT NULL AND removed_at IS NULL AND category <> '' GROUP BY category ORDER BY COUNT(*) DESC, category ASC",
     );
     let rows: Vec<(String, i64)> = match db.backend() {
-        Backend::Sqlite => sqlx::query_as(&sql).fetch_all(db.sqlite_pool().expect("sqlite")).await?,
-        Backend::Postgres => sqlx::query_as(&sql).fetch_all(db.postgres_pool().expect("postgres")).await?,
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
     };
     Ok(rows)
 }
@@ -428,8 +556,16 @@ pub async fn pending_entries(db: &Database) -> Result<Vec<DirectoryEntry>> {
          FROM directory_entries WHERE approved_by IS NULL AND removed_at IS NULL ORDER BY created_at ASC LIMIT 200",
     );
     let rows: Vec<DirectoryEntry> = match db.backend() {
-        Backend::Sqlite => sqlx::query_as(&sql).fetch_all(db.sqlite_pool().expect("sqlite")).await?,
-        Backend::Postgres => sqlx::query_as(&sql).fetch_all(db.postgres_pool().expect("postgres")).await?,
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
     };
     Ok(rows)
 }
@@ -493,19 +629,15 @@ pub async fn votes_for_tests(db: &Database, entry_id: &str) -> Vec<(String, i64)
         "SELECT account_id, vote_value FROM directory_votes WHERE entry_id = $1",
     );
     match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query_as(&sql)
-                .bind(entry_id)
-                .fetch_all(db.sqlite_pool().expect("sqlite"))
-                .await
-                .expect("votes")
-        }
-        Backend::Postgres => {
-            sqlx::query_as(&sql)
-                .bind(entry_id)
-                .fetch_all(db.postgres_pool().expect("postgres"))
-                .await
-                .expect("votes")
-        }
+        Backend::Sqlite => sqlx::query_as(&sql)
+            .bind(entry_id)
+            .fetch_all(db.sqlite_pool().expect("sqlite"))
+            .await
+            .expect("votes"),
+        Backend::Postgres => sqlx::query_as(&sql)
+            .bind(entry_id)
+            .fetch_all(db.postgres_pool().expect("postgres"))
+            .await
+            .expect("votes"),
     }
 }

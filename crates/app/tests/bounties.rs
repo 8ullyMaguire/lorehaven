@@ -54,7 +54,11 @@ impl Harness {
         let dir = scratch_dir(tag);
         let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
         let config = config_for(&dir);
-        Self { _dir: dir, tdb, config }
+        Self {
+            _dir: dir,
+            tdb,
+            config,
+        }
     }
 
     fn client(&self) -> Client {
@@ -74,7 +78,10 @@ struct Client {
 
 impl Client {
     fn new(app: axum::Router) -> Self {
-        Self { app, cookies: Vec::new() }
+        Self {
+            app,
+            cookies: Vec::new(),
+        }
     }
     fn cookie(&self, name: &str) -> Option<&str> {
         self.cookies
@@ -85,7 +92,9 @@ impl Client {
     fn capture(&mut self, response: &axum::response::Response) {
         for value in response.headers().get_all(header::SET_COOKIE) {
             let Ok(text) = value.to_str() else { continue };
-            let Some((pair, _)) = text.split_once(';') else { continue };
+            let Some((pair, _)) = text.split_once(';') else {
+                continue;
+            };
             if let Some((name, value)) = pair.split_once('=') {
                 let name = name.trim().to_owned();
                 let value = value.trim().to_owned();
@@ -113,15 +122,19 @@ impl Client {
             Some(v) => Body::from(v.to_string()),
             None => Body::empty(),
         };
-        let response = self.app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+        let response = self
+            .app
+            .clone()
+            .oneshot(builder.body(body).unwrap())
+            .await
+            .unwrap();
         let status = response.status();
         self.capture(&response);
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap_or_else(|_| {
-            Value::String(String::from_utf8_lossy(&body).into_owned())
-        });
+        let json: Value = serde_json::from_slice(&body)
+            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&body).into_owned()));
         (status, json)
     }
     async fn post(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
@@ -238,7 +251,9 @@ async fn reverse_bounty_is_open_immediately() {
     assert_eq!(status, StatusCode::OK, "list failed: {body:?}");
     let bounties = body["bounties"].as_array().unwrap();
     assert!(
-        bounties.iter().any(|b| b["type"] == "reverse" && b["state"] == "open"),
+        bounties
+            .iter()
+            .any(|b| b["type"] == "reverse" && b["state"] == "open"),
         "reverse bounty not open: {bounties:?}"
     );
 }

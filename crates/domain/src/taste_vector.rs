@@ -487,36 +487,36 @@ mod tests {
     #[test]
     fn profile_resonance_identical() {
         let profile = TasteProfile {
-            dimensions: vec![
-                TasteDimension {
-                    key: "angst".to_string(),
-                    label: "Angst".to_string(),
-                    admin_target: 0.5,
-                    weight: 1.0,
-                },
-            ],
+            dimensions: vec![TasteDimension {
+                key: "angst".to_string(),
+                label: "Angst".to_string(),
+                admin_target: 0.5,
+                weight: 1.0,
+            }],
             exemplars: vec![],
             anti_examples: vec![],
         };
-        let user = TasteVector { dimensions: vec![0.5] };
+        let user = TasteVector {
+            dimensions: vec![0.5],
+        };
         assert!((profile_resonance(&user, &profile) - 1.0).abs() < 1e-10);
     }
 
     #[test]
     fn profile_resonance_distant() {
         let profile = TasteProfile {
-            dimensions: vec![
-                TasteDimension {
-                    key: "angst".to_string(),
-                    label: "Angst".to_string(),
-                    admin_target: 0.0,
-                    weight: 1.0,
-                },
-            ],
+            dimensions: vec![TasteDimension {
+                key: "angst".to_string(),
+                label: "Angst".to_string(),
+                admin_target: 0.0,
+                weight: 1.0,
+            }],
             exemplars: vec![],
             anti_examples: vec![],
         };
-        let user = TasteVector { dimensions: vec![1.0] };
+        let user = TasteVector {
+            dimensions: vec![1.0],
+        };
         let r = profile_resonance(&user, &profile);
         // distance = tanh(1.0 / 2.0) ≈ 0.462, resonance = 1 - 0.462 ≈ 0.538
         assert!(r < 0.6);
@@ -526,18 +526,18 @@ mod tests {
     #[test]
     fn distance_to_profile_mismatched_dims() {
         let profile = TasteProfile {
-            dimensions: vec![
-                TasteDimension {
-                    key: "a".to_string(),
-                    label: "A".to_string(),
-                    admin_target: 0.5,
-                    weight: 1.0,
-                },
-            ],
+            dimensions: vec![TasteDimension {
+                key: "a".to_string(),
+                label: "A".to_string(),
+                admin_target: 0.5,
+                weight: 1.0,
+            }],
             exemplars: vec![],
             anti_examples: vec![],
         };
-        let user = TasteVector { dimensions: vec![0.5, 0.5] };
+        let user = TasteVector {
+            dimensions: vec![0.5, 0.5],
+        };
         assert_eq!(distance_to_profile(&user, &profile), 1.0);
     }
 }
@@ -592,7 +592,7 @@ pub struct DimensionElo {
 /// learning picks the dimensions where the model is most uncertain).
 pub fn generate_arena_round(
     pool: &[ArenaCard],
-    _dimensions: &[TasteDimension],  // reserved for dimension weighting
+    _dimensions: &[TasteDimension], // reserved for dimension weighting
     target_dimensions: &[String],
 ) -> Option<ArenaRound> {
     if pool.len() < 4 {
@@ -669,8 +669,14 @@ pub fn apply_arena_ballot(
     let mut updated: Vec<DimensionElo> = elos.to_vec();
 
     // Find best and worst cards.
-    let best = round.cards.iter().find(|c| c.work_id == ballot.best_work_id);
-    let worst = round.cards.iter().find(|c| c.work_id == ballot.worst_work_id);
+    let best = round
+        .cards
+        .iter()
+        .find(|c| c.work_id == ballot.best_work_id);
+    let worst = round
+        .cards
+        .iter()
+        .find(|c| c.work_id == ballot.worst_work_id);
     let (Some(best), Some(worst)) = (best, worst) else {
         return updated;
     };
@@ -751,9 +757,7 @@ pub fn weights_from_elos(elos: &[DimensionElo]) -> Vec<(String, f64)> {
         .collect();
 
     let total: f64 = raw.iter().map(|(_, w)| w).sum();
-    raw.into_iter()
-        .map(|(k, w)| (k, w / total))
-        .collect()
+    raw.into_iter().map(|(k, w)| (k, w / total)).collect()
 }
 
 #[cfg(test)]
