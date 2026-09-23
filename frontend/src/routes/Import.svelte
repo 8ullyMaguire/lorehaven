@@ -201,7 +201,24 @@
     const report = row.report;
     if (!report) return '';
     const summary = report.summary ?? report.message ?? report.detail;
-    return typeof summary === 'string' ? summary : '';
+    if (typeof summary === 'string') return summary;
+    // §32.7.9: surface media rescue stats when present.
+    const media = report.media_rescue;
+    if (media && typeof media === 'object') {
+      const m = media as Record<string, unknown>;
+      const total = typeof m.total_urls === 'number' ? m.total_urls : 0;
+      const held = typeof m.already_held === 'number' ? m.already_held : 0;
+      const created = typeof m.new_references === 'number' ? m.new_references : 0;
+      const bad = typeof m.unparseable === 'number' ? m.unparseable : 0;
+      if (total > 0) {
+        const parts = [`${total} media URLs found`];
+        if (held > 0) parts.push(`${held} already held`);
+        if (created > 0) parts.push(`${created} new`);
+        if (bad > 0) parts.push(`${bad} broken`);
+        return `Media rescue: ${parts.join(', ')}.`;
+      }
+    }
+    return '';
   }
 
   function sourceLabel(key: string): string {

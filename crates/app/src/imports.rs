@@ -360,12 +360,14 @@ pub async fn run(
     // the hash on its first check.
     let media_summary = rescue_import_media(state.db(), &item, &stored).await;
 
+    let report_json = report_with_media(&plan, &stored, false, &media_summary);
+
     finish(
         state,
         &row,
         import_job_id,
         "completed",
-        &report(&plan, &stored, false),
+        &report_json,
     )
     .await?;
     let _ = item_id;
@@ -835,6 +837,27 @@ async fn finish(
             .map_err(transient)?;
     }
     Ok(())
+}
+
+/// Build the import report JSON, including media rescue stats (§32.7.9).
+fn report_with_media(
+    plan: &ImportPlan,
+    stored: &[StoredChapter],
+    dry_run: bool,
+    media: &lorehaven_db::media_resilience::ImportMediaSummary,
+) -> String {
+    let base = report(plan, stored, dry_run);
+    // Merge the media summary into the existing JSON object.
+    let mut obj: serde_json::Value = serde_json::from_str(&base).unwrap_or_default();
+    if let Some(inner) = obj.as_object_mut() {
+        inner.insert("media_rescue".to_owned(), serde_json::json!({
+            "total_urls": media.total_urls,
+            "already_held": media.already_held,
+            "new_references": media.new_references,
+            "unparseable": media.unparseable,
+        }));
+    }
+    obj.to_string()
 }
 
 /// §32.7.9: rescue every image URL from an import's chapters.

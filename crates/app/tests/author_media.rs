@@ -4,6 +4,7 @@ use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
 use lorehaven_db::media_resilience;
+use lorehaven_db::Backend;
 use std::path::PathBuf;
 
 fn scratch_dir(tag: &str) -> PathBuf {
@@ -129,4 +130,75 @@ async fn targeted_bounty_with_chapter() {
     assert_eq!(bounties.len(), 1);
     assert_eq!(bounties[0].chapter_id, Some(chapter_id.to_string()));
     assert_eq!(bounties[0].reward, 75);
+}
+
+#[tokio::test]
+async fn author_media_health_report_tiers() {
+    let dir = scratch_dir("health");
+    let tdb = test_support::TestDb::connect_with_dir("am-health", &dir).await;
+    let db = tdb.db();
+
+    let account_id = "author-003";
+    let pseud_id = format!("{}-pseud", account_id);
+
+    // Seed account → pseud → works in FK order.
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query("INSERT INTO accounts (id, email, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))")
+                .bind(account_id)
+                .bind(format!("{}@test.dev", account_id))
+                .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
+            sqlx::query("INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))")
+                .bind(&pseud_id).bind(account_id).bind(&pseud_id).bind(&pseud_id)
+                .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
+            for (wid, title) in [("work-a", "Work A"), ("work-b", "Work B")] {
+                sqlx::query("INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at) VALUES (?, ?, ?, 'published', 'public', datetime('now'), datetime('now'))")
+                    .bind(wid).bind(title).bind(&pseud_id)
+                    .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
+            }
+        }
+        Backend::Postgres => {
+            sqlx::query("INSERT INTO accounts (id, email, created_at, updated_at) VALUES ($1, $2, now(), now())")
+                .bind(account_id)
+                .bind(format!("{}@test.dev", account_id))
+                .execute(db.postgres_pool().expect("postgres")).await.unwrap();
+            sqlx::query("INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at) VALUES ($1, $2, $3, $4, now(), now())")
+                .bind(&pseud_id).bind(account_id).bind(&pseud_id).bind(&pseud_id)
+                .execute(db.postgres_pool().expect("postgres")).await.unwrap();
+            for (wid, title) in [("work-a", "Work A"), ("work-b", "Work B")] {
+                sqlx::query("INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at) VALUES ($1, $2, $3, 'published', 'public', now(), now())")
+                    .bind(wid).bind(title).bind(&pseud_id)
+                    .execute(db.postgres_pool().expect("postgres")).await.unwrap();
+            }
+        }
+    }
+
+    // Work A: one reference (new, so zero healthy links → broken tier).
+    let (created_a, _) = media_resilience::upsert_media_reference_for_import(
+        db, "work-a", Some("ch-1"), "https://example.com/a.png",
+    )
+    .await
+    .expect("upsert ref a");
+    assert!(created_a);
+
+    // Work B: one reference (new, so zero healthy links → broken tier).
+    let (created_b, _) = media_resilience::upsert_media_reference_for_import(
+        db, "work-b", Some("ch-2"), "https://example.com/b.png",
+    )
+    .await
+    .expect("upsert ref b");
+    assert!(created_b);
+
+    let report = media_resilience::author_media_health_report(db, account_id)
+        .await
+        .expect("health report");
+
+    // Both works appear with 1 total reference each.
+    assert_eq!(report.len(), 2);
+    let a = report.iter().find(|r| r.work_title == "Work A").expect("work a");
+    let b = report.iter().find(|r| r.work_title == "Work B").expect("work b");
+    assert_eq!(a.total_references, 1);
+    assert_eq!(a.healthy_references, 0);
+    assert_eq!(b.total_references, 1);
+    assert_eq!(b.healthy_references, 0);
 }

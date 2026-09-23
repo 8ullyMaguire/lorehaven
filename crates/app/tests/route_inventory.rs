@@ -3105,6 +3105,13 @@ const ROUTE_TABLE: &[RouteEntry] = &[
     },
     RouteEntry {
         file: "author_media.rs",
+        handler: "get_author_media_health",
+        method: "GET",
+        path: "/author/media-health",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "author_media.rs",
         handler: "post_targeted_bounty",
         method: "POST",
         path: "/author/targeted-bounties",
