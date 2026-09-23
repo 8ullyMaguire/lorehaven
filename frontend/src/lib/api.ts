@@ -3134,3 +3134,77 @@ export function reverseMediaSearch(body: ReverseSearchBody): Promise<ReverseSear
     body: JSON.stringify(body),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Local mirror management (spec §32.7.6)
+// ---------------------------------------------------------------------------
+
+export interface LocalMirrorView {
+  id: string;
+  media_reference_id: string;
+  storage_path: string;
+  original_url: string;
+  file_size_bytes: number | null;
+  checksum_sha256: string | null;
+  status: string;
+  last_verified_at: string | null;
+  created_at: string;
+}
+
+export interface AddLocalMirrorBody {
+  media_reference_id: string;
+  storage_path: string;
+  original_url: string;
+  file_size_bytes?: number;
+  checksum_sha256?: string;
+  content_type?: string;
+}
+
+export function fetchLocalMirrors(referenceId: string): Promise<LocalMirrorView[]> {
+  return apiFetch<LocalMirrorView[]>(`/media/references/${encodeURIComponent(referenceId)}/mirrors`);
+}
+
+export function addLocalMirror(body: AddLocalMirrorBody): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>('/admin/local-mirrors', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function deactivateLocalMirror(mirrorId: string): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>(`/admin/local-mirrors/${encodeURIComponent(mirrorId)}`, {
+    method: 'DELETE',
+  });
+}
+
+// ---------------------------------------------------------------------------
+// IPFS pin management (spec §32.7.6)
+// ---------------------------------------------------------------------------
+
+export interface IpfsPinView {
+  id: string;
+  media_reference_id: string;
+  cid: string;
+  pin_service: string;
+  status: string;
+  file_size_bytes: number;
+  pinned_at: string;
+}
+
+export interface AddIpfsPinBody {
+  media_reference_id: string;
+  cid: string;
+  pin_service: string;
+  file_size_bytes: number;
+}
+
+export function fetchIpfsPins(referenceId: string): Promise<IpfsPinView[]> {
+  return apiFetch<IpfsPinView[]>(`/media/references/${encodeURIComponent(referenceId)}/ipfs-pins`);
+}
+
+export function addIpfsPin(body: AddIpfsPinBody): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>(`/media/references/${encodeURIComponent(body.media_reference_id)}/ipfs-pins`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
