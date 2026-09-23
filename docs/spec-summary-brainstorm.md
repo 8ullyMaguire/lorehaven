@@ -514,6 +514,8 @@ Official companion bot for chat platforms (Telegram, Discord, Matrix). Bot featu
 
 Community-curated map of the fandom ecosystem: external sites, archives, communities, events, challenges. Curated by trusted contributors (vanguard). Searchable and browsable. Demand-weighted (what readers look for but can't find on-instance is highlighted). Vote weighting modes: flat | trust | trust_taste | trust_taste_contribution.
 
+**Category governance (§45):** categories are community-moderated — proposed by trusted users, executed by quorum, with operator override, anti-churn guards, a public changelog, and entry moderation by quorum.
+
 ---
 
 ## 20. Remix (§40)
@@ -841,8 +843,14 @@ These themes recur across multiple sections and are fertile ground for ideation.
 
 **Author protection.** Authors control their work, their feedback preferences, their rating aggregates, their translation permissions, their remix policies. Readers control their data, their reading history, their pseud linkage, their opt-out dials. The spec is asymmetric in favor of authors. Is that the right balance?
 
+---
+
+## 29. User Configuration (§46)
+
+Priority 1 extended userward: every user-visible behavior has a setting with a documented default, resolved through one hierarchy (context → pseud → account → instance) with visible provenance and reset at every level. Per-domain settings tables (never one JSONB blob), one API pattern, a domain-grouped /settings surface with client-side settings search in the command palette, server-enforced content filters, per-event notification routing, and portable export/import. The operator shapes the instance; each user shapes their experience of it.
+
 **Growth vs. integrity.** Sharing loops (quote cards, fic trailers, cross-posting) turn readers into promoters. But growth can dilute culture. How does the spec prevent growth-harming-asymmetry between promotional tools and community-maintenance tools?
 
 ---
 
-*This summary covers the complete spec (§0–§44) and the taste-gravitational amendment. Cross-references like §16.17 point to the canonical docs. Last updated: 2026-09-23 from spec at 64,535 words + 6,599-word amendment.*
+*This summary covers the complete spec (§0–§46, including the §45 category governance and §46 user configuration additions) and the taste-gravitational amendment. Cross-references like §16.17 point to the canonical docs. Last updated: 2026-09-23.*

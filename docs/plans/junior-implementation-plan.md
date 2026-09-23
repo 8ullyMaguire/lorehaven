@@ -4297,3 +4297,87 @@ Never downgrades `shipped`. Idempotent: second run reports all `unchanged`.
 
 Cross-cutting checklist (§16 of this plan) + requirements rows M45-01…M45-07
 (§44.7 acceptance items) + `scripts/seed_roadmap.py --dry-run` output reviewed.
+
+## 15m. Milestone 47 (repo) — User configuration: the settings architecture (spec §46)
+
+Spec §46. Depends on: M2 (accounts/pseuds — the `privacy_settings` table
+pattern), M4 (reader §9.2), M10 (query language §15.4), M11 (§16.5 dial,
+§16.8 dashboard), M17 (§17.5 notification prefs), M1 (§6.4 palette).
+
+### 47.1 Why this is next
+
+Priority 1 names a fully customizable website; today that means operator
+config (§38) and marketplace themes (§21). User-facing settings exist but
+scattered: privacy/content (M2), reader typography (M4), notification
+prefs (M17), dashboard layout (M11) — each with its own shape. §46
+unifies them under one resolution hierarchy, one API pattern, and one
+settings surface, making user customization first-class without inventing
+per-feature mechanisms.
+
+### 47.2 Ledger rows (add before any code)
+
+- `M47-01` resolution hierarchy context→pseud→account→instance with
+  per-key `_source` (spec §46.2–46.3)
+- `M47-02` per-domain tables for new namespaces: `search_settings`,
+  `content_filters`, `notification_routes` (spec §46.3)
+- `M47-03` settings API family GET/PATCH/DELETE per namespace with
+  unknown-key rejection (spec §46.3)
+- `M47-04` server-side content-filter enforcement on search, feeds,
+  recommendations, notifications (spec §46.4)
+- `M47-05` search defaults pre-populating every search surface,
+  bidirectional with §15.4 (spec §46.4)
+- `M47-06` per-event notification channel routing extending §17.5
+  (spec §46.4)
+- `M47-07` `/settings` surface: domain-grouped IA, provenance labels,
+  reset at every level, palette-indexed settings search (spec §46.5)
+- `M47-08` settings export/import with compatibility report (spec §46.6)
+- `M47-09` settings writes audited (spec §46.3)
+
+### 47.3 Migration (next free number — 0069 is in flight for §45)
+
+```text
+search_settings(pseud_id PK, key, value_json, updated_at,
+                UNIQUE(pseud_id, key))
+content_filters(pseud_id PK, key, value_json, updated_at,
+                UNIQUE(pseud_id, key))
+notification_routes(account_id, event_type, in_app, email, push,
+                    email_mode, PK(account_id, event_type))
+```
+
+Key–value shape mirrors `privacy_settings` (migration 0001); values are
+typed JSON validated in domain, not by the DB.
+
+### 47.4 Domain (`crates/domain/src/settings.rs`)
+
+Pure functions: `resolve(levels, context) -> (value, source)` per key;
+`validate_key(namespace, key)`; `merge` for the resolved view. The
+namespace registry (key sets, types, defaults, labels) lives here as
+data — the same definitions feed storage validation and the client-side
+settings search.
+
+### 47.5 DB (`crates/db/src/settings.rs`)
+
+`get_level`, `upsert_key`, `delete_key` per namespace (dual dialect);
+`resolved(namespace, account, pseud)` — one query per level, merged in
+domain; audit-log write in the same transaction as the upsert.
+
+### 47.6 Routes (extend `crates/app/src/routes/settings.rs`)
+
+The §46.3 route family. Enforcement hooks: search, feed, recommendation,
+and notification pipelines call `content_filters` server-side — no
+surface may skip the filter step.
+
+### 47.7 Frontend
+
+`Settings.svelte` (new route, sectioned per §46.4), provenance + reset
+components, filter-chip lock icons in search, palette integration via
+the schema definitions exported to the client.
+
+### 47.8 Acceptance tests (`crates/app/tests/milestone_m47.rs`)
+
+One test per §46.8 bullet, in-process router pattern.
+
+### 47.9 Sign-off
+
+Cross-cutting checklist (§16 of this plan) + requirements rows
+M47-01…M47-09 (§46.8 acceptance items).

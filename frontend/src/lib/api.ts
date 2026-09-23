@@ -342,6 +342,8 @@ export interface AccountResponse {
 export interface MeResponse extends AccountResponse {
   pseuds: Pseud[];
   active_pseud_id: string | null;
+  /** Trust level (spec §19.1). Used to gate governance actions (§45). */
+  trust_level: number;
 }
 
 /** The response to a password-reset request. */
@@ -2964,6 +2966,152 @@ export function fetchDirectoryCategories(
   signal?: AbortSignal,
 ): Promise<{ items: DirectoryCategory[] }> {
   return apiFetch<{ items: DirectoryCategory[] }>('/directory/categories', { signal });
+}
+
+// --- Category governance (§45) --------------------------------------------
+
+export interface GovernanceCategory {
+  slug: string;
+  label: string;
+  state: 'active' | 'deprecated' | 'merged';
+  source: 'seed' | 'config' | 'community';
+  merged_into: string | null;
+  open_proposals: number;
+}
+
+export interface GovernanceState {
+  frozen: boolean;
+  max_active_categories: number;
+  items: GovernanceCategory[];
+}
+
+export interface Proposal {
+  id: string;
+  category_slug: string;
+  action: string;
+  payload: Record<string, unknown>;
+  status: string;
+  yes_votes: number;
+  no_votes: number;
+  quorum_needed: number;
+  closes_at: string;
+  created_by: string;
+  created_at: string;
+  decided_by: string | null;
+  decision_reason: string | null;
+  decided_at: string | null;
+}
+
+export interface ChangelogEntry {
+  id: string;
+  category_slug: string;
+  event: string;
+  actor: string;
+  document: string;
+  created_at: string;
+}
+
+/** Fetch governance state for all categories. */
+export function fetchGovernanceState(
+  signal?: AbortSignal,
+): Promise<GovernanceState> {
+  return apiFetch<GovernanceState>('/directory/categories/governance', { signal });
+}
+
+/** Create a category proposal (rename/merge/deprecate/create). */
+export function createCategoryProposal(body: {
+  category_slug: string;
+  action: string;
+  payload: Record<string, unknown>;
+}): Promise<{ id: string; status: string; quorum_needed: number; closes_at: string }> {
+  return apiFetch('/directory/categories/governance/proposals', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** Get a single proposal. */
+export function fetchProposal(
+  proposalId: string,
+  signal?: AbortSignal,
+): Promise<Proposal> {
+  return apiFetch<Proposal>(
+    `/directory/categories/governance/proposals/${encodeURIComponent(proposalId)}`,
+    { signal },
+  );
+}
+
+/** Vote on a proposal. */
+export function voteProposal(
+  proposalId: string,
+  value: 'yes' | 'no',
+): Promise<{ status: string; passed: boolean | null }> {
+  return apiFetch(
+    `/directory/categories/governance/proposals/${encodeURIComponent(proposalId)}/vote`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ value }),
+    },
+  );
+}
+
+/** Veto a proposal (operator only). */
+export function vetoProposal(
+  proposalId: string,
+  reason: string,
+): Promise<{ status: string }> {
+  return apiFetch(
+    `/directory/categories/governance/proposals/${encodeURIComponent(proposalId)}/veto`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    },
+  );
+}
+
+/** List changelog entries for a category. */
+export function fetchChangelog(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<{ items: ChangelogEntry[] }> {
+  return apiFetch<{ items: ChangelogEntry[] }>(
+    `/directory/categories/governance/changelog/${encodeURIComponent(slug)}`,
+    { signal },
+  );
+}
+
+/** Toggle governance freeze (operator only). */
+export function toggleFreeze(): Promise<{ frozen: boolean }> {
+  return apiFetch('/directory/categories/governance/freeze', { method: 'POST' });
+}
+
+/** Propose entry moderation (move/remove). */
+export function proposeEntryMod(
+  entryId: string,
+  action: 'move' | 'remove',
+  targetCategory?: string,
+): Promise<{ id: string; status: string; quorum_needed: number; closes_at: string }> {
+  return apiFetch(
+    `/directory/entries/${encodeURIComponent(entryId)}/moderation`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        action,
+        target_category: targetCategory,
+      }),
+    },
+  );
+}
+
+/** Vote on entry moderation. */
+export function voteEntryMod(
+  entryId: string,
+  value: 'yes' | 'no',
+): Promise<{ status: string; passed: boolean | null }> {
+  return apiFetch(
+    `/directory/entries/${encodeURIComponent(entryId)}/moderation/vote?value=${value}`,
+    { method: 'POST' },
+  );
 }
 
 /** Submit a directory entry (signed-in users). */
