@@ -237,6 +237,89 @@ pub async fn personalized_recommendations(
     }
 }
 
+/// Media-reference collaborative recommendations (spec §32.7.3, §9.10).
+///
+/// Finds works that share media references with the user's bookmarked works.
+/// The user's library works are the ones they have bookmarked; we look up
+/// which media references those works use, then find other works using the
+/// same references. Works with more shared references rank higher.
+pub async fn media_reference_collaborative_recommendations(
+    db: &Database,
+    account_id: &str,
+    limit: i64,
+) -> Result<Vec<WorkId>> {
+    // SQLite: find works sharing media references with user's bookmarked works.
+    // Step 1: get bookmarked work IDs for this account.
+    // Step 2: get media_reference_ids from work_media_references where work_id IN (bookmarked).
+    // Step 3: get work_ids from work_media_references where media_reference_id IN (found refs)
+    //         AND work_id NOT IN (bookmarked) AND work_id NOT owned by this account.
+    // Step 4: rank by count of shared references, descending.
+    let rows: Vec<(String,)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(
+                "SELECT wmr.work_id
+                 FROM work_media_references wmr
+                 WHERE wmr.media_reference_id IN (
+                     SELECT DISTINCT wmr2.media_reference_id
+                     FROM work_media_references wmr2
+                     JOIN bookmarks b ON b.subject_id = wmr2.work_id AND b.subject_type = 'work'
+                     WHERE b.account_id = ?
+                 )
+                 AND wmr.work_id NOT IN (
+                     SELECT subject_id FROM bookmarks WHERE account_id = ? AND subject_type = 'work'
+                 )
+                 AND wmr.work_id NOT IN (
+                     SELECT w.id FROM works w
+                     JOIN pseuds p ON p.id = w.owner_pseud_id
+                     WHERE p.account_id = ?
+                 )
+                 AND wmr.deleted_at IS NULL
+                 GROUP BY wmr.work_id
+                 ORDER BY COUNT(DISTINCT wmr.media_reference_id) DESC, wmr.work_id
+                 LIMIT ?",
+            )
+            .bind(account_id)
+            .bind(account_id)
+            .bind(account_id)
+            .bind(limit)
+            .fetch_all(db.sqlite_pool().expect("sqlite"))
+            .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(
+                "SELECT wmr.work_id::text
+                 FROM work_media_references wmr
+                 WHERE wmr.media_reference_id IN (
+                     SELECT DISTINCT wmr2.media_reference_id
+                     FROM work_media_references wmr2
+                     JOIN bookmarks b ON b.subject_id = wmr2.work_id AND b.subject_type = 'work'
+                     WHERE b.account_id = $1
+                 )
+                 AND wmr.work_id NOT IN (
+                     SELECT subject_id FROM bookmarks WHERE account_id = $1 AND subject_type = 'work'
+                 )
+                 AND wmr.work_id NOT IN (
+                     SELECT w.id FROM works w
+                     JOIN pseuds p ON p.id = w.owner_pseud_id
+                     WHERE p.account_id = $1
+                 )
+                 AND wmr.deleted_at IS NULL
+                 GROUP BY wmr.work_id
+                 ORDER BY COUNT(DISTINCT wmr.media_reference_id) DESC, wmr.work_id
+                 LIMIT $2",
+            )
+            .bind(account_id)
+            .bind(limit)
+            .fetch_all(db.postgres_pool().expect("postgres"))
+            .await?
+        }
+    };
+    Ok(rows
+        .into_iter()
+        .map(|(id,)| id.parse().unwrap_or_default())
+        .collect())
+}
+
 /// An operator-set work affinity (private, never rendered publicly).
 #[derive(Debug, Clone, Serialize)]
 pub struct OperatorAffinity {
