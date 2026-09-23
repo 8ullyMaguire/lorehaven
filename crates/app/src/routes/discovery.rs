@@ -143,6 +143,33 @@ async fn get_discovery(
             .collect(),
     );
 
+    // Engine 3: media-reference collaborative (signed-in users only).
+    // Finds works sharing media references (faceclaims, moodboards, playlists)
+    // with the user's bookmarked works. Spec §32.7.3, §9.10.
+    if let Some(ref account_id) = account_id {
+        let media_collab =
+            lorehaven_db::discovery::media_reference_collaborative_recommendations(
+                state.db(),
+                account_id,
+                limit,
+            )
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e)))?;
+        engines.push(
+            media_collab
+                .into_iter()
+                .enumerate()
+                .map(|(idx, id)| lorehaven_domain::discovery::Candidate {
+                    work_id: id,
+                    score: (limit - idx as i64),
+                    reason: "media_ref_collab".into(),
+                    taste_signal: 0.0,
+                    diversity_class: 0.5,
+                })
+                .collect(),
+        );
+    }
+
     // Merge candidates from all engines deterministically.
     let blended = lorehaven_domain::discovery::blend(&engines);
     let mut blended: Vec<_> = blended.into_iter().take(limit as usize).collect();
