@@ -625,12 +625,10 @@ impl Worker {
                     u64::try_from(state.config().jobs.terminal_retention_days * 24 * 60 * 60)
                         .unwrap_or(30 * 24 * 60 * 60),
                 );
-                let deleted = jobs::purge_terminal_jobs(
-                    state.db(),
-                    OffsetDateTime::now_utc() - retention,
-                )
-                .await
-                .map_err(transient)?;
+                let deleted =
+                    jobs::purge_terminal_jobs(state.db(), OffsetDateTime::now_utc() - retention)
+                        .await
+                        .map_err(transient)?;
                 jobs::progress(state.db(), job, 1000, Some("reaped"))
                     .await
                     .map_err(transient)?;
@@ -661,9 +659,10 @@ impl Worker {
                     .get("window_days")
                     .and_then(serde_json::Value::as_i64)
                     .unwrap_or(30);
-                let updated = crate::longevity::recompute_half_life(state, min_age_days, window_days)
-                    .await
-                    .map_err(transient)?;
+                let updated =
+                    crate::longevity::recompute_half_life(state, min_age_days, window_days)
+                        .await
+                        .map_err(transient)?;
                 jobs::progress(state.db(), job, 1000, Some("recomputed half-life"))
                     .await
                     .map_err(transient)?;

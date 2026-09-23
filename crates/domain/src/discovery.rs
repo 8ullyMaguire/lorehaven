@@ -304,15 +304,15 @@ mod tests {
                 work_id: w1,
                 score: 10,
                 reason: "base".into(),
-                    taste_signal: 0.0,
-                    diversity_class: 0.0,
+                taste_signal: 0.0,
+                diversity_class: 0.0,
             },
             Candidate {
                 work_id: w2,
                 score: 20,
                 reason: "base".into(),
-                    taste_signal: 0.0,
-                    diversity_class: 0.0,
+                taste_signal: 0.0,
+                diversity_class: 0.0,
             },
         ];
         let mut affinities = std::collections::HashMap::new();
@@ -331,8 +331,8 @@ mod tests {
             work_id: w,
             score: 10,
             reason: "engine-tag".into(),
-                    taste_signal: 0.0,
-                    diversity_class: 0.0,
+            taste_signal: 0.0,
+            diversity_class: 0.0,
         }];
         let mut affinities = std::collections::HashMap::new();
         affinities.insert(w.to_canonical_string(), 10_000);
@@ -347,8 +347,8 @@ mod tests {
             work_id: w,
             score: 10,
             reason: "base".into(),
-                    taste_signal: 0.0,
-                    diversity_class: 0.0,
+            taste_signal: 0.0,
+            diversity_class: 0.0,
         }];
         let mut affinities = std::collections::HashMap::new();
         affinities.insert(w.to_canonical_string(), -5_000); // 0.5x
@@ -387,8 +387,20 @@ mod tests {
         let w1 = WorkId::new();
         let w2 = WorkId::new();
         let candidates = vec![
-            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.0 },
-            Candidate { work_id: w2, score: 10, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.0 },
+            Candidate {
+                work_id: w1,
+                score: 10,
+                reason: "base".into(),
+                taste_signal: 0.0,
+                diversity_class: 0.0,
+            },
+            Candidate {
+                work_id: w2,
+                score: 10,
+                reason: "base".into(),
+                taste_signal: 0.0,
+                diversity_class: 0.0,
+            },
         ];
         let nudge_bp = 1000; // 1.1x
         let work_nudge = |_w: &WorkId| nudge_bp;
@@ -402,12 +414,28 @@ mod tests {
         let w1 = WorkId::new();
         let w2 = WorkId::new();
         let candidates = vec![
-            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.0 },
-            Candidate { work_id: w2, score: 8, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.0 },
+            Candidate {
+                work_id: w1,
+                score: 10,
+                reason: "base".into(),
+                taste_signal: 0.0,
+                diversity_class: 0.0,
+            },
+            Candidate {
+                work_id: w2,
+                score: 8,
+                reason: "base".into(),
+                taste_signal: 0.0,
+                diversity_class: 0.0,
+            },
         ];
         // w1 gets a 1.25x nudge (2500 bp); w2 gets nothing.
         let work_nudge = |w: &WorkId| {
-            if w.to_canonical_string() == w1.to_canonical_string() { 2500 } else { 0 }
+            if w.to_canonical_string() == w1.to_canonical_string() {
+                2500
+            } else {
+                0
+            }
         };
         let result = apply_theme_gravity(candidates, &work_nudge);
         assert_eq!(result[0].work_id, w1); // 12 > 8 after nudge
@@ -420,8 +448,20 @@ mod tests {
         let w1 = WorkId::new();
         let w2 = WorkId::new();
         let candidates = vec![
-            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.0 },
-            Candidate { work_id: w2, score: 5, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.0 },
+            Candidate {
+                work_id: w1,
+                score: 10,
+                reason: "base".into(),
+                taste_signal: 0.0,
+                diversity_class: 0.0,
+            },
+            Candidate {
+                work_id: w2,
+                score: 5,
+                reason: "base".into(),
+                taste_signal: 0.0,
+                diversity_class: 0.0,
+            },
         ];
         let work_nudge = |_w: &WorkId| 0;
         let result = apply_theme_gravity(candidates, &work_nudge);
@@ -442,8 +482,20 @@ mod tests {
         let w1 = WorkId::new();
         let w2 = WorkId::new();
         let candidates = vec![
-            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.9, diversity_class: 0.0 },
-            Candidate { work_id: w2, score: 5, reason: "base".into(), taste_signal: 0.1, diversity_class: 0.0 },
+            Candidate {
+                work_id: w1,
+                score: 10,
+                reason: "base".into(),
+                taste_signal: 0.9,
+                diversity_class: 0.0,
+            },
+            Candidate {
+                work_id: w2,
+                score: 5,
+                reason: "base".into(),
+                taste_signal: 0.1,
+                diversity_class: 0.0,
+            },
         ];
         let result = apply_taste_gravity(candidates, 1.0, "egalitarian", 1.0);
         assert_eq!(result[0].score, 10);
@@ -453,9 +505,13 @@ mod tests {
     #[test]
     fn apply_taste_gravity_zero_strength_noop() {
         let w1 = WorkId::new();
-        let candidates = vec![
-            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.9, diversity_class: 0.0 },
-        ];
+        let candidates = vec![Candidate {
+            work_id: w1,
+            score: 10,
+            reason: "base".into(),
+            taste_signal: 0.9,
+            diversity_class: 0.0,
+        }];
         let result = apply_taste_gravity(candidates, 0.0, "taste_weighted", 1.0);
         assert_eq!(result[0].score, 10);
     }
@@ -465,8 +521,20 @@ mod tests {
         let w1 = WorkId::new();
         let w2 = WorkId::new();
         let candidates = vec![
-            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.9, diversity_class: 0.0 },
-            Candidate { work_id: w2, score: 10, reason: "base".into(), taste_signal: 0.1, diversity_class: 0.0 },
+            Candidate {
+                work_id: w1,
+                score: 10,
+                reason: "base".into(),
+                taste_signal: 0.9,
+                diversity_class: 0.0,
+            },
+            Candidate {
+                work_id: w2,
+                score: 10,
+                reason: "base".into(),
+                taste_signal: 0.1,
+                diversity_class: 0.0,
+            },
         ];
         let result = apply_taste_gravity(candidates, 1.0, "taste_weighted", 1.0);
         // w1: 10 * (1 + 0.9 * 1 * 1) = 19
@@ -481,8 +549,20 @@ mod tests {
         let w1 = WorkId::new();
         let w2 = WorkId::new();
         let candidates = vec![
-            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.6, diversity_class: 0.0 },
-            Candidate { work_id: w2, score: 10, reason: "base".into(), taste_signal: 0.3, diversity_class: 0.0 },
+            Candidate {
+                work_id: w1,
+                score: 10,
+                reason: "base".into(),
+                taste_signal: 0.6,
+                diversity_class: 0.0,
+            },
+            Candidate {
+                work_id: w2,
+                score: 10,
+                reason: "base".into(),
+                taste_signal: 0.3,
+                diversity_class: 0.0,
+            },
         ];
         let result = apply_taste_gravity(candidates, 1.0, "admin_only", 1.0);
         // w1: 10 * (1 + 0.6 * 1 * 1) = 16
@@ -497,8 +577,20 @@ mod tests {
         let w1 = WorkId::new();
         let w2 = WorkId::new();
         let candidates = vec![
-            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.0 },
-            Candidate { work_id: w2, score: 5, reason: "base".into(), taste_signal: 0.0, diversity_class: 1.0 },
+            Candidate {
+                work_id: w1,
+                score: 10,
+                reason: "base".into(),
+                taste_signal: 0.0,
+                diversity_class: 0.0,
+            },
+            Candidate {
+                work_id: w2,
+                score: 5,
+                reason: "base".into(),
+                taste_signal: 0.0,
+                diversity_class: 1.0,
+            },
         ];
         let indices = inject_diversity_by_taste(&candidates, 2, 0.0);
         assert_eq!(indices, vec![0, 1]);
@@ -510,9 +602,27 @@ mod tests {
         let w2 = WorkId::new();
         let w3 = WorkId::new();
         let candidates = vec![
-            Candidate { work_id: w1, score: 10, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.0 },
-            Candidate { work_id: w2, score: 8, reason: "base".into(), taste_signal: 0.0, diversity_class: 0.5 },
-            Candidate { work_id: w3, score: 5, reason: "base".into(), taste_signal: 0.0, diversity_class: 1.0 },
+            Candidate {
+                work_id: w1,
+                score: 10,
+                reason: "base".into(),
+                taste_signal: 0.0,
+                diversity_class: 0.0,
+            },
+            Candidate {
+                work_id: w2,
+                score: 8,
+                reason: "base".into(),
+                taste_signal: 0.0,
+                diversity_class: 0.5,
+            },
+            Candidate {
+                work_id: w3,
+                score: 5,
+                reason: "base".into(),
+                taste_signal: 0.0,
+                diversity_class: 1.0,
+            },
         ];
         // 50% of 3 = 1 slot reserved for most diverse (w3)
         let indices = inject_diversity_by_taste(&candidates, 3, 0.5);

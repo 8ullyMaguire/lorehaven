@@ -9,8 +9,8 @@ use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use lorehaven_db;
-use lorehaven_domain::AppError;
 use lorehaven_domain::ids::WorkId;
+use lorehaven_domain::AppError;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -22,8 +22,14 @@ pub fn router() -> Router<AppState> {
             post(recompute_taste_profile),
         )
         .route("/discovery/taste-profile/clear", post(clear_taste_profile))
-        .route("/operator/taste-profile", get(get_admin_taste_profile).put(update_admin_taste_profile))
-        .route("/operator/taste-profile/recompute-all", post(recompute_all_taste_profiles))
+        .route(
+            "/operator/taste-profile",
+            get(get_admin_taste_profile).put(update_admin_taste_profile),
+        )
+        .route(
+            "/operator/taste-profile/recompute-all",
+            post(recompute_all_taste_profiles),
+        )
         .route("/me/streak", get(get_my_streak))
         .route("/media/reverse-search", post(reverse_search))
         .route("/curator/bounty-queue", get(curator_bounty_queue))
@@ -38,28 +44,29 @@ async fn get_my_streak(
     RequireSession(user): RequireSession,
 ) -> ApiResult<Json<serde_json::Value>> {
     let db = state.db();
-    let row: Option<(i64, i64, Option<String>, i64)> = match db.backend() {
-        lorehaven_db::Backend::Sqlite => {
-            sqlx::query_as(
+    let row: Option<(i64, i64, Option<String>, i64)> =
+        match db.backend() {
+            lorehaven_db::Backend::Sqlite => sqlx::query_as(
                 "SELECT current_streak, longest_streak, last_login_at, streak_freezes_used
                  FROM streaks WHERE account_id = ?",
             )
             .bind(user.account_id.to_string())
-            .fetch_optional(db.sqlite_pool().ok_or(ApiError(AppError::Internal(anyhow::anyhow!("db pool unavailable"))))?)
+            .fetch_optional(db.sqlite_pool().ok_or(ApiError(AppError::Internal(
+                anyhow::anyhow!("db pool unavailable"),
+            )))?)
             .await
-            .map_err(|e| ApiError(AppError::Internal(e.into())))?
-        }
-        lorehaven_db::Backend::Postgres => {
-            sqlx::query_as(
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?,
+            lorehaven_db::Backend::Postgres => sqlx::query_as(
                 "SELECT current_streak, longest_streak, last_login_at, streak_freezes_used
                  FROM streaks WHERE account_id = $1::uuid",
             )
             .bind(user.account_id.to_string())
-            .fetch_optional(db.postgres_pool().ok_or(ApiError(AppError::Internal(anyhow::anyhow!("db pool unavailable"))))?)
+            .fetch_optional(db.postgres_pool().ok_or(ApiError(AppError::Internal(
+                anyhow::anyhow!("db pool unavailable"),
+            )))?)
             .await
-            .map_err(|e| ApiError(AppError::Internal(e.into())))?
-        }
-    };
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?,
+        };
     let (current, longest, last_login_at, freezes_used) = row.unwrap_or((0, 0, None, 0));
     Ok(Json(serde_json::json!({
         "current_streak": current,
@@ -99,7 +106,8 @@ async fn get_discovery(
     let account_id: Option<String> = session.as_ref().map(|s| s.account_id.to_string());
 
     // Resolve the effective sort (spec §43.4): query param > stored preference > default.
-    let effective_sort = resolve_sort(&state, session.as_ref(), params.sort.as_deref(), "discover").await;
+    let effective_sort =
+        resolve_sort(&state, session.as_ref(), params.sort.as_deref(), "discover").await;
 
     // Build candidate lists from each recommendation engine, then blend.
     let mut engines: Vec<Vec<lorehaven_domain::discovery::Candidate>> = Vec::new();
@@ -147,14 +155,13 @@ async fn get_discovery(
     // Finds works sharing media references (faceclaims, moodboards, playlists)
     // with the user's bookmarked works. Spec §32.7.3, §9.10.
     if let Some(ref account_id) = account_id {
-        let media_collab =
-            lorehaven_db::discovery::media_reference_collaborative_recommendations(
-                state.db(),
-                account_id,
-                limit,
-            )
-            .await
-            .map_err(|e| ApiError(AppError::Internal(e)))?;
+        let media_collab = lorehaven_db::discovery::media_reference_collaborative_recommendations(
+            state.db(),
+            account_id,
+            limit,
+        )
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
         engines.push(
             media_collab
                 .into_iter()
@@ -182,7 +189,10 @@ async fn get_discovery(
             .await
             .map_err(|e| ApiError(AppError::Internal(e)))?;
         let half_life_of = |id: &lorehaven_domain::ids::WorkId| -> Option<i64> {
-            half_life_scores.iter().find(|(wid, _)| wid == &id.to_string()).and_then(|(_, bp)| *bp)
+            half_life_scores
+                .iter()
+                .find(|(wid, _)| wid == &id.to_string())
+                .and_then(|(_, bp)| *bp)
         };
         lorehaven_domain::longevity::apply_half_life(&mut blended, &half_life_of);
     }
@@ -211,19 +221,27 @@ async fn get_discovery(
         "generic" => ranked,
         "thematic" | "adaptive" => {
             let boost: Vec<String> = theme.boost_tags.iter().map(|s| s.to_lowercase()).collect();
-            let suppress: Vec<String> = theme.suppress_tags.iter().map(|s| s.to_lowercase()).collect();
+            let suppress: Vec<String> = theme
+                .suppress_tags
+                .iter()
+                .map(|s| s.to_lowercase())
+                .collect();
             if boost.is_empty() && suppress.is_empty() && theme.tag_gravity_bp.is_empty() {
                 ranked
             } else {
                 // Pre-fetch tag gravity for all candidates.
-                let mut gravity_map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+                let mut gravity_map: std::collections::HashMap<String, i64> =
+                    std::collections::HashMap::new();
                 for c in &ranked {
-                    let tags = lorehaven_db::taxonomy::tag_names_for_work(state.db(), &c.work_id.to_string())
-                        .await
-                        .map_err(|e| ApiError(AppError::Internal(e)))?
-                        .iter()
-                        .map(|t| t.to_lowercase())
-                        .collect::<Vec<_>>();
+                    let tags = lorehaven_db::taxonomy::tag_names_for_work(
+                        state.db(),
+                        &c.work_id.to_string(),
+                    )
+                    .await
+                    .map_err(|e| ApiError(AppError::Internal(e)))?
+                    .iter()
+                    .map(|t| t.to_lowercase())
+                    .collect::<Vec<_>>();
                     let mut total_bp: i64 = 0;
                     for tag in &tags {
                         if let Some(&bp) = theme.tag_gravity_bp.get(tag) {
@@ -236,9 +254,8 @@ async fn get_discovery(
                     }
                     gravity_map.insert(c.work_id.to_string(), total_bp);
                 }
-                let work_nudge = |id: &WorkId| -> i64 {
-                    gravity_map.get(&id.to_string()).copied().unwrap_or(0)
-                };
+                let work_nudge =
+                    |id: &WorkId| -> i64 { gravity_map.get(&id.to_string()).copied().unwrap_or(0) };
                 lorehaven_domain::discovery::apply_theme_gravity(ranked, &work_nudge)
             }
         }
@@ -369,7 +386,9 @@ fn default_for_surface(surface: &str) -> lorehaven_domain::browse::Sort {
     match surface {
         "discover" => lorehaven_domain::browse::Sort::ForYou,
         "people" | "tags" | "fandoms" | "authors" | "moods" => lorehaven_domain::browse::Sort::Az,
-        "library" | "collections" | "series" | "reading-paths" => lorehaven_domain::browse::Sort::New,
+        "library" | "collections" | "series" | "reading-paths" => {
+            lorehaven_domain::browse::Sort::New
+        }
         _ => lorehaven_domain::browse::Sort::New,
     }
 }
@@ -722,30 +741,30 @@ pub async fn reverse_search(
         }));
     };
 
-    let refs = lorehaven_db::media_resilience::find_by_perceptual_hash(
-        state.db(), &hash, 0,
-    )
-    .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    let refs = lorehaven_db::media_resilience::find_by_perceptual_hash(state.db(), &hash, 0)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
-    let refs_json: Vec<serde_json::Value> = refs.iter().map(|r| {
-        serde_json::json!({
-            "id": r.id,
-            "media_kind": r.media_kind,
-            "perceptual_hash": r.perceptual_hash,
-            "content_hash": r.content_hash,
-            "curator_verified": r.curator_verified,
+    let refs_json: Vec<serde_json::Value> = refs
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.id,
+                "media_kind": r.media_kind,
+                "perceptual_hash": r.perceptual_hash,
+                "content_hash": r.content_hash,
+                "curator_verified": r.curator_verified,
+            })
         })
-    }).collect();
+        .collect();
 
     // §32.7.3: also return the works that use each reference.
     let mut works_json: Vec<serde_json::Value> = Vec::new();
     for r in &refs {
-        let work_refs = lorehaven_db::media_resilience::find_works_by_media_reference(
-            state.db(), &r.id,
-        )
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        let work_refs =
+            lorehaven_db::media_resilience::find_works_by_media_reference(state.db(), &r.id)
+                .await
+                .map_err(|e| ApiError(AppError::Internal(e.into())))?;
         for (work_id, title, display_url) in work_refs {
             works_json.push(serde_json::json!({
                 "reference_id": r.id,
@@ -776,21 +795,23 @@ pub async fn curator_bounty_queue(
     let healthy_below = query.healthy_below.unwrap_or(3);
     let limit = query.limit.unwrap_or(50);
 
-    let refs = lorehaven_db::media_resilience::find_curator_bounty_queue(
-        state.db(), healthy_below, limit,
-    )
-    .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    let refs =
+        lorehaven_db::media_resilience::find_curator_bounty_queue(state.db(), healthy_below, limit)
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
-    let refs_json: Vec<serde_json::Value> = refs.iter().map(|r| {
-        serde_json::json!({
-            "id": r.id,
-            "media_kind": r.media_kind,
-            "perceptual_hash": r.perceptual_hash,
-            "content_hash": r.content_hash,
-            "curator_verified": r.curator_verified,
+    let refs_json: Vec<serde_json::Value> = refs
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.id,
+                "media_kind": r.media_kind,
+                "perceptual_hash": r.perceptual_hash,
+                "content_hash": r.content_hash,
+                "curator_verified": r.curator_verified,
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(Json(serde_json::json!({
         "queue": refs_json,

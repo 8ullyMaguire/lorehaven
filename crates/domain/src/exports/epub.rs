@@ -521,7 +521,10 @@ fn chapter_xhtml(input: &EpubInput<'_>, chapter: &EpubChapter<'_>) -> String {
     // interleaved, and never inside the attribution block — attribution is
     // legal notice, not growth surface (§42.3).
     if let Some(cta) = input.cta {
-        if cta.placement.carries_on(chapter.ordinal, input.chapters.len() as u32) {
+        if cta
+            .placement
+            .carries_on(chapter.ordinal, input.chapters.len() as u32)
+        {
             out.push_str(&format!(
                 "\n<div class=\"{}\">{}</div>\n",
                 EpubCta::CLASS,
@@ -1255,7 +1258,10 @@ mod tests {
 
     #[test]
     fn cta_placement_parses_and_round_trips() {
-        assert_eq!(CtaPlacement::parse("per_chapter"), Some(CtaPlacement::PerChapter));
+        assert_eq!(
+            CtaPlacement::parse("per_chapter"),
+            Some(CtaPlacement::PerChapter)
+        );
         assert_eq!(CtaPlacement::parse("per_work"), Some(CtaPlacement::PerWork));
         assert_eq!(CtaPlacement::parse("off"), Some(CtaPlacement::Off));
         assert_eq!(CtaPlacement::parse("everywhere"), None);
@@ -1267,7 +1273,6 @@ mod tests {
         assert!(CtaPlacement::PerWork.carries_on(3, 3));
         assert!(!CtaPlacement::Off.carries_on(3, 3));
     }
-
 
     #[test]
     fn an_epub_export_opens_and_contains_every_chapter() {

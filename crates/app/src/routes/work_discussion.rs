@@ -245,8 +245,6 @@ async fn get_linked_work(
     let work = lorehaven_db::work_backlink::work_for_topic(state.db(), &id)
         .await
         .map_err(internal)?
-        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound {
-            resource: "work",
-        }))?;
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
     Ok(Json(work))
 }

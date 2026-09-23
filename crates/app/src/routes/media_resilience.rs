@@ -5,11 +5,11 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use lorehaven_db::media_resilience;
 use lorehaven_domain::media_resilience::{LinkStatus, MediaContextKind};
 use lorehaven_domain::AppError;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use lorehaven_db::media_resilience;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -59,7 +59,9 @@ pub async fn get_media_reference(
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?
     else {
-        return Err(ApiError(AppError::NotFound { resource: "media_reference".into() }));
+        return Err(ApiError(AppError::NotFound {
+            resource: "media_reference".into(),
+        }));
     };
 
     let links = media_resilience::find_availability_links_for_reference(state.db(), &reference.id)
@@ -112,9 +114,14 @@ pub async fn add_media_reference(
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
     let is_operator = level >= 5;
     let can_edit = is_operator
-        || media_resilience::can_edit_work(state.db(), &work_id, &account_id, &pseud_id.to_string())
-            .await
-            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        || media_resilience::can_edit_work(
+            state.db(),
+            &work_id,
+            &account_id,
+            &pseud_id.to_string(),
+        )
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
     if !can_edit {
         return Err(ApiError(AppError::AuthRequired));
     }
@@ -162,11 +169,14 @@ pub async fn add_media_reference(
     .await
     .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
-    Ok((StatusCode::CREATED, Json(json!({
-        "id": reference_id,
-        "link_id": link_id,
-        "status": "pending_verification"
-    }))))
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "id": reference_id,
+            "link_id": link_id,
+            "status": "pending_verification"
+        })),
+    ))
 }
 
 /// Report a broken link.
@@ -184,7 +194,9 @@ pub async fn report_broken_link(
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
     let Some(link) = links.iter().find(|l| l.id == link_id) else {
-        return Err(ApiError(AppError::NotFound { resource: "availability_link".into() }));
+        return Err(ApiError(AppError::NotFound {
+            resource: "availability_link".into(),
+        }));
     };
 
     // Mark link as degraded pending verification
@@ -226,16 +238,20 @@ pub async fn add_mirror_link(
             .map_err(|e| ApiError(AppError::Internal(e.into())))?;
         level >= 5
     };
-    if !is_operator && !media_resilience::is_active_curator(state.db(), &account_id)
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))? {
+    if !is_operator
+        && !media_resilience::is_active_curator(state.db(), &account_id)
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?
+    {
         return Err(ApiError(AppError::AuthRequired));
     }
     let Some(_reference) = media_resilience::find_media_reference_by_id(state.db(), &reference_id)
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?
     else {
-        return Err(ApiError(AppError::NotFound { resource: "media_reference".into() }));
+        return Err(ApiError(AppError::NotFound {
+            resource: "media_reference".into(),
+        }));
     };
 
     let provider: lorehaven_domain::media_resilience::LinkProvider = body
@@ -273,11 +289,14 @@ pub async fn add_mirror_link(
     .await
     .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
-    Ok((StatusCode::CREATED, Json(json!({
-        "id": link_id,
-        "status": "pending_verification",
-        "credits_awarded": 15,
-    }))))
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "id": link_id,
+            "status": "pending_verification",
+            "credits_awarded": 15,
+        })),
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -287,7 +306,16 @@ pub async fn add_mirror_link(
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/media/references/{reference_id}", get(get_media_reference))
-        .route("/media/references/{reference_id}/report-broken", post(report_broken_link))
-        .route("/works/{work_id}/media", get(get_work_media_references).post(add_media_reference))
-        .route("/media/references/{reference_id}/mirrors", post(add_mirror_link))
+        .route(
+            "/media/references/{reference_id}/report-broken",
+            post(report_broken_link),
+        )
+        .route(
+            "/works/{work_id}/media",
+            get(get_work_media_references).post(add_media_reference),
+        )
+        .route(
+            "/media/references/{reference_id}/mirrors",
+            post(add_mirror_link),
+        )
 }

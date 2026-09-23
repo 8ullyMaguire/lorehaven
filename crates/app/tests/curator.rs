@@ -122,8 +122,13 @@ async fn link_verification_quorum() {
     // First verification
     let id1 = "verify-001";
     media_resilience::record_link_verification(
-        db, id1, link_id, media_ref_id, "curator-a",
-        VerificationType::ExactMatch, 1.0,
+        db,
+        id1,
+        link_id,
+        media_ref_id,
+        "curator-a",
+        VerificationType::ExactMatch,
+        1.0,
     )
     .await
     .expect("record verification");
@@ -140,8 +145,13 @@ async fn link_verification_quorum() {
     // Second verification — quorum reached
     let id2 = "verify-002";
     media_resilience::record_link_verification(
-        db, id2, link_id, media_ref_id, "curator-b",
-        VerificationType::PerceptualMatch, 0.85,
+        db,
+        id2,
+        link_id,
+        media_ref_id,
+        "curator-b",
+        VerificationType::PerceptualMatch,
+        0.85,
     )
     .await
     .expect("record verification");
@@ -168,8 +178,13 @@ async fn curator_cannot_double_verify() {
 
     let id1 = "verify-010";
     media_resilience::record_link_verification(
-        db, id1, link_id, media_ref_id, curator_id,
-        VerificationType::ExactMatch, 1.0,
+        db,
+        id1,
+        link_id,
+        media_ref_id,
+        curator_id,
+        VerificationType::ExactMatch,
+        1.0,
     )
     .await
     .expect("first verification");
@@ -201,24 +216,29 @@ async fn standing_bounty_matching() {
     // Reference with 1 healthy link should match (below threshold of 3)
     let media_ref_id = "ref-005";
     media_resilience::insert_media_reference(
-        db, media_ref_id, "hash-bounty",
+        db,
+        media_ref_id,
+        "hash-bounty",
         lorehaven_domain::media_resilience::MediaKind::Image,
     )
     .await
     .expect("insert ref");
 
     media_resilience::insert_availability_link(
-        db, "link-bounty", media_ref_id, "https://example.com/b.png",
-        lorehaven_domain::media_resilience::LinkProvider::Tumblr, None, 50,
+        db,
+        "link-bounty",
+        media_ref_id,
+        "https://example.com/b.png",
+        lorehaven_domain::media_resilience::LinkProvider::Tumblr,
+        None,
+        50,
     )
     .await
     .expect("insert link");
 
-    let bounties = media_resilience::find_matching_standing_bounties(
-        db, media_ref_id, 1, 0, false,
-    )
-    .await
-    .expect("find bounties");
+    let bounties = media_resilience::find_matching_standing_bounties(db, media_ref_id, 1, 0, false)
+        .await
+        .expect("find bounties");
     assert_eq!(bounties.len(), 1);
     assert_eq!(bounties[0].bounty_id, "bounty-001");
     assert_eq!(bounties[0].reward, 30);

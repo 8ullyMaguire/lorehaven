@@ -13,7 +13,7 @@ use serde_json::Value;
 use lorehaven_db::federation as fed;
 use lorehaven_db::instance_theme;
 
-use crate::auth::{RequirePseud, MaybeSession};
+use crate::auth::{MaybeSession, RequirePseud};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -152,9 +152,7 @@ pub async fn set_theme_visibility(
 }
 
 /// Compute theme vector from all engagement signals: bookmarks, private_tags, reading_status.
-async fn compute_theme_from_engagement(
-    db: &lorehaven_db::Database,
-) -> anyhow::Result<Value> {
+async fn compute_theme_from_engagement(db: &lorehaven_db::Database) -> anyhow::Result<Value> {
     let mut weights: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
 
     // Tags from bookmarks (weight 3.0 each)
@@ -251,7 +249,10 @@ async fn compute_theme_from_engagement(
 // ---------------------------------------------------------------------------
 
 /// List all public instance themes (for discovery).
-pub async fn list_public_themes(State(state): State<AppState>, MaybeSession(_session): MaybeSession) -> ApiResult<Json<Value>> {
+pub async fn list_public_themes(
+    State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
+) -> ApiResult<Json<Value>> {
     let themes = instance_theme::list_public_themes(state.db())
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
@@ -334,7 +335,11 @@ pub async fn set_peer_state(
 // ---------------------------------------------------------------------------
 
 /// ActivityPub inbox — receive activities from other instances.
-pub async fn ap_inbox(State(state): State<AppState>, MaybeSession(_session): MaybeSession, body: String) -> ApiResult<Json<Value>> {
+pub async fn ap_inbox(
+    State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
+    body: String,
+) -> ApiResult<Json<Value>> {
     let activity: Value = serde_json::from_str(&body)
         .map_err(|_| ApiError(lorehaven_domain::AppError::field("body", "invalid JSON")))?;
 
@@ -342,10 +347,7 @@ pub async fn ap_inbox(State(state): State<AppState>, MaybeSession(_session): May
         .get("type")
         .and_then(|v| v.as_str())
         .unwrap_or("Unknown");
-    let actor_id = activity
-        .get("actor")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let actor_id = activity.get("actor").and_then(|v| v.as_str()).unwrap_or("");
 
     tracing::info!("AP inbox: {} from {}", activity_type, actor_id);
 
@@ -399,7 +401,10 @@ pub async fn ap_inbox(State(state): State<AppState>, MaybeSession(_session): May
 // ---------------------------------------------------------------------------
 
 /// Get local actor profile.
-pub async fn ap_actor(State(state): State<AppState>, MaybeSession(_session): MaybeSession) -> ApiResult<Json<Value>> {
+pub async fn ap_actor(
+    State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
+) -> ApiResult<Json<Value>> {
     let base = &state.config().site.base_url;
     Ok(Json(serde_json::json!({
         "@context": "https://www.w3.org/ns/activitystreams",

@@ -251,9 +251,7 @@ pub async fn contribute_to_bounty(
     .await
     .map_err(|e| match e {
         lorehaven_db::bounties::FlexibleBountyError::NotFound => {
-            ApiError(lorehaven_domain::AppError::NotFound {
-                resource: "bounty",
-            })
+            ApiError(lorehaven_domain::AppError::NotFound { resource: "bounty" })
         }
         lorehaven_db::bounties::FlexibleBountyError::NotCrowdfunded => {
             ApiError(lorehaven_domain::AppError::Validation {
@@ -277,7 +275,9 @@ pub async fn contribute_to_bounty(
             ApiError(lorehaven_domain::AppError::Internal(e.into()))
         }
     })?;
-    Ok(Json(json!({ "funded_amount": funded, "activated": activated })))
+    Ok(Json(
+        json!({ "funded_amount": funded, "activated": activated }),
+    ))
 }
 
 /// Claim a bounty.
@@ -315,6 +315,9 @@ pub fn router() -> axum::Router<AppState> {
         .route("/usage", get(get_usage))
         .route("/bounties", get(list_bounties).post(create_bounty))
         .route("/bounties/{bounty_id}/claim", post(claim_bounty))
-        .route("/bounties/{bounty_id}/contribute", post(contribute_to_bounty))
+        .route(
+            "/bounties/{bounty_id}/contribute",
+            post(contribute_to_bounty),
+        )
         .route("/subscription", get(get_subscription))
 }

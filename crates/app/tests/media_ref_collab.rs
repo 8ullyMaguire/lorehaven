@@ -3,15 +3,10 @@
 //! Works sharing media references with the user's bookmarked works.
 
 use lorehaven_db::media_resilience;
-use lorehaven_domain::ids::WorkId;
 use lorehaven_db::Backend;
+use lorehaven_domain::ids::WorkId;
 
-async fn seed_work(
-    db: &lorehaven_db::Database,
-    work_id: &WorkId,
-    title: &str,
-    owner_pseud: &str,
-) {
+async fn seed_work(db: &lorehaven_db::Database, work_id: &WorkId, title: &str, owner_pseud: &str) {
     let id = work_id.to_string();
     match db.backend() {
         Backend::Sqlite => {
@@ -138,9 +133,10 @@ async fn media_ref_collab_empty_account() {
     let tdb = test_support::TestDb::connect_with_dir("mrc-empty", &dir).await;
     let db = tdb.db();
 
-    let recs = lorehaven_db::discovery::media_reference_collaborative_recommendations(
-        db, "nobody", 10,
-    ).await.expect("recommendations");
+    let recs =
+        lorehaven_db::discovery::media_reference_collaborative_recommendations(db, "nobody", 10)
+            .await
+            .expect("recommendations");
     assert!(recs.is_empty());
 }
 
@@ -152,10 +148,24 @@ async fn media_ref_collab_finds_shared_media() {
 
     use lorehaven_db::identity::{create_account, AccountStatus};
     use lorehaven_domain::policy::AgeState;
-    let account_a = create_account(db, "a@mrc.test", AgeState::DeclaredAdult, AccountStatus::Active)
-        .await.expect("create A").to_string();
-    let account_b = create_account(db, "b@mrc.test", AgeState::DeclaredAdult, AccountStatus::Active)
-        .await.expect("create B").to_string();
+    let account_a = create_account(
+        db,
+        "a@mrc.test",
+        AgeState::DeclaredAdult,
+        AccountStatus::Active,
+    )
+    .await
+    .expect("create A")
+    .to_string();
+    let account_b = create_account(
+        db,
+        "b@mrc.test",
+        AgeState::DeclaredAdult,
+        AccountStatus::Active,
+    )
+    .await
+    .expect("create B")
+    .to_string();
 
     seed_pseud(db, "pseud-a", &account_a, "handle-a").await;
     seed_pseud(db, "pseud-b", &account_b, "handle-b").await;
@@ -180,14 +190,24 @@ async fn media_ref_collab_finds_shared_media() {
     // A bookmarks W1.
     seed_bookmark(db, "bm-1", &account_a, &work1.to_string()).await;
 
-    let recs = lorehaven_db::discovery::media_reference_collaborative_recommendations(
-        db, &account_a, 10,
-    ).await.expect("recommendations");
+    let recs =
+        lorehaven_db::discovery::media_reference_collaborative_recommendations(db, &account_a, 10)
+            .await
+            .expect("recommendations");
 
     let ids: Vec<String> = recs.iter().map(|w| w.to_string()).collect();
-    assert!(ids.contains(&work2.to_string()), "W2 should be recommended, got: {ids:?}");
-    assert!(!ids.contains(&work3.to_string()), "W3 should not be recommended, got: {ids:?}");
-    assert!(!ids.contains(&work1.to_string()), "bookmarked work should not be recommended");
+    assert!(
+        ids.contains(&work2.to_string()),
+        "W2 should be recommended, got: {ids:?}"
+    );
+    assert!(
+        !ids.contains(&work3.to_string()),
+        "W3 should not be recommended, got: {ids:?}"
+    );
+    assert!(
+        !ids.contains(&work1.to_string()),
+        "bookmarked work should not be recommended"
+    );
 }
 
 #[tokio::test]
@@ -198,10 +218,24 @@ async fn media_ref_collab_ranks_by_shared_count() {
 
     use lorehaven_db::identity::{create_account, AccountStatus};
     use lorehaven_domain::policy::AgeState;
-    let account_a = create_account(db, "a@rank.test", AgeState::DeclaredAdult, AccountStatus::Active)
-        .await.expect("create A").to_string();
-    let account_b = create_account(db, "b@rank.test", AgeState::DeclaredAdult, AccountStatus::Active)
-        .await.expect("create B").to_string();
+    let account_a = create_account(
+        db,
+        "a@rank.test",
+        AgeState::DeclaredAdult,
+        AccountStatus::Active,
+    )
+    .await
+    .expect("create A")
+    .to_string();
+    let account_b = create_account(
+        db,
+        "b@rank.test",
+        AgeState::DeclaredAdult,
+        AccountStatus::Active,
+    )
+    .await
+    .expect("create B")
+    .to_string();
 
     seed_pseud(db, "pseud-a", &account_a, "handle-a").await;
     seed_pseud(db, "pseud-b", &account_b, "handle-b").await;
@@ -227,9 +261,10 @@ async fn media_ref_collab_ranks_by_shared_count() {
 
     seed_bookmark(db, "bm-1", &account_a, &work1.to_string()).await;
 
-    let recs = lorehaven_db::discovery::media_reference_collaborative_recommendations(
-        db, &account_a, 10,
-    ).await.expect("recommendations");
+    let recs =
+        lorehaven_db::discovery::media_reference_collaborative_recommendations(db, &account_a, 10)
+            .await
+            .expect("recommendations");
 
     // W2 (2 shared refs) should rank above W3 (1 shared ref).
     assert_eq!(recs.len(), 2, "both W2 and W3 should be recommended");
@@ -245,8 +280,15 @@ async fn media_ref_collab_excludes_own_works() {
 
     use lorehaven_db::identity::{create_account, AccountStatus};
     use lorehaven_domain::policy::AgeState;
-    let account_a = create_account(db, "a@own.test", AgeState::DeclaredAdult, AccountStatus::Active)
-        .await.expect("create A").to_string();
+    let account_a = create_account(
+        db,
+        "a@own.test",
+        AgeState::DeclaredAdult,
+        AccountStatus::Active,
+    )
+    .await
+    .expect("create A")
+    .to_string();
 
     seed_pseud(db, "pseud-a", &account_a, "handle-a").await;
 
@@ -265,13 +307,17 @@ async fn media_ref_collab_excludes_own_works() {
     // A bookmarks W1.
     seed_bookmark(db, "bm-1", &account_a, &work1.to_string()).await;
 
-    let recs = lorehaven_db::discovery::media_reference_collaborative_recommendations(
-        db, &account_a, 10,
-    ).await.expect("recommendations");
+    let recs =
+        lorehaven_db::discovery::media_reference_collaborative_recommendations(db, &account_a, 10)
+            .await
+            .expect("recommendations");
 
     // W2 is owned by A → excluded even though it shares ref-1.
     let ids: Vec<String> = recs.iter().map(|w| w.to_string()).collect();
-    assert!(!ids.contains(&work2.to_string()), "own work should not be recommended: {ids:?}");
+    assert!(
+        !ids.contains(&work2.to_string()),
+        "own work should not be recommended: {ids:?}"
+    );
 }
 
 #[tokio::test]
@@ -282,8 +328,15 @@ async fn media_ref_collab_no_bookmarks() {
 
     use lorehaven_db::identity::{create_account, AccountStatus};
     use lorehaven_domain::policy::AgeState;
-    let account_a = create_account(db, "a@nb.test", AgeState::DeclaredAdult, AccountStatus::Active)
-        .await.expect("create A").to_string();
+    let account_a = create_account(
+        db,
+        "a@nb.test",
+        AgeState::DeclaredAdult,
+        AccountStatus::Active,
+    )
+    .await
+    .expect("create A")
+    .to_string();
 
     seed_pseud(db, "pseud-a", &account_a, "handle-a").await;
     let work1 = WorkId::new();
@@ -292,8 +345,9 @@ async fn media_ref_collab_no_bookmarks() {
     seed_work_media_link(db, "wmr-1", &work1, "ref-1").await;
 
     // No bookmarks for A → no recommendations.
-    let recs = lorehaven_db::discovery::media_reference_collaborative_recommendations(
-        db, &account_a, 10,
-    ).await.expect("recommendations");
+    let recs =
+        lorehaven_db::discovery::media_reference_collaborative_recommendations(db, &account_a, 10)
+            .await
+            .expect("recommendations");
     assert!(recs.is_empty());
 }

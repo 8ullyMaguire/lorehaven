@@ -79,11 +79,7 @@ pub fn validate_url(raw: &str) -> Result<(), DirectoryError> {
     let url = url::Url::parse(raw).map_err(|_| DirectoryError::new("url_not_absolute"))?;
     match url.scheme() {
         "http" | "https" => {}
-        other => {
-            return Err(DirectoryError::new(format!(
-                "url_scheme_not_http: {other}"
-            )))
-        }
+        other => return Err(DirectoryError::new(format!("url_scheme_not_http: {other}"))),
     }
     // A userinfo component (`http://user@host/`) is a classic SSRF trick.
     if !url.username().is_empty() || url.password().is_some() {
@@ -271,7 +267,9 @@ mod tests {
             "url_userinfo_refused"
         );
         assert_eq!(
-            validate_url("http://user:pass@example.com/").unwrap_err().reason,
+            validate_url("http://user:pass@example.com/")
+                .unwrap_err()
+                .reason,
             "url_userinfo_refused"
         );
     }
@@ -337,10 +335,19 @@ mod tests {
     fn vote_weight_respects_the_mode() {
         let tw = &DEFAULT_TRUST_VOTE_WEIGHTS;
         // Flat: everything weighs 1.
-        assert_eq!(vote_weight(VoteWeighting::Flat, 0, tw, 0.0, 0.75, 1.25), 1.0);
-        assert_eq!(vote_weight(VoteWeighting::Flat, 6, tw, 1.0, 0.75, 1.25), 1.0);
+        assert_eq!(
+            vote_weight(VoteWeighting::Flat, 0, tw, 0.0, 0.75, 1.25),
+            1.0
+        );
+        assert_eq!(
+            vote_weight(VoteWeighting::Flat, 6, tw, 1.0, 0.75, 1.25),
+            1.0
+        );
         // Trust only: taste is ignored.
-        assert_eq!(vote_weight(VoteWeighting::Trust, 4, tw, 1.0, 0.75, 1.25), 1.5);
+        assert_eq!(
+            vote_weight(VoteWeighting::Trust, 4, tw, 1.0, 0.75, 1.25),
+            1.5
+        );
         // Trust and taste (default): both multiply.
         let w = vote_weight(VoteWeighting::TrustAndTaste, 4, tw, 0.5, 0.75, 1.25);
         assert!((w - 1.5).abs() < 1e-9);

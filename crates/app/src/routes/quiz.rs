@@ -21,7 +21,10 @@ pub fn router() -> Router<AppState> {
         .route("/quiz/answers", post(post_quiz_answers))
         .route("/quiz/answers", get(get_my_quiz_answers))
         .route("/quiz/skip", post(skip_quiz))
-        .route("/operator/quiz-works", get(admin_list_quiz_works).post(admin_set_quiz_works))
+        .route(
+            "/operator/quiz-works",
+            get(admin_list_quiz_works).post(admin_set_quiz_works),
+        )
 }
 
 /// Query params for `GET /quiz/works`.
@@ -67,7 +70,8 @@ async fn post_quiz_answers(
         )));
     }
     let account_id = user.account_id.to_string();
-    let mut answers: Vec<(String, bool)> = Vec::with_capacity(body.picked.len() + body.rejected.len());
+    let mut answers: Vec<(String, bool)> =
+        Vec::with_capacity(body.picked.len() + body.rejected.len());
     for id in &body.picked {
         answers.push((id.clone(), true));
     }
@@ -95,7 +99,11 @@ async fn get_my_quiz_answers(
     let answers = lorehaven_db::taste_health::get_quiz_answers(state.db(), &account_id)
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
-    let picked: Vec<String> = answers.iter().filter(|(_, p)| *p).map(|(w, _)| w.clone()).collect();
+    let picked: Vec<String> = answers
+        .iter()
+        .filter(|(_, p)| *p)
+        .map(|(w, _)| w.clone())
+        .collect();
     let rejected: Vec<String> = answers
         .iter()
         .filter(|(_, p)| !*p)

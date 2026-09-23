@@ -751,8 +751,7 @@ pub async fn total_platform_revenue(db: &Database) -> Result<i64, sqlx::Error> {
 
 /// Total pending payouts (sum of amount_minor across payouts not yet processed).
 pub async fn pending_payout_total(db: &Database) -> Result<i64, sqlx::Error> {
-    let sql =
-        "SELECT COALESCE(SUM(amount_minor), 0) FROM payouts WHERE status = 'initiated'";
+    let sql = "SELECT COALESCE(SUM(amount_minor), 0) FROM payouts WHERE status = 'initiated'";
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query_scalar(sql)
@@ -827,38 +826,52 @@ pub async fn set_ai_declaration(
             sqlx::query(
                 "INSERT INTO work_ai_declarations (work_id, declaration, declared_at)
                  VALUES (?, ?, ?)
-                 ON CONFLICT(work_id) DO UPDATE SET declaration = ?, revised_at = ?"
+                 ON CONFLICT(work_id) DO UPDATE SET declaration = ?, revised_at = ?",
             )
-            .bind(work_id).bind(declaration).bind(&now)
-            .bind(declaration).bind(&now)
-            .execute(db.sqlite_pool().expect("sqlite")).await?;
+            .bind(work_id)
+            .bind(declaration)
+            .bind(&now)
+            .bind(declaration)
+            .bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
         }
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO work_ai_declarations (work_id, declaration, declared_at)
                  VALUES ($1::uuid, $2, $3)
-                 ON CONFLICT(work_id) DO UPDATE SET declaration = $2, revised_at = $3"
+                 ON CONFLICT(work_id) DO UPDATE SET declaration = $2, revised_at = $3",
             )
-            .bind(work_id).bind(declaration).bind(&now)
-            .execute(db.postgres_pool().expect("postgres")).await?;
+            .bind(work_id)
+            .bind(declaration)
+            .bind(&now)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?;
         }
     }
     Ok(())
 }
 
 /// Get the AI declaration for a work (if any).
-pub async fn get_ai_declaration(db: &Database, work_id: &str) -> Result<Option<String>, sqlx::Error> {
+pub async fn get_ai_declaration(
+    db: &Database,
+    work_id: &str,
+) -> Result<Option<String>, sqlx::Error> {
     let sql = "SELECT declaration FROM work_ai_declarations WHERE work_id = ?";
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query_scalar(sql)
                 .bind(work_id)
-                .fetch_optional(db.sqlite_pool().expect("sqlite")).await
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await
         }
         Backend::Postgres => {
-            sqlx::query_scalar("SELECT declaration FROM work_ai_declarations WHERE work_id = $1::uuid")
-                .bind(work_id)
-                .fetch_optional(db.postgres_pool().expect("postgres")).await
+            sqlx::query_scalar(
+                "SELECT declaration FROM work_ai_declarations WHERE work_id = $1::uuid",
+            )
+            .bind(work_id)
+            .fetch_optional(db.postgres_pool().expect("postgres"))
+            .await
         }
     }
 }
@@ -928,13 +941,21 @@ pub async fn record_pool_b_distribution(
                   currency, quality_score_bp, attributed_reading_time_seconds,
                   ai_multiplier_bp, idempotency_key, created_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(idempotency_key) DO NOTHING"
+                 ON CONFLICT(idempotency_key) DO NOTHING",
             )
-            .bind(&id).bind(period_start).bind(period_end)
-            .bind(author_account_id).bind(amount_minor).bind(currency)
-            .bind(quality_score_bp).bind(attributed_reading_time_seconds)
-            .bind(ai_multiplier_bp).bind(idempotency_key).bind(&now)
-            .execute(db.sqlite_pool().expect("sqlite")).await?;
+            .bind(&id)
+            .bind(period_start)
+            .bind(period_end)
+            .bind(author_account_id)
+            .bind(amount_minor)
+            .bind(currency)
+            .bind(quality_score_bp)
+            .bind(attributed_reading_time_seconds)
+            .bind(ai_multiplier_bp)
+            .bind(idempotency_key)
+            .bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
         }
         Backend::Postgres => {
             sqlx::query(
@@ -943,13 +964,21 @@ pub async fn record_pool_b_distribution(
                   currency, quality_score_bp, attributed_reading_time_seconds,
                   ai_multiplier_bp, idempotency_key, created_at)
                  VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7, $8, $9, $10, $11)
-                 ON CONFLICT (idempotency_key) DO NOTHING"
+                 ON CONFLICT (idempotency_key) DO NOTHING",
             )
-            .bind(&id).bind(period_start).bind(period_end)
-            .bind(author_account_id).bind(amount_minor).bind(currency)
-            .bind(quality_score_bp).bind(attributed_reading_time_seconds)
-            .bind(ai_multiplier_bp).bind(idempotency_key).bind(&now)
-            .execute(db.postgres_pool().expect("postgres")).await?;
+            .bind(&id)
+            .bind(period_start)
+            .bind(period_end)
+            .bind(author_account_id)
+            .bind(amount_minor)
+            .bind(currency)
+            .bind(quality_score_bp)
+            .bind(attributed_reading_time_seconds)
+            .bind(ai_multiplier_bp)
+            .bind(idempotency_key)
+            .bind(&now)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?;
         }
     }
     Ok(id)
@@ -974,13 +1003,17 @@ pub async fn author_pool_a_in_period(
     let rows = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as::<_, (String, i64)>(&sql)
-                .bind(start).bind(end)
-                .fetch_all(db.sqlite_pool().expect("sqlite")).await?
+                .bind(start)
+                .bind(end)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
         }
         Backend::Postgres => {
             sqlx::query_as::<_, (String, i64)>(&sql)
-                .bind(start).bind(end)
-                .fetch_all(db.postgres_pool().expect("postgres")).await?
+                .bind(start)
+                .bind(end)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
         }
     };
     Ok(rows)
@@ -1007,13 +1040,17 @@ pub async fn author_reading_time_in_period(
     let rows = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as::<_, (String, i64)>(&sql)
-                .bind(start).bind(end)
-                .fetch_all(db.sqlite_pool().expect("sqlite")).await?
+                .bind(start)
+                .bind(end)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
         }
         Backend::Postgres => {
             sqlx::query_as::<_, (String, i64)>(&sql)
-                .bind(start).bind(end)
-                .fetch_all(db.postgres_pool().expect("postgres")).await?
+                .bind(start)
+                .bind(end)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
         }
     };
     Ok(rows)
@@ -1055,15 +1092,23 @@ pub async fn upsert_period_summary(
                    authors_in_pool_b = excluded.authors_in_pool_b,
                    authors_capped = excluded.authors_capped,
                    processor_fee_min_minor = excluded.processor_fee_min_minor,
-                   processor_fee_max_minor = excluded.processor_fee_max_minor"
+                   processor_fee_max_minor = excluded.processor_fee_max_minor",
             )
-            .bind(&id).bind(period_start).bind(period_end)
-            .bind(pool_a_total_minor).bind(pool_b_total_minor)
-            .bind(active_earner_median_minor).bind(cap_value_minor)
-            .bind(authors_in_pool_a).bind(authors_in_pool_b)
-            .bind(authors_capped).bind(processor_fee_min_minor)
-            .bind(processor_fee_max_minor).bind(&now)
-            .execute(db.sqlite_pool().expect("sqlite")).await?;
+            .bind(&id)
+            .bind(period_start)
+            .bind(period_end)
+            .bind(pool_a_total_minor)
+            .bind(pool_b_total_minor)
+            .bind(active_earner_median_minor)
+            .bind(cap_value_minor)
+            .bind(authors_in_pool_a)
+            .bind(authors_in_pool_b)
+            .bind(authors_capped)
+            .bind(processor_fee_min_minor)
+            .bind(processor_fee_max_minor)
+            .bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?;
         }
         Backend::Postgres => {
             sqlx::query(
@@ -1082,15 +1127,23 @@ pub async fn upsert_period_summary(
                    authors_in_pool_b = excluded.authors_in_pool_b,
                    authors_capped = excluded.authors_capped,
                    processor_fee_min_minor = excluded.processor_fee_min_minor,
-                   processor_fee_max_minor = excluded.processor_fee_max_minor"
+                   processor_fee_max_minor = excluded.processor_fee_max_minor",
             )
-            .bind(&id).bind(period_start).bind(period_end)
-            .bind(pool_a_total_minor).bind(pool_b_total_minor)
-            .bind(active_earner_median_minor).bind(cap_value_minor)
-            .bind(authors_in_pool_a).bind(authors_in_pool_b)
-            .bind(authors_capped).bind(processor_fee_min_minor)
-            .bind(processor_fee_max_minor).bind(&now)
-            .execute(db.postgres_pool().expect("postgres")).await?;
+            .bind(&id)
+            .bind(period_start)
+            .bind(period_end)
+            .bind(pool_a_total_minor)
+            .bind(pool_b_total_minor)
+            .bind(active_earner_median_minor)
+            .bind(cap_value_minor)
+            .bind(authors_in_pool_a)
+            .bind(authors_in_pool_b)
+            .bind(authors_capped)
+            .bind(processor_fee_min_minor)
+            .bind(processor_fee_max_minor)
+            .bind(&now)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?;
         }
     }
     Ok(id)

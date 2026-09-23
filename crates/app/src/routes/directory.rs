@@ -24,7 +24,10 @@ pub fn router() -> Router<AppState> {
         .route("/directory/lists", get(list_lists).post(create_list))
         .route("/directory/lists/{slug}", get(get_list))
         .route("/directory/entries", get(list_entries).post(submit_entry))
-        .route("/directory/entries/{id}", get(get_entry).delete(remove_entry))
+        .route(
+            "/directory/entries/{id}",
+            get(get_entry).delete(remove_entry),
+        )
         .route("/directory/entries/{id}/approve", post(approve_entry))
         .route("/directory/entries/{id}/vote", post(vote))
         .route("/directory/categories", get(categories))
@@ -43,10 +46,20 @@ async fn create_list(
     let slug = body["slug"].as_str().unwrap_or("").trim().to_lowercase();
     let title = body["title"].as_str().unwrap_or("").trim().to_owned();
     let description = body["description"].as_str().unwrap_or("").trim().to_owned();
-    let kind = body["kind"].as_str().unwrap_or("external").trim().to_owned();
+    let kind = body["kind"]
+        .as_str()
+        .unwrap_or("external")
+        .trim()
+        .to_owned();
 
-    if slug.is_empty() || !slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
-        return Err(bad_request("slug must be lowercase letters, digits and dashes"));
+    if slug.is_empty()
+        || !slug
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err(bad_request(
+            "slug must be lowercase letters, digits and dashes",
+        ));
     }
     domain::validate_title(&title).map_err(|e| bad_request(&e.reason))?;
     domain::validate_description(&description).map_err(|e| bad_request(&e.reason))?;
@@ -54,22 +67,34 @@ async fn create_list(
         return Err(bad_request("kind must be external or internal"));
     }
 
-    if db::list_by_slug(state.db(), &slug).await.map_err(internal)?.is_some() {
+    if db::list_by_slug(state.db(), &slug)
+        .await
+        .map_err(internal)?
+        .is_some()
+    {
         return Err(bad_request("slug already exists"));
     }
 
     let id = uuid::Uuid::new_v4().to_string();
     let now = lorehaven_db::sessions::now();
     db::create_list(
-        state.db(), &id, &slug, &title, &description, &kind,
-        true, 0,
+        state.db(),
+        &id,
+        &slug,
+        &title,
+        &description,
+        &kind,
+        true,
+        0,
         &session.account_id.to_string(),
         &now,
     )
     .await
     .map_err(internal)?;
 
-    let list = db::list_by_slug(state.db(), &slug).await.map_err(internal)?;
+    let list = db::list_by_slug(state.db(), &slug)
+        .await
+        .map_err(internal)?;
     Ok((StatusCode::CREATED, Json(json!({ "list": list }))))
 }
 
@@ -123,7 +148,9 @@ async fn list_entries(
     Query(q): Query<EntryQuery>,
 ) -> ApiResult<Json<Value>> {
     let viewer = session.as_ref().map(|s| s.account_id.to_string());
-    let is_operator = is_operator_check(&state, viewer.as_deref()).await.map_err(internal)?;
+    let is_operator = is_operator_check(&state, viewer.as_deref())
+        .await
+        .map_err(internal)?;
     let sort = match q.sort.as_deref() {
         Some("new") => db::DirectorySort::New,
         _ => db::DirectorySort::Top,
@@ -131,7 +158,10 @@ async fn list_entries(
 
     // Resolve slug -> list id.
     let list_id = match &q.list {
-        Some(slug) => db::list_by_slug(state.db(), slug).await.map_err(internal)?.map(|l| l.id),
+        Some(slug) => db::list_by_slug(state.db(), slug)
+            .await
+            .map_err(internal)?
+            .map(|l| l.id),
         None => None,
     };
 
@@ -145,7 +175,9 @@ async fn list_entries(
         viewer,
         is_operator,
     };
-    let entries = db::list_entries(state.db(), &filter).await.map_err(internal)?;
+    let entries = db::list_entries(state.db(), &filter)
+        .await
+        .map_err(internal)?;
     Ok(Json(json!({ "items": entries })))
 }
 
@@ -183,17 +215,31 @@ async fn submit_entry(
     let id = uuid::Uuid::new_v4().to_string();
     let now = lorehaven_db::sessions::now();
     db::submit_entry(
-        state.db(), &id, &list.id, &body.kind, &body.category, &body.title,
-        &url, &description, body.ref_id.as_deref(), &tags,
-        &session.account_id.to_string(), &now,
+        state.db(),
+        &id,
+        &list.id,
+        &body.kind,
+        &body.category,
+        &body.title,
+        &url,
+        &description,
+        body.ref_id.as_deref(),
+        &tags,
+        &session.account_id.to_string(),
+        &now,
     )
     .await
     .map_err(internal)?;
 
-    let entry = db::get_entry(state.db(), &id, Some(&session.account_id.to_string()), false)
-        .await
-        .map_err(internal)?
-        .expect("just inserted");
+    let entry = db::get_entry(
+        state.db(),
+        &id,
+        Some(&session.account_id.to_string()),
+        false,
+    )
+    .await
+    .map_err(internal)?
+    .expect("just inserted");
     // tags_json is storage; the API speaks a parsed array.
     let mut view = serde_json::to_value(&entry).expect("serialise entry");
     view["tags"] = json!(entry.tags());
@@ -206,7 +252,9 @@ async fn get_entry(
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
     let viewer = session.as_ref().map(|s| s.account_id.to_string());
-    let is_operator = is_operator_check(&state, viewer.as_deref()).await.map_err(internal)?;
+    let is_operator = is_operator_check(&state, viewer.as_deref())
+        .await
+        .map_err(internal)?;
     let entry = db::get_entry(state.db(), &id, viewer.as_deref(), is_operator)
         .await
         .map_err(internal)?
@@ -222,7 +270,9 @@ async fn remove_entry(
     require_operator(&state, &session).await?;
     let removed = db::remove_entry(state.db(), &id).await.map_err(internal)?;
     if !removed {
-        return Err(ApiError(lorehaven_domain::AppError::NotFound { resource: "entry" }));
+        return Err(ApiError(lorehaven_domain::AppError::NotFound {
+            resource: "entry",
+        }));
     }
     Ok(Json(json!({ "removed": true })))
 }
@@ -238,7 +288,9 @@ async fn approve_entry(
         .await
         .map_err(internal)?;
     if !approved {
-        return Err(ApiError(lorehaven_domain::AppError::NotFound { resource: "entry" }));
+        return Err(ApiError(lorehaven_domain::AppError::NotFound {
+            resource: "entry",
+        }));
     }
     let entry = db::get_entry(state.db(), &id, None, true)
         .await
@@ -264,23 +316,30 @@ async fn vote(
         return Err(bad_request("vote value must be 1 or -1"));
     }
     // Only approved entries are votable (spec §39.4: votes rank the list).
-    let entry = db::get_entry(state.db(), &id, Some(&session.account_id.to_string()), false)
-        .await
-        .map_err(internal)?
-        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "entry" }))?;
+    let entry = db::get_entry(
+        state.db(),
+        &id,
+        Some(&session.account_id.to_string()),
+        false,
+    )
+    .await
+    .map_err(internal)?
+    .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "entry" }))?;
     if entry.approved_by.is_none() {
         return Err(bad_request("pending entries cannot be voted on"));
     }
 
-    let trust_level = lorehaven_db::governance::trust_for(state.db(), &session.account_id.to_string())
-        .await
-        .map_err(|e| internal(e.into()))? as u8;
-    let affinity = lorehaven_db::discovery::taste_profile_for(state.db(), &session.account_id.to_string())
-        .await
-        .map_err(internal)?
-        .and_then(|p| p.signals.get("affinity").and_then(|v| v.as_f64()))
-        .unwrap_or(0.0)
-        .clamp(-1.0, 1.0);
+    let trust_level =
+        lorehaven_db::governance::trust_for(state.db(), &session.account_id.to_string())
+            .await
+            .map_err(|e| internal(e.into()))? as u8;
+    let affinity =
+        lorehaven_db::discovery::taste_profile_for(state.db(), &session.account_id.to_string())
+            .await
+            .map_err(internal)?
+            .and_then(|p| p.signals.get("affinity").and_then(|v| v.as_f64()))
+            .unwrap_or(0.0)
+            .clamp(-1.0, 1.0);
     let cfg = &state.config().directory;
     let weight = domain::vote_weight(
         cfg.weighting_mode(),
@@ -293,7 +352,12 @@ async fn vote(
 
     let now = lorehaven_db::sessions::now();
     let (score, live) = db::set_vote(
-        state.db(), &id, &session.account_id.to_string(), body.value, weight, &now,
+        state.db(),
+        &id,
+        &session.account_id.to_string(),
+        body.value,
+        weight,
+        &now,
     )
     .await
     .map_err(internal)?;
@@ -338,7 +402,10 @@ async fn moderation_queue(
 
 // --- Helpers ---------------------------------------------------------------
 
-async fn require_operator(state: &AppState, session: &crate::auth::SessionUser) -> Result<(), ApiError> {
+async fn require_operator(
+    state: &AppState,
+    session: &crate::auth::SessionUser,
+) -> Result<(), ApiError> {
     let level = lorehaven_db::governance::trust_for(state.db(), &session.account_id.to_string())
         .await
         .map_err(|e| internal(e.into()))? as u8;
@@ -348,9 +415,15 @@ async fn require_operator(state: &AppState, session: &crate::auth::SessionUser) 
     Ok(())
 }
 
-async fn is_operator_check(state: &AppState, account_id: Option<&str>) -> Result<bool, anyhow::Error> {
+async fn is_operator_check(
+    state: &AppState,
+    account_id: Option<&str>,
+) -> Result<bool, anyhow::Error> {
     match account_id {
-        Some(id) => Ok(lorehaven_db::governance::trust_for(state.db(), id).await.map_err(|e| anyhow::Error::from(e))? >= 5),
+        Some(id) => Ok(lorehaven_db::governance::trust_for(state.db(), id)
+            .await
+            .map_err(|e| anyhow::Error::from(e))?
+            >= 5),
         None => Ok(false),
     }
 }

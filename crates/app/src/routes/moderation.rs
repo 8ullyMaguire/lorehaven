@@ -55,8 +55,12 @@ async fn post_sanction(
     if !moderator_check(&state, &pseud_id.to_string()).await? {
         return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
-    let level = SanctionLevel::from_str(&body.level)
-        .ok_or_else(|| ApiError(lorehaven_domain::AppError::field("level", "unknown sanction level")))?;
+    let level = SanctionLevel::from_str(&body.level).ok_or_else(|| {
+        ApiError(lorehaven_domain::AppError::field(
+            "level",
+            "unknown sanction level",
+        ))
+    })?;
     let id = moderation::apply_sanction(
         state.db(),
         &body.account,
@@ -82,13 +86,10 @@ async fn get_sanction_check(
     MaybeSession(_session): MaybeSession,
     axum::extract::Query(query): axum::extract::Query<SanctionCheckQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let sanction = moderation::check_sanction(
-        state.db(),
-        &query.account,
-        query.category_id.as_deref(),
-    )
-    .await
-    .map_err(|e| internal(e.into()))?;
+    let sanction =
+        moderation::check_sanction(state.db(), &query.account, query.category_id.as_deref())
+            .await
+            .map_err(|e| internal(e.into()))?;
     Ok(Json(match sanction {
         Some(s) => json!({
             "active": true,
@@ -140,8 +141,13 @@ async fn put_federation_scope(
     Path(id): Path<String>,
     Json(body): Json<FederationScopeBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let scope = lorehaven_domain::moderation::FederationScope::from_str(&body.scope)
-        .ok_or_else(|| ApiError(lorehaven_domain::AppError::field("scope", "must be 'public', 'local', or 'unlisted'")))?;
+    let scope =
+        lorehaven_domain::moderation::FederationScope::from_str(&body.scope).ok_or_else(|| {
+            ApiError(lorehaven_domain::AppError::field(
+                "scope",
+                "must be 'public', 'local', or 'unlisted'",
+            ))
+        })?;
     let topic = lorehaven_db::community::topic_by_id(state.db(), &id)
         .await
         .map_err(|e| internal(e.into()))?
@@ -179,7 +185,10 @@ async fn post_feature(
 // Community health
 // ---------------------------------------------------------------------------
 
-async fn get_health(State(_state): State<AppState>, MaybeSession(_session): MaybeSession) -> ApiResult<Json<serde_json::Value>> {
+async fn get_health(
+    State(_state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
+) -> ApiResult<Json<serde_json::Value>> {
     Ok(Json(json!({ "status": "ok" })))
 }
 

@@ -1978,4 +1978,3 @@ fn shelf_import_input(
         provenance_json: item.provenance_json.clone(),
     }
 }
-

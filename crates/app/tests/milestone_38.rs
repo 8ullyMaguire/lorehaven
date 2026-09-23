@@ -11,20 +11,18 @@ use lorehaven_app::config::Config;
 
 #[test]
 fn retention_zero_is_a_valid_config() {
-    let parsed = Config::parse_from_str(
-        "environment = \"development\"\n[exports]\nretention_days = 0\n",
-    )
-    .expect("parse retention_days=0");
+    let parsed =
+        Config::parse_from_str("environment = \"development\"\n[exports]\nretention_days = 0\n")
+            .expect("parse retention_days=0");
     assert_eq!(parsed.exports.retention_days, 0);
 }
 
 // ---------------------------------------------------------------------------
 #[test]
 fn revision_ttl_respected() {
-    let parsed = Config::parse_from_str(
-        "environment = \"development\"\n[revisions]\nttl_secs = 3600\n",
-    )
-    .expect("parse revisions.ttl_secs");
+    let parsed =
+        Config::parse_from_str("environment = \"development\"\n[revisions]\nttl_secs = 3600\n")
+            .expect("parse revisions.ttl_secs");
     assert_eq!(parsed.revisions.ttl_secs, 3600);
 }
 
@@ -41,10 +39,9 @@ fn terminal_job_retention_respected() {
 // ---------------------------------------------------------------------------
 #[test]
 fn bulk_export_max_items_enforced() {
-    let parsed = Config::parse_from_str(
-        "environment = \"development\"\n[bulk_export]\nmax_items = 100\n",
-    )
-    .expect("parse bulk_export.max_items");
+    let parsed =
+        Config::parse_from_str("environment = \"development\"\n[bulk_export]\nmax_items = 100\n")
+            .expect("parse bulk_export.max_items");
     assert_eq!(parsed.bulk_export.max_items, 100);
 }
 
@@ -61,9 +58,8 @@ fn bulk_export_max_bytes_enforced() {
 // ---------------------------------------------------------------------------
 #[test]
 fn malformed_config_rejected() {
-    let result = Config::parse_from_str(
-        "environment = \"development\"\n[exports]\nretention_days = -1\n",
-    );
+    let result =
+        Config::parse_from_str("environment = \"development\"\n[exports]\nretention_days = -1\n");
     assert!(result.is_err(), "negative retention_days should fail");
     let err = result.unwrap_err();
     assert!(
@@ -75,9 +71,8 @@ fn malformed_config_rejected() {
 // ---------------------------------------------------------------------------
 #[test]
 fn zero_rejected_for_grant_ttl() {
-    let result = Config::parse_from_str(
-        "environment = \"development\"\n[exports]\ngrant_ttl_secs = 0\n",
-    );
+    let result =
+        Config::parse_from_str("environment = \"development\"\n[exports]\ngrant_ttl_secs = 0\n");
     assert!(result.is_err(), "zero grant_ttl_secs should fail");
     let err = result.unwrap_err();
     assert!(
@@ -112,10 +107,9 @@ fn all_config_values_have_defaults() {
 // ---------------------------------------------------------------------------
 #[test]
 fn custom_ttl_overrides_default() {
-    let parsed = Config::parse_from_str(
-        "environment = \"development\"\n[revisions]\nttl_secs = 3600\n",
-    )
-    .expect("parse custom ttl");
+    let parsed =
+        Config::parse_from_str("environment = \"development\"\n[revisions]\nttl_secs = 3600\n")
+            .expect("parse custom ttl");
 
     assert_eq!(parsed.revisions.ttl_secs, 3600);
 }
@@ -146,10 +140,9 @@ fn library_update_retention_configurable() {
 // ---------------------------------------------------------------------------
 #[test]
 fn library_check_batch_configurable() {
-    let parsed = Config::parse_from_str(
-        "environment = \"development\"\n[library]\ncheck_batch = 25\n",
-    )
-    .expect("parse library config");
+    let parsed =
+        Config::parse_from_str("environment = \"development\"\n[library]\ncheck_batch = 25\n")
+            .expect("parse library config");
 
     assert_eq!(parsed.library.check_batch, 25);
 }

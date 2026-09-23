@@ -702,7 +702,14 @@ mod tests {
 
     #[test]
     fn classify_rejected_placeholder_title() {
-        for title in &["untitled", "no title", "unknown", "title tbd", "chapter 1", "work"] {
+        for title in &[
+            "untitled",
+            "no title",
+            "unknown",
+            "title tbd",
+            "chapter 1",
+            "work",
+        ] {
             let work = ImportedWork::new(*title, "Author")
                 .with_chapter(ChapterIdentity::new("1", 1, "Ch").with_word_count(100));
             assert_eq!(
@@ -730,8 +737,8 @@ mod tests {
 
     #[test]
     fn classify_held_zero_word_count() {
-        let work = ImportedWork::new("Title", "Author")
-            .with_chapter(ChapterIdentity::new("1", 1, "Ch"));
+        let work =
+            ImportedWork::new("Title", "Author").with_chapter(ChapterIdentity::new("1", 1, "Ch"));
         assert_eq!(
             work.classify_quality(),
             ImportQuality::Held {

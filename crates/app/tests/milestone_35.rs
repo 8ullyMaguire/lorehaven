@@ -216,10 +216,14 @@ async fn graduated_response_ladder_roundtrip() {
         "Too many rapid posts",
         &alice_account,
         None,
-    ).await.expect("apply_sanction");
+    )
+    .await
+    .expect("apply_sanction");
 
-    let sanction = lorehaven_db::moderation::check_sanction(harness.tdb.db(), &target_account, None)
-        .await.expect("check_sanction");
+    let sanction =
+        lorehaven_db::moderation::check_sanction(harness.tdb.db(), &target_account, None)
+            .await
+            .expect("check_sanction");
     assert!(sanction.is_some());
     let s = sanction.expect("sanction");
     assert_eq!(s.level, "post_throttle");
@@ -234,10 +238,13 @@ async fn slow_mode_roundtrip() {
     let topic_id = create_topic(&mut client, "general", "Test Topic").await;
 
     lorehaven_db::moderation::set_slow_mode(harness.tdb.db(), &topic_id, 60)
-        .await.expect("set_slow_mode");
+        .await
+        .expect("set_slow_mode");
 
     let t = lorehaven_db::community::topic_by_id(harness.tdb.db(), &topic_id)
-        .await.expect("topic").expect("topic exists");
+        .await
+        .expect("topic")
+        .expect("topic exists");
     assert_eq!(t.mode, "plain");
 }
 
@@ -250,10 +257,13 @@ async fn federation_scope_roundtrip() {
     let topic_id = create_topic(&mut client, "general", "Test Topic").await;
 
     lorehaven_db::moderation::set_federation_scope(harness.tdb.db(), &topic_id, "local")
-        .await.expect("set_federation_scope");
+        .await
+        .expect("set_federation_scope");
 
     let t = lorehaven_db::community::topic_by_id(harness.tdb.db(), &topic_id)
-        .await.expect("topic").expect("topic exists");
+        .await
+        .expect("topic")
+        .expect("topic exists");
     assert_eq!(t.mode, "plain");
 }
 
@@ -265,23 +275,29 @@ async fn featured_post_roundtrip() {
 
     let topic_id = create_topic(&mut client, "general", "Test Topic").await;
 
-    let post_id = lorehaven_db::community::create_post(harness.tdb.db(), &topic_id, &pseud, "Hello")
-        .await.expect("create_post");
+    let post_id =
+        lorehaven_db::community::create_post(harness.tdb.db(), &topic_id, &pseud, "Hello")
+            .await
+            .expect("create_post");
 
     lorehaven_db::moderation::feature_post(harness.tdb.db(), &post_id, &account_id)
-        .await.expect("feature_post");
+        .await
+        .expect("feature_post");
 }
 
 #[tokio::test]
 async fn search_miss_roundtrip() {
     let harness = Harness::new("search-miss").await;
     lorehaven_db::moderation::record_search_miss(harness.tdb.db(), "some-query-hash", "some query")
-        .await.expect("record_search_miss");
+        .await
+        .expect("record_search_miss");
 
-    let row: Option<(String, i64)> = sqlx::query_as("SELECT query_text, count FROM forum_search_misses WHERE query_text = ?")
-        .bind("some query")
-        .fetch_optional(harness.tdb.db().sqlite_pool().expect("sqlite"))
-        .await.expect("fetch_optional");
+    let row: Option<(String, i64)> =
+        sqlx::query_as("SELECT query_text, count FROM forum_search_misses WHERE query_text = ?")
+            .bind("some query")
+            .fetch_optional(harness.tdb.db().sqlite_pool().expect("sqlite"))
+            .await
+            .expect("fetch_optional");
 
     assert!(row.is_some());
     let (query, count) = row.expect("row");

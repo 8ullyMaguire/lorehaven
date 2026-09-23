@@ -49,7 +49,10 @@ pub fn router() -> Router<AppState> {
         )
         .route("/forum/posts/{id}/votes", get(get_post_votes))
         // The author's opt-in to revealing who voted (spec §35.2 tiers).
-        .route("/forum/posts/{id}/vote-visibility", put(put_vote_visibility))
+        .route(
+            "/forum/posts/{id}/vote-visibility",
+            put(put_vote_visibility),
+        )
         // Meta-moderation: a TL4+ verdict on someone's vote.
         .route("/forum/votes/{id}/meta", post(post_meta_vote))
         // The taxonomy is data, so it is readable (spec §35.2).
@@ -115,11 +118,7 @@ async fn get_post_votes(
     let post = lorehaven_db::typed_votes::post_context(state.db(), &id)
         .await
         .map_err(internal)?
-        .ok_or_else(|| {
-            ApiError(lorehaven_domain::AppError::NotFound {
-                resource: "post",
-            })
-        })?;
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "post" }))?;
 
     let counts = lorehaven_db::typed_votes::vote_counts(state.db(), &id)
         .await
@@ -208,18 +207,15 @@ async fn cast_vote(
     let post = lorehaven_db::typed_votes::post_context(state.db(), &id)
         .await
         .map_err(internal)?
-        .ok_or_else(|| {
-            ApiError(lorehaven_domain::AppError::NotFound {
-                resource: "post",
-            })
-        })?;
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "post" }))?;
 
     // The taxonomy is the category's: a Critique category that configures
     // `constructive | harsh_but_fair | needs_sources` refuses `insightful`
     // without any code change (spec §35.2).
-    let taxonomy = lorehaven_db::typed_votes::vote_types_for_category(state.db(), &post.category_id)
-        .await
-        .map_err(internal)?;
+    let taxonomy =
+        lorehaven_db::typed_votes::vote_types_for_category(state.db(), &post.category_id)
+            .await
+            .map_err(internal)?;
     let vote_type = find_vote_type(&taxonomy, &body.vote_type)
         .cloned()
         .ok_or_else(|| {
@@ -264,16 +260,9 @@ async fn cast_vote(
 
     let now = OffsetDateTime::now_utc();
     let at = lorehaven_db::identity::format_rfc3339(now);
-    lorehaven_db::typed_votes::upsert_vote(
-        state.db(),
-        &id,
-        &pseud,
-        &vote_type.id,
-        weight_bp,
-        &at,
-    )
-    .await
-    .map_err(internal)?;
+    lorehaven_db::typed_votes::upsert_vote(state.db(), &id, &pseud, &vote_type.id, weight_bp, &at)
+        .await
+        .map_err(internal)?;
 
     // Karma is the receiver's: swap this pseud's old contribution for the new
     // one. A change is a delta, not an addition, so repeated changes cannot
@@ -293,7 +282,11 @@ async fn cast_vote(
     }
 
     let spent_after = budget.spent + additional;
-    let outcome = if existing.is_some() { "changed" } else { "cast" };
+    let outcome = if existing.is_some() {
+        "changed"
+    } else {
+        "cast"
+    };
     Ok(Json(json!({
         "outcome": outcome,
         "vote_type": vote_type.id,
@@ -339,7 +332,6 @@ async fn retract_vote(
     })))
 }
 
-
 /// The post author's opt-in to revealing who voted (spec §35.2 tiers).
 #[derive(Debug, Deserialize)]
 struct VisibilityBody {
@@ -355,11 +347,7 @@ async fn put_vote_visibility(
     let post = lorehaven_db::typed_votes::post_context(state.db(), &id)
         .await
         .map_err(internal)?
-        .ok_or_else(|| {
-            ApiError(lorehaven_domain::AppError::NotFound {
-                resource: "post",
-            })
-        })?;
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "post" }))?;
 
     // Only the post's author may open or close their own vote record. Anyone
     // else gets the same 404 a missing post gets (spec §3.3).
@@ -416,15 +404,9 @@ async fn post_meta_vote(
     let vote = lorehaven_db::typed_votes::vote_by_id(state.db(), &id)
         .await
         .map_err(internal)?
-        .ok_or_else(|| {
-            ApiError(lorehaven_domain::AppError::NotFound {
-                resource: "vote",
-            })
-        })?;
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "vote" }))?;
     if vote.pseud == steward {
-        return Err(refuse(
-            "You cannot meta-moderate your own vote.".to_owned(),
-        ));
+        return Err(refuse("You cannot meta-moderate your own vote.".to_owned()));
     }
 
     let forum = &state.config().forum;
@@ -478,7 +460,6 @@ async fn post_meta_vote(
     })))
 }
 
-
 /// The caller's rolling vote allowance, and when it starts filling again.
 async fn get_vote_budget(
     State(state): State<AppState>,
@@ -490,9 +471,8 @@ async fn get_vote_budget(
         .await
         .map_err(internal_sql)?;
     let now = OffsetDateTime::now_utc();
-    let start = lorehaven_db::identity::format_rfc3339(
-        lorehaven_domain::typed_votes::window_start(now),
-    );
+    let start =
+        lorehaven_db::identity::format_rfc3339(lorehaven_domain::typed_votes::window_start(now));
     let oldest = lorehaven_db::typed_votes::oldest_charge(state.db(), &account, &start)
         .await
         .map_err(internal)?;
@@ -574,4 +554,3 @@ fn karma_json(summary: lorehaven_db::typed_votes::KarmaSummary) -> Value {
         "updated_at": if summary.updated_at.is_empty() { Value::Null } else { json!(summary.updated_at) },
     })
 }
-

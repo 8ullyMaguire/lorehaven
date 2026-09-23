@@ -90,10 +90,7 @@ pub async fn add_schedule_section(
 }
 
 /// Get a topic's schedule sections, ordered by position (spec §35.3).
-pub async fn get_schedule(
-    db: &Database,
-    topic_id: &str,
-) -> Result<Vec<serde_json::Value>> {
+pub async fn get_schedule(db: &Database, topic_id: &str) -> Result<Vec<serde_json::Value>> {
     let rows = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as::<_, (i64, String, i64, i64, String)>(
@@ -205,10 +202,7 @@ pub async fn approve_wiki_pin(
 }
 
 /// Get the approved wiki pin for a topic (spec §35.3).
-pub async fn get_wiki_pin(
-    db: &Database,
-    topic_id: &str,
-) -> Result<Option<serde_json::Value>> {
+pub async fn get_wiki_pin(db: &Database, topic_id: &str) -> Result<Option<serde_json::Value>> {
     let row = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as::<_, (String, i64, String, String)>(
@@ -240,29 +234,21 @@ pub async fn get_wiki_pin(
 }
 
 /// Join a critique circle (spec §35.3). Returns the assigned turn position.
-pub async fn join_critique(
-    db: &Database,
-    topic_id: &str,
-    pseud: &str,
-) -> Result<i64> {
+pub async fn join_critique(db: &Database, topic_id: &str, pseud: &str) -> Result<i64> {
     let _now = crate::identity::now_rfc3339();
     // Get current max position
     let max_pos: Option<i64> = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_scalar(
-                "SELECT MAX(position) FROM critique_queue WHERE topic_id = ?",
-            )
-            .bind(topic_id)
-            .fetch_one(db.sqlite_pool().expect("sqlite"))
-            .await?
+            sqlx::query_scalar("SELECT MAX(position) FROM critique_queue WHERE topic_id = ?")
+                .bind(topic_id)
+                .fetch_one(db.sqlite_pool().expect("sqlite"))
+                .await?
         }
         Backend::Postgres => {
-            sqlx::query_scalar(
-                "SELECT MAX(position) FROM critique_queue WHERE topic_id = $1",
-            )
-            .bind(topic_id)
-            .fetch_one(db.sqlite_pool().expect("sqlite"))
-            .await?
+            sqlx::query_scalar("SELECT MAX(position) FROM critique_queue WHERE topic_id = $1")
+                .bind(topic_id)
+                .fetch_one(db.sqlite_pool().expect("sqlite"))
+                .await?
         }
     };
     let position = max_pos.unwrap_or(-1) + 1;
@@ -294,10 +280,7 @@ pub async fn join_critique(
 }
 
 /// Get the current turn queue for a critique circle (spec §35.3).
-pub async fn get_critique_queue(
-    db: &Database,
-    topic_id: &str,
-) -> Result<Vec<serde_json::Value>> {
+pub async fn get_critique_queue(db: &Database, topic_id: &str) -> Result<Vec<serde_json::Value>> {
     let rows = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as::<_, (String, i64, Option<String>)>(
@@ -330,11 +313,7 @@ pub async fn get_critique_queue(
 }
 
 /// Set a topic's thread mode.
-pub async fn set_topic_mode(
-    db: &Database,
-    topic_id: &str,
-    mode: &str,
-) -> Result<()> {
+pub async fn set_topic_mode(db: &Database, topic_id: &str, mode: &str) -> Result<()> {
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query("UPDATE forum_topics SET mode = ? WHERE id = ?")

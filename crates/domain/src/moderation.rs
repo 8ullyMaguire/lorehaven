@@ -40,10 +40,7 @@ impl SanctionLevel {
 
     /// True if the user may post at all under this sanction.
     pub fn blocks_posting(&self) -> bool {
-        matches!(
-            self,
-            Self::ReadOnly | Self::ForumBan | Self::SiteBan
-        )
+        matches!(self, Self::ReadOnly | Self::ForumBan | Self::SiteBan)
     }
 
     /// True if the user may read the forum at all. A forum ban that left

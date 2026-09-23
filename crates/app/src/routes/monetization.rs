@@ -6,12 +6,12 @@
 //! trust-level gate (TL >= 5) and idempotency where applicable.
 
 use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::Json;
 use lorehaven_db::{monetization, Backend};
 use serde::Deserialize;
 use serde_json::json;
-use axum::http::StatusCode;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -604,10 +604,12 @@ pub async fn set_work_ai_declaration(
         .parse::<lorehaven_domain::WorkId>()
         .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
     let declaration = lorehaven_domain::monetization::AiDeclaration::parse(&body.declaration)
-        .ok_or_else(|| ApiError(lorehaven_domain::AppError::field(
-            "declaration",
-            "must be none|assisted|co-written|generated",
-        )))?;
+        .ok_or_else(|| {
+            ApiError(lorehaven_domain::AppError::field(
+                "declaration",
+                "must be none|assisted|co-written|generated",
+            ))
+        })?;
     let work = lorehaven_db::content::find_work(state.db(), work_id)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
@@ -630,7 +632,9 @@ pub async fn set_work_ai_declaration(
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
-    Ok(Json(json!({ "status": "set", "declaration": declaration.as_str() })))
+    Ok(Json(
+        json!({ "status": "set", "declaration": declaration.as_str() }),
+    ))
 }
 
 pub async fn get_work_ai_declaration(
@@ -641,12 +645,9 @@ pub async fn get_work_ai_declaration(
     let work_id = work_id
         .parse::<lorehaven_domain::WorkId>()
         .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
-    let decl = monetization::get_ai_declaration(
-        state.db(),
-        &work_id.to_canonical_string(),
-    )
-    .await
-    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    let decl = monetization::get_ai_declaration(state.db(), &work_id.to_canonical_string())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     Ok(Json(json!({ "declaration": decl })))
 }
 
@@ -698,9 +699,18 @@ pub async fn get_transparency_dashboard(
 
 pub fn transparency_router() -> axum::Router<AppState> {
     axum::Router::new()
-        .route("/works/{work_id}/ai-declaration", post(set_work_ai_declaration).get(get_work_ai_declaration))
-        .route("/transparency/monetization", get(get_transparency_dashboard))
-        .route("/works/{work_id}/reading-session", post(record_reading_session))
+        .route(
+            "/works/{work_id}/ai-declaration",
+            post(set_work_ai_declaration).get(get_work_ai_declaration),
+        )
+        .route(
+            "/transparency/monetization",
+            get(get_transparency_dashboard),
+        )
+        .route(
+            "/works/{work_id}/reading-session",
+            post(record_reading_session),
+        )
         .route("/admin/monetization/settle", post(settle_period))
 }
 
@@ -746,7 +756,10 @@ pub async fn record_reading_session(
         }
     }
     let _ = pseud_id;
-    Ok((axum::http::StatusCode::CREATED, Json(json!({ "status": "recorded" }))))
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(json!({ "status": "recorded" })),
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -769,17 +782,25 @@ pub async fn settle_period(
     RequireSession(_user): RequireSession,
     Query(req): Query<SettleRequest>,
 ) -> ApiResult<Json<Value>> {
-    use lorehaven_domain::monetization::{GraduatedCap, distribute_pool_b};
+    use lorehaven_domain::monetization::{distribute_pool_b, GraduatedCap};
 
     // 1. Pool A per author (trailing 3-month window)
     let author_earnings = lorehaven_db::monetization::author_pool_a_in_period(
-        state.db(), &req.period_start, &req.period_end,
-    ).await.map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        state.db(),
+        &req.period_start,
+        &req.period_end,
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
 
     // 2. Active-earner median → cap value
     let mut incomes: Vec<i64> = author_earnings.iter().map(|(_, amt)| *amt).collect();
     incomes.sort_unstable();
-    let median = if incomes.is_empty() { 0 } else { incomes[incomes.len() / 2] };
+    let median = if incomes.is_empty() {
+        0
+    } else {
+        incomes[incomes.len() / 2]
+    };
     let cap = GraduatedCap {
         median_minor: median,
         band1_multiple: 5,
@@ -794,18 +815,25 @@ pub async fn settle_period(
         let (kept, spill) = cap.apply(*flow, 0);
         pool_a_total += kept;
         pool_b_total += spill;
-        if spill > 0 { capped_authors += 1; }
+        if spill > 0 {
+            capped_authors += 1;
+        }
         let _ = author;
     }
 
     // 4. Pool B: quality-weighted by reading time
     // Apply eligibility floor (spec §20.10.5)
     let reading_times = lorehaven_db::monetization::author_reading_time_in_period(
-        state.db(), &req.period_start, &req.period_end,
-    ).await.map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        state.db(),
+        &req.period_start,
+        &req.period_end,
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
 
     let total_reading: i64 = reading_times.iter().map(|(_, s)| *s).sum();
-    let eligible_shares: Vec<(String, i64, i64)> = reading_times.iter()
+    let eligible_shares: Vec<(String, i64, i64)> = reading_times
+        .iter()
         .filter_map(|(author, secs)| {
             // Check floor: in a real system, query distinct readers, account age, trust level, sanctions
             // For settlement, use simplified check: reading time > 0 means eligible
@@ -826,7 +854,9 @@ pub async fn settle_period(
 
     // 5. Record Pool B distributions
     for (author_idx, (author, amount)) in distributions.iter().enumerate() {
-        if *amount <= 0 { continue; }
+        if *amount <= 0 {
+            continue;
+        }
         let idem = format!("{}:{}:{}", req.period_start, req.period_end, author);
         // Find this author's quality score and reading time from eligible_shares
         let quality_bp = if author_idx < eligible_shares.len() {
@@ -834,7 +864,8 @@ pub async fn settle_period(
         } else {
             0
         };
-        let seconds = reading_times.iter()
+        let seconds = reading_times
+            .iter()
             .find(|(a, _)| a == author)
             .map(|(_, s)| *s)
             .unwrap_or(0);
@@ -849,7 +880,9 @@ pub async fn settle_period(
             seconds,
             10_000, // ai_multiplier_bp
             &idem,
-        ).await.map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        )
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
     }
 
     // 6. Upsert period summary
@@ -866,7 +899,9 @@ pub async fn settle_period(
         capped_authors,
         0,
         0,
-    ).await.map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
 
     Ok(Json(json!({
         "status": "settled",

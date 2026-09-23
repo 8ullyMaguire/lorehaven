@@ -57,8 +57,6 @@ pub const PAYLOAD_EXPORT_JOB_ID: &str = "export_job_id";
 /// How an export's output blob is owned, so the collector leaves it alone.
 pub const EXPORT_OWNER_TYPE: &str = "export_job";
 
-
-
 ///
 /// The limit exists so that a pathological input — a work whose HTML sends a
 /// converter into a long loop — cannot occupy a worker indefinitely. It is
@@ -938,7 +936,6 @@ pub async fn sweep(state: &AppState) -> Result<usize, HandlerError> {
     Ok(removed)
 }
 
-
 // ---------------------------------------------------------------------------
 // CTA injection (spec §42)
 // ---------------------------------------------------------------------------
@@ -956,7 +953,11 @@ async fn apply_instance_cta(
         "per_chapter" => CtaPlacementSerde::PerChapter,
         "per_work" => CtaPlacementSerde::PerWork,
         "off" => CtaPlacementSerde::Off,
-        _ => return Err(ExportFailure::Storage("invalid cta_placement config".to_owned())),
+        _ => {
+            return Err(ExportFailure::Storage(
+                "invalid cta_placement config".to_owned(),
+            ))
+        }
     };
     let quorum = config.exports.cta_quorum as usize;
 

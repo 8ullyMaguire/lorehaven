@@ -497,16 +497,22 @@ async fn deliver_export(
     // Mint a short-lived grant so the reader can download.
     let token = crate::exports::mint_grant(&state, &row.id)
         .await
-        .map_err(|error| ApiError(lorehaven_domain::AppError::Validation {
-            message: error.message(),
-            field_errors: Default::default(),
-        }))?;
+        .map_err(|error| {
+            ApiError(lorehaven_domain::AppError::Validation {
+                message: error.message(),
+                field_errors: Default::default(),
+            })
+        })?;
     let download_url = format!("/exports/download/{token}");
 
     // Refuse with 512 if no device transport is configured. This is the
     // documented "no mail transport" refusal from spec §13.4.
     let target_email = match body.device.as_str() {
-        "kindle" => state.config().device.as_ref().and_then(|d| d.kindle_email.as_ref()),
+        "kindle" => state
+            .config()
+            .device
+            .as_ref()
+            .and_then(|d| d.kindle_email.as_ref()),
         "generic" => state
             .config()
             .device
@@ -539,6 +545,6 @@ async fn deliver_export(
                 "download_url": download_url,
                 "message": "this instance has not configured a mail transport for device delivery; download the file and forward it yourself",
             })),
-        ))
+        )),
     }
 }

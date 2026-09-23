@@ -68,22 +68,18 @@ pub async fn recompute_half_life(
             "UPDATE works SET half_life_bp = $1 WHERE id::text = $2",
         );
         let rows = match db.backend() {
-            Backend::Sqlite => {
-                sqlx::query(&sql)
-                    .bind(bp)
-                    .bind(&work_id)
-                    .execute(db.sqlite_pool().expect("sqlite"))
-                    .await?
-                    .rows_affected()
-            }
-            Backend::Postgres => {
-                sqlx::query(&sql)
-                    .bind(bp)
-                    .bind(&work_id)
-                    .execute(db.postgres_pool().expect("postgres"))
-                    .await?
-                    .rows_affected()
-            }
+            Backend::Sqlite => sqlx::query(&sql)
+                .bind(bp)
+                .bind(&work_id)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?
+                .rows_affected(),
+            Backend::Postgres => sqlx::query(&sql)
+                .bind(bp)
+                .bind(&work_id)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?
+                .rows_affected(),
         };
         total_updated += rows;
     }
@@ -196,9 +192,7 @@ pub async fn half_life_map(
         .collect();
     let placeholder_str = placeholders.join(",");
 
-    let sql = format!(
-        "SELECT id, half_life_bp FROM works WHERE id IN ({placeholder_str})"
-    );
+    let sql = format!("SELECT id, half_life_bp FROM works WHERE id IN ({placeholder_str})");
     let rows: Vec<(String, Option<i64>)> = match db.backend() {
         Backend::Sqlite => {
             let mut query = sqlx::query_as(&sql);
@@ -208,9 +202,7 @@ pub async fn half_life_map(
             query.fetch_all(db.sqlite_pool().expect("sqlite")).await?
         }
         Backend::Postgres => {
-            let pg_placeholders: Vec<String> = (1..=ids.len())
-                .map(|i| format!("${i}"))
-                .collect();
+            let pg_placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("${i}")).collect();
             let pg_sql = format!(
                 "SELECT id::text, half_life_bp FROM works WHERE id::text IN ({})",
                 pg_placeholders.join(",")
@@ -219,7 +211,9 @@ pub async fn half_life_map(
             for id in &ids {
                 query = query.bind(id);
             }
-            query.fetch_all(db.postgres_pool().expect("postgres")).await?
+            query
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
         }
     };
     Ok(rows)

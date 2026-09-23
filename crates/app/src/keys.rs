@@ -47,14 +47,20 @@ pub fn generate_keypair() -> anyhow::Result<()> {
         .args(["genrsa", "-out", priv_path.to_str().unwrap(), "2048"])
         .output()?;
     if !output.status.success() {
-        anyhow::bail!("openssl genrsa failed: {}", String::from_utf8_lossy(&output.stderr));
+        anyhow::bail!(
+            "openssl genrsa failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
     let pub_path = public_key_path();
     let output = std::process::Command::new("openssl")
         .args(["rsa", "-in", priv_path.to_str().unwrap(), "-pubout"])
         .output()?;
     if !output.status.success() {
-        anyhow::bail!("openssl rsa pubout failed: {}", String::from_utf8_lossy(&output.stderr));
+        anyhow::bail!(
+            "openssl rsa pubout failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
     std::fs::write(&pub_path, &output.stdout)?;
     tracing::info!(path = %priv_path.display(), "generated ActivityPub RSA keypair");

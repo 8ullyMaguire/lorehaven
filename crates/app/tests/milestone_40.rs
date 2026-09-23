@@ -73,7 +73,9 @@ impl Client {
 
     fn capture(&mut self, response: &axum::response::Response) {
         for value in response.headers().get_all(header::SET_COOKIE) {
-            let Ok(text) = value.to_str() else { continue; };
+            let Ok(text) = value.to_str() else {
+                continue;
+            };
             let Some((pair, _)) = text.split_once(';') else {
                 continue;
             };
@@ -232,7 +234,10 @@ async fn create_work(client: &mut Client, title: &str, remix: &str) -> String {
 
     // Publish so it's visible to others (needed for fork tests with a forker).
     let (status, body) = client
-        .post(&format!("/api/v1/works/{work_id}/publish"), json!({ "expected_version": 1 }))
+        .post(
+            &format!("/api/v1/works/{work_id}/publish"),
+            json!({ "expected_version": 1 }),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "publish: {body}");
 
@@ -243,16 +248,14 @@ async fn create_work(client: &mut Client, title: &str, remix: &str) -> String {
 async fn fork_creates_draft_with_lineage_and_no_body() {
     let harness = Harness::new("fork-basic").await;
     let mut author = harness.client();
-    let (_author_acct, _author_pseud) =
-        register(&mut author, "author@example.com", "author").await;
+    let (_author_acct, _author_pseud) = register(&mut author, "author@example.com", "author").await;
 
     // Author creates a work with remix allowed.
     let parent_id = create_work(&mut author, "Original Title", "yes").await;
 
     // Forker registers.
     let mut forker = harness.client();
-    let (_forker_acct, _forker_pseud) =
-        register(&mut forker, "forker@example.com", "forker").await;
+    let (_forker_acct, _forker_pseud) = register(&mut forker, "forker@example.com", "forker").await;
 
     // Forker forks the work.
     let (status, body) = forker
@@ -263,21 +266,16 @@ async fn fork_creates_draft_with_lineage_and_no_body() {
     let fork_id = body["id"].as_str().expect("fork id").to_owned();
 
     // The fork should be a draft with no chapters.
-    let (status, body) = forker
-        .get(&format!("/api/v1/works/{fork_id}"))
-        .await;
+    let (status, body) = forker.get(&format!("/api/v1/works/{fork_id}")).await;
     assert_eq!(status, StatusCode::OK, "get fork: {body}");
     assert_eq!(body["lifecycle"], "draft");
     assert_eq!(body["chapters"].as_array().expect("chapters").len(), 0);
     assert!(body["title"].as_str().unwrap().contains("Fork"));
 
     // Verify lineage edge exists in DB.
-    let edges = lorehaven_db::permission::lineage_edges_for_work(
-        harness.tdb.db(),
-        &fork_id,
-    )
-    .await
-    .expect("lineage edges");
+    let edges = lorehaven_db::permission::lineage_edges_for_work(harness.tdb.db(), &fork_id)
+        .await
+        .expect("lineage edges");
     assert_eq!(edges.len(), 1, "expected one lineage edge");
     let edge = &edges[0];
     assert_eq!(edge.from_work_id, parent_id);
@@ -301,8 +299,15 @@ async fn fork_remix_no_is_refused() {
     let (status, body) = forker
         .post(&format!("/api/v1/works/{parent_id}/fork"), json!({}))
         .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "expected refusal: {body}");
-    assert_eq!(body["error"]["field_errors"]["remix"], "the author's permission statement declines remixes");
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "expected refusal: {body}"
+    );
+    assert_eq!(
+        body["error"]["field_errors"]["remix"],
+        "the author's permission statement declines remixes"
+    );
 }
 
 #[tokio::test]
@@ -321,7 +326,11 @@ async fn fork_remix_ask_is_refused() {
     let (status, body) = forker
         .post(&format!("/api/v1/works/{parent_id}/fork"), json!({}))
         .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "expected refusal: {body}");
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "expected refusal: {body}"
+    );
     assert!(body["error"]["field_errors"]["remix"]
         .as_str()
         .unwrap()
@@ -390,9 +399,7 @@ async fn fork_inherits_parent_visibility_private() {
     let fork_id = body["id"].as_str().unwrap().to_owned();
 
     // Fork should also be restricted.
-    let (status, body) = author
-        .get(&format!("/api/v1/works/{fork_id}"))
-        .await;
+    let (status, body) = author.get(&format!("/api/v1/works/{fork_id}")).await;
     assert_eq!(status, StatusCode::OK, "get fork: {body}");
     assert_eq!(body["visibility"], "restricted");
 }
@@ -427,7 +434,11 @@ async fn fork_depth_limit_enforced() {
     let (status, body) = author
         .post(&format!("/api/v1/works/{deepest}/fork"), json!({}))
         .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "expected depth refusal: {body}");
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "expected depth refusal: {body}"
+    );
     assert!(body["error"]["message"]
         .as_str()
         .unwrap()
@@ -452,24 +463,26 @@ async fn fork_lineage_survives_parent_deletion() {
 
     // Withdraw the parent (soft-delete equivalent for works).
     let (status, _body) = author
-        .post(&format!("/api/v1/works/{parent_id}/withdraw"), json!({ "expected_version": 2 }))
+        .post(
+            &format!("/api/v1/works/{parent_id}/withdraw"),
+            json!({ "expected_version": 2 }),
+        )
         .await;
     assert!(status.is_success(), "withdraw should succeed: {status}");
 
     // Fork should still be accessible.
-    let (status, body) = author
-        .get(&format!("/api/v1/works/{fork_id}"))
-        .await;
+    let (status, body) = author.get(&format!("/api/v1/works/{fork_id}")).await;
     assert_eq!(status, StatusCode::OK, "fork still exists: {body}");
 
     // Lineage edge should survive.
-    let edges = lorehaven_db::permission::lineage_edges_for_work(
-        harness.tdb.db(),
-        &fork_id,
-    )
-    .await
-    .expect("lineage edges");
-    assert_eq!(edges.len(), 1, "lineage edge should survive parent deletion");
+    let edges = lorehaven_db::permission::lineage_edges_for_work(harness.tdb.db(), &fork_id)
+        .await
+        .expect("lineage edges");
+    assert_eq!(
+        edges.len(),
+        1,
+        "lineage edge should survive parent deletion"
+    );
 }
 
 #[tokio::test]
@@ -482,20 +495,8 @@ async fn fork_inherits_parent_tags() {
     let parent_id = create_work(&mut author, "Tagged Work", "yes").await;
 
     // Add tags to parent via DB for test simplicity.
-    let _ = lorehaven_db::taxonomy::tag_work(
-        harness.tdb.db(),
-        &parent_id,
-        "tag-1",
-        1,
-    )
-    .await;
-    let _ = lorehaven_db::taxonomy::tag_work(
-        harness.tdb.db(),
-        &parent_id,
-        "tag-2",
-        1,
-    )
-    .await;
+    let _ = lorehaven_db::taxonomy::tag_work(harness.tdb.db(), &parent_id, "tag-1", 1).await;
+    let _ = lorehaven_db::taxonomy::tag_work(harness.tdb.db(), &parent_id, "tag-2", 1).await;
 
     // Fork.
     let (status, body) = author
@@ -505,12 +506,9 @@ async fn fork_inherits_parent_tags() {
     let fork_id = body["id"].as_str().unwrap().to_owned();
 
     // Fork should inherit tags.
-    let fork_tags = lorehaven_db::taxonomy::tags_for_work(
-        harness.tdb.db(),
-        &fork_id,
-    )
-    .await
-    .expect("tags for work");
+    let fork_tags = lorehaven_db::taxonomy::tags_for_work(harness.tdb.db(), &fork_id)
+        .await
+        .expect("tags for work");
     assert!(fork_tags.contains(&"tag-1".to_owned()), "tag-1 inherited");
     assert!(fork_tags.contains(&"tag-2".to_owned()), "tag-2 inherited");
 }

@@ -12,7 +12,9 @@ async fn local_mirror_insert_and_list() {
     let reference_id = "ref-001";
 
     media_resilience::insert_local_mirror(
-        db, mirror_id, reference_id,
+        db,
+        mirror_id,
+        reference_id,
         "/storage/mirror-001.png",
         "https://i.imgur.com/abc123.png",
         2048,
@@ -51,7 +53,9 @@ async fn ipfs_pin_insert_and_list() {
     let reference_id = "ref-001";
 
     media_resilience::insert_ipfs_pin(
-        db, pin_id, reference_id,
+        db,
+        pin_id,
+        reference_id,
         "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
         "pinata",
         4096,
@@ -78,7 +82,9 @@ async fn dmca_takedown_file_and_resolve() {
     let reference_id = "ref-002";
 
     media_resilience::insert_local_mirror(
-        db, mirror_id, reference_id,
+        db,
+        mirror_id,
+        reference_id,
         "/storage/dmca-test.png",
         "https://i.imgur.com/dmca.png",
         1024,
@@ -92,7 +98,9 @@ async fn dmca_takedown_file_and_resolve() {
     let takedown_id = "td-001";
 
     media_resilience::file_dmca_takedown(
-        db, takedown_id, mirror_id,
+        db,
+        takedown_id,
+        mirror_id,
         "Copyright Holder",
         "copyright@example.com",
         "Original artwork by me",
@@ -107,7 +115,9 @@ async fn dmca_takedown_file_and_resolve() {
 
     let takedown_id_2 = "td-002";
     media_resilience::file_dmca_takedown(
-        db, takedown_id_2, mirror_id,
+        db,
+        takedown_id_2,
+        mirror_id,
         "Another Claimant",
         "another@example.com",
         "My photo",

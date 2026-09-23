@@ -52,7 +52,11 @@ impl Harness {
         let dir = scratch_dir(tag);
         let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
         let config = config_for(&dir);
-        Self { _dir: dir, tdb, config }
+        Self {
+            _dir: dir,
+            tdb,
+            config,
+        }
     }
 
     fn client(&self) -> Client {
@@ -70,7 +74,10 @@ struct Client {
 
 impl Client {
     fn new(app: axum::Router) -> Self {
-        Self { app, cookies: Vec::new() }
+        Self {
+            app,
+            cookies: Vec::new(),
+        }
     }
     fn cookie(&self, name: &str) -> Option<&str> {
         self.cookies
@@ -81,7 +88,9 @@ impl Client {
     fn capture(&mut self, response: &axum::response::Response) {
         for value in response.headers().get_all(header::SET_COOKIE) {
             let Ok(text) = value.to_str() else { continue };
-            let Some((pair, _)) = text.split_once(';') else { continue };
+            let Some((pair, _)) = text.split_once(';') else {
+                continue;
+            };
             if let Some((name, value)) = pair.split_once('=') {
                 let name = name.trim().to_owned();
                 let value = value.trim().to_owned();
@@ -221,7 +230,10 @@ async fn work_vector_derived_from_matching_tag() {
             json!({ "kind": "tag", "canonical": "angst" }),
         )
         .await;
-    assert!(status == StatusCode::CREATED || status == StatusCode::OK, "create taxonomy node: {body}");
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "create taxonomy node: {body}"
+    );
     let node_id = body["node"]["id"].as_str().expect("node id").to_owned();
 
     let (status, _body) = client
@@ -230,7 +242,10 @@ async fn work_vector_derived_from_matching_tag() {
             json!({ "node_id": node_id, "weight": 50 }),
         )
         .await;
-    assert!(status == StatusCode::CREATED || status == StatusCode::OK, "tag work");
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "tag work"
+    );
 
     let vector = lorehaven_db::taste_health::compute_and_store_work_vector(&db, &work_id)
         .await
@@ -265,7 +280,10 @@ async fn quiz_picks_compute_initial_vector() {
             json!({ "kind": "tag", "canonical": "angst" }),
         )
         .await;
-    assert!(status == StatusCode::CREATED || status == StatusCode::OK, "create taxonomy node: {body}");
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "create taxonomy node: {body}"
+    );
     let node_id = body["node"]["id"].as_str().expect("node id").to_owned();
     let (status, _) = client
         .post(
@@ -323,7 +341,10 @@ async fn quiz_skip_leaves_account_without_vector() {
         .expect("get vector");
     match stored {
         Some((ref v, _d, ref at)) => {
-            assert!(v.is_empty(), "skipped quiz should not store a non-empty vector");
+            assert!(
+                v.is_empty(),
+                "skipped quiz should not store a non-empty vector"
+            );
             assert!(at.is_empty(), "skipped quiz should not store a computed_at");
         }
         None => {}

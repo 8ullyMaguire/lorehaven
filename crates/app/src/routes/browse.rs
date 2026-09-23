@@ -31,16 +31,51 @@ struct SurfaceInfo {
     default_sort: String,
 }
 
-async fn list_surfaces(State(_state): State<AppState>, MaybeSession(_session): MaybeSession) -> ApiResult<Json<Vec<SurfaceInfo>>> {
+async fn list_surfaces(
+    State(_state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
+) -> ApiResult<Json<Vec<SurfaceInfo>>> {
     let surfaces = vec![
-        SurfaceInfo { key: "discover".into(), label: "Discover".into(), default_sort: Sort::ForYou.as_str().into() },
-        SurfaceInfo { key: "people".into(), label: "People".into(), default_sort: Sort::Az.as_str().into() },
-        SurfaceInfo { key: "library".into(), label: "Library".into(), default_sort: Sort::New.as_str().into() },
-        SurfaceInfo { key: "tags".into(), label: "Tags".into(), default_sort: Sort::Az.as_str().into() },
-        SurfaceInfo { key: "fandoms".into(), label: "Fandoms".into(), default_sort: Sort::Az.as_str().into() },
-        SurfaceInfo { key: "collections".into(), label: "Collections".into(), default_sort: Sort::New.as_str().into() },
-        SurfaceInfo { key: "series".into(), label: "Series".into(), default_sort: Sort::New.as_str().into() },
-        SurfaceInfo { key: "authors".into(), label: "Authors".into(), default_sort: Sort::Az.as_str().into() },
+        SurfaceInfo {
+            key: "discover".into(),
+            label: "Discover".into(),
+            default_sort: Sort::ForYou.as_str().into(),
+        },
+        SurfaceInfo {
+            key: "people".into(),
+            label: "People".into(),
+            default_sort: Sort::Az.as_str().into(),
+        },
+        SurfaceInfo {
+            key: "library".into(),
+            label: "Library".into(),
+            default_sort: Sort::New.as_str().into(),
+        },
+        SurfaceInfo {
+            key: "tags".into(),
+            label: "Tags".into(),
+            default_sort: Sort::Az.as_str().into(),
+        },
+        SurfaceInfo {
+            key: "fandoms".into(),
+            label: "Fandoms".into(),
+            default_sort: Sort::Az.as_str().into(),
+        },
+        SurfaceInfo {
+            key: "collections".into(),
+            label: "Collections".into(),
+            default_sort: Sort::New.as_str().into(),
+        },
+        SurfaceInfo {
+            key: "series".into(),
+            label: "Series".into(),
+            default_sort: Sort::New.as_str().into(),
+        },
+        SurfaceInfo {
+            key: "authors".into(),
+            label: "Authors".into(),
+            default_sort: Sort::Az.as_str().into(),
+        },
     ];
     Ok(Json(surfaces))
 }
@@ -77,9 +112,10 @@ async fn get_sort(
         }));
     };
 
-    let pref = lorehaven_db::browse::get_sort_preference(state.db(), &pseud_id.to_string(), &surface)
-        .await
-        .map_err(|e| ApiError(AppError::internal("reading sort preference", e)))?;
+    let pref =
+        lorehaven_db::browse::get_sort_preference(state.db(), &pseud_id.to_string(), &surface)
+            .await
+            .map_err(|e| ApiError(AppError::internal("reading sort preference", e)))?;
 
     let (sort, source) = match pref {
         Some(pref) if Sort::parse(&pref.sort_value).is_some() => {
@@ -87,7 +123,11 @@ async fn get_sort(
         }
         _ => (surface_default.as_str().into(), "default".into()),
     };
-    Ok(Json(SortStateResponse { surface, sort, source }))
+    Ok(Json(SortStateResponse {
+        surface,
+        sort,
+        source,
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -104,13 +144,22 @@ async fn set_sort(
     let sort = Sort::parse(&body.sort).ok_or_else(|| {
         ApiError(AppError::field(
             "sort",
-            format!("unknown sort `{}`; accepted: {}", body.sort, Sort::accepted_set()),
+            format!(
+                "unknown sort `{}`; accepted: {}",
+                body.sort,
+                Sort::accepted_set()
+            ),
         ))
     })?;
 
-    lorehaven_db::browse::set_sort_preference(state.db(), &pseud_id.to_string(), &surface, sort.as_str())
-        .await
-        .map_err(|e| ApiError(AppError::internal("saving sort preference", e)))?;
+    lorehaven_db::browse::set_sort_preference(
+        state.db(),
+        &pseud_id.to_string(),
+        &surface,
+        sort.as_str(),
+    )
+    .await
+    .map_err(|e| ApiError(AppError::internal("saving sort preference", e)))?;
 
     Ok(Json(SortStateResponse {
         surface,
@@ -157,7 +206,9 @@ pub struct PeopleQuery {
     offset: i64,
 }
 
-fn default_page_limit() -> i64 { 50 }
+fn default_page_limit() -> i64 {
+    50
+}
 
 #[derive(Debug, Serialize)]
 struct PersonItem {
@@ -172,7 +223,8 @@ async fn list_people(
     MaybeSession(session): MaybeSession,
     Query(params): Query<PeopleQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let sort = resolve_surface_sort(&state, session.as_ref(), params.sort.as_deref(), "people").await;
+    let sort =
+        resolve_surface_sort(&state, session.as_ref(), params.sort.as_deref(), "people").await;
 
     let people = lorehaven_db::identity::list_discoverable_pseuds(
         state.db(),
@@ -203,7 +255,11 @@ fn apply_sort(items: &mut Vec<PersonItem>, sort: &str) {
         "updated" => items.sort_by(|a, b| b.id.cmp(&a.id)),
         "trending" => items.sort_by(|a, b| b.work_count.cmp(&a.work_count)),
         "top" => items.sort_by(|a, b| b.work_count.cmp(&a.work_count)),
-        "az" => items.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase())),
+        "az" => items.sort_by(|a, b| {
+            a.display_name
+                .to_lowercase()
+                .cmp(&b.display_name.to_lowercase())
+        }),
         "for-you" => items.sort_by(|a, b| b.work_count.cmp(&a.work_count)),
         _ => {}
     }
@@ -246,7 +302,12 @@ async fn list_tags(
 
     let mut items: Vec<TagItem> = tags
         .into_iter()
-        .map(|(id, canonical, kind, work_count)| TagItem { id, canonical, kind, work_count })
+        .map(|(id, canonical, kind, work_count)| TagItem {
+            id,
+            canonical,
+            kind,
+            work_count,
+        })
         .collect();
 
     apply_tag_sort(&mut items, &sort);
@@ -303,17 +364,21 @@ async fn list_works_by_tag(
 
     let mut items: Vec<WorksByTagItem> = works
         .into_iter()
-        .map(|(work_id, title, author_handle, updated_at)| WorksByTagItem {
-            work_id,
-            title,
-            author_handle,
-            updated_at,
-        })
+        .map(
+            |(work_id, title, author_handle, updated_at)| WorksByTagItem {
+                work_id,
+                title,
+                author_handle,
+                updated_at,
+            },
+        )
         .collect();
 
     apply_works_sort(&mut items, &sort);
 
-    Ok(Json(serde_json::json!({ "items": items, "sort": sort, "tag": tag })))
+    Ok(Json(
+        serde_json::json!({ "items": items, "sort": sort, "tag": tag }),
+    ))
 }
 
 // --- Fandoms ------------------------------------------------------------
@@ -330,7 +395,8 @@ async fn list_fandoms(
     MaybeSession(session): MaybeSession,
     Query(params): Query<TagListQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let sort = resolve_surface_sort(&state, session.as_ref(), params.sort.as_deref(), "fandoms").await;
+    let sort =
+        resolve_surface_sort(&state, session.as_ref(), params.sort.as_deref(), "fandoms").await;
 
     let fandoms = lorehaven_db::taxonomy::list_fandoms(
         state.db(),
@@ -342,7 +408,11 @@ async fn list_fandoms(
 
     let mut items: Vec<FandomItem> = fandoms
         .into_iter()
-        .map(|(slug, name, work_count)| FandomItem { slug, name, work_count })
+        .map(|(slug, name, work_count)| FandomItem {
+            slug,
+            name,
+            work_count,
+        })
         .collect();
 
     apply_fandom_sort(&mut items, &sort);
@@ -368,7 +438,8 @@ async fn list_works_by_fandom(
     Path(fandom): Path<String>,
     Query(params): Query<WorksByTagQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let sort = resolve_surface_sort(&state, session.as_ref(), params.sort.as_deref(), "fandoms").await;
+    let sort =
+        resolve_surface_sort(&state, session.as_ref(), params.sort.as_deref(), "fandoms").await;
 
     let works = lorehaven_db::taxonomy::works_by_fandom(
         state.db(),
@@ -381,17 +452,21 @@ async fn list_works_by_fandom(
 
     let mut items: Vec<WorksByTagItem> = works
         .into_iter()
-        .map(|(work_id, title, author_handle, updated_at)| WorksByTagItem {
-            work_id,
-            title,
-            author_handle,
-            updated_at,
-        })
+        .map(
+            |(work_id, title, author_handle, updated_at)| WorksByTagItem {
+                work_id,
+                title,
+                author_handle,
+                updated_at,
+            },
+        )
         .collect();
 
     apply_works_sort(&mut items, &sort);
 
-    Ok(Json(serde_json::json!({ "items": items, "sort": sort, "fandom": fandom })))
+    Ok(Json(
+        serde_json::json!({ "items": items, "sort": sort, "fandom": fandom }),
+    ))
 }
 
 // --- Works (shared) -----------------------------------------------------

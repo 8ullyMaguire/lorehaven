@@ -15,13 +15,19 @@ pub fn router() -> axum::Router<AppState> {
     axum::Router::new()
         .route("/admin/media-health/overview", get(media_health_overview))
         .route("/admin/media-health/link-rot", get(link_rot_report))
-        .route("/admin/media-health/curator-leaderboard", get(curator_leaderboard))
+        .route(
+            "/admin/media-health/curator-leaderboard",
+            get(curator_leaderboard),
+        )
         .route("/admin/media-health/bounty-status", get(bounty_status))
         .route("/admin/media-health/storage", get(storage_status))
         .route("/admin/media-health/providers", get(provider_reliability))
 }
 
-async fn require_operator(state: &AppState, user: &crate::auth::SessionUser) -> Result<(), ApiError> {
+async fn require_operator(
+    state: &AppState,
+    user: &crate::auth::SessionUser,
+) -> Result<(), ApiError> {
     let level = lorehaven_db::governance::trust_for(state.db(), &user.account_id.to_string())
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
@@ -48,9 +54,10 @@ async fn media_health_overview(
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
-    let below_threshold = lorehaven_db::media_resilience::count_references_below_threshold(state.db(), 3)
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    let below_threshold =
+        lorehaven_db::media_resilience::count_references_below_threshold(state.db(), 3)
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
     let health_pct = if total > 0 {
         (well_mirrored as f64 / total as f64 * 100.0).round()
@@ -59,9 +66,10 @@ async fn media_health_overview(
     };
 
     let one_week_ago = (Utc::now() - Duration::days(7)).to_rfc3339();
-    let recent_rescues = lorehaven_db::media_resilience::count_references_below_threshold(state.db(), 3)
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    let recent_rescues =
+        lorehaven_db::media_resilience::count_references_below_threshold(state.db(), 3)
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
     Ok(Json(json!({
         "total_references": total,
@@ -87,9 +95,10 @@ async fn link_rot_report(
 ) -> ApiResult<Json<Value>> {
     require_operator(&state, &user).await?;
 
-    let since = query.since.clone().unwrap_or_else(|| {
-        (Utc::now() - Duration::days(7)).to_rfc3339()
-    });
+    let since = query
+        .since
+        .clone()
+        .unwrap_or_else(|| (Utc::now() - Duration::days(7)).to_rfc3339());
 
     let rot = lorehaven_db::media_resilience::link_rot_by_provider(state.db(), &since)
         .await
@@ -135,9 +144,10 @@ async fn bounty_status(
 ) -> ApiResult<Json<Value>> {
     require_operator(&state, &user).await?;
 
-    let (active_count, total_amount) = lorehaven_db::media_resilience::standing_bounty_status(state.db())
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    let (active_count, total_amount) =
+        lorehaven_db::media_resilience::standing_bounty_status(state.db())
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
     Ok(Json(json!({
         "active_bounties": active_count,
@@ -152,9 +162,10 @@ async fn storage_status(
 ) -> ApiResult<Json<Value>> {
     require_operator(&state, &user).await?;
 
-    let (mirror_count, total_bytes) = lorehaven_db::media_resilience::local_mirror_storage(state.db())
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    let (mirror_count, total_bytes) =
+        lorehaven_db::media_resilience::local_mirror_storage(state.db())
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
     let ipfs_pins = lorehaven_db::media_resilience::count_active_ipfs_pins(state.db())
         .await
@@ -178,15 +189,22 @@ async fn provider_reliability(
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
-    let ranked: Vec<Value> = providers.iter().map(|(prov, healthy, total)| {
-        let rate = if *total > 0 { *healthy as f64 / *total as f64 } else { 0.0 };
-        json!({
-            "provider": prov,
-            "healthy": healthy,
-            "total": total,
-            "health_rate": (rate * 100.0).round() / 100.0,
+    let ranked: Vec<Value> = providers
+        .iter()
+        .map(|(prov, healthy, total)| {
+            let rate = if *total > 0 {
+                *healthy as f64 / *total as f64
+            } else {
+                0.0
+            };
+            json!({
+                "provider": prov,
+                "healthy": healthy,
+                "total": total,
+                "health_rate": (rate * 100.0).round() / 100.0,
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(Json(json!({
         "providers": ranked,

@@ -60,7 +60,9 @@ impl Client {
     }
     fn capture(&mut self, response: &axum::response::Response) {
         for value in response.headers().get_all(header::SET_COOKIE) {
-            let Ok(text) = value.to_str() else { continue; };
+            let Ok(text) = value.to_str() else {
+                continue;
+            };
             let Some((pair, _)) = text.split_once(';') else {
                 continue;
             };
@@ -251,7 +253,10 @@ async fn create_work(client: &mut Client, title: &str) -> String {
 
 async fn publish_work(client: &mut Client, work_id: &str) {
     let (status, body) = client
-        .post(&format!("/api/v1/works/{work_id}/publish"), json!({ "expected_version": 1 }))
+        .post(
+            &format!("/api/v1/works/{work_id}/publish"),
+            json!({ "expected_version": 1 }),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "publish: {body}");
 }
@@ -309,7 +314,11 @@ async fn spoiler_scope_refuses_non_author() {
             json!({ "chapter": 5 }),
         )
         .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "stranger cannot set spoiler scope");
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "stranger cannot set spoiler scope"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -457,9 +466,7 @@ async fn warning_prefs_round_trip() {
     register(&mut client, "reader@example.com", "reader").await;
 
     // Default: no prefs set.
-    let (status, body) = client
-        .get("/api/v1/me/warning-prefs")
-        .await;
+    let (status, body) = client.get("/api/v1/me/warning-prefs").await;
     assert_eq!(status, StatusCode::OK, "get prefs: {body}");
 
     // Set a preference to auto-expand violence warnings.
@@ -472,9 +479,7 @@ async fn warning_prefs_round_trip() {
     assert_eq!(status, StatusCode::OK, "set pref: {body}");
 
     // Verify it persisted.
-    let (status, body) = client
-        .get("/api/v1/me/warning-prefs")
-        .await;
+    let (status, body) = client.get("/api/v1/me/warning-prefs").await;
     assert_eq!(status, StatusCode::OK, "get prefs again: {body}");
 }
 

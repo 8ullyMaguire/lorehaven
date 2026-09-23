@@ -315,7 +315,10 @@ async fn submission_validates_url_title_description_tags() {
             )
             .await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{url}: {body}");
-        assert_eq!(body["error"]["field_errors"]["reason"], reason, "{url}: {body}");
+        assert_eq!(
+            body["error"]["field_errors"]["reason"], reason,
+            "{url}: {body}"
+        );
     }
 
     // Title rules.
@@ -366,7 +369,10 @@ async fn submission_validates_url_title_description_tags() {
         )
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
-    assert_eq!(body["error"]["field_errors"]["reason"], "description_too_long");
+    assert_eq!(
+        body["error"]["field_errors"]["reason"],
+        "description_too_long"
+    );
 
     // Good submission passes and normalizes tags.
     let (status, body) = member
@@ -402,7 +408,9 @@ async fn visibility_approved_own_pending_operator() {
 
     // Anonymous sees nothing.
     let mut anon = harness.client();
-    let (status, body) = anon.get("/api/v1/directory/entries?list=external-sites").await;
+    let (status, body) = anon
+        .get("/api/v1/directory/entries?list=external-sites")
+        .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["items"].as_array().expect("items").len(), 0, "{body}");
 
@@ -431,12 +439,17 @@ async fn visibility_approved_own_pending_operator() {
 
     // Approve it.
     let (status, body) = operator
-        .post(&format!("/api/v1/directory/entries/{entry_id}/approve"), json!({}))
+        .post(
+            &format!("/api/v1/directory/entries/{entry_id}/approve"),
+            json!({}),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
 
     // Now anonymous sees it; the queue is empty.
-    let (status, body) = anon.get("/api/v1/directory/entries?list=external-sites").await;
+    let (status, body) = anon
+        .get("/api/v1/directory/entries?list=external-sites")
+        .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["items"].as_array().expect("items").len(), 1, "{body}");
     let (_status, body) = operator.get("/api/v1/directory/moderation").await;
@@ -457,7 +470,10 @@ async fn voting_up_down_toggle_flip_and_weighted_score() {
 
     // Approve so others can vote.
     let (status, _b) = operator
-        .post(&format!("/api/v1/directory/entries/{entry_id}/approve"), json!({}))
+        .post(
+            &format!("/api/v1/directory/entries/{entry_id}/approve"),
+            json!({}),
+        )
         .await;
     assert_eq!(status, StatusCode::OK);
 
@@ -467,7 +483,10 @@ async fn voting_up_down_toggle_flip_and_weighted_score() {
     // A fresh member votes at TL0 (0.5) with no taste profile (floor 0.75):
     // weight 0.375 — the default trust_and_taste mode.
     let (status, body) = voter
-        .post(&format!("/api/v1/directory/entries/{entry_id}/vote"), json!({"value": 1}))
+        .post(
+            &format!("/api/v1/directory/entries/{entry_id}/vote"),
+            json!({"value": 1}),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["score"], json!(0.375), "{body}");
@@ -475,7 +494,10 @@ async fn voting_up_down_toggle_flip_and_weighted_score() {
 
     // Toggle off by repeating.
     let (status, body) = voter
-        .post(&format!("/api/v1/directory/entries/{entry_id}/vote"), json!({"value": 1}))
+        .post(
+            &format!("/api/v1/directory/entries/{entry_id}/vote"),
+            json!({"value": 1}),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["score"], json!(0.0), "{body}");
@@ -483,7 +505,10 @@ async fn voting_up_down_toggle_flip_and_weighted_score() {
 
     // Downvote instead.
     let (status, body) = voter
-        .post(&format!("/api/v1/directory/entries/{entry_id}/vote"), json!({"value": -1}))
+        .post(
+            &format!("/api/v1/directory/entries/{entry_id}/vote"),
+            json!({"value": -1}),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["score"], json!(-0.375), "{body}");
@@ -492,7 +517,10 @@ async fn voting_up_down_toggle_flip_and_weighted_score() {
     // Anonymous cannot vote.
     let mut anon = harness.client();
     let (status, _b) = anon
-        .post(&format!("/api/v1/directory/entries/{entry_id}/vote"), json!({"value": 1}))
+        .post(
+            &format!("/api/v1/directory/entries/{entry_id}/vote"),
+            json!({"value": 1}),
+        )
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
@@ -502,14 +530,23 @@ async fn voting_up_down_toggle_flip_and_weighted_score() {
     let (tl4_account, _p) = register(&mut tl4, "tl4@example.com", "tl4").await;
     lorehaven_db::directory::set_account_trust_for_tests(harness.tdb.db(), &tl4_account, 4).await;
     let (status, body) = tl4
-        .post(&format!("/api/v1/directory/entries/{entry_id}/vote"), json!({"value": 1}))
+        .post(
+            &format!("/api/v1/directory/entries/{entry_id}/vote"),
+            json!({"value": 1}),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let score = body["score"].as_f64().expect("score");
-    assert!(score > 0.0, "TL4 upvote must lift the score above zero: {body}");
+    assert!(
+        score > 0.0,
+        "TL4 upvote must lift the score above zero: {body}"
+    );
     // The response never carries weights.
     let raw = serde_json::to_string(&body).expect("serialise");
-    assert!(!raw.contains("weight"), "weights are never disclosed: {raw}");
+    assert!(
+        !raw.contains("weight"),
+        "weights are never disclosed: {raw}"
+    );
 }
 
 #[tokio::test]
@@ -524,14 +561,20 @@ async fn removal_is_hard_delete_and_votes_stay_for_audit() {
     let (_m_account, _m_pseud) = register(&mut member, "member@example.com", "memberer").await;
     let entry_id = submit_entry(&mut member, "Doomed", "https://doomed.example.org").await;
     let (status, _b) = operator
-        .post(&format!("/api/v1/directory/entries/{entry_id}/approve"), json!({}))
+        .post(
+            &format!("/api/v1/directory/entries/{entry_id}/approve"),
+            json!({}),
+        )
         .await;
     assert_eq!(status, StatusCode::OK);
 
     let mut voter = harness.client();
     let (_v_account, _v_pseud) = register(&mut voter, "voter@example.com", "voter").await;
     let (status, _b) = voter
-        .post(&format!("/api/v1/directory/entries/{entry_id}/vote"), json!({"value": 1}))
+        .post(
+            &format!("/api/v1/directory/entries/{entry_id}/vote"),
+            json!({"value": 1}),
+        )
         .await;
     assert_eq!(status, StatusCode::OK);
 
@@ -554,8 +597,7 @@ async fn removal_is_hard_delete_and_votes_stay_for_audit() {
 
     // But the vote row is still there for audit.
     let db = harness.tdb.db();
-    let votes: Vec<(String, i64)> =
-        lorehaven_db::directory::votes_for_tests(db, &entry_id).await;
+    let votes: Vec<(String, i64)> = lorehaven_db::directory::votes_for_tests(db, &entry_id).await;
     assert_eq!(votes.len(), 1, "votes survive entry removal for audit");
 }
 
@@ -571,7 +613,10 @@ async fn config_extra_categories_and_weighting_mode() {
     let (status, body) = operator.get("/api/v1/directory/categories").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let cats = body["items"].as_array().expect("items");
-    assert!(cats.iter().any(|c| c["category"] == "fanfiction_archive"), "{body}");
+    assert!(
+        cats.iter().any(|c| c["category"] == "fanfiction_archive"),
+        "{body}"
+    );
 
     // A category outside the seed set is refused unless configured.
     let mut member = harness.client();
@@ -590,7 +635,10 @@ async fn config_extra_categories_and_weighting_mode() {
         )
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
-    assert_eq!(body["error"]["field_errors"]["reason"], "category_not_allowed");
+    assert_eq!(
+        body["error"]["field_errors"]["reason"],
+        "category_not_allowed"
+    );
 }
 
 async fn seed_list(client: &mut Client) {

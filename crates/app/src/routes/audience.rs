@@ -18,12 +18,10 @@ async fn get_audience(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
 ) -> crate::http::ApiResult<Json<serde_json::Value>> {
-    let tiers = lorehaven_db::longevity::author_tier_aggregates(
-        state.db(),
-        &user.account_id.to_string(),
-    )
-    .await
-    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    let tiers =
+        lorehaven_db::longevity::author_tier_aggregates(state.db(), &user.account_id.to_string())
+            .await
+            .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
 
     let aggregates = lorehaven_domain::longevity::aggregate_tiers(&tiers);
     Ok(Json(serde_json::json!({

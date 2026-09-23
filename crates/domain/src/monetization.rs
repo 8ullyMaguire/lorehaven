@@ -262,17 +262,12 @@ pub fn distribute_pool_b(
     if pool_b_minor <= 0 || shares.is_empty() {
         return shares.iter().map(|(a, _, _)| (a.clone(), 0)).collect();
     }
-    let weights: Vec<i64> = shares
-        .iter()
-        .map(|(_, q, ai)| (q * ai).max(0))
-        .collect();
+    let weights: Vec<i64> = shares.iter().map(|(_, q, ai)| (q * ai).max(0)).collect();
     let total_weight: i64 = weights.iter().sum();
     if total_weight == 0 {
         let each = pool_b_minor / shares.len() as i64;
-        let mut out: Vec<(String, i64)> = shares
-            .iter()
-            .map(|(a, _, _)| (a.clone(), each))
-            .collect();
+        let mut out: Vec<(String, i64)> =
+            shares.iter().map(|(a, _, _)| (a.clone(), each)).collect();
         out[0].1 += pool_b_minor - each * shares.len() as i64;
         return out;
     }
@@ -482,10 +477,7 @@ mod tests {
 
     #[test]
     fn pool_b_distribution_equal_when_all_zero() {
-        let shares = vec![
-            ("a".to_string(), 0, 0),
-            ("b".to_string(), 0, 0),
-        ];
+        let shares = vec![("a".to_string(), 0, 0), ("b".to_string(), 0, 0)];
         let out = distribute_pool_b(100, &shares);
         assert_eq!(out[0].1, 50);
         assert_eq!(out[1].1, 50);

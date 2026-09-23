@@ -113,11 +113,7 @@ pub struct SanctionRow {
 }
 
 /// Set slow mode on a topic (spec §35.5).
-pub async fn set_slow_mode(
-    db: &Database,
-    topic_id: &str,
-    seconds: i64,
-) -> Result<()> {
+pub async fn set_slow_mode(db: &Database, topic_id: &str, seconds: i64) -> Result<()> {
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query("UPDATE forum_topics SET slow_mode_seconds = ? WHERE id = ?")
@@ -138,11 +134,7 @@ pub async fn set_slow_mode(
 }
 
 /// Set federation scope on a topic (spec §35.5).
-pub async fn set_federation_scope(
-    db: &Database,
-    topic_id: &str,
-    scope: &str,
-) -> Result<()> {
+pub async fn set_federation_scope(db: &Database, topic_id: &str, scope: &str) -> Result<()> {
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query("UPDATE forum_topics SET federation_scope = ? WHERE id = ?")
@@ -163,11 +155,7 @@ pub async fn set_federation_scope(
 }
 
 /// Feature a post (best-of curation, spec §35.5).
-pub async fn feature_post(
-    db: &Database,
-    post_id: &str,
-    curator: &str,
-) -> Result<()> {
+pub async fn feature_post(db: &Database, post_id: &str, curator: &str) -> Result<()> {
     let now = crate::identity::now_rfc3339();
     match db.backend() {
         Backend::Sqlite => {
@@ -191,11 +179,7 @@ pub async fn feature_post(
 }
 
 /// Record a zero-result search (spec §35.5).
-pub async fn record_search_miss(
-    db: &Database,
-    query_hash: &str,
-    query_text: &str,
-) -> Result<()> {
+pub async fn record_search_miss(db: &Database, query_hash: &str, query_text: &str) -> Result<()> {
     let now = crate::identity::now_rfc3339();
     match db.backend() {
         Backend::Sqlite => {
@@ -241,7 +225,7 @@ pub async fn record_topic_activity(
             sqlx::query(
                 "INSERT INTO forum_topic_activity (topic_id, activity_date, reply_count)
                  VALUES (?, ?, 1)
-                 ON CONFLICT(topic_id, activity_date) DO UPDATE SET reply_count = reply_count + 1"
+                 ON CONFLICT(topic_id, activity_date) DO UPDATE SET reply_count = reply_count + 1",
             )
             .bind(topic_id)
             .bind(activity_date)

@@ -387,22 +387,18 @@ pub async fn set_votes_visible(db: &Database, post_id: &str, visible: bool) -> R
     );
     let flag = if visible { 1_i64 } else { 0_i64 };
     let affected = match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query(&sql)
-                .bind(flag)
-                .bind(post_id)
-                .execute(db.sqlite_pool().expect("sqlite"))
-                .await?
-                .rows_affected()
-        }
-        Backend::Postgres => {
-            sqlx::query(&sql)
-                .bind(flag)
-                .bind(post_id)
-                .execute(db.postgres_pool().expect("postgres"))
-                .await?
-                .rows_affected()
-        }
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(flag)
+            .bind(post_id)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(flag)
+            .bind(post_id)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?
+            .rows_affected(),
     };
     Ok(affected > 0)
 }
@@ -648,7 +644,6 @@ pub async fn meta_actions_on_vote(db: &Database, vote_id: &str) -> Result<Vec<Me
     Ok(rows)
 }
 
-
 // ---------------------------------------------------------------------------
 // Karma (display only — spec §35.2, and §0.3 before it)
 // ---------------------------------------------------------------------------
@@ -777,10 +772,9 @@ pub async fn accrue_karma(
     let stored = read_karma(db, pseud).await?;
     let current = stored.as_ref().map_or(0, |(karma, _)| *karma);
     let decayed = stored.as_ref().map_or(current, |(_, updated_at)| {
-        OffsetDateTime::parse(updated_at, &Rfc3339)
-            .map_or(current, |at| {
-                decay_karma_bp(current, months_inactive(at, now), decay_percent)
-            })
+        OffsetDateTime::parse(updated_at, &Rfc3339).map_or(current, |at| {
+            decay_karma_bp(current, months_inactive(at, now), decay_percent)
+        })
     });
     let next = (decayed + delta_bp).max(0);
     write_karma(db, pseud, next, now).await?;

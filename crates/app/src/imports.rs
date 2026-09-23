@@ -362,14 +362,7 @@ pub async fn run(
 
     let report_json = report_with_media(&plan, &stored, false, &media_summary);
 
-    finish(
-        state,
-        &row,
-        import_job_id,
-        "completed",
-        &report_json,
-    )
-    .await?;
+    finish(state, &row, import_job_id, "completed", &report_json).await?;
     let _ = item_id;
     Ok(())
 }
@@ -850,12 +843,15 @@ fn report_with_media(
     // Merge the media summary into the existing JSON object.
     let mut obj: serde_json::Value = serde_json::from_str(&base).unwrap_or_default();
     if let Some(inner) = obj.as_object_mut() {
-        inner.insert("media_rescue".to_owned(), serde_json::json!({
-            "total_urls": media.total_urls,
-            "already_held": media.already_held,
-            "new_references": media.new_references,
-            "unparseable": media.unparseable,
-        }));
+        inner.insert(
+            "media_rescue".to_owned(),
+            serde_json::json!({
+                "total_urls": media.total_urls,
+                "already_held": media.already_held,
+                "new_references": media.new_references,
+                "unparseable": media.unparseable,
+            }),
+        );
     }
     obj.to_string()
 }

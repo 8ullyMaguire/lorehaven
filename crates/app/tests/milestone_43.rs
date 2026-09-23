@@ -52,7 +52,11 @@ impl Harness {
         let dir = scratch_dir(tag);
         let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
         let config = config_for(&dir);
-        Self { _dir: dir, tdb, config }
+        Self {
+            _dir: dir,
+            tdb,
+            config,
+        }
     }
 
     fn client(&self) -> Client {
@@ -70,7 +74,10 @@ struct Client {
 
 impl Client {
     fn new(app: axum::Router) -> Self {
-        Self { app, cookies: Vec::new() }
+        Self {
+            app,
+            cookies: Vec::new(),
+        }
     }
     fn cookie(&self, name: &str) -> Option<&str> {
         self.cookies
@@ -81,7 +88,9 @@ impl Client {
     fn capture(&mut self, response: &axum::response::Response) {
         for value in response.headers().get_all(header::SET_COOKIE) {
             let Ok(text) = value.to_str() else { continue };
-            let Some((pair, _)) = text.split_once(';') else { continue };
+            let Some((pair, _)) = text.split_once(';') else {
+                continue;
+            };
             if let Some((name, value)) = pair.split_once('=') {
                 let name = name.trim().to_owned();
                 let value = value.trim().to_owned();
@@ -267,9 +276,7 @@ async fn set_sort_rejects_unknown_sort() {
         .put("/api/v1/browse/sort/discover", json!({ "sort": "random" }))
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    let msg = body["error"]["message"]
-        .as_str()
-        .unwrap_or("");
+    let msg = body["error"]["message"].as_str().unwrap_or("");
     assert!(
         msg.contains("unknown sort"),
         "expected 'unknown sort' in message: {body}"

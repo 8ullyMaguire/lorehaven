@@ -26,7 +26,9 @@ pub async fn save_admin_taste_profile(
         Backend::Sqlite => {
             let pool = db.sqlite_pool().ok_or(pool_err())?;
             let mut tx = pool.begin().await?;
-            sqlx::query("DELETE FROM admin_taste_profile").execute(&mut *tx).await?;
+            sqlx::query("DELETE FROM admin_taste_profile")
+                .execute(&mut *tx)
+                .await?;
             for (key, label, target, weight) in dimensions {
                 sqlx::query(
                     "INSERT INTO admin_taste_profile (dimension_key, label, admin_target, weight, updated_at)
@@ -45,7 +47,9 @@ pub async fn save_admin_taste_profile(
         Backend::Postgres => {
             let pool = db.postgres_pool().ok_or(pool_err())?;
             let mut tx = pool.begin().await?;
-            sqlx::query("DELETE FROM admin_taste_profile").execute(&mut *tx).await?;
+            sqlx::query("DELETE FROM admin_taste_profile")
+                .execute(&mut *tx)
+                .await?;
             for (key, label, target, weight) in dimensions {
                 sqlx::query(
                     "INSERT INTO admin_taste_profile (dimension_key, label, admin_target, weight, updated_at)
@@ -96,7 +100,10 @@ pub async fn get_admin_taste_profile(
 /// substring match, e.g. tag "angst" matches dimension "angst"). Tags that match
 /// no dimension contribute nothing. The vector is ordered by dimension key sort
 /// order, matching `admin_taste_profile` ordering.
-pub async fn compute_and_store_work_vector(db: &Database, work_id: &str) -> Result<Vec<f64>, sqlx::Error> {
+pub async fn compute_and_store_work_vector(
+    db: &Database,
+    work_id: &str,
+) -> Result<Vec<f64>, sqlx::Error> {
     let dimensions = get_admin_taste_profile(db).await?;
     if dimensions.is_empty() {
         return Ok(vec![]);
@@ -148,10 +155,7 @@ pub async fn store_work_vector(
 // ---------------------------------------------------------------------------
 
 /// Read a work's cached taste vector (empty when never computed).
-pub async fn get_work_vector(
-    db: &Database,
-    work_id: &str,
-) -> Result<Vec<f64>, sqlx::Error> {
+pub async fn get_work_vector(db: &Database, work_id: &str) -> Result<Vec<f64>, sqlx::Error> {
     let sql = db.sql(
         "SELECT vector FROM work_taste_vectors WHERE work_id = ?",
         "SELECT vector FROM work_taste_vectors WHERE work_id = $1::uuid",
@@ -197,9 +201,8 @@ pub async fn get_work_vectors(
         return Ok(out);
     }
     let placeholders = crate::library::placeholders(work_ids.len(), false);
-    let sql = format!(
-        "SELECT work_id, vector FROM work_taste_vectors WHERE work_id IN ({placeholders})"
-    );
+    let sql =
+        format!("SELECT work_id, vector FROM work_taste_vectors WHERE work_id IN ({placeholders})");
     let mut rows: Vec<(String, String)> = Vec::new();
     match db.backend() {
         Backend::Sqlite => {
@@ -335,11 +338,7 @@ pub async fn compute_and_store_quiz_vector(
         let centroid = lorehaven_domain::taste_vector::compute_user_vector(&work_vectors, &weights);
         // Blend toward neutral 0.5 by (n+2)/(n+4) so quiz-only data stays moderate.
         let t = 2.0 / (work_vectors.len() as f64 + 4.0);
-        lorehaven_domain::taste_vector::blend_vectors(
-            &centroid,
-            &vec![0.5; n],
-            t,
-        )
+        lorehaven_domain::taste_vector::blend_vectors(&centroid, &vec![0.5; n], t)
     };
     if quiz_vector.is_empty() {
         return Ok(vec![]);
@@ -357,14 +356,8 @@ pub async fn compute_and_store_quiz_vector(
         1.0
     };
     let now = crate::identity::now_rfc3339();
-    crate::taste_vectors::store_taste_vector_public(
-        db,
-        account_id,
-        &quiz_vector,
-        distance,
-        &now,
-    )
-    .await?;
+    crate::taste_vectors::store_taste_vector_public(db, account_id, &quiz_vector, distance, &now)
+        .await?;
     Ok(quiz_vector)
 }
 
@@ -504,32 +497,31 @@ pub async fn list_quiz_works(
 }
 
 /// Replace the admin-curated quiz work pool.
-pub async fn set_admin_quiz_works(
-    db: &Database,
-    work_ids: &[String],
-) -> Result<(), sqlx::Error> {
+pub async fn set_admin_quiz_works(db: &Database, work_ids: &[String]) -> Result<(), sqlx::Error> {
     let now = crate::identity::now_rfc3339();
     match db.backend() {
         Backend::Sqlite => {
             let pool = db.sqlite_pool().ok_or(pool_err())?;
             let mut tx = pool.begin().await?;
-            sqlx::query("DELETE FROM quiz_works").execute(&mut *tx).await?;
-            for (i, id) in work_ids.iter().enumerate() {
-                sqlx::query(
-                    "INSERT INTO quiz_works (work_id, position, set_at) VALUES (?, ?, ?)",
-                )
-                .bind(id)
-                .bind(i as i64)
-                .bind(&now)
+            sqlx::query("DELETE FROM quiz_works")
                 .execute(&mut *tx)
                 .await?;
+            for (i, id) in work_ids.iter().enumerate() {
+                sqlx::query("INSERT INTO quiz_works (work_id, position, set_at) VALUES (?, ?, ?)")
+                    .bind(id)
+                    .bind(i as i64)
+                    .bind(&now)
+                    .execute(&mut *tx)
+                    .await?;
             }
             tx.commit().await?;
         }
         Backend::Postgres => {
             let pool = db.postgres_pool().ok_or(pool_err())?;
             let mut tx = pool.begin().await?;
-            sqlx::query("DELETE FROM quiz_works").execute(&mut *tx).await?;
+            sqlx::query("DELETE FROM quiz_works")
+                .execute(&mut *tx)
+                .await?;
             for (i, id) in work_ids.iter().enumerate() {
                 sqlx::query(
                     "INSERT INTO quiz_works (work_id, position, set_at) VALUES ($1::uuid, $2, $3)",

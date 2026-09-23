@@ -21,8 +21,14 @@ use lorehaven_db::thread_modes;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/topics/{id}/mode", get(get_mode).put(put_mode))
-        .route("/topics/{id}/schedule", get(get_schedule).post(add_schedule_section))
-        .route("/topics/{id}/wiki-pin", get(get_wiki_pin).post(post_wiki_pin).put(approve_wiki_pin))
+        .route(
+            "/topics/{id}/schedule",
+            get(get_schedule).post(add_schedule_section),
+        )
+        .route(
+            "/topics/{id}/wiki-pin",
+            get(get_wiki_pin).post(post_wiki_pin).put(approve_wiki_pin),
+        )
         .route("/topics/{id}/critique/join", post(join_critique))
         .route("/topics/{id}/critique/queue", get(get_critique_queue))
 }
@@ -41,7 +47,9 @@ async fn get_mode(
         .map_err(|e| internal(e.into()))?;
     match topic {
         Some(t) => Ok(Json(json!({ "mode": t.mode }))),
-        None => Err(ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" })),
+        None => Err(ApiError(lorehaven_domain::AppError::NotFound {
+            resource: "topic",
+        })),
     }
 }
 
@@ -56,8 +64,12 @@ async fn put_mode(
     Path(id): Path<String>,
     Json(body): Json<PutModeBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let mode = ThreadMode::from_str(&body.mode)
-        .ok_or_else(|| ApiError(lorehaven_domain::AppError::field("mode", "unknown thread mode")))?;
+    let mode = ThreadMode::from_str(&body.mode).ok_or_else(|| {
+        ApiError(lorehaven_domain::AppError::field(
+            "mode",
+            "unknown thread mode",
+        ))
+    })?;
     let topic = lorehaven_db::community::topic_by_id(state.db(), &id)
         .await
         .map_err(|e| internal(e.into()))?
@@ -65,8 +77,7 @@ async fn put_mode(
     let trust = lorehaven_db::governance::trust_for(state.db(), &pseud_id.to_string())
         .await
         .map_err(|e| internal(e.into()))?;
-    if topic.author_pseud != pseud_id.to_string() && !is_moderator(trust)
-    {
+    if topic.author_pseud != pseud_id.to_string() && !is_moderator(trust) {
         return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
     lorehaven_db::community::set_topic_mode(state.db(), &id, mode.as_str())
@@ -204,8 +215,7 @@ async fn approve_wiki_pin(
     let trust = lorehaven_db::governance::trust_for(state.db(), &pseud_id.to_string())
         .await
         .map_err(|e| internal(e.into()))?;
-    if topic.author_pseud != pseud_id.to_string() && !is_moderator(trust)
-    {
+    if topic.author_pseud != pseud_id.to_string() && !is_moderator(trust) {
         return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
     thread_modes::approve_wiki_pin(state.db(), &id, &body.post_id, &pseud_id.to_string())

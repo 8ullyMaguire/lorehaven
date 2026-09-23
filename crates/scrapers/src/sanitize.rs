@@ -619,10 +619,10 @@ mod tests {
     fn extract_image_urls_finds_absolute_urls() {
         let html = r#"<p>text</p><img src="https://example.com/a.png"><img src="https://other.example/b.jpg">"#;
         let urls = extract_image_urls(html, None);
-        assert_eq!(urls, vec![
-            "https://example.com/a.png",
-            "https://other.example/b.jpg",
-        ]);
+        assert_eq!(
+            urls,
+            vec!["https://example.com/a.png", "https://other.example/b.jpg",]
+        );
     }
 
     #[test]
@@ -630,10 +630,13 @@ mod tests {
         let base = Url::parse("https://archive.example/work/123").unwrap();
         let html = r#"<img src="/uploads/1.png"><img src="https://other.example/2.png">"#;
         let urls = extract_image_urls(html, Some(&base));
-        assert_eq!(urls, vec![
-            "https://archive.example/uploads/1.png",
-            "https://other.example/2.png",
-        ]);
+        assert_eq!(
+            urls,
+            vec![
+                "https://archive.example/uploads/1.png",
+                "https://other.example/2.png",
+            ]
+        );
     }
 
     #[test]

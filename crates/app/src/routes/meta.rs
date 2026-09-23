@@ -103,14 +103,18 @@ async fn meta(
         theme: ThemeSummary {
             mode: config.theme.mode.clone(),
             allow_user_opt_out: config.theme.allow_user_opt_out,
-            influence_sources: config.theme
+            influence_sources: config
+                .theme
                 .influence_sources
                 .iter()
-                .map(|s| match s.kind {
-                    crate::config::InfluenceSourceKind::OperatorTopics => "operator_topics",
-                    crate::config::InfluenceSourceKind::AdminTaste => "admin_taste",
-                    crate::config::InfluenceSourceKind::LongTermUsers => "long_term_users",
-                }.to_string())
+                .map(|s| {
+                    match s.kind {
+                        crate::config::InfluenceSourceKind::OperatorTopics => "operator_topics",
+                        crate::config::InfluenceSourceKind::AdminTaste => "admin_taste",
+                        crate::config::InfluenceSourceKind::LongTermUsers => "long_term_users",
+                    }
+                    .to_string()
+                })
                 .collect(),
         },
     })

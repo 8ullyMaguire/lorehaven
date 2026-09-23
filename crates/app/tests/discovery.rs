@@ -11,32 +11,47 @@ async fn reverse_search_by_perceptual_hash() {
 
     // Insert two references, then set perceptual hash on both (simulates curator setting it)
     media_resilience::insert_media_reference(db, "ref-rs-1", "sha256:abc", MediaKind::Image)
-        .await.expect("insert ref 1");
+        .await
+        .expect("insert ref 1");
     media_resilience::insert_media_reference(db, "ref-rs-2", "sha256:def", MediaKind::Image)
-        .await.expect("insert ref 2");
+        .await
+        .expect("insert ref 2");
 
     // Update perceptual_hash directly (in production this is done by curator/background job)
     match db.backend() {
         lorehaven_db::Backend::Sqlite => {
             sqlx::query("UPDATE media_references SET perceptual_hash = ? WHERE id = ?")
-                .bind("hash123").bind("ref-rs-1")
-                .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
+                .bind("hash123")
+                .bind("ref-rs-1")
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await
+                .unwrap();
             sqlx::query("UPDATE media_references SET perceptual_hash = ? WHERE id = ?")
-                .bind("hash123").bind("ref-rs-2")
-                .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
+                .bind("hash123")
+                .bind("ref-rs-2")
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await
+                .unwrap();
         }
         lorehaven_db::Backend::Postgres => {
             sqlx::query("UPDATE media_references SET perceptual_hash = $1 WHERE id = $2")
-                .bind("hash123").bind("ref-rs-1")
-                .execute(db.postgres_pool().expect("postgres")).await.unwrap();
+                .bind("hash123")
+                .bind("ref-rs-1")
+                .execute(db.postgres_pool().expect("postgres"))
+                .await
+                .unwrap();
             sqlx::query("UPDATE media_references SET perceptual_hash = $1 WHERE id = $2")
-                .bind("hash123").bind("ref-rs-2")
-                .execute(db.postgres_pool().expect("postgres")).await.unwrap();
+                .bind("hash123")
+                .bind("ref-rs-2")
+                .execute(db.postgres_pool().expect("postgres"))
+                .await
+                .unwrap();
         }
     }
 
     let found = media_resilience::find_by_perceptual_hash(db, "hash123", 0)
-        .await.expect("reverse search");
+        .await
+        .expect("reverse search");
     assert_eq!(found.len(), 2);
     assert!(found.iter().any(|r| r.id == "ref-rs-1"));
     assert!(found.iter().any(|r| r.id == "ref-rs-2"));
@@ -50,10 +65,12 @@ async fn curator_bounty_queue_finds_low_health_references() {
 
     // Insert reference with no links (should appear in queue with threshold 3)
     media_resilience::insert_media_reference(db, "ref-cbq-1", "sha256:c1", MediaKind::Image)
-        .await.expect("insert ref");
+        .await
+        .expect("insert ref");
 
     let queue = media_resilience::find_curator_bounty_queue(db, 3, 50)
-        .await.expect("bounty queue");
+        .await
+        .expect("bounty queue");
     assert_eq!(queue.len(), 1);
     assert_eq!(queue[0].id, "ref-cbq-1");
 }
@@ -97,7 +114,10 @@ async fn find_works_by_media_reference() {
     }
 
     let (created, reference_id) = media_resilience::upsert_media_reference_for_import(
-        db, "work-x", None, "https://img.example.com/xyz.png",
+        db,
+        "work-x",
+        None,
+        "https://img.example.com/xyz.png",
     )
     .await
     .expect("upsert import");
@@ -105,7 +125,10 @@ async fn find_works_by_media_reference() {
 
     // Same URL for work-y — dedup returns false but still inserts the work association.
     let (created2, _) = media_resilience::upsert_media_reference_for_import(
-        db, "work-y", None, "https://img.example.com/xyz.png",
+        db,
+        "work-y",
+        None,
+        "https://img.example.com/xyz.png",
     )
     .await
     .expect("upsert import 2");

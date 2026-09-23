@@ -54,7 +54,10 @@ pub async fn set_sort_preference(
                 .bind(pseud_id)
                 .bind(surface)
                 .bind(sort_value)
-                .execute(db.postgres_pool().expect("postgres pool for postgres backend"))
+                .execute(
+                    db.postgres_pool()
+                        .expect("postgres pool for postgres backend"),
+                )
                 .await?;
         }
     }
@@ -91,29 +94,21 @@ pub async fn get_sort_preference(
 }
 
 /// Delete a pseud's remembered sort preference for a surface.
-pub async fn delete_sort_preference(
-    db: &Database,
-    pseud_id: &str,
-    surface: &str,
-) -> Result<()> {
+pub async fn delete_sort_preference(db: &Database, pseud_id: &str, surface: &str) -> Result<()> {
     match db.backend() {
         Backend::Sqlite => {
-            sqlx::query(
-                "DELETE FROM reader_sort_preferences WHERE pseud_id = ?1 AND surface = ?2",
-            )
-            .bind(pseud_id)
-            .bind(surface)
-            .execute(db.sqlite_pool().expect("sqlite pool"))
-            .await?;
+            sqlx::query("DELETE FROM reader_sort_preferences WHERE pseud_id = ?1 AND surface = ?2")
+                .bind(pseud_id)
+                .bind(surface)
+                .execute(db.sqlite_pool().expect("sqlite pool"))
+                .await?;
         }
         Backend::Postgres => {
-            sqlx::query(
-                "DELETE FROM reader_sort_preferences WHERE pseud_id = $1 AND surface = $2",
-            )
-            .bind(pseud_id)
-            .bind(surface)
-            .execute(db.postgres_pool().expect("postgres pool"))
-            .await?;
+            sqlx::query("DELETE FROM reader_sort_preferences WHERE pseud_id = $1 AND surface = $2")
+                .bind(pseud_id)
+                .bind(surface)
+                .execute(db.postgres_pool().expect("postgres pool"))
+                .await?;
         }
     }
     Ok(())

@@ -215,12 +215,9 @@ pub struct WorksConfig {
 
 impl Default for WorksConfig {
     fn default() -> Self {
-        Self {
-            max_fork_depth: 3,
-        }
+        Self { max_fork_depth: 3 }
     }
 }
-
 
 /// Operator-only settings.
 ///
@@ -784,7 +781,6 @@ impl Default for ExportsConfig {
     }
 }
 
-
 ///
 /// # Why this is a configuration section and not a default
 ///
@@ -1328,9 +1324,7 @@ impl Config {
                     .iter()
                     .map(|(level, votes)| {
                         let level: i64 = level.trim().parse().map_err(|_| {
-                            anyhow::anyhow!(
-                                "forum.vote_budget key {level:?} is not a trust level"
-                            )
+                            anyhow::anyhow!("forum.vote_budget key {level:?} is not a trust level")
                         })?;
                         Ok((level, *votes))
                     })
@@ -1365,11 +1359,21 @@ impl Config {
         // --- exports ------------------------------------------------------
         let exports_file = file.exports.unwrap_or_default();
         let exports = ExportsConfig {
-            retention_days: exports_file.retention_days.unwrap_or_else(|| ExportsConfig::default().retention_days),
-            grant_ttl_secs: exports_file.grant_ttl_secs.unwrap_or_else(|| ExportsConfig::default().grant_ttl_secs),
-            cta_placement: exports_file.cta_placement.unwrap_or_else(|| ExportsConfig::default().cta_placement),
-            cta_html: exports_file.cta_html.unwrap_or_else(|| ExportsConfig::default().cta_html),
-            cta_quorum: exports_file.cta_quorum.unwrap_or_else(|| ExportsConfig::default().cta_quorum),
+            retention_days: exports_file
+                .retention_days
+                .unwrap_or_else(|| ExportsConfig::default().retention_days),
+            grant_ttl_secs: exports_file
+                .grant_ttl_secs
+                .unwrap_or_else(|| ExportsConfig::default().grant_ttl_secs),
+            cta_placement: exports_file
+                .cta_placement
+                .unwrap_or_else(|| ExportsConfig::default().cta_placement),
+            cta_html: exports_file
+                .cta_html
+                .unwrap_or_else(|| ExportsConfig::default().cta_html),
+            cta_quorum: exports_file
+                .cta_quorum
+                .unwrap_or_else(|| ExportsConfig::default().cta_quorum),
         };
 
         // --- directory -----------------------------------------------------
@@ -1395,7 +1399,11 @@ impl Config {
 
         // --- works (spec §40) ----------------------------------------------
         let works = WorksConfig {
-            max_fork_depth: file.works.as_ref().and_then(|w| w.max_fork_depth).unwrap_or(3),
+            max_fork_depth: file
+                .works
+                .as_ref()
+                .and_then(|w| w.max_fork_depth)
+                .unwrap_or(3),
         };
 
         let config = Self {
@@ -1440,12 +1448,16 @@ impl Config {
                 ThemeConfig {
                     mode: t.mode.unwrap_or_else(default_theme_mode),
                     allow_user_opt_out: t.allow_user_opt_out.unwrap_or(true),
-                    theme_dial_floor_bp: t.theme_dial_floor_bp.unwrap_or_else(default_theme_dial_floor_bp),
+                    theme_dial_floor_bp: t
+                        .theme_dial_floor_bp
+                        .unwrap_or_else(default_theme_dial_floor_bp),
                     adaptive_max_drift_bp: t.adaptive_max_drift_bp.unwrap_or(0),
-                    influence_sources: t.influence_sources.unwrap_or_else(default_influence_sources),
-            boost_tags: t.boost_tags.unwrap_or_default(),
-            suppress_tags: t.suppress_tags.unwrap_or_default(),
-            tag_gravity_bp: t.tag_gravity_bp.unwrap_or_default(),
+                    influence_sources: t
+                        .influence_sources
+                        .unwrap_or_else(default_influence_sources),
+                    boost_tags: t.boost_tags.unwrap_or_default(),
+                    suppress_tags: t.suppress_tags.unwrap_or_default(),
+                    tag_gravity_bp: t.tag_gravity_bp.unwrap_or_default(),
                 }
             },
             discovery: DiscoveryConfig::default(),
@@ -1486,30 +1498,46 @@ impl Config {
                 let v = file.vanguard.clone().unwrap_or_default();
                 VanguardConfig {
                     method: v.method.unwrap_or_else(|| VanguardConfig::default().method),
-                    threshold_percent: v.threshold_percent.unwrap_or(VanguardConfig::default().threshold_percent),
+                    threshold_percent: v
+                        .threshold_percent
+                        .unwrap_or(VanguardConfig::default().threshold_percent),
                     limit: v.limit.unwrap_or(VanguardConfig::default().limit),
                     can_pin: v.can_pin.unwrap_or(VanguardConfig::default().can_pin),
-                    can_nominate: v.can_nominate.unwrap_or(VanguardConfig::default().can_nominate),
-                    can_create_clubs: v.can_create_clubs.unwrap_or(VanguardConfig::default().can_create_clubs),
-                    public_badge: v.public_badge.unwrap_or(VanguardConfig::default().public_badge),
-                    bounty_discount: v.bounty_discount.unwrap_or(VanguardConfig::default().bounty_discount),
-                    pin_duration_days: v.pin_duration_days.unwrap_or(VanguardConfig::default().pin_duration_days),
+                    can_nominate: v
+                        .can_nominate
+                        .unwrap_or(VanguardConfig::default().can_nominate),
+                    can_create_clubs: v
+                        .can_create_clubs
+                        .unwrap_or(VanguardConfig::default().can_create_clubs),
+                    public_badge: v
+                        .public_badge
+                        .unwrap_or(VanguardConfig::default().public_badge),
+                    bounty_discount: v
+                        .bounty_discount
+                        .unwrap_or(VanguardConfig::default().bounty_discount),
+                    pin_duration_days: v
+                        .pin_duration_days
+                        .unwrap_or(VanguardConfig::default().pin_duration_days),
                 }
             },
             taste: {
                 let t = file.taste.unwrap_or_default();
                 TasteConfig {
                     gravity_strength: t.gravity_strength.unwrap_or(0.0),
-                    signal_weight_mode: t.signal_weight_mode.unwrap_or_else(|| "taste_weighted".to_string()),
+                    signal_weight_mode: t
+                        .signal_weight_mode
+                        .unwrap_or_else(|| "taste_weighted".to_string()),
                     admin_weight: t.admin_weight.unwrap_or(1.0),
                     diversity_injection_percent: t.diversity_injection_percent.unwrap_or(0.1),
-                    dimensions: t.dimensions.unwrap_or_else(|| vec![
-                        "angst".to_string(),
-                        "pacing".to_string(),
-                        "prose_density".to_string(),
-                        "canon_compliance".to_string(),
-                        "trope_diversity".to_string(),
-                    ]),
+                    dimensions: t.dimensions.unwrap_or_else(|| {
+                        vec![
+                            "angst".to_string(),
+                            "pacing".to_string(),
+                            "prose_density".to_string(),
+                            "canon_compliance".to_string(),
+                            "trope_diversity".to_string(),
+                        ]
+                    }),
                 }
             },
             signals: {
@@ -1540,7 +1568,9 @@ impl Config {
                         .unwrap_or_else(|| "admin_aligned".to_string()),
                     auto_disable_threshold: m.auto_disable_threshold.unwrap_or(0.3),
                     candidate_exploration_bonus: m.candidate_exploration_bonus.unwrap_or(2.0),
-                    candidate_promotion_impressions: m.candidate_promotion_impressions.unwrap_or(500),
+                    candidate_promotion_impressions: m
+                        .candidate_promotion_impressions
+                        .unwrap_or(500),
                 }
             },
             // --- revisions (spec §38) -----------------------------------------
@@ -1715,7 +1745,9 @@ impl Config {
                 anyhow::bail!("forum.vote_budget trust levels must not be negative, got {level}");
             }
             if *votes < 0 {
-                anyhow::bail!("forum.vote_budget must not be negative, got {votes} at level {level}");
+                anyhow::bail!(
+                    "forum.vote_budget must not be negative, got {votes} at level {level}"
+                );
             }
         }
         if self.forum.meta_mod_points < 0 {
@@ -1724,7 +1756,8 @@ impl Config {
         if self.forum.meta_mod_min_verdicts < 1 {
             anyhow::bail!("forum.meta_mod_min_verdicts must be at least 1");
         }
-        if !(0..=lorehaven_domain::typed_votes::WEIGHT_SCALE_BP).contains(&self.forum.min_vote_weight_bp)
+        if !(0..=lorehaven_domain::typed_votes::WEIGHT_SCALE_BP)
+            .contains(&self.forum.min_vote_weight_bp)
         {
             anyhow::bail!(
                 "forum.min_vote_weight_bp must be between 0 and {}",
@@ -1736,10 +1769,16 @@ impl Config {
         }
         // Export retention settings (spec §38).
         if self.exports.retention_days < 0 {
-            anyhow::bail!("exports.retention_days must be >= 0, got {}", self.exports.retention_days);
+            anyhow::bail!(
+                "exports.retention_days must be >= 0, got {}",
+                self.exports.retention_days
+            );
         }
         if self.exports.grant_ttl_secs <= 0 {
-            anyhow::bail!("exports.grant_ttl_secs must be > 0, got {}", self.exports.grant_ttl_secs);
+            anyhow::bail!(
+                "exports.grant_ttl_secs must be > 0, got {}",
+                self.exports.grant_ttl_secs
+            );
         }
         let cta_placement = &self.exports.cta_placement;
         if cta_placement != "per_chapter" && cta_placement != "per_work" && cta_placement != "off" {

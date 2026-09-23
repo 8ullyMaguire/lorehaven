@@ -73,7 +73,10 @@ pub async fn update_preferences(
     // Defaults match the migration defaults
     let auto_submit = body.auto_submit_to_archive.unwrap_or(true);
     let prefer_verified = body.prefer_curator_verified.unwrap_or(true);
-    let notifications = body.broken_link_notifications.as_deref().unwrap_or("digest_weekly");
+    let notifications = body
+        .broken_link_notifications
+        .as_deref()
+        .unwrap_or("digest_weekly");
     let allow_edits = body.allow_curator_edits.unwrap_or(true);
     let min_healthy = body.minimum_healthy_links.unwrap_or(3);
 
@@ -82,8 +85,13 @@ pub async fn update_preferences(
     }
 
     media_resilience::upsert_author_preferences(
-        state.db(), &account_id,
-        auto_submit, prefer_verified, notifications, allow_edits, min_healthy,
+        state.db(),
+        &account_id,
+        auto_submit,
+        prefer_verified,
+        notifications,
+        allow_edits,
+        min_healthy,
     )
     .await
     .map_err(|e| ApiError(AppError::Internal(e.into())))?;
@@ -151,30 +159,44 @@ pub async fn list_targeted_bounties(
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
-    let bounties_json: Vec<Value> = bounties.iter().map(|b| {
-        json!({
-            "bounty_id": b.id,
-            "work_id": b.work_id,
-            "chapter_id": b.chapter_id,
-            "media_reference_id": b.media_reference_id,
-            "reward": b.reward,
-            "status": b.status,
-            "description": b.description,
-            "claimed_by": b.claimed_by,
-            "created_at": b.created_at,
+    let bounties_json: Vec<Value> = bounties
+        .iter()
+        .map(|b| {
+            json!({
+                "bounty_id": b.id,
+                "work_id": b.work_id,
+                "chapter_id": b.chapter_id,
+                "media_reference_id": b.media_reference_id,
+                "reward": b.reward,
+                "status": b.status,
+                "description": b.description,
+                "claimed_by": b.claimed_by,
+                "created_at": b.created_at,
+            })
         })
-    }).collect();
+        .collect();
 
-    Ok(Json(json!({ "work_id": work_id, "bounties": bounties_json })))
+    Ok(Json(
+        json!({ "work_id": work_id, "bounties": bounties_json }),
+    ))
 }
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/author/media-preferences", get(get_preferences).put(update_preferences))
+        .route(
+            "/author/media-preferences",
+            get(get_preferences).put(update_preferences),
+        )
         .route("/author/media-health", get(get_author_media_health))
         .route("/author/targeted-bounties", post(post_targeted_bounty))
-        .route("/author/targeted-bounties/claim", post(claim_targeted_bounty))
-        .route("/works/{work_id}/targeted-bounties", get(list_targeted_bounties))
+        .route(
+            "/author/targeted-bounties/claim",
+            post(claim_targeted_bounty),
+        )
+        .route(
+            "/works/{work_id}/targeted-bounties",
+            get(list_targeted_bounties),
+        )
 }
 
 /// Get the current user's per-work media health report (§32.7.8).

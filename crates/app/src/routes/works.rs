@@ -35,7 +35,6 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
-use std::collections::BTreeMap;
 use lorehaven_db::collaboration;
 use lorehaven_db::content::{
     self, ContentError, PublicationOutcome, RevisionInput, RevisionSummary, Work, WorkPatch,
@@ -46,7 +45,9 @@ use lorehaven_db::reading;
 use lorehaven_db::taxonomy;
 use lorehaven_domain::content::Contributor;
 use lorehaven_domain::document::Document;
-use lorehaven_domain::permission::{ExclusionTarget, LineageEdge, LineageKind, Permission, PermissionStatement};
+use lorehaven_domain::permission::{
+    ExclusionTarget, LineageEdge, LineageKind, Permission, PermissionStatement,
+};
 use lorehaven_domain::policy::{
     can_access_content, AccessPolicy, Actor, ContentFacts, Decision, DenyReason, Lifecycle,
     Visibility,
@@ -54,6 +55,7 @@ use lorehaven_domain::policy::{
 use lorehaven_domain::{AppError, ChapterId, PseudId, RevisionId, WorkId};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 
 use crate::auth::{MaybeSession, RequireSession, SessionUser};
 use crate::http::{ApiError, ApiResult};
@@ -1568,7 +1570,6 @@ mod tests {
     }
 }
 
-
 /// Fork a work (spec §40.1). Creates a new empty draft owned by the caller,
 /// linked to the parent through a `remix` lineage edge, inheriting the
 /// parent's tags. No body text is copied — a fork starts empty.
@@ -1631,9 +1632,7 @@ async fn fork_work(
     let max_depth = state.config().works.max_fork_depth;
     if depth >= max_depth {
         return Err(ApiError(AppError::Validation {
-            message: format!(
-                "this work's fork chain has reached the maximum depth of {max_depth}"
-            ),
+            message: format!("this work's fork chain has reached the maximum depth of {max_depth}"),
             field_errors: BTreeMap::from([(
                 "depth".to_owned(),
                 format!("lineage depth {depth} >= maximum {max_depth}"),
@@ -1662,10 +1661,7 @@ async fn fork_work(
         from_work_id: parent_str.clone(),
         to_work_id: new_work.id.to_string(),
         kind: LineageKind::Remix,
-        provenance: format!(
-            "forked by {} at {}",
-            pseud, now
-        ),
+        provenance: format!("forked by {} at {}", pseud, now),
         created_at: now,
     };
     permission::insert_lineage_edge(state.db(), &edge).await?;

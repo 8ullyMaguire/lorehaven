@@ -29,7 +29,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::document::{escape_text, Block, Document, Inline, Mark};
 
-pub use epub::{CtaPlacement, EpubChapter, EpubCta, EpubError, EpubFacts, EpubInput, EpubProvenance};
+pub use epub::{
+    CtaPlacement, EpubChapter, EpubCta, EpubError, EpubFacts, EpubInput, EpubProvenance,
+};
 
 /// A format a work can be exported to (spec §13.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1561,4 +1563,3 @@ mod tests {
         assert_eq!(facts.chapter_titles, ["One", "Chapter 2"]);
     }
 }
-

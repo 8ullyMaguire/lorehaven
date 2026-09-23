@@ -21,11 +21,20 @@ pub fn router() -> Router<AppState> {
         .route("/topics/{id}/spoiler-scope", put(put_spoiler_scope))
         .route("/works/{id}/progress", get(get_progress).put(put_progress))
         .route("/posts/{id}/warnings", get(get_warnings).post(post_warning))
-        .route("/topics/{id}/draft", get(get_draft).post(post_draft).delete(delete_draft))
+        .route(
+            "/topics/{id}/draft",
+            get(get_draft).post(post_draft).delete(delete_draft),
+        )
         .route("/posts/{id}/schedule", post(post_schedule))
         .route("/posts/scheduled/due", get(get_due_scheduled))
-        .route("/posts/scheduled/{id}/publish", post(post_publish_scheduled))
-        .route("/me/warning-prefs", get(get_warning_prefs).put(put_warning_pref))
+        .route(
+            "/posts/scheduled/{id}/publish",
+            post(post_publish_scheduled),
+        )
+        .route(
+            "/me/warning-prefs",
+            get(get_warning_prefs).put(put_warning_pref),
+        )
 }
 
 // ---------------------------------------------------------------------------
@@ -88,9 +97,14 @@ async fn put_progress(
     Path(id): Path<String>,
     Json(body): Json<ProgressBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    spoilers::upsert_reader_progress(state.db(), &user.account_id.to_string(), &id, body.last_chapter)
-        .await
-        .map_err(|e| internal(e.into()))?;
+    spoilers::upsert_reader_progress(
+        state.db(),
+        &user.account_id.to_string(),
+        &id,
+        body.last_chapter,
+    )
+    .await
+    .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "last_chapter": body.last_chapter })))
 }
 
@@ -132,8 +146,12 @@ async fn post_warning(
     Path(id): Path<String>,
     Json(body): Json<WarningBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let warning_type = WarningType::from_str(&body.warning_type)
-        .ok_or_else(|| ApiError(lorehaven_domain::AppError::field("warning_type", "unknown type")))?;
+    let warning_type = WarningType::from_str(&body.warning_type).ok_or_else(|| {
+        ApiError(lorehaven_domain::AppError::field(
+            "warning_type",
+            "unknown type",
+        ))
+    })?;
     let severity = body.severity.unwrap_or(1);
     // Only the post author can add warnings (verified via post lookup).
     let post = lorehaven_db::community::post_by_id(state.db(), &id)
@@ -143,9 +161,15 @@ async fn post_warning(
     if post.author_pseud != pseud_id.to_string() {
         return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
-    spoilers::add_content_warning(state.db(), &id, warning_type, severity, body.custom_text.as_deref())
-        .await
-        .map_err(|e| internal(e.into()))?;
+    spoilers::add_content_warning(
+        state.db(),
+        &id,
+        warning_type,
+        severity,
+        body.custom_text.as_deref(),
+    )
+    .await
+    .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "added": true })))
 }
 
@@ -255,9 +279,7 @@ async fn get_warning_prefs(
         .map_err(|e| internal(e.into()))?;
     let prefs: Vec<serde_json::Value> = prefs
         .into_iter()
-        .map(|(t, a)| {
-            json!({ "warning_type": t.as_str(), "action": a.as_str() })
-        })
+        .map(|(t, a)| json!({ "warning_type": t.as_str(), "action": a.as_str() }))
         .collect();
     Ok(Json(json!({ "prefs": prefs })))
 }
@@ -273,13 +295,26 @@ async fn put_warning_pref(
     RequirePseud { user, .. }: RequirePseud,
     Json(body): Json<WarningPrefBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let warning_type = WarningType::from_str(&body.warning_type)
-        .ok_or_else(|| ApiError(lorehaven_domain::AppError::field("warning_type", "unknown type")))?;
-    let action = WarningAction::from_str(&body.action)
-        .ok_or_else(|| ApiError(lorehaven_domain::AppError::field("action", "must be 'blur' or 'show'")))?;
-    spoilers::set_warning_pref(state.db(), &user.account_id.to_string(), warning_type, action)
-        .await
-        .map_err(|e| internal(e.into()))?;
+    let warning_type = WarningType::from_str(&body.warning_type).ok_or_else(|| {
+        ApiError(lorehaven_domain::AppError::field(
+            "warning_type",
+            "unknown type",
+        ))
+    })?;
+    let action = WarningAction::from_str(&body.action).ok_or_else(|| {
+        ApiError(lorehaven_domain::AppError::field(
+            "action",
+            "must be 'blur' or 'show'",
+        ))
+    })?;
+    spoilers::set_warning_pref(
+        state.db(),
+        &user.account_id.to_string(),
+        warning_type,
+        action,
+    )
+    .await
+    .map_err(|e| internal(e.into()))?;
     Ok(Json(json!({ "set": true })))
 }
 

@@ -362,11 +362,7 @@ async fn usage_counters_increment_and_roll_over() {
 
 use lorehaven_db::monetization;
 
-async fn register_with_pseud(
-    client: &mut Client,
-    email: &str,
-    handle: &str,
-) {
+async fn register_with_pseud(client: &mut Client, email: &str, handle: &str) {
     let (status, body) = client
         .request(
             "POST",
@@ -419,7 +415,11 @@ async fn ai_declaration_can_be_set_and_read_back() {
     assert_eq!(body["declaration"].as_str().unwrap(), "co-written");
 
     let (status, body) = client
-        .request("GET", &format!("/api/v1/works/{}/ai-declaration", work_id), None)
+        .request(
+            "GET",
+            &format!("/api/v1/works/{}/ai-declaration", work_id),
+            None,
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "get: {body}");
     assert_eq!(body["declaration"].as_str().unwrap(), "co-written");
@@ -470,10 +470,13 @@ async fn settle_period_computes_pool_split() {
         "/api/v1/admin/monetization/settle?period_start=2026-01-01T00:00:00Z&period_end=2026-02-01T00:00:00Z",
         None,
     ).await;
-    
+
     assert_eq!(status, StatusCode::OK, "settle ok: {body}");
     let body_str = serde_json::to_string(&body).unwrap_or_default();
-    assert!(body_str.contains("\"status\":\"settled\""), "settled: {body}");
+    assert!(
+        body_str.contains("\"status\":\"settled\""),
+        "settled: {body}"
+    );
 
     harness.cleanup().await;
 }
@@ -489,11 +492,13 @@ async fn reading_session_records_time() {
     // Create a work to read
     let work_id = create_work_api(&mut client, "Reading Session Test").await;
 
-    let (status, body) = client.request(
-        "POST",
-        &format!("/api/v1/works/{}/reading-session", work_id),
-        Some(serde_json::json!({ "seconds": 180 })),
-    ).await;
+    let (status, body) = client
+        .request(
+            "POST",
+            &format!("/api/v1/works/{}/reading-session", work_id),
+            Some(serde_json::json!({ "seconds": 180 })),
+        )
+        .await;
     assert_eq!(status, StatusCode::CREATED, "reading session: {body}");
 }
 
@@ -502,7 +507,9 @@ async fn transparency_dashboard_returns_public_data() {
     let harness = Harness::new("transparency").await;
     let mut client = harness.client();
 
-    let (status, body) = client.request("GET", "/api/v1/transparency/monetization", None).await;
+    let (status, body) = client
+        .request("GET", "/api/v1/transparency/monetization", None)
+        .await;
     assert_eq!(status, StatusCode::OK, "dashboard: {body}");
 
     assert!(body["total_revenue_minor"].is_i64());

@@ -52,7 +52,11 @@ impl Harness {
         let dir = scratch_dir(tag);
         let tdb = test_support::TestDb::connect_with_dir(tag, &dir).await;
         let config = config_for(&dir);
-        Self { _dir: dir, tdb, config }
+        Self {
+            _dir: dir,
+            tdb,
+            config,
+        }
     }
     fn client(&self) -> Client {
         Client::new(server::build_router(AppState::new(
@@ -69,7 +73,10 @@ struct Client {
 
 impl Client {
     fn new(app: axum::Router) -> Self {
-        Self { app, cookies: Vec::new() }
+        Self {
+            app,
+            cookies: Vec::new(),
+        }
     }
     fn cookie(&self, name: &str) -> Option<&str> {
         self.cookies
@@ -80,7 +87,9 @@ impl Client {
     fn capture(&mut self, response: &axum::response::Response) {
         for value in response.headers().get_all(header::SET_COOKIE) {
             let Ok(text) = value.to_str() else { continue };
-            let Some((pair, _)) = text.split_once(';') else { continue };
+            let Some((pair, _)) = text.split_once(';') else {
+                continue;
+            };
             if let Some((name, value)) = pair.split_once('=') {
                 let name = name.trim().to_owned();
                 let value = value.trim().to_owned();
@@ -306,7 +315,10 @@ async fn streak_repeated_login_same_day_is_idempotent() {
     let state = lorehaven_db::engagement::record_login(&db, &account)
         .await
         .expect("login 2");
-    assert_eq!(state.current, 1, "second login same day should not increment");
+    assert_eq!(
+        state.current, 1,
+        "second login same day should not increment"
+    );
 }
 
 #[tokio::test]
@@ -378,12 +390,24 @@ async fn taste_notification_queue_and_drain() {
 #[tokio::test]
 async fn days_to_iso_date_known_dates() {
     // 1970-01-01 is day 0.
-    assert_eq!(lorehaven_db::engagement::__days_to_iso_date_for_test(0), "1970-01-01");
-    assert_eq!(lorehaven_db::engagement::__days_to_iso_date_for_test(1), "1970-01-02");
+    assert_eq!(
+        lorehaven_db::engagement::__days_to_iso_date_for_test(0),
+        "1970-01-01"
+    );
+    assert_eq!(
+        lorehaven_db::engagement::__days_to_iso_date_for_test(1),
+        "1970-01-02"
+    );
     // 2024-01-01 is day 19723.
-    assert_eq!(lorehaven_db::engagement::__days_to_iso_date_for_test(19723), "2024-01-01");
+    assert_eq!(
+        lorehaven_db::engagement::__days_to_iso_date_for_test(19723),
+        "2024-01-01"
+    );
     // 2026-09-22 is day 20718.
-    assert_eq!(lorehaven_db::engagement::__days_to_iso_date_for_test(20718), "2026-09-22");
+    assert_eq!(
+        lorehaven_db::engagement::__days_to_iso_date_for_test(20718),
+        "2026-09-22"
+    );
 }
 
 #[tokio::test]
@@ -403,9 +427,15 @@ async fn login_records_streak_and_endpoint_reports_it() {
 
     let (status, body) = client.get("/api/v1/me/streak").await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["current_streak"], 1, "one login should give a streak of 1");
+    assert_eq!(
+        body["current_streak"], 1,
+        "one login should give a streak of 1"
+    );
     assert!(body["longest_streak"].as_i64().unwrap() >= 1);
-    assert!(body["last_login_at"].is_string(), "last login timestamp present: {body}");
+    assert!(
+        body["last_login_at"].is_string(),
+        "last login timestamp present: {body}"
+    );
 }
 
 #[tokio::test]

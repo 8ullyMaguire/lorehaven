@@ -48,9 +48,15 @@ impl Harness {
     async fn new(tag: &str) -> Self {
         let dir = scratch_dir(tag);
         let config = config_for(&dir);
-        let db = Database::connect(&config.database).await.expect("db connect");
+        let db = Database::connect(&config.database)
+            .await
+            .expect("db connect");
         db.migrate().await.expect("migrations");
-        Self { _dir: dir, config, db }
+        Self {
+            _dir: dir,
+            config,
+            db,
+        }
     }
 
     fn router(&self) -> axum::Router {
@@ -61,12 +67,20 @@ impl Harness {
 #[tokio::test]
 async fn test_get_board_public() {
     let h = Harness::new("board-public").await;
-    let resp = h.router()
-        .oneshot(Request::builder().uri("/api/v1/roadmap").body(Body::empty()).unwrap())
+    let resp = h
+        .router()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/roadmap")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(resp.into_body(), 10_000_000).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), 10_000_000)
+        .await
+        .unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
     assert!(json["board"].is_object());
 }
@@ -74,12 +88,20 @@ async fn test_get_board_public() {
 #[tokio::test]
 async fn test_changelog_empty_public() {
     let h = Harness::new("changelog-empty").await;
-    let resp = h.router()
-        .oneshot(Request::builder().uri("/api/v1/roadmap/changelog").body(Body::empty()).unwrap())
+    let resp = h
+        .router()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/roadmap/changelog")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(resp.into_body(), 10_000_000).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), 10_000_000)
+        .await
+        .unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
     let moves = json["moves"].as_array().unwrap();
     assert!(moves.is_empty(), "fresh install has no moves");

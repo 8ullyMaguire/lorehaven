@@ -44,9 +44,7 @@ pub async fn get_board(State(state): State<AppState>) -> ApiResult<Json<Value>> 
 }
 
 /// Group cards by stage, each bucket ordered by Elo DESC.
-fn group_by_stage(
-    cards: Vec<lorehaven_db::roadmap::Card>,
-) -> serde_json::Map<String, Value> {
+fn group_by_stage(cards: Vec<lorehaven_db::roadmap::Card>) -> serde_json::Map<String, Value> {
     let mut map = serde_json::Map::new();
     for card in cards {
         let entry = map
@@ -87,7 +85,9 @@ pub async fn get_arena(
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
     if candidates.len() < 4 {
-        return Ok(Json(json!({ "ballot": null, "reason": "not_enough_cards" })));
+        return Ok(Json(
+            json!({ "ballot": null, "reason": "not_enough_cards" }),
+        ));
     }
 
     let ballot_id = uuid::Uuid::new_v4().to_string();
@@ -159,11 +159,7 @@ pub async fn post_arena_vote(
     let (card_ids, served_elo, _) = roadmap::fetch_ballot(state.db(), &body.ballot_id)
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?
-        .ok_or_else(|| {
-            ApiError(AppError::NotFound {
-                resource: "ballot",
-            })
-        })?;
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "ballot" }))?;
 
     let find_rating = |id: &str| {
         served_elo
@@ -205,7 +201,12 @@ pub async fn post_arena_vote(
 
     // Build updates: (card_id, new_elo, is_best, is_worst).
     let mut updates: Vec<(String, f64, bool, bool)> = Vec::new();
-    updates.push((body.best_id.clone(), best_rating + outcome.best_delta, true, false));
+    updates.push((
+        body.best_id.clone(),
+        best_rating + outcome.best_delta,
+        true,
+        false,
+    ));
     updates.push((
         body.worst_id.clone(),
         worst_rating + outcome.worst_delta,
@@ -213,7 +214,12 @@ pub async fn post_arena_vote(
         true,
     ));
     for (i, (id, orig_r)) in unchosen.iter().enumerate() {
-        updates.push((id.clone(), orig_r + outcome.unchosen_deltas[i], false, false));
+        updates.push((
+            id.clone(),
+            orig_r + outcome.unchosen_deltas[i],
+            false,
+            false,
+        ));
     }
 
     roadmap::apply_elo_and_counters(state.db(), &updates)
@@ -299,9 +305,7 @@ pub async fn post_move_card(
     let card = cards
         .iter()
         .find(|c| c.id == body.card_id)
-        .ok_or_else(|| ApiError(AppError::NotFound {
-            resource: "card",
-        }))?;
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "card" }))?;
 
     let from_stage = card.stage.clone();
     roadmap::record_move(

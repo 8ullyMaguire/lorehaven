@@ -5,10 +5,10 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get};
 use axum::{Json, Router};
+use lorehaven_db::roles;
 use lorehaven_domain::AppError;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use lorehaven_db::roles;
 
 /// Check whether the current user holds the Vanguard role.
 pub async fn get_my_vanguard_status(
@@ -41,9 +41,15 @@ pub async fn pin_work(
     if !is_vanguard {
         return Err(ApiError(AppError::AccessDenied));
     }
-    let id = roles::pin_work(state.db(), &account_id, &work_id, &body.pin_reason, body.message.as_deref())
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    let id = roles::pin_work(
+        state.db(),
+        &account_id,
+        &work_id,
+        &body.pin_reason,
+        body.message.as_deref(),
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
     Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
 }
 
@@ -69,7 +75,8 @@ pub async fn get_pins_for_work(
     let pins = roles::list_active_pins(state.db())
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
-    let filtered: Vec<Value> = pins.into_iter()
+    let filtered: Vec<Value> = pins
+        .into_iter()
         .filter(|p| p["work_id"].as_str() == Some(work_id.as_str()))
         .collect();
     Ok(Json(json!({ "pins": filtered })))
@@ -140,7 +147,10 @@ pub async fn list_vanguards(
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/vanguard/status", get(get_my_vanguard_status))
-        .route("/vanguard/pins/{work_id}", get(get_pins_for_work).post(pin_work).delete(unpin_work))
+        .route(
+            "/vanguard/pins/{work_id}",
+            get(get_pins_for_work).post(pin_work).delete(unpin_work),
+        )
         .route("/vanguards", get(list_vanguards).post(grant_vanguard))
         .route("/vanguards/{account_id}", delete(revoke_vanguard))
 }
