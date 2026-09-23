@@ -2806,6 +2806,80 @@ export function fetchMyStreak(signal?: AbortSignal): Promise<{
 }
 
 // ---------------------------------------------------------------------------
+// Taste Calibration Arena (spec §0.4.2a)
+// ---------------------------------------------------------------------------
+
+export interface ArenaCard {
+  work_id: string;
+  title: string;
+  fandom: string;
+  tags: string[];
+  word_count: number;
+  excerpt: string;
+  target_dimension: string;
+}
+
+export interface ArenaRound {
+  cards: ArenaCard[];
+}
+
+export interface DimensionSummary {
+  key: string;
+  label: string;
+  matches_played: number;
+}
+
+export interface ArenaNextResponse {
+  round: ArenaRound;
+  dimensions: DimensionSummary[];
+}
+
+export interface ArenaVoteRequest {
+  best_work_id: string;
+  worst_work_id: string;
+  reason_tags: string[];
+}
+
+export interface ArenaVoteResponse {
+  success: boolean;
+  message: string;
+  next_round: ArenaRound | null;
+}
+
+export interface DimensionWeightSummary {
+  key: string;
+  label: string;
+  influence: string;
+}
+
+export interface ArenaWeightsResponse {
+  dimensions: DimensionWeightSummary[];
+}
+
+/** Fetch the next arena round. */
+export function fetchArenaNext(signal?: AbortSignal): Promise<ArenaNextResponse> {
+  return apiFetch<ArenaNextResponse>('/arena/next', { signal });
+}
+
+/** Submit an arena ballot. */
+export function submitArenaVote(body: ArenaVoteRequest): Promise<ArenaVoteResponse> {
+  return apiFetch<ArenaVoteResponse>('/arena/vote', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** Dismiss the arena. */
+export function dismissArena(): Promise<{ success: boolean; message: string }> {
+  return apiFetch('/arena/dismiss', { method: 'POST' });
+}
+
+/** Fetch the signed-in user's arena weight summary. */
+export function fetchArenaWeights(signal?: AbortSignal): Promise<ArenaWeightsResponse> {
+  return apiFetch<ArenaWeightsResponse>('/arena/weights', { signal });
+}
+
+// ---------------------------------------------------------------------------
 // Resource Directory (spec §39)
 // ---------------------------------------------------------------------------
 

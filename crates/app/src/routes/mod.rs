@@ -11,6 +11,7 @@ pub mod decision_service;
 pub mod derivative;
 pub mod cta;
 pub mod directory;
+pub mod arena;
 pub mod discovery;
 pub mod economy;
 pub mod browse;

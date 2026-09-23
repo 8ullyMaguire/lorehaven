@@ -290,6 +290,247 @@ pub async fn taste_signal_for_works(
 }
 
 /// Weekly batch: recompute all taste vectors.
+
+// ---------------------------------------------------------------------------
+// Taste Calibration Arena (spec §0.4.2a)
+// ---------------------------------------------------------------------------
+
+/// Record an arena ballot and update per-dimension Elo ratings.
+pub async fn record_arena_ballot(
+    db: &Database,
+    account_id: &str,
+    best_work_id: &str,
+    worst_work_id: &str,
+    reason_tags: &[String],
+) -> Result<(), sqlx::Error> {
+    let tags_json = serde_json::to_string(reason_tags).unwrap_or_else(|_| "[]".to_string());
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().ok_or(pool_err())?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let now_str = format!("{}", now);
+            sqlx::query(
+                "INSERT INTO arena_ballots (id, account_id, best_work_id, worst_work_id, reason_tags, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(account_id)
+            .bind(best_work_id)
+            .bind(worst_work_id)
+            .bind(tags_json)
+            .bind(now_str)
+            .execute(pool)
+            .await?;
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().ok_or(pool_err())?;
+            let tags_json = serde_json::to_value(reason_tags).unwrap_or(serde_json::json!([]));
+            sqlx::query(
+                "INSERT INTO arena_ballots (account_id, best_work_id, worst_work_id, reason_tags)
+                 VALUES ($1, $2, $3, $4)",
+            )
+            .bind(account_id)
+            .bind(best_work_id)
+            .bind(worst_work_id)
+            .bind(tags_json)
+            .execute(pool)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Get or create arena weights for an account.
+pub async fn get_arena_weights(
+    db: &Database,
+    account_id: &str,
+) -> Result<Vec<(String, f64, f64, i64)>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let rows = sqlx::query_as::<_, (String, f64, f64, i64)>(
+                "SELECT dimension_key, weight, elo_rating, matches_played
+                 FROM arena_weights WHERE account_id = ?",
+            )
+            .bind(account_id)
+            .fetch_all(db.sqlite_pool().ok_or(pool_err())?)
+            .await?;
+            Ok(rows)
+        }
+        Backend::Postgres => {
+            let rows = sqlx::query_as::<_, (String, f64, f64, i64)>(
+                "SELECT dimension_key, weight, elo_rating, matches_played
+                 FROM arena_weights WHERE account_id = $1",
+            )
+            .bind(account_id)
+            .fetch_all(db.postgres_pool().ok_or(pool_err())?)
+            .await?;
+            Ok(rows)
+        }
+    }
+}
+
+/// Update arena weights after a ballot.
+pub async fn update_arena_weights(
+    db: &Database,
+    account_id: &str,
+    dimension_key: &str,
+    weight: f64,
+    elo_rating: f64,
+    matches_played: i64,
+) -> Result<(), sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().ok_or(pool_err())?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let now_str = format!("{}", now);
+            sqlx::query(
+                "INSERT INTO arena_weights (id, account_id, dimension_key, weight, elo_rating, matches_played, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (account_id, dimension_key) DO UPDATE SET
+                   weight = excluded.weight,
+                   elo_rating = excluded.elo_rating,
+                   matches_played = excluded.matches_played,
+                   updated_at = excluded.updated_at",
+            )
+            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(account_id)
+            .bind(dimension_key)
+            .bind(weight)
+            .bind(elo_rating)
+            .bind(matches_played)
+            .bind(now_str.clone())
+            .bind(now_str)
+            .execute(pool)
+            .await?;
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().ok_or(pool_err())?;
+            sqlx::query(
+                "INSERT INTO arena_weights (account_id, dimension_key, weight, elo_rating, matches_played)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (account_id, dimension_key) DO UPDATE SET
+                   weight = EXCLUDED.weight,
+                   elo_rating = EXCLUDED.elo_rating,
+                   matches_played = EXCLUDED.matches_played,
+                   updated_at = now()",
+            )
+            .bind(account_id)
+            .bind(dimension_key)
+            .bind(weight)
+            .bind(elo_rating)
+            .bind(matches_played)
+            .execute(pool)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Get works for arena pool (excluding already-voted works).
+/// Returns (work_id, title, summary, fandom, tags, word_count).
+pub async fn get_arena_pool(
+    db: &Database,
+    account_id: &str,
+    limit: i64,
+) -> Result<Vec<(String, String, String, String, Vec<String>, u32)>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().ok_or(pool_err())?;
+            let rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, i64)>(
+                "SELECT w.id, w.title, w.summary,
+                        COALESCE((SELECT tn.canonical FROM taxonomy_nodes tn
+                                  JOIN work_tags wt ON tn.id = wt.node_id
+                                  WHERE wt.work_id = w.id AND tn.kind = 'fandom'
+                                  LIMIT 1), ''),
+                        COALESCE((SELECT GROUP_CONCAT(tn2.canonical, ',')
+                                  FROM taxonomy_nodes tn2
+                                  JOIN work_tags wt2 ON tn2.id = wt2.node_id
+                                  WHERE wt2.work_id = w.id AND tn2.kind = 'tag'), ''),
+                        COALESCE(wc.word_count, 0)
+                 FROM works w
+                 LEFT JOIN (
+                     SELECT c.work_id, SUM(cr.word_count) as word_count
+                     FROM chapters c
+                     JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                     GROUP BY c.work_id
+                 ) wc ON w.id = wc.work_id
+                 WHERE w.lifecycle = 'published'
+                   AND w.visibility = 'public'
+                   AND w.deleted_at IS NULL
+                   AND w.id NOT IN (
+                       SELECT best_work_id FROM arena_ballots WHERE account_id = ?
+                       UNION
+                       SELECT worst_work_id FROM arena_ballots WHERE account_id = ?
+                   )
+                 LIMIT ?",
+            )
+            .bind(account_id)
+            .bind(account_id)
+            .bind(limit)
+            .fetch_all(db.sqlite_pool().ok_or(pool_err())?)
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|(id, title, summary, fandom, tags, wc)| {
+                    let tags: Vec<String> = tags
+                        .map(|t| t.split(',').map(|s| s.to_string()).collect())
+                        .unwrap_or_default();
+                    (id, title, summary, fandom, tags, wc as u32)
+                })
+                .collect())
+        }
+        Backend::Postgres => {
+            let rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, i64)>(
+                "SELECT w.id, w.title, w.summary,
+                        COALESCE((SELECT tn.canonical FROM taxonomy_nodes tn
+                                  JOIN work_tags wt ON tn.id = wt.node_id
+                                  WHERE wt.work_id = w.id AND tn.kind = 'fandom'
+                                  LIMIT 1), ''),
+                        COALESCE((SELECT string_agg(tn2.canonical, ',')
+                                  FROM taxonomy_nodes tn2
+                                  JOIN work_tags wt2 ON tn2.id = wt2.node_id
+                                  WHERE wt2.work_id = w.id AND tn2.kind = 'tag'), ''),
+                        COALESCE(wc.word_count, 0)
+                 FROM works w
+                 LEFT JOIN (
+                     SELECT c.work_id, SUM(cr.word_count) as word_count
+                     FROM chapters c
+                     JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                     GROUP BY c.work_id
+                 ) wc ON w.id = wc.work_id
+                 WHERE w.lifecycle = 'published'
+                   AND w.visibility = 'public'
+                   AND w.deleted_at IS NULL
+                   AND w.id NOT IN (
+                       SELECT best_work_id FROM arena_ballots WHERE account_id = $1
+                       UNION
+                       SELECT worst_work_id FROM arena_ballots WHERE account_id = $1
+                   )
+                 LIMIT $2",
+            )
+            .bind(account_id)
+            .bind(limit)
+            .fetch_all(db.postgres_pool().ok_or(pool_err())?)
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|(id, title, summary, fandom, tags, wc)| {
+                    let tags: Vec<String> = tags
+                        .map(|t| t.split(',').map(|s| s.to_string()).collect())
+                        .unwrap_or_default();
+                    (id, title, summary, fandom, tags, wc as u32)
+                })
+                .collect())
+        }
+    }
+}
+
 pub async fn recompute_all_taste_vectors(db: &Database) -> Result<(), sqlx::Error> {
     let account_ids: Vec<(String,)> = match db.backend() {
         Backend::Sqlite => {
