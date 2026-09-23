@@ -3282,3 +3282,89 @@ export function addIpfsPin(body: AddIpfsPinBody): Promise<{ id: string }> {
     body: JSON.stringify(body),
   });
 }
+
+// ---------------------------------------------------------------------------
+// M45 — Roadmap consensus (spec §44, ADR 0023)
+// ---------------------------------------------------------------------------
+
+export interface RoadmapCard {
+  id: string;
+  title: string;
+  category: string;
+  stage: string;
+  elo_rating: number;
+  matches_played: number;
+  times_best: number;
+  times_worst: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoadmapBoard {
+  board: Record<string, RoadmapCard[]>;
+  total_cards: number;
+}
+
+export interface ArenaBallot {
+  ballot_id: string;
+  cards: RoadmapCard[];
+}
+
+export interface RoadmapMove {
+  id: string;
+  card_id: string;
+  card_title: string;
+  from_stage: string;
+  to_stage: string;
+  reason: string | null;
+  actor_account_id: string;
+  created_at: string;
+}
+
+export interface RoadmapChangelog {
+  moves: RoadmapMove[];
+}
+
+export interface ArenaVoteBody {
+  ballot_id: string;
+  best_id: string;
+  worst_id: string;
+}
+
+export interface SuggestBody {
+  title: string;
+  category?: string;
+}
+
+export function fetchRoadmapBoard(signal?: AbortSignal): Promise<RoadmapBoard> {
+  return apiFetch<RoadmapBoard>('/roadmap', { signal });
+}
+
+export function fetchArenaBallot(): Promise<ArenaBallot> {
+  return apiFetch<ArenaBallot>('/roadmap/arena');
+}
+
+export function submitRoadmapVote(body: ArenaVoteBody): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>('/roadmap/arena', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function suggestFeature(body: SuggestBody): Promise<{ id: string; status: string }> {
+  return apiFetch<{ id: string; status: string }>('/roadmap/suggest', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function fetchRoadmapChangelog(signal?: AbortSignal): Promise<RoadmapChangelog> {
+  return apiFetch<RoadmapChangelog>('/roadmap/changelog', { signal });
+}
+
+export function moveRoadmapCard(body: { card_id: string; stage: string; reason?: string }): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>('/admin/roadmap/move', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
