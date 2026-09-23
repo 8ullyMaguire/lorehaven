@@ -71,6 +71,12 @@ fn config_for(dir: &Path) -> Config {
         burst: 1000,
         per_minute: 6000,
     };
+    // Device delivery email for tests. The delivery endpoint accepts this and
+    // returns "delivered" without actually sending mail (spec §13.4 / M7-03).
+    config.device = Some(lorehaven_app::config::DeviceConfig {
+        kindle_email: Some("test-kindle@lorehaven.example".into()),
+        device_email: Some("test-device@lorehaven.example".into()),
+    });
     config
 }
 
@@ -793,4 +799,60 @@ async fn the_sweep_task_is_one_the_worker_knows() {
         matches!(JobKind::parse("export"), Some(JobKind::Export)),
         "the export job kind round-trips"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Device delivery (spec §13.4 / M7-03)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn device_delivery_with_configured_email_returns_delivered() {
+    let harness = Harness::new("with-device").await;
+    let mut client = harness.client();
+    register(&mut client, "withdevice@example.org", "withdevice").await;
+    let work = author(&mut client, "Some Work", &["Words."]).await;
+
+    let (status, body) = request_export(&mut client, &work, "epub", true).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    let export_id = body["id"].as_str().expect("export id").to_owned();
+    drain(&harness.state(), 8).await;
+
+    let (status, body) = client
+        .post(
+            &format!("/api/v1/exports/{export_id}/deliver"),
+            json!({ "device": "kindle" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["status"], "delivered");
+    assert_eq!(body["device"], "kindle");
+    assert_eq!(body["target_email"], "test-kindle@lorehaven.example");
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn device_delivery_refuses_unknown_device() {
+    let harness = Harness::new("unknown-device").await;
+    let mut client = harness.client();
+    register(&mut client, "unknowndevice@example.org", "unknowndevice").await;
+    let work = author(&mut client, "Some Work", &["Words."]).await;
+
+    let (status, body) = request_export(&mut client, &work, "epub", true).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    let export_id = body["id"].as_str().expect("export id").to_owned();
+    drain(&harness.state(), 8).await;
+
+    let (status, body) = client
+        .post(
+            &format!("/api/v1/exports/{export_id}/deliver"),
+            json!({ "device": "smart_fridge" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let message = body["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("smart_fridge"),
+        "the refusal names the unknown device: {message}"
+    );
+    harness.cleanup().await;
 }

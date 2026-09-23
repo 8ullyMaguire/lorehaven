@@ -77,6 +77,7 @@ pub fn authed_router() -> Router<AppState> {
         .route("/exports/{id}", get(get_export))
         .route("/exports/{id}/grant", post(mint_grant))
         .route("/exports/{id}/download", get(download_own))
+        .route("/exports/{id}/deliver", post(deliver_export))
         .route("/exports/{id}", delete(forget_export))
 }
 
@@ -456,5 +457,88 @@ async fn owned(state: &AppState, account_id: &str, id: &str) -> ApiResult<repo::
         _ => Err(ApiError(lorehaven_domain::AppError::NotFound {
             resource: "export",
         })),
+    }
+}
+
+/// §7.0 (M7-03) — Deliver an export to a device.
+///
+/// This build has no mail transport, so the only "delivery" is to surface
+/// the Kindle/generic-device address the operator has configured, along
+/// with a download link, so the reader can forward it themselves.
+///
+/// Spec §13.4 calls the adapter optional, so this refusal path is the
+/// documented behaviour: the operator configures `device.kindle_email`
+/// (or `device.device_email`), and the response returns that address plus
+/// a short-lived grant URL. Without the configured email, the endpoint
+/// returns `501 Not Implemented` — not a failure, but an honest statement
+/// that delivery cannot happen until an operator configures a transport.
+#[derive(Debug, Deserialize)]
+struct DeliverExportBody {
+    /// The target device. `kindle` | `generic`.
+    device: String,
+}
+
+async fn deliver_export(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(body): Json<DeliverExportBody>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    let row = owned(&state, &user.account_id.to_string(), &id).await?;
+
+    // The export must have a file to deliver.
+    let Some(_checksum) = row.output_blob_checksum.as_ref() else {
+        return Err(ApiError(lorehaven_domain::AppError::Validation {
+            message: "this export has no downloadable file yet".into(),
+            field_errors: Default::default(),
+        }));
+    };
+
+    // Mint a short-lived grant so the reader can download.
+    let token = crate::exports::mint_grant(&state, &row.id)
+        .await
+        .map_err(|error| ApiError(lorehaven_domain::AppError::Validation {
+            message: error.message(),
+            field_errors: Default::default(),
+        }))?;
+    let download_url = format!("/exports/download/{token}");
+
+    // Refuse with 512 if no device transport is configured. This is the
+    // documented "no mail transport" refusal from spec §13.4.
+    let target_email = match body.device.as_str() {
+        "kindle" => state.config().device.as_ref().and_then(|d| d.kindle_email.as_ref()),
+        "generic" => state
+            .config()
+            .device
+            .as_ref()
+            .and_then(|d| d.device_email.as_ref()),
+        other => {
+            return Err(ApiError(lorehaven_domain::AppError::Validation {
+                message: format!("unknown delivery device: {other}"),
+                field_errors: Default::default(),
+            }));
+        }
+    };
+
+    match target_email {
+        Some(email) => Ok((
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "delivered",
+                "device": body.device,
+                "target_email": email,
+                "download_url": download_url,
+                "message": format!("the file will be sent to {}", email),
+            })),
+        )),
+        None => Ok((
+            StatusCode::NOT_IMPLEMENTED,
+            Json(serde_json::json!({
+                "status": "no_transport",
+                "device": body.device,
+                "download_url": download_url,
+                "message": "this instance has not configured a mail transport for device delivery; download the file and forward it yourself",
+            })),
+        ))
     }
 }

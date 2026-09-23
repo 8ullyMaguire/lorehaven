@@ -162,6 +162,8 @@ pub struct Config {
     pub revisions: RevisionsConfig,
     /// Job queue settings (spec §38).
     pub jobs: JobsConfig,
+    /// Device delivery settings (spec §13.4 / M7-03).
+    pub device: Option<DeviceConfig>,
     /// Media resilience settings (spec §32.7).
     pub media_resilience: MediaResilienceConfig,
     /// Library update-check settings (spec §38).
@@ -1557,6 +1559,11 @@ impl Config {
                     .and_then(|j| j.terminal_retention_days)
                     .unwrap_or_else(|| JobsConfig::default().terminal_retention_days),
             },
+            // --- device delivery (spec §13.4 / M7-03) -------------------------
+            device: file.device.as_ref().map(|d| DeviceConfig {
+                kindle_email: d.kindle_email.clone(),
+                device_email: d.device_email.clone(),
+            }),
             // --- media_resilience (spec §32.7) -----------------------------------
             media_resilience: MediaResilienceConfig::default(),
             // --- library (spec §38) --------------------------------------------
@@ -1650,6 +1657,7 @@ impl Config {
             meta_ranker: MetaRankerConfig::default(),
             revisions: RevisionsConfig::default(),
             jobs: JobsConfig::default(),
+            device: None,
             media_resilience: MediaResilienceConfig::default(),
             library: LibraryConfig::default(),
             config_path: None,
@@ -1814,6 +1822,8 @@ struct FileConfig {
     works: Option<WorksSection>,
     revisions: Option<RevisionsSection>,
     jobs: Option<JobsSection>,
+    /// Device delivery settings (spec §13.4 / M7-03).
+    device: Option<DeviceSection>,
     library: Option<LibrarySection>,
     theme: Option<ThemeSection>,
     /// Taste gravity settings (spec §0.4, §16.17).
@@ -2143,6 +2153,27 @@ struct AdministrationSection {
     webhook_max_attempts: Option<u32>,
     webhook_base_delay_ms: Option<u64>,
     webhook_allowed_hosts: Option<Vec<String>>,
+}
+
+/// Device delivery settings (spec §13.4 / M7-03).
+///
+/// Optional because the adapter is optional. When `None`, device delivery
+/// returns `501 Not Implemented`.
+#[derive(Debug, Default, Clone)]
+pub struct DeviceConfig {
+    /// Email address for Kindle delivery.
+    pub kindle_email: Option<String>,
+    /// Email address for generic device delivery.
+    pub device_email: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeviceSection {
+    /// Email address for Kindle delivery (M7-03 / spec §13.4).
+    kindle_email: Option<String>,
+    /// Email address for generic device delivery.
+    device_email: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
