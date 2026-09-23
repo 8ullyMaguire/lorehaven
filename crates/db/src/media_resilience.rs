@@ -2192,7 +2192,7 @@ pub async fn author_media_health_report(
              WHERE al.status = 'healthy'
              GROUP BY al.media_reference_id
          ) healthy ON healthy.media_reference_id = wmr.media_reference_id
-         WHERE w.owner_account_id = ?
+         WHERE w.owner_pseud_id IN (SELECT p.id FROM pseuds p WHERE p.account_id = ?)
          GROUP BY w.id, w.title
          ORDER BY w.title"
             .to_string(),
@@ -2210,7 +2210,7 @@ pub async fn author_media_health_report(
              WHERE al.status = 'healthy'
              GROUP BY al.media_reference_id
          ) healthy ON healthy.media_reference_id = wmr.media_reference_id
-         WHERE w.owner_account_id = $1
+         WHERE w.owner_pseud_id IN (SELECT p.id FROM pseuds p WHERE p.account_id = $1)
          GROUP BY w.id, w.title
          ORDER BY w.title"
             .to_string(),
