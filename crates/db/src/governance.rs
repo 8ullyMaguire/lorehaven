@@ -490,6 +490,12 @@ pub async fn has_operator_role(db: &Database, account: &str) -> Result<bool, sql
     }
 }
 
+/// Operator check used by admin routes (spec §19.1): trust level >= 5.
+pub async fn is_operator(db: &Database, account: &str) -> Result<bool, sqlx::Error> {
+    let level = trust_for(db, account).await?;
+    Ok(level >= 5)
+}
+
 pub async fn grant_operator_role(
     db: &Database,
     account: &str,
