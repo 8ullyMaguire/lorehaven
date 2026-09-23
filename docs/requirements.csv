@@ -164,3 +164,57 @@ M15-07,economy,Processor fees recorded and deducted before pool math,M15,impleme
 M15-08,economy,Subscription revenue attributed by reading time,M15,implemented-locally-tested,crates/app/src/routes/monetization.rs,Spec §20.6.1. Time-on-page weighted; §9.7.8 anti-gaming inherited; never word count.
 M15-09,economy,Monetization transparency dashboard on /api/v1/meta,M15,implemented-locally-tested,crates/app/tests/milestone_15.rs,Spec §20.10.7. Pools/cap/median/histogram/weights/fee range; never individual earnings.
 M0-12,platform,Processor-agnostic billing adapter replacing the Stripe reference,M0,implemented-locally-tested,crates/app/src/routes/monetization.rs,"Spec §2.1, §2.2. Operator owns processor and content-policy compatibility."
+M45-10,discovery,Scout value replaces overlap-based resonance in curation credit,M45,planned,--,"Gaps review A1. Credit engagement with works that later earn high operator rating/vanguard consensus, weighted by obscurity at time of engagement."
+M45-11,platform,Incentivized interactions tagged at write time and discounted in ranking,M45,planned,--,Gaps review A2. Reading-club/topic/bounty bonuses and taste notifications must not inflate ranking signals. Retrofit-critical.
+M45-12,governance,Generated-content posture as instance policy: forbid|disclose|allow,M45,planned,--,Gaps review A3. Author credits vest on completion by distinct trusted readers; authorship attestation for bounties; never sanction on detector output alone.
+M45-13,discovery,Uniform-random exploration slots with per-slot selection-probability logging,M45,planned,--,Gaps review A4. Enables inverse-propensity scoring and unbiased offline evaluation. Retrofit-critical: log from day one.
+M45-14,discovery,Work coordinates: deterministic stylometry + end-of-work micro-surveys,M45,planned,--,"Gaps review A5. Sentence-length variance, dialogue ratio, vocabulary richness, chapter length. Optional local embeddings only with M27 ML permission."
+M45-15,discovery,Exposure floor: every new work gets guaranteed minimum impressions,M45,planned,--,Gaps review A6. Doubles as unbiased exploration data.
+M45-16,taxonomy,Only confirmed tags count toward gravity; per-work tag contribution cap,M45,planned,--,Gaps review A7. Reader/wrangler-confirmed only; inaccurate tags flag into M29 wrangling queue.
+M45-17,discovery,Operator taste leakage view on /admin/discovery,M45,planned,--,Gaps review A9. Shows what an observant user could infer from public artifacts; payouts attributed to instance and batched; resonance label updates weekly in coarse buckets only.
+M45-18,economy,Faucet/sink dashboard; credits stay closed-loop and never cashable,M45,planned,--,Gaps review A11. Faucets pay for signal or supply; sinks convert credits into supply.
+M45-19,discovery,Tasting menu: active-learning calibration queue with 300-word passages,M45,planned,--,Gaps review B1. Reason-tagged quick ratings picked by uncertainty.
+M45-20,imports,History import as cold start: AO3/FFN/Goodreads bookmarks and kudos,M45,planned,--,Gaps review B2. Offered to every user; beats quiz.
+M45-21,reading,"Structured DNF reasons: one-tap abandonment cause, private by default",M45,planned,--,Gaps review B3. Aggregate to authors only with constructive-feedback opt-in (§8.4).
+M45-22,reading,Personal concierge queue with session selector,M45,planned,--,Gaps review B4. Comfort read/wreck me/20 minutes; WIP completion alerts.
+M45-23,discovery,North-star metric with per-mechanism attribution,M45,planned,--,Gaps review B5. Works rated per month + time-to-find; attribute each loved work to the surfacing mechanism.
+M45-24,feedback,Reason-tagged kudos and line-level highlights,M45,planned,--,Gaps review B6. Optional kudos reason; highlight-to-react on a sentence.
+M45-25,community,"Keystone author program: drought detection, feedback routing, beta matching",M45,planned,--,Gaps review C1. Opt-in credit patronage; never touches ranking.
+M45-26,community,Feedback-drought intervention: welcome rota guarantees first-work comment in 72h,M45,planned,--,Gaps review C2. Route readers to strong-completion/few-comment works; small comment bonus.
+M45-27,community,"Exchanges, prompt memes, big bangs with matching engine",M45,planned,--,"Gaps review C3. Yuletide-style gift exchanges; anonymous prompt/fill boards; social, not transactional."
+M45-28,writing,WIP adoption and closure notes with lineage,M45,planned,--,Gaps review C4. Mark abandoned WIPs up-for-adoption; publish planned endings; credit closure notes.
+M45-29,writing,"Finisher signals: update cadence and completion history, positive framing only",M45,planned,--,Gaps review C5. Finisher badge; optional completion pledges via escrow; off by default.
+M45-30,translation,"Cross-language supply: taste-score foreign works, fund translation bounties",M45,planned,--,Gaps review C6. Tags map across languages; stylometry partially transfers; author permission required.
+M45-31,discovery,Fandom-blind discovery: canon-agnostic works surfaced for unknown fandoms,M45,planned,--,Gaps review C7.
+M45-32,discovery,Trend radar: emerging-fandom detection for event and bounty timing,M45,planned,--,Gaps review C8.
+M45-33,community,"Beta and specialist matchmaking: betas, Britpickers, sensitivity readers",M45,planned,--,"Gaps review C9. Credit-rewarded, opt-in, critique only where requested."
+M45-34,community,Fic Finder bounties: pay for identifying half-remembered works,M45,planned,--,Gaps review C10. Full-text search + optional semantic search + reverse media search.
+M45-35,search,Rec blurbs as second summaries in results,M45,planned,--,Gaps review C11. Best rec note + short excerpt beside author summary.
+M45-36,media,"MediaReference descriptions as link-rot last fallback, curator-bountied",M45,planned,--,Gaps review D1.
+M45-37,media,"Stable identifiers for media: MusicBrainz/ISRC, tracklists, Wikidata, ISBN/TMDB",M45,planned,--,Gaps review D2. Identity over location.
+M45-38,media,Author-note links through snapshot-and-monitor pipeline,M45,planned,--,Gaps review D3.
+M45-39,preservation,"Instance-death protection: mutual backup, dead-man's-switch export, redirect registry",M45,planned,--,Gaps review D4. Persistent work IDs; ActivityPub Move for accounts.
+M45-40,community,Curator lenses: invited rec-bloggers publish opt-in taste-profile views,M45,planned,--,Gaps review E2. Browse archive through X's eyes; operator's own lens stays invisible.
+M45-41,growth,"Rec-post attribution: share links carry sharer code, both sides earn credits",M45,planned,--,Gaps review E3.
+M45-42,growth,Claim your works: invite authors whose works exist as metadata,M45,planned,--,Gaps review E4. AO3-profile code verification; exclusion registry for opt-outs.
+M45-43,growth,"Discord bot with rec commands, per-fandom feeds, account linking",M45,planned,--,Gaps review E5. Extends §37 companion bot.
+M45-44,federation,Sister instances: subscribe to public picks over ActivityPub,M45,planned,--,Gaps review E6. Directory searchable by public topics (§0.4).
+M45-45,admin,Taste as versioned blendable object with governance mode,M45,planned,--,Gaps review F1. Operator/council/community-vote lens ownership; succession plan.
+M45-46,admin,Preview before apply: view-as persona preview of discover/search under proposed config,M45,planned,--,Gaps review F2. Config history and rollback.
+M45-47,admin,"Scale-aware activation: mechanisms declare minimum activity, dormant below it",M45,planned,--,"Gaps review F3. Small instances get simpler behavior, features unlock as they grow."
+M45-48,admin,Hardware-aware presets with graceful degradation tiers,M45,planned,--,Gaps review F4. SQLite weekly batches/no embeddings → Postgres+Redis incremental.
+M45-49,discovery,Variety within the aligned set: MMR re-ranking and satiation modeling,M45,planned,--,Gaps review F5. Three angst fics in a row nudges next pick toward fluff.
+M45-50,admin,Scheduled gravity: time-boxed theme configs for events and seasons,M45,planned,--,Gaps review F6.
+M45-51,governance,"GDPR compliance: resonance score disclosed on access requests, erasure cascades",M45,planned,--,Gaps review G1. Profiling purpose in privacy notice; private-library copy survival policy.
+M45-52,governance,DSA notice-and-action flow and statements of reasons,M45,planned,--,Gaps review G2. Art. 17 covers demotion — collides with shadow sanction tier; DMCA intake kept for US claimants.
+M45-53,imports,"Import visibility default: public sees metadata and link, cached body private until author claims",M45,planned,--,Gaps review G3. Biggest reputational and copyright risk; verify with counsel.
+M45-54,governance,RPF instance policy knob; Spain honor/image rights awareness,M45,planned,--,Gaps review G5. LO 1/1982.
+M45-55,governance,"Built-in compliance tooling: notice forms, SOR templates, DSAR export",M45,planned,--,Gaps review G6. Operators are legally responsible for their own instance.
+M45-01,governance,"Roadmap board: cards grouped by stage, Elo-ordered, anonymously readable",M45,planned,--,"Spec §44.1, §44.5. Ported from fichub-consensus."
+M45-02,governance,"MaxDiff arena: 4-card ballot, best+worst, virtual 1v1 Elo matches K=32",M45,planned,--,Spec §44.3. Only idea-stage cards eligible; ballots log pre-match Elo.
+M45-03,governance,Voting and suggesting gated at TL>=1 via trust ladder,M45,planned,--,Spec §44.4. governance::trust_for; no separate voter table.
+M45-04,governance,Stage moves operator-only with public changelog and reasons,M45,planned,--,"Spec §44.2, §44.5. Elo is the community's, stage is the operator's."
+M45-05,governance,Seed script maps requirements.csv rows to cards idempotently,M45,planned,--,Spec §44.6. scripts/seed_roadmap.py; never downgrades shipped.
+M45-06,governance,One vote per ballot per account; second vote is a named error,M45,planned,--,Spec §44.7.
+M45-07,governance,Suggestion dedup by normalized title attaches to existing card,M45,planned,--,Spec §44.1.
+M45-56,discovery,"Taste Calibration Arena: 4-card forced-tradeoff, best+worst, Plackett-Luce dimensional weights",M45,planned,--,"Spec §0.4.2a. Arena reveals dimensional weights (prose/pacing/characters) that absolute swipes conflate. 300-word excerpts. Optional reason tags. Monthly drift mini-rounds."
