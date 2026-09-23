@@ -23,7 +23,6 @@ CREATE TABLE IF NOT EXISTS instance_fingerprints (
     created_at          TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_instance_fingerprints_host ON instance_fingerprints(instance_host, valid_until DESC);
-CREATE INDEX IF NOT EXISTS idx_instance_fingerprints_valid ON instance_fingerprints(valid_until);
 
 CREATE TABLE IF NOT EXISTS ap_actors (
     id              TEXT PRIMARY KEY,
