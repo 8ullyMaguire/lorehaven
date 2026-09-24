@@ -63,7 +63,9 @@ residuals), M47 (3, settings surfaces), plus the new M52–M55.
    `~/code/rust/fanfic-scrapers` (read-only reference).
 4. M54 bot port, M55 OpenAPI, M56 M45/M47 residuals.
 5. Then: 3 known E2E failures (worker timing, download verification,
-   subscription unread count), tag v1.0.0, deploy to thinkcentre.
+   subscription unread count) — confirmed after M52 commit: 2 remain flaky
+   (both export/worker: EPUB ready detection + delete after). The media
+   overflow is fixed. Tag v1.0.0, deploy to thinkcentre.
 6. Run `scripts/seed_roadmap.py` after committing — the 16 new planned rows
    appear as `idea` cards (ADR 0023: the CSV is the board seed).
 
