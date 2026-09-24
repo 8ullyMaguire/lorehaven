@@ -18,7 +18,6 @@ CREATE TABLE IF NOT EXISTS notifications (
     title       TEXT NOT NULL,
     body        TEXT NOT NULL,
     work_id     UUID,
-    delivery_channel TEXT NOT NULL DEFAULT 'in_app',  -- in_app | email | push | none
     read_at     TEXT,
     created_at  TEXT NOT NULL
 );
