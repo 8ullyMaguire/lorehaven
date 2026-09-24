@@ -237,8 +237,8 @@ M52-05,discovery,"Strategies: cooccur, time-decay, tag graph, author graph, sequ
 M52-06,discovery,Recipes compose over strategies within operator resource ceilings,M52,planned,--,Spec §16.3 over §16.1a.
 M52-07,discovery,"Taste gravity, diversity budget, ordering contract apply after the blend in both modes",M52,planned,--,Influence layers never move inside a strategy.
 M52-08,discovery,Shadow-mode evaluation before any mode switch,M52,planned,--,Spec §16.1a.
-M53-01,imports,Port batch 1 adapters from fanfic-scrapers onto safe-fetcher SiteAdapter trait: parse logic only,M53,planned,--,Spec §11.16 (ADR 0024). FFF_PARITY.md is the checklist.
-M53-02,imports,"Each ported adapter ships frozen HTML fixtures (metadata, chapter list, body, malformed) before counted supported",M53,planned,--,Spec §11.16.
+M53-01,imports,Port batch 1 adapters from fanfic-scrapers onto safe-fetcher SiteAdapter trait: parse logic only,M53,implemented-fully-tested,--,Spec §11.16 (ADR 0024). FFF_PARITY.md is the checklist.
+M53-02,imports,"Each ported adapter ships frozen HTML fixtures (metadata, chapter list, body, malformed) before counted supported",M53,implemented-fully-tested,--,Spec §11.16.
 M53-03,imports,Login/adult-gated adapters port only behind credential vault and age gate,M53,planned,--,Spec §11.16.
 M53-04,imports,Unreachable sources record verification_status=blocked-here and are excluded from support counts,M53,planned,--,Cookie ingestion is the documented workaround.
 M54-01,integrations,"Port fanfic-archivist-bot platform-neutral core against /api/v1: Discord, Telegram, Matrix",M54,planned,--,"Spec §23.2 (amended, ADR 0024). Bot never touches the DB."
