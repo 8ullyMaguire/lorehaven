@@ -34,10 +34,9 @@ pub fn admin_router() -> Router<AppState> {
     Router::new().route("/admin/roadmap/move", post(post_move_card))
 }
 
-/// `GET /api/v1/roadmap` — the full board, grouped by stage.
+/// `GET /api/v1/roadmap` — the full board, grouped by stage. Public (spec §44.5).
 pub async fn get_board(
     State(state): State<AppState>,
-    RequireSession(_session): RequireSession,
 ) -> ApiResult<Json<Value>> {
     let cards = roadmap::list_cards(state.db(), None)
         .await
