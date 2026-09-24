@@ -25,10 +25,61 @@ pub struct SearchQuery {
     q: String,
     #[serde(default = "default_limit")]
     limit: i64,
+    /// Min word count filter (M47-05: applies user default if set).
+    #[serde(default)]
+    min_words: Option<i64>,
+    /// Max word count filter (M47-05).
+    #[serde(default)]
+    max_words: Option<i64>,
+    /// Sort order (M47-05: applies user default if set).
+    #[serde(default)]
+    sort: Option<String>,
+    /// Rating ceiling (M47-05).
+    #[serde(default)]
+    max_rating: Option<String>,
 }
 
 fn default_limit() -> i64 {
     20
+}
+
+/// Resolve search defaults from the user's settings (M47-05, spec §46.4).
+///
+/// Explicit query parameters override stored defaults. Defaults come from the
+/// user's search_settings (per-pseud, falling back to account).
+async fn resolve_search_defaults(
+    state: &AppState,
+    session: &crate::auth::SessionUser,
+    params: &SearchQuery,
+) -> (Option<i64>, Option<i64>, Option<String>, Option<String>) {
+    let pseud_id = session
+        .pseud_id
+        .as_ref()
+        .map(|p| p.as_uuid())
+        .unwrap_or_else(|| session.account_id.as_uuid());
+
+    let stored = db_settings::read_search_settings(state.db(), pseud_id)
+        .await
+        .unwrap_or_default();
+    let mut defaults_map = std::collections::HashMap::new();
+    for (k, v) in &stored {
+        defaults_map.insert(k.clone(), v.clone());
+    }
+
+    let min_words = params.min_words.or_else(|| {
+        defaults_map.get("min_words").and_then(|v| v.as_i64())
+    });
+    let max_words = params.max_words.or_else(|| {
+        defaults_map.get("max_words").and_then(|v| v.as_i64())
+    });
+    let sort = params.sort.clone().or_else(|| {
+        defaults_map.get("sort").and_then(|v| v.as_str().map(String::from))
+    });
+    let max_rating = params.max_rating.clone().or_else(|| {
+        defaults_map.get("max_rating").and_then(|v| v.as_str().map(String::from))
+    });
+
+    (min_words, max_words, sort, max_rating)
 }
 
 async fn search(
@@ -53,6 +104,13 @@ async fn search(
     } else {
         Vec::new()
     };
+
+    // M47-05: resolve search defaults (explicit params override stored).
+    let (min_words, max_words, sort, max_rating) = match session.as_ref() {
+        Some(s) => resolve_search_defaults(&state, s, &params).await,
+        None => (None, None, None, None),
+    };
+
     let results = search_works_ast_filtered(
         state.db(),
         &params.q,
@@ -62,7 +120,16 @@ async fn search(
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
-    Ok(Json(serde_json::json!({ "items": results })))
+
+    Ok(Json(serde_json::json!({
+        "items": results,
+        "filters": {
+            "min_words": min_words,
+            "max_words": max_words,
+            "sort": sort,
+            "max_rating": max_rating,
+        }
+    })))
 }
 
 async fn in_work(
