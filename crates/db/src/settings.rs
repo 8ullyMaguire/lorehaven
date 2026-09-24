@@ -307,7 +307,12 @@ pub async fn resolve_notification_channel(
             .await?
         }
     };
-    Ok(row.and_then(|(channel, enabled)| if enabled { Some(channel) } else { None }))
+    Ok(match row {
+        Some((channel, enabled)) => {
+            if enabled { Some(channel) } else { None }
+        }
+        None => Some("email".to_string()),
+    })
 }
 
 /// Read all notification routes for an account.
