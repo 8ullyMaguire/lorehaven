@@ -6,6 +6,8 @@ This document specifies intended behavior. It does not claim that any feature, a
 
 **Amendments:** The taste-gravitational system (multi-dimensional taste profile, taste-weighted signals, resonance score, vanguard role, instance presets, and related extensions) is specified in `docs/spec-amendments/taste-gravitational-system.md`, which amends §0.4, §0.4.6, §9.7, §9.8, §9.9, §14.5, §16.2, §16.17–16.19, §17.6, §19, and §20.3. Where this document and the amendment conflict, the amendment governs. Implementation plan: `docs/plans/taste-gravitational-system-v2.md` (supersedes v1).
 
+**ADR 0024 (2026-09-24):** This repository is the base for the consolidated from-scratch specification. The FicNexus gap analysis (`docs/spec-gaps-ficnexus.md`) is resolved by adoption: §16.1a adds the recommendation strategy registry (RRF blend, golden legacy-parity test, `rec.mode`), §11.16 adds the adapter porting backlog (port source: `fanfic-scrapers`, fixture-gated), §23.2 names the bot port source (`fanfic-archivist-bot`). Remaining work to that target state is planned in `docs/plans/remaining-work.md`.
+
 ---
 
 # 0. Site Premise
@@ -1895,6 +1897,27 @@ PUT    /api/v1/admin/retention/sources/:sourceKey
 - An aggregated work offers no offline download and no export, and says why instead of producing a file containing a link.
 - An operator may narrow retention for one source and may not widen it on an aggregating instance.
 
+## 11.16 Adapter porting backlog (ADR 0024)
+
+Adapter count remains an outcome, never a claim (§11.7). The porting source
+is the FicNexus-era `fanfic-scrapers` crate (107-site FanFicFare parity);
+`FFF_PARITY.md` in that repository is the checklist. Porting rules:
+
+- Each ported adapter is rewritten against this repository's safe-fetcher
+  `SiteAdapter` trait — the FicNexus fetch path is never copied; only
+  parsing logic is.
+- Every ported adapter ships with frozen HTML fixtures (metadata, chapter
+  list, chapter body, malformed input) before it is counted as supported.
+- Login-requiring and adult-gated adapters port only behind the credential
+  vault (§11.6) and the age gate, and record that in their fixture suite.
+- Where this host cannot reach a source (Cloudflare-walled, geo-blocked),
+  the adapter records `verification_status = blocked-here` and is excluded
+  from support counts until live verification is possible; the user-supplied
+  cookie ingestion path is the documented workaround.
+- Porting lands in batches (top sources by reader demand first), tracked as
+  plan rows in `docs/plans/remaining-work.md`, never as a bulk import of
+  unverified parsers.
+
 ---
 
 # 12. Milestone 7: Positivity Filter and Feedback Delivery
@@ -2418,6 +2441,35 @@ generate_candidates(context, limit) → candidate IDs and baseline scores
 ```
 
 All candidates pass shared eligibility rules.
+
+## 16.1a Strategy registry and blend (ADR 0024)
+
+The baseline engines above are the **legacy mode**. They are joined by a
+strategy registry modeled on the proven FicNexus design:
+
+```text
+RecStrategy trait: generate(context, limit) → Vec<ScoredRec>
+Registry: named strategies, per-strategy enable + config, resource ceilings
+Blend: reciprocal-rank fusion (RRF, k=60) over enabled strategies
+```
+
+- A failing or empty strategy is skipped, never fatal; the fallback chain
+  ends in popularity.
+- `rec.mode = legacy | pluggable` (config, default `legacy`). Switching is
+  preceded by shadow-mode evaluation on the same candidate sets.
+- **Golden legacy-parity test**: in `legacy` mode the registry path must
+  reproduce the current `discovery::blend` output exactly on a frozen
+  fixture set. The neutral behavior is frozen before any strategy is added.
+- Strategies land incrementally: co-occurrence (bookmarks/reads),
+  time-decayed activity, tag graph, author graph, sequential, completion
+  weighted, curator prior, bandit exploration, external sidecar. Embedding
+  and matrix-factorization strategies are feature-gated on an AI provider
+  being configured (they degrade to disabled, never to an error).
+- Recipes (§16.3) compose over strategies: a recipe names strategies and
+  weights; the blend honors them within the operator's resource ceilings.
+- Taste gravity (§16.16), the diversity budget (§16.17), and the ordering
+  contract (§43) apply **after** the blend, identically in both modes —
+  influence layers never move inside a strategy.
 
 Private bookmark and rating data are not silently pooled. Use explicitly permitted signals, aggregation thresholds, documented retention.
 
@@ -4019,6 +4071,12 @@ Third-party tools receive the same authorization, content, privacy, and rate-lim
 ## 23.2 Chat bots as thin REST clients
 
 Bot-client framework and reference adapters for Discord, Telegram, Matrix.
+
+The port source is the FicNexus-era `fanfic-archivist-bot` repository: its
+platform-neutral core (commands, pagination cache, token store, per-platform
+render matrix) is rewritten against `/api/v1` — the bot stays a thin REST
+client and never touches this database. Discord, Telegram and Matrix port
+first; IRC, Slack and Fediverse adapters follow the same core.
 
 Each adapter gets separate fixture and live-verification status.
 

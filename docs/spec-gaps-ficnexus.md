@@ -1,8 +1,15 @@
 # FicNexus features absent from the Lorehaven plan
 
-Status: **review draft — proposed, not adopted.** Nothing here has been added to
-`docs/spec.md` or `docs/requirements.csv`. This document exists so the decision
-is made explicitly rather than by omission.
+Status: **resolved by ADR 0024 (2026-09-24).** The gap analysis below was
+produced before the decision; it is kept as the audit trail. Resolution
+summary: the A-items are adopted (most were already absorbed into `spec.md`
+during the M6–M26 build — credential vault §11.6, source health §11.8, body
+retention §11.15, ratings/reviews §9.5, view counts §9.8, query language
+§15.5, the rec strategy registry via the new §16.1a, the bot port via the
+amended §23.2); the adapter porting backlog is the new §11.16 with plan
+milestones M53+ in `docs/plans/remaining-work.md`; the C-items keep the
+plan's stance (C3: reputation stays out of the trust axes). Nothing from
+this document remains silently unaddressed.
 
 ## How this was produced
 

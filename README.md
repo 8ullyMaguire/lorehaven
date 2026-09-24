@@ -10,29 +10,29 @@ all live in this repository.
 
 ## Status
 
-**Milestones 0 through 5 are complete**: the running application, the design
-system, accounts and pseuds, writing and publishing, the reader with ratings,
-reviews, notes and history, and the job queue with its content-addressed blob
-store, encrypted secret storage and worker. Milestone 6 is **partly built**: the
-import framework, the safe fetcher that stands between a pasted URL and the
-network, the first source adapter, the chapter sanitiser and the source-credential
-surface are implemented and tested, and the pages that would let a reader use
-them are not. Milestones 7–18 are not implemented.
+**2026-09-24 (ADR 0024):** this repository is the base for the consolidated
+from-scratch specification. The honest one-line status: **177 of 230 original
+requirement rows implemented** (172 locally-tested, 5 fully-tested), **49
+planned** (M45 taste-arena residuals and M47 settings surfaces), **4
+deliberately unsupported**, tags through `v0.51.0`. What remains to the target
+spec is planned in `docs/plans/remaining-work.md`: the recommendation
+strategy registry (M52), adapter porting batches (M53+), the companion bot
+(M54), OpenAPI publication (M55), and the M45/M47 planned rows (M56).
 
-That is the honest summary; `docs/requirements.csv` lists every requirement with
-a status, and `docs/verification.md` records the evidence behind each claim.
+The build is organized as worked milestones that do not correspond one-to-one
+to spec §-numbers — `docs/plans/junior-implementation-plan.md` §0 maps them.
+`docs/requirements.csv` lists every requirement with a status (the row-by-row
+authority, and the seed for the roadmap board), and `docs/verification.md`
+records the evidence behind each claim.
 
 | Milestone | Area | State |
 |---|---|---|
-| 0 | Repository, tooling, running application | Done, tested |
-| 1 | Design system and navigation | Done, tested, with two gaps listed in the verification log |
-| 2 | Accounts, pseuds, privacy, age policy | Done: API and pages, tested, and driven in a browser |
-| 3 | Drafts, chapters, publishing, revisions | Done, tested, driven in a browser — tag `v0.04-publishing` |
-| 4 | Reader, ratings, reviews, notes, history | Done, tested, driven in a browser — tag `v0.05-reader` |
-| 5 | Jobs, storage, secret encryption, outbox delivery | Done, tested, driven in a browser — tag `v0.06-jobs` |
-| 6 | Imports, source credentials, batches, preservation | **Partly built**: API, importer and one source adapter tested; pages not built and nine of the ten planned sources not ported |
-| 7–18 | Offline, library, search, discovery, community, events, governance, economy, extensions, integrations, operations | Not implemented |
-| 21 | Monetization, subscriptions, gifts, saved-search alerts, AI-training assertion | **Skeleton**: tables in migration 0022, domain rules pinned (14 tests), routes return 501 stubs; contract pinned by `milestone_21.rs` |
+| M0–M15 | Platform core: tooling, design system, accounts/pseuds, publishing, reader, jobs, imports, exports, library, taxonomy/search, discovery, positivity, community, governance, economy | Built and locally tested (see requirements.csv for per-row status) |
+| M16–M26 | Marketplace, translation, public API surface, admin/ops, monetization, media skeleton, comments/CSV, archive mode, TTS | Built (contract + bodies; per-row status in requirements.csv) |
+| M31–M35 | Forum series: categories, read state, thread modes, spoilers, forks, sparklines | Built and locally tested |
+| M39–M47 | Directory, fork provenance, half-life, export CTAs, browse ordering, roadmap consensus (Elo board), work aggregates, user settings | Built (M45/M47 have planned residual rows) |
+| M48–M51 | Media resilience: import rescue, health dashboards, mirrors, reverse search | Built — tag `v0.51.0` |
+| M52–M55 | Rec strategy registry, adapter porting, companion bot, OpenAPI publication | Planned — `docs/plans/remaining-work.md` |
 
 No screen in this repository displays mock data. Pages that exist show real
 values from the server; routes that are linked but unbuilt say so plainly.

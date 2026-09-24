@@ -18,6 +18,13 @@ or the git log disagree with this plan, they were updated after it was —
 re-verify before acting, and update this plan file in the same commit as any
 change you find.
 
+> **Superseded (2026-09-24, ADR 0024):** the §0.1/§0.2 tables above are a
+> snapshot of 2026-09-14 and are now badly stale — the build has passed
+> through M45 and M51 since (tags `v0.51.0`). Read this file as the
+> historical map of how M0–M47 were planned. The forward plan is
+> `docs/plans/remaining-work.md`; `docs/handoff.md` is the current-state
+> summary; `docs/requirements.csv` is the authority.
+
 ---
 
 ## 0. Where the site stands (honest baseline)
