@@ -246,6 +246,86 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Authenticated,
     },
     // ------------------------------------------------------------------
+    // M47: User Configuration (spec §46)
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "settings.rs",
+        handler: "get_search_settings",
+        method: "GET",
+        path: "/settings/search",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "settings.rs",
+        handler: "patch_search_settings",
+        method: "PATCH",
+        path: "/settings/search",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "settings.rs",
+        handler: "delete_search_setting",
+        method: "DELETE",
+        path: "/settings/search/{key}",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "settings.rs",
+        handler: "list_content_filters",
+        method: "GET",
+        path: "/settings/content-filters",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "settings.rs",
+        handler: "post_content_filter",
+        method: "POST",
+        path: "/settings/content-filters",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "settings.rs",
+        handler: "delete_content_filter",
+        method: "DELETE",
+        path: "/settings/content-filters/{filter_type}/{value}",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "settings.rs",
+        handler: "get_notification_routes",
+        method: "GET",
+        path: "/settings/notifications",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "settings.rs",
+        handler: "patch_notification_route",
+        method: "PATCH",
+        path: "/settings/notifications",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "settings.rs",
+        handler: "delete_notification_route",
+        method: "DELETE",
+        path: "/settings/notifications/{event_type}",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "settings.rs",
+        handler: "export_settings",
+        method: "GET",
+        path: "/settings/export",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "settings.rs",
+        handler: "import_settings",
+        method: "POST",
+        path: "/settings/import",
+        audience: Audience::Authenticated,
+    },
+    // ------------------------------------------------------------------
     // Works — public reads, session-scoped writes
     // ------------------------------------------------------------------
     RouteEntry {
@@ -1983,6 +2063,13 @@ const ROUTE_TABLE: &[RouteEntry] = &[
     },
     RouteEntry {
         file: "external.rs",
+        handler: "get_openapi_spec",
+        method: "GET",
+        path: "/openapi.json",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "external.rs",
         handler: "get_ai_work",
         method: "GET",
         path: "/ai/works/{id}",
@@ -2983,7 +3070,7 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         handler: "get_board",
         method: "GET",
         path: "/roadmap",
-        audience: Audience::Authenticated,
+        audience: Audience::Public,
     },
     RouteEntry {
         file: "roadmap.rs",
