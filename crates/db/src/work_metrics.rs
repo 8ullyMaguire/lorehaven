@@ -10,8 +10,8 @@
 use anyhow::Result;
 use sqlx::FromRow;
 
-use lorehaven_domain::WorkId;
 use crate::{Backend, Database};
+use lorehaven_domain::WorkId;
 
 /// Public aggregate counts for one work, as shown on the work card.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
@@ -72,7 +72,10 @@ pub async fn get_metrics(db: &Database, work_id: &WorkId) -> Result<WorkMetrics>
         Some(m) => Ok(m),
         None => {
             let live = compute_live(db, &wid).await?;
-            Ok(WorkMetrics { work_id: wid, ..live })
+            Ok(WorkMetrics {
+                work_id: wid,
+                ..live
+            })
         }
     }
 }
@@ -301,26 +304,22 @@ pub async fn record_view(
          ON CONFLICT(work_id, viewer_hash, viewed_at) DO NOTHING",
     );
     let rows = match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query(&sql)
-                .bind(work_id)
-                .bind(viewer_hash)
-                .bind(viewed_at)
-                .bind(is_automated)
-                .execute(db.sqlite_pool().expect("sqlite handle"))
-                .await?
-                .rows_affected()
-        }
-        Backend::Postgres => {
-            sqlx::query(&sql)
-                .bind(work_id)
-                .bind(viewer_hash)
-                .bind(viewed_at)
-                .bind(is_automated)
-                .execute(db.postgres_pool().expect("postgres handle"))
-                .await?
-                .rows_affected()
-        }
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(work_id)
+            .bind(viewer_hash)
+            .bind(viewed_at)
+            .bind(is_automated)
+            .execute(db.sqlite_pool().expect("sqlite handle"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(work_id)
+            .bind(viewer_hash)
+            .bind(viewed_at)
+            .bind(is_automated)
+            .execute(db.postgres_pool().expect("postgres handle"))
+            .await?
+            .rows_affected(),
     };
     Ok(rows > 0)
 }
@@ -332,11 +331,7 @@ pub async fn increment_views(db: &Database, work_id: &str) -> Result<()> {
 }
 
 /// Toggle kudos for an account on a work. Returns the new state (true = kudoed).
-pub async fn toggle_kudos(
-    db: &Database,
-    work_id: &str,
-    account_id: &str,
-) -> Result<bool> {
+pub async fn toggle_kudos(db: &Database, work_id: &str, account_id: &str) -> Result<bool> {
     let existing = kudo_state(db, work_id, account_id).await?;
     if existing {
         remove_kudos(db, work_id, account_id).await?;
@@ -434,12 +429,7 @@ pub async fn increment_counter(
     upsert_counter(db, work_id, column, delta).await
 }
 
-async fn upsert_counter(
-    db: &Database,
-    work_id: &str,
-    column: &str,
-    delta: i64,
-) -> Result<()> {
+async fn upsert_counter(db: &Database, work_id: &str, column: &str, delta: i64) -> Result<()> {
     // The column name is validated by the caller (always a literal in this
     // module), so interpolating it is safe. Values are bound.
     let now_sql = match db.backend() {
@@ -486,12 +476,7 @@ async fn upsert_counter(
     Ok(())
 }
 
-async fn decrement_counter(
-    db: &Database,
-    work_id: &str,
-    column: &str,
-    delta: i64,
-) -> Result<()> {
+async fn decrement_counter(db: &Database, work_id: &str, column: &str, delta: i64) -> Result<()> {
     upsert_counter(db, work_id, column, -delta).await
 }
 
@@ -615,8 +600,8 @@ mod tests {
     }
 
     async fn create_test_account(db: &crate::Database) -> String {
-        use crate::identity::AccountStatus;
         use crate::identity::create_account;
+        use crate::identity::AccountStatus;
         use lorehaven_domain::policy::AgeState;
         let account = create_account(
             db,
@@ -649,7 +634,11 @@ mod tests {
         // Automated traffic never counts.
         let bot = record_view(&db, &work_id, "bot-1", "2026-09-23T10:00:00", true).await?;
         assert!(bot, "the bot row is recorded (for analytics)");
-        assert_eq!(count_views(&db, &work_id).await?, 3, "bot excluded from views");
+        assert_eq!(
+            count_views(&db, &work_id).await?,
+            3,
+            "bot excluded from views"
+        );
         Ok(())
     }
 
@@ -660,10 +649,16 @@ mod tests {
         let account = create_test_account(&db).await;
 
         assert_eq!(count_kudos(&db, &work_id).await?, 0);
-        assert!(toggle_kudos(&db, &work_id, &account).await?, "first toggle kudoses");
+        assert!(
+            toggle_kudos(&db, &work_id, &account).await?,
+            "first toggle kudoses"
+        );
         assert_eq!(count_kudos(&db, &work_id).await?, 1);
         // Idempotent re-add through the raw function.
-        assert!(!toggle_kudos(&db, &work_id, &account).await?, "second toggle removes");
+        assert!(
+            !toggle_kudos(&db, &work_id, &account).await?,
+            "second toggle removes"
+        );
         assert_eq!(count_kudos(&db, &work_id).await?, 0);
         Ok(())
     }
@@ -681,7 +676,10 @@ mod tests {
 
         // Recompute from source: no view log rows, so views drop to live truth.
         let live = recompute_and_store(&db, &work_id).await?;
-        assert_eq!(live.views, 0, "recompute replaces stale counters with live counts");
+        assert_eq!(
+            live.views, 0,
+            "recompute replaces stale counters with live counts"
+        );
         let after = get_metrics(&db, &work_id.parse().unwrap()).await?;
         assert_eq!(after.views, 0);
         Ok(())

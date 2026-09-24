@@ -61,10 +61,7 @@ pub async fn upsert_search_setting(
 }
 
 /// Read all search settings for a pseud.
-pub async fn read_search_settings(
-    db: &Database,
-    pseud_id: Uuid,
-) -> Result<Vec<(String, Value)>> {
+pub async fn read_search_settings(db: &Database, pseud_id: Uuid) -> Result<Vec<(String, Value)>> {
     let sql = "SELECT key, value FROM search_settings WHERE pseud_id = ?";
     let rows = match db.backend() {
         Backend::Sqlite => {
@@ -174,38 +171,31 @@ pub async fn remove_content_filter(
     value: &str,
 ) -> Result<bool> {
     let affected = match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query(
-                "DELETE FROM content_filters WHERE pseud_id = ? AND filter_type = ? AND value = ?",
-            )
-            .bind(pseud_id.to_string())
-            .bind(filter_type)
-            .bind(value)
-            .execute(db.sqlite_pool().expect("sqlite handle"))
-            .await?
-            .rows_affected()
-        }
-        Backend::Postgres => {
-            sqlx::query(
-                "DELETE FROM content_filters WHERE pseud_id = ? AND filter_type = ? AND value = ?",
-            )
-            .bind(pseud_id.to_string())
-            .bind(filter_type)
-            .bind(value)
-            .execute(db.postgres_pool().expect("postgres handle"))
-            .await?
-            .rows_affected()
-        }
+        Backend::Sqlite => sqlx::query(
+            "DELETE FROM content_filters WHERE pseud_id = ? AND filter_type = ? AND value = ?",
+        )
+        .bind(pseud_id.to_string())
+        .bind(filter_type)
+        .bind(value)
+        .execute(db.sqlite_pool().expect("sqlite handle"))
+        .await?
+        .rows_affected(),
+        Backend::Postgres => sqlx::query(
+            "DELETE FROM content_filters WHERE pseud_id = ? AND filter_type = ? AND value = ?",
+        )
+        .bind(pseud_id.to_string())
+        .bind(filter_type)
+        .bind(value)
+        .execute(db.postgres_pool().expect("postgres handle"))
+        .await?
+        .rows_affected(),
     };
 
     Ok(affected > 0)
 }
 
 /// List all content filters for a pseud.
-pub async fn list_content_filters(
-    db: &Database,
-    pseud_id: Uuid,
-) -> Result<Vec<ContentFilterRow>> {
+pub async fn list_content_filters(db: &Database, pseud_id: Uuid) -> Result<Vec<ContentFilterRow>> {
     let sql = "SELECT filter_type, value FROM content_filters WHERE pseud_id = ? ORDER BY filter_type, value";
     let rows = match db.backend() {
         Backend::Sqlite => {

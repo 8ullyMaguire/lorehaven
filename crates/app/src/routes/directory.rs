@@ -16,8 +16,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use lorehaven_db::directory as db;
 use lorehaven_db::category_governance as cg_db;
+use lorehaven_db::directory as db;
 use lorehaven_domain::category_governance as cg;
 use lorehaven_domain::directory as domain;
 use lorehaven_domain::governance::TL_STEWARD;
@@ -40,15 +40,42 @@ pub fn router() -> Router<AppState> {
         .route("/directory/moderation", get(moderation_queue))
         // Category governance (§45)
         .route("/directory/categories/governance", get(governance_state))
-        .route("/directory/categories/governance/proposals", post(create_proposal))
-        .route("/directory/categories/governance/proposals/{id}", get(get_proposal))
-        .route("/directory/categories/governance/proposals/{id}/vote", post(vote_proposal))
-        .route("/directory/categories/governance/proposals/{id}/veto", post(veto_proposal))
-        .route("/directory/categories/governance/changelog/{slug}", get(changelog))
-        .route("/directory/categories/governance/freeze", post(toggle_freeze))
-        .route("/directory/categories/governance/max", post(set_max_categories))
-        .route("/directory/entries/{id}/moderation", post(propose_entry_mod))
-        .route("/directory/entries/{id}/moderation/vote", post(vote_entry_mod))
+        .route(
+            "/directory/categories/governance/proposals",
+            post(create_proposal),
+        )
+        .route(
+            "/directory/categories/governance/proposals/{id}",
+            get(get_proposal),
+        )
+        .route(
+            "/directory/categories/governance/proposals/{id}/vote",
+            post(vote_proposal),
+        )
+        .route(
+            "/directory/categories/governance/proposals/{id}/veto",
+            post(veto_proposal),
+        )
+        .route(
+            "/directory/categories/governance/changelog/{slug}",
+            get(changelog),
+        )
+        .route(
+            "/directory/categories/governance/freeze",
+            post(toggle_freeze),
+        )
+        .route(
+            "/directory/categories/governance/max",
+            post(set_max_categories),
+        )
+        .route(
+            "/directory/entries/{id}/moderation",
+            post(propose_entry_mod),
+        )
+        .route(
+            "/directory/entries/{id}/moderation/vote",
+            post(vote_entry_mod),
+        )
 }
 
 // --- Lists ---------------------------------------------------------------
@@ -519,8 +546,8 @@ async fn create_proposal(
         return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
 
-    let action = cg::ProposalAction::parse(&body.action)
-        .ok_or_else(|| bad_request("invalid action"))?;
+    let action =
+        cg::ProposalAction::parse(&body.action).ok_or_else(|| bad_request("invalid action"))?;
 
     // Validate action against current category state.
     let category = cg_db::get_category(state.db(), &body.category_slug)
@@ -544,9 +571,10 @@ async fn create_proposal(
     }
 
     // Anti-churn: 72-hour cooldown per action per category (§45.4).
-    if let Some(last_time) = cg_db::last_proposal_time(state.db(), &body.category_slug, action.as_str())
-        .await
-        .map_err(|e| anyhow::Error::from(e))?
+    if let Some(last_time) =
+        cg_db::last_proposal_time(state.db(), &body.category_slug, action.as_str())
+            .await
+            .map_err(|e| anyhow::Error::from(e))?
     {
         if let Ok(last) = chrono::DateTime::parse_from_rfc3339(&last_time) {
             let now = chrono::Utc::now();
@@ -557,8 +585,7 @@ async fn create_proposal(
         }
     }
 
-    let payload_str = serde_json::to_string(&body.payload)
-        .map_err(|e| anyhow::Error::from(e))?;
+    let payload_str = serde_json::to_string(&body.payload).map_err(|e| anyhow::Error::from(e))?;
 
     // For create, validate the new slug doesn't already exist.
     if action == cg::ProposalAction::Create {
@@ -575,8 +602,8 @@ async fn create_proposal(
 
     let quorum = cg::quorum_for(action);
     let now = chrono::Utc::now().to_rfc3339();
-    let closes_at = (chrono::Utc::now() + chrono::Duration::days(cg::PROPOSAL_TTL_DAYS))
-        .to_rfc3339();
+    let closes_at =
+        (chrono::Utc::now() + chrono::Duration::days(cg::PROPOSAL_TTL_DAYS)).to_rfc3339();
 
     let id = cg_db::create_proposal(
         state.db(),
@@ -667,8 +694,8 @@ async fn vote_proposal(
         return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
 
-    let value = cg::VoteValue::parse(&body.value)
-        .ok_or_else(|| bad_request("invalid vote value"))?;
+    let value =
+        cg::VoteValue::parse(&body.value).ok_or_else(|| bad_request("invalid vote value"))?;
 
     // Check proposal is open.
     let proposal = cg_db::get_proposal(state.db(), &id)
@@ -706,7 +733,8 @@ async fn vote_proposal(
                 &proposal.category_slug,
                 cg::ChangelogEvent::Executed.as_str(),
                 &account_id,
-                &serde_json::json!({ "action": proposal.action, "payload": proposal.payload }).to_string(),
+                &serde_json::json!({ "action": proposal.action, "payload": proposal.payload })
+                    .to_string(),
                 &now,
             )
             .await
@@ -765,9 +793,15 @@ async fn veto_proposal(
     require_operator(&state, &session).await?;
 
     let now = chrono::Utc::now().to_rfc3339();
-    let ok = cg_db::veto_proposal(state.db(), &id, &session.account_id.to_string(), &body.reason, &now)
-        .await
-        .map_err(|e| anyhow::Error::from(e))?;
+    let ok = cg_db::veto_proposal(
+        state.db(),
+        &id,
+        &session.account_id.to_string(),
+        &body.reason,
+        &now,
+    )
+    .await
+    .map_err(|e| anyhow::Error::from(e))?;
 
     if !ok {
         return Err(bad_request("proposal not found or not open"));
@@ -854,8 +888,8 @@ async fn propose_entry_mod(
         return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
 
-    let action = cg::EntryModAction::parse(&body.action)
-        .ok_or_else(|| bad_request("invalid action"))?;
+    let action =
+        cg::EntryModAction::parse(&body.action).ok_or_else(|| bad_request("invalid action"))?;
 
     // Check entry exists.
     let entry = db::get_entry(state.db(), &entry_id, None, false)
@@ -865,8 +899,8 @@ async fn propose_entry_mod(
     let _ = entry;
 
     let now = chrono::Utc::now().to_rfc3339();
-    let closes_at = (chrono::Utc::now() + chrono::Duration::days(cg::ENTRY_MOD_TTL_DAYS))
-        .to_rfc3339();
+    let closes_at =
+        (chrono::Utc::now() + chrono::Duration::days(cg::ENTRY_MOD_TTL_DAYS)).to_rfc3339();
 
     let id = cg_db::create_entry_mod_proposal(
         state.db(),
