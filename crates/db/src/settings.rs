@@ -280,6 +280,36 @@ pub async fn upsert_notification_route(
     Ok(())
 }
 
+/// Resolve the effective channel for an event type, respecting per-event
+/// routing (spec §46.4). Returns None if the event is disabled or no route
+/// exists (default: in-app).
+pub async fn resolve_notification_channel(
+    db: &Database,
+    account_id: Uuid,
+    event_type: &str,
+) -> Result<Option<String>> {
+    let sql = "SELECT channel, enabled FROM notification_routes WHERE account_id = ? AND event_type = ?";
+    let row: Option<(String, bool)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, (String, bool)>(sql)
+                .bind(account_id.to_string())
+                .bind(event_type)
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, (String, bool)>(
+                "SELECT channel, enabled FROM notification_routes WHERE account_id::text = ? AND event_type = ?",
+            )
+            .bind(account_id.to_string())
+            .bind(event_type)
+            .fetch_optional(db.postgres_pool().expect("postgres handle"))
+            .await?
+        }
+    };
+    Ok(row.and_then(|(channel, enabled)| if enabled { Some(channel) } else { None }))
+}
+
 /// Read all notification routes for an account.
 pub async fn read_notification_routes(
     db: &Database,
