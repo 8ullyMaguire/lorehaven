@@ -5,6 +5,14 @@ built**. `docs/spec.md` says what the platform must do; these files say what to
 type, in what order, and how to check it. They are written for someone who
 knows Rust and Svelte but has never seen this repository.
 
+> **Status note (2026-09-24):** the live forward plan is now
+> `docs/plans/remaining-work.md` (ADR 0024 — the gap to the consolidated
+> from-scratch spec: M52 rec registry, M53 adapter porting, M54 bot port,
+> M55 OpenAPI, M56 M45/M47 residuals). The junior implementation plan below
+> is the historical map of M0–M47 and its §0.1/§0.2 tables are stale —
+> `docs/requirements.csv` is the row-by-row authority, and
+> `docs/handoff.md` describes where the build stands today.
+
 > **Status note (2026-09-14):** this README's milestone list predates the
 > junior implementation plan and does not match its M-numbering — treat
 > `junior-implementation-plan.md` (§0.2 for the numbering map, §15 for the
