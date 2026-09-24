@@ -76,6 +76,10 @@ impl RecRegistry {
         reg
     }
 
+    pub fn strategy_count(&self) -> usize {
+        self.strategies.len()
+    }
+
     pub async fn generate(&self, db: &Database, ctx: RecContext) -> Result<Vec<String>> {
         let mut scores: HashMap<String, f64> = HashMap::new();
         let mut _seen_set: HashSet<String> = ctx.seen.iter().cloned().collect();

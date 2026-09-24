@@ -10,6 +10,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use lorehaven_db;
 use lorehaven_domain::ids::WorkId;
+use std::str::FromStr;
 use lorehaven_domain::AppError;
 
 pub fn router() -> Router<AppState> {
@@ -177,9 +178,42 @@ async fn get_discovery(
         );
     }
 
-    // Merge candidates from all engines deterministically.
-    let blended = lorehaven_domain::discovery::blend(&engines);
-    let mut blended: Vec<_> = blended.into_iter().take(limit as usize).collect();
+    // Merge candidates. Branch on rec_mode (spec §16.1a, M52-07):
+    // - legacy: blend multi-engine candidates (current behavior)
+    // - pluggable: use strategy registry with RRF blend
+    let mut blended: Vec<lorehaven_domain::discovery::Candidate> =
+        if state.config().discovery.rec_mode == "pluggable" {
+            if let Some(ref account_id) = account_id {
+                let registry = crate::rec_engine::build_registry(&state.config().discovery);
+                let ids = crate::rec_engine::generate_with_registry(
+                    state.db(),
+                    &registry,
+                    account_id,
+                    limit as usize,
+                )
+                .await
+                .map_err(|e| ApiError(AppError::Internal(e)))?;
+                ids.into_iter()
+                    .map(|id| lorehaven_domain::ids::WorkId::from_str(&id))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| ApiError(AppError::Internal(e.into())))?
+                    .into_iter()
+                    .enumerate()
+                    .map(|(idx, work_id)| lorehaven_domain::discovery::Candidate {
+                        work_id,
+                        score: (limit - idx as i64),
+                        reason: "strategy".into(),
+                        taste_signal: 0.0,
+                        diversity_class: 0.5,
+                    })
+                    .collect()
+            } else {
+                vec![]
+            }
+        } else {
+            let blended = lorehaven_domain::discovery::blend(&engines);
+            blended.into_iter().take(limit as usize).collect()
+        };
 
     // Apply half-life ranking (silent reordering, spec §41.1).
     if state.config().discovery.enable_half_life {

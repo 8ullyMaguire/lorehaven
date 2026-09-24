@@ -235,7 +235,7 @@ M52-03,discovery,"rec.mode = legacy | pluggable config, default legacy",M52,impl
 M52-04,discovery,Golden legacy-parity test: registry path reproduces discovery::blend exactly on frozen fixtures,M52,implemented-fully-tested,--,Spec §16.1a. Freezes neutral behavior before strategies land.
 M52-05,discovery,"Strategies: cooccur, time-decay, tag graph, author graph, sequential, completion, curator prior, bandit, external",M52,implemented-fully-tested,--,Embeddings/MF gated on AI provider presence.
 M52-06,discovery,Recipes compose over strategies within operator resource ceilings,M52,implemented-fully-tested,--,Spec §16.3 over §16.1a.
-M52-07,discovery,"Taste gravity, diversity budget, ordering contract apply after the blend in both modes",M52,planned,--,Influence layers never move inside a strategy.
+M52-07,discovery,"Taste gravity, diversity budget, ordering contract apply after the blend in both modes",M52,implemented-fully-tested,--,Influence layers never move inside a strategy.
 M52-08,discovery,Shadow-mode evaluation before any mode switch,M52,planned,--,Spec §16.1a.
 M53-01,imports,Port batch 1 adapters from fanfic-scrapers onto safe-fetcher SiteAdapter trait: parse logic only,M53,implemented-fully-tested,--,Spec §11.16 (ADR 0024). FFF_PARITY.md is the checklist.
 M53-02,imports,"Each ported adapter ships frozen HTML fixtures (metadata, chapter list, body, malformed) before counted supported",M53,implemented-fully-tested,--,Spec §11.16.
