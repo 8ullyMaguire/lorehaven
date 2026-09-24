@@ -54,6 +54,7 @@ pub mod permission;
 pub mod positivity;
 pub mod rating_integrity;
 pub mod reading;
+pub mod rec_strategy;
 pub mod revisions;
 pub mod roadmap;
 pub mod roles;

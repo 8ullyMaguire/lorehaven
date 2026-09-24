@@ -41,7 +41,6 @@ pub mod positivity;
 pub mod query;
 pub mod query_sql;
 pub mod reading;
-pub mod rec_strategy;
 pub mod settings;
 pub mod spoilers;
 pub mod stats;
