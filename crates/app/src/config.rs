@@ -359,7 +359,7 @@ impl Default for ThemeConfig {
 }
 
 /// Discovery feed diversity settings.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct DiscoveryConfig {
     /// Maximum works from the same fandom in one feed response (0 = unlimited).
     pub per_fandom_cap: usize,
@@ -371,6 +371,31 @@ pub struct DiscoveryConfig {
     pub half_life_min_age_days: i64,
     /// Window size in days for both recent and first-window reader counts.
     pub half_life_window_days: i64,
+    /// Recommendation mode: `legacy` (current `discovery::blend`) or `pluggable`
+    /// (strategy registry with RRF blend). Default: legacy (spec §16.1a).
+    pub rec_mode: String,
+    /// RRF k constant for the strategy blend (spec §16.1a). Default: 60.
+    pub rec_rrf_k: f64,
+    /// Per-strategy resource ceiling: max results each strategy may contribute.
+    pub rec_per_strategy_cap: usize,
+    /// Enabled strategy names for pluggable mode. Empty = all enabled.
+    pub rec_enabled_strategies: Vec<String>,
+}
+
+impl Default for DiscoveryConfig {
+    fn default() -> Self {
+        Self {
+            per_fandom_cap: 0,
+            exploration_rate: 0.0,
+            enable_half_life: true,
+            half_life_min_age_days: 14,
+            half_life_window_days: 30,
+            rec_mode: "legacy".to_string(),
+            rec_rrf_k: 60.0,
+            rec_per_strategy_cap: 100,
+            rec_enabled_strategies: Vec::new(),
+        }
+    }
 }
 
 /// Community / interaction tier settings (spec §41.2).
