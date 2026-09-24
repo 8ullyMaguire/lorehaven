@@ -223,7 +223,7 @@ M45-56,discovery,"Taste Calibration Arena: 4-card forced-tradeoff, best+worst, P
 M47-01,settings,Resolution hierarchy context>pseud>account>instance with per-key _source provenance,M47,implemented-locally-tested,domain + db + api layers complete,Spec §46.2-46.3. Plan §15m.
 M47-02,settings,"Per-domain settings tables: search_settings, content_filters, notification_routes",M47,planned,--,Spec §46.3. No JSONB mega-table; migration 0002 pattern.
 M47-03,settings,Settings API family GET/PATCH/DELETE per namespace with unknown-key rejection,M47,implemented-locally-tested,crates/app/src/routes/settings.rs,Spec §46.3.
-M47-04,settings,"Server-side content-filter enforcement on search, feeds, recommendations, notifications",M47,planned,--,Spec §46.4. Blocked tag never reaches the client.
+M47-04,settings,"Server-side content-filter enforcement on search, feeds, recommendations, notifications",M47,implemented-locally-tested,search route + db filter layer + integration test,Spec §46.4. Blocked tag never reaches the client.
 M47-05,settings,"Search defaults pre-populating every search surface, bidirectional with §15.4 query language",M47,planned,--,Spec §46.4. Presets are §14.2 saved searches.
 M47-06,settings,Per-event notification channel routing extending §17.5,M47,planned,--,Spec §46.4.
 M47-07,settings,"/settings surface: domain-grouped IA, provenance labels, reset per level, palette-indexed search",M47,planned,--,Spec §46.5. Client-side search from schema definitions.

@@ -31,6 +31,10 @@ pub struct NotificationRow {
 // ---------------------------------------------------------------------------
 
 /// Insert one notification. `work_id` is optional context the UI links to.
+///
+/// Respects per-event channel routing (spec §46.4): if the account has disabled
+/// this event type, the notification is dropped. Otherwise the resolved channel
+/// (default `in_app`) is stored on the row.
 pub async fn notify(
     db: &Database,
     account_id: &str,
@@ -41,11 +45,25 @@ pub async fn notify(
 ) -> Result<String, sqlx::Error> {
     let id = Uuid::new_v4().to_string();
     let now = crate::identity::now_rfc3339();
+
+    // Resolve delivery channel; None means the event is disabled for this account.
+    let channel = match crate::settings::resolve_notification_channel(
+        db,
+        uuid::Uuid::parse_str(account_id).map_err(|e| sqlx::Error::Protocol(format!("bad uuid: {e}")))?,
+        kind,
+    )
+    .await
+    {
+        Ok(Some(ch)) => ch,
+        Ok(None) => return Ok(id), // event disabled — silently drop
+        Err(_) => "in_app".to_string(), // routing lookup failed — fall back to default
+    };
+
     let sql = db.sql(
-        "INSERT INTO notifications (id, account_id, kind, title, body, work_id, read_at, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7)",
-        "INSERT INTO notifications (id, account_id, kind, title, body, work_id, read_at, created_at)
-         VALUES ($1, $2::uuid, $3, $4, $5, $6::uuid, NULL, $7)",
+        "INSERT INTO notifications (id, account_id, kind, title, body, work_id, delivery_channel, read_at, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8)",
+        "INSERT INTO notifications (id, account_id, kind, title, body, work_id, delivery_channel, read_at, created_at)
+         VALUES ($1, $2::uuid, $3, $4, $5, $6::uuid, $7, NULL, $8)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -56,6 +74,7 @@ pub async fn notify(
                 .bind(title)
                 .bind(body)
                 .bind(work_id)
+                .bind(&channel)
                 .bind(&now)
                 .execute(db.sqlite_pool().expect("sqlite"))
                 .await?;
@@ -68,6 +87,7 @@ pub async fn notify(
                 .bind(title)
                 .bind(body)
                 .bind(work_id)
+                .bind(&channel)
                 .bind(&now)
                 .execute(db.postgres_pool().expect("postgres"))
                 .await?;
