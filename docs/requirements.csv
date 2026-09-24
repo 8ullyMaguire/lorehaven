@@ -228,4 +228,4 @@ M47-05,settings,"Search defaults pre-populating every search surface, bidirectio
 M47-06,settings,Per-event notification channel routing extending §17.5,M47,planned,--,Spec §46.4.
 M47-07,settings,"/settings surface: domain-grouped IA, provenance labels, reset per level, palette-indexed search",M47,planned,--,Spec §46.5. Client-side search from schema definitions.
 M47-08,settings,Settings export/import with compatibility report,M47,planned,stub framework in routes/settings.rs,Spec §46.6. Generalizes §6 appearance bundle.
-M47-09,settings,Settings writes audited to the governance audit log,M47,planned,--,Spec §46.3.
+M47-09,settings,Settings writes audited to the governance audit log,M47,implemented-fully-tested,--,Spec §46.3.

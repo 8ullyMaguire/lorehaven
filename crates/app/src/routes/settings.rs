@@ -441,6 +441,25 @@ fn now_string() -> String {
         .unwrap_or_default()
 }
 
+/// Append an audit-log entry for a settings write (spec §46.3).
+async fn audit_settings_write(
+    db: &lorehaven_db::Database,
+    account_id: &uuid::Uuid,
+    action: &str,
+    subject_id: &str,
+    document: serde_json::Value,
+) {
+    let _ = lorehaven_db::governance::audit_append(
+        db,
+        &account_id.to_string(),
+        action,
+        "settings",
+        subject_id,
+        &document.to_string(),
+    )
+    .await;
+}
+
 fn search_setting_schema() -> Vec<KeyDescription> {
     domain_settings::SETTING_KEYS
         .iter()
@@ -512,6 +531,14 @@ async fn patch_search_settings(
         }
         db_settings::upsert_search_setting(state.db(), pseud_id, &item.key, &item.value, &now)
             .await?;
+        audit_settings_write(
+            state.db(),
+            &user.account_id.as_uuid(),
+            "settings.search.write",
+            &pseud_id.to_string(),
+            serde_json::json!({ "key": item.key, "value": item.value }),
+        )
+        .await;
     }
     get_search_settings(State(state), RequireSession(user)).await
 }
@@ -530,6 +557,14 @@ async fn delete_search_setting(
         .map(|p| p.as_uuid())
         .unwrap_or_else(|| account.id.as_uuid());
     let removed = db_settings::delete_search_setting(state.db(), pseud_id, &key).await?;
+    audit_settings_write(
+        state.db(),
+        &user.account_id.as_uuid(),
+        "settings.search.delete",
+        &pseud_id.to_string(),
+        serde_json::json!({ "key": key }),
+    )
+    .await;
     Ok(Json(serde_json::json!({ "removed": removed, "key": key })))
 }
 
@@ -604,6 +639,14 @@ async fn post_content_filter(
         &now,
     )
     .await?;
+    audit_settings_write(
+        state.db(),
+        &user.account_id.as_uuid(),
+        "settings.content_filter.write",
+        &pseud_id.to_string(),
+        serde_json::json!({ "filter_type": request.filter_type, "value": request.value }),
+    )
+    .await;
     Ok(Json(ContentFilterView {
         filter_type: request.filter_type,
         value: request.value,
@@ -625,6 +668,14 @@ async fn delete_content_filter(
         .unwrap_or_else(|| account.id.as_uuid());
     let removed =
         db_settings::remove_content_filter(state.db(), pseud_id, &filter_type, &value).await?;
+    audit_settings_write(
+        state.db(),
+        &user.account_id.as_uuid(),
+        "settings.content_filter.delete",
+        &pseud_id.to_string(),
+        serde_json::json!({ "filter_type": filter_type, "value": value }),
+    )
+    .await;
     Ok(Json(
         serde_json::json!({ "removed": removed, "filter_type": filter_type, "value": value }),
     ))
@@ -691,6 +742,14 @@ async fn patch_notification_route(
             &now,
         )
         .await?;
+        audit_settings_write(
+            state.db(),
+            &user.account_id.as_uuid(),
+            "settings.notification.write",
+            &account_id.to_string(),
+            serde_json::json!({ "event_type": item.event_type, "channel": item.channel, "enabled": item.enabled }),
+        )
+        .await;
     }
     get_notification_routes(State(state), RequireSession(user)).await
 }
@@ -702,6 +761,14 @@ async fn delete_notification_route(
 ) -> ApiResult<Json<serde_json::Value>> {
     let account_id = user.account_id.as_uuid();
     let removed = db_settings::delete_notification_route(state.db(), account_id, &event_type).await?;
+    audit_settings_write(
+        state.db(),
+        &user.account_id.as_uuid(),
+        "settings.notification.delete",
+        &account_id.to_string(),
+        serde_json::json!({ "event_type": event_type }),
+    )
+    .await;
     Ok(Json(serde_json::json!({ "removed": removed, "event_type": event_type })))
 }
 
