@@ -1,9 +1,4 @@
-//! Recommendation strategies (spec §16.1a).
-//!
-//! Each strategy is a boxed async fn that takes the database, the account
-//! being recommended for, and the context (already-seen works, cap), and
-//! returns a ranked `Vec<WorkId>`. The [`RecRegistry`] runs all registered
-//! strategies and blends their outputs via RRF (reciprocal rank fusion).
+//! Recommendation strategies (spec §16.1a) and recipe composition (§16.3).
 
 use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
@@ -28,6 +23,9 @@ pub type RecStrategyFn = Arc<
         + Sync,
 >;
 
+/// A factory that creates a strategy by name.
+pub type StrategyFactory = Arc<dyn Fn() -> RecStrategyFn + Send + Sync>;
+
 /// Registry of recommendation strategies with RRF blending.
 pub struct RecRegistry {
     k: f64,
@@ -44,6 +42,38 @@ impl RecRegistry {
 
     pub fn register(&mut self, name: &'static str, f: RecStrategyFn) {
         self.strategies.push((name, f));
+    }
+
+    /// Build a registry from a recipe document (spec §16.3).
+    ///
+    /// The recipe document names strategies and optional weights:
+    /// ```json
+    /// { "strategies": { "cooccurrence": 1.0, "time_decay": 0.8 } }
+    /// ```
+    ///
+    /// Strategies not named in the recipe are excluded. Strategies named
+    /// but not available in the factories map are silently skipped.
+    pub fn build_from_document(
+        k: f64,
+        document: &serde_json::Value,
+        factories: &HashMap<String, StrategyFactory>,
+    ) -> Self {
+        let mut reg = Self::new(k);
+
+        let strategies = document
+            .get("strategies")
+            .and_then(|v| v.as_object());
+
+        if let Some(strategies) = strategies {
+            for (name, _weight) in strategies {
+                if let Some(factory) = factories.get(name) {
+                    let strategy = factory();
+                    reg.register(name.clone().leak(), strategy);
+                }
+            }
+        }
+
+        reg
     }
 
     pub async fn generate(&self, db: &Database, ctx: RecContext) -> Result<Vec<String>> {
@@ -377,6 +407,41 @@ pub fn bandit_strategy() -> RecStrategyFn {
     })
 }
 
+/// Build the default strategy factories map (spec §16.1a).
+pub fn default_strategies() -> HashMap<String, StrategyFactory> {
+    let mut map: HashMap<String, StrategyFactory> = HashMap::new();
+    map.insert(
+        "cooccurrence".to_string(),
+        Arc::new(|| cooccurrence_strategy()),
+    );
+    map.insert(
+        "time_decay".to_string(),
+        Arc::new(|| time_decay_strategy()),
+    );
+    map.insert(
+        "tag_graph".to_string(),
+        Arc::new(|| tag_graph_strategy()),
+    );
+    map.insert(
+        "author_graph".to_string(),
+        Arc::new(|| author_graph_strategy()),
+    );
+    map.insert(
+        "sequential".to_string(),
+        Arc::new(|| sequential_strategy()),
+    );
+    map.insert(
+        "completion_weight".to_string(),
+        Arc::new(|| completion_weight_strategy()),
+    );
+    map.insert(
+        "curator_prior".to_string(),
+        Arc::new(|| curator_prior_strategy()),
+    );
+    map.insert("bandit".to_string(), Arc::new(|| bandit_strategy()));
+    map
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -410,5 +475,38 @@ mod tests {
             Arc::new(|_db, _ctx| Box::pin(async move { Ok(vec![]) })),
         );
         assert_eq!(reg.strategies.len(), 1);
+    }
+
+    #[test]
+    fn build_from_document_empty() {
+        let factories = default_strategies();
+        let doc = serde_json::json!({});
+        let reg = RecRegistry::build_from_document(60.0, &doc, &factories);
+        assert!(reg.strategies.is_empty());
+    }
+
+    #[test]
+    fn build_from_document_selects_strategies() {
+        let factories = default_strategies();
+        let doc = serde_json::json!({
+            "strategies": {
+                "cooccurrence": 1.0,
+                "tag_graph": 0.8
+            }
+        });
+        let reg = RecRegistry::build_from_document(60.0, &doc, &factories);
+        assert_eq!(reg.strategies.len(), 2);
+    }
+
+    #[test]
+    fn build_from_document_unknown_strategy_skipped() {
+        let factories = default_strategies();
+        let doc = serde_json::json!({
+            "strategies": {
+                "nonexistent": 1.0
+            }
+        });
+        let reg = RecRegistry::build_from_document(60.0, &doc, &factories);
+        assert!(reg.strategies.is_empty());
     }
 }
