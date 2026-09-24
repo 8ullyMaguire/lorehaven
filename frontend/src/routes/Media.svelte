@@ -65,8 +65,8 @@
     <p role="status">{loading ? 'Loading media…' : results ? `${results.total} ${results.total === 1 ? 'result' : 'results'}` : ''}</p>
     <nav aria-label="Tools">
       <a href="/media/search">Reverse search</a>
-      <a href={`${feed}&format=atom`}>Atom</a>
-      <a href={`${feed}&format=rss`}>RSS</a>
+      <a href={`${feed}&format=atom`}>Atom feed</a>
+      <a href={`${feed}&format=rss`}>RSS feed</a>
     </nav>
   </div>
   {#if error}<ErrorSummary {error} onretry={() => load()} />{/if}
@@ -91,7 +91,7 @@
 </section>
 
 <style>
-  .catalogue { max-width: 1080px; margin: 0 auto; padding: var(--space-4); }
+  .catalogue { max-width: 1080px; margin: 0 auto; padding: var(--space-4); overflow-x: hidden; }
   header { margin-block: var(--space-4) var(--space-6); }
   .eyebrow { color: var(--color-muted); font-size: var(--text-sm); letter-spacing: .12em; }
   h1 { margin-block: var(--space-2); }
