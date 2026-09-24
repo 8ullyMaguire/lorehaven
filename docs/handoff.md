@@ -1,6 +1,6 @@
 # Handoff — ADR 0024 adopted: Lorehaven is the from-scratch base; docs realigned
 
-Date: 2026-09-24 (M52 tag `m52-rec-strategy`). Previous handoff
+Date: 2026-09-24 (M52 tag `m52-rec-strategy`, export E2E fix). Previous handoff
 (M51 + M12 + M7, v0.51.0+2) is archived at
 `docs/handoffs/2026-09-23T112310+0200-m51-media-resilience-m12-mentions-m7-device-delivery-handoff.md`.
 
