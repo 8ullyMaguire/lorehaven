@@ -12,7 +12,7 @@
 //! instance's policy allows, so setting `max_rating: explicit` as a restricted
 //! account widens nothing.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
 
 use axum::extract::State;
@@ -23,7 +23,8 @@ use lorehaven_db::sessions;
 use lorehaven_db::settings as db_settings;
 use lorehaven_domain::policy::ContentRating;
 use lorehaven_domain::settings::{
-    self as domain_settings, resolve_setting, SettingsExport, SETTINGS_EXPORT_VERSION,
+    self as domain_settings, resolve_setting, ResolvedSetting, SettingsExport,
+    SETTINGS_EXPORT_VERSION,
 };
 use lorehaven_domain::{AppError, PseudId};
 use serde::{Deserialize, Serialize};
@@ -708,13 +709,64 @@ async fn export_settings(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
 ) -> ApiResult<Json<SettingsExport>> {
-    let _ = (state, user);
-    let export = SettingsExport {
+    let pseud_id = user
+        .pseud_id
+        .as_ref()
+        .map(|p| p.as_uuid())
+        .unwrap_or_else(|| user.account_id.as_uuid());
+
+    let search_settings = db_settings::read_search_settings(state.db(), pseud_id).await?;
+    let content_filters = db_settings::list_content_filters(state.db(), pseud_id).await?;
+    let notification_routes = db_settings::read_notification_routes(state.db(), user.account_id.as_uuid()).await?;
+
+    let mut namespaces: HashMap<String, Vec<ResolvedSetting>> = HashMap::new();
+
+    use domain_settings::SettingSource;
+
+    namespaces.insert(
+        "search".to_string(),
+        search_settings
+            .into_iter()
+            .map(|(key, value)| ResolvedSetting {
+                key,
+                value,
+                source: SettingSource::Pseud,
+                summary: String::new(),
+            })
+            .collect(),
+    );
+
+    namespaces.insert(
+        "content_filters".to_string(),
+        content_filters
+            .into_iter()
+            .map(|r| ResolvedSetting {
+                key: r.filter_type,
+                value: serde_json::Value::String(r.value),
+                source: SettingSource::Pseud,
+                summary: String::new(),
+            })
+            .collect(),
+    );
+
+    namespaces.insert(
+        "notifications".to_string(),
+        notification_routes
+            .into_iter()
+            .map(|r| ResolvedSetting {
+                key: format!("{}:{}", r.event_type, r.channel),
+                value: serde_json::Value::Bool(r.enabled),
+                source: SettingSource::Account,
+                summary: String::new(),
+            })
+            .collect(),
+    );
+
+    Ok(Json(SettingsExport {
         version: SETTINGS_EXPORT_VERSION,
         exported_at: now_string(),
-        namespaces: Default::default(),
-    };
-    Ok(Json(export))
+        namespaces,
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -739,17 +791,91 @@ async fn import_settings(
     RequireSession(user): RequireSession,
     Json(request): Json<ImportRequest>,
 ) -> ApiResult<Json<ImportReport>> {
-    let _ = (state, user);
     if request.data.version != SETTINGS_EXPORT_VERSION {
         return Err(ApiError(AppError::field(
             "version",
             format!("unsupported export version: {}", request.data.version),
         )));
     }
-    Ok(Json(ImportReport {
-        accepted: Vec::new(),
-        rejected: Vec::new(),
-    }))
+
+    let pseud_id = user
+        .pseud_id
+        .as_ref()
+        .map(|p| p.as_uuid())
+        .unwrap_or_else(|| user.account_id.as_uuid());
+    let account_id = user.account_id.as_uuid();
+
+    let mut accepted = Vec::new();
+    let mut rejected = Vec::new();
+
+    let now = chrono::Utc::now().to_rfc3339();
+
+    for (namespace, settings) in &request.data.namespaces {
+        for setting in settings {
+            let result = match namespace.as_str() {
+                "search" => {
+                    db_settings::upsert_search_setting(
+                        state.db(),
+                        pseud_id,
+                        &setting.key,
+                        &setting.value,
+                        &now,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())
+                }
+                "content_filters" => {
+                    let value = setting
+                        .value
+                        .as_str()
+                        .ok_or_else(|| "filter value must be a string".to_string())
+                        .map_err(|e| ApiError(AppError::field("value", e)))?;
+                    db_settings::add_content_filter(
+                        state.db(),
+                        pseud_id,
+                        &setting.key,
+                        value,
+                        &now,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())
+                }
+                "notifications" => {
+                    let parts: Vec<&str> = setting.key.splitn(2, ':').collect();
+                    if parts.len() != 2 {
+                        Err(format!("invalid notification key: {}", setting.key))
+                    } else {
+                        let enabled = setting
+                            .value
+                            .as_bool()
+                            .ok_or_else(|| "notification value must be a boolean".to_string())
+                            .map_err(|e| ApiError(AppError::field("value", e)))?;
+                        db_settings::upsert_notification_route(
+                            state.db(),
+                            account_id,
+                            parts[0],
+                            parts[1],
+                            enabled,
+                            &now,
+                        )
+                        .await
+                        .map_err(|e| e.to_string())
+                    }
+                }
+                _ => Err(format!("unknown namespace: {}", namespace)),
+            };
+
+            match result {
+                Ok(_) => accepted.push(format!("{}/{}", namespace, setting.key)),
+                Err(reason) => rejected.push(ImportRejection {
+                    key: format!("{}/{}", namespace, setting.key),
+                    reason,
+                }),
+            }
+        }
+    }
+
+    Ok(Json(ImportReport { accepted, rejected }))
 }
 
 #[cfg(test)]
