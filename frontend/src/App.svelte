@@ -30,6 +30,7 @@
   import Reader from './routes/Reader.svelte';
   import Register from './routes/Register.svelte';
   import Search from './routes/Search.svelte';
+  import Settings from './routes/Settings.svelte';
   import Media from './routes/Media.svelte';
   import MediaSearch from './routes/MediaSearch.svelte';
   import SignIn from './routes/SignIn.svelte';
@@ -223,6 +224,7 @@
             Writing as <strong>@{session.activePseud.handle}</strong>
           </a>
         {/if}
+        <a href="/settings" onclick={(event) => onLinkClick(event, '/settings')}>Settings</a>
         <a href="/account" onclick={(event) => onLinkClick(event, '/account')}>Account</a>
         <Button variant="quiet" size="sm" onclick={signOut}>Sign out</Button>
       {:else}
@@ -274,6 +276,8 @@
     <PasswordReset />
   {:else if route.id === 'account'}
     <Account />
+  {:else if route.id === 'settings'}
+    <Settings />
   {:else if route.id === 'pseuds'}
     <Pseuds />
   {:else if route.id === 'pseud-profile'}
