@@ -106,3 +106,95 @@ async fn test_changelog_empty_public() {
     let moves = json["moves"].as_array().unwrap();
     assert!(moves.is_empty(), "fresh install has no moves");
 }
+
+// ---------------------------------------------------------------------------
+// M55 — Public API publication (spec §23.1)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_openapi_spec_valid() {
+    let h = Harness::new("openapi-spec").await;
+    let resp = h
+        .router()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/openapi.json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 10_000_000)
+        .await
+        .unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+
+    // Shape assertions: OpenAPI 3.1 contract.
+    assert_eq!(json["openapi"], "3.1.0");
+    assert_eq!(json["info"]["title"], "Lorehaven Public API");
+    assert_eq!(json["info"]["version"], "v1");
+
+    // Supported paths are present.
+    assert!(json["paths"]["/public/works/{id}"].is_object());
+    assert!(json["paths"]["/public/search"].is_object());
+    assert!(json["paths"]["/me/tokens"].is_object());
+
+    // Schemas.
+    assert!(json["components"]["schemas"]["Work"].is_object());
+    assert!(json["components"]["schemas"]["Token"].is_object());
+    assert!(json["components"]["schemas"]["Error"].is_object());
+
+    // Security scheme: bearer <REDACTED>
+    assert_eq!(
+        json["components"]["securitySchemes"]["bearer"]["scheme"],
+        "bearer"
+    );
+
+    // All paths have responses defined.
+    for (path, detail) in json["paths"].as_object().unwrap() {
+        let methods = if detail["get"].is_object() {
+            vec!["get".to_string(), "post".to_string(), "put".to_string(), "delete".to_string(), "patch".to_string()]
+        } else if detail["post"].is_object() {
+            vec!["post".to_string()]
+        } else {
+            vec![]
+        };
+        for method in methods {
+            let key = if method == "get" && detail["get"].is_object() {
+                "get"
+            } else if method == "post" && detail["post"].is_object() {
+                "post"
+            } else {
+                continue;
+            };
+            assert!(
+                detail[key]["responses"].is_object(),
+                "method {} on {} has no responses",
+                key,
+                path
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_openapi_spec_cors_headers() {
+    let h = Harness::new("openapi-cors").await;
+    let resp = h
+        .router()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/openapi.json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .expect("content-type header");
+    assert_eq!(ct, "application/json");
+}
