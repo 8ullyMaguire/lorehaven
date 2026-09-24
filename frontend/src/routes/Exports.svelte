@@ -127,10 +127,17 @@
       await new Promise((resolve) => setTimeout(resolve, attempt < 5 ? 500 : 2000));
       try {
         const job = await fetchExport(id);
-        exports = exports.map((entry) => (entry.id === job.id ? job : entry));
+        // Race: load() may overwrite exports after start() appended the job.
+        // Append if missing rather than only mapping over existing entries.
+        if (exports.some((entry) => entry.id === job.id)) {
+          exports = exports.map((entry) => (entry.id === job.id ? job : entry));
+        } else {
+          exports = [job, ...exports];
+        }
         if (job.state === 'ready' || job.state === 'failed' || job.state === 'cancelled') return;
       } catch {
-        return;
+        // Transient error — keep polling rather than giving up.
+        continue;
       }
     }
   }

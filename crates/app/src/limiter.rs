@@ -130,12 +130,12 @@ impl Default for Limits {
                 burst: 30,
                 per_minute: 120,
             },
-            // Bulk export: 5 back-to-back is enough for a person who clicked
-            // twice; 10/minute leaves room for the other doors while a large
-            // bundle runs.
+            // Export: readers poll their job state frequently (one request per
+            // second per open exports page). A bundle of quick polls followed
+            // by a download must not trip the limit.
             export: Quota {
-                burst: 5,
-                per_minute: 10,
+                burst: 30,
+                per_minute: 120,
             },
             default: Quota {
                 burst: 120,
