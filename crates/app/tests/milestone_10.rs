@@ -845,3 +845,91 @@ async fn search_respects_content_filters() {
 
     harness.cleanup().await;
 }
+/// Export/import round-trip (M47-08, §46.4).
+#[tokio::test]
+async fn export_import_round_trip() {
+    let harness = Harness::new("settings-export-import").await;
+    let mut client = harness.client();
+    let (_account_id, _pseud_id) = register(&mut client, "sarah@example.com", "sarah").await;
+
+    // Set a search preference.
+    let (status, _) = client
+        .request("PATCH", "/api/v1/settings/search", Some(json!({ "changes": [{ "key": "search.default_sort", "value": "relevance" }] })))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Add a content filter.
+    let (status, _) = client
+        .post("/api/v1/settings/content-filters", json!({ "filter_type": "tag", "value": "spoilers" }))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Set a notification route.
+    let (status, _) = client
+        .request("PATCH", "/api/v1/settings/notifications", Some(json!({ "changes": [{ "event_type": "gift", "channel": "email", "enabled": true }] })))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Export.
+    let (status, body) = client.get("/api/v1/settings/export").await;
+    assert_eq!(status, StatusCode::OK, "export: {body}");
+    let export = body;
+    assert_eq!(
+        export["version"].as_u64().unwrap(),
+        1u64,
+        "export version must be 1"
+    );
+    assert!(
+        export["namespaces"]["search"].as_array().unwrap().len() == 1,
+        "one search setting"
+    );
+    assert!(
+        export["namespaces"]["content_filters"].as_array().unwrap().len() == 1,
+        "one content filter"
+    );
+    assert!(
+        export["namespaces"]["notifications"].as_array().unwrap().len() == 1,
+        "one notification route"
+    );
+
+    // Import into a fresh account.
+    let mut tom_client = harness.client();
+    let (_tom_id, _tom_pseud) = register(&mut tom_client, "tom@example.com", "tom").await;
+
+    let (status, body) = tom_client
+        .post("/api/v1/settings/import", json!({ "data": export }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "import: {body}");
+    assert_eq!(
+        body["accepted"].as_array().unwrap().len(),
+        3,
+        "all three settings imported: {body}"
+    );
+    assert!(
+        body["rejected"].as_array().unwrap().is_empty(),
+        "no rejections: {body}"
+    );
+
+    // Verify settings landed.
+    let (status, body) = tom_client.get("/api/v1/settings/search").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["settings"][0]["value"].as_str(),
+        Some("relevance"),
+        "imported search setting must be visible: {body}"
+    );
+
+    // Reject unsupported version.
+    let (status, _) = tom_client
+        .post("/api/v1/settings/import", json!({
+            "data": {
+                "version": 99,
+                "exported_at": "2026-01-01T00:00:00Z",
+                "namespaces": {}
+            }
+        }))
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "unsupported version must 400");
+
+    harness.cleanup().await;
+}
