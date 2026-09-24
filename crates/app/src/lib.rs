@@ -27,6 +27,7 @@ pub mod logging;
 pub mod longevity;
 pub mod narration;
 pub mod privacy;
+pub mod rec_engine;
 pub mod revisions;
 pub mod routes;
 pub mod safety;
