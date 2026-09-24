@@ -115,7 +115,7 @@ pub enum SettingSource {
 }
 
 /// One resolved setting key with its provenance.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResolvedSetting {
     pub key: String,
     pub value: serde_json::Value,
@@ -169,7 +169,7 @@ pub fn resolve_setting(
 }
 
 /// Resolved settings export document (spec §46.6).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SettingsExport {
     pub version: u32,
     pub exported_at: String,

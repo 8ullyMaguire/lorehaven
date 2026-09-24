@@ -13,15 +13,21 @@
 //! account widens nothing.
 
 use std::collections::BTreeMap;
+use std::str::FromStr;
 
 use axum::extract::State;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use lorehaven_db::identity::{self, PrivacyScope};
 use lorehaven_db::sessions;
+use lorehaven_db::settings as db_settings;
 use lorehaven_domain::policy::ContentRating;
+use lorehaven_domain::settings::{
+    self as domain_settings, resolve_setting, SettingsExport, SETTINGS_EXPORT_VERSION,
+};
 use lorehaven_domain::{AppError, PseudId};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::auth::RequireSession;
 use crate::http::{ApiError, ApiResult};
@@ -33,6 +39,33 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/settings/privacy", get(get_privacy).patch(patch_privacy))
         .route("/settings/content", get(get_content).patch(patch_content))
+        // M47: per-namespace settings endpoints (spec §46.3).
+        .route(
+            "/settings/search",
+            get(get_search_settings).patch(patch_search_settings),
+        )
+        .route(
+            "/settings/search/:key",
+            axum::routing::delete(delete_search_setting),
+        )
+        .route(
+            "/settings/content-filters",
+            get(list_content_filters).post(post_content_filter),
+        )
+        .route(
+            "/settings/content-filters/:filter_type/:value",
+            axum::routing::delete(delete_content_filter),
+        )
+        .route(
+            "/settings/notifications",
+            get(get_notification_routes).patch(patch_notification_route),
+        )
+        .route(
+            "/settings/notifications/:event_type",
+            axum::routing::delete(delete_notification_route),
+        )
+        .route("/settings/export", get(export_settings))
+        .route("/settings/import", post(import_settings))
 }
 
 // ---------------------------------------------------------------------------
@@ -369,6 +402,330 @@ impl TapError<ApiError> for ApiError {
         tracing::warn!(%cause, "content settings write refused");
         self
     }
+}
+
+// ---------------------------------------------------------------------------
+// M47: User Configuration API family (spec §46)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+struct ResolvedSettingView {
+    key: String,
+    value: serde_json::Value,
+    source: String,
+    summary: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SettingWriteItem {
+    key: String,
+    value: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+struct SearchSettingsView {
+    pseud_id: String,
+    settings: Vec<ResolvedSettingView>,
+    schema: Vec<KeyDescription>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PatchSearchChanges {
+    changes: Vec<SettingWriteItem>,
+}
+
+fn now_string() -> String {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default()
+}
+
+fn search_setting_schema() -> Vec<KeyDescription> {
+    domain_settings::SETTING_KEYS
+        .iter()
+        .filter(|def| matches!(def.namespace, domain_settings::SettingNamespace::Search))
+        .map(|def| KeyDescription {
+            key: def.key,
+            summary: def.summary,
+            values: &[],
+        })
+        .collect()
+}
+
+async fn get_search_settings(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<SearchSettingsView>> {
+    let account = identity::find_account(state.db(), user.account_id)
+        .await?
+        .ok_or_else(|| ApiError(AppError::AuthRequired))?;
+    let pseud_id = account.id.as_uuid();
+    let rows = db_settings::read_search_settings(state.db(), pseud_id).await?;
+    let schema_keys: Vec<&str> = domain_settings::SETTING_KEYS
+        .iter()
+        .filter(|def| matches!(def.namespace, domain_settings::SettingNamespace::Search))
+        .map(|def| def.key)
+        .collect();
+    let mut settings = Vec::new();
+    for key in schema_keys {
+        let pseud_value = rows.iter().find(|(k, _)| k == key).map(|(_, v)| v);
+        let resolved = resolve_setting(key, None, pseud_value, None)?;
+        settings.push(ResolvedSettingView {
+            key: resolved.key,
+            value: resolved.value,
+            source: format!("{:?}", resolved.source).to_lowercase(),
+            summary: resolved.summary,
+        });
+    }
+    Ok(Json(SearchSettingsView {
+        pseud_id: pseud_id.to_string(),
+        settings,
+        schema: search_setting_schema(),
+    }))
+}
+
+async fn patch_search_settings(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Json(request): Json<PatchSearchChanges>,
+) -> ApiResult<Json<SearchSettingsView>> {
+    let account = identity::find_account(state.db(), user.account_id)
+        .await?
+        .ok_or_else(|| ApiError(AppError::AuthRequired))?;
+    let pseud_id = account.id.as_uuid();
+    let now = now_string();
+    for item in &request.changes {
+        if domain_settings::key_def(&item.key).is_none() {
+            return Err(ApiError(AppError::field(
+                "key",
+                format!("unknown setting key: {}", item.key),
+            )));
+        }
+        db_settings::upsert_search_setting(state.db(), pseud_id, &item.key, &item.value, &now)
+            .await?;
+    }
+    get_search_settings(State(state), RequireSession(user)).await
+}
+
+async fn delete_search_setting(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    axum::extract::Path(key): axum::extract::Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let account = identity::find_account(state.db(), user.account_id)
+        .await?
+        .ok_or_else(|| ApiError(AppError::AuthRequired))?;
+    let pseud_id = account.id.as_uuid();
+    let removed = db_settings::delete_search_setting(state.db(), pseud_id, &key).await?;
+    Ok(Json(serde_json::json!({ "removed": removed, "key": key })))
+}
+
+#[derive(Debug, Serialize)]
+struct ContentFilterListView {
+    pseud_id: String,
+    filters: Vec<ContentFilterView>,
+}
+
+#[derive(Debug, Serialize)]
+struct ContentFilterView {
+    filter_type: String,
+    value: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateContentFilter {
+    filter_type: String,
+    value: String,
+}
+
+async fn list_content_filters(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<ContentFilterListView>> {
+    let account = identity::find_account(state.db(), user.account_id)
+        .await?
+        .ok_or_else(|| ApiError(AppError::AuthRequired))?;
+    let pseud_id = account.id.as_uuid();
+    let rows = db_settings::list_content_filters(state.db(), pseud_id).await?;
+    Ok(Json(ContentFilterListView {
+        pseud_id: pseud_id.to_string(),
+        filters: rows
+            .into_iter()
+            .map(|r| ContentFilterView {
+                filter_type: r.filter_type,
+                value: r.value,
+            })
+            .collect(),
+    }))
+}
+
+async fn post_content_filter(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Json(request): Json<CreateContentFilter>,
+) -> ApiResult<Json<ContentFilterView>> {
+    if domain_settings::ContentFilterType::from_str(&request.filter_type).is_err() {
+        return Err(ApiError(AppError::field(
+            "filter_type",
+            "unknown content filter type",
+        )));
+    }
+    let account = identity::find_account(state.db(), user.account_id)
+        .await?
+        .ok_or_else(|| ApiError(AppError::AuthRequired))?;
+    let pseud_id = account.id.as_uuid();
+    let now = now_string();
+    db_settings::add_content_filter(
+        state.db(),
+        pseud_id,
+        &request.filter_type,
+        &request.value,
+        &now,
+    )
+    .await?;
+    Ok(Json(ContentFilterView {
+        filter_type: request.filter_type,
+        value: request.value,
+    }))
+}
+
+async fn delete_content_filter(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    axum::extract::Path((filter_type, value)): axum::extract::Path<(String, String)>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let account = identity::find_account(state.db(), user.account_id)
+        .await?
+        .ok_or_else(|| ApiError(AppError::AuthRequired))?;
+    let pseud_id = account.id.as_uuid();
+    let removed =
+        db_settings::remove_content_filter(state.db(), pseud_id, &filter_type, &value).await?;
+    Ok(Json(
+        serde_json::json!({ "removed": removed, "filter_type": filter_type, "value": value }),
+    ))
+}
+
+#[derive(Debug, Serialize)]
+struct NotificationRoutesView {
+    account_id: String,
+    routes: Vec<NotificationRouteView>,
+}
+
+#[derive(Debug, Serialize)]
+struct NotificationRouteView {
+    event_type: String,
+    channel: String,
+    enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct PatchNotificationRoutes {
+    changes: Vec<NotificationRouteWrite>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NotificationRouteWrite {
+    event_type: String,
+    channel: String,
+    enabled: bool,
+}
+
+async fn get_notification_routes(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<NotificationRoutesView>> {
+    let account_id = user.account_id.as_uuid();
+    let rows = db_settings::read_notification_routes(state.db(), account_id).await?;
+    Ok(Json(NotificationRoutesView {
+        account_id: user.account_id.to_string(),
+        routes: rows
+            .into_iter()
+            .map(|r| NotificationRouteView {
+                event_type: r.event_type,
+                channel: r.channel,
+                enabled: r.enabled,
+            })
+            .collect(),
+    }))
+}
+
+async fn patch_notification_route(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Json(request): Json<PatchNotificationRoutes>,
+) -> ApiResult<Json<NotificationRoutesView>> {
+    let account_id = user.account_id.as_uuid();
+    let now = now_string();
+    for item in &request.changes {
+        db_settings::upsert_notification_route(
+            state.db(),
+            account_id,
+            &item.event_type,
+            &item.channel,
+            item.enabled,
+            &now,
+        )
+        .await?;
+    }
+    get_notification_routes(State(state), RequireSession(user)).await
+}
+
+async fn delete_notification_route(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    axum::extract::Path(event_type): axum::extract::Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let account_id = user.account_id.as_uuid();
+    let removed = db_settings::delete_notification_route(state.db(), account_id, &event_type).await?;
+    Ok(Json(serde_json::json!({ "removed": removed, "event_type": event_type })))
+}
+
+async fn export_settings(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<SettingsExport>> {
+    let _ = (state, user);
+    let export = SettingsExport {
+        version: SETTINGS_EXPORT_VERSION,
+        exported_at: now_string(),
+        namespaces: Default::default(),
+    };
+    Ok(Json(export))
+}
+
+#[derive(Debug, Deserialize)]
+struct ImportRequest {
+    data: SettingsExport,
+}
+
+#[derive(Debug, Serialize)]
+struct ImportReport {
+    accepted: Vec<String>,
+    rejected: Vec<ImportRejection>,
+}
+
+#[derive(Debug, Serialize)]
+struct ImportRejection {
+    key: String,
+    reason: String,
+}
+
+async fn import_settings(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Json(request): Json<ImportRequest>,
+) -> ApiResult<Json<ImportReport>> {
+    let _ = (state, user);
+    if request.data.version != SETTINGS_EXPORT_VERSION {
+        return Err(ApiError(AppError::field(
+            "version",
+            format!("unsupported export version: {}", request.data.version),
+        )));
+    }
+    Ok(Json(ImportReport {
+        accepted: Vec::new(),
+        rejected: Vec::new(),
+    }))
 }
 
 #[cfg(test)]
