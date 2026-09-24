@@ -323,6 +323,7 @@ pub async fn get_ai_work(
 /// Published at `/api/v1/openapi.json` so tooling (client generators, linters,
 /// Swagger UI) can consume the contract without scraping routes.
 pub async fn get_openapi_spec(
+    _maybe: MaybeSession,
     State(_state): State<AppState>,
 ) -> ApiResult<(axum::http::StatusCode, [(axum::http::header::HeaderName, &'static str); 1], Json<serde_json::Value>)> {
     let spec = serde_json::json!({

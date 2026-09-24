@@ -14,6 +14,7 @@ pub mod derivative;
 pub mod directory;
 pub mod discovery;
 pub mod document;
+pub mod dnf;
 pub mod economy;
 pub mod error;
 pub mod events;

@@ -36,6 +36,7 @@ pub fn admin_router() -> Router<AppState> {
 
 /// `GET /api/v1/roadmap` — the full board, grouped by stage. Public (spec §44.5).
 pub async fn get_board(
+    _maybe: MaybeSession,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Value>> {
     let cards = roadmap::list_cards(state.db(), None)
