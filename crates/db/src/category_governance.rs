@@ -231,11 +231,7 @@ pub async fn rename_category(db: &Database, slug: &str, new_label: &str) -> Resu
 
 /// Apply a category merge: mark source merged, re-home entries (§45.1).
 /// Entry scores and vote rows are untouched — no cascade.
-pub async fn merge_categories(
-    db: &Database,
-    source_slug: &str,
-    target_slug: &str,
-) -> Result<bool> {
+pub async fn merge_categories(db: &Database, source_slug: &str, target_slug: &str) -> Result<bool> {
     match db.backend() {
         Backend::Sqlite => {
             let pool = db.sqlite_pool().expect("sqlite");
@@ -320,12 +316,11 @@ pub async fn hard_delete_category(db: &Database, slug: &str) -> Result<bool> {
             if has_entries > 0 {
                 return Ok(false);
             }
-            let result = sqlx::query(
-                "DELETE FROM categories WHERE slug = ? AND source = 'community'",
-            )
-            .bind(slug)
-            .execute(&mut *tx)
-            .await?;
+            let result =
+                sqlx::query("DELETE FROM categories WHERE slug = ? AND source = 'community'")
+                    .bind(slug)
+                    .execute(&mut *tx)
+                    .await?;
             tx.commit().await?;
             Ok(result.rows_affected() > 0)
         }
@@ -342,12 +337,11 @@ pub async fn hard_delete_category(db: &Database, slug: &str) -> Result<bool> {
             if has_entries > 0 {
                 return Ok(false);
             }
-            let result = sqlx::query(
-                "DELETE FROM categories WHERE slug = ? AND source = 'community'",
-            )
-            .bind(slug)
-            .execute(&mut *tx)
-            .await?;
+            let result =
+                sqlx::query("DELETE FROM categories WHERE slug = ? AND source = 'community'")
+                    .bind(slug)
+                    .execute(&mut *tx)
+                    .await?;
             tx.commit().await?;
             Ok(result.rows_affected() > 0)
         }
@@ -550,12 +544,11 @@ pub async fn vote_on_proposal(
             .bind(proposal_id)
             .execute(&mut *tx)
             .await?;
-            let proposal: CategoryProposal = sqlx::query_as(
-                "SELECT * FROM category_proposals WHERE id = ?",
-            )
-            .bind(proposal_id)
-            .fetch_one(&mut *tx)
-            .await?;
+            let proposal: CategoryProposal =
+                sqlx::query_as("SELECT * FROM category_proposals WHERE id = ?")
+                    .bind(proposal_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
             let decided = proposal_decided(
                 proposal.yes_votes as u32,
                 proposal.no_votes as u32,
@@ -602,12 +595,11 @@ pub async fn vote_on_proposal(
             .bind(proposal_id)
             .execute(&mut *tx)
             .await?;
-            let proposal: CategoryProposal = sqlx::query_as(
-                "SELECT * FROM category_proposals WHERE id = ?",
-            )
-            .bind(proposal_id)
-            .fetch_one(&mut *tx)
-            .await?;
+            let proposal: CategoryProposal =
+                sqlx::query_as("SELECT * FROM category_proposals WHERE id = ?")
+                    .bind(proposal_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
             let decided = proposal_decided(
                 proposal.yes_votes as u32,
                 proposal.no_votes as u32,
@@ -907,12 +899,11 @@ pub async fn vote_on_entry_mod(
             .bind(proposal_id)
             .execute(&mut *tx)
             .await?;
-            let proposal: EntryModProposal = sqlx::query_as(
-                "SELECT * FROM entry_moderation_proposals WHERE id = ?",
-            )
-            .bind(proposal_id)
-            .fetch_one(&mut *tx)
-            .await?;
+            let proposal: EntryModProposal =
+                sqlx::query_as("SELECT * FROM entry_moderation_proposals WHERE id = ?")
+                    .bind(proposal_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
             let decided = proposal_decided(
                 proposal.yes_votes as u32,
                 proposal.no_votes as u32,
@@ -959,12 +950,11 @@ pub async fn vote_on_entry_mod(
             .bind(proposal_id)
             .execute(&mut *tx)
             .await?;
-            let proposal: EntryModProposal = sqlx::query_as(
-                "SELECT * FROM entry_moderation_proposals WHERE id = ?",
-            )
-            .bind(proposal_id)
-            .fetch_one(&mut *tx)
-            .await?;
+            let proposal: EntryModProposal =
+                sqlx::query_as("SELECT * FROM entry_moderation_proposals WHERE id = ?")
+                    .bind(proposal_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
             let decided = proposal_decided(
                 proposal.yes_votes as u32,
                 proposal.no_votes as u32,

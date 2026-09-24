@@ -1274,10 +1274,13 @@ async fn toggle_kudos(
     Path(id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let work_id = parse_work_id(&id)?;
-    let kudoed =
-        work_metrics::toggle_kudos(state.db(), &work_id.to_string(), &user.account_id.to_string())
-            .await
-            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    let kudoed = work_metrics::toggle_kudos(
+        state.db(),
+        &work_id.to_string(),
+        &user.account_id.to_string(),
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
     Ok(Json(serde_json::json!({ "kudoed": kudoed })))
 }
 

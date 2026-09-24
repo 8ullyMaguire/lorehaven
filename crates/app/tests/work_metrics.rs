@@ -216,9 +216,7 @@ async fn public_work_excludes_metrics_when_owner_opted_out() {
     owner.publish_work(&work_id).await;
 
     // Opt out of public ratings.
-    let (status, body) = owner
-        .get(&format!("/api/v1/works/{work_id}"))
-        .await;
+    let (status, body) = owner.get(&format!("/api/v1/works/{work_id}")).await;
     assert_eq!(status, StatusCode::OK);
     let version = body["version"].as_i64().expect("version");
     let (status, _) = owner
