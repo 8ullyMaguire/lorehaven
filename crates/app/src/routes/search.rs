@@ -8,7 +8,8 @@ use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::routing::get;
 use axum::{Json, Router};
-use lorehaven_db::search::{search_in_work, search_works_ast, InWorkMatch};
+use lorehaven_db::search::{search_in_work, search_works_ast_filtered, InWorkMatch};
+use lorehaven_db::settings as db_settings;
 use lorehaven_domain::ids::WorkId;
 use serde::Deserialize;
 
@@ -36,9 +37,31 @@ async fn search(
     Query(params): Query<SearchQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let viewer_id = session.as_ref().map(|s| s.account_id.to_string());
-    let results = search_works_ast(state.db(), &params.q, viewer_id.as_deref(), params.limit)
-        .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    // M47-04: load content filters for the viewer's pseud and exclude matching works.
+    let filters = if let Some(ref session) = session {
+        let pseud_id = session
+            .pseud_id
+            .as_ref()
+            .map(|p| p.as_uuid())
+            .unwrap_or_else(|| session.account_id.as_uuid());
+        db_settings::list_content_filters(state.db(), pseud_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| (r.filter_type, r.value))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let results = search_works_ast_filtered(
+        state.db(),
+        &params.q,
+        viewer_id.as_deref(),
+        params.limit,
+        &filters,
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     Ok(Json(serde_json::json!({ "items": results })))
 }
 

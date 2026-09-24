@@ -763,3 +763,85 @@ async fn publishing_indexes_the_work_so_the_public_search_can_find_it() {
     );
     harness.cleanup().await;
 }
+
+/// M47-04: server-side content-filter enforcement on search — blocked tag never
+/// reaches the client. Inserts a taxonomy node and work_tag so the filter can
+/// match a real tag relationship.
+#[tokio::test]
+async fn search_respects_content_filters() {
+    let harness = Harness::new("search-content-filter").await;
+
+    // Create two works.
+    let alpha_id = published_work(&harness, "a@example.com", "AuthorA", "Alpha Work").await;
+    let _beta_id = published_work(&harness, "b@example.com", "AuthorB", "Beta Work").await;
+
+    // Insert a tag node and tag the Alpha work directly.
+    let now = chrono::Utc::now().to_rfc3339();
+    let node_id = uuid::Uuid::new_v4().to_string();
+    let db = harness.tdb.db();
+    let sql_node = db.sql(
+        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES ($1::uuid, $2, $3, $4, $5::timestamptz)",
+    );
+    match db.backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query(&sql_node)
+                .bind(&node_id).bind("tag").bind("enemies to lovers").bind("enemies to lovers").bind(&now)
+                .execute(db.sqlite_pool().unwrap()).await.unwrap();
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query(&sql_node)
+                .bind(&node_id).bind("tag").bind("enemies to lovers").bind("enemies to lovers").bind(&now)
+                .execute(db.postgres_pool().unwrap()).await.unwrap();
+        }
+    }
+    let sql_tag = db.sql(
+        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES ($1::uuid, $2, $3, $4::timestamptz)",
+    );
+    match db.backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query(&sql_tag)
+                .bind(&alpha_id).bind(&node_id).bind(1i64).bind(&now)
+                .execute(db.sqlite_pool().unwrap()).await.unwrap();
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query(&sql_tag)
+                .bind(&alpha_id).bind(&node_id).bind(1i64).bind(&now)
+                .execute(db.postgres_pool().unwrap()).await.unwrap();
+        }
+    }
+
+    // Register a reader.
+    let mut client = harness.client();
+    register(&mut client, "reader@example.com", "Reader").await;
+
+    // Block "enemies to lovers" tag.
+    let (status, body) = client
+        .post(
+            "/api/v1/settings/content-filters",
+            json!({ "filter_type": "tag", "value": "enemies to lovers" }),
+        )
+        .await;
+    assert!(
+        status == StatusCode::OK || status == StatusCode::CREATED,
+        "add filter: {status} {body}"
+    );
+
+    // Search: only Beta should appear (Alpha has the blocked tag).
+    let (status, body) = client.get("/api/v1/search?q=Work").await;
+    assert_eq!(status, StatusCode::OK, "search with filter: {body}");
+    let titles: Vec<String> = body["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .map(|i| i["title"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        titles,
+        vec!["Beta Work".to_owned()],
+        "blocked tag must not appear in results: {body}"
+    );
+
+    harness.cleanup().await;
+}

@@ -2,6 +2,7 @@
 //! filtering. Both dialects.
 
 use crate::search::SearchResult;
+use crate::settings::ContentFilterRow;
 use crate::{sql_owned, Backend, Database};
 use anyhow::Result;
 use lorehaven_domain::query::parse_query;
@@ -9,6 +10,77 @@ use lorehaven_domain::query_sql::render_query;
 
 /// Search works using the AST parser and dialect-aware SQL.
 pub async fn search_works_ast(
+    db: &Database,
+    query: &str,
+    viewer_id: Option<&str>,
+    limit: i64,
+) -> Result<Vec<SearchResult>> {
+    search_works_ast_impl(db, query, viewer_id, limit).await
+}
+
+/// Search with content-filter exclusion (spec §46.4 — blocked tag never reaches
+/// the client). `filters` is a list of (filter_type, value) pairs, e.g.
+/// `("tag", "enemies to lovers")`.
+pub async fn search_works_ast_filtered(
+    db: &Database,
+    query: &str,
+    viewer_id: Option<&str>,
+    limit: i64,
+    filters: &[(String, String)],
+) -> Result<Vec<SearchResult>> {
+    let results = search_works_ast_impl(db, query, viewer_id, limit).await?;
+    if filters.is_empty() {
+        return Ok(results);
+    }
+    // Post-filter: remove works whose tags match any content filter.
+    // For search result sizes (≤~20) this is cheaper than dynamic SQL.
+    let mut filtered = Vec::with_capacity(results.len());
+    for result in results {
+        let work_tags = work_tag_values(db, &result.work_id).await?;
+        let excluded = filters.iter().any(|(filter_type, value)| {
+            work_tags
+                .iter()
+                .any(|tag| tag.filter_type == *filter_type && tag.value == *value)
+        });
+        if !excluded {
+            filtered.push(result);
+        }
+    }
+    Ok(filtered)
+}
+
+/// Load a work's tag values with their filter types (tag/fandom/warning).
+async fn work_tag_values(db: &Database, work_id: &str) -> Result<Vec<ContentFilterRow>> {
+    // taxonomy_nodes.kind distinguishes tag/fandom/warning; work_tags links
+    // works to nodes.
+    let sql = "SELECT tn.kind AS filter_type, tn.canonical AS value \
+               FROM work_tags wt \
+               JOIN taxonomy_nodes tn ON tn.id = wt.node_id \
+               WHERE wt.work_id = ?";
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as::<_, ContentFilterRow>(sql)
+                .bind(work_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as::<_, ContentFilterRow>(
+                "SELECT tn.kind AS filter_type, tn.canonical AS value \
+                 FROM work_tags wt \
+                 JOIN taxonomy_nodes tn ON tn.id = wt.node_id \
+                 WHERE wt.work_id::text = ?",
+            )
+            .bind(work_id)
+            .fetch_all(db.postgres_pool().expect("postgres handle"))
+            .await?
+        }
+    };
+    Ok(rows)
+}
+
+/// Search works using the AST parser and dialect-aware SQL.
+async fn search_works_ast_impl(
     db: &Database,
     query: &str,
     viewer_id: Option<&str>,
