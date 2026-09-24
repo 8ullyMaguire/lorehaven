@@ -45,7 +45,7 @@ pub fn router() -> Router<AppState> {
             get(get_search_settings).patch(patch_search_settings),
         )
         .route(
-            "/settings/search/:key",
+            "/settings/search/{key}",
             axum::routing::delete(delete_search_setting),
         )
         .route(
@@ -53,7 +53,7 @@ pub fn router() -> Router<AppState> {
             get(list_content_filters).post(post_content_filter),
         )
         .route(
-            "/settings/content-filters/:filter_type/:value",
+            "/settings/content-filters/{filter_type}/{value}",
             axum::routing::delete(delete_content_filter),
         )
         .route(
@@ -61,7 +61,7 @@ pub fn router() -> Router<AppState> {
             get(get_notification_routes).patch(patch_notification_route),
         )
         .route(
-            "/settings/notifications/:event_type",
+            "/settings/notifications/{event_type}",
             axum::routing::delete(delete_notification_route),
         )
         .route("/settings/export", get(export_settings))
@@ -459,7 +459,11 @@ async fn get_search_settings(
     let account = identity::find_account(state.db(), user.account_id)
         .await?
         .ok_or_else(|| ApiError(AppError::AuthRequired))?;
-    let pseud_id = account.id.as_uuid();
+    let pseud_id = user
+        .pseud_id
+        .as_ref()
+        .map(|p| p.as_uuid())
+        .unwrap_or_else(|| account.id.as_uuid());
     let rows = db_settings::read_search_settings(state.db(), pseud_id).await?;
     let schema_keys: Vec<&str> = domain_settings::SETTING_KEYS
         .iter()
@@ -492,7 +496,11 @@ async fn patch_search_settings(
     let account = identity::find_account(state.db(), user.account_id)
         .await?
         .ok_or_else(|| ApiError(AppError::AuthRequired))?;
-    let pseud_id = account.id.as_uuid();
+    let pseud_id = user
+        .pseud_id
+        .as_ref()
+        .map(|p| p.as_uuid())
+        .unwrap_or_else(|| account.id.as_uuid());
     let now = now_string();
     for item in &request.changes {
         if domain_settings::key_def(&item.key).is_none() {
@@ -515,7 +523,11 @@ async fn delete_search_setting(
     let account = identity::find_account(state.db(), user.account_id)
         .await?
         .ok_or_else(|| ApiError(AppError::AuthRequired))?;
-    let pseud_id = account.id.as_uuid();
+    let pseud_id = user
+        .pseud_id
+        .as_ref()
+        .map(|p| p.as_uuid())
+        .unwrap_or_else(|| account.id.as_uuid());
     let removed = db_settings::delete_search_setting(state.db(), pseud_id, &key).await?;
     Ok(Json(serde_json::json!({ "removed": removed, "key": key })))
 }
@@ -545,7 +557,11 @@ async fn list_content_filters(
     let account = identity::find_account(state.db(), user.account_id)
         .await?
         .ok_or_else(|| ApiError(AppError::AuthRequired))?;
-    let pseud_id = account.id.as_uuid();
+    let pseud_id = user
+        .pseud_id
+        .as_ref()
+        .map(|p| p.as_uuid())
+        .unwrap_or_else(|| account.id.as_uuid());
     let rows = db_settings::list_content_filters(state.db(), pseud_id).await?;
     Ok(Json(ContentFilterListView {
         pseud_id: pseud_id.to_string(),
@@ -573,7 +589,11 @@ async fn post_content_filter(
     let account = identity::find_account(state.db(), user.account_id)
         .await?
         .ok_or_else(|| ApiError(AppError::AuthRequired))?;
-    let pseud_id = account.id.as_uuid();
+    let pseud_id = user
+        .pseud_id
+        .as_ref()
+        .map(|p| p.as_uuid())
+        .unwrap_or_else(|| account.id.as_uuid());
     let now = now_string();
     db_settings::add_content_filter(
         state.db(),
@@ -597,7 +617,11 @@ async fn delete_content_filter(
     let account = identity::find_account(state.db(), user.account_id)
         .await?
         .ok_or_else(|| ApiError(AppError::AuthRequired))?;
-    let pseud_id = account.id.as_uuid();
+    let pseud_id = user
+        .pseud_id
+        .as_ref()
+        .map(|p| p.as_uuid())
+        .unwrap_or_else(|| account.id.as_uuid());
     let removed =
         db_settings::remove_content_filter(state.db(), pseud_id, &filter_type, &value).await?;
     Ok(Json(

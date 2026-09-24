@@ -10,6 +10,7 @@ use serde::Serialize;
 mod ast_search;
 
 pub use ast_search::search_works_ast;
+pub use ast_search::search_works_ast_filtered;
 
 /// A single search result.
 #[derive(Debug, Clone, Serialize)]

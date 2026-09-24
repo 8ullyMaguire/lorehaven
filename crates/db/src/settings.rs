@@ -112,7 +112,7 @@ pub async fn delete_search_setting(db: &Database, pseud_id: Uuid, key: &str) -> 
 // Content filters (per pseud)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ContentFilterRow {
     pub filter_type: String,
     pub value: String,
