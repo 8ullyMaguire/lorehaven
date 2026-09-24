@@ -3536,3 +3536,118 @@ export function moveRoadmapCard(body: { card_id: string; stage: string; reason?:
     body: JSON.stringify(body),
   });
 }
+
+// ---------------------------------------------------------------------------
+// M47 — User Configuration (spec §46)
+// ---------------------------------------------------------------------------
+
+export interface SettingSchema {
+  key: string;
+  summary: string;
+}
+
+export interface ResolvedSetting {
+  key: string;
+  value: unknown;
+  source: string;
+  summary: string;
+}
+
+export interface SearchSettingsView {
+  pseud_id: string;
+  settings: ResolvedSetting[];
+  schema: SettingSchema[];
+}
+
+export interface ContentFilterView {
+  filter_type: string;
+  value: string;
+}
+
+export interface ContentFilterListView {
+  pseud_id: string;
+  filters: ContentFilterView[];
+}
+
+export interface NotificationRouteView {
+  event_type: string;
+  channel: string;
+  enabled: boolean;
+}
+
+export interface NotificationRoutesView {
+  account_id: string;
+  routes: NotificationRouteView[];
+}
+
+export interface SettingsExport {
+  version: string;
+  namespaces: Record<string, ResolvedSetting[]>;
+}
+
+export interface ImportReport {
+  accepted: string[];
+  rejected: { key: string; reason: string }[];
+}
+
+export function fetchSearchSettings(signal?: AbortSignal): Promise<SearchSettingsView> {
+  return apiFetch<SearchSettingsView>('/settings/search', { signal });
+}
+
+export function patchSearchSettings(changes: { key: string; value: unknown }[]): Promise<SearchSettingsView> {
+  return apiFetch<SearchSettingsView>('/settings/search', {
+    method: 'PATCH',
+    body: JSON.stringify({ changes }),
+  });
+}
+
+export function deleteSearchSetting(key: string): Promise<{ removed: boolean; key: string }> {
+  return apiFetch<{ removed: boolean; key: string }>(`/settings/search/${key}`, {
+    method: 'DELETE',
+  });
+}
+
+export function fetchContentFilters(signal?: AbortSignal): Promise<ContentFilterListView> {
+  return apiFetch<ContentFilterListView>('/settings/content-filters', { signal });
+}
+
+export function addContentFilter(filter_type: string, value: string): Promise<ContentFilterView> {
+  return apiFetch<ContentFilterView>('/settings/content-filters', {
+    method: 'POST',
+    body: JSON.stringify({ filter_type, value }),
+  });
+}
+
+export function deleteContentFilter(filter_type: string, value: string): Promise<{ removed: boolean }> {
+  return apiFetch<{ removed: boolean }>(`/settings/content-filters/${filter_type}/${value}`, {
+    method: 'DELETE',
+  });
+}
+
+export function fetchNotificationRoutes(signal?: AbortSignal): Promise<NotificationRoutesView> {
+  return apiFetch<NotificationRoutesView>('/settings/notifications', { signal });
+}
+
+export function patchNotificationRoutes(changes: { event_type: string; channel: string; enabled: boolean }[]): Promise<NotificationRoutesView> {
+  return apiFetch<NotificationRoutesView>('/settings/notifications', {
+    method: 'PATCH',
+    body: JSON.stringify({ changes }),
+  });
+}
+
+export function deleteNotificationRoute(event_type: string): Promise<{ removed: boolean }> {
+  return apiFetch<{ removed: boolean }>(`/settings/notifications/${event_type}`, {
+    method: 'DELETE',
+  });
+}
+
+export function exportSettings(signal?: AbortSignal): Promise<SettingsExport> {
+  return apiFetch<SettingsExport>('/settings/export', { signal });
+}
+
+export function importSettings(data: SettingsExport): Promise<ImportReport> {
+  return apiFetch<ImportReport>('/settings/import', {
+    method: 'POST',
+    body: JSON.stringify({ data }),
+  });
+}
