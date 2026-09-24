@@ -60,6 +60,7 @@ pub mod roadmap;
 pub mod roles;
 pub mod search;
 pub mod secrets;
+pub mod dnf;
 pub mod sessions;
 pub mod settings;
 pub mod spoilers;

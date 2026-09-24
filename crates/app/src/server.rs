@@ -322,6 +322,11 @@ pub fn build_router(state: AppState) -> Router {
             &state,
         ))
         .merge(routes::reading::authed_router())
+        .merge(classified(
+            routes::dnf::router(),
+            RouteClass::Search,
+            &state,
+        ))
         // Positivity filter: the author's own defaults, per-work policy and
         // inbox. Session-scoped like the library: every route needs one and
         // most write, so the whole tree sits under the writers' class.
