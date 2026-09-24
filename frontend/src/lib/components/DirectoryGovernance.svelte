@@ -14,8 +14,8 @@
     type Proposal,
     type ChangelogEntry,
     type DirectoryEntry,
-  } from '../lib/api';
-  import { session } from '../lib/session.svelte.ts';
+  } from '../api';
+  import { session } from '../session.svelte.ts';
   import Button from './Button.svelte';
   import ErrorSummary from './ErrorSummary.svelte';
 
