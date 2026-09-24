@@ -467,6 +467,7 @@
     gap: var(--space-5);
     margin-left: var(--space-5);
     flex: 1;
+    flex-wrap: wrap;
   }
 
   .desktop a {
