@@ -60,6 +60,7 @@ pub mod roles;
 pub mod search;
 pub mod secrets;
 pub mod sessions;
+pub mod settings;
 pub mod spoilers;
 pub mod storage;
 pub mod subscriptions;
