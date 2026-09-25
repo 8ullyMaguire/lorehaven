@@ -11,9 +11,16 @@ SQLite: **1788 passed, 0 failed, 83 suites.** `cargo fmt` clean,
 (Note for the next session: `-D warnings` must come *after* `--`, or clippy
 rejects it as an unexpected argument and exits 1 having checked nothing.)
 
-PostgreSQL was 1762 passed / 125 failed across 30 suites when this session's work
-started. Both figures come from `--no-fail-fast` workspace runs, never from
-per-suite spot checks.
+PostgreSQL: **1660 passed, 130 failed, 33 suites** carrying a failure, measured
+by `cargo test --workspace --no-fail-fast` with `LOREHAVEN_TEST_PG_URL` set. The
+worst five are `milestone_5` (16), `milestone_6` (14), `milestone_7` (9),
+`milestone_40` (8), `milestone_32` (7). (I first wrote this section from a run
+that had been cut off at 25 suites, which read 1762/125 across 30 — the 83-suite
+run is the number to trust, and the lesson is not to quote a partial one.)
+
+An earlier note in this file's history gave 1762/151; both figures were from
+partial or per-suite runs. The 1660/130 above is the first full-workspace
+measurement.
 
 ## What was actually wrong, and it was not what I first assumed
 

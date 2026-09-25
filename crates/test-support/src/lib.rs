@@ -265,3 +265,148 @@ pub fn id(label: &str) -> String {
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     uuid::Uuid::from_bytes(bytes).to_string()
 }
+
+// ---------------------------------------------------------------------------
+// HTTP client for route-level tests
+// ---------------------------------------------------------------------------
+//
+// Several suites need to drive the real router with a real session. The client
+// was copy-pasted into each of them, which is how a cookie-capture bug or a CSRF
+// change had to be fixed in four places. It lives here now so there is one
+// implementation, and adding a route test no longer means copying 150 lines
+// first.
+
+use axum::body::Body;
+use axum::http::{header, Request, StatusCode};
+use axum::Router;
+use serde_json::Value;
+use tower::ServiceExt;
+
+/// A router plus the cookies it has handed out.
+///
+/// The cookie jar is the whole point: the app authenticates with a session
+/// cookie, so a route test that does not carry cookies back is testing the
+/// anonymous path and passing for the wrong reason.
+pub struct TestClient {
+    app: Router,
+    cookies: Vec<(String, String)>,
+}
+
+impl TestClient {
+    pub fn new(app: Router) -> Self {
+        Self {
+            app,
+            cookies: Vec::new(),
+        }
+    }
+
+    fn capture(&mut self, response: &axum::response::Response) {
+        for value in response.headers().get_all(header::SET_COOKIE) {
+            let Ok(text) = value.to_str() else { continue };
+            let Some((pair, _)) = text.split_once(';') else {
+                continue;
+            };
+            let Some((name, value)) = pair.split_once('=') else {
+                continue;
+            };
+            let name = name.trim().to_owned();
+            let value = value.trim().to_owned();
+            // A cleared cookie arrives with an empty value; dropping it is how
+            // a logout actually takes effect in the jar.
+            self.cookies.retain(|(k, _)| k != &name);
+            if !value.is_empty() {
+                self.cookies.push((name, value));
+            }
+        }
+    }
+
+    /// Issue a request, carrying and capturing cookies.
+    pub async fn request(
+        &mut self,
+        method: &str,
+        uri: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        let mut builder = Request::builder().method(method).uri(uri);
+        if !self.cookies.is_empty() {
+            let jar = self
+                .cookies
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join("; ");
+            builder = builder.header(header::COOKIE, jar);
+        }
+        // The CSRF check wants a header echoing the token the session cookie set.
+        // The cookie is `lorehaven_csrf`, and a safe method needs none -- the app
+        // only rejects unsafe ones, so sending it everywhere is harmless but
+        // omitting it on GET keeps the request honest.
+        if !matches!(method, "GET" | "HEAD" | "OPTIONS") {
+            if let Some(csrf) = self.cookie("lorehaven_csrf").map(str::to_owned) {
+                builder = builder.header("x-csrf-token", csrf);
+            }
+        }
+        let request = match body {
+            Some(value) => builder
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(value.to_string()))
+                .expect("build request"),
+            None => builder.body(Body::empty()).expect("build request"),
+        };
+        let response = self
+            .app
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("router is infallible");
+        let status = response.status();
+        self.capture(&response);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap_or_default();
+        let value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+        (status, value)
+    }
+
+    pub async fn get(&mut self, uri: impl AsRef<str>) -> (StatusCode, Value) {
+        self.request("GET", uri.as_ref(), None).await
+    }
+
+    pub async fn post(&mut self, uri: impl AsRef<str>, body: Value) -> (StatusCode, Value) {
+        self.request("POST", uri.as_ref(), Some(body)).await
+    }
+
+    pub fn cookie(&self, name: &str) -> Option<&str> {
+        self.cookies
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
+    }
+}
+
+/// Register an account through the API and return its id.
+///
+/// Goes through the real registration route rather than inserting a row, so the
+/// session cookie and the CSRF token are the ones the app itself issued.
+pub async fn register(client: &mut TestClient, email: &str, handle: &str) -> String {
+    const PASSWORD: &str = "a-long-enough-passphrase";
+    let (status, body) = client
+        .post(
+            "/api/v1/auth/register",
+            serde_json::json!({
+                "email": email,
+                "password": PASSWORD,
+                "handle": handle,
+                "display_name": handle,
+                "age_band": "adult"
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "register {handle}: {body}");
+    let (status, me) = client.get("/api/v1/auth/me").await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    me["account"]["id"]
+        .as_str()
+        .expect("account id in /auth/me")
+        .to_owned()
+}

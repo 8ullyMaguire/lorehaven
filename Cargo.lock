@@ -3327,9 +3327,12 @@ dependencies = [
 name = "test-support"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "lorehaven-db",
+ "serde_json",
  "sqlx",
  "tokio",
+ "tower",
  "uuid",
 ]
 

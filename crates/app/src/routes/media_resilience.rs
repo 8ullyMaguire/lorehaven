@@ -1,7 +1,7 @@
 use crate::auth::{MaybeSession, RequirePseud, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -335,4 +335,149 @@ pub fn router() -> Router<AppState> {
             "/media/references/{reference_id}/mirrors",
             post(add_mirror_link),
         )
+        .route("/media/match-proposals", get(list_match_proposals))
+        .route(
+            "/media/match-proposals/{proposal_id}",
+            post(resolve_match_proposal),
+        )
+}
+
+/// Gate for the curator-facing media endpoints.
+///
+/// Trust level 5 rather than the media opt-in table, because these merge and
+/// discard media references: that is a moderation action, and the opt-in list
+/// exists for curators who want *extra* work, not a lower bar for destructive
+/// ones. Mirrors `media_health::require_operator` so the two agree on who may.
+async fn require_operator(
+    state: &AppState,
+    user: &crate::auth::SessionUser,
+) -> Result<(), ApiError> {
+    let level = lorehaven_db::governance::trust_for(state.db(), &user.account_id.to_string())
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    if level >= 5 {
+        Ok(())
+    } else {
+        // The caller *is* signed in -- `RequireSession` already proved that --
+        // so "authentication required" is a lie that also hides the real reason
+        // from the client. A reader hitting this gets 403 and can act on it.
+        Err(ApiError(AppError::AccessDenied))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// §32.7.2 Perceptual match proposals (curator review)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct ResolveProposalBody {
+    /// `confirm` merges the candidate into the existing reference; `reject`
+    /// keeps them apart. Anything else is a 422 rather than a silent default,
+    /// because the two outcomes are opposites and guessing one is destructive.
+    pub decision: String,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+fn proposal_to_json(row: &media_resilience::MatchProposal) -> Value {
+    json!({
+        "id": row.id,
+        "candidate_reference_id": row.candidate_reference_id,
+        "existing_reference_id": row.existing_reference_id,
+        "content_hash": row.content_hash,
+        "perceptual_hash": row.perceptual_hash,
+        "hamming_distance": row.hamming_distance,
+        "match_confidence": row.match_confidence,
+        "status": row.status,
+        "created_at": row.created_at,
+    })
+}
+
+/// The pending proposals, closest match first.
+///
+/// Bounded by a `limit` that the caller controls up to 200, because a fetch
+/// storm on one popular image produces a proposal per importing work and an
+/// unbounded queue is the failure this endpoint exists to prevent. The total
+/// pending count is returned alongside it, so a curator can see that there is
+/// more than they are being shown.
+pub async fn list_match_proposals(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Query(query): Query<MatchProposalQuery>,
+) -> ApiResult<Json<Value>> {
+    require_operator(&state, &user).await?;
+
+    let limit = query.limit.unwrap_or(50);
+    let pending = media_resilience::list_pending_match_proposals(state.db(), limit)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    let total = media_resilience::count_pending_match_proposals(state.db())
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+
+    Ok(Json(json!({
+        "pending": pending
+            .iter()
+            .map(|p| json!({
+                "proposal": proposal_to_json(&p.proposal),
+                "existing_content_hash": p.existing_content_hash,
+            }))
+            .collect::<Vec<_>>(),
+        "total_pending": total,
+    })))
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct MatchProposalQuery {
+    pub limit: Option<i64>,
+}
+
+/// Confirm or reject one proposal.
+pub async fn resolve_match_proposal(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(proposal_id): Path<String>,
+    Json(body): Json<ResolveProposalBody>,
+) -> ApiResult<Json<Value>> {
+    require_operator(&state, &user).await?;
+
+    let decision = match body.decision.as_str() {
+        "confirm" => media_resilience::ProposalDecision::Confirm,
+        "reject" => media_resilience::ProposalDecision::Reject,
+        other => {
+            return Err(ApiError(AppError::Validation {
+                message: format!("decision must be `confirm` or `reject`, got `{other}`"),
+                field_errors: std::collections::BTreeMap::new(),
+            }));
+        }
+    };
+    let note = body
+        .note
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty());
+
+    let resolved = media_resilience::resolve_match_proposal(
+        state.db(),
+        &proposal_id,
+        decision,
+        &user.account_id.to_string(),
+        note,
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+
+    if !resolved {
+        // Missing, already decided, or not an id at all -- one 404 for all three.
+        // Distinguishing them would tell a curator that someone else got there
+        // first, which is not their business while they are still deciding.
+        return Err(ApiError(AppError::NotFound {
+            resource: "match_proposal",
+        }));
+    }
+    Ok(Json(json!({
+        "id": proposal_id,
+        "status": decision.as_status(),
+        "merged": decision.is_confirmation(),
+    })))
 }
