@@ -325,7 +325,11 @@ pub async fn get_ai_work(
 pub async fn get_openapi_spec(
     _maybe: MaybeSession,
     State(_state): State<AppState>,
-) -> ApiResult<(axum::http::StatusCode, [(axum::http::header::HeaderName, &'static str); 1], Json<serde_json::Value>)> {
+) -> ApiResult<(
+    axum::http::StatusCode,
+    [(axum::http::header::HeaderName, &'static str); 1],
+    Json<serde_json::Value>,
+)> {
     let spec = serde_json::json!({
         "openapi": "3.1.0",
         "info": {
@@ -455,7 +459,10 @@ pub async fn get_openapi_spec(
     });
     Ok((
         axum::http::StatusCode::OK,
-        [(axum::http::header::HeaderName::from_static("content-type"), "application/json")],
+        [(
+            axum::http::header::HeaderName::from_static("content-type"),
+            "application/json",
+        )],
         Json(spec),
     ))
 }

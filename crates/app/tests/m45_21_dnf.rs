@@ -60,12 +60,7 @@ impl Harness {
         server::build_router(AppState::new(self.config.clone(), self.db.clone()))
     }
 
-    async fn call(
-        &self,
-        method: Method,
-        path: &str,
-        body: Option<Value>,
-    ) -> (StatusCode, Value) {
+    async fn call(&self, method: Method, path: &str, body: Option<Value>) -> (StatusCode, Value) {
         let builder = Request::builder().uri(path).method(method);
         let req = if let Some(b) = body {
             builder
@@ -96,28 +91,42 @@ async fn test_dnf_endpoints_unauthenticated() {
 
     // All endpoints require authentication
     let (status, _) = h
-        .call(Method::POST, "/api/v1/works/11111111-1111-1111-1111-111111111111/dnf", Some(body.clone()))
+        .call(
+            Method::POST,
+            "/api/v1/works/11111111-1111-1111-1111-111111111111/dnf",
+            Some(body.clone()),
+        )
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     let (status, _) = h
-        .call(Method::PUT, "/api/v1/works/11111111-1111-1111-1111-111111111111/dnf", Some(body))
+        .call(
+            Method::PUT,
+            "/api/v1/works/11111111-1111-1111-1111-111111111111/dnf",
+            Some(body),
+        )
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     let (status, _) = h
-        .call(Method::GET, "/api/v1/works/11111111-1111-1111-1111-111111111111/dnf", None)
+        .call(
+            Method::GET,
+            "/api/v1/works/11111111-1111-1111-1111-111111111111/dnf",
+            None,
+        )
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     let (status, _) = h
-        .call(Method::DELETE, "/api/v1/works/11111111-1111-1111-1111-111111111111/dnf", None)
+        .call(
+            Method::DELETE,
+            "/api/v1/works/11111111-1111-1111-1111-111111111111/dnf",
+            None,
+        )
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    let (status, _) = h
-        .call(Method::GET, "/api/v1/me/dnf", None)
-        .await;
+    let (status, _) = h.call(Method::GET, "/api/v1/me/dnf", None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
@@ -170,18 +179,9 @@ async fn test_dnf_db_layer_roundtrip() {
     assert!(row.is_public);
 
     // Upsert again (update)
-    dnf::upsert_dnf(
-        db,
-        account,
-        pseud,
-        work.id,
-        "triggering",
-        None,
-        false,
-        now,
-    )
-    .await
-    .expect("update DNF");
+    dnf::upsert_dnf(db, account, pseud, work.id, "triggering", None, false, now)
+        .await
+        .expect("update DNF");
 
     let row = dnf::read_dnf(db, pseud, work.id)
         .await
@@ -194,7 +194,10 @@ async fn test_dnf_db_layer_roundtrip() {
     let counts = dnf::aggregate_dnf_counts(db, work.id)
         .await
         .expect("aggregate DNF");
-    assert!(counts.is_empty(), "no public records after update to private");
+    assert!(
+        counts.is_empty(),
+        "no public records after update to private"
+    );
 
     // Make it public again for aggregate test
     dnf::upsert_dnf(
@@ -218,9 +221,7 @@ async fn test_dnf_db_layer_roundtrip() {
     assert_eq!(counts[0].1, 1);
 
     // List by pseud
-    let list = dnf::list_dnf_by_pseud(db, pseud)
-        .await
-        .expect("list DNF");
+    let list = dnf::list_dnf_by_pseud(db, pseud).await.expect("list DNF");
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].reason, "abandoned_by_author");
 
@@ -278,9 +279,7 @@ async fn test_dnf_unique_constraint_per_pseud_work() {
         .expect("second upsert should update");
 
     // Only one record
-    let list = dnf::list_dnf_by_pseud(db, pseud)
-        .await
-        .expect("list DNF");
+    let list = dnf::list_dnf_by_pseud(db, pseud).await.expect("list DNF");
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].reason, "triggering");
 

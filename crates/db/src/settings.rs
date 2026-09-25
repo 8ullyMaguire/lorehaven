@@ -288,7 +288,8 @@ pub async fn resolve_notification_channel(
     account_id: Uuid,
     event_type: &str,
 ) -> Result<Option<String>> {
-    let sql = "SELECT channel, enabled FROM notification_routes WHERE account_id = ? AND event_type = ?";
+    let sql =
+        "SELECT channel, enabled FROM notification_routes WHERE account_id = ? AND event_type = ?";
     let row: Option<(String, bool)> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as::<_, (String, bool)>(sql)
@@ -309,7 +310,11 @@ pub async fn resolve_notification_channel(
     };
     Ok(match row {
         Some((channel, enabled)) => {
-            if enabled { Some(channel) } else { None }
+            if enabled {
+                Some(channel)
+            } else {
+                None
+            }
         }
         None => Some("email".to_string()),
     })

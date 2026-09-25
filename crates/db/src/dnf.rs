@@ -106,35 +106,27 @@ pub async fn delete_dnf(
     );
 
     let affected = match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query(&sql)
-                .bind(now)
-                .bind(pseud_id.to_string())
-                .bind(work_id.to_string())
-                .execute(db.sqlite_pool().expect("sqlite handle"))
-                .await?
-                .rows_affected()
-        }
-        Backend::Postgres => {
-            sqlx::query(&sql)
-                .bind(now)
-                .bind(pseud_id.to_string())
-                .bind(work_id.to_string())
-                .execute(db.postgres_pool().expect("postgres handle"))
-                .await?
-                .rows_affected()
-        }
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(now)
+            .bind(pseud_id.to_string())
+            .bind(work_id.to_string())
+            .execute(db.sqlite_pool().expect("sqlite handle"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(now)
+            .bind(pseud_id.to_string())
+            .bind(work_id.to_string())
+            .execute(db.postgres_pool().expect("postgres handle"))
+            .await?
+            .rows_affected(),
     };
 
     Ok(affected > 0)
 }
 
 /// Read a single DNF record (the pseud's own record for a work).
-pub async fn read_dnf(
-    db: &Database,
-    pseud_id: PseudId,
-    work_id: WorkId,
-) -> Result<Option<DnfRow>> {
+pub async fn read_dnf(db: &Database, pseud_id: PseudId, work_id: WorkId) -> Result<Option<DnfRow>> {
     let sql = db.sql(
         "SELECT id, account_id, pseud_id, work_id, reason, note, is_public, created_at, updated_at
          FROM did_not_finish
@@ -146,18 +138,44 @@ pub async fn read_dnf(
 
     let row = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, (String, String, String, String, String, Option<String>, bool, String, String)>(&sql)
-                .bind(pseud_id.to_string())
-                .bind(work_id.to_string())
-                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
-                .await?
+            sqlx::query_as::<
+                _,
+                (
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    Option<String>,
+                    bool,
+                    String,
+                    String,
+                ),
+            >(&sql)
+            .bind(pseud_id.to_string())
+            .bind(work_id.to_string())
+            .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+            .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, (String, String, String, String, String, Option<String>, bool, String, String)>(&sql)
-                .bind(pseud_id.to_string())
-                .bind(work_id.to_string())
-                .fetch_optional(db.postgres_pool().expect("postgres handle"))
-                .await?
+            sqlx::query_as::<
+                _,
+                (
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    Option<String>,
+                    bool,
+                    String,
+                    String,
+                ),
+            >(&sql)
+            .bind(pseud_id.to_string())
+            .bind(work_id.to_string())
+            .fetch_optional(db.postgres_pool().expect("postgres handle"))
+            .await?
         }
     };
 
@@ -213,23 +231,60 @@ pub async fn list_dnf_for_work(
 
     let rows = match db.backend() {
         Backend::Sqlite => {
-            let mut q = sqlx::query_as::<_, (String, String, String, String, String, Option<String>, bool, String, String)>(&sql)
-                .bind(work_id.to_string());
+            let mut q = sqlx::query_as::<
+                _,
+                (
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    Option<String>,
+                    bool,
+                    String,
+                    String,
+                ),
+            >(&sql)
+            .bind(work_id.to_string());
             if !include_private {}
-            q.fetch_all(db.sqlite_pool().expect("sqlite handle")).await?
+            q.fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, (String, String, String, String, String, Option<String>, bool, String, String)>(&sql)
-                .bind(work_id.to_string())
-                .fetch_all(db.postgres_pool().expect("postgres handle"))
-                .await?
+            sqlx::query_as::<
+                _,
+                (
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    Option<String>,
+                    bool,
+                    String,
+                    String,
+                ),
+            >(&sql)
+            .bind(work_id.to_string())
+            .fetch_all(db.postgres_pool().expect("postgres handle"))
+            .await?
         }
     };
 
     Ok(rows
         .into_iter()
         .map(
-            |(id, account_id, pseud_id, work_id, reason, note, is_public, created_at, updated_at)| {
+            |(
+                id,
+                account_id,
+                pseud_id,
+                work_id,
+                reason,
+                note,
+                is_public,
+                created_at,
+                updated_at,
+            )| {
                 DnfRow {
                     id,
                     account_id,
@@ -248,10 +303,7 @@ pub async fn list_dnf_for_work(
 
 /// Aggregate DNF reason counts for a work (public-only).
 /// Returns a map of reason → count, sorted by count descending.
-pub async fn aggregate_dnf_counts(
-    db: &Database,
-    work_id: WorkId,
-) -> Result<Vec<(String, i64)>> {
+pub async fn aggregate_dnf_counts(db: &Database, work_id: WorkId) -> Result<Vec<(String, i64)>> {
     let sql = db.sql(
         "SELECT reason, COUNT(*) AS cnt
          FROM did_not_finish
@@ -304,10 +356,7 @@ pub async fn work_allows_dnf_feedback(db: &Database, work_id: WorkId) -> Result<
 }
 
 /// List all DNF records by a pseud (for their personal reading history).
-pub async fn list_dnf_by_pseud(
-    db: &Database,
-    pseud_id: PseudId,
-) -> Result<Vec<DnfRow>> {
+pub async fn list_dnf_by_pseud(db: &Database, pseud_id: PseudId) -> Result<Vec<DnfRow>> {
     let sql = db.sql(
         "SELECT id, account_id, pseud_id, work_id, reason, note, is_public, created_at, updated_at
          FROM did_not_finish
@@ -321,23 +370,59 @@ pub async fn list_dnf_by_pseud(
 
     let rows = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, (String, String, String, String, String, Option<String>, bool, String, String)>(&sql)
-                .bind(pseud_id.to_string())
-                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
-                .await?
+            sqlx::query_as::<
+                _,
+                (
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    Option<String>,
+                    bool,
+                    String,
+                    String,
+                ),
+            >(&sql)
+            .bind(pseud_id.to_string())
+            .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+            .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, (String, String, String, String, String, Option<String>, bool, String, String)>(&sql)
-                .bind(pseud_id.to_string())
-                .fetch_all(db.postgres_pool().expect("postgres handle"))
-                .await?
+            sqlx::query_as::<
+                _,
+                (
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                    Option<String>,
+                    bool,
+                    String,
+                    String,
+                ),
+            >(&sql)
+            .bind(pseud_id.to_string())
+            .fetch_all(db.postgres_pool().expect("postgres handle"))
+            .await?
         }
     };
 
     Ok(rows
         .into_iter()
         .map(
-            |(id, account_id, pseud_id, work_id, reason, note, is_public, created_at, updated_at)| {
+            |(
+                id,
+                account_id,
+                pseud_id,
+                work_id,
+                reason,
+                note,
+                is_public,
+                created_at,
+                updated_at,
+            )| {
                 DnfRow {
                     id,
                     account_id,

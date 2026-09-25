@@ -154,7 +154,13 @@ async fn test_openapi_spec_valid() {
     // All paths have responses defined.
     for (path, detail) in json["paths"].as_object().unwrap() {
         let methods = if detail["get"].is_object() {
-            vec!["get".to_string(), "post".to_string(), "put".to_string(), "delete".to_string(), "patch".to_string()]
+            vec![
+                "get".to_string(),
+                "post".to_string(),
+                "put".to_string(),
+                "delete".to_string(),
+                "patch".to_string(),
+            ]
         } else if detail["post"].is_object() {
             vec!["post".to_string()]
         } else {
