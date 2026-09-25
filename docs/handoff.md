@@ -1,3 +1,33 @@
+# Handoff — M32-07d: the media fetch job, driven end to end
+
+Date: 2026-09-25. **The current, full handoff is
+`docs/handoffs/2026-09-25T181500+0200-m32-07d-media-fetch-job-handoff.md`
+— read that one.** It records spec §32.7.2's last structural gap closed:
+`JobKind::MediaFetch`, the worker handler that runs guard → resolve → fetch →
+classify → read bounded → fingerprint → record, and the enqueue in
+`add_media_reference` — whose comment already promised "content hash computed
+async by the pipeline". `record_fingerprint` now has a production caller.
+
+**The decision worth reviewing.** Testing the handler against a loopback server
+required touching the SSRF guard. My first cut branched *around* it, which is
+wrong regardless of the fact that it also failed: a bypassed guard leaves a
+second, untested path through the most security-sensitive function in the chain.
+The working shape is `plan_fetch_allowing(url, allow, timeout)` with
+`plan_fetch` delegating to it with an empty slice, so production has exactly one
+path and the allowlist applies to both the literal-address and the DNS-resolution
+check.
+
+**Still not shipped:** `phash`/`whash`/`ahash` unimplemented;
+`audio_fingerprint` unapplied to audio; the worker not exercised in the E2E
+suite (these tests drive the handler directly against a local server, so a
+Playwright test watching a reference go from `pending` to hashed is next); and
+only the first availability link is tried.
+
+Gate: clippy 0/0, fmt clean, **82 suites / 1785 tests, 0 failed**. No frontend
+file was touched.
+
+---
+
 # Handoff — M32-07c: real image decoding, so a fetched image gets a real hash
 
 Date: 2026-09-25. **The current, full handoff is
