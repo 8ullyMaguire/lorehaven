@@ -22,7 +22,8 @@ async fn fetch_level_postgres(
     account: &str,
 ) -> Result<i64, sqlx::Error> {
     let row = sqlx::query(sql).bind(account).fetch_optional(pool).await?;
-    Ok(row.map(|r| r.get::<i32, _>(0) as i64).unwrap_or(TL_NEW))
+    // COUNT() is INT8 on PostgreSQL, so the column is i64, not i32.
+    Ok(row.map(|r| r.get::<i64, _>(0)).unwrap_or(TL_NEW))
 }
 
 pub async fn trust_for(db: &Database, account: &str) -> Result<i64, sqlx::Error> {
