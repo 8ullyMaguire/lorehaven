@@ -71,7 +71,7 @@
   ];
 
   $effect(() => {
-    if (!session.me?.id) return;
+    if (!session.me) return;
     void loadHealth();
   });
 
@@ -164,7 +164,7 @@
       insertUrl = '';
       insertNote = '';
       previewRefs = null;
-      if (session.me?.id) {
+      if (session.me) {
         await loadHealth();
       }
     } catch (failure) {
@@ -199,10 +199,10 @@
     }
   }
 
-  async function onReportBroken(refId: string, linkId: string) {
+  async function onReportBroken(referenceId: string) {
     try {
-      await reportBrokenLink(linkId);
-      if (session.me?.id) {
+      await reportBrokenLink(referenceId);
+      if (session.me) {
         await loadHealth();
       }
     } catch {
@@ -210,11 +210,6 @@
     }
   }
 
-  function healthBadge(total: number, healthy: number, broken: number) {
-    if (broken > 0) return { label: 'Has broken refs', cls: 'badge badge-danger' };
-    if (total - healthy > 0) return { label: 'Needs mirroring', cls: 'badge badge-warn' };
-    return { label: 'All healthy', cls: 'badge badge-ok' };
-  }
 
   const totalRefs = $derived(
     health?.reduce((acc, r) => acc + r.total_references, 0) ?? 0,
@@ -283,20 +278,20 @@
       {/if}
 
       {#if healthLoading}
-        <Skeleton rows={4} />
+        <Skeleton lines={4} />
       {:else if healthError}
         <ErrorSummary error={healthError} />
       {:else if health && health.length === 0}
         <EmptyState
           title="No media yet"
-          body="Add media references from the Insert Media tab."
+          description="Add media references from the Insert Media tab."
         />
       {:else if health}
         <ul class="health-list">
           {#each health as row (row.work_id)}
             <li class="health-row">
               <div class="health-row-main">
-                <a href="/works/{row.work_id}" onclick={handleLinkClick}>
+                <a href={`/works/${row.work_id}`} onclick={(event) => handleLinkClick(event, `/works/${row.work_id}`)}>
                   {row.work_title}
                 </a>
                 <span class="muted">{row.total_references} refs</span>
@@ -338,14 +333,8 @@
       </p>
 
       <form class="form" onsubmit={(e) => { e.preventDefault(); void insertReference(); }}>
-        <label>
-          Work ID
-          <TextField bind:value={insertWorkId} placeholder="insert-work-uuid" />
-        </label>
-        <label>
-          URL
-          <TextField bind:value={insertUrl} placeholder="https://..." onchange={() => void lookupUrl()} />
-        </label>
+                  <TextField label="Work ID" bind:value={insertWorkId} placeholder="insert-work-uuid" />
+                  <TextField label="URL" bind:value={insertUrl} placeholder="https://..." onchange={() => void lookupUrl()} />
         <label>
           Context
           <select bind:value={insertContext}>
@@ -354,10 +343,7 @@
             {/each}
           </select>
         </label>
-        <label>
-          Note (optional)
-          <TextField bind:value={insertNote} placeholder="Source, artist, etc." />
-        </label>
+                  <TextField label="Note (optional)" bind:value={insertNote} placeholder="Source, artist, etc." />
 
         {#if insertNotice}
           <p class="notice">{insertNotice}</p>
@@ -385,7 +371,7 @@
               </a>
               <span class="badge badge-ok">{ref.healthy_links}/{ref.total_links} links</span>
               {#if ref.healthy_links === 0}
-                <Button size="sm" variant="ghost" onclick={() => onReportBroken(ref.id, ref.id)}>
+                <Button size="sm" variant="quiet" onclick={() => onReportBroken(ref.id)}>
                   Report broken
                 </Button>
               {/if}
@@ -396,22 +382,13 @@
 
       <h2>Post a Targeted Bounty</h2>
       <form class="form" onsubmit={(e) => { e.preventDefault(); void submitBounty(); }}>
-        <label>
-          Work ID
-          <TextField bind:value={bountyWorkId} placeholder="work-uuid" />
-        </label>
-        <label>
-          Media Reference ID (optional)
-          <TextField bind:value={bountyRefId} placeholder="ref-uuid" />
-        </label>
+        <TextField label="Work ID" bind:value={bountyWorkId} placeholder="work-uuid" />
+        <TextField label="Media Reference ID (optional)" bind:value={bountyRefId} placeholder="ref-uuid" />
         <label>
           Reward (credits)
           <input type="number" bind:value={bountyReward} min="1" />
         </label>
-        <label>
-          Description (optional)
-          <TextField bind:value={bountyDesc} placeholder="What needs doing" />
-        </label>
+                  <TextField label="Description (optional)" bind:value={bountyDesc} placeholder="What needs doing" />
 
         {#if bountyNotice}
           <p class="notice">{bountyNotice}</p>
@@ -432,7 +409,7 @@
       {#if prefsError}
         <ErrorSummary error={prefsError} />
       {:else if !prefs}
-        <Skeleton rows={3} />
+        <Skeleton lines={3} />
       {:else}
         <form class="form" onsubmit={savePrefs}>
           <label class="checkbox">

@@ -34,11 +34,13 @@
   }
 </script>
 
+<!-- Hoisted so the arrow closure sees a narrowed string. -->
 {#if !loading && thread}
+  {@const topicId = thread.topic_id}
   <a
-    href={`/forum/topics/${thread.topic_id}`}
+    href={`/forum/topics/${topicId}`}
     class="discuss-link"
-    onclick={(event) => handleLinkClick(event, `/forum/topics/${thread.topic_id}`)}
+    onclick={(event) => handleLinkClick(event, `/forum/topics/${topicId}`)}
   >
     <span class="discuss-label">Discuss this work</span>
     <span class="discuss-arrow" aria-hidden="true">→</span>

@@ -31,6 +31,12 @@
       busy = false;
     }
   }
+
+  /** Human-readable failure text; ApiError carries a server message. */
+  function messageFor(failure: unknown): string {
+    if (failure instanceof Error && failure.message) return failure.message;
+    return 'Could not record that. Please try again.';
+  }
 </script>
 
 <div class="kudos">
@@ -48,9 +54,19 @@
   {:else}
     <a href="/sign-in" class="kudos-login">Sign in to leave kudos</a>
   {/if}
+  {#if error}
+    <!-- A failed toggle used to be swallowed: the button simply sprang back
+         with no explanation, which reads as "my click didn't register". -->
+    <p class="kudos-error" role="alert">{messageFor(error)}</p>
+  {/if}
 </div>
 
 <style>
+  .kudos-error {
+    color: var(--color-danger, #b91c1c);
+    font-size: var(--text-xs, 0.75rem);
+    margin: var(--space-1, 0.25rem) 0 0;
+  }
   .kudos-button {
     padding: var(--space-2) var(--space-3);
     border: var(--border-width) solid var(--color-border);

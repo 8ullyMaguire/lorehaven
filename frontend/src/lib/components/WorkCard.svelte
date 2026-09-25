@@ -1,3 +1,27 @@
+<script module lang="ts">
+  /**
+   * Exported from the module context so callers and tests can type their
+   * fixtures against the real shape. An `export interface` in the instance
+   * `<script>` is not importable in Svelte 5.
+   */
+  export interface WorkSummary {
+    id: string;
+    title: string;
+    authorDisplayName: string;
+    summary?: string;
+    completion: 'in_progress' | 'complete' | 'hiatus' | 'abandoned';
+    rating: 'general' | 'teen' | 'mature' | 'explicit';
+    wordCount?: number;
+    chapters?: number;
+    mainCharacters?: string[];
+    centralRelationships?: string[];
+    /** Whether the reader has saved this work. */
+    bookmarked?: boolean;
+    /** Public engagement counts, when the owner permits them. */
+    metrics?: import('../api').WorkMetricsView | null;
+  }
+</script>
+
 <script lang="ts">
   /**
    * A work, in one of three densities.
@@ -19,24 +43,8 @@
    * they lost.
    */
   import MetadataChip from './MetadataChip.svelte';
-  import type { WorkMetricsView } from '../lib/api';
-
-  export interface WorkSummary {
-    id: string;
-    title: string;
-    authorDisplayName: string;
-    summary?: string;
-    completion: 'in_progress' | 'complete' | 'hiatus' | 'abandoned';
-    rating: 'general' | 'teen' | 'mature' | 'explicit';
-    wordCount?: number;
-    chapters?: number;
-    mainCharacters?: string[];
-    centralRelationships?: string[];
-    /** Whether the reader has saved this work. */
-    bookmarked?: boolean;
-    /** Public engagement counts, when the owner permits them. */
-    metrics?: WorkMetricsView | null;
-  }
+  // `WorkSummary` is declared in this file's module <script>, which the
+  // instance script can see without importing it back from itself.
 
   /** How much of a work to draw. */
   export type WorkCardVariant = 'full' | 'row' | 'compact';

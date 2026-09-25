@@ -6,12 +6,10 @@
     voteDirectoryEntry,
     approveDirectoryEntry,
     removeDirectoryEntry,
-    fetchModerationQueue,
     type DirectoryEntry,
     type DirectoryCategory,
   } from '../lib/api';
-  import { handleLinkClick } from '../lib/router';
-  import { session } from '../lib/session.svelte.ts';
+    import { session } from '../lib/session.svelte.ts';
   import Button from '../lib/components/Button.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
@@ -194,7 +192,7 @@
   {/if}
 
   {#if loading}
-    <Skeleton height="12rem" />
+    <Skeleton lines={6} label="Loading directory" />
   {:else if entries.length === 0}
     <p class="empty">No entries yet. Be the first to submit one!</p>
   {:else}

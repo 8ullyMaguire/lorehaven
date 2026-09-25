@@ -57,7 +57,7 @@ describe('AuthorMedia', () => {
   });
 
   it('renders summary counts and per-work health badges', async () => {
-    api.fetchAuthorMediaHealth.mockResolvedValue({
+    vi.mocked(api.fetchAuthorMediaHealth).mockResolvedValue({
       items: [
         {
           work_id: 'work-1',
@@ -98,7 +98,7 @@ describe('AuthorMedia', () => {
   });
 
   it('posts a reference from the insert form', async () => {
-    api.postMediaReference.mockResolvedValue({ id: 'ref-1', link_id: 'link-1', status: 'pending' });
+    vi.mocked(api.postMediaReference).mockResolvedValue({ id: 'ref-1', link_id: 'link-1', status: 'pending' });
     render(AuthorMedia);
     await waitFor(() => screen.getByText('Insert Media'));
     fireEvent.click(screen.getByText('Insert Media'));

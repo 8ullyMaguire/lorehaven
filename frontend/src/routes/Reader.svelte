@@ -22,7 +22,7 @@
    * signed-out reader keeps it in `localStorage` and it is never uploaded.
    */
   import {
-    createBookmark, fetchChapter, fetchTypography, saveProgress, type ChapterContent } from '../lib/api';
+    apiFetch, createBookmark, fetchChapter, fetchTypography, saveProgress, type ChapterContent } from '../lib/api';
   import {
     DEFAULT_TYPOGRAPHY,
     PositionFlusher,

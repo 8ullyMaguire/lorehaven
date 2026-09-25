@@ -17,12 +17,8 @@
     type ReverseSearchView,
     type LocalMirrorView,
     type IpfsPinView,
-    type AddLocalMirrorBody,
-    type AddIpfsPinBody,
-  } from '../lib/api';
-  import { handleLinkClick } from '../lib/router';
-  import { session } from '../lib/session.svelte.ts';
-  import Button from '../lib/components/Button.svelte';
+      } from '../lib/api';
+      import Button from '../lib/components/Button.svelte';
   import EmptyState from '../lib/components/EmptyState.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
@@ -162,12 +158,12 @@
   </form>
 
   {#if searchLoading}
-    <Skeleton rows={3} />
+    <Skeleton lines={3} />
   {:else if searchError}
     <ErrorSummary error={searchError} />
   {:else if searchResult}
     {#if searchResult.references.length === 0}
-      <EmptyState title="No matching media" body="No media reference matched that hash." />
+      <EmptyState title="No matching media" description="No media reference matched that hash." />
     {:else}
       <section class="results">
         <h2>References found</h2>
@@ -197,7 +193,7 @@
         <section class="mirror-section">
           <h2>Local Mirrors</h2>
           {#if mirrorsLoading}
-            <Skeleton rows={2} />
+            <Skeleton lines={2} />
           {:else if mirrorError}
             <ErrorSummary error={mirrorError} />
           {:else if mirrors && mirrors.length > 0}
@@ -228,7 +224,7 @@
               </tbody>
             </table>
           {:else}
-            <EmptyState title="No mirrors" body="No local mirrors registered for this reference." />
+            <EmptyState title="No mirrors" description="No local mirrors registered for this reference." />
           {/if}
 
           <form class="add-form" onsubmit={onMirrorSubmit}>
@@ -242,7 +238,7 @@
         <section class="pin-section">
           <h2>IPFS Pins</h2>
           {#if pinsLoading}
-            <Skeleton rows={2} />
+            <Skeleton lines={2} />
           {:else if pinError}
             <ErrorSummary error={pinError} />
           {:else if pins && pins.length > 0}
@@ -262,7 +258,7 @@
               {/each}
             </ul>
           {:else}
-            <EmptyState title="No IPFS pins" body="No pins registered for this reference." />
+            <EmptyState title="No IPFS pins" description="No pins registered for this reference." />
           {/if}
 
           <form class="add-form" onsubmit={onPinSubmit}>

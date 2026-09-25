@@ -1,7 +1,6 @@
 <script lang="ts">
   import { skipQuiz, saveQuizAnswers, fetchQuizWorks, type DiscoveryItem } from '../lib/api';
-  import { handleLinkClick } from '../lib/router';
-  import Button from '../lib/components/Button.svelte';
+    import Button from '../lib/components/Button.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
@@ -86,7 +85,7 @@
   {/if}
 
   {#if loading}
-    <Skeleton height="12rem" />
+    <Skeleton lines={6} label="Loading questions" />
   {:else if works.length === 0}
     <p class="empty">No quiz works available yet. Import or publish some works first.</p>
   {:else}
@@ -126,7 +125,7 @@
 
     <footer class="quiz-footer">
       <span class="quiz-count">{picked.size} picked</span>
-      <Button onclick={submit} disabled={picked.size + rejected.size === 0} {saving}>
+      <Button onclick={submit} disabled={picked.size + rejected.size === 0} loading={saving}>
         {saving ? 'Saving...' : 'Continue'}
       </Button>
       <button type="button" class="quiz-skip" onclick={handleSkip}>

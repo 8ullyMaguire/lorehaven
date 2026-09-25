@@ -1361,9 +1361,12 @@ export async function joinCritique(topicId: string): Promise<number> {
 }
 
 export interface CritiqueEntry {
-  pseud_id: string;
+  /** The waiting critic's pseud. */
+  pseud: string;
+  /** Queue order within the topic. */
   position: number;
-  work_id: string;
+  /** The excerpt queued for critique, if one was recorded. */
+  excerpt: string | null;
 }
 
 export async function getCritiqueQueue(topicId: string, signal?: AbortSignal): Promise<CritiqueEntry[]> {
@@ -1381,7 +1384,6 @@ export interface ContentWarning {
   severity: number;
   custom_text?: string;
 }
-
 export async function getContentWarnings(postId: string, signal?: AbortSignal): Promise<ContentWarning[]> {
   const page = await apiFetch<{ warnings: ContentWarning[] }>(
     `/posts/${encodeURIComponent(postId)}/warnings`,
@@ -3588,6 +3590,45 @@ export interface SettingsExport {
 export interface ImportReport {
   accepted: string[];
   rejected: { key: string; reason: string }[];
+}
+
+/**
+ * How the reader's recorded engine choice resolved (spec §16.1b).
+ *
+ * `unavailable` is the case that matters: the reader chose an engine the
+ * operator has since disabled. They are told which choice stopped applying
+ * and what is in effect instead, rather than being handed another engine's
+ * results with no explanation. `engine` and `using` are only present on the
+ * variants that report a substitution.
+ */
+export type RecEngineChoice =
+  | { state: 'instance_default'; using: string[] }
+  | { state: 'honored'; engine: string }
+  | { state: 'unavailable'; engine: string; using: string[] };
+
+export interface RecEngineView {
+  pseud_id: string;
+  /** The stored choice, or null when the reader has never chosen. */
+  engine: string | null;
+  choice: RecEngineChoice;
+  /** The operator's enabled set — the only things that can be picked. */
+  available: string[];
+}
+
+export function fetchRecEngine(signal?: AbortSignal): Promise<RecEngineView> {
+  return apiFetch<RecEngineView>('/settings/recommendations', { signal });
+}
+
+/**
+ * Set or clear the reader's engine choice. `''` clears back to the instance
+ * default. Rejects with the accepted values on 422, so callers should show the
+ * message rather than a generic failure.
+ */
+export function patchRecEngine(engine: string): Promise<RecEngineView> {
+  return apiFetch<RecEngineView>('/settings/recommendations', {
+    method: 'PATCH',
+    body: JSON.stringify({ engine }),
+  });
 }
 
 export function fetchSearchSettings(signal?: AbortSignal): Promise<SearchSettingsView> {

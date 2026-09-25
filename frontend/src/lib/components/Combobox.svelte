@@ -1,5 +1,4 @@
 <script lang="ts">
-	import type { HTMLInputEvent } from 'svelte/elements';
 
 	export interface ComboboxOption {
 		value: string;
@@ -28,9 +27,9 @@
 		placeholder = ''
 	}: Props = $props();
 
-	function handleInput(event: HTMLInputEvent) {
-		const input = event.target as HTMLInputElement;
-		onchange(input.value);
+	function handleInput(event: Event) {
+	  const input = event.currentTarget as HTMLInputElement;
+	  onchange(input.value);
 	}
 
 	function getDescribedBy(): string | undefined {

@@ -9,9 +9,7 @@
     type Pin,
     type VanguardStatus,
   } from '../lib/api';
-  import { handleLinkClick } from '../lib/router';
-  import { session } from '../lib/session.svelte.ts';
-  import Button from '../lib/components/Button.svelte';
+      import Button from '../lib/components/Button.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
@@ -103,7 +101,7 @@
   {/if}
 
   {#if loading}
-    <Skeleton height="8rem" />
+    <Skeleton lines={6} label="Loading" />
   {:else}
     {#if streak}
       <div class="vanguard-streak">

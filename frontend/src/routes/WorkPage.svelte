@@ -12,32 +12,27 @@
    * rating needs an account rather than shown stars that would fail on click.
    */
   import {
+    apiFetch,
     fetchDiscussionMode,
-    fetchReactions,
-    fetchReviews,
-    fetchThread,
-    fetchWork,
+      fetchReviews,
+      fetchWork,
     fetchWorkMediaReferences,
     fetchWorkPricing,
     getProgress,
     isAuthorWork,
-    postReaction,
-    purchaseWork,
+      purchaseWork,
     reportBrokenLink,
-    setDiscussionMode,
-    upsertReview,
+      upsertReview,
     type AuthorWork,
     type DiscussionModeResponse,
     type ProgressView,
     type PublicPricingResponse,
     type PublicWork,
-    type ReactionsResponse,
-    type ReviewView,
-    type ThreadResponse,
-    type WorkMediaReferenceView,
+      type ReviewView,
+      type WorkMediaReferenceView,
   } from '../lib/api';
   import { ApiError } from '../lib/api';
-  import { describeCompletion, describeDiscussionMode, describeLifecycle, describeRating, describeReactionType, describeVisibility, reactionGlyph } from '../lib/labels';
+  import { describeCompletion, describeLifecycle, describeRating, describeVisibility } from '../lib/labels';
   import { handleLinkClick } from '../lib/router';
   import { session } from '../lib/session.svelte.ts';
   import DiscussLink from '../lib/components/DiscussLink.svelte';

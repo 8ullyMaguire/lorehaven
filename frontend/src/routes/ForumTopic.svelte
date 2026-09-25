@@ -8,13 +8,11 @@
    * is available to signed-in moderators.
    */
   import {
-    createReply,
     fetchPosts,
     fetchTopic,
     type ForumTopic,
     type ForumPost,
-    setTopicMode,
-  } from '../lib/api';
+    } from '../lib/api';
   import { session } from '../lib/session.svelte.ts';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
@@ -33,9 +31,6 @@
   let posts = $state<ForumPost[]>([]);
   let loading = $state(true);
   let error = $state<unknown>(null);
-  let draft = $state('');
-  let posting = $state(false);
-  let posted = $state(false);
 
   async function load() {
     loading = true;
@@ -50,23 +45,6 @@
     }
   }
 
-  async function reply(event: SubmitEvent) {
-    event.preventDefault();
-    const body = draft.trim();
-    if (!body || posting) return;
-    posting = true;
-    error = null;
-    try {
-      await createReply(topicId, body);
-      draft = '';
-      posted = true;
-      await load();
-    } catch (failure) {
-      error = failure;
-    } finally {
-      posting = false;
-    }
-  }
 
   // Moderator status — determined by the account's trust level.
   // The Account interface does not yet expose trust_level directly,
@@ -97,14 +75,14 @@
     {/if}
 
     {#if session.isSignedIn}
-      <ThreadModePicker {topicId} mode={topic.mode} />
+      <ThreadModePicker {topicId} mode={topic.mode} onsaved={() => void load()} />
     {/if}
 
     <!-- Mode-specific surfaces -->
     {#if topic.mode === 'reading_group'}
       <ReadingSchedule {topicId} {isModerator} />
     {:else if topic.mode === 'critique_circle'}
-      <CritiqueQueue {topicId} {isModerator} />
+      <CritiqueQueue {topicId} />
     {/if}
 
     <!-- Posts -->
@@ -114,7 +92,7 @@
       <ol class="posts">
         {#each posts as post (post.id)}
           <li>
-            <ForumPostEl {post} readerChapter={0} />
+            <ForumPostEl {post} />
           </li>
         {/each}
       </ol>
@@ -123,7 +101,7 @@
     <!-- Moderation panel -->
     {#if isModerator}
       <div class="moderation-wrap">
-        <ModerationPanel {topicId} />
+        <ModerationPanel {topicId} {isModerator} />
       </div>
     {/if}
 
@@ -165,8 +143,5 @@
   }
   .moderation-wrap {
     margin: 1.5rem 0;
-  }
-  .receipt {
-    color: var(--ok, #2a7a2a);
   }
 </style>

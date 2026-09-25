@@ -37,12 +37,14 @@
     adding = true;
     error = null;
     try {
-      await addScheduleSection({
-        topic_id: topicId,
+      // Appended after whatever is already scheduled; the server stores
+      // position verbatim, so sending 0 would reorder the whole schedule.
+      await addScheduleSection(topicId, {
+        position: sections.length + 1,
         title: newTitle,
         chapter_start: newStart,
         chapter_end: newEnd,
-        unlocks_at: newUnlocks || undefined,
+        unlocks_at: newUnlocks,
       });
       newTitle = '';
       newUnlocks = '';

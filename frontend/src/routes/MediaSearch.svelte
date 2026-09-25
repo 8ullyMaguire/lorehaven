@@ -12,8 +12,7 @@
     type ReverseSearchView,
   } from '../lib/api';
   import { handleLinkClick } from '../lib/router';
-  import { session } from '../lib/session.svelte.ts';
-  import Button from '../lib/components/Button.svelte';
+    import Button from '../lib/components/Button.svelte';
   import EmptyState from '../lib/components/EmptyState.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
@@ -97,14 +96,14 @@
   </form>
 
   {#if loading}
-    <Skeleton rows={3} />
+    <Skeleton lines={3} />
   {:else if error}
     <ErrorSummary error={error} />
   {:else if result}
     {#if result.references.length === 0}
       <EmptyState
         title="No matching media"
-        body="No media reference matched that hash or URL."
+        description="No media reference matched that hash or URL."
       />
     {:else}
       <h2>Matching References</h2>
@@ -128,7 +127,7 @@
           {#each result.works as w (w.work_id + w.reference_id)}
             <li class="work-row">
               <div class="work-main">
-                <a href={`/works/${w.work_id}`} onclick={handleLinkClick}>
+                <a href={`/works/${w.work_id}`} onclick={(event) => handleLinkClick(event, `/works/${w.work_id}`)}>
                   {w.work_title}
                 </a>
                 {#if w.display_url}
@@ -148,14 +147,14 @@
       {:else}
         <EmptyState
           title="No works found"
-          body="No works reference this media reference."
+          description="No works reference this media reference."
         />
       {/if}
     {/if}
   {:else if searched}
     <EmptyState
       title="No matches"
-      body="Try a different hash or URL."
+      description="Try a different hash or URL."
     />
   {/if}
 </section>

@@ -3,21 +3,19 @@
     fetchGovernanceState,
     createCategoryProposal,
     fetchChangelog,
-    voteProposal,
-    vetoProposal,
     toggleFreeze,
     proposeEntryMod,
-    voteEntryMod,
     fetchDirectoryEntries,
     type GovernanceState,
     type GovernanceCategory,
-    type Proposal,
     type ChangelogEntry,
     type DirectoryEntry,
   } from '../api';
   import { session } from '../session.svelte.ts';
   import Button from './Button.svelte';
+  import Dialog from './Dialog.svelte';
   import ErrorSummary from './ErrorSummary.svelte';
+  import Skeleton from './Skeleton.svelte';
 
   // Trust level thresholds (spec §19.1, §45.2)
   const TL_STEWARD = 4;
@@ -34,14 +32,8 @@
   let proposalPayload = $state<Record<string, unknown>>({});
   let proposalSubmitting = $state(false);
 
-  // Detail view
-  let selectedProposal = $state<Proposal | null>(null);
   let selectedChangelog = $state<ChangelogEntry[]>([]);
   let showChangelog = $state(false);
-
-  // Veto
-  let vetoReason = $state('');
-  let vetoing = $state(false);
 
   // Entry moderation
   let modAction = $state<'move' | 'remove'>('move');
@@ -89,38 +81,6 @@
     }
   }
 
-  async function handleVote(proposalId: string, value: 'yes' | 'no') {
-    try {
-      await voteProposal(proposalId, value);
-      await load();
-      if (selectedProposal) {
-        // Refresh the selected proposal
-        const updated = await fetchGovernanceState();
-        const cat = updated.items.find(
-          (c) => c.slug === selectedProposal?.category_slug,
-        );
-        // We don't have a direct endpoint to get a single proposal,
-        // so we just reload governance state.
-      }
-    } catch (failure) {
-      error = failure;
-    }
-  }
-
-  async function handleVeto(proposalId: string) {
-    if (!vetoReason.trim()) return;
-    vetoing = true;
-    try {
-      await vetoProposal(proposalId, vetoReason.trim());
-      vetoReason = '';
-      await load();
-    } catch (failure) {
-      error = failure;
-    } finally {
-      vetoing = false;
-    }
-  }
-
   async function handleToggleFreeze() {
     try {
       await toggleFreeze();
@@ -153,15 +113,6 @@
     }
   }
 
-  async function handleVoteEntryMod(entryId: string, value: 'yes' | 'no') {
-    try {
-      await voteEntryMod(entryId, value);
-      await load();
-    } catch (failure) {
-      error = failure;
-    }
-  }
-
   $effect(() => {
     if (isSteward) void load();
   });
@@ -178,23 +129,6 @@
         return 'badge-muted';
     }
   };
-
-  const actionLabel = (action: string) => {
-    switch (action) {
-      case 'rename':
-        return 'Rename';
-      case 'merge':
-        return 'Merge';
-      case 'deprecate':
-        return 'Deprecate';
-      case 'create':
-        return 'Create';
-      case 'delete':
-        return 'Delete';
-      default:
-        return action;
-    }
-  };
 </script>
 
 {#if !isSteward}
@@ -202,7 +136,7 @@
     <p>Category governance is available to Stewards and above only.</p>
   </div>
 {:else if loading}
-  <Skeleton height="8rem" />
+  <Skeleton lines={6} label="Loading governance state" />
 {:else if error}
   <ErrorSummary {error} onretry={load} />
 {:else if governance}
@@ -212,7 +146,7 @@
       <div class="governance-controls">
         {#if isOperator}
           <Button
-            variant={governance.frozen ? 'success' : 'danger'}
+            variant={governance.frozen ? 'secondary' : 'danger'}
             onclick={handleToggleFreeze}
           >
             {governance.frozen ? 'Unfreeze governance' : 'Freeze governance'}
@@ -384,29 +318,23 @@
       </ul>
     </div>
 
-    <!-- Changelog modal -->
-    {#if showChangelog}
-      <div class="changelog-overlay" onclick={() => (showChangelog = false)}>
-        <div class="changelog-modal" onclick={(e) => e.stopPropagation()}>
-          <header>
-            <h3>Changelog</h3>
-            <button type="button" onclick={() => (showChangelog = false)}>
-              Close
-            </button>
-          </header>
-          <ul>
-            {#each selectedChangelog as entry}
-              <li>
-                <span class="changelog-event">{entry.event}</span>
-                <span class="changelog-actor">{entry.actor}</span>
-                <time>{entry.created_at}</time>
-                <pre>{entry.document}</pre>
-              </li>
-          {/each}
-          </ul>
-        </div>
-      </div>
-    {/if}
+    <!-- Changelog. Dialog handles focus trapping, Escape and focus restore. -->
+    <Dialog
+      open={showChangelog}
+      title="Changelog"
+      onclose={() => (showChangelog = false)}
+    >
+      <ul class="changelog-list">
+        {#each selectedChangelog as entry}
+          <li>
+            <span class="changelog-event">{entry.event}</span>
+            <span class="changelog-actor">{entry.actor}</span>
+            <time>{entry.created_at}</time>
+            <pre>{entry.document}</pre>
+          </li>
+        {/each}
+      </ul>
+    </Dialog>
   </section>
 {/if}
 
@@ -607,44 +535,29 @@
     cursor: not-allowed;
   }
 
-  .changelog-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 100;
-  }
-
-  .changelog-modal {
-    background: var(--surface);
-    border-radius: var(--radius);
-    padding: var(--space-6);
-    max-width: 600px;
-    width: 90%;
-    max-height: 80vh;
-    overflow-y: auto;
-  }
-
-  .changelog-modal header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: var(--space-4);
-  }
-
-  .changelog-modal ul {
+  /* Dialog supplies the overlay, panel, header and scroll container. These
+     rules style only the changelog content rendered inside it. */
+  .changelog-list {
     list-style: none;
     padding: 0;
     margin: 0;
   }
-
-  .changelog-modal li {
+  .changelog-list li {
     padding: var(--space-3);
     border-bottom: 1px solid var(--border);
   }
-
+  .changelog-list time {
+    color: var(--text-muted);
+  }
+  .changelog-list pre {
+    margin-top: var(--space-2);
+    padding: var(--space-2);
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-xs);
+    overflow-x: auto;
+  }
   .changelog-event {
     font-weight: 600;
     margin-right: var(--space-2);
@@ -654,20 +567,6 @@
     color: var(--text-muted);
     font-size: var(--text-sm);
     margin-right: var(--space-2);
-  }
-
-  .changelog-modal time {
-    color: var(--text-muted);
-    font-size: var(--text-xs);
-  }
-
-  .changelog-modal pre {
-    margin-top: var(--space-2);
-    padding: var(--space-2);
-    background: var(--surface-elevated);
-    border-radius: var(--radius-sm);
-    font-size: var(--text-xs);
-    overflow-x: auto;
   }
 
   .governance-closed {
