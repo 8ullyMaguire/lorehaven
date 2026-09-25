@@ -219,7 +219,7 @@ impl Default for MediaResilienceConfig {
             dead_threshold_failures: 5,
             check_interval_secs: 3600,
             enabled: true,
-            perceptual_hash_algorithm: PerceptualHashAlgorithm::Phash,
+            perceptual_hash_algorithm: PerceptualHashAlgorithm::Dhash,
             perceptual_match_threshold: 6,
             require_curator_confirmation_below: 3,
             require_curator_confirmation_above: 0,
@@ -2226,7 +2226,10 @@ struct JobsSection {
 struct MediaResilienceSection {
     /// Whether media resilience runs on this instance at all.
     enabled: Option<bool>,
-    /// Image perceptual hash algorithm: phash | dhash | whash | ahash.
+    /// Image perceptual hash algorithm. `dhash` is the default and the only
+    /// implemented value; `phash`, `whash` and `ahash` are accepted so an
+    /// operator can record intent, but a build asked to compute one refuses
+    /// rather than storing a different algorithm's output.
     perceptual_hash_algorithm: Option<String>,
     /// Hamming distance at or below which two image hashes are the same image.
     perceptual_match_threshold: Option<i64>,
@@ -2956,9 +2959,13 @@ audio_fingerprint = "acoustid"
         // Spec §32.7.2 states these defaults; the earlier keys are the
         // long-standing curator-credit and health-check values.
         assert!(config.media_resilience.enabled);
+        // `dhash`, not `phash`: dHash is the only algorithm this build
+        // computes, so a default naming another one would advertise a dedup the
+        // stock instance cannot perform. Spec §32.7.2's example is updated to
+        // match.
         assert_eq!(
             config.media_resilience.perceptual_hash_algorithm.as_str(),
-            "phash"
+            "dhash"
         );
         assert_eq!(config.media_resilience.perceptual_match_threshold, 6);
         assert_eq!(
@@ -2972,6 +2979,19 @@ audio_fingerprint = "acoustid"
         assert_eq!(
             config.media_resilience.audio_fingerprint.as_str(),
             "chromaprint"
+        );
+    }
+
+    #[test]
+    fn the_default_image_fingerprint_is_one_this_build_actually_computes() {
+        // A default of `phash` while the only implemented algorithm is dHash
+        // means a stock instance advertises a perceptual dedup it cannot
+        // perform. The default has to name something real.
+        let d = MediaResilienceConfig::default();
+        assert_eq!(
+            d.perceptual_hash_algorithm,
+            PerceptualHashAlgorithm::Dhash,
+            "the default must be the algorithm the fetcher implements"
         );
     }
 

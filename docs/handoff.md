@@ -1,6 +1,35 @@
+# Handoff — M32-07b: perceptual hashes computed and stored; the default no longer lies
+
+Date: 2026-09-25. **The current, full handoff is
+`docs/handoffs/2026-09-25T164500+0200-m32-07b-perceptual-hashes-computed-and-stored-handoff.md`
+— read that one.** It records spec §32.7.2's second half: a real 64-bit dHash
+that resamples the frame to a fixed 9×8 grid, the SSRF guard on the media fetch
+path, and the DB write that makes the `perceptual_hash` column real.
+
+**M32-07a's handoff called the remaining half "blocked on a dependency". That
+was wrong in the way that matters:** crates.io was reachable the whole time and
+no decoder was in the lockfile. The dependency was *absent*, not *unavailable*.
+Three bugs in my own new code were caught by tests written for them — a dHash
+that read only the top five rows of an image, an `assert_eq!` where a Hamming
+distance bound was the real property, and an SSRF check written against
+`host_str()` that silently skipped every IPv6 literal including `[::1]`. The
+`perceptual_hash_algorithm` default changed from `phash` to `dhash`, because
+phash is not implemented and a stock instance was advertising a dedup it could
+not perform.
+
+**Still not shipped, and the next step:** image *decoding* is still absent, so a
+real fetched JPEG/PNG gets its exact content hash and a `NULL` perceptual hash
+rather than a fabricated fingerprint, and there is no media job kind or fetch
+loop driving any of it. `audio_fingerprint` is still unapplied to audio.
+
+Gate: clippy 0/0, fmt clean, 1767 workspace tests passed, 0 failed. No frontend
+file was touched, so the Svelte and E2E gates were not re-run.
+
+---
+
 # Handoff — M32-07a perceptual dedup implemented; the column nothing populates
 
-Date: 2026-09-25 (tip `fd08762` + this docs commit). **The current, full handoff
+Date: 2026-09-25 (tip `fd08762` + this docs commit). The previous full handoff
 is
 `docs/handoffs/2026-09-25T153000+0200-m32-07a-perceptual-dedup-implemented-handoff.md`
 — read that one.** It records spec §32.7.2 perceptual deduplication: a
@@ -67,11 +96,11 @@ concentrated + 2–3 week backgroundable adapter tail.
   M45/M47 residuals; verified current-state summary.
 - `docs/requirements.csv` — repaired 9 malformed rows (unquoted-comma bug
   shifted columns; M33/M34/M35 series), added M52-01…M55-02 (16 planned
-  rows). Now 246 rows, 0 malformed: 177 implemented (172 locally-tested,
-  5 fully-tested), 65 planned, 4 unsupported.
+  rows). Now 255 rows, 0 malformed: 194 implemented (174 locally-tested,
+  20 fully-tested), 57 planned, 4 unsupported.
 - `README.md` — status section rewritten: was stale ("M0–M5 complete, M6
-  partly built"); now the verified state (177/230 original rows implemented,
-  tags through v0.51.0, milestone-series table).
+  partly built"); now the verified state, tags through v0.51.0, milestone-series
+  table.
 - `docs/plans/README.md`, `docs/plans/junior-implementation-plan.md` —
   superseded-status notes pointing at remaining-work.md.
 - `docs/spec-gaps-ficnexus.md` — status header: resolved by ADR 0024 with
@@ -79,7 +108,7 @@ concentrated + 2–3 week backgroundable adapter tail.
 
 ## Verified current state (evidence: requirements.csv + git log + tests)
 
-177 of 230 original rows implemented. 51 milestone test files (M0–M45),
+194 of 255 rows implemented. 51 milestone test files (M0–M45),
 migrations to 0071 in both dialects, 37 frontend routes, 11 scraper
 adapters, tags through `v0.51.0`. Series built: platform core M0–M15,
 marketplace/translation/API/admin M16–M26, forum M31–M35, directory/fork/

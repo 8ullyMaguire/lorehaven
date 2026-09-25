@@ -25,6 +25,7 @@ pub mod library_updates;
 pub mod limiter;
 pub mod logging;
 pub mod longevity;
+pub mod media_fetch;
 pub mod narration;
 pub mod privacy;
 pub mod rec_engine;

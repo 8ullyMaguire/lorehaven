@@ -5827,7 +5827,7 @@ fics simultaneously.
 ```toml
 [media_resilience]
 enabled = true
-perceptual_hash_algorithm = "phash"          # phash | dhash | whash | ahash
+perceptual_hash_algorithm = "dhash"          # dhash (implemented) | phash | whash | ahash
 perceptual_match_threshold = 6                # Hamming distance
 audio_fingerprint = "chromaprint"
 require_curator_confirmation_below = 3        # perceptual matches with distance 3-6 need curator confirm

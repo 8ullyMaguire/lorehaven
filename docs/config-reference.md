@@ -158,7 +158,7 @@ optional: with it absent, the defaults below apply.
 | Key | Type | Default | Purpose |
 |-----|------|---------|---------|
 | `enabled` | `bool` | `true` | Whether perceptual dedup runs on this instance |
-| `perceptual_hash_algorithm` | `string` | `"phash"` | Image fingerprint: `phash`, `dhash`, `whash`, `ahash`. An unknown value stops the instance rather than loading a default, because the alternative is an instance that claims to deduplicate with a hash it never computes |
+| `perceptual_hash_algorithm` | `string` | `"dhash"` | Image fingerprint: `dhash`, `phash`, `whash`, `ahash`. Only `dhash` is implemented, and it is the default because a setting naming an unbuilt algorithm makes the instance claim a dedup it cannot perform; asking for another is refused rather than answered with a different algorithm's output. An unknown value stops the instance rather than loading a default, because the alternative is an instance that claims to deduplicate with a hash it never computes |
 | `perceptual_match_threshold` | `int` | `6` | Hamming distance at or below which two image hashes are offered as the same image. Must be 1–32; outside that range the instance refuses to start, because a threshold that matches nothing or everything fails silently |
 | `require_curator_confirmation_below` | `int` | `3` | A perceptual match scoring below this confidence needs a curator to confirm the linkage. 0–100 |
 | `require_curator_confirmation_above` | `int` | `0` | A perceptual match at or above this confidence auto-attaches. The spec's default of `0` means no perceptual match auto-attaches — only exact content-hash matches do. 0–100 |

@@ -9,12 +9,11 @@ the forward plan. Every new milestone below gets rows in
 `docs/requirements.csv` before code starts (ADR 0023: the CSV is the
 canonical feature inventory and the roadmap-board seed).
 
-## Where the build actually stands (2026-09-24, commit 97b24b0)
+## Where the build actually stands (re-derived 2026-09-25)
 
-The README's "M0–M5 complete, M6 partly built" note is stale. Verified state
-re-derived from `docs/requirements.csv` on 2026-09-25: **192 rows implemented**
-(172 locally-tested, 20 fully-tested), **57 planned**, **4 deliberately
-unsupported**, 253 rows total. 51 milestone test files through M45, migrations to
+Verified from `docs/requirements.csv`: **194 rows implemented**
+(174 locally-tested, 20 fully-tested), **57 planned**, **4 deliberately
+unsupported**, 255 rows total. 51 milestone test files through M45, migrations to
 0071, 37 frontend routes, tags through `v0.51.0`. The
 platform core (M0–M15), the forum series (M31–M35), media resilience
 (M48–M51), roadmap consensus (M45), browse ordering (M43), export CTAs

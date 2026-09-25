@@ -5,6 +5,7 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use lorehaven_app::config::Config;
+use lorehaven_app::media_fetch::MediaFingerprint;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
 use lorehaven_db::media_resilience;
@@ -608,5 +609,145 @@ async fn reverse_search_reports_a_confidence_score_per_match() {
     assert!(
         exact > near,
         "an exact match scores above a 2-bit match: {exact} vs {near}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// M32-07b: the fetched hashes are persisted (spec §32.7.2)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn recording_a_fingerprint_fills_the_hashes_it_carries() {
+    let dir = scratch_dir("record-fp");
+    let tdb = test_support::TestDb::connect_with_dir("mr-record", &dir).await;
+    let db = tdb.db();
+
+    media_resilience::insert_media_reference(db, "rec-1", "pending", MediaKind::Image)
+        .await
+        .expect("insert");
+
+    let fp = MediaFingerprint {
+        content_hash: "sha256:abc123".to_owned(),
+        perceptual_hash: Some("00ff00ff00ff00ff".to_owned()),
+        width: 800,
+        height: 600,
+    };
+    media_resilience::record_fingerprint(db, "rec-1", &(&fp).into())
+        .await
+        .expect("record fingerprint");
+
+    let stored = media_resilience::find_media_reference_by_id(db, "rec-1")
+        .await
+        .expect("find")
+        .expect("exists");
+    // The reference moves off the `pending` placeholder at the same time: an
+    // exact content hash is what makes a reference findable by exact match, and
+    // leaving `pending` there would mean the row claims to be unfetched while
+    // carrying a real hash.
+    assert_eq!(stored.content_hash, "sha256:abc123");
+    assert_eq!(stored.perceptual_hash.as_deref(), Some("00ff00ff00ff00ff"));
+    assert_eq!(stored.width, Some(800));
+    assert_eq!(stored.height, Some(600));
+}
+
+#[tokio::test]
+async fn recording_an_undecodable_body_stores_the_exact_hash_and_no_perceptual_one() {
+    let dir = scratch_dir("record-nodec");
+    let tdb = test_support::TestDb::connect_with_dir("mr-record-nodec", &dir).await;
+    let db = tdb.db();
+
+    media_resilience::insert_media_reference(db, "rec-2", "pending", MediaKind::Image)
+        .await
+        .expect("insert");
+
+    // A build with no image decoder can still hash the bytes exactly. The
+    // perceptual hash stays NULL - storing an empty string instead would make
+    // the dedup search see distance 0 against every other undecodable image and
+    // merge them all into one reference.
+    let fp = MediaFingerprint::without_perceptual_hash(b"\x89PNG not decodable here");
+    media_resilience::record_fingerprint(db, "rec-2", &(&fp).into())
+        .await
+        .expect("record fingerprint");
+
+    let stored = media_resilience::find_media_reference_by_id(db, "rec-2")
+        .await
+        .expect("find")
+        .expect("exists");
+    assert!(stored.content_hash.starts_with("sha256:"));
+    assert_eq!(stored.perceptual_hash, None);
+}
+
+#[tokio::test]
+async fn an_undecodable_reference_is_never_returned_by_the_dedup_search() {
+    let dir = scratch_dir("record-nodec-search");
+    let tdb = test_support::TestDb::connect_with_dir("mr-record-ns", &dir).await;
+    let db = tdb.db();
+
+    for id in ["nodec-a", "nodec-b"] {
+        media_resilience::insert_media_reference(db, id, "pending", MediaKind::Image)
+            .await
+            .expect("insert");
+        let fp = MediaFingerprint::without_perceptual_hash(id.as_bytes());
+        media_resilience::record_fingerprint(db, id, &(&fp).into())
+            .await
+            .expect("record");
+    }
+
+    // Two different images, neither fingerprinted. A NULL perceptual_hash must
+    // not match anything, at any threshold - this is the failure mode that
+    // makes an empty-string hash dangerous.
+    let found = media_resilience::find_by_perceptual_hash(db, "00ff00ff00ff00ff", 32)
+        .await
+        .expect("search");
+    assert!(
+        found.is_empty(),
+        "undecodable images must not match: {found:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_recorded_fingerprint_is_found_by_the_search() {
+    let dir = scratch_dir("record-found");
+    let tdb = test_support::TestDb::connect_with_dir("mr-record-found", &dir).await;
+    let db = tdb.db();
+
+    media_resilience::insert_media_reference(db, "rec-3", "pending", MediaKind::Image)
+        .await
+        .expect("insert");
+    let fp = MediaFingerprint {
+        content_hash: "sha256:def".to_owned(),
+        perceptual_hash: Some("00fc00fc00fc00fc".to_owned()),
+        width: 64,
+        height: 64,
+    };
+    media_resilience::record_fingerprint(db, "rec-3", &(&fp).into())
+        .await
+        .expect("record");
+
+    // The round trip that makes the feature real: a hash written by the fetcher
+    // is found by the search the curator runs. `00fc...` and `00ff...` differ in
+    // exactly 8 bits (two per 16-bit word, four words), so the threshold has to
+    // be at least 8 for this to match.
+    let found = media_resilience::find_by_perceptual_hash(db, "00ff00ff00ff00ff", 8)
+        .await
+        .expect("search");
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].id, "rec-3");
+}
+
+#[tokio::test]
+async fn recording_a_fingerprint_for_a_missing_reference_is_an_error_not_a_silent_no_op() {
+    let dir = scratch_dir("record-missing");
+    let tdb = test_support::TestDb::connect_with_dir("mr-record-missing", &dir).await;
+    let db = tdb.db();
+
+    let fp = MediaFingerprint::without_perceptual_hash(b"bytes");
+    // A fetch that completes for a reference that no longer exists must say
+    // so. Silently succeeding would report the media as mirrored when the row
+    // it belongs to has gone.
+    let outcome = media_resilience::record_fingerprint(db, "no-such-ref", &(&fp).into()).await;
+    assert!(
+        outcome.is_err(),
+        "recording against a missing row must fail"
     );
 }
