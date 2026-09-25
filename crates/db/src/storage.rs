@@ -423,7 +423,7 @@ impl BlobStore {
     /// How many bytes this instance is storing, and how many blobs.
     pub async fn usage(&self, db: &Database) -> Result<(i64, i64)> {
         let sql = db.sql(
-            "SELECT COUNT(*) AS blobs, COALESCE(SUM(byte_size), 0) AS bytes FROM content_blobs",
+            "SELECT COUNT(*) AS blobs, COALESCE(CAST(SUM(byte_size) AS BIGINT), 0) AS bytes FROM content_blobs",
             "SELECT COUNT(*)::bigint AS blobs, COALESCE(SUM(byte_size), 0)::bigint AS bytes
                FROM content_blobs",
         );

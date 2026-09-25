@@ -2016,7 +2016,7 @@ pub struct StorageUsage {
 /// Returns an error if either statement fails.
 pub async fn storage_usage(db: &Database, account_id: &str) -> Result<StorageUsage> {
     let imported_sql = db.sql(
-        "SELECT COALESCE(SUM(b.byte_size), 0), COUNT(*) FROM content_blobs b \
+        "SELECT COALESCE(CAST(SUM(b.byte_size) AS BIGINT), 0), COUNT(*) FROM content_blobs b \
          WHERE b.checksum IN (SELECT cr.checksum FROM content_references cr \
              JOIN library_items li ON li.id = cr.owner_id \
              WHERE cr.owner_type = 'library_item' AND li.account_id = ?)",
@@ -2028,7 +2028,7 @@ pub async fn storage_usage(db: &Database, account_id: &str) -> Result<StorageUsa
              WHERE cr.owner_type = 'library_item' AND li.account_id::text = ?)",
     );
     let export_sql = db.sql(
-        "SELECT COALESCE(SUM(output_bytes), 0) FROM export_jobs \
+        "SELECT COALESCE(CAST(SUM(output_bytes) AS BIGINT), 0) FROM export_jobs \
          WHERE account_id = ? AND output_bytes IS NOT NULL",
         "SELECT COALESCE(SUM(output_bytes), 0)::bigint FROM export_jobs \
          WHERE account_id::text = ? AND output_bytes IS NOT NULL",

@@ -75,7 +75,7 @@ const WORK_TOTALS_SQLITE: &str = "SELECT
      (SELECT COUNT(*) FROM chapters c
         JOIN works w2 ON w2.id = c.work_id
        WHERE w2.owner_pseud_id = ?) AS chapters,
-     (SELECT COALESCE(SUM(cr.word_count), 0)
+     (SELECT COALESCE(CAST(SUM(cr.word_count) AS BIGINT), 0)
         FROM chapters c
         JOIN chapter_revisions cr ON cr.id = c.current_revision_id
         JOIN works w2 ON w2.id = c.work_id
@@ -90,7 +90,7 @@ const WORK_TOTALS_POSTGRES: &str = "SELECT
      (SELECT COUNT(*) FROM chapters c
         JOIN works w2 ON w2.id = c.work_id
        WHERE w2.owner_pseud_id = ?::uuid) AS chapters,
-     (SELECT COALESCE(SUM(cr.word_count), 0)
+     (SELECT COALESCE(CAST(SUM(cr.word_count) AS BIGINT), 0)
         FROM chapters c
         JOIN chapter_revisions cr ON cr.id = c.current_revision_id
         JOIN works w2 ON w2.id = c.work_id
@@ -145,7 +145,7 @@ async fn work_totals(
 const READER_TOTALS_SQLITE: &str = "SELECT
      (SELECT COUNT(*) FROM rating r JOIN works w ON w.id = r.work_id
        WHERE w.owner_pseud_id = ? AND r.is_public = 1 AND r.deleted_at IS NULL) AS ratings,
-     (SELECT COALESCE(SUM(r.stars), 0) FROM rating r JOIN works w ON w.id = r.work_id
+     (SELECT COALESCE(CAST(SUM(r.stars) AS BIGINT), 0) FROM rating r JOIN works w ON w.id = r.work_id
        WHERE w.owner_pseud_id = ? AND r.is_public = 1 AND r.deleted_at IS NULL) AS rating_stars,
      (SELECT COUNT(*) FROM review rv JOIN works w ON w.id = rv.work_id
        WHERE w.owner_pseud_id = ? AND rv.is_public = 1
@@ -156,7 +156,7 @@ const READER_TOTALS_SQLITE: &str = "SELECT
 const READER_TOTALS_POSTGRES: &str = "SELECT
      (SELECT COUNT(*) FROM rating r JOIN works w ON w.id = r.work_id
        WHERE w.owner_pseud_id = ?::uuid AND r.is_public = 1 AND r.deleted_at IS NULL) AS ratings,
-     (SELECT COALESCE(SUM(r.stars), 0) FROM rating r JOIN works w ON w.id = r.work_id
+     (SELECT COALESCE(CAST(SUM(r.stars) AS BIGINT), 0) FROM rating r JOIN works w ON w.id = r.work_id
        WHERE w.owner_pseud_id = ?::uuid AND r.is_public = 1 AND r.deleted_at IS NULL) AS rating_stars,
      (SELECT COUNT(*) FROM review rv JOIN works w ON w.id = rv.work_id
        WHERE w.owner_pseud_id = ?::uuid AND rv.is_public = 1

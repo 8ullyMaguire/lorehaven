@@ -173,7 +173,7 @@ pub async fn search_works(db: &Database, needle: &str, limit: i64) -> Result<Vec
                 .join(" OR ");
             let sql = format!(
                 "SELECT w.id, w.title, a.handle AS author_handle, \
-                        (SELECT COALESCE(SUM(cr.word_count), 0) \
+                        (SELECT COALESCE(CAST(SUM(cr.word_count) AS BIGINT), 0) \
                          FROM chapters c \
                          JOIN chapter_revisions cr ON cr.id = c.current_revision_id \
                          WHERE c.work_id = w.id AND c.deleted_at IS NULL) AS word_count, \

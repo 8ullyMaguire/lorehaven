@@ -642,7 +642,7 @@ pub async fn rating_for(db: &Database, pseud: PseudId, work: WorkId) -> Result<O
 /// the aggregate, which is the spec §9.4 rule this query enforces.
 pub async fn public_rating_summary(db: &Database, work: WorkId) -> Result<Option<RatingSummary>> {
     let sql = db.sql(
-        "SELECT COUNT(*) AS count, COALESCE(SUM(stars), 0) AS sum
+        "SELECT COUNT(*) AS count, COALESCE(CAST(SUM(stars) AS BIGINT), 0) AS sum
            FROM rating
           WHERE work_id = ? AND is_public = 1 AND deleted_at IS NULL
           HAVING COUNT(*) >= ?",

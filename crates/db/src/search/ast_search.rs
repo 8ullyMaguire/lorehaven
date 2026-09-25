@@ -102,7 +102,7 @@ async fn search_works_ast_impl(
         Some(_) => {
             let sqlite = format!(
                 "SELECT works.id, works.title, pseuds.handle AS author_handle, \
-                        (SELECT COALESCE(SUM(cr.word_count), 0) FROM chapters c \
+                        (SELECT COALESCE(CAST(SUM(cr.word_count) AS BIGINT), 0) FROM chapters c \
                          JOIN chapter_revisions cr ON cr.id = c.current_revision_id \
                          WHERE c.work_id = works.id AND c.deleted_at IS NULL) AS word_count, \
                         COUNT(works_index_terms.term) AS score \
@@ -154,7 +154,7 @@ async fn search_works_ast_impl(
         None => {
             let sqlite = format!(
                 "SELECT works.id, works.title, pseuds.handle AS author_handle, \
-                        (SELECT COALESCE(SUM(cr.word_count), 0) FROM chapters c \
+                        (SELECT COALESCE(CAST(SUM(cr.word_count) AS BIGINT), 0) FROM chapters c \
                          JOIN chapter_revisions cr ON cr.id = c.current_revision_id \
                          WHERE c.work_id = works.id AND c.deleted_at IS NULL) AS word_count, \
                         COUNT(works_index_terms.term) AS score \

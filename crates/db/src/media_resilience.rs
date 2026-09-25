@@ -673,7 +673,7 @@ pub async fn insert_curator_reward(
 pub async fn sum_curator_rewards_today(db: &Database, account_id: &str) -> Result<i64> {
     let sql = sql_owned(
         db,
-        "SELECT COALESCE(SUM(amount), 0) AS total
+        "SELECT COALESCE(CAST(SUM(amount) AS BIGINT), 0) AS total
          FROM curator_rewards
          WHERE account_id = ?
            AND created_at >= datetime('now', 'start of day')"
@@ -3250,7 +3250,7 @@ pub async fn curator_leaderboard(db: &Database, limit: i64) -> Result<Vec<(Strin
         db,
         "SELECT account_id,
                 COUNT(*) AS reward_count,
-                SUM(amount) AS total_amount
+                CAST(SUM(amount) AS BIGINT) AS total_amount
          FROM curator_rewards
          GROUP BY account_id
          ORDER BY total_amount DESC
@@ -3258,7 +3258,7 @@ pub async fn curator_leaderboard(db: &Database, limit: i64) -> Result<Vec<(Strin
             .to_string(),
         "SELECT account_id,
                 COUNT(*) AS reward_count,
-                SUM(amount) AS total_amount
+                SUM(amount)::bigint AS total_amount
          FROM curator_rewards
          GROUP BY account_id
          ORDER BY total_amount DESC
@@ -3286,10 +3286,10 @@ pub async fn curator_leaderboard(db: &Database, limit: i64) -> Result<Vec<(Strin
 pub async fn standing_bounty_status(db: &Database) -> Result<(i64, i64)> {
     let sql = sql_owned(
         db,
-        "SELECT COUNT(*) AS cnt, COALESCE(SUM(reward), 0) AS total
+        "SELECT COUNT(*) AS cnt, COALESCE(CAST(SUM(reward) AS BIGINT), 0) AS total
          FROM targeted_bounties WHERE status = 'active'"
             .to_string(),
-        "SELECT COUNT(*) AS cnt, COALESCE(SUM(reward), 0) AS total
+        "SELECT COUNT(*) AS cnt, COALESCE(CAST(SUM(reward) AS BIGINT), 0) AS total
          FROM targeted_bounties WHERE status = 'active'"
             .to_string(),
     );
@@ -3312,10 +3312,15 @@ pub async fn standing_bounty_status(db: &Database) -> Result<(i64, i64)> {
 pub async fn local_mirror_storage(db: &Database) -> Result<(i64, i64)> {
     let sql = sql_owned(
         db,
-        "SELECT COUNT(*) AS cnt, COALESCE(SUM(file_size_bytes), 0) AS total_bytes
+        "SELECT COUNT(*) AS cnt, COALESCE(CAST(SUM(file_size_bytes) AS BIGINT), 0) AS total_bytes
          FROM local_mirrors"
             .to_string(),
-        "SELECT COUNT(*) AS cnt, COALESCE(SUM(file_size_bytes), 0) AS total_bytes
+        // `SUM` over a BIGINT column returns NUMERIC in PostgreSQL, which will
+        // not decode into an i64 ("mismatched types; Rust type `i64` (as SQL type
+        // `INT8`) is not compatible with SQL type `NUMERIC`"). SQLite returns an
+        // integer, so the two arms cannot share a spelling; the cast is harmless
+        // to neither and keeps one row type.
+        "SELECT COUNT(*) AS cnt, COALESCE(SUM(file_size_bytes), 0)::bigint AS total_bytes
          FROM local_mirrors"
             .to_string(),
     );
@@ -3368,12 +3373,18 @@ pub async fn provider_reliability(db: &Database) -> Result<Vec<(String, i64, i64
          GROUP BY provider
          ORDER BY (healthy * 1.0 / total) DESC"
             .to_string(),
+        // PostgreSQL will not resolve a SELECT alias inside `ORDER BY` for a
+        // grouped aggregate -- "column \"healthy\" does not exist" -- so the
+        // expression is repeated rather than named. `CAST` rather than `::` so
+        // the same string is valid on both dialects, and because a grouped SUM
+        // over an integer column is NUMERIC in PostgreSQL and will not decode
+        // into an i64 without it.
         "SELECT provider,
-                SUM(CASE WHEN status = 'healthy' THEN 1 ELSE 0 END) AS healthy,
+                CAST(SUM(CASE WHEN status = 'healthy' THEN 1 ELSE 0 END) AS BIGINT) AS healthy,
                 COUNT(*) AS total
          FROM availability_links
          GROUP BY provider
-         ORDER BY (healthy::float / total) DESC"
+         ORDER BY (CAST(SUM(CASE WHEN status = 'healthy' THEN 1 ELSE 0 END) AS REAL) / total) DESC"
             .to_string(),
     );
     let rows: Vec<(String, i64, i64)> = match db.backend() {
