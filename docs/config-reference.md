@@ -150,6 +150,27 @@ Library update-check settings (spec §38).
 | `update_check_retention_days` | `int` | `90` | Days to keep update-check records |
 | `check_batch` | `int` | `50` | Items per library update job |
 
+## `[media_resilience]`
+
+Media resilience and perceptual deduplication (spec §32.7.2). The table is
+optional: with it absent, the defaults below apply.
+
+| Key | Type | Default | Purpose |
+|-----|------|---------|---------|
+| `enabled` | `bool` | `true` | Whether perceptual dedup runs on this instance |
+| `perceptual_hash_algorithm` | `string` | `"phash"` | Image fingerprint: `phash`, `dhash`, `whash`, `ahash`. An unknown value stops the instance rather than loading a default, because the alternative is an instance that claims to deduplicate with a hash it never computes |
+| `perceptual_match_threshold` | `int` | `6` | Hamming distance at or below which two image hashes are offered as the same image. Must be 1–32; outside that range the instance refuses to start, because a threshold that matches nothing or everything fails silently |
+| `require_curator_confirmation_below` | `int` | `3` | A perceptual match scoring below this confidence needs a curator to confirm the linkage. 0–100 |
+| `require_curator_confirmation_above` | `int` | `0` | A perceptual match at or above this confidence auto-attaches. The spec's default of `0` means no perceptual match auto-attaches — only exact content-hash matches do. 0–100 |
+| `audio_fingerprint` | `string` | `"chromaprint"` | Audio fingerprinting scheme: `chromaprint`, `acoustid` |
+
+The `perceptual_match_threshold` is read by
+`POST /api/v1/media/reverse-search`, which returns each match with a
+`match_distance`, a `match_confidence` and a `match_kind` of `exact` or
+`perceptual`. A reference whose `perceptual_hash` is `NULL` (its bytes were
+never fetched) and any hash that is not hex are skipped rather than scored: a
+malformed value is not evidence of similarity.
+
 ## `[tts]`
 
 Text-to-speech engine settings.
