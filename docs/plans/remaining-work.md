@@ -254,10 +254,44 @@ The dead handlers were removed rather than left to rot. Restoring this means:
 
 ### Then — hardening and release
 
-E2E green (73/73 as of `d04a54a`), deploy to thinkcentre production (build
-there, never through SSHFS). A `v1.0.0` tag is deliberately **not** cut: the
-release decision is the operator's, and the remaining M45/M47/M53/M54 rows are
-open.
+E2E green (73/73 as of `9cd3c71`, the commit that fixed the export-delete
+assertion), deploy to thinkcentre production (build there, never through
+SSHFS). A `v1.0.0` tag is deliberately **not** cut: the release decision is the
+operator's, and the remaining M45/M47/M53/M54 rows are open.
+
+## Carried from 2026-09-25 — the `max_distance` gap is a feature hole, not a lint
+
+`db::media_resilience::find_by_perceptual_hash` takes a `max_distance` and does
+not implement Hamming-distance search; the parameter is now named
+`_max_distance` and the doc comment says outright that the threshold is not
+honoured and that a result must not be read as "these are similar". No caller can
+reach the gap today — both pass `0` — so it is not a regression, but it is a
+function whose signature promises deduplication it does not perform.
+
+Either implement the threshold or drop the parameter and have callers
+pre-filter. The former is the smaller change: the surrounding module already
+persists `phash` per media reference, so the query only needs
+`AND phash != ?` with a computed Hamming distance. ~half a day, and it should be
+done before any importer starts relying on perceptual deduplication.
+
+## Gate discipline — read before trusting any count in this file
+
+A `cargo clippy` gate in this repo reported **0 warnings and 0 errors** for
+several sessions while the tree held 30. The command was
+`cargo clippy ... 2>/dev/null | grep -cE '^(warning|error)'`: rustc and clippy
+write warnings to **stderr**, so the `2>/dev/null` threw them all away and the
+`grep -c` counted an empty stdout. See
+`docs/handoffs/2026-09-25T142500+0200-false-clean-gate-three-defects-e2e-assertion-fixed-handoff.md`.
+
+When running any gate in this project:
+
+- Redirect with `> /tmp/x.log 2>&1`, then read the file. Never pipe through
+  `grep -c` without `2>&1`.
+- If a gate has never once failed, suspect the gate before trusting it.
+- A green E2E that asserts an empty state or a global count on a shared test
+  account is a false signal too. The export-delete test asserted `"No exports
+  yet"` on an account the export-download test above it also writes to, so the
+  empty state could never appear — it tested the fixture, not the feature.
 
 ## Order and rationale
 

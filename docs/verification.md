@@ -1402,6 +1402,60 @@ no data.
 
 ---
 
+## 2026-09-25 — Two false green signals, both in gates, one hiding real defects
+
+A clippy gate reported clean while the tree held 30 warnings (covered above).
+The E2E suite was the second false signal, and it was hiding a *test* defect
+rather than a product defect.
+
+### The export-delete test asserted a state the shared account can never reach
+
+`frontend/e2e/coverage.spec.ts` waited for `Ready`, clicked the first `Delete`,
+then asserted `getByText('No exports yet')` was visible. The E2E account is
+shared: the export-download test immediately above it creates a second export on
+the same account, so a `Ready` row is always present and the empty state can
+never appear.
+
+The product behaviour was correct throughout — the deleted row *was* removed,
+and the captured page snapshot showed exactly that, with the second `Ready`
+export still listed. The test failed on a working build, which is how it had
+survived as a phantom product bug.
+
+Two wrong turns before the real one, both worth recording:
+
+1. Asserting that the item count drops to `0`. With two rows before the click,
+   `0` is as unreachable as the empty state. Wrong in the same way.
+2. Filtering the row by its title, `Disposable`. The list renders
+   `job.label || job.format`, and a worker-produced export carries no label, so
+   its heading is `EPUB` — the filter matched **zero** rows and the test failed
+   at the `Ready` wait with no obvious cause.
+
+The fix uses the export id in the download `href` as the row's identity:
+
+| Assertion | Checks |
+|---|---|
+| `a.download[href*="<exportId>"]` has count 0 | that export's own row is gone |
+| the section's `.item` count is `before - 1` | exactly one row was removed, not two |
+
+**The transferable rule:** when a UI test fails, decide whether the assertion
+describes the feature or the fixture. Empty states, global counts, and
+first-row locators all describe fixtures, and fixtures are shared, ordered, and
+stateful. A test that can only pass on a pristine account will fail forever on a
+dirty one — and the failure reads as a bug in the thing under test, which sends
+you to debug the wrong code.
+
+### Gates, final state
+
+| Check | Result |
+|---|---|
+| `cargo clippy --workspace --all-targets` (stderr captured) | **0 warnings, 0 errors** |
+| `cargo test --workspace --no-fail-fast` | 1775 passed, 1 failed (rate-limit flake; passes 1/1 alone in 59s) |
+| `cargo build --release` | clean, 5m 10s |
+| `npx vite build` | clean |
+| `npx playwright test` | **73/73**, verified on the full suite, not only in isolation |
+
+---
+
 **Webhook delivery is now being built** (`crates/app/src/webhook_delivery.rs`,
 uncommitted, 159 lines): `deliver_notification` calls `webhook_sender::send`,
 records each attempt through `marketplace::record_delivery` — closing the "no
