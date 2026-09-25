@@ -1,15 +1,34 @@
 #!/usr/bin/env python3
-"""Report `_at` placeholders in a PostgreSQL arm that lack a `::timestamptz` cast.
+"""Report `_at` placeholders in a PostgreSQL arm that CAST to timestamptz wrongly.
 
-The SQLite schema spells the timestamp columns TEXT; PostgreSQL types them
-TIMESTAMPTZ. The codebase binds an RFC-3339 string in both, so an uncast
-placeholder fails on PostgreSQL with either
+    THIS TOOL IS OBSOLETE AND ITS PREMISE WAS WRONG. DO NOT RUN IT.
 
-    42804: column "updated_at" is of type timestamp with time zone
-           but expression is of type text
+Its docstring used to claim that "PostgreSQL types them TIMESTAMPTZ". It does
+not. This project's PostgreSQL migrations mirror the SQLite types exactly, so
+timestamp columns are TEXT nearly everywhere -- `jobs`, `outbox_events`,
+`comments`, `chats`, and a hundred more. Only a few tables in
+`media_resilience`, `curator_roles` and `export_jobs` are genuinely TIMESTAMPTZ.
+
+Acting on the false premise, this script added `::timestamptz` to 26 `_at` binds
+across 24 files. Every one of them was a defect: a TEXT column compared against
+or assigned a timestamptz, which PostgreSQL rejects with
+
     42883: operator does not exist: text <= timestamp with time zone
+    42804: column "available_at" is of type text
+           but expression is of type timestamp with time zone
 
-`--fix` adds the cast. It is deliberately conservative:
+That included every job-claim, lease-renewal, expiry-sweep and retry-schedule
+query, so the job runner did not work on PostgreSQL at all. The casts have been
+removed (commit ef3a9ed) and `check-uncast-pg-placeholders.py` now enforces the
+correct rule: a `::timestamptz` cast feeding a TEXT column is the fault.
+
+If you need to know whether a given timestamp column is TEXT or TIMESTAMPTZ,
+ask the schema rather than the column's name:
+
+    python3 scripts/check-uncast-pg-placeholders.py --self-test
+    grep -rn 'CREATE TABLE jobs' migrations/postgres/
+
+The original rules, kept only so the history is readable:
 
   * Only the *second* string literal of a `db.sql(...)` call is treated as the
     PostgreSQL arm. An arm that is byte-identical to the SQLite one is skipped,
@@ -235,30 +254,20 @@ def main() -> int:
     if args.self_test:
         return self_test()
 
-    files: list[pathlib.Path] = []
-    for p in args.paths or ["crates"]:
-        path = pathlib.Path(p)
-        files.extend(sorted(path.rglob("*.rs")) if path.is_dir() else [path])
-
-    total = 0
-    for f in files:
-        src = f.read_text(encoding="utf-8")
-        edits = candidates(src)
-        if not edits:
-            continue
-        total += len(edits)
-        new = apply_edits(src, edits)
-        if not round_trips(src, new):
-            print(f"REFUSING {f}: edit would not round-trip", file=sys.stderr)
-            return 1
-        rel = f
-        if args.fix:
-            f.write_text(new, encoding="utf-8")
-            print(f"fixed {rel}: {len(edits)} cast(s)")
-        else:
-            print(f"{rel}: {len(edits)} uncast `_at` placeholder(s)")
-    print(f"{'fixed' if args.fix else 'found'} {total} in total")
-    return 0
+    # Every cast this tool would add is a defect, so there is no run left to do.
+    # The self-test above is kept because CI runs it and because it documents the
+    # rules that were wrong.
+    print(
+        "fix-timestamptz-binds.py no longer does anything.\n"
+        "Its premise -- that PostgreSQL types the timestamp columns TIMESTAMPTZ -- "
+        "is false: the PostgreSQL migrations mirror the SQLite types, so those "
+        "columns are TEXT and the cast it added is the defect it was written to "
+        "prevent. See the module docstring.\n"
+        "To check a statement, use check-uncast-pg-placeholders.py, which reads the "
+        "column type out of the migrations instead of guessing from its name.",
+        file=sys.stderr,
+    )
+    return 2
 
 
 if __name__ == "__main__":

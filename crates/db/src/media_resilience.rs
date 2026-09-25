@@ -2873,8 +2873,17 @@ pub async fn find_by_perceptual_hash(
 
     let rows = sql_owned(
         db,
+        // Each CAST needs its column name back as an alias: without it the
+        // result column is named after the expression, and the row reader's
+        // `r.get("width")` is `ColumnNotFound("width")`. The widths are
+        // widened because the reader asks for an i64 and SQLite would hand back
+        // whatever it stored.
         "SELECT id, perceptual_hash, content_hash, media_kind, first_seen_at,
-                CAST(width AS BIGINT), CAST(height AS BIGINT), CAST(duration_seconds AS BIGINT), format, CAST(file_size_bytes AS BIGINT),
+                CAST(width AS BIGINT) AS width,
+                CAST(height AS BIGINT) AS height,
+                CAST(duration_seconds AS BIGINT) AS duration_seconds,
+                format,
+                CAST(file_size_bytes AS BIGINT) AS file_size_bytes,
                 content_notes, curator_verified, created_at, updated_at
          FROM media_references
          WHERE perceptual_hash IS NOT NULL"
@@ -3046,9 +3055,13 @@ pub async fn find_curator_bounty_queue(
         Backend::Sqlite => {
             let pool = db.sqlite_pool().expect("sqlite");
             let rows = sqlx::query(
+                // SQLite reads every column in its declared type, so this arm
+                // needs no casts. The `::text` forms on the PostgreSQL side are
+                // what a TEXT column must be widened to; here they are a parse
+                // error: `unrecognized token: ":"`.
                 "SELECT m.id, m.perceptual_hash, m.content_hash, m.media_kind, m.first_seen_at,
                         m.width, m.height, m.duration_seconds, m.format, m.file_size_bytes,
-                        m.content_notes::text, m.curator_verified, m.created_at::text, m.updated_at::text
+                        m.content_notes, m.curator_verified, m.created_at, m.updated_at
                  FROM media_references m
                  WHERE (SELECT COUNT(*) FROM availability_links
                         WHERE media_reference_id = m.id AND status = 'healthy') < ?

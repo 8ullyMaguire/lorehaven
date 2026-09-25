@@ -54,19 +54,24 @@ jobs:
       # each of them had a silent hole at least once -- see the handoff. They
       # are cheap, they need no database, and they run here so a regression is
       # caught on the push rather than by a failing suite twenty minutes later.
-      - name: Timestamp-cast fixer self-test
-        run: python3 scripts/fix-timestamptz-binds.py --self-test
-
       # The checker's own rules, on statements whose correct answer is known.
       # It carried a `:: anywhere` guard that was wrong, and nothing said so.
       - name: Uncast-placeholder checker self-test
         run: python3 scripts/check-uncast-pg-placeholders.py --self-test
 
-      # No uncast placeholder may bind text to a UUID, TIMESTAMPTZ or JSONB
-      # column. Exits non-zero while any remain, so this stays red until the
-      # $n sites in permission.rs, rating_integrity.rs and roles.rs are fixed.
+      # No placeholder may bind text to a column the dialect types, in either
+      # direction: an uncast bind to a UUID/TIMESTAMPTZ/JSONB column, a
+      # `::timestamptz` cast to a TEXT one, or a boolean literal against an
+      # integer column. All three shipped broken on PostgreSQL before this.
       - name: Uncast placeholders
         run: python3 scripts/check-uncast-pg-placeholders.py crates
+
+      # fix-timestamptz-binds.py is disabled. It assumed the PostgreSQL
+      # timestamp columns are TIMESTAMPTZ; they are TEXT, so every cast it
+      # added was itself a defect. Only the self-test runs, which keeps the
+      # wrong rules documented and under test.
+      - name: Obsolete timestamp-cast fixer (self-test only)
+        run: python3 scripts/fix-timestamptz-binds.py --self-test
 
       - name: PostgreSQL arms must not use the SQLite pool
         run: python3 scripts/check-pg-arm-uses-sqlite-pool.py crates
