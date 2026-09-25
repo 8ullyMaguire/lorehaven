@@ -103,25 +103,13 @@ pub fn tier_for(warmth_bp: i64, thresholds: &WarmthThresholds) -> &'static str {
 use serde::{Deserialize, Serialize};
 
 /// Aggregate tier counts for an author panel (spec §41.2).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct TierAggregates {
     pub lurk: i64,
     pub react: i64,
     pub comment: i64,
     pub create: i64,
     pub total: i64,
-}
-
-impl Default for TierAggregates {
-    fn default() -> Self {
-        Self {
-            lurk: 0,
-            react: 0,
-            comment: 0,
-            create: 0,
-            total: 0,
-        }
-    }
 }
 
 /// Compute aggregate tier counts from a list of (tier, count) pairs.
@@ -197,7 +185,7 @@ mod tests {
             },
         ];
 
-        let id_0 = candidates[0].work_id.clone();
+        let id_0 = candidates[0].work_id;
         let reason_0 = candidates[0].reason.clone();
 
         apply_half_life(&mut candidates, &|id| {

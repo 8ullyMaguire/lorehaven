@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn compute_user_vector_single_work() {
         let work = vec![0.8, 0.6, 0.4];
-        let result = compute_user_vector(&[work.clone()], &[1.0]);
+        let result = compute_user_vector(std::slice::from_ref(&work), &[1.0]);
         assert_eq!(result, work);
     }
 
@@ -632,8 +632,8 @@ pub fn generate_arena_round(
         let next = remaining
             .iter()
             .max_by(|a, b| {
-                let da = card_distance(a, first, &target_dimensions);
-                let db = card_distance(b, first, &target_dimensions);
+                let da = card_distance(a, first, target_dimensions);
+                let db = card_distance(b, first, target_dimensions);
                 da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
             })
             .cloned()?;
@@ -657,6 +657,7 @@ pub fn generate_arena_round(
 ///   - best beats middle1, middle2, worst
 ///   - middle1 beats worst
 ///   - middle2 beats worst
+///
 /// Each match updates the Elo of the dimension that most differentiates the
 /// two cards.
 ///

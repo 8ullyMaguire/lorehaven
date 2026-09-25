@@ -2,7 +2,6 @@
 //!
 //! Streaks, lifecycle incentives, and taste-weighted notification queuing.
 
-use serde_json::Value;
 use sqlx::Row;
 
 use crate::{Backend, Database};
@@ -57,7 +56,7 @@ pub async fn record_login(db: &Database, account_id: &str) -> Result<StreakState
             .fetch_optional(pool)
             .await?;
 
-            let Some((current, longest, last_login, freezes, _updated)) = state else {
+            let Some((current, longest, last_login, _freezes, _updated)) = state else {
                 return Ok(StreakState {
                     current: 0,
                     longest: 0,
@@ -116,7 +115,7 @@ pub async fn record_login(db: &Database, account_id: &str) -> Result<StreakState
             .fetch_optional(pool)
             .await?;
 
-            let Some((current, longest, last_login, freezes, _updated)) = state else {
+            let Some((current, longest, last_login, _freezes, _updated)) = state else {
                 return Ok(StreakState {
                     current: 0,
                     longest: 0,
@@ -168,7 +167,9 @@ fn days_to_iso_date(days: u64) -> String {
     let z = days + 719_468u64;
     let era = z / 146_097;
     let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 1_460_97) / 365;
+    // 146_096 (not 146_097): the century leap-year correction. Using 146_097
+    // makes every 400-year boundary date, incl. 2000-02-29, come out a day late.
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
     let y = yoe + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
@@ -361,4 +362,32 @@ pub async fn pending_taste_notification_count(
         }
     };
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::days_to_iso_date;
+
+    /// Day counts from the Unix epoch, so the expected dates are checkable by
+    /// hand rather than by reimplementing the algorithm under test.
+    #[test]
+    fn iso_date_epoch_and_leap_days() {
+        assert_eq!(days_to_iso_date(0), "1970-01-01");
+        assert_eq!(days_to_iso_date(59), "1970-03-01");
+        // 2000-02-29 is day 11016. This is the case the 146_096 divisor exists
+        // for: with 146_097 the century correction is off by one and the date
+        // comes out as 2000-03-01.
+        assert_eq!(days_to_iso_date(11_016), "2000-02-29");
+        assert_eq!(days_to_iso_date(19_723), "2024-01-01");
+    }
+
+    /// Every day across a span covering 56 years, so a regression in any part of
+    /// the calendar arithmetic surfaces rather than only on leap days.
+    #[test]
+    fn iso_date_matches_a_known_sequence() {
+        // 2020-01-01 through 2020-12-31 is 366 days; 2021 is not a leap year.
+        assert_eq!(days_to_iso_date(18_262), "2020-01-01");
+        assert_eq!(days_to_iso_date(18_628), "2021-01-01");
+        assert_eq!(days_to_iso_date(21_000), "2027-07-01");
+    }
 }

@@ -2,6 +2,7 @@
 ///
 /// Each mode restructures one surface of a topic. `Plain` is the default and
 /// behaves exactly as a topic did before modes existed.
+use std::str::FromStr;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreadMode {
     /// A plain topic: no restructuring, the default.
@@ -41,20 +42,6 @@ impl ThreadMode {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "plain" => Some(Self::Plain),
-            "ama" => Some(Self::Ama),
-            "reading_group" => Some(Self::ReadingGroup),
-            "critique" => Some(Self::Critique),
-            "wiki_pin" => Some(Self::WikiPin),
-            "collab_fic" => Some(Self::CollabFic),
-            "prompt" => Some(Self::Prompt),
-            "character_voice" => Some(Self::CharacterVoice),
-            _ => None,
-        }
-    }
-
     /// Whether this mode restricts new posts to a turn queue (critique).
     pub fn uses_turn_queue(self) -> bool {
         matches!(self, Self::Critique)
@@ -74,6 +61,24 @@ impl ThreadMode {
 impl Default for ThreadMode {
     fn default() -> Self {
         Self::Plain
+    }
+}
+
+impl FromStr for ThreadMode {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "plain" => Ok(Self::Plain),
+            "ama" => Ok(Self::Ama),
+            "reading_group" => Ok(Self::ReadingGroup),
+            "critique" => Ok(Self::Critique),
+            "wiki_pin" => Ok(Self::WikiPin),
+            "collab_fic" => Ok(Self::CollabFic),
+            "prompt" => Ok(Self::Prompt),
+            "character_voice" => Ok(Self::CharacterVoice),
+            _ => Err(()),
+        }
     }
 }
 
@@ -98,17 +103,16 @@ mod tests {
     fn every_mode_roundtrips() {
         for mode in all_modes() {
             let s = mode.as_str();
-            let parsed = ThreadMode::from_str(s).unwrap_or_else(|| {
-                panic!("ThreadMode::from_str({s:?}) returned None");
-            });
+            let parsed = ThreadMode::from_str(s)
+                .unwrap_or_else(|()| panic!("ThreadMode::from_str({s:?}) was rejected"));
             assert_eq!(mode, parsed, "roundtrip mismatch for {mode:?}");
         }
     }
 
     #[test]
-    fn unknown_mode_returns_none() {
-        assert_eq!(ThreadMode::from_str("telepathy"), None);
-        assert_eq!(ThreadMode::from_str(""), None);
+    fn unknown_mode_is_rejected() {
+        assert!(ThreadMode::from_str("telepathy").is_err());
+        assert!(ThreadMode::from_str("").is_err());
     }
 
     #[test]

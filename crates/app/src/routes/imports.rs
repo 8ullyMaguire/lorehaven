@@ -592,7 +592,7 @@ async fn preview_import(
                 .map(|chapter| ChapterIdentity {
                     word_count: None,
                     source_chapter_key: chapter.source_chapter_key.clone(),
-                    ordinal: chapter.ordinal as u32,
+                    ordinal: chapter.ordinal,
                     title: chapter.title.clone(),
                 })
                 .collect(),
@@ -875,7 +875,7 @@ async fn start_import(
                     .iter()
                     .map(|chapter| ChapterIdentity {
                         source_chapter_key: chapter.source_chapter_key.clone(),
-                        ordinal: chapter.ordinal as u32,
+                        ordinal: chapter.ordinal,
                         word_count: None,
                         title: chapter.title.clone(),
                     })

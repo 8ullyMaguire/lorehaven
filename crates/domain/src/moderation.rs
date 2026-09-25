@@ -1,5 +1,6 @@
 /// Moderation ladder and community health (spec §35.5).
 use std::fmt;
+use std::str::FromStr;
 
 /// Graduated response ladder (spec §35.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -27,17 +28,6 @@ impl SanctionLevel {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "verbal_warning" => Some(Self::VerbalWarning),
-            "post_throttle" => Some(Self::PostThrottle),
-            "read_only" => Some(Self::ReadOnly),
-            "forum_ban" => Some(Self::ForumBan),
-            "site_ban" => Some(Self::SiteBan),
-            _ => None,
-        }
-    }
-
     /// True if the user may post at all under this sanction.
     pub fn blocks_posting(&self) -> bool {
         matches!(self, Self::ReadOnly | Self::ForumBan | Self::SiteBan)
@@ -52,6 +42,21 @@ impl SanctionLevel {
     /// True if this is a site-wide ban.
     pub fn is_site_wide(&self) -> bool {
         matches!(self, Self::SiteBan)
+    }
+}
+
+impl FromStr for SanctionLevel {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "verbal_warning" => Ok(Self::VerbalWarning),
+            "post_throttle" => Ok(Self::PostThrottle),
+            "read_only" => Ok(Self::ReadOnly),
+            "forum_ban" => Ok(Self::ForumBan),
+            "site_ban" => Ok(Self::SiteBan),
+            _ => Err(()),
+        }
     }
 }
 
@@ -81,18 +86,22 @@ impl FederationScope {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "public" => Some(Self::Public),
-            "local" => Some(Self::Local),
-            "unlisted" => Some(Self::Unlisted),
-            _ => None,
-        }
-    }
-
     /// True if the topic should be federated outbound.
     pub fn is_federated(&self) -> bool {
         matches!(self, Self::Public)
+    }
+}
+
+impl FromStr for FederationScope {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "public" => Ok(Self::Public),
+            "local" => Ok(Self::Local),
+            "unlisted" => Ok(Self::Unlisted),
+            _ => Err(()),
+        }
     }
 }
 

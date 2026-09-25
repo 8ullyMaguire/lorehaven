@@ -27,6 +27,9 @@ pub struct DnfRow {
 
 /// Upsert a DNF record. A pseud can have only one DNF per work
 /// (unique partial index on (pseud_id, work_id) WHERE deleted_at IS NULL).
+// DB functions take their parameters explicitly rather than a builder:
+// a builder here would only move the same fields one call deeper.
+#[allow(clippy::too_many_arguments)]
 pub async fn upsert_dnf(
     db: &Database,
     account_id: AccountId,
@@ -231,7 +234,7 @@ pub async fn list_dnf_for_work(
 
     let rows = match db.backend() {
         Backend::Sqlite => {
-            let mut q = sqlx::query_as::<
+            let q = sqlx::query_as::<
                 _,
                 (
                     String,
@@ -246,7 +249,7 @@ pub async fn list_dnf_for_work(
                 ),
             >(&sql)
             .bind(work_id.to_string());
-            if !include_private {}
+
             q.fetch_all(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }

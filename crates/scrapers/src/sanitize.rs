@@ -116,12 +116,10 @@ fn extract_src(tag: &str) -> Option<String> {
     let after = after.trim_start();
     let after = after.strip_prefix('=')?;
     let after = after.trim_start();
-    if after.starts_with('"') {
-        let after = &after[1..];
+    if let Some(after) = after.strip_prefix('"') {
         let end = after.find('"')?;
         Some(after[..end].to_string())
-    } else if after.starts_with('\'') {
-        let after = &after[1..];
+    } else if let Some(after) = after.strip_prefix('\'') {
         let end = after.find('\'')?;
         Some(after[..end].to_string())
     } else {

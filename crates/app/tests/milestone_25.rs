@@ -1074,7 +1074,7 @@ async fn public_domain_collections_driven_by_rights_field() {
 async fn insert_rights(tdb: &test_support::TestDb, work_id: &str, license: &str) {
     let cast = if tdb.is_postgres() { "::uuid" } else { "" };
     exec(
-        &tdb,
+        tdb,
         &format!(
             "INSERT INTO media_rights (work_id, license, updated_at, version) VALUES (?{cast}, ?, '2026-09-01T00:00:00Z', 1)",
         ),

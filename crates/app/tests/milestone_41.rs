@@ -246,8 +246,8 @@ async fn half_life_changes_ranking_with_no_field_changes() {
         },
     ];
 
-    let id_a = candidates[0].work_id.clone();
-    let id_b = candidates[1].work_id.clone();
+    let id_a = candidates[0].work_id;
+    let id_b = candidates[1].work_id;
 
     let half_life_map = std::collections::HashMap::from([(id_b.to_string(), 10000i64)]);
 

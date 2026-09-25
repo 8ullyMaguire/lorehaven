@@ -3,6 +3,7 @@
 //! Tests the DNF DB layer against an in-memory SQLite database and verifies
 //! that unauthenticated HTTP requests are rejected with 401.
 
+use std::path::Path;
 use std::path::PathBuf;
 
 use axum::body::Body;
@@ -25,7 +26,7 @@ fn scratch_dir(tag: &str) -> PathBuf {
     dir
 }
 
-fn config_for(dir: &PathBuf) -> Config {
+fn config_for(dir: &Path) -> Config {
     let mut config = Config::development_defaults();
     config.storage.root = dir.to_path_buf();
     config.database = DatabaseConfig::new(format!(

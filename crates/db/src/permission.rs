@@ -296,6 +296,46 @@ pub async fn is_excluded(
     }
 }
 
+/// Compute the lineage depth of a work — how many ancestors it has in the
+/// `remix` chain. A work with no parent returns 0; a work whose parent has
+/// no parent returns 1; and so on. Walks up the chain following `remix` edges
+/// only (translations and other kinds don't extend the fork chain).
+pub async fn lineage_depth(db: &Database, work_id: &str) -> Result<u32> {
+    let mut depth = 0u32;
+    let mut current = Some(work_id.to_owned());
+    // Guard against cycles: walk at most 100 steps regardless of config.
+    while let Some(id) = current.take() {
+        if depth >= 100 {
+            break;
+        }
+        let sql = db.sql(
+            "SELECT from_work_id FROM derivative_lineage WHERE to_work_id = ? AND kind = 'remix' LIMIT 1",
+            "SELECT from_work_id FROM derivative_lineage WHERE to_work_id = $1 AND kind = 'remix' LIMIT 1",
+        );
+        let parent: Option<String> = match db.backend() {
+            Backend::Sqlite => {
+                sqlx::query_scalar(&sql)
+                    .bind(&id)
+                    .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                    .await?
+            }
+            Backend::Postgres => {
+                sqlx::query_scalar(&sql)
+                    .bind(&id)
+                    .fetch_optional(db.postgres_pool().expect("postgres"))
+                    .await?
+            }
+        };
+        if let Some(p) = parent {
+            depth += 1;
+            current = Some(p);
+        } else {
+            break;
+        }
+    }
+    Ok(depth)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,44 +498,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         Ok(())
     }
-}
-
-/// Compute the lineage depth of a work — how many ancestors it has in the
-/// `remix` chain. A work with no parent returns 0; a work whose parent has
-/// no parent returns 1; and so on. Walks up the chain following `remix` edges
-/// only (translations and other kinds don't extend the fork chain).
-pub async fn lineage_depth(db: &Database, work_id: &str) -> Result<u32> {
-    let mut depth = 0u32;
-    let mut current = Some(work_id.to_owned());
-    // Guard against cycles: walk at most 100 steps regardless of config.
-    while let Some(id) = current.take() {
-        if depth >= 100 {
-            break;
-        }
-        let sql = db.sql(
-            "SELECT from_work_id FROM derivative_lineage WHERE to_work_id = ? AND kind = 'remix' LIMIT 1",
-            "SELECT from_work_id FROM derivative_lineage WHERE to_work_id = $1 AND kind = 'remix' LIMIT 1",
-        );
-        let parent: Option<String> = match db.backend() {
-            Backend::Sqlite => {
-                sqlx::query_scalar(&sql)
-                    .bind(&id)
-                    .fetch_optional(db.sqlite_pool().expect("sqlite"))
-                    .await?
-            }
-            Backend::Postgres => {
-                sqlx::query_scalar(&sql)
-                    .bind(&id)
-                    .fetch_optional(db.postgres_pool().expect("postgres"))
-                    .await?
-            }
-        };
-        if let Some(p) = parent {
-            depth += 1;
-            current = Some(p);
-        } else {
-            break;
-        }
-    }
-    Ok(depth)
 }

@@ -9,10 +9,12 @@ use serde::{Deserialize, Serialize};
 /// The ordering a reader has asked for (spec §43.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[derive(Default)]
 pub enum Sort {
     /// The §16 engine blend and the reader's recipe; a permutation, never a filter.
     ForYou,
     /// Publication or update event order, from the §4.3 event log.
+    #[default]
     New,
     /// Last publication event.
     Updated,
@@ -92,12 +94,6 @@ impl Sort {
             self,
             Self::New | Self::Updated | Self::Top | Self::BestMatch | Self::Az
         )
-    }
-}
-
-impl Default for Sort {
-    fn default() -> Self {
-        Self::New
     }
 }
 

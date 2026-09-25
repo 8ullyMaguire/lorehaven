@@ -329,6 +329,9 @@ pub async fn update_link_status(
 // ---------------------------------------------------------------------------
 // Work-media references
 // ---------------------------------------------------------------------------
+// DB functions take their parameters explicitly rather than a builder:
+// a builder here would only move the same fields one call deeper.
+#[allow(clippy::too_many_arguments)]
 
 pub async fn insert_work_media_reference(
     db: &Database,
@@ -1006,6 +1009,9 @@ pub async fn list_work_media_references(
     }
     Ok(out)
 }
+// DB functions take their parameters explicitly rather than a builder:
+// a builder here would only move the same fields one call deeper.
+#[allow(clippy::too_many_arguments)]
 
 fn build_media_ref_view(
     id: String,
@@ -1444,6 +1450,9 @@ pub struct TargetedBounty {
     pub claimed_by: Option<String>,
     pub created_at: String,
 }
+// DB functions take their parameters explicitly rather than a builder:
+// a builder here would only move the same fields one call deeper.
+#[allow(clippy::too_many_arguments)]
 
 /// Post a targeted bounty for a specific work/media reference.
 pub async fn post_targeted_bounty(
@@ -1620,6 +1629,9 @@ pub struct LocalMirror {
     pub status: String,
     pub mirrored_at: String,
 }
+// DB functions take their parameters explicitly rather than a builder:
+// a builder here would only move the same fields one call deeper.
+#[allow(clippy::too_many_arguments)]
 
 /// Record a new local mirror.
 pub async fn insert_local_mirror(

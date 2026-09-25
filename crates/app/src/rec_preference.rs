@@ -166,8 +166,10 @@ mod tests {
     }
 
     fn registry_with(names: &[&str]) -> RecRegistry {
-        let mut config = DiscoveryConfig::default();
-        config.rec_enabled_strategies = names.iter().map(|s| s.to_string()).collect();
+        let config = DiscoveryConfig {
+            rec_enabled_strategies: names.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        };
         build_registry(&config)
     }
 

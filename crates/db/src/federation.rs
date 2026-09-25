@@ -90,6 +90,9 @@ pub struct SimilarityBreakdown {
 // AP Actors
 // ---------------------------------------------------------------------------
 
+// DB functions take their parameters explicitly rather than a builder:
+// a builder here would only move the same fields one call deeper.
+#[allow(clippy::too_many_arguments)]
 pub async fn create_actor(
     db: &Database,
     actor_type: &str,
@@ -442,13 +445,13 @@ pub async fn upsert_peer(
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query("INSERT INTO federation_peers_v2 (id, peer_host, similarity, state, last_checked, auto_federate, set_by, set_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(peer_host) DO UPDATE SET similarity = excluded.similarity, state = excluded.state, last_checked = excluded.last_checked, auto_federate = excluded.auto_federate, set_by = excluded.set_by, set_at = excluded.set_at")
-                .bind(&Uuid::new_v4().to_string()).bind(peer_host).bind(similarity).bind(state)
+                .bind(Uuid::new_v4().to_string()).bind(peer_host).bind(similarity).bind(state)
                 .bind(&now).bind(auto_federate).bind(set_by).bind(&now)
                 .execute(db.sqlite_pool().expect("sqlite")).await?;
         }
         Backend::Postgres => {
             sqlx::query("INSERT INTO federation_peers_v2 (id, peer_host, similarity, state, last_checked, auto_federate, set_by, set_at) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (peer_host) DO UPDATE SET similarity = EXCLUDED.similarity, state = EXCLUDED.state, last_checked = EXCLUDED.last_checked, auto_federate = EXCLUDED.auto_federate, set_by = EXCLUDED.set_by, set_at = EXCLUDED.set_at")
-                .bind(&Uuid::new_v4().to_string()).bind(peer_host).bind(similarity).bind(state)
+                .bind(Uuid::new_v4().to_string()).bind(peer_host).bind(similarity).bind(state)
                 .bind(&now).bind(auto_federate).bind(set_by).bind(&now)
                 .execute(db.postgres_pool().expect("postgres")).await?;
         }
