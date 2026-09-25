@@ -119,6 +119,19 @@ impl TestDb {
     /// Connect (and create) the scratch database for one test. SQLite writes
     /// `lorehaven.sqlite` inside `dir`; PostgreSQL creates and migrates a
     /// uniquely named scratch database.
+    ///
+    /// One test gets exactly one of these. That matters more than it looks:
+    /// under SQLite every `TestDb` for a given `dir` resolves to the same
+    /// `lorehaven.sqlite` file, so a test that opens a second one and writes a
+    /// fixture through it appears to work. Under PostgreSQL the second call
+    /// creates a *different* database, so the fixture lands somewhere the code
+    /// under test never queries, and the test fails for reasons that have
+    /// nothing to do with the code. Worse, it can pass for the wrong reason --
+    /// an assertion that should have failed finds an empty table and 404s.
+    ///
+    /// When a test needs both an `AppState` and a fixture handle, build them
+    /// from one `TestDb` and return it alongside the router. `media_resilience::
+    /// build_app` is the worked example.
     pub async fn connect_with_dir(tag: &str, dir: &Path) -> Self {
         match std::env::var("LOREHAVEN_TEST_PG_URL") {
             Ok(admin_url) if !admin_url.is_empty() => {

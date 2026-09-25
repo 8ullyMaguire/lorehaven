@@ -1364,8 +1364,7 @@ pub async fn find_matching_standing_bounties(
         Backend::Sqlite => {
             let pool = db.sqlite_pool().expect("sqlite");
             let rows = sqlx::query(
-                // `id` is UUID and the row reader takes Strings.
-                "SELECT id::text, name, reward, provider, healthy_links_below
+                "SELECT id, name, reward, provider, healthy_links_below
                  FROM curator_standing_bounties
                  WHERE enabled = 1
                    AND (healthy_links_below IS NULL OR healthy_links_below > ?)
