@@ -249,7 +249,7 @@ pub async fn soft_delete_comment(
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "UPDATE comments SET deleted_at = ?, body = '[deleted]' WHERE id = ? AND author_pseud = ? AND deleted_at IS NULL",
-        "UPDATE comments SET deleted_at = ?, body = '[deleted]' WHERE id = ? AND author_pseud = ? AND deleted_at IS NULL",
+        "UPDATE comments SET deleted_at = ?::timestamptz, body = '[deleted]' WHERE id = ? AND author_pseud = ? AND deleted_at IS NULL",
     );
     let rows = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)

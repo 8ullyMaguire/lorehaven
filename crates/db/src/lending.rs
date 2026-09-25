@@ -252,7 +252,7 @@ pub async fn revoke_loan(db: &Database, loan_id: &str) -> Result<bool> {
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "UPDATE work_loans SET revoked_at = ?, updated_at = ?, version = version + 1 WHERE id = ? AND revoked_at IS NULL",
-        "UPDATE work_loans SET revoked_at = ?, updated_at = ?, version = version + 1 WHERE id = ?::uuid AND revoked_at IS NULL",
+        "UPDATE work_loans SET revoked_at = ?::timestamptz, updated_at = ?::timestamptz, version = version + 1 WHERE id = ?::uuid AND revoked_at IS NULL",
     );
     let rows_affected = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)

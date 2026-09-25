@@ -292,7 +292,7 @@ pub async fn update_shelf(
          WHERE id = ? AND account_id = ? AND version = ?",
         "UPDATE shelves SET name = COALESCE(?, name), description = COALESCE(?, description), \
          is_public = COALESCE(?::int::boolean, is_public), position = COALESCE(?, position), \
-         updated_at = ?, version = version + 1 \
+         updated_at = ?::timestamptz, version = version + 1 \
          WHERE id::text = ? AND account_id::text = ? AND version = ?",
     );
     let affected = run!(db, sql, |q| q
@@ -716,7 +716,7 @@ pub async fn update_bookmark(
          WHERE id = ? AND account_id = ? AND version = ?",
         "UPDATE bookmarks SET note = COALESCE(?, note), \
          position_permille = COALESCE(?, position_permille), \
-         is_public = COALESCE(?::int::boolean, is_public), updated_at = ?, \
+         is_public = COALESCE(?::int::boolean, is_public), updated_at = ?::timestamptz, \
          version = version + 1 \
          WHERE id::text = ? AND account_id::text = ? AND version = ?",
     );
@@ -1488,7 +1488,7 @@ pub async fn update_saved_view(
          updated_at = ?, version = version + 1 \
          WHERE id = ? AND account_id = ? AND version = ?",
         "UPDATE saved_views SET name = COALESCE(?, name), \
-         pinned = COALESCE(?::int::boolean, pinned), updated_at = ?, version = version + 1 \
+         pinned = COALESCE(?::int::boolean, pinned), updated_at = ?::timestamptz, version = version + 1 \
          WHERE id::text = ? AND account_id::text = ? AND version = ?",
     );
     let affected = run!(db, sql, |q| q

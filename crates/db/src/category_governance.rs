@@ -637,7 +637,7 @@ pub async fn veto_proposal(
 ) -> Result<bool> {
     let sql = db.sql(
         "UPDATE category_proposals SET status = 'vetoed', decided_by = ?, decision_reason = ?, decided_at = ? WHERE id = ? AND status = 'open'",
-        "UPDATE category_proposals SET status = 'vetoed', decided_by = ?, decision_reason = ?, decided_at = ? WHERE id = ? AND status = 'open'",
+        "UPDATE category_proposals SET status = 'vetoed', decided_by = ?, decision_reason = ?, decided_at = ?::timestamptz WHERE id = ? AND status = 'open'",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -1024,7 +1024,7 @@ pub async fn apply_entry_mod_action(db: &Database, proposal_id: &str, now: &str)
         "remove" => {
             let sql = db.sql(
                 "UPDATE directory_entries SET removed_at = ? WHERE id = ? AND removed_at IS NULL",
-                "UPDATE directory_entries SET removed_at = ? WHERE id = ? AND removed_at IS NULL",
+                "UPDATE directory_entries SET removed_at = ?::timestamptz WHERE id = ? AND removed_at IS NULL",
             );
             match db.backend() {
                 Backend::Sqlite => {

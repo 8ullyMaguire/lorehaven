@@ -505,7 +505,7 @@ pub async fn respond_to_invite(db: &Database, invite: &Invite, accept: bool) -> 
             SET status = ?, responded_at = ?, updated_at = ?, version = version + 1
           WHERE id = ? AND status = 'pending'",
         "UPDATE collaboration_invites
-            SET status = ?, responded_at = ?, updated_at = ?, version = version + 1
+            SET status = ?, responded_at = ?::timestamptz, updated_at = ?::timestamptz, version = version + 1
           WHERE id::text = ? AND status = 'pending'",
     );
     let grant_sql = db.sql(
@@ -581,7 +581,7 @@ pub async fn revoke_invite(db: &Database, id: CollaborationInviteId) -> Result<b
             SET status = 'revoked', updated_at = ?, version = version + 1
           WHERE id = ? AND status = 'pending'",
         "UPDATE collaboration_invites
-            SET status = 'revoked', updated_at = ?, version = version + 1
+            SET status = 'revoked', updated_at = ?::timestamptz, version = version + 1
           WHERE id::text = ? AND status = 'pending'",
     );
 

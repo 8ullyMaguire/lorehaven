@@ -340,7 +340,7 @@ pub async fn set_source_enabled(
                             updated_at = ?, version = version + 1
          WHERE key = ?",
         "UPDATE sources SET enabled = ?, disabled_reason = ?, health = ?,
-                            updated_at = ?, version = version + 1
+                            updated_at = ?::timestamptz, version = version + 1
          WHERE key = ?",
     );
     let health = if enabled { "unknown" } else { "paused" };
@@ -389,7 +389,7 @@ pub async fn set_source_health(db: &Database, key: &str, health: &str) -> Result
         "UPDATE sources SET health = ?, last_checked_at = ?, updated_at = ?,
                             version = version + 1
          WHERE key = ?",
-        "UPDATE sources SET health = ?, last_checked_at = ?, updated_at = ?,
+        "UPDATE sources SET health = ?, last_checked_at = ?::timestamptz, updated_at = ?::timestamptz,
                             version = version + 1
          WHERE key = ?",
     );
@@ -836,7 +836,7 @@ pub async fn touch_library_item_synced(db: &Database, item_id: &str) -> Result<(
     let now = now_rfc3339();
     let sql = db.sql(
         "UPDATE library_items SET last_synced_at = ?, updated_at = ? WHERE id = ?",
-        "UPDATE library_items SET last_synced_at = ?, updated_at = ? WHERE id::text = ?",
+        "UPDATE library_items SET last_synced_at = ?::timestamptz, updated_at = ?::timestamptz WHERE id::text = ?",
     );
     run!(db, &sql, |query| {
         query.bind(&now).bind(&now).bind(item_id)
@@ -1088,7 +1088,7 @@ pub async fn set_import_state(
         "UPDATE import_jobs SET state = ?,
                                 library_item_id = COALESCE(?::uuid, library_item_id),
                                 report_json = COALESCE(?, report_json),
-                                updated_at = ?, version = version + 1
+                                updated_at = ?::timestamptz, version = version + 1
          WHERE id::text = ?",
     );
     run!(db, &sql, |query| {
@@ -1507,7 +1507,7 @@ pub async fn set_credential_status(
          WHERE id = ?",
         "UPDATE source_credentials
          SET status = ?, last_checked_at = CASE WHEN ? = 1 THEN ? ELSE last_checked_at END,
-             updated_at = ?, version = version + 1
+             updated_at = ?::timestamptz, version = version + 1
          WHERE id::text = ?",
     );
     run!(db, &sql, |query| {

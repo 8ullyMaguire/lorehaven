@@ -478,7 +478,7 @@ pub async fn set_export_state(db: &Database, id: &str, state: &str) -> Result<()
     let now = now_rfc3339();
     let sql = db.sql(
         "UPDATE export_jobs SET state = ?, updated_at = ?, version = version + 1 WHERE id = ?",
-        "UPDATE export_jobs SET state = ?, updated_at = ?, version = version + 1 WHERE id::text = ?",
+        "UPDATE export_jobs SET state = ?, updated_at = ?::timestamptz, version = version + 1 WHERE id::text = ?",
     );
     run!(db, &sql, |query| { query.bind(state).bind(&now).bind(id) })
         .await
@@ -505,7 +505,7 @@ pub async fn record_output(
          converter_version = ?, error_message = NULL, updated_at = ?, version = version + 1 \
          WHERE id = ?",
         "UPDATE export_jobs SET state = 'ready', output_blob_checksum = ?, output_bytes = ?, \
-         converter_version = ?, error_message = NULL, updated_at = ?, version = version + 1 \
+         converter_version = ?, error_message = NULL, updated_at = ?::timestamptz, version = version + 1 \
          WHERE id::text = ?",
     );
     run!(db, &sql, |query| {
@@ -527,7 +527,7 @@ pub async fn fail_export(db: &Database, id: &str, message: &str) -> Result<()> {
     let sql = db.sql(
         "UPDATE export_jobs SET state = 'failed', error_message = ?, updated_at = ?, \
          version = version + 1 WHERE id = ?",
-        "UPDATE export_jobs SET state = 'failed', error_message = ?, updated_at = ?, \
+        "UPDATE export_jobs SET state = 'failed', error_message = ?, updated_at = ?::timestamptz, \
          version = version + 1 WHERE id::text = ?",
     );
     run!(db, &sql, |query| {
