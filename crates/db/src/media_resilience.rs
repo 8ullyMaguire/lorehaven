@@ -1814,7 +1814,7 @@ pub async fn insert_local_mirror(
                 "INSERT INTO local_mirrors
                     (id, media_reference_id, storage_path, original_url, file_size_bytes,
                      content_type, checksum_sha256, mirrored_by, status, mirrored_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9)",
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9::timestamptz)",
             )
             .bind(id)
             .bind(media_reference_id)
@@ -1968,7 +1968,7 @@ pub async fn insert_ipfs_pin(
             sqlx::query(
                 "INSERT INTO ipfs_pins
                     (id, media_reference_id, cid, pin_service, status, file_size_bytes, pinned_at)
-                 VALUES ($1, $2, $3, $4, 'pinned', $5, $6)",
+                 VALUES ($1, $2, $3, $4, 'pinned', $5, $6::timestamptz)",
             )
             .bind(id)
             .bind(media_reference_id)
@@ -2078,7 +2078,7 @@ pub async fn file_dmca_takedown(
                 "INSERT INTO dmca_takedowns
                     (id, local_mirror_id, claimant_name, claimant_email,
                      original_work_description, complaint_text, status, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)",
+                 VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7::timestamptz)",
             )
             .bind(id)
             .bind(mirror_id)

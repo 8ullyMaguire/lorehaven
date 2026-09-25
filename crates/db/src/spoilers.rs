@@ -28,7 +28,7 @@ pub async fn upsert_reader_progress(
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO reader_work_progress (account, work_id, last_chapter, updated_at)
-                 VALUES ($1, $2, $3, $4)
+                 VALUES ($1::uuid, $2::uuid, $3, $4)
                  ON CONFLICT(account, work_id) DO UPDATE SET last_chapter = excluded.last_chapter, updated_at = excluded.updated_at"
             )
             .bind(account)
@@ -50,7 +50,7 @@ pub async fn get_reader_progress(
 ) -> Result<Option<i64>> {
     let sql = db.sql(
         "SELECT last_chapter FROM reader_work_progress WHERE account = ? AND work_id = ?",
-        "SELECT last_chapter FROM reader_work_progress WHERE account = $1 AND work_id = $2",
+        "SELECT last_chapter FROM reader_work_progress WHERE account = $1::uuid AND work_id = $2::uuid",
     );
     let row = match db.backend() {
         Backend::Sqlite => {
@@ -190,7 +190,7 @@ pub async fn upsert_draft(db: &Database, account: &str, topic_id: &str, body: &s
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO post_drafts (id, account, topic_id, body, updated_at)
-                 VALUES ($1, $2, $3, $4, $5)
+                 VALUES ($1, $2::uuid, $3, $4, $5)
                  ON CONFLICT(account, topic_id) DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at"
             )
             .bind(uuid::Uuid::new_v4().to_string())
@@ -209,7 +209,7 @@ pub async fn upsert_draft(db: &Database, account: &str, topic_id: &str, body: &s
 pub async fn get_draft(db: &Database, account: &str, topic_id: &str) -> Result<Option<String>> {
     let sql = db.sql(
         "SELECT body FROM post_drafts WHERE account = ? AND topic_id = ?",
-        "SELECT body FROM post_drafts WHERE account = $1 AND topic_id = $2",
+        "SELECT body FROM post_drafts WHERE account = $1::uuid AND topic_id = $2",
     );
     let row = match db.backend() {
         Backend::Sqlite => {
@@ -234,7 +234,7 @@ pub async fn get_draft(db: &Database, account: &str, topic_id: &str) -> Result<O
 pub async fn delete_draft(db: &Database, account: &str, topic_id: &str) -> Result<bool> {
     let sql = db.sql(
         "DELETE FROM post_drafts WHERE account = ? AND topic_id = ?",
-        "DELETE FROM post_drafts WHERE account = $1 AND topic_id = $2",
+        "DELETE FROM post_drafts WHERE account = $1::uuid AND topic_id = $2",
     );
     let affected = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
@@ -276,7 +276,7 @@ pub async fn set_warning_pref(
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO reader_warning_prefs (account, warning_type, action)
-                 VALUES ($1, $2, $3)
+                 VALUES ($1::uuid, $2, $3)
                  ON CONFLICT(account, warning_type) DO UPDATE SET action = excluded.action",
             )
             .bind(account)
@@ -296,7 +296,7 @@ pub async fn list_warning_prefs(
 ) -> Result<Vec<(WarningType, WarningAction)>> {
     let sql = db.sql(
         "SELECT warning_type, action FROM reader_warning_prefs WHERE account = ?",
-        "SELECT warning_type, action FROM reader_warning_prefs WHERE account = $1",
+        "SELECT warning_type, action FROM reader_warning_prefs WHERE account = $1::uuid",
     );
     let rows = match db.backend() {
         Backend::Sqlite => {

@@ -293,15 +293,15 @@ pub async fn media_reference_collaborative_recommendations(
                      SELECT DISTINCT wmr2.media_reference_id
                      FROM work_media_references wmr2
                      JOIN bookmarks b ON b.subject_id = wmr2.work_id AND b.subject_type = 'work'
-                     WHERE b.account_id = $1
+                     WHERE b.account_id = $1::uuid
                  )
                  AND wmr.work_id NOT IN (
-                     SELECT subject_id FROM bookmarks WHERE account_id = $1 AND subject_type = 'work'
+                     SELECT subject_id FROM bookmarks WHERE account_id = $1::uuid AND subject_type = 'work'
                  )
                  AND wmr.work_id NOT IN (
                      SELECT w.id FROM works w
                      JOIN pseuds p ON p.id = w.owner_pseud_id
-                     WHERE p.account_id = $1
+                     WHERE p.account_id = $1::uuid
                  )
                  AND wmr.deleted_at IS NULL
                  GROUP BY wmr.work_id

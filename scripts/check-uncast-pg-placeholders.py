@@ -257,6 +257,85 @@ def values_expressions(sql: str) -> list[str]:
     return out
 
 
+def add_missing_casts(sql: str, known: dict[str, dict[str, str]]) -> str:
+    """Return `sql` with a cast added to every placeholder that needs one.
+
+    Split out from the reporting so the fix and the check read the same rules.
+    Only placeholders proven bare get a cast, and each is cast to the type its
+    own column was declared with -- an `::text` here would be the defect the
+    checker exists to catch, not a fix for it.
+
+    Edits are collected and applied last, right to left. Mutating the string
+    while iterating its matches shifts every later offset, and the result was
+    `work$2::uuidd` -- a column name cut in half by a cast landing inside it.
+    """
+    edits: list[tuple[int, int, str]] = []
+    for match in re.finditer(
+        r"([a-z_][a-z0-9_]*)\s*(?:=|<>|!=|>|<|like|ilike|in)\s*(\$\d+)(?!\s*::)",
+        sql,
+        re.IGNORECASE,
+    ):
+        col, placeholder = match.group(1).lower(), match.group(2)
+        for columns in known.values():
+            cast = _cast_needed(columns.get(col))
+            if cast:
+                edits.append((match.start(2), match.end(2), f"{placeholder}::{cast}"))
+                break
+
+    # INSERT: pair each column with its VALUES position and cast the bare ones.
+    # Walks the real expression spans so a comma inside `date_trunc('day', ?)`
+    # is not mistaken for a column boundary.
+    order = insert_column_order(sql)
+    values = values_expressions(sql)
+    if order and values and len(order) == len(values):
+        vm = VALUES_START.search(sql)
+        assert vm is not None
+        for col, expr in zip(order, values):
+            if not is_bare_bind(expr):
+                continue
+            cast = None
+            for columns in known.values():
+                cast = _cast_needed(columns.get(col))
+                if cast:
+                    break
+            if cast:
+                bind = expr.strip()
+                at = sql.index(bind, vm.end()) if bind in sql[vm.end():] else -1
+                if at >= 0:
+                    edits.append((at, at + len(bind), f"{bind}::{cast}"))
+
+    out = sql
+    for start, end, replacement in sorted(edits, reverse=True):
+        out = out[:start] + replacement + out[end:]
+    return out
+
+
+def _cast_needed(coltype: str | None) -> str | None:
+    """The cast a column of this declared type needs, or None if it needs none."""
+    if not coltype or _accepts_text(coltype):
+        return None
+    return PG_CAST.get(coltype.strip().lower())
+
+
+# The PostgreSQL type to cast a bind to, keyed by the type the schema declares.
+PG_CAST = {
+    "uuid": "uuid",
+    "integer": "int4",
+    "bigint": "int8",
+    "smallint": "int2",
+    "double precision": "float8",
+    "real": "float4",
+    "boolean": "bool",
+    "numeric": "numeric",
+    "date": "date",
+    "timestamptz": "timestamptz",
+    "timestamp": "timestamp",
+    "bytea": "bytea",
+    "jsonb": "jsonb",
+    "json": "json",
+}
+
+
 def _accepts_text(coltype: str) -> bool:
     base = coltype.split("(")[0].strip()
     return base not in NEEDS_EXPLICIT_CAST
@@ -283,6 +362,69 @@ def scan(root: pathlib.Path, schema: dict[str, dict[str, str]]) -> list[tuple[pa
     return hits
 
 
+SCHEMA = {
+    "works": {"id": "uuid", "updated_at": "text", "title": "text"},
+    "roadmap_cards": {"id": "text", "elo_rating": "double precision",
+                      "updated_at": "timestamptz"},
+    "progress": {"account": "uuid", "work_id": "uuid", "last_chapter": "integer",
+                 "updated_at": "text"},
+}
+
+# Each case is (SQL, should_report, note). The negative cases are the point:
+# a checker that flags correct SQL gets muted, and then it flags nothing.
+SELF_TEST_CASES: list[tuple[str, bool, str]] = [
+    ("SELECT title FROM works WHERE id = $1", True,
+     "a UUID column with a bare bind"),
+    ("SELECT title FROM works WHERE id = $1::uuid", False,
+     "already cast"),
+    ("UPDATE works SET updated_at = $1 WHERE id = $2", True,
+     "the timestamp needs a cast but the id is bare"),
+    ("UPDATE works SET updated_at = $1 WHERE id = $2::uuid", False,
+     "both handled"),
+    ("SELECT title FROM works WHERE id = $1::uuid -- ::", False,
+     "a cast elsewhere must not decide this statement"),
+    ("UPDATE roadmap_cards SET elo_rating = $1, updated_at = $2 WHERE id = $3",
+     True, "float8 and timestamptz both need casts"),
+    ("INSERT INTO progress (account, work_id, last_chapter, updated_at) "
+     "VALUES ($1, $2, $3, $4)", True,
+     "INSERT: only the typed columns get a cast"),
+    ("INSERT INTO progress (account, work_id, last_chapter, updated_at) "
+     "VALUES ($1::uuid, $2::uuid, $3, $4)", False,
+     "INSERT: already cast"),
+]
+
+
+def self_test() -> int:
+    """Prove the rules on statements whose correct answer is known.
+
+    Run in CI. The guard this file used to carry -- skip any statement with a
+    `::` anywhere -- was wrong and the suite could not say so, because there was
+    no suite.
+    """
+    failures = []
+    for sql, should_report, note in SELF_TEST_CASES:
+        known = {t: SCHEMA[t] for t in tables_in(sql) if t in SCHEMA}
+        reported = offending_lines(sql, known)
+        if reported != should_report:
+            failures.append(
+                f"{'false positive' if reported else 'false negative'}: {note}\n  {sql}")
+        # A fix must both clear the report and survive a second pass.
+        if should_report:
+            fixed = add_missing_casts(sql, known)
+            if offending_lines(fixed, known):
+                failures.append(f"fix left a site behind: {sql}\n  {fixed}")
+            if add_missing_casts(fixed, known) != fixed:
+                failures.append(f"fix is not idempotent: {sql}\n  {fixed}")
+
+    for failure in failures:
+        print(f"FAIL {failure}")
+    if failures:
+        print(f"\n{len(failures)} of {len(SELF_TEST_CASES)} self-test cases failed")
+        return 1
+    print(f"self-test: {len(SELF_TEST_CASES)} cases passed")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", type=pathlib.Path,
@@ -290,7 +432,12 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--migrations", type=pathlib.Path,
                         default=pathlib.Path("migrations/postgres"),
                         help="directory holding the PostgreSQL DDL")
+    parser.add_argument("--self-test", action="store_true",
+                        help="check the checker's own rules and exit")
     args = parser.parse_args(argv[1:])
+
+    if args.self_test:
+        return self_test()
 
     schema = load_schema(args.migrations)
     if not schema:

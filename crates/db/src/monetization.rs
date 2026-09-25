@@ -435,7 +435,7 @@ pub async fn grant_entitlement(
                     .execute(db.sqlite_pool().expect("sqlite")).await?;
             }
             Backend::Postgres => {
-                sqlx::query("UPDATE work_entitlements SET source_payment_id = $1, expires_at = $2, granted_at = $3 WHERE id = $4")
+                sqlx::query("UPDATE work_entitlements SET source_payment_id = $1, expires_at = $2, granted_at = $3 WHERE id = $4::uuid")
                     .bind(source_payment_id).bind(expires_at).bind(&now).bind(&id)
                     .execute(db.postgres_pool().expect("postgres")).await?;
             }

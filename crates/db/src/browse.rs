@@ -32,7 +32,7 @@ pub async fn set_sort_preference(
         .into(),
         r#"
         INSERT INTO reader_sort_preferences (pseud_id, surface, sort_value, updated_at)
-        VALUES ($1, $2, $3, now())
+        VALUES ($1::uuid, $2, $3, now())
         ON CONFLICT (pseud_id, surface) DO UPDATE SET
             sort_value = EXCLUDED.sort_value,
             updated_at = EXCLUDED.updated_at
@@ -82,7 +82,7 @@ pub async fn get_sort_preference(
         }
         Backend::Postgres => {
             sqlx::query_as::<_, SortPreferenceRow>(
-                "SELECT pseud_id, surface, sort_value, updated_at FROM reader_sort_preferences WHERE pseud_id = $1 AND surface = $2",
+                "SELECT pseud_id, surface, sort_value, updated_at FROM reader_sort_preferences WHERE pseud_id = $1::uuid AND surface = $2",
             )
             .bind(pseud_id)
             .bind(surface)
@@ -104,11 +104,13 @@ pub async fn delete_sort_preference(db: &Database, pseud_id: &str, surface: &str
                 .await?;
         }
         Backend::Postgres => {
-            sqlx::query("DELETE FROM reader_sort_preferences WHERE pseud_id = $1 AND surface = $2")
-                .bind(pseud_id)
-                .bind(surface)
-                .execute(db.postgres_pool().expect("postgres pool"))
-                .await?;
+            sqlx::query(
+                "DELETE FROM reader_sort_preferences WHERE pseud_id = $1::uuid AND surface = $2",
+            )
+            .bind(pseud_id)
+            .bind(surface)
+            .execute(db.postgres_pool().expect("postgres pool"))
+            .await?;
         }
     }
     Ok(())

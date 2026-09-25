@@ -57,6 +57,11 @@ jobs:
       - name: Timestamp-cast fixer self-test
         run: python3 scripts/fix-timestamptz-binds.py --self-test
 
+      # The checker's own rules, on statements whose correct answer is known.
+      # It carried a `:: anywhere` guard that was wrong, and nothing said so.
+      - name: Uncast-placeholder checker self-test
+        run: python3 scripts/check-uncast-pg-placeholders.py --self-test
+
       # No uncast placeholder may bind text to a UUID, TIMESTAMPTZ or JSONB
       # column. Exits non-zero while any remain, so this stays red until the
       # $n sites in permission.rs, rating_integrity.rs and roles.rs are fixed.

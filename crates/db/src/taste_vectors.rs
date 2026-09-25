@@ -44,7 +44,7 @@ async fn fetch_taste_vector_postgres(
     let row = sqlx::query(
         "SELECT taste_vector, taste_centroid_distance::float8,
                 to_char(taste_vector_computed_at, 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') as computed_at
-         FROM accounts WHERE id = $1",
+         FROM accounts WHERE id = $1::uuid",
     )
     .bind(account_id)
     .fetch_optional(pool)
@@ -95,7 +95,7 @@ async fn store_taste_vector_postgres(
     let vec_json = serde_json::to_value(vector).unwrap_or(serde_json::json!([]));
     sqlx::query(
         "UPDATE accounts SET taste_vector = $1, taste_centroid_distance = $2,
-         taste_vector_computed_at = $3::timestamptz WHERE id = $4",
+         taste_vector_computed_at = $3::timestamptz WHERE id = $4::uuid",
     )
     .bind(&vec_json)
     .bind(distance)
@@ -346,7 +346,7 @@ pub async fn record_arena_ballot(
                 // PostgreSQL, so the placeholders need casts. Without them the
                 // driver sends them as text and the insert fails 42804.
                 "INSERT INTO arena_ballots (account_id, best_work_id, worst_work_id, reason_tags)
-                 VALUES ($1::uuid, $2::uuid, $3::uuid, $4)",
+                 VALUES ($1::uuid, $2::uuid, $3::uuid, $4::jsonb)",
             )
             .bind(account_id)
             .bind(best_work_id)

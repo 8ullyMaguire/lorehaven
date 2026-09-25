@@ -372,7 +372,7 @@ async fn add_kudos(db: &Database, work_id: &str, account_id: &str) -> Result<()>
     let sql = db.sql(
         "INSERT INTO work_kudos (work_id, account_id, created_at) VALUES (?, ?, datetime('now'))
          ON CONFLICT(work_id, account_id) DO NOTHING",
-        "INSERT INTO work_kudos (work_id, account_id, created_at) VALUES ($1, $2, now())
+        "INSERT INTO work_kudos (work_id, account_id, created_at) VALUES ($1::uuid, $2::uuid, now())
          ON CONFLICT(work_id, account_id) DO NOTHING",
     );
     match db.backend() {
@@ -501,7 +501,7 @@ pub async fn recompute_and_store(db: &Database, work_id: &str) -> Result<WorkMet
         "INSERT INTO work_metric_aggregates
            (work_id, views, complete_reads, reactions, kudos, bookmarks,
             collection_adds, reviews, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+         VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, now())
          ON CONFLICT(work_id) DO UPDATE SET
            views = excluded.views,
            complete_reads = excluded.complete_reads,
