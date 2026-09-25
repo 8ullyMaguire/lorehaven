@@ -2494,7 +2494,55 @@ Test both databases for correct binding, negative-filter semantics, query parser
 
 Priority 4 (admin-enjoyable without monothematic) is centered here.
 
-## 16.1 Baseline engines
+## 16.1.5 User-preferred engine (new)
+
+Every user may select a single recommendation engine (or none) that overrides the instance default for all discovery surfaces.
+
+- Configuration: the per-account setting `discovery.rec_engine` (string, registered in `domain::settings`). The instance-level counterpart is `DiscoveryConfig::rec_enabled_strategies`; the empty string means "use the instance default", which is what distinguishes "no choice made" from "chose the engine that happens to be the default".
+- Default: empty → use the instance `DiscoveryConfig::rec_mode`.
+- Validation: if set, must match a key in the pluggable strategy registry (if `rec_mode == "pluggable"`).
+- Scope: all discovery endpoints: `/discover`, `/works/{id}`, `/api/v1/discovery`, `/api/v1/feeds`, `/api/v1/search`, `/api/v1/roadmap`, `/api/v1/admin/discovery`.
+- Persistence: tied to the user’s pseud; changing pseud resets to instance default.
+- Overrides: if an admin declares instance-wide forced engine, it takes precedence; otherwise, the user's choice is respected.
+
+**API example (POST /auth/me):**
+
+```http
+PATCH /api/v1/auth/me
+{
+  "preferred_rec_engine": "tag_graph"
+}
+```
+
+**UI:** Settings → Recommendations → "Select engine" combobox. The instance’s available engines are listed with brief descriptions.
+
+**Behavior:** The preferred engine is cached server-side, invalidated on logout, and respected by both legacy and pluggable discovery modes. When a user’s choice matches the legacy mode’s `discovery.rec_mode`, the default behavior is unchanged.
+
+**Error responses:** 400 if the chosen engine is not available (e.g., disabled by `rec_enabled_strategies`).
+
+**Implementation steps (as built, M52-09):**
+1. Registered `discovery.rec_engine` as a per-account `SettingKeyDef`, resolving
+   against the strategy registry.
+2. `rec_preference::resolve_strategies` reads the account setting, falls back to
+   the instance list when it is empty, and returns the merged strategy set.
+3. `rec_engine::build_registry` derives the registry from that set, so every
+   discovery surface inherits the preference without re-reading the setting.
+
+**Test coverage:** unit tests for engine resolution; E2E test: sign in as author A, set engine "author_graph”, publish work W, verify W appears in the next feed for author A under that engine.
+
+**Dependency:** Requires the pluggable strategy registry (`rec_mode == "pluggable"`) to be implemented (M52-08). If not, the field is ignored and discovery falls back to instance default.
+
+**Operator controls:** Via `rec_enabled_strategies` and `rec_mode`. Administrators may force a default engine via config; user preference never overrides that.
+
+**Security:** User profile mutations use CSRF tokens. Permission enforced by `RequireSession`.
+
+**Logging:** Include engine choice in audit logs (`discovery.preferred_engine`) with user ID.
+
+**Metrics:** Track usage of user-preferred engines in `discovery.preferred_engine_hits` to identify power-user behavior.
+
+**Future:** Engine selection may extend to feed composition, recommendation feeds, and the public roadmap.
+
+---
 
 Recent, trending by time window, content similarity, also bookmarked, similar by bookmarks, Blind Date, user-preference matching, community-suggested similarity, completion-rate weighted, mood-matched, cross-fandom dynamic matching, complete-and-under-read.
 

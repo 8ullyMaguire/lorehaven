@@ -378,7 +378,11 @@ pub struct DiscoveryConfig {
     pub rec_rrf_k: f64,
     /// Per-strategy resource ceiling: max results each strategy may contribute.
     pub rec_per_strategy_cap: usize,
-    /// Enabled strategy names for pluggable mode. Empty = all enabled.
+    /// Enabled strategy names for the pluggable mode. Empty = all enabled.
+    ///
+    /// This is the *instance* choice. A reader's own override is the
+    /// `discovery.rec_engine` per-account setting, which falls back to this
+    /// when unset; see `rec_preference::resolve_strategies`.
     pub rec_enabled_strategies: Vec<String>,
 }
 
