@@ -39,6 +39,35 @@ Port the FicNexus rec-platform design onto `discovery`.
 - Recipes (§16.3) compose over strategies; taste gravity / diversity /
   ordering contract apply after the blend, in both modes.
 - Rows: M52-01…M52-08. Depends on: nothing open. ~1 week.
+  M52-01…07 are built (8 strategies, RRF blend, recipe composition, both
+  modes wired). M52-08 (shadow-mode evaluation) is open.
+
+### M52-08 — Per-user recommendation engine preference (spec §16.1.5, new)
+
+A reader may choose a recommendation engine, and that choice is remembered and
+honoured everywhere a recommendation is produced. The instance default remains
+the fallback; the user's choice overrides it, and an operator may pin an engine
+that overrides both.
+
+- One preference per **pseud**, not per account: a reader who wears two faces
+  may want different recommendations from each, and a choice attached to the
+  account would silently apply to both.
+- Persisted in a `user_settings` key/value table (per pseud), not as a column:
+  the setting is one of several per-pseud preferences, and a column would have
+  to be re-migrated for each.
+- Validated against the enabled strategy set at write time. An unavailable
+  engine is a `400` with the accepted values named, never a silent fallback —
+  the same reasoning as §0.4.7's instance mode.
+- Every surface that produces a recommendation reads the preference through
+  one resolver: discovery, feeds, search-as-you-type, the arena, and the
+  author's own "more like this".
+- Empties are represented as "instance default", not as a null engine.
+
+**Note on an earlier attempt:** commits `72ee3e3`–`827e25a` drafted this but
+removed `rec_enabled_strategies` from `DiscoveryConfig` while
+`rec_engine.rs` still read it, which did not compile. That draft was reverted
+in `d86d081`'s push; the spec intent survives here and the implementation
+starts from a green tree.
 
 ### M53 — Adapter porting, batch 1 (spec §11.16, new)
 
