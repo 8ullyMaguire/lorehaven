@@ -105,6 +105,23 @@ format = "pretty"
 # of readers that its author withdrew.
 # archive_fallback = false
 
+# Instance identity and accessibility (spec §0.4.6, §0.4.7).
+[instance]
+# Preset name: open_library, curated_boutique, admin_garden, genre_haven,
+# experimental_lab, custom. (spec §0.6)
+# preset = "curated_boutique"
+
+# Who may reach this instance without signing in:
+#   public        — anyone may browse. Writing always needs an account.
+#   walled_garden — browsing needs an account. The landing page and /api/v1/meta
+#                   stay open, because a reader who cannot see the sign-in
+#                   link cannot use it.
+#   private       — the operator only. For maintenance and isolated development.
+#
+# An unrecognised value stops startup rather than falling back to `public`: a
+# misspelling that silently opened the instance would be found by a stranger.
+# mode = "public"
+
 # Theme mode and gravity settings (spec §0.4.6).
 #
 # `mode` selects the instance's discovery posture:

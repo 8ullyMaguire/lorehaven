@@ -264,7 +264,10 @@ async fn direct_door_eligible(
     ) else {
         return false;
     };
-    let mut policy = AccessPolicy::default();
+    // A walled-garden or private instance closes the media doors to anonymous
+    // visitors too; media is content, so it honors the same posture as a work
+    // rather than a second policy of its own (spec §7).
+    let mut policy = state.config().instance.mode.access_policy();
     if let Some(user) = session {
         let Ok(settings) =
             lorehaven_db::sessions::content_settings(state.db(), user.account_id).await

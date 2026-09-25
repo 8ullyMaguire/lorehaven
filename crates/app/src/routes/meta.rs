@@ -54,6 +54,10 @@ struct TopicSummary {
 /// what the server will refuse.
 #[derive(Debug, Serialize)]
 struct PolicySummary {
+    /// The instance's accessibility posture, spelled out (spec §0.4.7). The
+    /// boolean below is its effect on anonymous reading; the two travel
+    /// together so a client never has to infer one from the other.
+    instance_mode: &'static str,
     anonymous_reading: bool,
     anonymous_max_rating: &'static str,
     unknown_age_max_rating: &'static str,
@@ -68,7 +72,10 @@ async fn meta(
     MaybeSession(_user): MaybeSession,
 ) -> Json<MetaResponse> {
     let config = state.config();
-    let policy = lorehaven_domain::policy::AccessPolicy::default();
+    // The summary is how a client (and a person reading the raw JSON) learns
+    // that the instance is closed to anonymous readers, so it must reflect the
+    // configured posture rather than the library default (spec §0.4.7).
+    let policy = config.instance.mode.access_policy();
 
     Json(MetaResponse {
         name: config.site.name.clone(),
@@ -78,6 +85,7 @@ async fn meta(
         environment: config.environment.as_str(),
         base_url: config.site.base_url.clone(),
         policy: PolicySummary {
+            instance_mode: config.instance.mode.as_str(),
             anonymous_reading: policy.anonymous_reading_enabled,
             anonymous_max_rating: rating_name(policy.anonymous_max_rating),
             unknown_age_max_rating: rating_name(policy.unknown_age_max_rating),

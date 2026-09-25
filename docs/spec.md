@@ -127,6 +127,70 @@ Adaptive mode requires `long_term_users` in `influence_sources`; startup validat
 
 **Transparency.** `/api/v1/meta` surfaces the mode and influence sources (by kind only, not member identities). Adaptive mode additionally publishes a coarse histogram of topic-pull distribution: decile buckets of works by their topic-gravity score. This is enough to audit drift without enabling per-work gaming.
 
+## 0.4.7 Instance accessibility mode
+
+An instance declares who may reach it without identifying themselves. This is
+one axis; a work's own `visibility` (§8) is the other, and the effective access
+to any particular work is the two combined by the one eligibility service
+(`can_access_content`, spec §7) rather than decided twice in two places.
+
+### The three modes
+
+| Mode | Anonymous browsing | Anonymous reading | Who is admitted |
+|------|--------------------|-------------------|-----------------|
+| `public` (default) | Allowed | Allowed up to the configured rating ceiling | Everyone |
+| `walled_garden` | Refused with `401` | Refused | Everyone with an account |
+| `private` | Refused with `401` | Refused | The operator only |
+
+`public` is the default because §7 requires anonymous reading of suitable
+public fiction to stay available; an instance that closed that door by default
+would be a different product from the one specified here.
+
+### Configuration
+
+```toml
+[instance]
+mode = "walled_garden"   # public | walled_garden | private
+```
+
+An unrecognised value stops startup. This is deliberate: a misspelling that
+silently fell back to `public` would open an instance its operator believed
+closed, and the person who could detect it — a stranger — is the last to be
+told.
+
+### What stays open in a closed instance
+
+Two surfaces remain reachable without a session in every mode except `private`:
+the landing page and `GET /api/v1/meta`. A reader who cannot see that sign-in
+exists cannot sign in, and a client that cannot read the instance's policy
+cannot know what it will be refused. `meta` therefore reports the mode
+explicitly (`policy.instance_mode`) alongside its effect
+(`policy.anonymous_reading`), so a client never has to infer one from the other.
+
+### Relationship to work visibility
+
+The instance mode sets the floor; the work's own visibility can only be
+narrower, never wider. A `restricted` work behind a `private` instance is still
+closed to every non-operator; a `public` work on a `walled_garden` instance is
+still closed to anonymous readers. `private` is an operator posture for
+maintenance and isolated development, not a per-work setting, and it is
+deliberately the same word the work axis already uses for a different thing —
+which is why the two are named `instance.mode` and `works.visibility` and never
+both called "private" in configuration.
+
+### Enforcement
+
+No middleware makes this decision on its own. The mode is translated once into
+an `AccessPolicy` (`InstanceMode::access_policy`), whose
+`anonymous_reading_enabled` flag is the field the eligibility service already
+reads. Every surface that shows content therefore honours the instance mode by
+construction, and a new surface cannot forget: it gets the default policy from
+one place, and the mode from the same one.
+
+`private` additionally requires a trust level of TL>5 on every request. That
+rule is a governance rule, not a content rule, and it is enforced where
+operator authorization already is rather than duplicated in the content path.
+
 ---
 
 # 1. Ground Rules for Implementation

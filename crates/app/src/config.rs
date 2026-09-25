@@ -537,17 +537,97 @@ impl Default for SignalsConfig {
     }
 }
 
-/// Instance preset (spec §0.6).
+/// Instance preset (spec §0.6) and accessibility posture (spec §0.4.7).
 #[derive(Debug, Clone)]
 pub struct InstanceConfig {
     /// Preset name: open_library, curated_boutique, admin_garden, genre_haven, experimental_lab, custom.
     pub preset: String,
+    /// Who may reach the instance without signing in.
+    pub mode: InstanceMode,
+}
+
+/// How widely an instance admits readers who have not identified themselves
+/// (spec §0.4.7).
+///
+/// The name is deliberately about the *instance*, not the work. A work's own
+/// `visibility` column is the second axis and is unchanged by this setting; the
+/// effective access to a work is the two combined by the one eligibility service
+/// in `lorehaven_domain::policy`.
+///
+/// `Public` is the default because spec §7 requires anonymous reading of
+/// suitable public fiction to stay available. `WalledGarden` keeps that reading
+/// but puts a sign-in wall in front of it. `Private` is the operator's
+/// maintenance posture: the instance answers nobody but an administrator, and
+/// says so rather than pretending to be an empty public library.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstanceMode {
+    /// Anyone may browse. Writes still require a session.
+    Public,
+    /// Browsing requires a session. The landing page and `/api/v1/meta` stay
+    /// open, because a reader who cannot even see that sign-in exists cannot
+    /// sign in.
+    WalledGarden,
+    /// The instance is closed to everyone but the operator.
+    Private,
+}
+
+impl InstanceMode {
+    /// Canonical configuration spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Public => "public",
+            Self::WalledGarden => "walled_garden",
+            Self::Private => "private",
+        }
+    }
+
+    /// Parse a configuration value, refusing anything unrecognised.
+    ///
+    /// An operator typo is a startup error rather than a silently ignored line:
+    /// a misspelled mode that fell back to `public` would open an instance the
+    /// operator believed closed.
+    pub fn parse(raw: &str) -> Result<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "public" | "open" => Ok(Self::Public),
+            "walled_garden" | "walled-garden" | "walled" => Ok(Self::WalledGarden),
+            "private" | "closed" => Ok(Self::Private),
+            other => anyhow::bail!(
+                "unknown instance mode {other:?}; expected public, walled_garden or private"
+            ),
+        }
+    }
+
+    /// Whether a request with no session may reach browsing surfaces at all.
+    ///
+    /// `Private` refuses even a signed-in reader; the operator-only rule is
+    /// enforced by the trust level, not here.
+    #[must_use]
+    pub const fn allows_anonymous_browsing(self) -> bool {
+        matches!(self, Self::Public)
+    }
+
+    /// The eligibility policy this mode implies.
+    #[must_use]
+    pub fn access_policy(self) -> lorehaven_domain::policy::AccessPolicy {
+        lorehaven_domain::policy::AccessPolicy {
+            anonymous_reading_enabled: self.allows_anonymous_browsing(),
+            ..lorehaven_domain::policy::AccessPolicy::default()
+        }
+    }
+}
+
+impl Default for InstanceMode {
+    fn default() -> Self {
+        Self::Public
+    }
 }
 
 impl Default for InstanceConfig {
     fn default() -> Self {
         Self {
             preset: "curated_boutique".to_string(),
+            mode: InstanceMode::default(),
         }
     }
 }
@@ -1604,6 +1684,15 @@ impl Config {
                 let i = file.instance.unwrap_or_default();
                 InstanceConfig {
                     preset: i.preset.unwrap_or_else(|| "curated_boutique".to_string()),
+                    // A misspelled mode stops startup rather than falling back to
+                    // the permissive default, so an operator who believed they
+                    // had closed the instance finds out.
+                    mode: i
+                        .mode
+                        .as_deref()
+                        .map(InstanceMode::parse)
+                        .transpose()?
+                        .unwrap_or_default(),
                 }
             },
             // --- meta_ranker (spec §9.10) --------------------------------------
@@ -1995,6 +2084,8 @@ struct SignalsSection {
 #[serde(deny_unknown_fields)]
 struct InstanceSection {
     preset: Option<String>,
+    /// Who may reach the instance without signing in (spec §0.4.7).
+    mode: Option<String>,
 }
 
 /// The `[meta_ranker]` table (spec §9.10): meta-ranker settings.
@@ -2760,5 +2851,101 @@ mode = "quantum"
         )
         .expect("loads");
         assert_eq!(config.theme.mode, "quantum");
+    }
+
+    #[test]
+    fn the_default_instance_is_public() {
+        // Spec §7 requires anonymous reading of suitable public fiction to stay
+        // available, so a fresh instance must not be closed to readers.
+        let config = Config::development_defaults();
+        assert_eq!(config.instance.mode, InstanceMode::Public);
+        assert!(config.instance.mode.access_policy().anonymous_reading_enabled);
+    }
+
+    #[test]
+    fn a_walled_garden_closes_anonymous_reading_and_nothing_else() {
+        // The rating ceilings are the same as the default: a sign-in wall is a
+        // wall in front of the same library, not a different library.
+        let public = InstanceMode::Public.access_policy();
+        let walled = InstanceMode::WalledGarden.access_policy();
+        assert!(public.anonymous_reading_enabled);
+        assert!(!walled.anonymous_reading_enabled);
+        assert_eq!(walled.anonymous_max_rating, public.anonymous_max_rating);
+        assert_eq!(walled.adult_max_rating, public.adult_max_rating);
+    }
+
+    #[test]
+    fn private_mode_is_at_least_as_closed_as_a_walled_garden() {
+        assert!(!InstanceMode::Private.access_policy().anonymous_reading_enabled);
+    }
+
+    #[test]
+    fn instance_modes_round_trip_through_their_config_spelling() {
+        for mode in [
+            InstanceMode::Public,
+            InstanceMode::WalledGarden,
+            InstanceMode::Private,
+        ] {
+            let parsed = InstanceMode::parse(mode.as_str()).expect("parses");
+            assert_eq!(parsed, mode);
+        }
+    }
+
+    #[test]
+    fn an_unrecognised_instance_mode_is_a_startup_error() {
+        // A typo that fell back to `public` would open an instance the operator
+        // believed closed, so this must refuse rather than default.
+        let error = InstanceMode::parse("wall_garden").expect_err("must refuse");
+        assert!(
+            error.to_string().contains("walled_garden"),
+            "the message must name the accepted values: {error}"
+        );
+    }
+
+    #[test]
+    fn the_instance_mode_loads_from_the_configuration_file() {
+        let config = load_from(
+            "walled",
+            r#"
+[instance]
+mode = "walled_garden"
+"#,
+        )
+        .expect("loads");
+        assert_eq!(config.instance.mode, InstanceMode::WalledGarden);
+        assert!(!config.instance.mode.access_policy().anonymous_reading_enabled);
+    }
+
+    #[test]
+    fn a_misspelled_mode_in_the_configuration_file_refuses_to_load() {
+        let error = load_from(
+            "wall-typo",
+            r#"
+[instance]
+mode = "wall_garden"
+"#,
+        )
+        .expect_err("must refuse");
+        assert!(
+            error.to_string().contains("walled_garden"),
+            "the message must name the accepted values: {error}"
+        );
+    }
+
+    #[test]
+    fn the_preset_survives_being_read_alongside_the_mode() {
+        // The two instance settings are independent: adding a mode must not
+        // cost an operator the preset they already declared.
+        let config = load_from(
+            "both",
+            r#"
+[instance]
+preset = "genre_haven"
+mode = "private"
+"#,
+        )
+        .expect("loads");
+        assert_eq!(config.instance.preset, "genre_haven");
+        assert_eq!(config.instance.mode, InstanceMode::Private);
     }
 }

@@ -993,8 +993,10 @@ pub(crate) async fn reading_decision(
         via_deep_link: true,
     };
 
-    let policy = AccessPolicy::default();
-    let _ = state;
+    // The instance's own posture is part of the eligibility answer: a walled
+    // garden refuses an anonymous reader exactly as a `restricted` work does,
+    // and the two must not be decided in different places (spec §7).
+    let policy = state.config().instance.mode.access_policy();
 
     if actor_is_contributor {
         return Reading::Contributor;
