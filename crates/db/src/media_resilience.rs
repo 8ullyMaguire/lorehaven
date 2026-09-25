@@ -220,10 +220,10 @@ pub async fn find_media_reference_by_content_hash(
                 created_at, updated_at
          FROM media_references WHERE content_hash = ?"
             .to_string(),
-        // `id` is read back into a String: cast to text, or sqlx refuses to
-        // decode UUID into String.
-        // Row reader takes Strings: `id` is UUID and the three timestamps are
-        // TIMESTAMPTZ on PostgreSQL, so both need casting.
+        // The row reader takes Strings, so every column PostgreSQL does not
+        // already store as text has to be cast: `id` is UUID, the three
+        // timestamps are TIMESTAMPTZ, `content_notes` is JSONB, and the
+        // dimensions are INT4. The SQLite arm needs none of this.
         "SELECT id::text, perceptual_hash, content_hash, media_kind,
                 first_seen_at::text, width::bigint, height::bigint,
                 duration_seconds::bigint, format,
