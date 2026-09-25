@@ -1353,6 +1353,55 @@ on a young instance, the whole exchange is an endpoint that answers empty.
 
 ---
 
+## 2026-09-25 — A false clean gate: 30 clippy warnings hidden by `2>/dev/null`
+
+**A previous handoff claimed `cargo clippy --workspace --all-targets` was
+clean. It was not.** The command was `cargo clippy ... 2>/dev/null | grep -cE
+'^(warning|error)'`. rustc writes warnings to **stderr**, so the pipe read an
+empty stdout and returned 0. The gate was measuring nothing, and the 30
+warnings had been present the whole time.
+
+Re-measured with `2>&1`: **30 warnings, 0 errors.** Three were real defects.
+
+| Defect | Why it mattered |
+|---|---|
+| `media_resilience::find_matching_standing_bounties` took a `media_reference_id` it never used | Its doc comment promised "bounties that match a given media reference"; the table has no such column, so the comment described behaviour that did not exist |
+| `longevity::half_life_map` built placeholders with `if i == 0 { "" } else { "" }` | Both arms empty. It emitted `?, ?, ?` and worked by accident; replaced with the house `library::placeholders` helper |
+| `media_resilience::find_by_perceptual_hash` accepted a `max_distance` and ignored it | A caller passing a large threshold got exact matches only, while the signature implied a fuzzy search. Both callers pass `0`, so behaviour is unchanged; the doc comment now says the threshold is not honoured |
+
+Plus a test that had never run: `domain::spoilers::test_display` had lost its
+`#[test]` attribute, so its Display assertions were dead code. Clippy flagged
+it correctly; the first fix attempt wrongly assumed the attribute was already
+there and produced a duplicate.
+
+The remaining 21 were mechanical: five `#[allow(clippy::too_many_arguments)]`
+attributes a previous pass had detached from their functions and then deleted
+as formatting nits, six blank lines after outer attributes, two never-read
+assignments, a manual `Default` impl replaced by `#[derive(Default)]` with an
+explicit `#[default]` on `Plain`, four `&mut Vec` parameters narrowed to
+`&mut [_]`, and unused imports in two test files.
+
+One clippy suggestion was **rejected**: collapsing the nested `if let` in
+`discovery::resolve_sort` into a let-chain requires edition 2024, and
+`lorehaven-app` is edition 2021. The combined `Option` does the same job.
+
+**Gate after the fix, re-measured on this tree:**
+
+| Check | Result |
+|---|---|
+| `cargo clippy --workspace --all-targets` (stderr captured) | **0 warnings, 0 errors** |
+| `cargo test --workspace --no-fail-fast` | **1775 passed, 1 failed** |
+| the failure, re-run alone | `repeated_login_attempts_are_rate_limited` — passes 1/1 in 59s. The known process-global rate-limit bucket flake under parallel test threads; not caused by this change |
+| `cargo fmt` scoped to the three touched crates | clean |
+
+**Rule this establishes:** a linter or test count is evidence only if the command
+captured the stream the tool writes to. When checking rustc, clippy, cargo test
+or a compiler that reports on stderr, use `2>&1` and redirect to a file, then
+read the file. `2>/dev/null` before a `grep -c` produces a confident zero from
+no data.
+
+---
+
 **Webhook delivery is now being built** (`crates/app/src/webhook_delivery.rs`,
 uncommitted, 159 lines): `deliver_notification` calls `webhook_sender::send`,
 records each attempt through `marketplace::record_delivery` — closing the "no
