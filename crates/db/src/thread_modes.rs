@@ -39,7 +39,7 @@ pub async fn create_topic(
             .bind(title)
             .bind(&now)
             .bind(mode)
-            .execute(db.sqlite_pool().expect("sqlite"))
+            .execute(db.postgres_pool().expect("postgres"))
             .await?;
         }
     }
@@ -82,7 +82,7 @@ pub async fn add_schedule_section(
             .bind(chapter_start)
             .bind(chapter_end)
             .bind(unlocks_at)
-            .execute(db.sqlite_pool().expect("sqlite"))
+            .execute(db.postgres_pool().expect("postgres"))
             .await?;
         }
     }
