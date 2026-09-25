@@ -103,7 +103,10 @@ mod tests {
         for reason in all_reasons() {
             let label = reason.label();
             assert!(!label.is_empty());
-            assert!(label.chars().any(|c| c.is_ascii_lowercase()), "labels should be sentence case");
+            assert!(
+                label.chars().any(|c| c.is_ascii_lowercase()),
+                "labels should be sentence case"
+            );
         }
     }
 
