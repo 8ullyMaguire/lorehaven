@@ -185,9 +185,16 @@ test('exports: a finished export can be deleted (forgotten)', async ({ page }) =
   await page.locator('#new-export').waitFor();
   await page.locator('label.ack input[type=checkbox]').check();
   await page.click('button:text-is("Make the export")');
-  await expect(
-    page.locator('section[aria-labelledby=my-exports] .item .state').first(),
-  ).toBeVisible({ timeout: 60_000 });
+
+  // Wait for Ready, not merely for a state to appear. "Queued" is visible
+  // immediately, and deleting mid-production asks the server to remove a
+  // row the worker still owns — which the test then reads as a failure to
+  // delete rather than as the race it actually is.
+  const ready = page
+    .locator('section[aria-labelledby=my-exports] .item .state')
+    .filter({ hasText: 'Ready' })
+    .first();
+  await expect(ready).toBeVisible({ timeout: 60_000 });
 
   await page
     .locator('section[aria-labelledby=my-exports] .item button:text-is("Delete")')
