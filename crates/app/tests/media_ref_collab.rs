@@ -133,10 +133,13 @@ async fn media_ref_collab_empty_account() {
     let tdb = test_support::TestDb::connect_with_dir("mrc-empty", &dir).await;
     let db = tdb.db();
 
-    let recs =
-        lorehaven_db::discovery::media_reference_collaborative_recommendations(db, "nobody", 10)
-            .await
-            .expect("recommendations");
+    let recs = lorehaven_db::discovery::media_reference_collaborative_recommendations(
+        db,
+        &test_support::id("nobody"),
+        10,
+    )
+    .await
+    .expect("recommendations");
     assert!(recs.is_empty());
 }
 
@@ -167,25 +170,25 @@ async fn media_ref_collab_finds_shared_media() {
     .expect("create B")
     .to_string();
 
-    seed_pseud(db, "pseud-a", &account_a, "handle-a").await;
-    seed_pseud(db, "pseud-b", &account_b, "handle-b").await;
+    seed_pseud(db, &test_support::id("pseud-a"), &account_a, "handle-a").await;
+    seed_pseud(db, &test_support::id("pseud-b"), &account_b, "handle-b").await;
 
     let work1 = WorkId::new();
     let work2 = WorkId::new();
     let work3 = WorkId::new();
 
-    seed_work(db, &work1, "Work One", "pseud-a").await;
-    seed_work(db, &work2, "Work Two", "pseud-b").await;
-    seed_work(db, &work3, "Work Three", "pseud-b").await;
+    seed_work(db, &work1, "Work One", &test_support::id("pseud-a")).await;
+    seed_work(db, &work2, "Work Two", &test_support::id("pseud-b")).await;
+    seed_work(db, &work3, "Work Three", &test_support::id("pseud-b")).await;
 
-    seed_media_ref(db, "ref-1").await;
-    seed_media_ref(db, "ref-2").await;
+    seed_media_ref(db, &test_support::id("ref-1")).await;
+    seed_media_ref(db, &test_support::id("ref-2")).await;
 
     // W1 uses ref-1; W2 uses ref-1 (shared) and ref-2; W3 uses ref-2 only.
-    seed_work_media_link(db, "wmr-1", &work1, "ref-1").await;
-    seed_work_media_link(db, "wmr-2", &work2, "ref-1").await;
-    seed_work_media_link(db, "wmr-3", &work2, "ref-2").await;
-    seed_work_media_link(db, "wmr-4", &work3, "ref-2").await;
+    seed_work_media_link(db, &test_support::id("wmr-1"), &work1, "ref-1").await;
+    seed_work_media_link(db, &test_support::id("wmr-2"), &work2, "ref-1").await;
+    seed_work_media_link(db, &test_support::id("wmr-3"), &work2, "ref-2").await;
+    seed_work_media_link(db, &test_support::id("wmr-4"), &work3, "ref-2").await;
 
     // A bookmarks W1.
     seed_bookmark(db, "bm-1", &account_a, &work1.to_string()).await;
@@ -237,27 +240,27 @@ async fn media_ref_collab_ranks_by_shared_count() {
     .expect("create B")
     .to_string();
 
-    seed_pseud(db, "pseud-a", &account_a, "handle-a").await;
-    seed_pseud(db, "pseud-b", &account_b, "handle-b").await;
+    seed_pseud(db, &test_support::id("pseud-a"), &account_a, "handle-a").await;
+    seed_pseud(db, &test_support::id("pseud-b"), &account_b, "handle-b").await;
 
     let work1 = WorkId::new();
     let work2 = WorkId::new();
     let work3 = WorkId::new();
 
-    seed_work(db, &work1, "Work One", "pseud-a").await;
-    seed_work(db, &work2, "Work Two", "pseud-b").await;
-    seed_work(db, &work3, "Work Three", "pseud-b").await;
+    seed_work(db, &work1, "Work One", &test_support::id("pseud-a")).await;
+    seed_work(db, &work2, "Work Two", &test_support::id("pseud-b")).await;
+    seed_work(db, &work3, "Work Three", &test_support::id("pseud-b")).await;
 
-    seed_media_ref(db, "ref-1").await;
-    seed_media_ref(db, "ref-2").await;
-    seed_media_ref(db, "ref-3").await;
+    seed_media_ref(db, &test_support::id("ref-1")).await;
+    seed_media_ref(db, &test_support::id("ref-2")).await;
+    seed_media_ref(db, &test_support::id("ref-3")).await;
 
     // W1 uses ref-1, ref-2. W2 shares both (2 shared). W3 shares only ref-1 (1 shared).
-    seed_work_media_link(db, "wmr-1", &work1, "ref-1").await;
-    seed_work_media_link(db, "wmr-2", &work2, "ref-1").await;
-    seed_work_media_link(db, "wmr-3", &work1, "ref-2").await;
-    seed_work_media_link(db, "wmr-4", &work2, "ref-2").await;
-    seed_work_media_link(db, "wmr-5", &work3, "ref-1").await;
+    seed_work_media_link(db, &test_support::id("wmr-1"), &work1, "ref-1").await;
+    seed_work_media_link(db, &test_support::id("wmr-2"), &work2, "ref-1").await;
+    seed_work_media_link(db, &test_support::id("wmr-3"), &work1, "ref-2").await;
+    seed_work_media_link(db, &test_support::id("wmr-4"), &work2, "ref-2").await;
+    seed_work_media_link(db, &test_support::id("wmr-5"), &work3, "ref-1").await;
 
     seed_bookmark(db, "bm-1", &account_a, &work1.to_string()).await;
 
@@ -290,19 +293,19 @@ async fn media_ref_collab_excludes_own_works() {
     .expect("create A")
     .to_string();
 
-    seed_pseud(db, "pseud-a", &account_a, "handle-a").await;
+    seed_pseud(db, &test_support::id("pseud-a"), &account_a, "handle-a").await;
 
     let work1 = WorkId::new();
     let work2 = WorkId::new();
 
-    seed_work(db, &work1, "Work One", "pseud-a").await;
-    seed_work(db, &work2, "Work Two", "pseud-a").await;
+    seed_work(db, &work1, "Work One", &test_support::id("pseud-a")).await;
+    seed_work(db, &work2, "Work Two", &test_support::id("pseud-a")).await;
 
-    seed_media_ref(db, "ref-1").await;
+    seed_media_ref(db, &test_support::id("ref-1")).await;
 
     // Both works owned by A share ref-1, but W2 is A's own work.
-    seed_work_media_link(db, "wmr-1", &work1, "ref-1").await;
-    seed_work_media_link(db, "wmr-2", &work2, "ref-1").await;
+    seed_work_media_link(db, &test_support::id("wmr-1"), &work1, "ref-1").await;
+    seed_work_media_link(db, &test_support::id("wmr-2"), &work2, "ref-1").await;
 
     // A bookmarks W1.
     seed_bookmark(db, "bm-1", &account_a, &work1.to_string()).await;
@@ -338,11 +341,11 @@ async fn media_ref_collab_no_bookmarks() {
     .expect("create A")
     .to_string();
 
-    seed_pseud(db, "pseud-a", &account_a, "handle-a").await;
+    seed_pseud(db, &test_support::id("pseud-a"), &account_a, "handle-a").await;
     let work1 = WorkId::new();
-    seed_work(db, &work1, "Work One", "pseud-a").await;
-    seed_media_ref(db, "ref-1").await;
-    seed_work_media_link(db, "wmr-1", &work1, "ref-1").await;
+    seed_work(db, &work1, "Work One", &test_support::id("pseud-a")).await;
+    seed_media_ref(db, &test_support::id("ref-1")).await;
+    seed_work_media_link(db, &test_support::id("wmr-1"), &work1, "ref-1").await;
 
     // No bookmarks for A → no recommendations.
     let recs =

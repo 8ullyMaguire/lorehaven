@@ -105,7 +105,7 @@ fn render_fielded(field: &QueryField, value: &str) -> Result<SqlFragment, QueryE
         QueryField::MinQuality => {
             let threshold = quality_threshold(value)?;
             // Stored weights are instance-controlled; missing signals do not qualify.
-            Ok(SqlFragment::new("((SELECT SUM(CAST(qs.value AS DOUBLE PRECISION) * qs.weight) / NULLIF(SUM(qs.weight), 0) FROM quality_signals qs WHERE qs.work_id = works.id AND qs.weight > 0) >= CAST(? AS DOUBLE PRECISION))").with_bind(threshold))
+            Ok(SqlFragment::new("((SELECT SUM(CAST(qs.value AS DOUBLE PRECISION) * qs.weight) / NULLIF(CAST(SUM(qs.weight) AS BIGINT), 0) FROM quality_signals qs WHERE qs.work_id = works.id AND qs.weight > 0) >= CAST(? AS DOUBLE PRECISION))").with_bind(threshold))
         }
         QueryField::Quality => {
             let (kind, threshold) = value

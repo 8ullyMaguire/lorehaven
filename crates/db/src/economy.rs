@@ -15,7 +15,7 @@ async fn fetch_balances_sqlite(
     pool: &sqlx::SqlitePool,
     account: &str,
 ) -> Result<Vec<(String, i64)>, sqlx::Error> {
-    let rows = sqlx::query("SELECT bucket, SUM(amount_bp) AS total FROM credit_entries WHERE account = ? GROUP BY bucket")
+    let rows = sqlx::query("SELECT bucket, CAST(SUM(amount_bp) AS BIGINT) AS total FROM credit_entries WHERE account = ? GROUP BY bucket")
         .bind(account)
         .fetch_all(pool)
         .await?;
@@ -29,7 +29,7 @@ async fn fetch_balances_postgres(
     pool: &sqlx::postgres::PgPool,
     account: &str,
 ) -> Result<Vec<(String, i64)>, sqlx::Error> {
-    let rows = sqlx::query("SELECT bucket, SUM(amount_bp) AS total FROM credit_entries WHERE account = $1 GROUP BY bucket")
+    let rows = sqlx::query("SELECT bucket, SUM(amount_bp)::bigint AS total FROM credit_entries WHERE account = $1 GROUP BY bucket")
         .bind(account)
         .fetch_all(pool)
         .await?;
@@ -515,16 +515,18 @@ pub async fn list_bounties(db: &Database) -> Result<Vec<Value>, sqlx::Error> {
          ORDER BY created_at DESC LIMIT 50";
     match db.backend() {
         Backend::Sqlite => {
-            let rows: Vec<BountyRow> =
-                sqlx::query_as(SELECT_SQLITE).fetch_all(db.sqlite_pool().expect("sqlite")).await?;
+            let rows: Vec<BountyRow> = sqlx::query_as(SELECT_SQLITE)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?;
             Ok(rows
                 .into_iter()
                 .map(|r| bounty_json(&r.0, &r.1, &r.2, &r.3, r.4, &r.5, &r.6))
                 .collect())
         }
         Backend::Postgres => {
-            let rows: Vec<BountyRow> =
-                sqlx::query_as(SELECT_POSTGRES).fetch_all(db.postgres_pool().expect("postgres")).await?;
+            let rows: Vec<BountyRow> = sqlx::query_as(SELECT_POSTGRES)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?;
             Ok(rows
                 .into_iter()
                 .map(|r| bounty_json(&r.0, &r.1, &r.2, &r.3, r.4, &r.5, &r.6))

@@ -10,25 +10,35 @@ async fn reverse_search_by_perceptual_hash() {
     let db = tdb.db();
 
     // Insert two references, then set perceptual hash on both (simulates curator setting it)
-    media_resilience::insert_media_reference(db, "ref-rs-1", "sha256:abc", MediaKind::Image)
-        .await
-        .expect("insert ref 1");
-    media_resilience::insert_media_reference(db, "ref-rs-2", "sha256:def", MediaKind::Image)
-        .await
-        .expect("insert ref 2");
+    media_resilience::insert_media_reference(
+        db,
+        &test_support::id("ref-rs-1"),
+        "sha256:abc",
+        MediaKind::Image,
+    )
+    .await
+    .expect("insert ref 1");
+    media_resilience::insert_media_reference(
+        db,
+        &test_support::id("ref-rs-2"),
+        "sha256:def",
+        MediaKind::Image,
+    )
+    .await
+    .expect("insert ref 2");
 
     // Update perceptual_hash directly (in production this is done by curator/background job)
     match db.backend() {
         lorehaven_db::Backend::Sqlite => {
             sqlx::query("UPDATE media_references SET perceptual_hash = ? WHERE id = ?")
                 .bind("00ff00ff")
-                .bind("ref-rs-1")
+                .bind(test_support::id("ref-rs-1"))
                 .execute(db.sqlite_pool().expect("sqlite"))
                 .await
                 .unwrap();
             sqlx::query("UPDATE media_references SET perceptual_hash = ? WHERE id = ?")
                 .bind("00ff00ff")
-                .bind("ref-rs-2")
+                .bind(test_support::id("ref-rs-2"))
                 .execute(db.sqlite_pool().expect("sqlite"))
                 .await
                 .unwrap();
@@ -36,13 +46,13 @@ async fn reverse_search_by_perceptual_hash() {
         lorehaven_db::Backend::Postgres => {
             sqlx::query("UPDATE media_references SET perceptual_hash = $1 WHERE id = $2::uuid")
                 .bind("00ff00ff")
-                .bind("ref-rs-1")
+                .bind(test_support::id("ref-rs-1"))
                 .execute(db.postgres_pool().expect("postgres"))
                 .await
                 .unwrap();
             sqlx::query("UPDATE media_references SET perceptual_hash = $1 WHERE id = $2::uuid")
                 .bind("00ff00ff")
-                .bind("ref-rs-2")
+                .bind(test_support::id("ref-rs-2"))
                 .execute(db.postgres_pool().expect("postgres"))
                 .await
                 .unwrap();
@@ -57,8 +67,8 @@ async fn reverse_search_by_perceptual_hash() {
         .await
         .expect("reverse search");
     assert_eq!(found.len(), 2);
-    assert!(found.iter().any(|r| r.id == "ref-rs-1"));
-    assert!(found.iter().any(|r| r.id == "ref-rs-2"));
+    assert!(found.iter().any(|r| r.id == test_support::id("ref-rs-1")));
+    assert!(found.iter().any(|r| r.id == test_support::id("ref-rs-2")));
 }
 
 #[tokio::test]
@@ -85,33 +95,36 @@ async fn find_works_by_media_reference() {
     let tdb = test_support::TestDb::connect_with_dir("find-wmr", &dir).await;
     let db = tdb.db();
 
-    let account_id = "acc-finder";
-    let pseud_id = format!("{}-pseud", account_id);
+    // Each of these is its own UUID. Suffixing one onto another produced
+    // "<uuid>-pseud", which is not a UUID -- and it is a `&str` that SQLite
+    // stores in a TEXT column without complaint, so only PostgreSQL objected.
+    let account_id = test_support::id("acc-finder");
+    let pseud_id = test_support::id("pseud-finder");
 
     match db.backend() {
         lorehaven_db::Backend::Sqlite => {
             sqlx::query("INSERT INTO accounts (id, email, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))")
-                .bind(account_id).bind(format!("{}@test.dev", account_id))
+                .bind(&account_id).bind(format!("{}@test.dev", account_id))
                 .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
             sqlx::query("INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))")
                 .bind(&pseud_id).bind(account_id).bind(&pseud_id).bind(&pseud_id)
                 .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
-            for wid in ["work-x", "work-y"] {
+            for wid in [test_support::id("work-x"), test_support::id("work-y")] {
                 sqlx::query("INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at) VALUES (?, ?, ?, 'published', 'public', datetime('now'), datetime('now'))")
-                    .bind(wid).bind(format!("Title {}", wid)).bind(&pseud_id)
+                    .bind(&wid).bind(format!("Title {wid}")).bind(&pseud_id)
                     .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
             }
         }
         lorehaven_db::Backend::Postgres => {
             sqlx::query("INSERT INTO accounts (id, email, created_at, updated_at) VALUES ($1::uuid, $2, now(), now())")
-                .bind(account_id).bind(format!("{}@test.dev", account_id))
+                .bind(&account_id).bind(format!("{}@test.dev", account_id))
                 .execute(db.postgres_pool().expect("postgres")).await.unwrap();
             sqlx::query("INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, $4, now(), now())")
                 .bind(&pseud_id).bind(account_id).bind(&pseud_id).bind(&pseud_id)
                 .execute(db.postgres_pool().expect("postgres")).await.unwrap();
-            for wid in ["work-x", "work-y"] {
+            for wid in [test_support::id("work-x"), test_support::id("work-y")] {
                 sqlx::query("INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at) VALUES ($1::uuid, $2, $3::uuid, 'published', 'public', now(), now())")
-                    .bind(wid).bind(format!("Title {}", wid)).bind(&pseud_id)
+                    .bind(&wid).bind(format!("Title {wid}")).bind(&pseud_id)
                     .execute(db.postgres_pool().expect("postgres")).await.unwrap();
             }
         }

@@ -25,7 +25,7 @@ pub async fn get_trust_weighted_rating_summary(
 ) -> Result<Option<RatingSummary>> {
     let sql = db.sql(
         "SELECT COUNT(*) AS count, \
-                COALESCE(SUM(stars * COALESCE(tl.level, 1)), 0) AS weighted_sum, \
+                COALESCE(CAST(SUM(stars * COALESCE(tl.level, 1)) AS BIGINT), 0) AS weighted_sum, \
                 COALESCE(SUM(COALESCE(tl.level, 1)), 0) AS total_weight \
            FROM rating \
            LEFT JOIN trust_levels tl ON rating.account_id = tl.account \

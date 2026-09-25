@@ -31,7 +31,7 @@ async fn admin_overview_mixed_health() {
     // ref-001: 3 healthy links (well mirrored)
     media_resilience::insert_media_reference(
         db,
-        "ref-001",
+        &test_support::id("ref-001"),
         "hash-1",
         lorehaven_domain::media_resilience::MediaKind::Image,
     )
@@ -40,8 +40,8 @@ async fn admin_overview_mixed_health() {
     for i in 0..3 {
         media_resilience::insert_availability_link(
             db,
-            &format!("link-001-{i}"),
-            "ref-001",
+            &test_support::id(&format!("link-001-{i}")),
+            &test_support::id("ref-001"),
             &format!("https://example.com/img-001-{i}.png"),
             lorehaven_domain::media_resilience::LinkProvider::Imgur,
             None,
@@ -51,7 +51,7 @@ async fn admin_overview_mixed_health() {
         .expect("insert link");
         media_resilience::update_link_status(
             db,
-            &format!("link-001-{i}"),
+            &test_support::id(&format!("link-001-{i}")),
             lorehaven_domain::media_resilience::LinkStatus::Healthy,
             0,
         )
@@ -62,7 +62,7 @@ async fn admin_overview_mixed_health() {
     // ref-002: 1 healthy link (below threshold)
     media_resilience::insert_media_reference(
         db,
-        "ref-002",
+        &test_support::id("ref-002"),
         "hash-2",
         lorehaven_domain::media_resilience::MediaKind::Image,
     )
@@ -71,7 +71,7 @@ async fn admin_overview_mixed_health() {
     media_resilience::insert_availability_link(
         db,
         "link-002",
-        "ref-002",
+        &test_support::id("ref-002"),
         "https://example.com/img-002.png",
         lorehaven_domain::media_resilience::LinkProvider::Pinterest,
         None,
@@ -91,7 +91,7 @@ async fn admin_overview_mixed_health() {
     // ref-003: 2 healthy links (below threshold of 3)
     media_resilience::insert_media_reference(
         db,
-        "ref-003",
+        &test_support::id("ref-003"),
         "hash-3",
         lorehaven_domain::media_resilience::MediaKind::Image,
     )
@@ -101,7 +101,7 @@ async fn admin_overview_mixed_health() {
         media_resilience::insert_availability_link(
             db,
             &format!("link-003-{i}"),
-            "ref-003",
+            &test_support::id("ref-003"),
             &format!("https://example.com/img-003-{i}.png"),
             lorehaven_domain::media_resilience::LinkProvider::Tumblr,
             None,
@@ -143,7 +143,7 @@ async fn link_rot_by_provider() {
 
     media_resilience::insert_media_reference(
         db,
-        "ref-rot-1",
+        &test_support::id("ref-rot-1"),
         "hash-r1",
         lorehaven_domain::media_resilience::MediaKind::Image,
     )
@@ -153,7 +153,7 @@ async fn link_rot_by_provider() {
     media_resilience::insert_availability_link(
         db,
         "link-r1",
-        "ref-rot-1",
+        &test_support::id("ref-rot-1"),
         "https://imgur.com/dead1",
         lorehaven_domain::media_resilience::LinkProvider::Imgur,
         None,
@@ -199,7 +199,7 @@ async fn curator_leaderboard_with_entries() {
 
     media_resilience::insert_media_reference(
         db,
-        "ref-lb",
+        &test_support::id("ref-lb"),
         "hash-lb",
         lorehaven_domain::media_resilience::MediaKind::Image,
     )
@@ -208,7 +208,7 @@ async fn curator_leaderboard_with_entries() {
     media_resilience::insert_availability_link(
         db,
         "link-lb",
-        "ref-lb",
+        &test_support::id("ref-lb"),
         "https://example.com/lb.png",
         lorehaven_domain::media_resilience::LinkProvider::Other,
         None,
@@ -221,7 +221,7 @@ async fn curator_leaderboard_with_entries() {
         db,
         "alice",
         lorehaven_domain::media_resilience::CuratorAction::MirrorAdd,
-        Some("ref-lb"),
+        Some(&test_support::id("ref-lb")),
         Some("link-lb"),
         15,
     )
@@ -232,7 +232,7 @@ async fn curator_leaderboard_with_entries() {
         db,
         "bob",
         lorehaven_domain::media_resilience::CuratorAction::Verify,
-        Some("ref-lb"),
+        Some(&test_support::id("ref-lb")),
         Some("link-lb"),
         5,
     )
@@ -300,7 +300,7 @@ async fn provider_reliability_with_data() {
 
     media_resilience::insert_media_reference(
         db,
-        "ref-pr-1",
+        &test_support::id("ref-pr-1"),
         "hash-pr1",
         lorehaven_domain::media_resilience::MediaKind::Image,
     )
@@ -312,7 +312,7 @@ async fn provider_reliability_with_data() {
         media_resilience::insert_availability_link(
             db,
             &format!("link-pa-{i}"),
-            "ref-pr-1",
+            &test_support::id("ref-pr-1"),
             &format!("https://provider-a.com/img-{i}.png"),
             lorehaven_domain::media_resilience::LinkProvider::Imgur,
             None,
@@ -334,7 +334,7 @@ async fn provider_reliability_with_data() {
     media_resilience::insert_availability_link(
         db,
         "link-pb",
-        "ref-pr-1",
+        &test_support::id("ref-pr-1"),
         "https://provider-b.com/img.png",
         lorehaven_domain::media_resilience::LinkProvider::Pinterest,
         None,

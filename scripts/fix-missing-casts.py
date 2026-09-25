@@ -34,8 +34,9 @@ def main() -> int:
         edits: list[tuple[int, int, str]] = []
         for match in chk.STRING_LIT.finditer(text):
             sql = match.group(1)
-            if not re.search(r"\$\d+", sql):
-                continue  # the SQLite arm; `?` cannot fail this way
+            if not re.search(r"\$\d+", sql) and not re.search(r"\bsum\s*\(", sql, re.I):
+                # A SQLite arm with no bind and no aggregate cannot fail here.
+                continue
             known = {t: schema[t] for t in chk.tables_in(sql) if t in schema}
             if not known:
                 continue

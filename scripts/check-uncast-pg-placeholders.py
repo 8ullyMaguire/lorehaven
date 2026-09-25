@@ -175,6 +175,11 @@ def offending_lines(sql: str, schema: dict[str, dict[str, str]]) -> bool:
     statement said nothing about the others. The per-placeholder check below is
     what the guard was standing in for, badly.
     """
+    # A SUM over an integer column is wrong with or without a bind, so it is
+    # checked before the placeholder test rather than after it.
+    if sum_sites(sql, schema):
+        return True
+
     if not re.search(r"\$\d+", sql):
         # `?` is the SQLite spelling. The PostgreSQL arm is the one rewritten to
         # `$n`, so without a placeholder this is a SQLite arm and cannot fail.
@@ -212,6 +217,13 @@ def offending_lines(sql: str, schema: dict[str, dict[str, str]]) -> bool:
             coltype = columns.get(col)
             if coltype and not _accepts_text(coltype):
                 return True
+
+    # `SUM` over an integer column is NUMERIC in PostgreSQL and an integer in
+    # SQLite. Reported here as well as in `scan` so the self-test and the gate
+    # cannot disagree about what counts -- the self-test is worth nothing if it
+    # exercises a different predicate than the gate does.
+    if sum_sites(sql, known):
+        return True
 
     return False
 
@@ -304,6 +316,36 @@ def add_missing_casts(sql: str, known: dict[str, dict[str, str]]) -> str:
                 if at >= 0:
                     edits.append((at, at + len(bind), f"{bind}::{cast}"))
 
+    # A SUM over an integer column needs widening, and no placeholder is involved.
+    # `CAST(SUM(x) AS BIGINT)` rather than `SUM(x)::bigint`: the `::` form is
+    # PostgreSQL only, and many of these statements are spelled once and run on
+    # both backends. `CAST` is the one form both dialects accept.
+    #
+    # The whole `SUM(...)` call is wrapped, matched to its closing paren. An
+    # earlier attempt appended after the call and produced
+    # `SUM(x CAST(... AS BIGINT))`, which is not valid SQL in either dialect.
+    for col in sum_sites(sql, known):
+        for match in re.finditer(
+            rf"SUM\(\s*(?:[a-z_][\w]*\s*\.\s*)?{re.escape(col)}\b", sql, re.IGNORECASE
+        ):
+            start = match.start()
+            # Scan from the `(` itself. Starting one character earlier -- at the
+            # last letter of the column name -- never reaches depth zero, so the
+            # fix silently did nothing while looking like it had run.
+            open_paren = sql.index("(", match.start())
+            depth = 0
+            end = None
+            for i in range(open_paren, len(sql)):
+                if sql[i] == "(":
+                    depth += 1
+                elif sql[i] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+            if end is not None and "::" not in sql[end:end + 2]:
+                edits.append((start, end, f"CAST({sql[start:end]} AS BIGINT)"))
+
     out = sql
     for start, end, replacement in sorted(edits, reverse=True):
         out = out[:start] + replacement + out[end:]
@@ -354,11 +396,19 @@ def scan(root: pathlib.Path, schema: dict[str, dict[str, str]]) -> list[tuple[pa
             sql = match.group(1)
             if not re.search(r"\b(?:SELECT|INSERT|UPDATE|DELETE)\b", sql, re.IGNORECASE):
                 continue
-            if not offending_lines(sql, schema):
+            tables = tables_in(sql)
+            known = {t: schema[t] for t in tables if t in schema}
+            reasons: list[str] = []
+            if offending_lines(sql, known):
+                reasons.append("uncast placeholder")
+            summed = sum_sites(sql, known) if known else []
+            if summed:
+                reasons.append("SUM(" + ", SUM(".join(summed) + ") is NUMERIC")
+            if not reasons:
                 continue
             line = text[: match.start()].count("\n") + 1
             flat = " ".join(sql.split())[:78]
-            hits.append((path, line, flat))
+            hits.append((path, line, f"{'; '.join(reasons)}: {flat}"))
     return hits
 
 
@@ -391,7 +441,52 @@ SELF_TEST_CASES: list[tuple[str, bool, str]] = [
     ("INSERT INTO progress (account, work_id, last_chapter, updated_at) "
      "VALUES ($1::uuid, $2::uuid, $3, $4)", False,
      "INSERT: already cast"),
+    ("SELECT COALESCE(SUM(last_chapter), 0) AS total FROM progress", True,
+     "SUM over INTEGER is NUMERIC in PostgreSQL"),
+    ("SELECT COALESCE(SUM(last_chapter), 0)::bigint AS total FROM progress", False,
+     "SUM: already widened with ::"),
+    ("SELECT CAST(SUM(last_chapter) AS BIGINT) AS total FROM progress", False,
+     "SUM: already widened with CAST, which SQLite also accepts"),
+    ("SELECT SUM(last_chapter) AS total FROM progress WHERE account = $1::uuid",
+     True, "SUM is its own finding, independent of any bind"),
+    ("SELECT SUM(last_chapter)::bigint AS total FROM progress WHERE account = $1::uuid",
+     False, "both settled"),
 ]
+
+
+# `SUM` over an integer column is NUMERIC in PostgreSQL and an integer in
+# SQLite, so a row type of `i64` cannot decode it. The error names neither the
+# aggregate nor the pool: "mismatched types; Rust type `i64` (as SQL type `INT8`)
+# is not compatible with SQL type `NUMERIC`". `::bigint` in the PostgreSQL arm
+# settles it, and is what events.rs, imports.rs and rating_integrity.rs already
+# do -- the rest of the tree had not caught up.
+INTEGER_TYPES = ("integer", "bigint", "smallint")
+# `SUM(t.cost)` is as common as `SUM(cost)`; the pattern has to see through the
+# qualifier or it reports nothing for half the tree.
+# `SUM(stars * COALESCE(tl.level, 1))` sums an expression that is still an
+# integer, so the first identifier in the argument is enough to judge it --
+# `SUM(t.cost)` and `SUM(word_count)` both reduce to the same shape.
+SUM_COLUMN = re.compile(r"SUM\(\s*([a-z_][\w]*\s*\.\s*)?([a-z_][\w]*)", re.IGNORECASE)
+
+
+def sum_sites(sql: str, known: dict[str, dict[str, str]]) -> list[str]:
+    """Columns this statement sums whose sum will not decode as an integer."""
+    lowered = sql.lower()
+    if "::bigint" in lowered or "::int" in lowered:
+        return []  # already widened
+    if re.search(r"cast\s*\([^)]*sum\s*\(", lowered):
+        return []  # CAST(SUM(x) AS BIGINT) -- the form SQLite also accepts
+    if "sum" not in sql.lower():
+        return []
+    out: list[str] = []
+    for match in SUM_COLUMN.finditer(sql):
+        col = match.group(2).lower()
+        for columns in known.values():
+            coltype = columns.get(col)
+            if coltype in INTEGER_TYPES:
+                out.append(col)
+                break
+    return out
 
 
 def self_test() -> int:

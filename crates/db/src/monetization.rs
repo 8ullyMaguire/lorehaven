@@ -740,7 +740,7 @@ pub async fn total_platform_revenue(db: &Database) -> Result<i64, sqlx::Error> {
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query_scalar(
-                "SELECT COALESCE(SUM(amount_minor), 0) FROM author_earnings_ledger WHERE kind = 'platform_fee'",
+                "SELECT COALESCE(CAST(SUM(amount_minor) AS BIGINT), 0) FROM author_earnings_ledger WHERE kind = 'platform_fee'",
             )
                 .fetch_one(db.sqlite_pool().expect("sqlite"))
                 .await
@@ -763,7 +763,7 @@ pub async fn pending_payout_total(db: &Database) -> Result<i64, sqlx::Error> {
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query_scalar(
-                "SELECT COALESCE(SUM(amount_minor), 0) FROM payouts WHERE status = 'initiated'",
+                "SELECT COALESCE(CAST(SUM(amount_minor) AS BIGINT), 0) FROM payouts WHERE status = 'initiated'",
             )
             .fetch_one(db.sqlite_pool().expect("sqlite"))
             .await
@@ -1007,11 +1007,11 @@ pub async fn author_pool_a_in_period(
     end: &str,
 ) -> Result<Vec<(String, i64)>, sqlx::Error> {
     let sql = db.sql(
-        "SELECT author_account_id, COALESCE(SUM(amount_minor), 0) AS total
+        "SELECT author_account_id, COALESCE(CAST(SUM(amount_minor) AS BIGINT), 0) AS total
            FROM author_earnings_ledger
           WHERE created_at >= ? AND created_at < ? AND kind IN ('sale','tip','attribution')
           GROUP BY author_account_id",
-        "SELECT author_account_id::text, COALESCE(SUM(amount_minor), 0) AS total
+        "SELECT author_account_id::text, COALESCE(CAST(SUM(amount_minor) AS BIGINT), 0) AS total
            FROM author_earnings_ledger
           WHERE created_at >= ?::timestamptz::text AND created_at < ?::timestamptz::text AND kind IN ('sale','tip','attribution')
           GROUP BY author_account_id",
@@ -1042,12 +1042,12 @@ pub async fn author_reading_time_in_period(
     end: &str,
 ) -> Result<Vec<(String, i64)>, sqlx::Error> {
     let sql = db.sql(
-        "SELECT w.owner_pseud_id AS author, COALESCE(SUM(rs.seconds), 0) AS secs
+        "SELECT w.owner_pseud_id AS author, COALESCE(CAST(SUM(rs.seconds) AS BIGINT), 0) AS secs
            FROM reading_sessions rs
            JOIN works w ON rs.work_id = w.id
            WHERE rs.started_at >= ? AND rs.started_at < ?
            GROUP BY w.owner_pseud_id",
-        "SELECT w.owner_pseud_id::text AS author, COALESCE(SUM(rs.seconds), 0) AS secs
+        "SELECT w.owner_pseud_id::text AS author, COALESCE(CAST(SUM(rs.seconds) AS BIGINT), 0) AS secs
            FROM reading_sessions rs
            JOIN works w ON rs.work_id = w.id::uuid
            WHERE rs.started_at >= ?::timestamptz::text AND rs.started_at < ?::timestamptz::text

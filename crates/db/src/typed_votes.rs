@@ -359,8 +359,8 @@ pub async fn votes_on_post(db: &Database, post_id: &str) -> Result<Vec<Individua
 /// held when they cast it.
 pub async fn weighted_total_bp(db: &Database, post_id: &str) -> Result<i64> {
     let sql = db.sql(
-        "SELECT COALESCE(SUM(weight_at_cast_bp), 0) FROM forum_votes WHERE post_id = ?",
-        "SELECT COALESCE(SUM(weight_at_cast_bp), 0) FROM forum_votes WHERE post_id = $1",
+        "SELECT COALESCE(CAST(SUM(weight_at_cast_bp) AS BIGINT), 0) FROM forum_votes WHERE post_id = ?",
+        "SELECT COALESCE(SUM(weight_at_cast_bp)::bigint, 0) FROM forum_votes WHERE post_id = $1",
     );
     let total: i64 = match db.backend() {
         Backend::Sqlite => {
@@ -414,11 +414,11 @@ pub async fn set_votes_visible(db: &Database, post_id: &str, visible: bool) -> R
 /// property already (§19), so the two line up.
 pub async fn budget_spent(db: &Database, account_id: &str, window_start: &str) -> Result<i64> {
     let sql = db.sql(
-        "SELECT COALESCE(SUM(t.cost), 0) FROM forum_votes v \
+        "SELECT COALESCE(CAST(SUM(t.cost) AS BIGINT), 0) FROM forum_votes v \
          JOIN pseuds p ON p.id = v.pseud \
          JOIN forum_vote_types t ON t.id = v.vote_type \
          WHERE p.account_id = ? AND v.created_at > ?",
-        "SELECT COALESCE(SUM(t.cost), 0) FROM forum_votes v \
+        "SELECT COALESCE(CAST(SUM(t.cost) AS BIGINT), 0) FROM forum_votes v \
          JOIN pseuds p ON p.id = v.pseud \
          JOIN forum_vote_types t ON t.id = v.vote_type \
          WHERE p.account_id = $1::uuid AND v.created_at > $2::timestamptz",
@@ -727,10 +727,10 @@ pub async fn karma_summary(db: &Database, pseud: &str) -> Result<KarmaSummary> {
     let (karma_bp, updated_at) = stored.unwrap_or_else(|| (0, String::new()));
 
     let sql = db.sql(
-        "SELECT COUNT(*), COALESCE(SUM(v.weight_at_cast_bp), 0) FROM forum_votes v \
+        "SELECT COUNT(*), COALESCE(CAST(SUM(v.weight_at_cast_bp) AS BIGINT), 0) FROM forum_votes v \
          JOIN forum_posts p ON p.id = v.post_id \
          WHERE p.author_pseud = ? AND p.deleted_at IS NULL",
-        "SELECT COUNT(*), COALESCE(SUM(v.weight_at_cast_bp), 0) FROM forum_votes v \
+        "SELECT COUNT(*), COALESCE(CAST(SUM(v.weight_at_cast_bp) AS BIGINT), 0) FROM forum_votes v \
          JOIN forum_posts p ON p.id = v.post_id \
          WHERE p.author_pseud = $1 AND p.deleted_at IS NULL",
     );
