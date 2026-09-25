@@ -222,11 +222,20 @@ pub async fn enqueue(
 
 /// Build the claim SQL for the given dialect.
 fn claim_sql(extra_clause: &str, backend: Backend) -> String {
+    // `available_at` and the timestamps below are TIMESTAMPTZ on PostgreSQL and
+    // TEXT on SQLite, so the comparison placeholder carries a cast there and
+    // not here. The clause is interpolated into both dialects, so the cast has
+    // to be chosen per backend rather than written into the shared string.
+    let at = if backend == Backend::Postgres {
+        "?::timestamptz"
+    } else {
+        "?"
+    };
     let where_clause = if extra_clause.is_empty() {
-        "WHERE state = 'queued' AND available_at <= ?".to_string()
+        format!("WHERE state = 'queued' AND available_at <= {at}")
     } else {
         format!(
-            "WHERE state = 'queued' AND available_at <= ? AND {}",
+            "WHERE state = 'queued' AND available_at <= {at} AND {}",
             extra_clause.trim_start_matches(" AND ")
         )
     };
@@ -244,8 +253,8 @@ fn claim_sql(extra_clause: &str, backend: Backend) -> String {
         ),
         Backend::Postgres => format!(
             "UPDATE jobs
-                SET state = 'leased', lease_owner = ?, lease_expires_at = ?,
-                    updated_at = ?, version = version + 1
+                SET state = 'leased', lease_owner = ?, lease_expires_at = ?::timestamptz,
+                    updated_at = ?::timestamptz, version = version + 1
                FROM (SELECT id FROM jobs
                       {where_clause}
                       ORDER BY priority DESC, available_at ASC
@@ -733,9 +742,9 @@ pub async fn requeue_expired_leases(db: &Database, now: OffsetDateTime) -> Resul
             AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?",
         "UPDATE jobs
             SET state = 'queued', lease_owner = NULL, lease_expires_at = NULL,
-                updated_at = ?, version = version + 1
+                updated_at = ?::timestamptz, version = version + 1
           WHERE state IN ('leased', 'running')
-            AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?",
+            AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?::timestamptz",
     );
     let now_text = crate::identity::format_rfc3339(now);
     let affected = match db.backend() {
@@ -961,8 +970,9 @@ pub async fn all_jobs(
                     lease_expires_at, progress_permille, checkpoint, last_error,
                     requested_by::text AS requested_by, created_at, updated_at, version
                FROM jobs
-              WHERE (? IS NULL OR state = ?)
-                AND (created_at < ? OR (created_at = ? AND id::text < ?))
+              WHERE (?::text IS NULL OR state = ?)
+                AND (created_at < ?::timestamptz
+                     OR (created_at = ?::timestamptz AND id::text < ?))
               ORDER BY created_at DESC, id DESC LIMIT ?",
         ),
         None => db.sql(
@@ -1074,7 +1084,7 @@ pub async fn purge_terminal_jobs(db: &Database, older_than: OffsetDateTime) -> R
         "DELETE FROM jobs
           WHERE state IN ('succeeded', 'failed', 'cancelled') AND updated_at < ?",
         "DELETE FROM jobs
-          WHERE state IN ('succeeded', 'failed', 'cancelled') AND updated_at < ?",
+          WHERE state IN ('succeeded', 'failed', 'cancelled') AND updated_at < ?::timestamptz",
     );
     let cutoff = crate::identity::format_rfc3339(older_than);
     let affected = match db.backend() {

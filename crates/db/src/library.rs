@@ -2301,7 +2301,7 @@ pub async fn update_checks_since(
 pub async fn sweep_update_checks(db: &Database, cutoff: &str) -> Result<u64> {
     let sql = db.sql(
         "DELETE FROM update_checks WHERE checked_at < ?",
-        "DELETE FROM update_checks WHERE checked_at < ?",
+        "DELETE FROM update_checks WHERE checked_at < ?::timestamptz",
     );
     let affected = run!(db, sql, |q| q.bind(cutoff)).await?;
     Ok(affected)
