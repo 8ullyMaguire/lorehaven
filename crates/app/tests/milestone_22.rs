@@ -516,31 +516,39 @@ async fn seed_quality_signal(
     let db = fx.tdb.db();
     let id = format!("qs-{n}");
     let now = "2026-01-01T00:00:00Z";
-    let sql = "INSERT INTO quality_signals (id, work_id, signal_kind, value, weight, source, computed_at) VALUES (?, ?, ?, ?, ?, 'test', ?)";
-    match db.backend() {
-        Backend::Sqlite => sqlx::query(sql)
-            .bind(&id)
-            .bind(work_id)
-            .bind(signal_kind)
-            .bind(value)
-            .bind(weight)
-            .bind(now)
-            .execute(db.sqlite_pool().expect("sqlite pool"))
-            .await
-            .unwrap()
-            .rows_affected(),
-        Backend::Postgres => sqlx::query(sql)
-            .bind(&id)
-            .bind(work_id)
-            .bind(signal_kind)
-            .bind(value)
-            .bind(weight)
-            .bind(now)
-            .execute(db.postgres_pool().expect("postgres pool"))
-            .await
-            .unwrap()
-            .rows_affected(),
+    // `quality_signals.id` and `.work_id` are UUID on PostgreSQL, so the PG arm
+    // needs explicit casts: `Database::sql` renumbers the placeholders but does
+    // not cast, and a bare `?` bound to a `&str` fails with 42804.
+    let sql = db.sql(
+        "INSERT INTO quality_signals (id, work_id, signal_kind, value, weight, source, computed_at) VALUES (?, ?, ?, ?, ?, 'test', ?)",
+        "INSERT INTO quality_signals (id, work_id, signal_kind, value, weight, source, computed_at) VALUES (?::uuid, ?::uuid, ?, ?, ?, 'test', ?)",
+    );
+    let query = sqlx::query(sql.as_ref());
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            query
+                .bind(&id)
+                .bind(work_id)
+                .bind(signal_kind)
+                .bind(value)
+                .bind(weight)
+                .bind(now)
+                .execute(db.sqlite_pool().expect("sqlite pool"))
+                .await
+        }
+        Backend::Postgres => {
+            query
+                .bind(&id)
+                .bind(work_id)
+                .bind(signal_kind)
+                .bind(value)
+                .bind(weight)
+                .bind(now)
+                .execute(db.postgres_pool().expect("postgres pool"))
+                .await
+        }
     };
+    let rows = rows.unwrap().rows_affected();
 }
 
 /// Deterministic file/edition ids derived from the seeded work id: swap
