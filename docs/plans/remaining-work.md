@@ -259,20 +259,32 @@ assertion), deploy to thinkcentre production (build there, never through
 SSHFS). A `v1.0.0` tag is deliberately **not** cut: the release decision is the
 operator's, and the remaining M45/M47/M53/M54 rows are open.
 
-## Carried from 2026-09-25 — the `max_distance` gap is a feature hole, not a lint
+## M32 perceptual dedup — the search is done, populating the column is not
 
-`db::media_resilience::find_by_perceptual_hash` takes a `max_distance` and does
-not implement Hamming-distance search; the parameter is now named
-`_max_distance` and the doc comment says outright that the threshold is not
-honoured and that a result must not be read as "these are similar". No caller can
-reach the gap today — both pass `0` — so it is not a regression, but it is a
-function whose signature promises deduplication it does not perform.
+`db::media_resilience::find_by_perceptual_hash` is a real Hamming-distance
+search as of `3346144`, ordered closest first, and the `[media_resilience]`
+config table it reads is wired to TOML for the first time. The route
+`POST /api/v1/media/reverse-search` takes the operator's threshold and returns
+`match_distance`, `match_confidence`, `match_kind` and `auto_attach` per match,
+and the admin media page shows them.
 
-Either implement the threshold or drop the parameter and have callers
-pre-filter. The former is the smaller change: the surrounding module already
-persists `phash` per media reference, so the query only needs
-`AND phash != ?` with a computed Hamming distance. ~half a day, and it should be
-done before any importer starts relying on perceptual deduplication.
+**The remaining piece is M32-07b: nothing computes a perceptual hash.** The
+column is only ever written by a test, so the search is correct on an empty
+column and the feature is not reachable from the site. The blocker is real
+rather than incidental:
+
+- image decoding is not a dependency of this workspace, so applying
+  `perceptual_hash_algorithm` to image bytes is a new crate, not wiring;
+- audio needs the same treatment for `audio_fingerprint`;
+- the two keys `require_curator_confirmation_below` and
+  `require_curator_confirmation_above` are parsed and validated but no merge
+  path reads them, because there is no merge path — the curator workflow
+  §32.7.2 describes is unbuilt.
+
+Order of work when M32-07b is picked up: decode and fingerprint in the fetch
+path, then the merge door that consumes the two confirmation keys, then the
+front-end affordance for it. Doing the merge door first would build a workflow
+around a column nothing populates.
 
 ## Gate discipline — read before trusting any count in this file
 

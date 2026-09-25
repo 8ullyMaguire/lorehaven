@@ -361,13 +361,17 @@
     background: var(--color-surface-alt);
     color: var(--color-muted);
   }
+  /* Colour-on-neutral, matching .media-ref-health in WorkPage.svelte.
+     `--color-success-bg` and `--color-warning-bg` are not defined in
+     tokens.css - the design system has the foreground tones and a neutral
+     `--color-accent-soft` but no tinted backgrounds - so a `background:
+     var(--color-success-bg)` silently renders transparent rather than
+     warning that the token is missing. */
   .badge-ok {
-    background: var(--color-success-bg);
     color: var(--color-success);
   }
   .badge-warn {
-    background: var(--color-warning-bg, var(--color-surface-alt));
-    color: var(--color-warning, var(--color-muted));
+    color: var(--color-warning);
   }
   .status {
     font-size: 0.75rem;
