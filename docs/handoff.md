@@ -1,4 +1,11 @@
-# Handoff — ADR 0024 adopted: Lorehaven is the from-scratch base; docs realigned
+# Handoff — M56-01 instance accessibility mode; build recovered; no 1.0 tag
+
+Date: 2026-09-25 (tip `5fb778e`). **The current, full handoff is
+`docs/handoffs/2026-09-25T110532+0200-m56-01-instance-access-mode-build-recovered-handoff.md`
+— read that one.** It records a build-breaking regression that was repaired
+(`921a59d` reset + DNF cherry-pick), what is now true, what was superseded,
+and what must be re-verified before deploying. This file remains the standing
+milestone history.
 
 Date: 2026-09-24 (M52 tag `m52-rec-strategy`, export E2E fix). Previous handoff
 (M51 + M12 + M7, v0.51.0+2) is archived at
