@@ -2556,9 +2556,11 @@ produced.
 - **Unset means "instance default"**, never a null engine and never a silent
   choice on the reader's behalf. An empty value is the instance default.
 - **Validated against the enabled strategy set at write time.** An engine the
-  operator has not enabled is a `400` naming the accepted values, on the same
-  reasoning as §0.4.7's instance mode: a setting that silently falls back is
-  worse than a setting that refuses.
+  operator has not enabled is refused with the accepted values named, on the
+  same reasoning as §0.4.7's instance mode: a setting that silently falls back
+  is worse than a setting that refuses. The refusal is `422` — the code this
+  codebase already uses for a well-formed request whose value is not one the
+  instance accepts — not a bespoke status.
 
 **The operator's enabled set wins, and the reader is told.** A preference
 recorded before an operator disabled that strategy is *remembered but not

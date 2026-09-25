@@ -86,6 +86,22 @@ pub const SETTING_KEYS: &[SettingKeyDef] = &[
         default_json: r#""balanced""#,
         summary: "Mix of familiar versus exploratory recommendations",
     },
+    // M52-09: the reader's chosen recommendation strategy (spec §16.1b).
+    //
+    // The default is the empty string, not a strategy name: an unset
+    // preference means "whatever the instance uses", and the empty string is
+    // what lets the resolver tell "the reader chose nothing" apart from "the
+    // reader chose a strategy that happens to be the instance default". The
+    // instance's own choice is config (`rec_enabled_strategies`), not a value
+    // stored per reader, so hard-coding a strategy name here would silently
+    // pin every reader to one engine the moment the operator changed it.
+    SettingKeyDef {
+        key: "discovery.rec_engine",
+        namespace: SettingNamespace::Discovery,
+        default_json: r#""""#,
+        summary:
+            "Which recommendation strategy produces your recommendations (blank = instance default)",
+    },
 ];
 
 /// Look up a recognized key definition.
@@ -95,8 +111,9 @@ pub fn key_def(key: &str) -> Option<&'static SettingKeyDef> {
 
 /// The instance-level default for a recognized key, parsed from its JSON literal.
 pub fn default_value(key: &str) -> Option<serde_json::Value> {
-    key_def(key)
-        .map(|def| serde_json::from_str(def.default_json).expect("invalid default_json in registry"))
+    key_def(key).map(|def| {
+        serde_json::from_str(def.default_json).expect("invalid default_json in registry")
+    })
 }
 
 /// The namespace a key belongs to.
@@ -382,9 +399,13 @@ mod tests {
         let context = serde_json::json!("context-value");
         let pseud = serde_json::json!("pseud-value");
         let account = serde_json::json!("account-value");
-        let r =
-            resolve_setting("reader.font_family", Some(&context), Some(&pseud), Some(&account))
-                .unwrap();
+        let r = resolve_setting(
+            "reader.font_family",
+            Some(&context),
+            Some(&pseud),
+            Some(&account),
+        )
+        .unwrap();
         assert_eq!(r.source, SettingSource::Context);
         assert_eq!(r.value, "context-value");
     }
