@@ -449,9 +449,10 @@ pub async fn insert_work_media_reference(
             (id, work_id, chapter_id, media_reference_id, context, display_url, author_note)
          VALUES (?, ?, ?, ?, ?, ?, ?)"
             .to_string(),
+        // Four UUID columns.
         "INSERT INTO work_media_references
             (id, work_id, chapter_id, media_reference_id, context, display_url, author_note)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)"
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7)"
             .to_string(),
     );
     match db.backend() {
@@ -1363,7 +1364,8 @@ pub async fn find_matching_standing_bounties(
         Backend::Sqlite => {
             let pool = db.sqlite_pool().expect("sqlite");
             let rows = sqlx::query(
-                "SELECT id, name, reward, provider, healthy_links_below
+                // `id` is UUID and the row reader takes Strings.
+                "SELECT id::text, name, reward, provider, healthy_links_below
                  FROM curator_standing_bounties
                  WHERE enabled = 1
                    AND (healthy_links_below IS NULL OR healthy_links_below > ?)
@@ -1388,7 +1390,8 @@ pub async fn find_matching_standing_bounties(
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             let rows = sqlx::query(
-                "SELECT id, name, reward, provider, healthy_links_below
+                // `id` is UUID and the row reader takes Strings.
+                "SELECT id::text, name, reward, provider, healthy_links_below
                  FROM curator_standing_bounties
                  WHERE enabled = true
                    AND (healthy_links_below IS NULL OR healthy_links_below > $1)
@@ -1442,6 +1445,9 @@ pub async fn upsert_author_preferences(
         Backend::Sqlite => {
             let pool = db.sqlite_pool().expect("sqlite");
             sqlx::query(
+                // `created_at`/`updated_at` are TIMESTAMPTZ and `now` is bound
+                // as an RFC 3339 string; `account_id` is TEXT on this table and
+                // needs nothing.
                 "INSERT INTO author_media_preferences
                     (account_id, auto_submit_to_archive, prefer_curator_verified,
                      broken_link_notifications, allow_curator_edits, minimum_healthy_links,
@@ -1479,14 +1485,14 @@ pub async fn upsert_author_preferences(
                     (account_id, auto_submit_to_archive, prefer_curator_verified,
                      broken_link_notifications, allow_curator_edits, minimum_healthy_links,
                      created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $7::timestamptz)
                  ON CONFLICT(account_id) DO UPDATE SET
                     auto_submit_to_archive = $2,
                     prefer_curator_verified = $3,
                     broken_link_notifications = $4,
                     allow_curator_edits = $5,
                     minimum_healthy_links = $6,
-                    updated_at = $7",
+                    updated_at = $7::timestamptz",
             )
             .bind(account_id)
             .bind(auto_submit)
@@ -1530,8 +1536,12 @@ pub async fn get_author_preferences(
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             let row = sqlx::query(
+                // The three flags are BOOLEAN on PostgreSQL (INTEGER on SQLite,
+                // which is why the two arms read them differently), and
+                // `minimum_healthy_links` is INTEGER against an i64 field.
                 "SELECT account_id, auto_submit_to_archive, prefer_curator_verified,
-                        broken_link_notifications, allow_curator_edits, minimum_healthy_links
+                        broken_link_notifications, allow_curator_edits,
+                        minimum_healthy_links::bigint
                  FROM author_media_preferences WHERE account_id = $1",
             )
             .bind(account_id)
@@ -1586,6 +1596,8 @@ pub async fn post_targeted_bounty(
         Backend::Sqlite => {
             let pool = db.sqlite_pool().expect("sqlite");
             sqlx::query(
+                // The five ids are TEXT on this table; the two timestamps are
+                // TIMESTAMPTZ and `now` arrives as an RFC 3339 string.
                 "INSERT INTO targeted_bounties
                     (id, work_id, chapter_id, media_reference_id, account_id,
                      reward, status, description, created_at, updated_at)
@@ -1609,7 +1621,7 @@ pub async fn post_targeted_bounty(
                 "INSERT INTO targeted_bounties
                     (id, work_id, chapter_id, media_reference_id, account_id,
                      reward, status, description, created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, 'open', $7, $8, $8)",
+                 VALUES ($1, $2, $3, $4, $5, $6, 'open', $7, $8::timestamptz, $8::timestamptz)",
             )
             .bind(id)
             .bind(work_id)
@@ -1653,7 +1665,8 @@ pub async fn claim_targeted_bounty(
             let pool = db.postgres_pool().expect("postgres");
             let result = sqlx::query(
                 "UPDATE targeted_bounties
-                 SET status = 'claimed', claimed_by = $1, claimed_at = $2, updated_at = $2
+                 SET status = 'claimed', claimed_by = $1,
+                     claimed_at = $2::timestamptz, updated_at = $2::timestamptz
                  WHERE id = $3 AND status = 'open'",
             )
             .bind(claimant)
@@ -1702,8 +1715,11 @@ pub async fn list_targeted_bounties_for_work(
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             let rows = sqlx::query(
+                // Read into String/i64: `reward` is INTEGER, so widen it, and
+                // `created_at` is TIMESTAMPTZ, so render it as text.
                 "SELECT id, work_id, chapter_id, media_reference_id, account_id,
-                        reward, status, description, claimed_by, created_at
+                        reward::bigint, status, description, claimed_by,
+                        created_at::text
                  FROM targeted_bounties WHERE work_id = $1 ORDER BY created_at DESC",
             )
             .bind(work_id)

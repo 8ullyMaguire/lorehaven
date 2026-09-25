@@ -51,10 +51,13 @@ pub async fn grant_vanguard(
         Backend::Postgres => {
             let pool = db.postgres_pool().ok_or(pool_err())?;
             sqlx::query(
+                // `account_id` and `granted_by` are UUID; the two timestamps
+                // are TIMESTAMPTZ and are bound as RFC 3339 strings.
                 "INSERT INTO vanguard_roles (account_id, granted_at, method, expires_at, granted_by)
-                 VALUES ($1, $2, $3, $4, $5)
+                 VALUES ($1::uuid, $2::timestamptz, $3, $4::timestamptz, $5::uuid)
                  ON CONFLICT(account_id)
-                 DO UPDATE SET granted_at = $2, method = $3, expires_at = $4, granted_by = $5",
+                 DO UPDATE SET granted_at = $2::timestamptz, method = $3,
+                               expires_at = $4::timestamptz, granted_by = $5::uuid",
             )
             .bind(account_id)
             .bind(&now)
@@ -108,7 +111,8 @@ pub async fn is_vanguard(db: &Database, account_id: &str) -> Result<bool, sqlx::
             let pool = db.postgres_pool().ok_or(pool_err())?;
             sqlx::query_scalar(
                 "SELECT COUNT(*) FROM vanguard_roles
-                 WHERE account_id = $1 AND (expires_at IS NULL OR expires_at > $2)",
+                 WHERE account_id = $1::uuid
+                   AND (expires_at IS NULL OR expires_at > $2::timestamptz)",
             )
             .bind(account_id)
             .bind(&now)
@@ -149,9 +153,12 @@ pub async fn list_vanguards(db: &Database) -> Result<Vec<Value>, sqlx::Error> {
         Backend::Postgres => {
             let pool = db.postgres_pool().ok_or(pool_err())?;
             let rows = sqlx::query(
-                "SELECT account_id, granted_at, method, expires_at, granted_by
+                // Read into Strings, so the two UUIDs and the timestamps are
+                // cast rather than handed to the row reader as native types.
+                "SELECT account_id::text, granted_at::text, method,
+                        expires_at::text, granted_by::text
                  FROM vanguard_roles
-                 WHERE expires_at IS NULL OR expires_at > $1
+                 WHERE expires_at IS NULL OR expires_at > $1::timestamptz
                  ORDER BY granted_at DESC",
             )
             .bind(&now)
@@ -209,9 +216,10 @@ pub async fn pin_work(
         Backend::Postgres => {
             let pool = db.postgres_pool().ok_or(pool_err())?;
             sqlx::query(
+                // Three UUIDs and a TIMESTAMPTZ.
                 "INSERT INTO vanguard_pins (id, account_id, work_id, pin_reason, message, pinned_at)
-                 VALUES ($1, $2, $3, $4, $5, $6)
-                 ON CONFLICT(account_id, work_id) DO UPDATE SET pinned_at = $6, pin_reason = $4, message = $5",
+                 VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::timestamptz)
+                 ON CONFLICT(account_id, work_id) DO UPDATE SET pinned_at = $6::timestamptz, pin_reason = $4, message = $5",
             )
             .bind(&id)
             .bind(account_id)
@@ -243,7 +251,7 @@ pub async fn unpin_work(db: &Database, account_id: &str, work_id: &str) -> Resul
         }
         Backend::Postgres => {
             let pool = db.postgres_pool().ok_or(pool_err())?;
-            sqlx::query("UPDATE vanguard_pins SET deleted_at = $1 WHERE account_id = $2 AND work_id = $3 AND deleted_at IS NULL")
+            sqlx::query("UPDATE vanguard_pins SET deleted_at = $1::timestamptz WHERE account_id = $2::uuid AND work_id = $3::uuid AND deleted_at IS NULL")
                 .bind(&now)
                 .bind(account_id)
                 .bind(work_id)
@@ -290,12 +298,17 @@ pub async fn list_active_pins(db: &Database) -> Result<Vec<Value>, sqlx::Error> 
         Backend::Postgres => {
             let pool = db.postgres_pool().ok_or(pool_err())?;
             let rows = sqlx::query(
-                "SELECT vp.id, vp.account_id, vp.work_id, vp.pin_reason, vp.message, vp.pinned_at, vp.expires_at
+                // Read into Strings: the three UUIDs and the three timestamps
+                // are cast, and the two expiry comparisons need the bind cast
+                // for the same reason.
+                "SELECT vp.id::text, vp.account_id::text, vp.work_id::text,
+                        vp.pin_reason, vp.message, vp.pinned_at::text,
+                        vp.expires_at::text
                  FROM vanguard_pins vp
                  JOIN vanguard_roles vr ON vp.account_id = vr.account_id
                  WHERE vp.deleted_at IS NULL
-                   AND (vp.expires_at IS NULL OR vp.expires_at > $1)
-                   AND (vr.expires_at IS NULL OR vr.expires_at > $1)
+                   AND (vp.expires_at IS NULL OR vp.expires_at > $1::timestamptz)
+                   AND (vr.expires_at IS NULL OR vr.expires_at > $1::timestamptz)
                  ORDER BY vp.pinned_at DESC",
             )
             .bind(&now)

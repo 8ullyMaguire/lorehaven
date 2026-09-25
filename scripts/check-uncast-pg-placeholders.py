@@ -45,11 +45,16 @@ import re
 import sys
 from collections import defaultdict
 
-# Types a bound `&str` can land in without complaint. Anything else is a report.
-TEXTUAL = {
-    "text", "varchar", "character varying", "char", "character", "bpchar",
-    "citext", "name", "uuid", "json", "jsonb", "xml",
-    "character varying(36)",
+# Column types a bound `&str` cannot satisfy by accident, and which therefore
+# have to be named in the statement. A TIMESTAMPTZ column is here because the
+# codebase stores timestamps as RFC 3339 strings and binds them as text, which
+# PostgreSQL will not coerce: the statement has to say `::timestamptz`. Numeric
+# and boolean types are deliberately absent -- a test may well be binding a real
+# `i64`/`bool` there, and the type alone cannot tell, so those are settled by
+# running the suite on both dialects rather than by guessing.
+NEEDS_EXPLICIT_CAST = {
+    "uuid", "timestamptz", "timestamp", "timestamp with time zone",
+    "timestamp without time zone", "date", "json", "jsonb", "uuid[]",
 }
 
 # `CREATE TABLE x (` ... `);` in a migration, then `col  TYPE ...` lines.
@@ -62,6 +67,14 @@ COLUMN = re.compile(
     r"(?:\s+(?:NOT\s+NULL|NULL|DEFAULT\b[^,]*|PRIMARY\s+KEY|UNIQUE|REFERENCES\b.*?))*\s*,",
     re.IGNORECASE | re.MULTILINE,
 )
+# The final column of a CREATE TABLE has no trailing comma, so COLUMN cannot
+# match it. Take it separately: same shape, comma optional only at the end, and
+# anchored so it cannot re-read a line COLUMN already handled.
+LAST_COLUMN = re.compile(
+    r"^\s*([a-z_][a-z0-9_]*)\s+([A-Za-z][A-Za-z0-9_ ]*?(?:\([^)]*\))?)"
+    r"(?:\s+(?:NOT\s+NULL|NULL|DEFAULT\b[^,]*|PRIMARY\s+KEY|UNIQUE|REFERENCES\b.*))?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 
 def load_schema(migrations: pathlib.Path) -> dict[str, dict[str, str]]:
@@ -72,9 +85,17 @@ def load_schema(migrations: pathlib.Path) -> dict[str, dict[str, str]]:
         for match in CREATE_TABLE.finditer(text):
             table, body = match.group(1).lower(), match.group(2)
             columns = schema.setdefault(table, {})
-            for col in COLUMN.finditer(body):
+            found = list(COLUMN.finditer(body)) + list(LAST_COLUMN.finditer(body))
+            for col in found:
+                # The trailing constraint group is non-greedy, so on
+                # `uuid NOT NULL` the captured type can still carry it.
                 coltype = " ".join(col.group(2).split()).lower()
-                columns.setdefault(col.group(1).lower(), coltype)
+                for noise in ("not null", "null", "primary key", "unique"):
+                    coltype = re.sub(rf"\b{noise}\b.*", "", coltype).strip()
+                # Last writer wins. A table is often declared once and then
+                # redeclared by a later migration that retypes columns, and the
+                # schema the database actually has is the last one applied.
+                columns[col.group(1).lower()] = coltype
     return schema
 
 
@@ -152,7 +173,7 @@ def offending_lines(sql: str, schema: dict[str, dict[str, str]]) -> bool:
 
 def _accepts_text(coltype: str) -> bool:
     base = coltype.split("(")[0].strip()
-    return base in TEXTUAL
+    return base not in NEEDS_EXPLICIT_CAST
 
 
 def scan(root: pathlib.Path, schema: dict[str, dict[str, str]]) -> list[tuple[pathlib.Path, int, str]]:
