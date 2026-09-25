@@ -1,3 +1,182 @@
+# Handoff — the PostgreSQL cast class, and one structural gap in the schema
+
+Date: 2026-09-25. **The current entry.** Supersedes the 1637/151 baseline below,
+which is now stale. `docs/postgres-migration-repair.md` is still the authority
+on how the migration chain broke; that history has not changed.
+
+## The state, measured not estimated
+
+SQLite: **1788 passed, 0 failed, 83 suites.** `cargo fmt` clean,
+`cargo clippy --workspace --all-targets -- -D warnings` clean, 0 warnings.
+(Note for the next session: `-D warnings` must come *after* `--`, or clippy
+rejects it as an unexpected argument and exits 1 having checked nothing.)
+
+PostgreSQL was 1762 passed / 125 failed across 30 suites when this session's work
+started. Both figures come from `--no-fail-fast` workspace runs, never from
+per-suite spot checks.
+
+## What was actually wrong, and it was not what I first assumed
+
+I spent a long stretch of this session on a wrong theory, so the record is worth
+keeping. The 27 failures whose panic message was the bare string `sqlite` looked
+like test fixtures reaching for `db.sqlite_pool()`. They were not: every one was
+`crates/db/src/thread_modes.rs`, **production code**, where `create_forum_topic`
+and `add_schedule_section` each had a `Backend::Postgres` arm whose statement was
+written for PostgreSQL (`$1::uuid`) and whose executor was
+`db.sqlite_pool().expect("sqlite")`. Under SQLite that arm is never taken, so
+every SQLite test passed. Two tokens of production code, 27 dead tests.
+
+`scripts/check-pg-arm-uses-sqlite-pool.py` is the permanent gate — a brace-depth
+scan rather than a regex, because ~800 of the 824 `sqlite_pool()` uses in
+`crates/*/src` are legitimately inside `Backend::Sqlite` arms. Verified as a gate
+by running it against the pre-fix file: it reports exactly those two sites, at
+the right lines.
+
+## The class that dominates: TIMESTAMPTZ
+
+PostgreSQL types the timestamp columns `TIMESTAMPTZ`; the SQLite schema spells
+the same columns `TEXT`; the whole codebase binds an RFC-3339 string. So every
+one of these passes on SQLite and fails on PostgreSQL:
+
+    42804: column "updated_at" is of type timestamp with time zone
+           but expression is of type text
+    42883: operator does not exist: text <= timestamp with time zone
+
+**82 sites remain**, all one shape: an `_at` column bound to a placeholder in a
+PostgreSQL arm. The one that bit hardest was `jobs.requeue_expired_leases`,
+which runs inside the worker pass — so it took down *every* test in a suite
+rather than one assertion, and said `operator does not exist` rather than
+anything pointing at a cast.
+
+**The cast follows the Rust type, not the column.** TIMESTAMPTZ feeding a
+`String` needs `::text`; INTEGER feeding an `i64` needs `::bigint`. Backwards is
+a real trap: `version` was an INT4 read into an `i64`, which fails even though
+the value is text-compatible.
+
+Two structural notes, because they are why the class keeps reappearing:
+
+- `jobs.rs::claim_sql` interpolates one `where_clause` into both dialects, so its
+  cast must be chosen per backend inside the string builder, not written into the
+  shared clause.
+- A hand-written `Backend::Postgres` arm executed via `sqlx::query` directly gets
+  no `?`→`$n` rewriting, so a `?::uuid` there reaches the server as a literal
+  question mark. `sqlx::Either` is not a way out: the `either` crate has no
+  `Executor` impl and `sqlx::Any` is not enabled here.
+
+## A gap in the parity test, now closed
+
+`the_two_dialects_declare_the_same_columns_and_indexes` compared table names,
+column names and index names. It passed for all 74 migrations while **12 tables
+declared `REFERENCES` in one dialect and not the other** — `payment_events`
+among them, which is how a test inserting invented UUIDs was accepted on SQLite
+and rejected with 23503 on PostgreSQL.
+
+The parser now records foreign keys, including the `ALTER TABLE ... FOREIGN KEY`
+spelling: a circular reference cannot be declared inline, and the two dialects
+disagree about which to use for `chapters.current_revision_id`. The divergences
+are listed in `KNOWN_FK_DIVERGENCES`, and a test asserts that list equals the
+actual divergence — so a table that gets *fixed* fails the test instead of
+keeping a stale allowance, and a new divergence fails too.
+
+**Closing the gap is not done, and I judged it out of scope here.** It means a
+12-step SQLite table rebuild per table, which needs `PRAGMA foreign_keys = OFF` —
+a no-op inside the transaction `migrate()` runs each migration in. So it is a
+decision about the migration runner first, and that decision is next.
+
+## The detector, and a lesson about it
+
+`scripts/check-uncast-pg-placeholders.py` reads the migrations and reports
+placeholders bound to columns the PostgreSQL schema types. Its INSERT branch
+**never fired**: `INSERT_COLUMN` was `^\s*(col)...(,|$)` under `re.MULTILINE`, so
+`^` matched only a line start and the function returned the first column and
+nothing else. Two more bugs in the same function — `split("VALUES", 1)` with
+`rindex("(")` picked the wrong paren, and the column list's trailing `)` stayed
+inside the slice, defeating the `(?=,|$)` lookahead and silently dropping the
+last column, always `updated_at`.
+
+It now reports 54 statements across 13 files; it was reporting 44, of which every
+INSERT was a false negative. **A detector that reports "OK" is worth nothing
+until you have watched it catch a real defect** — the way I found this was by
+asking why it had missed `user_devices`, not by reading the code.
+
+## What I tried and abandoned
+
+I wrote `scripts/add-timestamptz-casts.py` to apply the 82 casts mechanically. It
+corrupted two files in a dry run before I applied it anywhere: it wrote at byte
+offsets computed from overlapping call spans, and `cargo check` reported
+`character literal may only contain one codepoint`. I deleted it. **The casts are
+hand-written and the script is not in the tree.** A script that edits SQL strings
+by offset needs its own test suite before it goes near the repo; a half-applied
+cast is a silent corruption, not a compile error.
+
+## Next step, in order
+
+1. **Fix `migrate()`'s transaction handling so `PRAGMA foreign_keys` works**,
+   then add the 12 missing SQLite foreign keys and empty `KNOWN_FK_DIVERGENCES`.
+2. Work the 82 TIMESTAMPTZ sites **by suite**, running that suite on PostgreSQL
+   after each file. Do not batch them — worker-pass sites mask everything else in
+   a suite, so a batch looks like no progress and then like everything at once.
+3. Only then re-measure. Per-suite numbers are the useful signal; one workspace
+   total hides which file you just fixed.
+
+---
+
+# Handoff — PostgreSQL migration chain repaired (P1); dedup branch still owed
+
+Date: 2026-09-25. **Read `docs/postgres-migration-repair.md` first** — it is the
+authority on what was broken and what the baseline is. Commits `de9555a`,
+`6789f5a`, `55d1c7e`, pushed to both remotes.
+
+**M32-07e did not get written, and that is the right outcome.** I set out to
+implement the spec's §32.7.2 perceptual dedup branch. Before writing a line of
+it, the FK-target checker flagged `device_deliveries.export_job_id ->
+export_jobs_old` — a table that does not exist — and following that thread
+turned up something much larger: **the PostgreSQL migration chain has never
+applied past migration 0041.** Every test that opens a scratch PG database dies
+during `migrate`, before a single assertion.
+
+Seven `TEXT` columns referencing `UUID` primary keys, across 0041 and 0042. Plus
+`device_deliveries` broken differently in each dialect by 0035 — SQLite renamed
+the table and the rename rewrote the referencing FK onto a dropped table; PG
+dropped the table outright and never recreated it. All of it shipped green
+because **nothing in the codebase inserts into that table**.
+
+**The number that matters:** with the chain repaired, the full PG suite runs for
+the first time — 1637 passed, **151 failed**, against SQLite's 1785 / 0. Those
+151 are not regressions; they are the first honest measurement of a dialect
+this project ships and has never run. All 20 of the uuid-vs-text errors are in
+test files, none in production.
+
+**The defect class worth knowing:** `TestDb::sql()` renumbers `?` to `$n` for PG
+but does not cast, so a test binding an id as `&str` into a `UUID` column passes
+on SQLite and dies on PG with 42804. The house fix is the two-arm
+`db.sql(sqlite, postgres)` form spelling the PG arm `?::uuid`, as
+`create_export` does. `crates/app/tests/device_delivery_fk.rs` is the reference
+implementation, verified 3/3 on both dialects.
+
+## Gate
+
+SQLite: fmt clean, clippy 0/0, suite re-running at commit time. Device-delivery
+suite: 3/3 SQLite, 3/3 PostgreSQL 17.11. FK-target checker reports clean.
+
+## What is still owed, in order
+
+1. **The 151 PG failures.** Mechanical but not small: dual-arm the test
+   fixtures, fix the `boolean`/`timestamptz` columns, remove the stray `::` in
+   `milestone_22.rs:541`. Its own milestone, gated on both dialects every time —
+   the whole failure mode here was running one.
+2. **M32-07e itself**, still unwritten. `migrations/*/0074_media_match_proposals.sql`
+   is staged and uncommitted — the table for the spec's curator-confirmation
+   branch. `find_media_reference_by_content_hash` still has zero callers and both
+   `require_curator_confirmation_*` config fields are still read by nothing.
+3. `phash`/`whash`/`ahash` unimplemented; `audio_fingerprint` unapplied to audio;
+   the worker not exercised in E2E.
+
+Nothing deployed. `docs/handoffs/2026-09-25T181500+0200-m32-07d-media-fetch-job-handoff.md`
+is the last feature handoff and is still accurate for the media work.
+
+---
+
 # Handoff — M32-07d: the media fetch job, driven end to end
 
 Date: 2026-09-25. **The current, full handoff is
