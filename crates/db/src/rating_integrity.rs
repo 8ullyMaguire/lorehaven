@@ -121,7 +121,7 @@ pub async fn clear_rating_anomaly_event(
 ) -> Result<()> {
     let sql = db.sql(
         "UPDATE rating_anomaly_events SET cleared_at = ?, cleared_by = ? WHERE id = ?",
-        "UPDATE rating_anomaly_events SET cleared_at = $1, cleared_by = $2 WHERE id = $3",
+        "UPDATE rating_anomaly_events SET cleared_at = $1::timestamptz, cleared_by = $2 WHERE id = $3",
     );
     let now = crate::identity::now_rfc3339();
     match db.backend() {
@@ -212,7 +212,7 @@ pub async fn get_work_anomaly_events(
 pub async fn set_work_contested(db: &Database, work_id: &WorkId, reason: &str) -> Result<()> {
     let sql = db.sql(
         "UPDATE works SET contested = 1, contested_at = ?, contested_reason = ? WHERE id = ?",
-        "UPDATE works SET contested = 1, contested_at = $1, contested_reason = $2 WHERE id = $3",
+        "UPDATE works SET contested = 1, contested_at = $1::timestamptz, contested_reason = $2 WHERE id = $3",
     );
     let now = crate::identity::now_rfc3339();
     match db.backend() {

@@ -294,7 +294,7 @@ pub async fn record_warmth(
 
     let update_tier_sql = db.sql(
         "UPDATE interaction_warmth SET tier = ?, updated_at = ? WHERE account_id = ? AND author_account = ?",
-        "UPDATE interaction_warmth SET tier = $1, updated_at = $2 WHERE account_id::text = $3 AND author_account::text = $4",
+        "UPDATE interaction_warmth SET tier = $1, updated_at = $2::timestamptz WHERE account_id::text = $3 AND author_account::text = $4",
     );
     match db.backend() {
         Backend::Sqlite => {
