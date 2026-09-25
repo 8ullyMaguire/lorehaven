@@ -6,7 +6,9 @@ ALTER TABLE forum_topics ADD COLUMN slow_mode_seconds INTEGER NOT NULL DEFAULT 0
 ALTER TABLE forum_topics ADD COLUMN federation_scope TEXT NOT NULL DEFAULT 'public';
 
 ALTER TABLE forum_posts ADD COLUMN featured INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE forum_posts ADD COLUMN featured_by TEXT REFERENCES accounts(id) ON DELETE SET NULL;
+-- UUID: accounts(id) is a UUID primary key, and a TEXT foreign key cannot be
+-- created against one.
+ALTER TABLE forum_posts ADD COLUMN featured_by UUID REFERENCES accounts(id) ON DELETE SET NULL;
 ALTER TABLE forum_posts ADD COLUMN featured_at TEXT;
 
 CREATE INDEX idx_forum_posts_featured ON forum_posts(featured) WHERE featured = 1;
@@ -17,11 +19,11 @@ CREATE INDEX idx_forum_posts_original_topic ON forum_posts(original_topic_id) WH
 
 CREATE TABLE forum_sanctions (
     id              TEXT PRIMARY KEY,
-    account         TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    account         UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     category_id     TEXT REFERENCES forum_categories(id) ON DELETE CASCADE,
     level           TEXT NOT NULL,
     reason          TEXT NOT NULL,
-    actor           TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    actor           UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     created_at      TEXT NOT NULL,
     expires_at      TEXT,
     active          INTEGER NOT NULL DEFAULT 1,
@@ -61,7 +63,7 @@ CREATE UNIQUE INDEX idx_forum_search_misses_hash ON forum_search_misses(query_ha
 
 CREATE TABLE forum_post_first_vote_notified (
     post_id         TEXT NOT NULL REFERENCES forum_posts(id) ON DELETE CASCADE,
-    account         TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    account         UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     notified_at     TEXT NOT NULL,
     vote_count      INTEGER NOT NULL,
     PRIMARY KEY (post_id, account)
