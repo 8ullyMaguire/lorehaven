@@ -3260,12 +3260,16 @@ pub async fn curator_leaderboard(db: &Database, limit: i64) -> Result<Vec<(Strin
          ORDER BY total_amount DESC
          LIMIT ?"
             .to_string(),
-        "SELECT account_id,
+        // `account_id` is a UUID and the row type is a String, so it is cast on
+        // output. `ORDER BY` repeats the aggregate rather than naming the alias:
+        // PostgreSQL will not order a grouped query by a SELECT alias, and
+        // `SUM(amount)` is NUMERIC, hence the ::bigint in the expression.
+        "SELECT account_id::text,
                 COUNT(*) AS reward_count,
                 SUM(amount)::bigint AS total_amount
          FROM curator_rewards
          GROUP BY account_id
-         ORDER BY total_amount DESC
+         ORDER BY SUM(amount) DESC
          LIMIT $1"
             .to_string(),
     );
