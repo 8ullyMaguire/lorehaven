@@ -3083,7 +3083,7 @@ pub async fn find_curator_bounty_queue(
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             let rows = sqlx::query(
-                "SELECT m.id::text, m.perceptual_hash, m.content_hash, m.media_kind, m.first_seen_at,
+                "SELECT m.id::text, m.perceptual_hash, m.content_hash, m.media_kind, m.first_seen_at::text,
                         CAST(m.width AS BIGINT), CAST(m.height AS BIGINT), CAST(m.duration_seconds AS BIGINT), m.format, CAST(m.file_size_bytes AS BIGINT),
                         m.content_notes, m.curator_verified, m.created_at, m.updated_at
                  FROM media_references m

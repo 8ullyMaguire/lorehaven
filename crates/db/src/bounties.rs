@@ -15,7 +15,7 @@
 //! form, selected by [`Database::backend`].
 
 use crate::Database;
-use serde_json::json;
+use serde_json::{json, Value};
 
 /// The `bounties` row as selected by the read queries, in column order.
 ///
@@ -279,11 +279,11 @@ pub async fn list_flexible_bounties(db: &Database) -> Result<Vec<Value>, sqlx::E
         }
         crate::Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres handle");
-                // `amount` and `funded_amount` are INTEGER; widen for the i64 row type.
-                // `fetch_bounty` does the same, for the same reason.
+            // `amount` and `funded_amount` are INTEGER; widen for the i64 row type.
+            // `fetch_bounty` does the same, for the same reason.
             sqlx::query_as(
                 "SELECT id, type, job_kind, terms, CAST(amount AS BIGINT), CAST(funded_amount AS BIGINT),
-                        state, created_by, created_at, activated_at
+                        state, created_by, created_at, activated_at",
             )
             .fetch_all(pool)
             .await?
@@ -336,5 +336,3 @@ pub enum FlexibleBountyError {
     #[error("database error: {0}")]
     Sql(#[source] sqlx::Error),
 }
-
-use serde_json::Value;
