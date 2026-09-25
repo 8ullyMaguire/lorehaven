@@ -12,8 +12,8 @@ all live in this repository.
 
 **2026-09-25 (ADR 0024):** this repository is the base for the consolidated
 from-scratch specification. The honest one-line status, re-derived from
-`docs/requirements.csv`: **195 of 256 requirement rows implemented**
-(175 locally-tested, 20 fully-tested), **57 planned**, **4 deliberately
+`docs/requirements.csv`: **196 of 257 requirement rows implemented**
+(176 locally-tested, 20 fully-tested), **57 planned**, **4 deliberately
 unsupported**, tags through `v0.51.0`. What remains is planned in
 `docs/plans/remaining-work.md`: the recommendation strategy registry (M52),
 adapter porting batches (M53+), the companion bot (M54), OpenAPI publication

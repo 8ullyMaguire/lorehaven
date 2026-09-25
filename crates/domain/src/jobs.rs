@@ -148,6 +148,15 @@ job_kinds! {
     #[doc = "Build a derivative rendition (EPUB/PDF/text) or extract OCR from a"]
     #[doc = "scanned upload (M25 / spec §32.4)."]
     Derivative => "derivative",
+    #[doc = "Fetch a media reference's bytes and store its exact and perceptual"]
+    #[doc = "hashes (M32-07d / spec §32.7.2)."]
+    #[doc = ""]
+    #[doc = "A job because the URL is author-supplied and the fetch must never"]
+    #[doc = "hold an HTTP request open: the add-reference door answers 201 and the"]
+    #[doc = "hashing happens here. The `pending` placeholder `add_media_reference`"]
+    #[doc = "writes is replaced by this job, which is what makes the dedup search"]
+    #[doc = "readable instead of structurally correct on an empty column."]
+    MediaFetch => "media_fetch",
     #[doc = "Produce or regenerate a TTS narration edition (M26 / spec §32.5)."]
     #[doc = ""]
     #[doc = "Author-approved machine narration. The worker invokes the configured"]
@@ -183,6 +192,7 @@ impl JobKind {
             Self::UpdateCheck => ResourceClass::Interactive,
             Self::Derivative => ResourceClass::Interactive,
             Self::Narration => ResourceClass::Interactive,
+            Self::MediaFetch => ResourceClass::Interactive,
         }
     }
 
@@ -204,6 +214,7 @@ impl JobKind {
             Self::UpdateCheck => 7,
             Self::Derivative => 8,
             Self::Narration => 9,
+            Self::MediaFetch => 10,
         }
     }
 }
