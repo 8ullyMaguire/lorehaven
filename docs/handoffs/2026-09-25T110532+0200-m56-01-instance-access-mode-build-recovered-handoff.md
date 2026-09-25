@@ -66,46 +66,63 @@ strategy set).
 
 ## Verification
 
-- `cargo test --workspace` — **1685 passed, 0 failed** across 79 binaries.
-  This is the first time the full suite has completed: the search parser
-  had an infinite loop on any parenthesised query (`(tag:x OR tag:y)`),
-  which is what the handoff had been reporting as a "slow" `parse_range`
-  test. See the parser commit below.
-- `cargo check -p lorehaven-app` — clean (warnings only, all pre-existing).
+**This is the first session in which the full test suite has ever run to
+completion.** All four layers are green:
+
+| Layer | Result |
+|---|---|
+| `cargo test --workspace` | **1685 passed, 0 failed** (79 binaries) |
+| `npx vitest run` (frontend) | **300 passed, 0 failed** (58 files) |
+| `npx playwright test` (E2E) | **73 passed, 0 failed** |
+| `cargo check -p lorehaven-app` | clean (warnings only, all pre-existing) |
+
 - `cargo test -p lorehaven-app --lib config::` — 30/30, including 8 new
   instance-mode tests.
 - `cargo test -p lorehaven-app --test instance_access_mode` — 5/5 through
   the real router.
 - `cargo test -p lorehaven-app --test m45_21_dnf` — 3/3.
-- E2E last measured **73/73** at `d04a54a`. The mode defaults to `public`, so
-  the E2E contract is unchanged, but this has not been re-measured on the
-  repaired tree. **Re-run the Playwright suite before deploying.**
+- `cargo test -p lorehaven-domain --lib` — 482/482 in **0.30s**, where it
+  previously never returned.
 
-## The search parser was hanging the whole test suite
+## Three defects fixed beyond the accessibility mode
 
-`crates/domain/src/search.rs` had three defects, all pre-existing and all
-covered by tests that were *failing* rather than passing:
+### 1. The search parser hung the entire test suite (`ff9fff9`)
+
+`crates/domain/src/search.rs` had three independent bugs, all pre-existing,
+all covered by tests that were *failing* rather than passing:
 
 1. **Infinite loop on any parenthesised query.** `parse_terms` broke only on
    EOF. A group whose last term was followed by `)` left the cursor on the
    bracket — neither EOF nor a term — and the free-text fallback never
-   advanced. `(tag:romance OR tag:angst)` spun forever. This is why
-   `cargo test --workspace` never finished; it looked like a slow test, not a
-   hang, and was written up as such in earlier handoffs.
+   advanced. `(tag:romance OR tag:angst)` spun forever. Earlier handoffs
+   recorded this as a "slow `parse_range` test"; it was a hang, and it is
+   why `cargo test --workspace` had never finished.
 2. **`words:>10000` and `kudos:>=100` parsed as `Equal`** with the operator
-   glued into the value. The grammar is `field : [op] value`; `:` was being
-   treated as the equality operator with no look past it.
+   glued into the value. The grammar is `field : [op] value`; `:` was the
+   equality operator with no look past it.
 3. **`date:2026-01..2026-06` parsed as an equality on the whole string**,
-   because `.` was not a value terminator and `..` was absorbed before the
-   range check could see it.
+   because `.` was not a value terminator.
 
-The fix is `ff9fff9`. `parse_terms` now breaks on `)` as well as EOF, the
-separator and the operator are parsed as two steps, and `..` terminates a
-value while a lone `.` does not — so `2026-01` and `0.5` survive.
+`parse_terms` now breaks on `)` as well as EOF, the separator and the
+operator are parsed as two steps, and `..` terminates a value while a lone
+`.` does not — so `2026-01` and `0.5` survive.
 
-**If you see a test suite that appears to hang, check the search parser
-first.** The domain lib tests now run in 0.30s where they previously never
-returned.
+**If a suite ever appears to hang again, check the search parser first.**
+
+### 2. The Media unit test asserted link text the component does not render (`0575c22`)
+
+The test looked for a link named "Atom"; the component says "Atom feed", and
+`e2e/media.spec.ts` has always asserted the latter. The test was the stale
+party.
+
+### 3. The export-delete E2E deleted a row the worker still owned (`d624c15`)
+
+The test waited for `.state` to be *visible*, which is true the instant the
+export is queued, then asked the server to remove a row the worker still
+owned. It read the refusal as "the delete did not work" rather than as the
+race it was. Now it waits for `Ready` — the contract the EPUB download test
+already asserts. Passes in 2.9s where it previously burned its full 15s
+timeout and failed.
 
 ## Release status
 
