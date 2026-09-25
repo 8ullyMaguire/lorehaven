@@ -72,7 +72,7 @@ async fn seed_bookmark(db: &lorehaven_db::Database, id: &str, account_id: &str, 
         Backend::Sqlite => {
             sqlx::query(
                 "INSERT INTO bookmarks (id, account_id, subject_type, subject_id, note, is_public, created_at, updated_at, version)
-                 VALUES (?, ?, 'work', ?, '', 0, datetime('now'), datetime('now'), 1)",
+                 VALUES (?, ?, 'work', ?, '', FALSE, datetime('now'), datetime('now'), 1)",
             )
             .bind(id)
             .bind(account_id)
@@ -84,7 +84,7 @@ async fn seed_bookmark(db: &lorehaven_db::Database, id: &str, account_id: &str, 
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO bookmarks (id, account_id, subject_type, subject_id, note, is_public, created_at, updated_at, version)
-                 VALUES ($1::uuid, $2::uuid, 'work', $3::uuid, '', 0, NOW(), NOW(), 1)",
+                 VALUES ($1::uuid, $2::uuid, 'work', $3::uuid, '', FALSE, NOW(), NOW(), 1)",
             )
             .bind(id)
             .bind(account_id)
@@ -215,7 +215,13 @@ async fn media_ref_collab_finds_shared_media() {
     .await;
 
     // A bookmarks W1.
-    seed_bookmark(db, "bm-1", &account_a, &work1.to_string()).await;
+    seed_bookmark(
+        db,
+        &test_support::id("bm-1"),
+        &account_a,
+        &work1.to_string(),
+    )
+    .await;
 
     let recs =
         lorehaven_db::discovery::media_reference_collaborative_recommendations(db, &account_a, 10)
@@ -316,7 +322,13 @@ async fn media_ref_collab_ranks_by_shared_count() {
     )
     .await;
 
-    seed_bookmark(db, "bm-1", &account_a, &work1.to_string()).await;
+    seed_bookmark(
+        db,
+        &test_support::id("bm-1"),
+        &account_a,
+        &work1.to_string(),
+    )
+    .await;
 
     let recs =
         lorehaven_db::discovery::media_reference_collaborative_recommendations(db, &account_a, 10)
@@ -374,7 +386,13 @@ async fn media_ref_collab_excludes_own_works() {
     .await;
 
     // A bookmarks W1.
-    seed_bookmark(db, "bm-1", &account_a, &work1.to_string()).await;
+    seed_bookmark(
+        db,
+        &test_support::id("bm-1"),
+        &account_a,
+        &work1.to_string(),
+    )
+    .await;
 
     let recs =
         lorehaven_db::discovery::media_reference_collaborative_recommendations(db, &account_a, 10)

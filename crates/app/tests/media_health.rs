@@ -235,7 +235,7 @@ async fn curator_leaderboard_with_entries() {
 
     media_resilience::insert_curator_reward(
         db,
-        "bob",
+        &test_support::id("bob"),
         lorehaven_domain::media_resilience::CuratorAction::Verify,
         Some(&test_support::id("ref-lb")),
         Some(&test_support::id("link-lb")),
@@ -248,8 +248,9 @@ async fn curator_leaderboard_with_entries() {
         .await
         .expect("leaderboard");
     assert_eq!(leaders.len(), 2);
-    // alice should be first (15 > 5)
-    assert_eq!(leaders[0].0, "alice");
+    // alice should be first (15 > 5). The id is a UUID on PostgreSQL, and it is
+    // the same one the reward above was recorded against.
+    assert_eq!(leaders[0].0, test_support::id("alice"));
     assert_eq!(leaders[0].1, 1); // reward_count
     assert_eq!(leaders[0].2, 15); // total_amount
 }
