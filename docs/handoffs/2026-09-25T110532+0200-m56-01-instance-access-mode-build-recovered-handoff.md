@@ -66,6 +66,11 @@ strategy set).
 
 ## Verification
 
+- `cargo test --workspace` — **1685 passed, 0 failed** across 79 binaries.
+  This is the first time the full suite has completed: the search parser
+  had an infinite loop on any parenthesised query (`(tag:x OR tag:y)`),
+  which is what the handoff had been reporting as a "slow" `parse_range`
+  test. See the parser commit below.
 - `cargo check -p lorehaven-app` — clean (warnings only, all pre-existing).
 - `cargo test -p lorehaven-app --lib config::` — 30/30, including 8 new
   instance-mode tests.
@@ -73,8 +78,34 @@ strategy set).
   the real router.
 - `cargo test -p lorehaven-app --test m45_21_dnf` — 3/3.
 - E2E last measured **73/73** at `d04a54a`. The mode defaults to `public`, so
-  the E2E contract is unchanged, but this has not been re-measured since the
-  reset. **Re-run the Playwright suite before deploying.**
+  the E2E contract is unchanged, but this has not been re-measured on the
+  repaired tree. **Re-run the Playwright suite before deploying.**
+
+## The search parser was hanging the whole test suite
+
+`crates/domain/src/search.rs` had three defects, all pre-existing and all
+covered by tests that were *failing* rather than passing:
+
+1. **Infinite loop on any parenthesised query.** `parse_terms` broke only on
+   EOF. A group whose last term was followed by `)` left the cursor on the
+   bracket — neither EOF nor a term — and the free-text fallback never
+   advanced. `(tag:romance OR tag:angst)` spun forever. This is why
+   `cargo test --workspace` never finished; it looked like a slow test, not a
+   hang, and was written up as such in earlier handoffs.
+2. **`words:>10000` and `kudos:>=100` parsed as `Equal`** with the operator
+   glued into the value. The grammar is `field : [op] value`; `:` was being
+   treated as the equality operator with no look past it.
+3. **`date:2026-01..2026-06` parsed as an equality on the whole string**,
+   because `.` was not a value terminator and `..` was absorbed before the
+   range check could see it.
+
+The fix is `ff9fff9`. `parse_terms` now breaks on `)` as well as EOF, the
+separator and the operator are parsed as two steps, and `..` terminates a
+value while a lone `.` does not — so `2026-01` and `0.5` survive.
+
+**If you see a test suite that appears to hang, check the search parser
+first.** The domain lib tests now run in 0.30s where they previously never
+returned.
 
 ## Release status
 
