@@ -1,4 +1,89 @@
-# Handoff — the uncast-placeholder class, closed; the detector now tests itself
+# Handoff — the same class of fault, run in the opposite direction
+
+## The short version
+
+The previous session closed "a TEXT bind into a typed column". This session found
+the mirror image: **a typed bind into a TEXT column**, which nobody was checking
+for, and which had disabled the entire job runner on PostgreSQL.
+
+`fix-timestamptz-binds.py` existed to add `::timestamptz` to every `_at` bind. Its
+docstring asserted the reason: *"the SQLite schema spells the timestamp columns
+TEXT; PostgreSQL types them TIMESTAMPTZ."* The first half is right. The second is
+false — this project's PostgreSQL migrations mirror the SQLite types exactly, so
+`jobs.available_at`, `outbox_events.created_at`, `comments.created_at` and about a
+hundred more are all `TEXT`. Every cast the tool added was a defect:
+
+    operator does not exist: text <= timestamp with time zone
+
+26 statements across 24 files carried one. The job runner was the worst of it —
+`claim_next`, every lease renewal, the expiry sweep, the retry schedule — so on
+PostgreSQL nothing was ever claimed and no job ever ran. The tool is now disabled
+(commit `3b9cc87`); only `--self-test` still runs.
+
+**If you take one thing from this:** never infer a column's type from its name, its
+`_at` suffix, or what the other dialect does. Read it out of `migrations/postgres`.
+`check-uncast-pg-placeholders.py` now does exactly that, and that is the only reason
+these are found rather than guessed at.
+
+## The two other faults, same root
+
+Both are "assumed the type instead of reading it":
+
+- `work_view_log.is_automated` and `collections.is_public` /
+  `work_contributors.public_attribution` are `INTEGER`, not `BOOLEAN`. Flag columns
+  are spelled `BOOLEAN` in only 19 of the migrations, so neither spelling can be
+  assumed. A Rust `bool` bind and a `= true` comparison are both rejected:
+  `bigint = boolean`. This broke the anonymous work page, which is the first
+  request a crawler makes.
+- `work_kudos.created_at` and `work_metric_aggregates.updated_at` are `TEXT` and
+  were written with a bare `now()`. `NOW_TEXT` in `work_metrics.rs` renders it in
+  exactly the form SQLite's `datetime('now')` produces, so a row written by either
+  dialect sorts and compares identically.
+
+## Two diagnostics, so the next one is ten minutes not two hours
+
+Locating a dialect fault by reading candidate SQL does not work — there are 250
+tables and both spellings appear in the same file. Two permanent hooks:
+
+- `LOREHAVEN_TRACE_SQL=1` with `RUST_LOG=lorehaven_db=debug` makes
+  `Database::sql` log every PostgreSQL statement it builds. The failing one is the
+  last line before the error. (It logs nothing for hand-written `sqlx::query`
+  arms, which is itself the signal that the statement bypasses `db.sql`.)
+- `public_view` names the step that failed. It fans out to four independent
+  queries and a fault in any of them was an anonymous 500.
+
+## The checker now has 24 self-test cases, and the negative cases are the point
+
+Two rules were added, each with a negative case proving it does not fire on correct
+SQL:
+
+| fault | reported | must NOT report |
+|---|---|---|
+| uncast bind → typed column | `jobs.updated_at = $1` | `... = $1::text` |
+| `::timestamptz` → TEXT column | `jobs.updated_at = $1::timestamptz` | `local_mirrors.expires_at = $1::timestamptz` (that column really is TIMESTAMPTZ) |
+| boolean literal → integer column | `c.is_public = true` | `reviews.is_public = true` (that column really is BOOLEAN) |
+
+Both new rules resolve table aliases, so `JOIN collections c ON ...` followed by
+`c.is_public = true` is judged rather than skipped. Alias resolution also fixed
+`work_backlink.rs`, which had the same integer-flag fault and had been passing
+only because nothing looked.
+
+## Also fixed, both pre-existing
+
+- `find_curator_bounty_queue`'s **SQLite** arm carried `::text` and `::bigint`
+  casts. SQLite cannot parse them (`unrecognized token: ":"`), so the curator
+  bounty queue was a 500 on SQLite. The casts belong to the PostgreSQL arm.
+- `find_by_perceptual_hash`'s SQLite arm had `CAST(width AS BIGINT)` with no
+  alias, so the result column was named after the expression and the row reader's
+  `r.get("width")` was `ColumnNotFound("width")`. Reverse image search never ran.
+  Each cast now carries its column name back.
+
+## Where things stand
+
+SQLite: green. PostgreSQL: `milestone_10` 21/21, `milestone_21` 23/23,
+`work_metrics` 3/3, `discovery` 3/3, `curator` 5/5.
+
+---
 
 ## What this session found, in the order it had to be found
 
