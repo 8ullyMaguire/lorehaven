@@ -11,7 +11,7 @@
 
 use anyhow::{bail, Result};
 use lorehaven_db::identity::{self, AccountStatus, PrivacyScope};
-use lorehaven_db::Database;
+use lorehaven_db::{Backend, Database};
 use lorehaven_domain::policy::AgeState;
 use lorehaven_domain::{AccountId, PseudId};
 
@@ -140,29 +140,56 @@ pub async fn run(config: &Config, db: &Database, args: &SeedArgs) -> Result<Seed
     // --- forum categories ---------------------------------------------------
     // Seed a minimal set of forum categories so GET /forums has content.
     // Idempotent: only insert if the table is empty.
-    let pool = db.sqlite_pool().expect("sqlite in seed");
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM forum_categories")
-        .fetch_one(pool)
-        .await?;
-    if count == 0 {
-        let categories = [
-            ("general", "General", 1, 0),
-            ("fanworks", "Fanworks", 2, 0),
-            ("discussion", "Discussion", 3, 0),
-            ("help", "Help & Feedback", 4, 0),
-        ];
-        for (id, name, position, min_trust) in categories {
-            sqlx::query(
-                "INSERT OR IGNORE INTO forum_categories (id, name, position, min_trust) VALUES (?, ?, ?, ?)",
-            )
-            .bind(id)
-            .bind(name)
-            .bind(position)
-            .bind(min_trust)
-            .execute(pool)
-            .await?;
+    // `lorehaven seed` is reachable from the CLI against either backend, so this
+    // cannot assume SQLite: the pool and the insert spelling both differ.
+    let categories = [
+        ("general", "General", 1, 0),
+        ("fanworks", "Fanworks", 2, 0),
+        ("discussion", "Discussion", 3, 0),
+        ("help", "Help & Feedback", 4, 0),
+    ];
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite in seed");
+            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM forum_categories")
+                .fetch_one(pool)
+                .await?;
+            if count == 0 {
+                for (id, name, position, min_trust) in categories {
+                    sqlx::query(
+                        "INSERT OR IGNORE INTO forum_categories (id, name, position, min_trust) VALUES (?, ?, ?, ?)",
+                    )
+                    .bind(id)
+                    .bind(name)
+                    .bind(position)
+                    .bind(min_trust)
+                    .execute(pool)
+                    .await?;
+                }
+                tracing::info!("seeded {} forum categories", categories.len());
+            }
         }
-        tracing::info!("seeded {} forum categories", categories.len());
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres in seed");
+            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM forum_categories")
+                .fetch_one(pool)
+                .await?;
+            if count == 0 {
+                for (id, name, position, min_trust) in categories {
+                    // PostgreSQL spells this `ON CONFLICT DO NOTHING`.
+                    sqlx::query(
+                        "INSERT INTO forum_categories (id, name, position, min_trust) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+                    )
+                    .bind(id)
+                    .bind(name)
+                    .bind(position)
+                    .bind(min_trust)
+                    .execute(pool)
+                    .await?;
+                }
+                tracing::info!("seeded {} forum categories", categories.len());
+            }
+        }
     }
 
     Ok(SeedSummary {

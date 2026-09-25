@@ -35,6 +35,34 @@ POOL = re.compile(r"sqlite_pool\(\)")
 POSTGRES = re.compile(r"Postgres")
 
 
+
+# A function that reaches for the pool without ever naming the backend has no
+# PostgreSQL arm at all -- it will run, and it will run against SQLite, and the
+# failure will read as a decoding bug in whatever column it touched. `list_bounties`
+# shipped that way and reported "Rust type `i64` (as SQL type `INT8`) is not
+# compatible with SQL type `INT4`", which names neither the pool nor the port.
+FN = re.compile(r"^\s*(?:pub(?:\([\w:]+\))?\s+)?(?:async\s+)?fn\s+(\w+)", re.M)
+
+
+def unported(text: str) -> list[tuple[str, int]]:
+    """Functions that use the pool but branch on no backend."""
+    out: list[tuple[str, int]] = []
+    functions = list(FN.finditer(text))
+    for i, m in enumerate(functions):
+        end = functions[i + 1].start() if i + 1 < len(functions) else len(text)
+        body = text[m.end() : end]
+        uses_pool = "sqlite_pool()" in body
+        names_backend = "Backend::" in body or ".backend()" in body
+        # A helper that exists only to be called from one backend's arm is
+        # correct as it stands. So is a test. `sqlite_pool()` in the name is the
+        # convention this repo already uses for the former.
+        if "_sqlite" in m.group(1):
+            continue
+        if uses_pool and not names_backend:
+            out.append((m.group(1), text[: m.start()].count("\n") + 1))
+    return out
+
+
 def scan(text: str) -> list[tuple[int, str]]:
     """Every `sqlite_pool()` in `text`, with the header of the block it sits in.
 
@@ -92,9 +120,31 @@ def main(argv: list[str]) -> int:
                 line = text[:pos].count("\n") + 1
                 bad.append((path, line, header))
 
-    if not bad:
-        print("ok: no Backend::Postgres arm calls sqlite_pool()")
+    missing: list[tuple[pathlib.Path, str, int]] = []
+    for path in files:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "sqlite_pool()" not in text:
+            continue
+        for name, line in unported(text):
+            missing.append((path, name, line))
+
+    if not bad and not missing:
+        print("ok: no Backend::Postgres arm calls sqlite_pool(), "
+              "and no function uses the pool without a backend arm")
         return 0
+
+    if missing:
+        print(f"{len(missing)} function(s) use the pool with no backend arm at all:\n")
+        for path, name, line in missing:
+            print(f"  {path}:{line}  {name}")
+        print(
+            "\nSuch a function cannot fail the first check -- there is no\n"
+            "PostgreSQL arm to put a sqlite_pool() in. It runs on SQLite under\n"
+            "every local test and misbehaves under LOREHAVEN_TEST_PG_URL, where\n"
+            "the error names a column type rather than the missing port.\n"
+        )
+    if not bad:
+        return 1
 
     print(f"{len(bad)} site(s) call sqlite_pool() inside a PostgreSQL arm:\n")
     for path, line, header in bad:

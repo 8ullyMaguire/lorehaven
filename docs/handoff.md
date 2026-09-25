@@ -1,3 +1,81 @@
+# Handoff — the uncast-placeholder class, closed; the detector now tests itself
+
+## What this session found, in the order it had to be found
+
+Writing the §32.7.2 curator routes produced a test suite that passed 9/9 on SQLite
+and failed 6/9 on PostgreSQL, all with `401 authentication required` on routes the
+caller had just authenticated for. Four independent defects were stacked on top of
+each other; fixing any one of them changed the symptom from one failure to another,
+which is what made this slow.
+
+1. **My own test harness** hardcoded a `sqlite://` URL in `Config::database` while
+   the pool was PostgreSQL, so the app read a database nobody had migrated. Every
+   authenticated call 401'd for a reason that had nothing to do with sessions.
+   `Harness::new` now branches on `TestDb::is_postgres()`.
+
+2. **`create_session`** bound `created_at` / `last_seen_at` / `expires_at` bare.
+   Harmless by accident: those columns are `TEXT` in `migrations/postgres`, and
+   the earlier session in this repo had been "fixing" them with `?::timestamptz`.
+   Fourteen such casts are now removed from `crates/db/src/sessions.rs`. They were
+   the actual cause of the 401s: `expires_at > ?` compared TEXT against a coerced
+   timestamptz, matched nothing, and the lookup reported the session as absent.
+   `milestone_3` on PostgreSQL goes **0/11 to 10/11** from this one fix.
+
+3. **`require_operator`** in `media_resilience.rs` and `media_health.rs` answered a
+   signed-in non-curator with `AppError::AuthRequired` (401). `RequireSession` had
+   already proven the caller was authenticated, so 401 was both wrong and
+   actively misleading -- a logged-in reader was told to log in again. Both now
+   return `AccessDenied` (403), which already existed in `AppError`.
+
+4. **The detector was lying.** `check-uncast-pg-placeholders.py` skipped any
+   statement containing `::` anywhere, on the theory that one cast meant casts
+   everywhere. `create_session` casts three UUID binds and left three timestamps
+   bare in the same statement, so the one statement with the live bug was skipped
+   wholesale and the checker reported OK. The guard is gone; the per-placeholder
+   comparison and INSERT-position checks do that job properly.
+
+## The lesson, since it has now cost two sessions
+
+Every check in `.github/workflows/ci.yml` had a hole, and the pattern is the same:
+a heuristic that was reasonable when written, never tested, and impossible to
+distinguish from working. `fix-timestamptz-binds.py` grew a `--self-test` last
+session. This session the uncast checker grew the same thing, and it immediately
+found that the fix it generates was **not idempotent** -- it edited the string while
+iterating matches over it and turned `work_id = $2` into `work$2::uuidd`.
+
+If you touch a checker here, add its negative cases in the same commit. A checker
+with only positive cases is a checker nobody can trust to say "OK".
+
+## Current state, measured
+
+- `cargo test --workspace` on SQLite: **1811 passed, 0 failed**.
+- The uncast-placeholder checker is **clean for the first time** (0 sites), and
+  `check-uncast-pg-placeholders.py --self-test` runs in CI ahead of the check.
+- §32.7.2 is complete end to end: the fetch job proposes, the curator queue lists,
+  a decision confirms or rejects, and the whole lifecycle is covered on both
+  backends (`media_resilience.rs` 34 db-level, `media_match_proposals.rs` 9
+  route-level, both 9/9 and 34/34 on SQLite and PostgreSQL).
+
+## Still open, honestly
+
+- `taste_engagement` (3) and `media_health` (6) still fail on PostgreSQL. Not
+  investigated this session. `milestone_3` is down to 1.
+- The PostgreSQL route suites have never all been green in one run, so treat any
+  "the suite passes" claim that does not name the backend as unverified.
+
+## How to resume
+
+```bash
+cd ~/code-local/rust/lorehaven
+export CARGO_TARGET_DIR=$HOME/.cargo-target/lorehaven
+python3 scripts/check-uncast-pg-placeholders.py --self-test   # the checker's rules
+python3 scripts/check-uncast-pg-placeholders.py crates        # the real gate
+export LOREHAVEN_TEST_PG_URL='postgres://lorehaven:lhreview@127.0.0.1:55433/postgres'
+cargo test --workspace
+```
+
+---
+
 # Handoff — the PostgreSQL cast class, and one structural gap in the schema
 
 Date: 2026-09-25. **The current entry.** Supersedes the 1637/151 baseline below,

@@ -292,12 +292,24 @@ async fn search_miss_roundtrip() {
         .await
         .expect("record_search_miss");
 
-    let row: Option<(String, i64)> =
-        sqlx::query_as("SELECT query_text, count FROM forum_search_misses WHERE query_text = ?")
+    // Read back through whichever pool the fixture is on, so the assertion is
+    // the same claim on both backends instead of SQLite-only by construction.
+    let sql = harness.tdb.db().sql(
+        "SELECT query_text, count FROM forum_search_misses WHERE query_text = ?",
+        "SELECT query_text, count FROM forum_search_misses WHERE query_text = $1",
+    );
+    let row: Option<(String, i64)> = match harness.tdb.db().backend() {
+        lorehaven_db::Backend::Sqlite => sqlx::query_as(&sql)
             .bind("some query")
             .fetch_optional(harness.tdb.db().sqlite_pool().expect("sqlite"))
             .await
-            .expect("fetch_optional");
+            .expect("fetch_optional"),
+        lorehaven_db::Backend::Postgres => sqlx::query_as(&sql)
+            .bind("some query")
+            .fetch_optional(harness.tdb.db().postgres_pool().expect("postgres"))
+            .await
+            .expect("fetch_optional"),
+    };
 
     assert!(row.is_some());
     let (query, count) = row.expect("row");
