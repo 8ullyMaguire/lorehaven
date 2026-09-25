@@ -435,6 +435,75 @@ def in_sql_pair(text: str, pos: int) -> str | None:
         return "postgres"
     return None
 
+# A statement with a verb and no target is a truncated literal. Not hypothetical:
+# an earlier line-index edit of mine dropped the FROM clause from a SELECT, and
+# the resulting 500 took a while to trace to a half-applied patch rather than to
+# anything PostgreSQL-specific.
+SQL_KEYWORDS = {
+    "into", "values", "or", "replace", "ignore", "select", "default", "table",
+    "set", "from", "where", "on", "conflict", "nothing", "constraint", "columns",
+    "values", "and", "all", "any", "exists", "if", "not", "as",
+}
+
+
+def incomplete_sites(sql: str) -> list[str]:
+    text = " ".join(sql.split())
+    # A human message that happens to start with the word "insert" is not SQL.
+    # Require the statement to look like one: no leading lowercase prose, and a
+    # verb followed by a real SQL keyword rather than an English word.
+    if not re.match(
+        r"\s*(?:WITH\b[^;]*?)?(?:SELECT\b|INSERT\s+INTO\b|INSERT\b|"
+        r"UPDATE\s+\w+\s+SET\b|UPDATE\b|DELETE\s+FROM\b)",
+        text,
+        re.IGNORECASE,
+    ):
+        return []
+    # "insert reference" matches INSERT but has no SQL keyword after it. The verb
+    # alone is only a statement if something SQL-ish follows.
+    # `SELECT 1` and `SELECT ?` are health checks; a `{PLACEHOLDER}` means the
+    # statement is a format template completed elsewhere, so its tail is not here
+    # to be judged.
+    if re.match(r"\s*select\s+(?:\d+|\?|:)", text, re.IGNORECASE):
+        return []
+    # A `{TOKEN}` means the statement is completed from a const elsewhere --
+    # `{INVITE_JOINS}` carries the FROM clause, for one. The tail is not here to
+    # be judged.
+    if re.search(r"\{\w+\}", text):
+        return []
+    # A bare verb and nothing else is a message, not a statement.
+    if re.match(r"\s*(?:insert|update|delete|select)\b\s*;?\s*$", text, re.IGNORECASE):
+        return []
+    # A CSS selector, not a statement.
+    if re.match(r"\s*(?:select|insert|update|delete)\s*[.#\[a-z-]", text, re.IGNORECASE) and not re.search(
+        r"\b(?:from|into|set|values|where)\b", text, re.IGNORECASE
+    ):
+        return []
+    # `SELECT COUNT(*)` with the WHERE supplied by a template is a whole statement.
+    if re.match(r"\s*select\s+count\s*\(\s*\*\s*\)", text, re.IGNORECASE):
+        return []
+    if re.match(r"\s*insert\b(?!\s+into\b)\s+[a-z_]+\b", text, re.IGNORECASE):
+        tail = re.match(r"\s*insert\b\s+([a-z_]+)\b", text, re.IGNORECASE).group(1).lower()
+        if tail not in SQL_KEYWORDS:
+            return []
+    if re.match(r"\s*update\b(?!\s+\w+\s+set\b)", text, re.IGNORECASE) and not re.match(
+        r"\s*update\b\s+\w+\s+set\b", text, re.IGNORECASE
+    ):
+        return []
+    if re.search(r"\bSELECT\b", text, re.IGNORECASE) and not re.search(
+        r"\bFROM\b", text, re.IGNORECASE
+    ):
+        return ["SELECT with no FROM"]
+    if re.match(r"\s*INSERT\b", text, re.IGNORECASE) and not re.search(
+        r"\bINTO\b", text, re.IGNORECASE
+    ):
+        return ["INSERT with no INTO"]
+    if re.match(r"\s*UPDATE\b", text, re.IGNORECASE) and not re.search(
+        r"\bSET\b", text, re.IGNORECASE
+    ):
+        return ["UPDATE with no SET"]
+    return []
+
+
 def scan(root: pathlib.Path, schema: dict[str, dict[str, str]]) -> list[tuple[pathlib.Path, int, str]]:
     hits: list[tuple[pathlib.Path, int, str]] = []
     # Accept a file as well as a directory, so a single module can be checked
@@ -467,6 +536,11 @@ def scan(root: pathlib.Path, schema: dict[str, dict[str, str]]) -> list[tuple[pa
             narrow = int4_sites(sql, known) if known else []
             if narrow:
                 reasons.append("INT4 column into i64: " + ", ".join(narrow))
+            # Only production SQL. A test asserting on placeholder rewriting
+            # legitimately has statements like `SELECT $1` with no FROM, and a
+            # `#[cfg(test)]` literal is not a query that will ever run.
+            if '#[cfg(test)]' not in text[: match.start()]:
+                reasons.extend(incomplete_sites(sql))
             if not reasons:
                 continue
             line = text[: match.start()].count("\n") + 1

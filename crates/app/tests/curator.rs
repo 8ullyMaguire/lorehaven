@@ -85,7 +85,7 @@ async fn link_verification_quorum() {
     let tdb = test_support::TestDb::connect_with_dir("cur-quorum", &dir).await;
     let db = tdb.db();
 
-    let link_id = test_support::id(&test_support::id("link-001"));
+    let link_id = test_support::id("link-001");
     let media_ref_id = test_support::id("ref-001");
 
     // No verifications yet
@@ -151,9 +151,9 @@ async fn curator_cannot_double_verify() {
     let tdb = test_support::TestDb::connect_with_dir("cur-double", &dir).await;
     let db = tdb.db();
 
-    let link_id = test_support::id(&test_support::id("link-002"));
+    let link_id = test_support::id("link-002");
     let media_ref_id = test_support::id("ref-002");
-    let curator_id = test_support::id(&test_support::id("curator-x"));
+    let curator_id = test_support::id("curator-x");
 
     let id1 = test_support::id("verify-010");
     media_resilience::record_link_verification(
