@@ -3330,6 +3330,7 @@ dependencies = [
  "darkhold-db",
  "sqlx",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

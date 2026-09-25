@@ -203,3 +203,52 @@ impl TestDb {
         }
     }
 }
+
+/// FNV-1a, 64-bit. Fixed offset basis and prime, so the value depends only on
+/// the label -- unlike `DefaultHasher`, which is seeded per process and would
+/// hand a different UUID on each test binary run, and would collide between two
+/// fixtures running in the same process.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// A stable, valid UUID for a test-scoped name.
+///
+/// The fixtures were written before the PostgreSQL dialect worked, so they use
+/// readable slugs like `"work-a1"` for ids. SQLite stores those in a TEXT column
+/// and is perfectly happy; the same columns are `UUID` on PostgreSQL, and a slug
+/// fails there with 22P02, or 42804 when the statement casts the placeholder but
+/// the value is still not a UUID. Rather than spell out 36 characters at every
+/// site, map the slug through a fixed function: the same name always yields the
+/// same id, so a fixture binds `id("work-a1")` when it inserts and looks up the
+/// same value later.
+///
+/// Deliberately not `Uuid::new_v5`: the workspace enables only uuid's `v4`
+/// feature, and adding `v5` for a test helper would widen the dependency surface
+/// of every crate. FNV-1a with a fixed offset basis keeps the result stable across
+/// runs; a per-process-seeded hasher would hand out a different UUID on every
+/// run, and would collide between two fixtures in the same process.
+///
+/// `label` only has to be unique within one test's fixture. Two fixtures are
+/// separate databases, so they may reuse the same labels freely.
+#[must_use]
+pub fn id(label: &str) -> String {
+    // Two rounds, so near-identical labels ("work-a1" / "work-a2") do not differ
+    // in only a single bit of the hashed region.
+    let a = fnv1a(label.as_bytes());
+    let b = fnv1a(&a.to_be_bytes());
+
+    let mut bytes = [0u8; 16];
+    bytes[..8].copy_from_slice(&a.to_be_bytes());
+    bytes[8..].copy_from_slice(&b.to_be_bytes());
+    // Version 4 and the RFC 4122 variant bits, so the value is well-formed by
+    // any validator rather than merely parseable.
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(bytes).to_string()
+}

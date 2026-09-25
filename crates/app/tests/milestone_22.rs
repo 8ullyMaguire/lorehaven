@@ -523,32 +523,31 @@ async fn seed_quality_signal(
         "INSERT INTO quality_signals (id, work_id, signal_kind, value, weight, source, computed_at) VALUES (?, ?, ?, ?, ?, 'test', ?)",
         "INSERT INTO quality_signals (id, work_id, signal_kind, value, weight, source, computed_at) VALUES (?::uuid, ?::uuid, ?, ?, ?, 'test', ?)",
     );
-    let query = sqlx::query(sql.as_ref());
     let rows = match db.backend() {
-        Backend::Sqlite => {
-            query
-                .bind(&id)
-                .bind(work_id)
-                .bind(signal_kind)
-                .bind(value)
-                .bind(weight)
-                .bind(now)
-                .execute(db.sqlite_pool().expect("sqlite pool"))
-                .await
-        }
-        Backend::Postgres => {
-            query
-                .bind(&id)
-                .bind(work_id)
-                .bind(signal_kind)
-                .bind(value)
-                .bind(weight)
-                .bind(now)
-                .execute(db.postgres_pool().expect("postgres pool"))
-                .await
-        }
+        Backend::Sqlite => sqlx::query(sql.as_ref())
+            .bind(&id)
+            .bind(work_id)
+            .bind(signal_kind)
+            .bind(value)
+            .bind(weight)
+            .bind(now)
+            .execute(db.sqlite_pool().expect("sqlite pool"))
+            .await
+            .unwrap()
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(sql.as_ref())
+            .bind(&id)
+            .bind(work_id)
+            .bind(signal_kind)
+            .bind(value)
+            .bind(weight)
+            .bind(now)
+            .execute(db.postgres_pool().expect("postgres pool"))
+            .await
+            .unwrap()
+            .rows_affected(),
     };
-    let rows = rows.unwrap().rows_affected();
+    assert_eq!(rows, 1, "quality signal row should insert");
 }
 
 /// Deterministic file/edition ids derived from the seeded work id: swap
