@@ -2294,6 +2294,132 @@ pub async fn record_match_proposal(
     Ok(affected > 0)
 }
 
+/// The §32.7.2 exact-match branch: attach a reference's availability links to
+/// the reference that already holds the same bytes, and drop the duplicate.
+///
+/// This is the automatic half of deduplication, and the spec is unambiguous that
+/// it needs no human: "Exact match (content_hash identical): Attach as a new
+/// AvailabilityLink to the existing MediaReference. Zero new storage cost."
+///
+/// The same merge `resolve_match_proposal` performs, factored out because the two
+/// callers reach it by different routes -- one from a curator's click, one from
+/// the fetch job -- and two copies of a five-statement move would drift.
+///
+/// Returns `false` when the ids name the same reference or either is missing,
+/// which is what a re-fetch looks like.
+pub async fn attach_reference_to_existing(
+    db: &Database,
+    existing_reference_id: &str,
+    candidate_reference_id: &str,
+) -> Result<bool, sqlx::Error> {
+    if existing_reference_id == candidate_reference_id
+        || !match_proposal_id_is_valid(existing_reference_id)
+        || !match_proposal_id_is_valid(candidate_reference_id)
+    {
+        return Ok(false);
+    }
+    // Both references must exist. Checking first turns a partial move -- links
+    // repointed at nothing -- into a refusal.
+    for id in [existing_reference_id, candidate_reference_id] {
+        let found = match db.backend() {
+            Backend::Sqlite => sqlx::query("SELECT id FROM media_references WHERE id = ?")
+                .bind(id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?
+                .is_some(),
+            Backend::Postgres => {
+                sqlx::query("SELECT id::text FROM media_references WHERE id = $1::uuid")
+                    .bind(id)
+                    .fetch_optional(db.postgres_pool().expect("postgres"))
+                    .await?
+                    .is_some()
+            }
+        };
+        if !found {
+            return Ok(false);
+        }
+    }
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            // `OR IGNORE` / `OR REPLACE` because a URL already attached to the
+            // surviving reference must not collide with the one being moved --
+            // the common case, since the exact-match branch runs *because* the
+            // bytes matched and the first link is often the same URL.
+            sqlx::query(
+                "UPDATE OR IGNORE work_media_references
+                    SET media_reference_id = ?
+                  WHERE media_reference_id = ?",
+            )
+            .bind(existing_reference_id)
+            .bind(candidate_reference_id)
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "UPDATE OR REPLACE availability_links
+                    SET media_reference_id = ?
+                  WHERE media_reference_id = ?",
+            )
+            .bind(existing_reference_id)
+            .bind(candidate_reference_id)
+            .execute(pool)
+            .await?;
+            // Proposals naming this reference as a candidate are repointed at
+            // the survivor rather than left to a foreign-key violation, and
+            // proposals naming it as the existing side are dropped along with
+            // the reference by the cascade.
+            sqlx::query(
+                "UPDATE OR REPLACE media_match_proposals
+                    SET candidate_reference_id = ?
+                  WHERE candidate_reference_id = ?",
+            )
+            .bind(existing_reference_id)
+            .bind(candidate_reference_id)
+            .execute(pool)
+            .await?;
+            sqlx::query("DELETE FROM media_references WHERE id = ?")
+                .bind(candidate_reference_id)
+                .execute(pool)
+                .await?;
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            sqlx::query(
+                "UPDATE work_media_references
+                    SET media_reference_id = $1::uuid
+                  WHERE media_reference_id = $2::uuid",
+            )
+            .bind(existing_reference_id)
+            .bind(candidate_reference_id)
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "UPDATE availability_links
+                    SET media_reference_id = $1::uuid
+                  WHERE media_reference_id = $2::uuid",
+            )
+            .bind(existing_reference_id)
+            .bind(candidate_reference_id)
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "UPDATE media_match_proposals
+                    SET candidate_reference_id = $1::uuid
+                  WHERE candidate_reference_id = $2::uuid",
+            )
+            .bind(existing_reference_id)
+            .bind(candidate_reference_id)
+            .execute(pool)
+            .await?;
+            sqlx::query("DELETE FROM media_references WHERE id = $1::uuid")
+                .bind(candidate_reference_id)
+                .execute(pool)
+                .await?;
+        }
+    }
+    Ok(true)
+}
+
 /// A curator's decision on a proposal.
 ///
 /// `Confirm` merges the candidate into the existing reference; `Reject` keeps
@@ -2422,6 +2548,9 @@ pub async fn resolve_match_proposal(
 /// `ON DELETE CASCADE` then removes the candidate reference itself, and with it
 /// any `work_media_references` rows pointing at it, which is why the work
 /// associations are repointed first.
+/// Resolve a proposal id to the pair of references it names, then perform the
+/// merge. A thin wrapper so the fetch job's exact-match branch and the curator's
+/// confirm share one implementation of the move.
 async fn move_links_to_existing(db: &Database, proposal_id: &str) -> Result<(), sqlx::Error> {
     // Fetch, then map, per backend: the two arms return `SqliteRow` and `PgRow`,
     // which have no common type, and `sqlx::any` is not enabled here. Building the
@@ -2461,80 +2590,7 @@ async fn move_links_to_existing(db: &Database, proposal_id: &str) -> Result<(), 
     let Some((candidate, existing)) = pair else {
         return Err(sqlx::Error::RowNotFound);
     };
-    // A proposal naming its own reference as both ends would delete the row it
-    // is reading from and repoint every link at a row about to disappear.
-    if candidate == existing {
-        return Ok(());
-    }
-
-    match db.backend() {
-        Backend::Sqlite => {
-            let pool = db.sqlite_pool().expect("sqlite");
-            // Work associations first: the candidate row's cascade would take
-            // them with it.
-            sqlx::query(
-                "UPDATE OR IGNORE work_media_references
-                    SET media_reference_id = ?
-                  WHERE media_reference_id = ?",
-            )
-            .bind(&existing)
-            .bind(&candidate)
-            .execute(pool)
-            .await?;
-            sqlx::query(
-                "UPDATE OR REPLACE availability_links
-                    SET media_reference_id = ?
-                  WHERE media_reference_id = ?",
-            )
-            .bind(&existing)
-            .bind(&candidate)
-            .execute(pool)
-            .await?;
-            sqlx::query("DELETE FROM media_references WHERE id = ?")
-                .bind(&candidate)
-                .execute(pool)
-                .await?;
-        }
-        Backend::Postgres => {
-            let pool = db.postgres_pool().expect("postgres");
-            sqlx::query(
-                "UPDATE work_media_references
-                    SET media_reference_id = $1::uuid
-                  WHERE media_reference_id = $2::uuid",
-            )
-            .bind(&existing)
-            .bind(&candidate)
-            .execute(pool)
-            .await?;
-            sqlx::query(
-                "UPDATE availability_links
-                    SET media_reference_id = $1::uuid
-                  WHERE media_reference_id = $2::uuid",
-            )
-            .bind(&existing)
-            .bind(&candidate)
-            .execute(pool)
-            .await?;
-            // The candidate may itself be the candidate of another pending
-            // proposal -- two near-duplicates of the same image. Those are
-            // re-pointed at the surviving reference rather than left dangling,
-            // which the two foreign keys on media_match_proposals would
-            // otherwise refuse.
-            sqlx::query(
-                "UPDATE media_match_proposals
-                    SET candidate_reference_id = $1::uuid
-                  WHERE candidate_reference_id = $2::uuid",
-            )
-            .bind(&existing)
-            .bind(&candidate)
-            .execute(pool)
-            .await?;
-            sqlx::query("DELETE FROM media_references WHERE id = $1::uuid")
-                .bind(&candidate)
-                .execute(pool)
-                .await?;
-        }
-    }
+    attach_reference_to_existing(db, &existing, &candidate).await?;
     Ok(())
 }
 
