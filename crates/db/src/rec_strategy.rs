@@ -29,7 +29,7 @@ pub type StrategyFactory = Arc<dyn Fn() -> RecStrategyFn + Send + Sync>;
 /// Registry of recommendation strategies with RRF blending.
 pub struct RecRegistry {
     k: f64,
-    strategies: Vec<(&'static str, RecStrategyFn)>,
+    strategies: Vec<(String, RecStrategyFn)>,
 }
 
 impl RecRegistry {
@@ -40,8 +40,15 @@ impl RecRegistry {
         }
     }
 
-    pub fn register(&mut self, name: &'static str, f: RecStrategyFn) {
-        self.strategies.push((name, f));
+    /// Register a strategy under `name`.
+    ///
+    /// Takes `impl Into<String>` rather than `&'static str`: the strategy names
+    /// come from a factories map that is rebuilt on every call, so its keys
+    /// cannot be borrowed for `'static`. The name is stored rather than
+    /// discarded, because it is what the blend's per-strategy weights key off
+    /// and what [`RecRegistry::names`] reports.
+    pub fn register(&mut self, name: impl Into<String>, f: RecStrategyFn) {
+        self.strategies.push((name.into(), f));
     }
 
     /// Build a registry from a recipe document (spec §16.3).
@@ -78,6 +85,42 @@ impl RecRegistry {
 
     pub fn strategy_count(&self) -> usize {
         self.strategies.len()
+    }
+
+    /// The registered strategy names, in registration order.
+    ///
+    /// The settings endpoint validates a reader's engine choice against this,
+    /// and the reader's own settings surface lists it, so the names have to be
+    /// readable rather than internal.
+    pub fn names(&self) -> Vec<&str> {
+        self.strategies.iter().map(|(name, _)| name.as_str()).collect()
+    }
+
+    /// Whether `name` is registered.
+    pub fn contains(&self, name: &str) -> bool {
+        self.strategies.iter().any(|(n, _)| n == name)
+    }
+
+    /// A registry containing only `name`, if it is registered.
+    ///
+    /// This is how a reader's stored preference is honoured (spec §16.1b): the
+    /// operator's registry decides what exists, and the reader's preference
+    /// narrows the blend to one strategy. Returns `None` when the stored
+    /// preference names a strategy the operator has since disabled — the
+    /// caller reports that rather than silently blending everything.
+    pub fn only(&self, name: &str) -> Option<RecRegistry> {
+        if !self.contains(name) {
+            return None;
+        }
+        let (n, f) = self
+            .strategies
+            .iter()
+            .find(|(n, _)| n == name)
+            .expect("contains() checked membership");
+        Some(RecRegistry {
+            k: self.k,
+            strategies: vec![(n.clone(), f.clone())],
+        })
     }
 
     pub async fn generate(&self, db: &Database, ctx: RecContext) -> Result<Vec<String>> {
