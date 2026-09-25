@@ -2874,7 +2874,7 @@ pub async fn find_by_perceptual_hash(
     let rows = sql_owned(
         db,
         "SELECT id, perceptual_hash, content_hash, media_kind, first_seen_at,
-                width, height, duration_seconds, format, file_size_bytes,
+                CAST(width AS BIGINT), CAST(height AS BIGINT), CAST(duration_seconds AS BIGINT), format, CAST(file_size_bytes AS BIGINT),
                 content_notes, curator_verified, created_at, updated_at
          FROM media_references
          WHERE perceptual_hash IS NOT NULL"
@@ -3083,7 +3083,7 @@ pub async fn find_curator_bounty_queue(
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             let rows = sqlx::query(
-                "SELECT m.id, m.perceptual_hash, m.content_hash, m.media_kind, m.first_seen_at,
+                "SELECT m.id::text, m.perceptual_hash, m.content_hash, m.media_kind, m.first_seen_at,
                         CAST(m.width AS BIGINT), CAST(m.height AS BIGINT), CAST(m.duration_seconds AS BIGINT), m.format, CAST(m.file_size_bytes AS BIGINT),
                         m.content_notes, m.curator_verified, m.created_at, m.updated_at
                  FROM media_references m

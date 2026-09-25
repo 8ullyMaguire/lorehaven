@@ -119,11 +119,11 @@ pub async fn find_card_by_title_normalized(
 pub async fn list_cards(db: &Database, stage: Option<&str>) -> Result<Vec<Card>, sqlx::Error> {
     let sql = match stage {
         Some(_) => "SELECT id, title, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at FROM roadmap_cards WHERE stage = ? ORDER BY elo_rating DESC, matches_played DESC, id ASC",
-        None => "SELECT id, title, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at FROM roadmap_cards ORDER BY elo_rating DESC, matches_played DESC, id ASC",
+        None => "SELECT id, title, category, stage, elo_rating, CAST(matches_played AS BIGINT), CAST(times_best AS BIGINT), CAST(times_worst AS BIGINT), created_at, updated_at FROM roadmap_cards ORDER BY elo_rating DESC, matches_played DESC, id ASC",
     };
     let sql_pg = match stage {
         Some(_) => "SELECT id, title, category, stage, elo_rating, CAST(matches_played AS BIGINT), CAST(times_best AS BIGINT), CAST(times_worst AS BIGINT), created_at, updated_at FROM roadmap_cards WHERE stage = $1 ORDER BY elo_rating DESC, matches_played DESC, id ASC",
-        None => "SELECT id, title, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at FROM roadmap_cards ORDER BY elo_rating DESC, matches_played DESC, id ASC",
+        None => "SELECT id, title, category, stage, elo_rating, CAST(matches_played AS BIGINT), CAST(times_best AS BIGINT), CAST(times_worst AS BIGINT), created_at, updated_at FROM roadmap_cards ORDER BY elo_rating DESC, matches_played DESC, id ASC",
     };
     match db.backend() {
         Backend::Sqlite => {

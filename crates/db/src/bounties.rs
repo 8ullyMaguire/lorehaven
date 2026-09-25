@@ -279,9 +279,11 @@ pub async fn list_flexible_bounties(db: &Database) -> Result<Vec<Value>, sqlx::E
         }
         crate::Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres handle");
+                // `amount` and `funded_amount` are INTEGER; widen for the i64 row type.
+                // `fetch_bounty` does the same, for the same reason.
             sqlx::query_as(
-                "SELECT id, type, job_kind, terms, amount, funded_amount, state, created_by, created_at, activated_at
-                 FROM bounties WHERE state IN ('open', 'funding') ORDER BY created_at DESC LIMIT 50",
+                "SELECT id, type, job_kind, terms, CAST(amount AS BIGINT), CAST(funded_amount AS BIGINT),
+                        state, created_by, created_at, activated_at
             )
             .fetch_all(pool)
             .await?

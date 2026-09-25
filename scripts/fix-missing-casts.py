@@ -34,9 +34,16 @@ def main() -> int:
         edits: list[tuple[int, int, str]] = []
         for match in chk.STRING_LIT.finditer(text):
             sql = match.group(1)
-            if not re.search(r"\$\d+", sql) and not re.search(r"\bsum\s*\(", sql, re.I):
-                # A SQLite arm with no bind and no aggregate cannot fail here.
+            # The same arm rules the checker uses, or the fixer edits the SQLite
+            # half of a pair and the checker keeps reporting the PostgreSQL one.
+            if chk.arm_at(text, match.start()) == "sqlite":
                 continue
+            if chk.in_sql_pair(text, match.start()) == "sqlite":
+                continue
+            # No placeholder test here. `arm_at` and `in_sql_pair` above have
+            # already decided which arm this is, and a PostgreSQL arm that binds
+            # nothing is still a PostgreSQL arm -- `list_flexible_bounties` had no
+            # placeholder and still decoded an INT4 into an i64.
             known = {t: schema[t] for t in chk.tables_in(sql) if t in schema}
             if not known:
                 continue

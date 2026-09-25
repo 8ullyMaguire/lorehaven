@@ -138,7 +138,7 @@ pub async fn list_lists(db: &Database) -> Result<Vec<DirectoryList>> {
     let sql = db.sql(
         "SELECT id, slug, title, description, kind, is_instance_list, position, created_by, created_at \
          FROM directory_lists ORDER BY is_instance_list DESC, position ASC, created_at ASC",
-        "SELECT id, slug, title, description, kind, is_instance_list, position, created_by, created_at \
+        "SELECT id, slug, title, description, kind, is_instance_list, CAST(position AS BIGINT), created_by, created_at \
          FROM directory_lists ORDER BY is_instance_list DESC, position ASC, created_at ASC",
     );
     let rows: Vec<DirectoryList> = match db.backend() {

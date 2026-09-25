@@ -396,6 +396,45 @@ def _accepts_text(coltype: str) -> bool:
     return base not in NEEDS_EXPLICIT_CAST
 
 
+
+# The most recent `Backend::X =>` before a position. A literal's enclosing arm is
+# the last one seen, which is right for the `db.sql(a, b)` pair shape the repo
+# uses and for a single-arm literal alike.
+ARM = re.compile(r"Backend::(Sqlite|Postgres)")
+
+
+def arm_at(text: str, pos: int) -> str | None:
+    last = None
+    for match in ARM.finditer(text, 0, pos):
+        last = match.group(1).lower()
+    return last
+
+
+
+SQL_PAIR = re.compile(r"\b(?:db\.sql|sql_owned)\s*\(")
+
+
+def in_sql_pair(text: str, pos: int) -> str | None:
+    """"sqlite" or "postgres" if this literal is one half of a db.sql pair.
+
+    `db.sql(sqlite_sql, postgres_sql)` and `sql_owned(db, sqlite, postgres)`
+    are the repo's two-arm shape. The arm scan above cannot see inside the call,
+    and the placeholder spelling cannot either -- neither half has to bind
+    anything -- so the pair is recognised from the call that opened before it.
+    """
+    open_at = None
+    for match in SQL_PAIR.finditer(text, 0, pos):
+        open_at = match.end()
+    if open_at is None:
+        return None
+    # A comma before this literal means it is the second argument.
+    between = text[open_at:pos]
+    if between.count(",") == 0:
+        return "sqlite"
+    if between.count(",") == 1:
+        return "postgres"
+    return None
+
 def scan(root: pathlib.Path, schema: dict[str, dict[str, str]]) -> list[tuple[pathlib.Path, int, str]]:
     hits: list[tuple[pathlib.Path, int, str]] = []
     # Accept a file as well as a directory, so a single module can be checked
@@ -407,6 +446,14 @@ def scan(root: pathlib.Path, schema: dict[str, dict[str, str]]) -> list[tuple[pa
         text = path.read_text(encoding="utf-8", errors="replace")
         for match in STRING_LIT.finditer(text):
             sql = match.group(1)
+            # Which arm is this literal in? A string inside a `Backend::Sqlite`
+            # arm is the SQLite half whatever it contains, and the placeholder
+            # spelling is not enough to tell -- a PG arm that binds nothing has
+            # no `$n` and no `?` either.
+            if arm_at(text, match.start()) == "sqlite":
+                continue
+            if in_sql_pair(text, match.start()) == "sqlite":
+                continue
             if not re.search(r"\b(?:SELECT|INSERT|UPDATE|DELETE)\b", sql, re.IGNORECASE):
                 continue
             tables = tables_in(sql)
@@ -538,7 +585,11 @@ def int4_sites(sql: str, known: dict[str, dict[str, str]]) -> list[str]:
     guard the rule reports both halves of every `db.sql(a, b)` pair and roughly
     doubles the output for no new information.
     """
-    if not re.search(r"\$\d+", sql):
+    if not re.search(r"\$\d+", sql) and "?" in sql:
+        # `?` is the SQLite spelling. A statement with neither `$n` nor `?` binds
+        # nothing, and the PostgreSQL arm of such a pair is still a PostgreSQL arm
+        # -- `list_flexible_bounties` had no placeholder at all and still decoded
+        # an INT4 into an i64.
         return []
     if re.match(r"\s*INSERT\b", sql, re.IGNORECASE):
         # A bind is not a decode. sqlx sends an `i32` for an INTEGER column and
@@ -546,14 +597,24 @@ def int4_sites(sql: str, known: dict[str, dict[str, str]]) -> list[str]:
         # Only reading an INT4 column *into an i64* is a real fault.
         return []
     head = re.split(r"\bFROM\b", sql, maxsplit=1, flags=re.IGNORECASE)[0]
-    if "::" in head:
-        # A cast anywhere in the list is the established fix; do not second-guess
-        # which column it was meant for.
-        return []
     out: list[str] = []
     for match in SELECT_ITEM.finditer(head):
         col = match.group(2).lower()
         if col in ("count", "sum", "cast", "coalesce"):
+            continue
+        # Each column is judged against its own cast. "A cast anywhere in the
+        # SELECT list settles the list" was the heuristic that hid `m.id`: the
+        # statement already had four widening casts, so the missing UUID one on
+        # the first column went unremarked and the reader got a String where
+        # PostgreSQL had a UUID.
+        # `col::bigint`, `col::bigint AS col`, and `CAST(col AS BIGINT)`.
+        # The alias is allowed in the middle: an aliased cast is the idiomatic
+        # form and reporting it produced a false positive.
+        if re.search(
+            rf"{re.escape(col)}\s*::[^\s,]+(?:\s+AS\s+{re.escape(col)}\b)?", head, re.I
+        ):
+            continue
+        if re.search(rf"CAST\(\s*(?:[a-z_]\w*\s*\.\s*)?{re.escape(col)}\s*\)", head, re.I):
             continue
         for columns in known.values():
             if columns.get(col) in INT4_COLUMNS:
