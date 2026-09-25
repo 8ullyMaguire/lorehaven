@@ -193,6 +193,22 @@ many, and whether it was the same suite you meant.
 - **Clear the warnings that were already there.** A red gate that predates your
   work is still in the tree you are touching; leaving it means the next person
   cannot tell your failures from the old ones.
+- **Capture the stream the tool writes to, or the gate is theatre.** rustc,
+  clippy and `cargo test` report warnings and errors on **stderr**. A check
+  written as `cargo clippy ... 2>/dev/null | grep -c warning` returns a confident
+  zero from an empty stdout while the tree is full of warnings — and it will keep
+  returning zero, which is worse than a red gate, because it looks like evidence.
+  Redirect to a file and read the file: `... > /tmp/gate.log 2>&1`. The corollary
+  is the rule that actually saves you: **if a gate has never once failed, suspect
+  the gate before you trust it.** A check that has been green for every session is
+  not proof of a clean tree; it is the shape a broken check takes.
+- **An E2E test that asserts an empty state or a global count is testing the
+  fixture, not the feature.** Shared test accounts accumulate state between
+  tests, so "the list is now empty" can never hold on the second run. Assert the
+  specific thing you changed: capture a stable per-row handle (an id in an href,
+  an `aria-label`) before acting, then assert that handle is gone and the count
+  fell by exactly one. And match rows on ids, not on user-facing text — UI
+  labels often fall back to a generic value.
 - **Commit per coherent piece**, with a message that says what changed and why.
   The history is part of the documentation, and it is the only part nobody
   maintains — so write it as if it will be read, because it will be.

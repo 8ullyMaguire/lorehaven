@@ -12,8 +12,8 @@ all live in this repository.
 
 **2026-09-25 (ADR 0024):** this repository is the base for the consolidated
 from-scratch specification. The honest one-line status, re-derived from
-`docs/requirements.csv`: **192 of 253 requirement rows implemented**
-(172 locally-tested, 20 fully-tested), **57 planned**, **4 deliberately
+`docs/requirements.csv`: **192 of 254 requirement rows implemented**
+(172 locally-tested, 20 fully-tested), **58 planned**, **4 deliberately
 unsupported**, tags through `v0.51.0`. What remains is planned in
 `docs/plans/remaining-work.md`: the recommendation strategy registry (M52),
 adapter porting batches (M53+), the companion bot (M54), OpenAPI publication
@@ -134,6 +134,28 @@ independent of the site theme.
 This is meant to be self-hosted software. Every limit and toggle is a
 configuration value with a documented default rather than a number in the code,
 and `lorehaven doctor` reports the state of the machine it is running on.
+
+## Running the gates
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets > /tmp/clippy.log 2>&1   # stderr matters
+cargo test  --workspace --no-fail-fast  > /tmp/test.log   2>&1
+```
+
+Redirect with `2>&1` and read the file. `rustc`, `clippy` and `cargo test`
+report warnings and errors on **stderr**, so a check piped through
+`grep -c warning` with `2>/dev/null` in front of it returns a confident zero
+from an empty stdout. That mistake sat in this repo's gate for several
+sessions, reporting "0 warnings" while the tree held 30 — three of them real
+defects, including a test that had never run. If a gate has never once failed,
+suspect the gate before you trust it. Background: `docs/verification.md`.
+
+A green E2E deserves the same suspicion. `frontend/e2e/coverage.spec.ts` asserted
+that the export list was empty after deleting one export, on an account shared
+with the test above it — so it could never pass, and the failure read as a
+product bug. Assert the specific thing you changed, using a stable per-row
+handle, and count rows before and after.
 
 ## Licence
 

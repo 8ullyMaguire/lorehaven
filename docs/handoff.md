@@ -1,11 +1,23 @@
-# Handoff — metadata exchange specified; docs synchronised; nothing built
+# Handoff — a false clean gate hid three real defects; an E2E assertion was wrong, not the feature
 
-Date: 2026-09-25 (tip `62aaab5` + this docs commit). **The current, full handoff
-is
-`docs/handoffs/2026-09-25T134127+0200-metadata-exchange-specified-docs-synced-handoff.md`
-— read that one.** It records the metadata-exchange spec landing (spec §0.3,
-§2.3.1, §11.17, §15.17, §16.16.1, §19.14; 5 `planned` rows; M57 build order),
-what was rejected and why, and the outstanding verification debt.
+Date: 2026-09-25 (tip `9cd3c71`). **The current, full handoff is
+`docs/handoffs/2026-09-25T142500+0200-false-clean-gate-three-defects-e2e-assertion-fixed-handoff.md`
+— read that one.** It records a `cargo clippy` gate that reported 0 warnings
+because it piped stderr to `/dev/null` and rustc reports warnings there; the 30
+warnings that were actually present, three of them real defects (an ignored
+`media_reference_id` whose doc comment promised a per-reference match, SQL
+placeholders built by `if i == 0 { "" } else { "" }`, and a `max_distance`
+silently ignored), a test that had never run, and an E2E test that asserted an
+empty list on a shared account when it should have asserted its own row's
+disappearance. Verification: clippy 0/0 with stderr captured, 1775 tests passed
+with one known rate-limit flake that passes in isolation, release build clean,
+E2E 73/73.
+
+Date: 2026-09-25 (tip `4ae4450`). The previous full handoff is
+`docs/handoffs/2026-09-25T134127+0200-metadata-exchange-specified-docs-synced-handoff.md`,
+which records the metadata-exchange specification landing (spec §0.3, §2.3.1,
+§11.17, §15.17, §16.16.1, §19.14; 5 `planned` rows; M57 build order), what was
+rejected and why, and the outstanding verification debt.
 
 Date: 2026-09-25 (tip `5fb778e`). The previous full handoff is
 `docs/handoffs/2026-09-25T110532+0200-m56-01-instance-access-mode-build-recovered-handoff.md`.
