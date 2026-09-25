@@ -245,3 +245,4 @@ M54-01,integrations,"Port fanfic-archivist-bot platform-neutral core against /ap
 M54-02,integrations,"Bot link flow: short-lived challenge, Lorehaven-side pseud+scope confirmation, revocable tokens",M54,planned,--,Spec §23.2. Bots never receive passwords.
 M55-01,platform,OpenAPI specification generated from the router and published docs page,M55,implemented-fully-tested,--,Spec §23.1. API surface exists (M18); this is the publication contract.
 M55-02,platform,Scoped-token issuance UI and deprecation policy,M55,implemented-fully-tested,--,Spec §23.1.
+M56-01,platform,Instance accessibility mode: public | walled_garden | private,M56,implemented-fully-tested,crates/app/tests/instance_access_mode.rs,Spec §0.4.7. Configured as [instance] mode; a typo stops startup rather than falling back to public.

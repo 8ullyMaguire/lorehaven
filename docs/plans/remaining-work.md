@@ -64,15 +64,24 @@ OpenAPI generated from the router, published docs page, scoped-token
 issuance UI, deprecation policy. The API itself exists (M18 built the
 surface); this milestone is the *publication contract*. ~3–4 days.
 
-### M56 — Close M45 + M47 planned rows
+### M56 — Instance posture and the remaining planned rows
 
-The 49 planned rows: taste-arena residuals (M45) and the settings surfaces
-(M47-02/05/07). These predate ADR 0024 and stay first-class. ~1 week.
+M56-01 — **instance accessibility mode** (`public` | `walled_garden` |
+`private`, spec §0.4.7) is **implemented and fully tested**. The mode is
+translated once into an `AccessPolicy` rather than checked per handler, so
+every content surface honours it by construction. An unrecognised value stops
+startup.
+
+The rest of M56 is the 49 planned rows: taste-arena residuals (M45) and the
+settings surfaces (M47-02/05/07). These predate ADR 0024 and stay first-class.
+~1 week.
 
 ### Then — hardening and release
 
-E2E green (3 known failures per handoff), tag v1.0.0, deploy to thinkcentre
-production (build there, never through SSHFS).
+E2E green (73/73 as of `d04a54a`), deploy to thinkcentre production (build
+there, never through SSHFS). A `v1.0.0` tag is deliberately **not** cut: the
+release decision is the operator's, and the remaining M45/M47/M53/M54 rows are
+open.
 
 ## Order and rationale
 
