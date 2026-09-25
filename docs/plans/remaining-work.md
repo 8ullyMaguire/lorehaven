@@ -59,8 +59,9 @@ that overrides both.
   migration 0070 explicitly rejects a JSONB mega-table in favour of per-domain
   settings, and `discovery.*` keys already live in `search_settings`.)
 - Validated against the enabled strategy set at write time. An unavailable
-  engine is a `400` with the accepted values named, never a silent fallback —
-  the same reasoning as §0.4.7's instance mode.
+  engine is refused with the accepted values named, never a silent fallback —
+  the same reasoning as §0.4.7's instance mode. The code is `422`,
+  `AppError::Validation`'s existing status here, not a bespoke one.
 - Every surface that produces a recommendation reads the preference through
   one resolver: discovery, feeds, search-as-you-type, the arena, and the
   author's own "more like this".

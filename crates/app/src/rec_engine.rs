@@ -1,8 +1,6 @@
 use anyhow::Result;
 
-use lorehaven_db::rec_strategy::{
-    default_strategies, RecContext, RecRegistry, StrategyFactory,
-};
+use lorehaven_db::rec_strategy::{default_strategies, RecContext, RecRegistry, StrategyFactory};
 use lorehaven_db::Database;
 
 /// Every strategy name this build can produce, in a stable order.
@@ -30,8 +28,7 @@ pub fn available_strategies() -> Vec<String> {
 /// - Empty vector → all strategies enabled
 /// - Non-empty → only listed strategies are registered
 pub fn build_registry(config: &crate::config::DiscoveryConfig) -> RecRegistry {
-    let factories: std::collections::HashMap<String, StrategyFactory> =
-        default_strategies();
+    let factories: std::collections::HashMap<String, StrategyFactory> = default_strategies();
     let mut reg = RecRegistry::new(config.rec_rrf_k);
     let enabled = &config.rec_enabled_strategies;
 

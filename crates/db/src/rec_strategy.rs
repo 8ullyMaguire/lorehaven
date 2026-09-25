@@ -18,7 +18,10 @@ pub struct RecContext {
 /// A recommendation strategy: given the database and context, return a
 /// ranked list of work IDs.
 pub type RecStrategyFn = Arc<
-    dyn Fn(&Database, RecContext) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<String>>> + Send>>
+    dyn Fn(
+            &Database,
+            RecContext,
+        ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<String>>> + Send>>
         + Send
         + Sync,
 >;
@@ -27,6 +30,10 @@ pub type RecStrategyFn = Arc<
 pub type StrategyFactory = Arc<dyn Fn() -> RecStrategyFn + Send + Sync>;
 
 /// Registry of recommendation strategies with RRF blending.
+///
+/// `Clone` because a reader's stored preference (spec §16.1b) narrows the
+/// blend to one strategy without mutating the instance-wide registry.
+#[derive(Clone)]
 pub struct RecRegistry {
     k: f64,
     strategies: Vec<(String, RecStrategyFn)>,
@@ -67,9 +74,7 @@ impl RecRegistry {
     ) -> Self {
         let mut reg = Self::new(k);
 
-        let strategies = document
-            .get("strategies")
-            .and_then(|v| v.as_object());
+        let strategies = document.get("strategies").and_then(|v| v.as_object());
 
         if let Some(strategies) = strategies {
             for (name, _weight) in strategies {
@@ -93,7 +98,10 @@ impl RecRegistry {
     /// and the reader's own settings surface lists it, so the names have to be
     /// readable rather than internal.
     pub fn names(&self) -> Vec<&str> {
-        self.strategies.iter().map(|(name, _)| name.as_str()).collect()
+        self.strategies
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect()
     }
 
     /// Whether `name` is registered.
@@ -461,22 +469,13 @@ pub fn default_strategies() -> HashMap<String, StrategyFactory> {
         "cooccurrence".to_string(),
         Arc::new(|| cooccurrence_strategy()),
     );
-    map.insert(
-        "time_decay".to_string(),
-        Arc::new(|| time_decay_strategy()),
-    );
-    map.insert(
-        "tag_graph".to_string(),
-        Arc::new(|| tag_graph_strategy()),
-    );
+    map.insert("time_decay".to_string(), Arc::new(|| time_decay_strategy()));
+    map.insert("tag_graph".to_string(), Arc::new(|| tag_graph_strategy()));
     map.insert(
         "author_graph".to_string(),
         Arc::new(|| author_graph_strategy()),
     );
-    map.insert(
-        "sequential".to_string(),
-        Arc::new(|| sequential_strategy()),
-    );
+    map.insert("sequential".to_string(), Arc::new(|| sequential_strategy()));
     map.insert(
         "completion_weight".to_string(),
         Arc::new(|| completion_weight_strategy()),

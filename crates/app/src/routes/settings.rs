@@ -67,6 +67,17 @@ pub fn router() -> Router<AppState> {
         )
         .route("/settings/export", get(export_settings))
         .route("/settings/import", post(import_settings))
+        // M52-09: the reader's recommendation-engine preference (spec §16.1b).
+        //
+        // Its own endpoint rather than a `discovery.*` key on the search
+        // settings endpoint, because the write has to be validated against the
+        // operator's live strategy registry — a rule the generic per-key
+        // settings loop cannot express, and one that must refuse with the
+        // accepted values rather than store something unusable.
+        .route(
+            "/settings/recommendations",
+            get(get_rec_engine).patch(patch_rec_engine),
+        )
 }
 
 // ---------------------------------------------------------------------------
@@ -760,7 +771,8 @@ async fn delete_notification_route(
     axum::extract::Path(event_type): axum::extract::Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let account_id = user.account_id.as_uuid();
-    let removed = db_settings::delete_notification_route(state.db(), account_id, &event_type).await?;
+    let removed =
+        db_settings::delete_notification_route(state.db(), account_id, &event_type).await?;
     audit_settings_write(
         state.db(),
         &user.account_id.as_uuid(),
@@ -769,7 +781,9 @@ async fn delete_notification_route(
         serde_json::json!({ "event_type": event_type }),
     )
     .await;
-    Ok(Json(serde_json::json!({ "removed": removed, "event_type": event_type })))
+    Ok(Json(
+        serde_json::json!({ "removed": removed, "event_type": event_type }),
+    ))
 }
 
 async fn export_settings(
@@ -784,7 +798,8 @@ async fn export_settings(
 
     let search_settings = db_settings::read_search_settings(state.db(), pseud_id).await?;
     let content_filters = db_settings::list_content_filters(state.db(), pseud_id).await?;
-    let notification_routes = db_settings::read_notification_routes(state.db(), user.account_id.as_uuid()).await?;
+    let notification_routes =
+        db_settings::read_notification_routes(state.db(), user.account_id.as_uuid()).await?;
 
     let mut namespaces: HashMap<String, Vec<ResolvedSetting>> = HashMap::new();
 
@@ -880,32 +895,24 @@ async fn import_settings(
     for (namespace, settings) in &request.data.namespaces {
         for setting in settings {
             let result = match namespace.as_str() {
-                "search" => {
-                    db_settings::upsert_search_setting(
-                        state.db(),
-                        pseud_id,
-                        &setting.key,
-                        &setting.value,
-                        &now,
-                    )
-                    .await
-                    .map_err(|e| e.to_string())
-                }
+                "search" => db_settings::upsert_search_setting(
+                    state.db(),
+                    pseud_id,
+                    &setting.key,
+                    &setting.value,
+                    &now,
+                )
+                .await
+                .map_err(|e| e.to_string()),
                 "content_filters" => {
                     let value = setting
                         .value
                         .as_str()
                         .ok_or_else(|| "filter value must be a string".to_string())
                         .map_err(|e| ApiError(AppError::field("value", e)))?;
-                    db_settings::add_content_filter(
-                        state.db(),
-                        pseud_id,
-                        &setting.key,
-                        value,
-                        &now,
-                    )
-                    .await
-                    .map_err(|e| e.to_string())
+                    db_settings::add_content_filter(state.db(), pseud_id, &setting.key, value, &now)
+                        .await
+                        .map_err(|e| e.to_string())
                 }
                 "notifications" => {
                     let parts: Vec<&str> = setting.key.splitn(2, ':').collect();
@@ -943,6 +950,157 @@ async fn import_settings(
     }
 
     Ok(Json(ImportReport { accepted, rejected }))
+}
+
+// ---------------------------------------------------------------------------
+// M52-09: the reader's recommendation-engine preference (spec §16.1b)
+// ---------------------------------------------------------------------------
+
+/// What the reader should see: their recorded choice, whether it is in effect,
+/// what is in effect instead if not, and what they are allowed to pick.
+///
+/// `available` is the operator's enabled set, not every strategy this build
+/// knows about. A reader cannot pick a strategy the operator has turned off,
+/// so listing the others would be offering something that 400s on write.
+#[derive(Debug, Serialize)]
+struct RecEngineView {
+    pseud_id: String,
+    /// The stored choice, or `null` when the reader has never chosen.
+    engine: Option<String>,
+    /// The resolution: `instance_default`, `honored`, or `unavailable`.
+    choice: crate::rec_preference::EngineChoice,
+    available: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PatchRecEngine {
+    /// The strategy to use, or `""` to clear the choice back to the instance
+    /// default.
+    engine: String,
+}
+
+/// Resolve the session's pseud, the same way every other settings handler does.
+///
+/// A session with no pseud falls back to the account id, so a reader who has
+/// not chosen a face still gets a per-pseud store that works.
+async fn session_pseud(state: &AppState, user: &crate::auth::SessionUser) -> ApiResult<uuid::Uuid> {
+    let account = identity::find_account(state.db(), user.account_id)
+        .await?
+        .ok_or_else(|| ApiError(AppError::AuthRequired))?;
+    Ok(user
+        .pseud_id
+        .as_ref()
+        .map(|p| p.as_uuid())
+        .unwrap_or_else(|| account.id.as_uuid()))
+}
+
+async fn get_rec_engine(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<RecEngineView>> {
+    let pseud_id = session_pseud(&state, &user).await?;
+    let registry = crate::rec_engine::build_registry(&state.config().discovery);
+
+    let stored = db_settings::read_search_settings(state.db(), pseud_id)
+        .await?
+        .into_iter()
+        .find(|(key, _)| key == crate::rec_preference::SETTING_KEY)
+        .and_then(|(_, value)| value.as_str().map(str::to_owned))
+        .filter(|s| !s.trim().is_empty());
+
+    let choice = crate::rec_preference::resolve(&registry, stored.as_deref());
+
+    Ok(Json(RecEngineView {
+        pseud_id: pseud_id.to_string(),
+        engine: stored,
+        choice,
+        available: registry.names().into_iter().map(str::to_owned).collect(),
+    }))
+}
+
+async fn patch_rec_engine(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Json(request): Json<PatchRecEngine>,
+) -> ApiResult<Json<RecEngineView>> {
+    let pseud_id = session_pseud(&state, &user).await?;
+    let registry = crate::rec_engine::build_registry(&state.config().discovery);
+
+    // Validate before writing. An engine the operator has disabled is
+    // refused naming what is accepted, never stored as a value that silently
+    // does nothing — the same reasoning as the instance mode of §0.4.7. The
+    // refusal is 422, which is what `AppError::Validation` already maps to.
+    let engine = match crate::rec_preference::validate(&registry, &request.engine) {
+        Ok(engine) => engine,
+        Err(accepted) => {
+            return Err(ApiError(AppError::field(
+                "engine",
+                format!(
+                    "unknown or disabled recommendation engine; accepted values: {}",
+                    if accepted.is_empty() {
+                        "none enabled on this instance".to_owned()
+                    } else {
+                        accepted.join(", ")
+                    }
+                ),
+            )));
+        }
+    };
+
+    let now = now_string();
+    if engine.is_empty() {
+        // Clearing means "instance default". Deleting the row rather than
+        // storing `""` keeps the resolved value identical to a reader who
+        // never chose, instead of storing a value that merely looks like one.
+        db_settings::delete_search_setting(
+            state.db(),
+            pseud_id,
+            crate::rec_preference::SETTING_KEY,
+        )
+        .await?;
+    } else {
+        db_settings::upsert_search_setting(
+            state.db(),
+            pseud_id,
+            crate::rec_preference::SETTING_KEY,
+            &serde_json::Value::String(engine.clone()),
+            &now,
+        )
+        .await?;
+    }
+
+    audit_settings_write(
+        state.db(),
+        &user.account_id.as_uuid(),
+        if engine.is_empty() {
+            "rec_engine.clear"
+        } else {
+            "rec_engine.set"
+        },
+        &pseud_id.to_string(),
+        serde_json::json!({ "engine": engine }),
+    )
+    .await;
+
+    let choice = crate::rec_preference::resolve(
+        &registry,
+        if engine.is_empty() {
+            None
+        } else {
+            Some(engine.as_str())
+        },
+    );
+
+    Ok(Json(RecEngineView {
+        pseud_id: pseud_id.to_string(),
+        engine: if engine.is_empty() {
+            None
+        } else {
+            Some(engine)
+        },
+        choice,
+        available: registry.names().into_iter().map(str::to_owned).collect(),
+    }))
 }
 
 #[cfg(test)]

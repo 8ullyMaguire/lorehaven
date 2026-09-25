@@ -10,8 +10,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use lorehaven_db;
 use lorehaven_domain::ids::WorkId;
-use std::str::FromStr;
 use lorehaven_domain::AppError;
+use std::str::FromStr;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -184,7 +184,25 @@ async fn get_discovery(
     let mut blended: Vec<lorehaven_domain::discovery::Candidate> =
         if state.config().discovery.rec_mode == "pluggable" {
             if let Some(ref account_id) = account_id {
+                // M52-09: the reader's stored engine preference narrows the
+                // blend (spec §16.1b). The resolver is the only thing that
+                // reads the preference, so a reader's choice applies here the
+                // same as it applies on every other surface — and when the
+                // operator has since disabled the reader's choice, the
+                // instance blend is used and `choice` says so, rather than a
+                // different engine being substituted without notice.
+                let choice = crate::rec_preference::load_for_pseud(
+                    state.db(),
+                    &state.config().discovery,
+                    session
+                        .as_ref()
+                        .and_then(|s| s.pseud_id.as_ref().map(|p| p.as_uuid())),
+                )
+                .await;
                 let registry = crate::rec_engine::build_registry(&state.config().discovery);
+                let registry = choice.effective_registry(&registry).unwrap_or_else(|| {
+                    crate::rec_engine::build_registry(&state.config().discovery)
+                });
                 let ids = crate::rec_engine::generate_with_registry(
                     state.db(),
                     &registry,
