@@ -43,7 +43,6 @@ pub mod query;
 pub mod query_sql;
 pub mod reading;
 pub mod settings;
-pub mod shadow;
 pub mod spoilers;
 pub mod stats;
 pub mod subscriptions;
