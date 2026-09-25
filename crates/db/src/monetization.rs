@@ -1013,7 +1013,7 @@ pub async fn author_pool_a_in_period(
           GROUP BY author_account_id",
         "SELECT author_account_id::text, COALESCE(SUM(amount_minor), 0) AS total
            FROM author_earnings_ledger
-          WHERE created_at >= ?::text AND created_at < ?::text AND kind IN ('sale','tip','attribution')
+          WHERE created_at >= ?::timestamptz::text AND created_at < ?::timestamptz::text AND kind IN ('sale','tip','attribution')
           GROUP BY author_account_id",
     );
     let rows = match db.backend() {
@@ -1050,7 +1050,7 @@ pub async fn author_reading_time_in_period(
         "SELECT w.owner_pseud_id::text AS author, COALESCE(SUM(rs.seconds), 0) AS secs
            FROM reading_sessions rs
            JOIN works w ON rs.work_id = w.id::uuid
-           WHERE rs.started_at >= ?::text AND rs.started_at < ?::text
+           WHERE rs.started_at >= ?::timestamptz::text AND rs.started_at < ?::timestamptz::text
            GROUP BY w.owner_pseud_id",
     );
     let rows = match db.backend() {

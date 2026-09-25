@@ -246,7 +246,7 @@ pub async fn submit_entry(
 pub async fn approve_entry(db: &Database, id: &str, operator_id: &str, now: &str) -> Result<bool> {
     let sql = db.sql(
         "UPDATE directory_entries SET approved_by = ?, updated_at = ? WHERE id = ? AND approved_by IS NULL",
-        "UPDATE directory_entries SET approved_by = ?, updated_at = ? WHERE id = ? AND approved_by IS NULL",
+        "UPDATE directory_entries SET approved_by = ?, updated_at = ?::timestamptz WHERE id = ? AND approved_by IS NULL",
     );
     let affected = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)

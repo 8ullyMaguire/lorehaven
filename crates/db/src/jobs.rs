@@ -394,7 +394,7 @@ pub async fn heartbeat(
     let sql = db.sql(
         "UPDATE jobs SET lease_expires_at = ?, updated_at = ?, version = version + 1
           WHERE id = ? AND lease_owner = ? AND state IN ('leased', 'running')",
-        "UPDATE jobs SET lease_expires_at = ?, updated_at = ?, version = version + 1
+        "UPDATE jobs SET lease_expires_at = ?::timestamptz, updated_at = ?::timestamptz, version = version + 1
           WHERE id::text = ? AND lease_owner = ? AND state IN ('leased', 'running')",
     );
     let expires = crate::identity::format_rfc3339(now + lease);
@@ -437,7 +437,7 @@ pub async fn attempt_started(
     let now = now_rfc3339();
     let count = db.sql(
         "UPDATE jobs SET attempts = ?, updated_at = ?, version = version + 1 WHERE id = ?",
-        "UPDATE jobs SET attempts = ?, updated_at = ?, version = version + 1 WHERE id::text = ?",
+        "UPDATE jobs SET attempts = ?, updated_at = ?::timestamptz, version = version + 1 WHERE id::text = ?",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -504,7 +504,7 @@ pub async fn close_attempt(
             SET finished_at = ?, outcome = ?, error = ?
           WHERE job_id = ? AND worker = ? AND finished_at IS NULL",
         "UPDATE job_attempts
-            SET finished_at = ?, outcome = ?, error = ?
+            SET finished_at = ?::timestamptz, outcome = ?, error = ?
           WHERE job_id::text = ? AND worker = ? AND finished_at IS NULL",
     );
     let now = now_rfc3339();
@@ -548,7 +548,7 @@ pub async fn complete(db: &Database, job: JobId, worker: &str) -> Result<bool> {
         "UPDATE jobs
             SET state = 'succeeded', progress_permille = 1000, checkpoint = NULL,
                 lease_owner = NULL, lease_expires_at = NULL, last_error = NULL,
-                updated_at = ?, version = version + 1
+                updated_at = ?::timestamptz, version = version + 1
           WHERE id::text = ? AND lease_owner = ? AND state IN ('leased', 'running')",
     );
     let now = now_rfc3339();
@@ -653,8 +653,8 @@ pub async fn fail(
                 version = version + 1
           WHERE id = ? AND lease_owner = ?",
         "UPDATE jobs
-            SET state = ?, attempts = ?, available_at = ?, last_error = ?,
-                lease_owner = NULL, lease_expires_at = NULL, updated_at = ?,
+            SET state = ?, attempts = ?, available_at = ?::timestamptz, last_error = ?,
+                lease_owner = NULL, lease_expires_at = NULL, updated_at = ?::timestamptz,
                 version = version + 1
           WHERE id::text = ? AND lease_owner = ?",
     );
@@ -706,7 +706,7 @@ pub async fn cancel(db: &Database, job: JobId) -> Result<bool> {
           WHERE id = ? AND state IN ('queued', 'leased', 'running')",
         "UPDATE jobs
             SET state = 'cancelled', lease_owner = NULL, lease_expires_at = NULL,
-                updated_at = ?, version = version + 1
+                updated_at = ?::timestamptz, version = version + 1
           WHERE id::text = ? AND state IN ('queued', 'leased', 'running')",
     );
     let now = now_rfc3339();
@@ -742,9 +742,9 @@ pub async fn requeue_expired_leases(db: &Database, now: OffsetDateTime) -> Resul
             AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?",
         "UPDATE jobs
             SET state = 'queued', lease_owner = NULL, lease_expires_at = NULL,
-                updated_at = ?::timestamptz, version = version + 1
+                updated_at = ?::timestamptz::timestamptz, version = version + 1
           WHERE state IN ('leased', 'running')
-            AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?::timestamptz",
+            AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?::timestamptz::timestamptz",
     );
     let now_text = crate::identity::format_rfc3339(now);
     let affected = match db.backend() {
@@ -780,7 +780,7 @@ pub async fn progress(
         "UPDATE jobs
             SET progress_permille = ?, checkpoint = COALESCE(?, checkpoint),
                 state = CASE WHEN state = 'leased' THEN 'running' ELSE state END,
-                updated_at = ?, version = version + 1
+                updated_at = ?::timestamptz, version = version + 1
           WHERE id::text = ? AND state IN ('leased', 'running')",
     );
     let permille = permille.clamp(0, 1000);
@@ -889,7 +889,7 @@ pub async fn jobs_for(
                     lease_expires_at, progress_permille, checkpoint, last_error,
                     requested_by::text AS requested_by, created_at, updated_at, version
                FROM jobs WHERE requested_by::text = ?
-                 AND (created_at < ? OR (created_at = ? AND id::text < ?))
+                 AND (created_at < ?::timestamptz OR (created_at = ?::timestamptz AND id::text < ?))
               ORDER BY created_at DESC, id DESC LIMIT ?",
         ),
         None => db.sql(
@@ -971,8 +971,8 @@ pub async fn all_jobs(
                     requested_by::text AS requested_by, created_at, updated_at, version
                FROM jobs
               WHERE (?::text IS NULL OR state = ?)
-                AND (created_at < ?::timestamptz
-                     OR (created_at = ?::timestamptz AND id::text < ?))
+                AND (created_at < ?::timestamptz::timestamptz
+                     OR (created_at = ?::timestamptz::timestamptz AND id::text < ?))
               ORDER BY created_at DESC, id DESC LIMIT ?",
         ),
         None => db.sql(
@@ -1084,7 +1084,7 @@ pub async fn purge_terminal_jobs(db: &Database, older_than: OffsetDateTime) -> R
         "DELETE FROM jobs
           WHERE state IN ('succeeded', 'failed', 'cancelled') AND updated_at < ?",
         "DELETE FROM jobs
-          WHERE state IN ('succeeded', 'failed', 'cancelled') AND updated_at < ?::timestamptz",
+          WHERE state IN ('succeeded', 'failed', 'cancelled') AND updated_at < ?::timestamptz::timestamptz",
     );
     let cutoff = crate::identity::format_rfc3339(older_than);
     let affected = match db.backend() {
@@ -1116,9 +1116,9 @@ pub async fn requeue(db: &Database, job: JobId) -> Result<bool> {
                 lease_expires_at = NULL, updated_at = ?, version = version + 1
           WHERE id = ? AND state IN ('succeeded', 'failed', 'cancelled')",
         "UPDATE jobs
-            SET state = 'queued', attempts = 0, available_at = ?, last_error = NULL,
+            SET state = 'queued', attempts = 0, available_at = ?::timestamptz, last_error = NULL,
                 progress_permille = 0, checkpoint = NULL, lease_owner = NULL,
-                lease_expires_at = NULL, updated_at = ?, version = version + 1
+                lease_expires_at = NULL, updated_at = ?::timestamptz, version = version + 1
           WHERE id::text = ? AND state IN ('succeeded', 'failed', 'cancelled')",
     );
     let now = now_rfc3339();

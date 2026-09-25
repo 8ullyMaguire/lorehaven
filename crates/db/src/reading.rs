@@ -678,7 +678,7 @@ pub async fn delete_rating(db: &Database, pseud: PseudId, work: WorkId) -> Resul
     let sql = db.sql(
         "UPDATE rating SET deleted_at = ?, updated_at = ?
           WHERE pseud_id = ? AND work_id = ? AND deleted_at IS NULL",
-        "UPDATE rating SET deleted_at = ?, updated_at = ?
+        "UPDATE rating SET deleted_at = ?::timestamptz, updated_at = ?::timestamptz
           WHERE pseud_id::text = ? AND work_id::text = ? AND deleted_at IS NULL",
     );
     let now = now_rfc3339();
@@ -948,7 +948,7 @@ pub async fn delete_review(db: &Database, pseud: PseudId, work: WorkId) -> Resul
     let sql = db.sql(
         "UPDATE review SET deleted_at = ?, updated_at = ?
           WHERE pseud_id = ? AND work_id = ? AND deleted_at IS NULL",
-        "UPDATE review SET deleted_at = ?, updated_at = ?
+        "UPDATE review SET deleted_at = ?::timestamptz, updated_at = ?::timestamptz
           WHERE pseud_id::text = ? AND work_id::text = ? AND deleted_at IS NULL",
     );
     let now = now_rfc3339();
@@ -1063,7 +1063,7 @@ pub async fn save_note(
             SET body = ?, updated_at = ?, version = version + 1
           WHERE id = ? AND deleted_at IS NULL",
         "UPDATE reader_note
-            SET body = ?, updated_at = ?, version = version + 1
+            SET body = ?, updated_at = ?::timestamptz, version = version + 1
           WHERE id::text = ? AND deleted_at IS NULL",
     );
     let insert = db.sql(
@@ -1159,7 +1159,7 @@ pub async fn delete_note(db: &Database, pseud: PseudId, note_id: &str) -> Result
     let sql = db.sql(
         "UPDATE reader_note SET deleted_at = ?, updated_at = ?
           WHERE id = ? AND pseud_id = ? AND deleted_at IS NULL",
-        "UPDATE reader_note SET deleted_at = ?, updated_at = ?
+        "UPDATE reader_note SET deleted_at = ?::timestamptz, updated_at = ?::timestamptz
           WHERE id::text = ? AND pseud_id::text = ? AND deleted_at IS NULL",
     );
     let now = now_rfc3339();
