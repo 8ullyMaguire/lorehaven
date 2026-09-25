@@ -1,3 +1,37 @@
+# Handoff — M32-07c: real image decoding, so a fetched image gets a real hash
+
+Date: 2026-09-25. **The current, full handoff is
+`docs/handoffs/2026-09-25T173000+0200-m32-07c-real-image-decoding-handoff.md`
+— read that one.** It records spec §32.7.2's decoding half: `image = "=0.25.6"`
+pinned because 0.25.7+ raises the workspace's declared `rust-version = "1.82"`,
+`fingerprint_encoded` decoding a body to luma and producing both hashes, and the
+pixel limit applied *to the decoder* via `ImageReader::limits` rather than
+checked after the allocation has already happened.
+
+**Two corrections to my own work in the same session.** My first "the same image,
+re-encoded" fixture flipped a PNG filter byte that was already set, so the copy
+was byte-identical — and flipping a filter without re-encoding the deltas
+changes the *decoded* image anyway, so the premise was wrong as well as the
+bytes. It now splices a `tEXt` chunk: different bytes, identical pixels, which
+is the real shape of the problem. And the decompression-bomb fixture emitted
+`width * height` zero bytes, making its own test 33 seconds while the decoder
+refused correctly throughout; a bomb only needs its declared size with one real
+row, and it is now 0.00s.
+
+**Still not shipped, and it is now the only structural gap in the chain:** there
+is no media job kind and no fetch loop, so nothing queues a fetch and drives
+`plan_fetch → classify → decode → record_fingerprint` in sequence.
+`record_fingerprint` has no production caller — only tests. That is the same "a
+parser is not a feature" shape, and it is why the job wiring is the next
+milestone rather than polish. `phash`/`whash`/`ahash` remain unimplemented and
+`audio_fingerprint` is still unapplied to audio.
+
+Gate: clippy 0/0, fmt clean, 81 suites / 1773 tests, 0 failed. An earlier run hit
+the documented `milestone_2` rate-limit flake, which passes in isolation; the
+clean re-run is the quoted number. No frontend file was touched.
+
+---
+
 # Handoff — M32-07b: perceptual hashes computed and stored; the default no longer lies
 
 Date: 2026-09-25. **The current, full handoff is
