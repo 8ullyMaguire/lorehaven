@@ -1,12 +1,28 @@
-use std::sync::Arc;
-
 use anyhow::Result;
 
 use lorehaven_db::rec_strategy::{
-    bandit_strategy, cooccurrence_strategy, completion_weight_strategy,
-    curator_prior_strategy, RecContext, RecRegistry,
+    default_strategies, RecContext, RecRegistry, StrategyFactory,
 };
 use lorehaven_db::Database;
+
+/// Every strategy name this build can produce, in a stable order.
+///
+/// Sourced from `rec_strategy::default_strategies` rather than restated here.
+/// The two lists used to be independent: this one carried
+/// `// TODO: time_decay, tag_graph, author_graph, sequential` while all eight
+/// strategies were implemented and tested in `rec_strategy.rs`. Eight strategies
+/// passed their tests and four of them could never run in production. One list
+/// means the next strategy cannot be half-wired again.
+///
+/// Returns owned strings: the factories map is rebuilt on each call, so its
+/// keys do not outlive it.
+pub fn available_strategies() -> Vec<String> {
+    let mut names: Vec<String> = default_strategies().keys().cloned().collect();
+    // HashMap iteration order is not stable, and an unstable registry order
+    // makes the RRF blend's tie-breaking untestable.
+    names.sort();
+    names
+}
 
 /// Build a pluggable-mode registry from config (spec §16.1a, §16.3).
 ///
@@ -14,23 +30,17 @@ use lorehaven_db::Database;
 /// - Empty vector → all strategies enabled
 /// - Non-empty → only listed strategies are registered
 pub fn build_registry(config: &crate::config::DiscoveryConfig) -> RecRegistry {
+    let factories: std::collections::HashMap<String, StrategyFactory> =
+        default_strategies();
     let mut reg = RecRegistry::new(config.rec_rrf_k);
-
-    // Available strategies (spec §16.1a).
-    let available: Vec<(&str, lorehaven_db::rec_strategy::RecStrategyFn)> = vec![
-        ("cooccurrence", cooccurrence_strategy()),
-        ("bandit", bandit_strategy()),
-        ("completion_weight", completion_weight_strategy()),
-        ("curator_prior", curator_prior_strategy()),
-        // TODO: time_decay, tag_graph, author_graph, sequential
-        // TODO: external sidecar (feature-gated)
-    ];
-
     let enabled = &config.rec_enabled_strategies;
 
-    for (name, strategy) in available {
-        if enabled.is_empty() || enabled.iter().any(|s| s == name) {
-            reg.register(name, strategy);
+    for name in available_strategies() {
+        if !enabled.is_empty() && !enabled.iter().any(|s| *s == name) {
+            continue;
+        }
+        if let Some(factory) = factories.get(&name) {
+            reg.register(name, factory());
         }
     }
 
@@ -65,11 +75,52 @@ mod tests {
     }
 
     #[test]
-    fn build_registry_empty_enables_all() {
+    fn build_registry_empty_enables_every_available_strategy() {
         let config = test_config(vec![]);
         let reg = build_registry(&config);
-        // 4 strategies registered (cooccurrence, bandit, completion_weight, curator_prior)
-        assert_eq!(reg.strategy_count(), 4);
+        // Asserted against the source of truth, not a literal. The literal `4`
+        // is what let four implemented strategies sit unreachable behind a
+        // TODO while this test stayed green.
+        assert_eq!(reg.strategy_count(), available_strategies().len());
+        assert!(
+            reg.strategy_count() >= 8,
+            "spec §16.1a names eight strategies; found {}",
+            reg.strategy_count()
+        );
+    }
+
+    #[test]
+    fn every_spec_strategy_is_reachable() {
+        // The regression this change exists to prevent, named explicitly: each
+        // strategy the spec lists must be registrable, not merely implemented.
+        for name in [
+            "cooccurrence",
+            "time_decay",
+            "tag_graph",
+            "author_graph",
+            "sequential",
+            "completion_weight",
+            "curator_prior",
+            "bandit",
+        ] {
+            let reg = build_registry(&test_config(vec![name.to_string()]));
+            assert!(
+                reg.contains(name),
+                "spec §16.1a strategy {name} is implemented but unreachable"
+            );
+        }
+    }
+
+    #[test]
+    fn available_strategies_is_sorted_and_stable() {
+        // RRF tie-breaking is only testable if registry order is deterministic,
+        // and it comes from a HashMap.
+        let first = available_strategies();
+        let second = available_strategies();
+        assert_eq!(first, second);
+        let mut sorted = first.clone();
+        sorted.sort();
+        assert_eq!(first, sorted);
     }
 
     #[test]
@@ -77,6 +128,7 @@ mod tests {
         let config = test_config(vec!["cooccurrence".to_string()]);
         let reg = build_registry(&config);
         assert_eq!(reg.strategy_count(), 1);
+        assert_eq!(reg.names(), vec!["cooccurrence"]);
     }
 
     #[test]
