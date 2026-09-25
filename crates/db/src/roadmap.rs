@@ -122,7 +122,7 @@ pub async fn list_cards(db: &Database, stage: Option<&str>) -> Result<Vec<Card>,
         None => "SELECT id, title, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at FROM roadmap_cards ORDER BY elo_rating DESC, matches_played DESC, id ASC",
     };
     let sql_pg = match stage {
-        Some(_) => "SELECT id, title, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at FROM roadmap_cards WHERE stage = $1 ORDER BY elo_rating DESC, matches_played DESC, id ASC",
+        Some(_) => "SELECT id, title, category, stage, elo_rating, CAST(matches_played AS BIGINT), CAST(times_best AS BIGINT), CAST(times_worst AS BIGINT), created_at, updated_at FROM roadmap_cards WHERE stage = $1 ORDER BY elo_rating DESC, matches_played DESC, id ASC",
         None => "SELECT id, title, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at FROM roadmap_cards ORDER BY elo_rating DESC, matches_played DESC, id ASC",
     };
     match db.backend() {
@@ -152,7 +152,7 @@ pub async fn list_cards(db: &Database, stage: Option<&str>) -> Result<Vec<Card>,
 /// Pick N random `idea`-stage cards for an arena ballot.
 pub async fn arena_candidates(db: &Database, limit: i64) -> Result<Vec<Card>, sqlx::Error> {
     let sql = "SELECT id, title, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at FROM roadmap_cards WHERE stage = 'idea' ORDER BY RANDOM() LIMIT ?";
-    let sql_pg = "SELECT id, title, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at FROM roadmap_cards WHERE stage = 'idea' ORDER BY RANDOM() LIMIT $1";
+    let sql_pg = "SELECT id, title, category, stage, elo_rating, CAST(matches_played AS BIGINT), CAST(times_best AS BIGINT), CAST(times_worst AS BIGINT), created_at, updated_at FROM roadmap_cards WHERE stage = 'idea' ORDER BY RANDOM() LIMIT $1";
     match db.backend() {
         Backend::Sqlite => {
             let rows = sqlx::query(sql)

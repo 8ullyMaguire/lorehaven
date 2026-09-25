@@ -50,8 +50,8 @@ pub async fn get_metrics(db: &Database, work_id: &WorkId) -> Result<WorkMetrics>
         "SELECT work_id, views, complete_reads, reactions, kudos, bookmarks,
                 collection_adds, reviews
            FROM work_metric_aggregates WHERE work_id = ?",
-        "SELECT work_id, views, complete_reads, reactions, kudos, bookmarks,
-                collection_adds, reviews
+        "SELECT work_id, CAST(views AS BIGINT), CAST(complete_reads AS BIGINT), CAST(reactions AS BIGINT), CAST(kudos AS BIGINT), CAST(bookmarks AS BIGINT),
+                CAST(collection_adds AS BIGINT), CAST(reviews AS BIGINT)
            FROM work_metric_aggregates WHERE work_id::text = $1",
     );
     let row: Option<WorkMetrics> = match db.backend() {

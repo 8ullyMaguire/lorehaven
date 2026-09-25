@@ -179,6 +179,8 @@ def offending_lines(sql: str, schema: dict[str, dict[str, str]]) -> bool:
     # checked before the placeholder test rather than after it.
     if sum_sites(sql, schema):
         return True
+    if int4_sites(sql, schema):
+        return True
 
     if not re.search(r"\$\d+", sql):
         # `?` is the SQLite spelling. The PostgreSQL arm is the one rewritten to
@@ -346,6 +348,17 @@ def add_missing_casts(sql: str, known: dict[str, dict[str, str]]) -> str:
             if end is not None and "::" not in sql[end:end + 2]:
                 edits.append((start, end, f"CAST({sql[start:end]} AS BIGINT)"))
 
+    # Widen a bare INT4/INT2 column in the SELECT list the same way. CAST, so
+    # the result is valid on SQLite too and the statement need not be split.
+    head_end = re.search(r"\bFROM\b", sql, re.IGNORECASE)
+    for col in int4_sites(sql, known):
+        for match in re.finditer(
+            rf"(?<![:\w])((?:[a-z_][\w]*\s*\.\s*)?){re.escape(col)}\b(?!\s*::|\s*\()",
+            sql[: head_end.start()] if head_end else sql,
+            re.IGNORECASE,
+        ):
+            edits.append((match.start(1), match.end(), f"CAST({match.group(0)} AS BIGINT)"))
+
     out = sql
     for start, end, replacement in sorted(edits, reverse=True):
         out = out[:start] + replacement + out[end:]
@@ -404,6 +417,9 @@ def scan(root: pathlib.Path, schema: dict[str, dict[str, str]]) -> list[tuple[pa
             summed = sum_sites(sql, known) if known else []
             if summed:
                 reasons.append("SUM(" + ", SUM(".join(summed) + ") is NUMERIC")
+            narrow = int4_sites(sql, known) if known else []
+            if narrow:
+                reasons.append("INT4 column into i64: " + ", ".join(narrow))
             if not reasons:
                 continue
             line = text[: match.start()].count("\n") + 1
@@ -451,6 +467,15 @@ SELF_TEST_CASES: list[tuple[str, bool, str]] = [
      True, "SUM is its own finding, independent of any bind"),
     ("SELECT SUM(last_chapter)::bigint AS total FROM progress WHERE account = $1::uuid",
      False, "both settled"),
+    ("SELECT last_chapter FROM progress WHERE account = $1::uuid", True,
+     "INT4 column read into an i64"),
+    ("SELECT last_chapter::bigint FROM progress WHERE account = $1::uuid", False,
+     "INT4: already widened"),
+    ("SELECT COUNT(*) AS n FROM progress", False,
+     "COUNT is int8 already, no widening wanted"),
+    ("INSERT INTO progress (account, work_id, last_chapter, updated_at) "
+     "VALUES ($1::uuid, $2::uuid, $3, $4)", False,
+     "an INT4 bind is not a decode, so an INSERT is not a finding"),
 ]
 
 
@@ -484,6 +509,54 @@ def sum_sites(sql: str, known: dict[str, dict[str, str]]) -> list[str]:
         for columns in known.values():
             coltype = columns.get(col)
             if coltype in INTEGER_TYPES:
+                out.append(col)
+                break
+    return out
+
+
+# A column declared INTEGER (INT4) will not decode into an i64 either. It reads
+# as the same family as the NUMERIC case and was found the same way -- one test
+# failure at a time, each in a different module. "mismatched types; Rust type
+# `i64` (as SQL type `INT8`) is not compatible with SQL type `INT4`".
+#
+# The SELECT list is the place to widen, because a cast on the column also fixes
+# a bind compared against it in the same statement. The check is deliberately
+# narrow: it only fires on a bare column reference in a SELECT list, because a
+# `COUNT(*)` or an already-cast `col::bigint` is fine and must not be reported.
+INT4_COLUMNS = ("integer", "smallint")
+SELECT_ITEM = re.compile(
+    r"(?:^|\s|,)((?:[a-z_][\w]*\s*\.\s*)?)([a-z_][\w]*)(?=\s*(?:,|FROM|AS|$))",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def int4_sites(sql: str, known: dict[str, dict[str, str]]) -> list[str]:
+    """INT4/INT2 columns in the SELECT list with no widening cast.
+
+    Only for a statement that is actually the PostgreSQL arm. An INT4 column in
+    the SQLite string needs no cast -- SQLite has no INT4 -- so without this
+    guard the rule reports both halves of every `db.sql(a, b)` pair and roughly
+    doubles the output for no new information.
+    """
+    if not re.search(r"\$\d+", sql):
+        return []
+    if re.match(r"\s*INSERT\b", sql, re.IGNORECASE):
+        # A bind is not a decode. sqlx sends an `i32` for an INTEGER column and
+        # PostgreSQL accepts it; nothing fails, so there is nothing to report.
+        # Only reading an INT4 column *into an i64* is a real fault.
+        return []
+    head = re.split(r"\bFROM\b", sql, maxsplit=1, flags=re.IGNORECASE)[0]
+    if "::" in head:
+        # A cast anywhere in the list is the established fix; do not second-guess
+        # which column it was meant for.
+        return []
+    out: list[str] = []
+    for match in SELECT_ITEM.finditer(head):
+        col = match.group(2).lower()
+        if col in ("count", "sum", "cast", "coalesce"):
+            continue
+        for columns in known.values():
+            if columns.get(col) in INT4_COLUMNS:
                 out.append(col)
                 break
     return out

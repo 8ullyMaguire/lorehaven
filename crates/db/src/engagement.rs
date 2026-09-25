@@ -108,7 +108,7 @@ pub async fn record_login(db: &Database, account_id: &str) -> Result<StreakState
             .await?;
 
             let state: Option<(i64, i64, Option<String>, i64, String)> = sqlx::query_as(
-                "SELECT current_streak, longest_streak, last_login_at, streak_freezes_used, updated_at
+                "SELECT CAST(current_streak AS BIGINT), CAST(longest_streak AS BIGINT), last_login_at, CAST(streak_freezes_used AS BIGINT), updated_at
                  FROM streaks WHERE account_id = $1::uuid"
             )
             .bind(account_id)

@@ -155,7 +155,7 @@ pub async fn get_work_anomaly_events(
            FROM rating_anomaly_events \
           WHERE work_id = ? AND cleared_at IS NULL \
           ORDER BY detected_at DESC",
-        "SELECT id, work_id, cohort_id, kind, severity, detail, detected_at, cleared_at, cleared_by \
+        "SELECT id, work_id, cohort_id, kind, CAST(severity AS BIGINT), detail, detected_at, cleared_at, cleared_by \
            FROM rating_anomaly_events \
           WHERE work_id = $1::uuid AND cleared_at IS NULL \
           ORDER BY detected_at DESC",

@@ -103,7 +103,7 @@ pub async fn get_schedule(db: &Database, topic_id: &str) -> Result<Vec<serde_jso
         }
         Backend::Postgres => {
             sqlx::query_as::<_, (i64, String, i64, i64, String)>(
-                "SELECT position, title, chapter_start, chapter_end, unlocks_at
+                "SELECT CAST(position AS BIGINT), title, CAST(chapter_start AS BIGINT), CAST(chapter_end AS BIGINT), unlocks_at
                  FROM topic_schedules WHERE topic_id = $1 ORDER BY position",
             )
             .bind(topic_id)
@@ -203,26 +203,25 @@ pub async fn approve_wiki_pin(
 
 /// Get the approved wiki pin for a topic (spec §35.3).
 pub async fn get_wiki_pin(db: &Database, topic_id: &str) -> Result<Option<serde_json::Value>> {
-    let row = match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query_as::<_, (String, i64, String, String)>(
-                "SELECT body, revision, edited_by, edited_at FROM topic_wiki_pins
+    let row =
+        match db.backend() {
+            Backend::Sqlite => {
+                sqlx::query_as::<_, (String, i64, String, String)>(
+                    "SELECT body, revision, edited_by, edited_at FROM topic_wiki_pins
                  WHERE topic_id = ? AND approved_by IS NOT NULL",
-            )
-            .bind(topic_id)
-            .fetch_optional(db.sqlite_pool().expect("sqlite"))
-            .await?
-        }
-        Backend::Postgres => {
-            sqlx::query_as::<_, (String, i64, String, String)>(
-                "SELECT body, revision, edited_by, edited_at FROM topic_wiki_pins
+                )
+                .bind(topic_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?
+            }
+            Backend::Postgres => sqlx::query_as::<_, (String, i64, String, String)>(
+                "SELECT body, CAST(revision AS BIGINT), edited_by, edited_at FROM topic_wiki_pins
                  WHERE topic_id = $1 AND approved_by IS NOT NULL",
             )
             .bind(topic_id)
             .fetch_optional(db.sqlite_pool().expect("sqlite"))
-            .await?
-        }
-    };
+            .await?,
+        };
     Ok(row.map(|(body, rev, by, at)| {
         serde_json::json!({
             "body": body,
@@ -293,7 +292,7 @@ pub async fn get_critique_queue(db: &Database, topic_id: &str) -> Result<Vec<ser
         }
         Backend::Postgres => {
             sqlx::query_as::<_, (String, i64, Option<String>)>(
-                "SELECT pseud, position, excerpt FROM critique_queue
+                "SELECT pseud, CAST(position AS BIGINT), excerpt FROM critique_queue
                  WHERE topic_id = $1 ORDER BY position",
             )
             .bind(topic_id)

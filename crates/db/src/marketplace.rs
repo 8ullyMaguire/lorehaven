@@ -392,7 +392,7 @@ pub async fn list_webhooks(db: &Database, owner: &str) -> Result<Vec<Value>, sql
                 .collect())
         }
         Backend::Postgres => {
-            let rows = sqlx::query("SELECT id, owner, url, events, active, created_at FROM webhook_endpoints WHERE owner = $1")
+            let rows = sqlx::query("SELECT id, owner, url, events, CAST(active AS BIGINT), created_at FROM webhook_endpoints WHERE owner = $1")
                 .bind(owner)
                 .fetch_all(db.postgres_pool().expect("postgres"))
                 .await?;
@@ -491,7 +491,7 @@ pub async fn list_all_active_webhooks(db: &Database) -> Result<Vec<Value>, sqlx:
         }
         Backend::Postgres => {
             let rows = sqlx::query(
-                "SELECT id, owner, url, events, active, created_at FROM webhook_endpoints WHERE active = $1"
+                "SELECT id, owner, url, events, CAST(active AS BIGINT), created_at FROM webhook_endpoints WHERE active = $1"
             )
             .bind(1i64)
             .fetch_all(db.postgres_pool().expect("postgres"))
