@@ -274,7 +274,13 @@ impl Database {
     pub fn sql<'a>(&self, sqlite: &'a str, postgres: &'a str) -> Cow<'a, str> {
         match self.backend {
             Backend::Sqlite => Cow::Borrowed(sqlite),
-            Backend::Postgres => Cow::Owned(rewrite_placeholders(postgres)),
+            Backend::Postgres => {
+                let out = Cow::Owned(rewrite_placeholders(postgres));
+                if tracing::enabled!(tracing::Level::DEBUG) && pg_statement_trace() {
+                    tracing::debug!(sql = %out, "postgres statement");
+                }
+                out
+            }
         }
     }
 
@@ -340,6 +346,20 @@ pub fn sql_owned(db: &Database, sqlite: String, postgres: String) -> String {
         Backend::Sqlite => sqlite,
         Backend::Postgres => rewrite_placeholders(&postgres),
     }
+}
+
+/// Whether to log every PostgreSQL statement this process builds.
+///
+/// Dialect faults are invisible from the outside: a statement that passes on
+/// SQLite fails on PostgreSQL with a type error, and the response carries only
+/// the error, never the SQL that produced it. Setting `LOREHAVEN_TRACE_SQL=1`
+/// with `RUST_LOG=lorehaven_db=debug` prints each statement as it is built, so
+/// the failing one is the last line before the error. Gated on the DEBUG level
+/// as well, so a normal run does not pay for the check.
+fn pg_statement_trace() -> bool {
+    use std::sync::OnceLock;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("LOREHAVEN_TRACE_SQL").is_ok_and(|v| v != "0"))
 }
 
 /// Whether `id` can be a primary key on PostgreSQL.

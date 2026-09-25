@@ -104,7 +104,7 @@ pub async fn delete_dnf(
     let sql = db.sql(
         "UPDATE did_not_finish SET deleted_at = ?
          WHERE pseud_id = ? AND work_id = ? AND deleted_at IS NULL",
-        "UPDATE did_not_finish SET deleted_at = $1::timestamptz
+        "UPDATE did_not_finish SET deleted_at = $1
          WHERE pseud_id = $2::uuid AND work_id = $3::uuid AND deleted_at IS NULL",
     );
 

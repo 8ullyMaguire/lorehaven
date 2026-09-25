@@ -182,7 +182,7 @@ pub async fn mark_read(
     let sql = db.sql(
         "UPDATE notifications SET read_at = ?1
           WHERE id = ?2 AND account_id = ?3 AND read_at IS NULL",
-        "UPDATE notifications SET read_at = $1::timestamptz
+        "UPDATE notifications SET read_at = $1
           WHERE id = $2 AND account_id = $3::uuid AND read_at IS NULL",
     );
     let affected = match db.backend() {
@@ -209,7 +209,7 @@ pub async fn mark_all_read(db: &Database, account_id: &str) -> Result<u64, sqlx:
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "UPDATE notifications SET read_at = ?1 WHERE account_id = ?2 AND read_at IS NULL",
-        "UPDATE notifications SET read_at = $1::timestamptz WHERE account_id = $2::uuid AND read_at IS NULL",
+        "UPDATE notifications SET read_at = $1 WHERE account_id = $2::uuid AND read_at IS NULL",
     );
     match db.backend() {
         Backend::Sqlite => Ok(sqlx::query(&sql)

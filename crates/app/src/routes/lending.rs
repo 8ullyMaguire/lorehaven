@@ -246,7 +246,7 @@ async fn check_active_loan_id(
     let now = now_rfc3339();
     let sql = db.sql(
         "SELECT id FROM work_loans WHERE work_id = ? AND borrower_account_id = ? AND revoked_at IS NULL AND expires_at > ? LIMIT 1",
-        "SELECT id FROM work_loans WHERE work_id = ?::uuid AND borrower_account_id = ?::uuid AND revoked_at IS NULL AND expires_at > ?::timestamptz LIMIT 1",
+        "SELECT id FROM work_loans WHERE work_id = ?::uuid AND borrower_account_id = ?::uuid AND revoked_at IS NULL AND expires_at > ? LIMIT 1",
     );
     let row = match db.backend() {
         lorehaven_db::Backend::Sqlite => {

@@ -140,7 +140,7 @@ pub async fn mark_derivative_built(
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "UPDATE derivatives SET output_checksum = ?, output_bytes = ?, output_mime_type = ?, state = 'ready', built_at = ?, updated_at = ?, version = version + 1 WHERE id = ?",
-        "UPDATE derivatives SET output_checksum = ?, output_bytes = ?, output_mime_type = ?, state = 'ready', built_at = ?::timestamptz, updated_at = ?::timestamptz, version = version + 1 WHERE id = ?::uuid",
+        "UPDATE derivatives SET output_checksum = ?, output_bytes = ?, output_mime_type = ?, state = 'ready', built_at = ?, updated_at = ?, version = version + 1 WHERE id = ?::uuid",
     );
     let rows_affected = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
@@ -172,7 +172,7 @@ pub async fn mark_derivative_failed(db: &Database, id: &str, message: &str) -> R
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "UPDATE derivatives SET state = 'failed', error_message = ?, updated_at = ?, version = version + 1 WHERE id = ?",
-        "UPDATE derivatives SET state = 'failed', error_message = ?, updated_at = ?::timestamptz, version = version + 1 WHERE id = ?::uuid",
+        "UPDATE derivatives SET state = 'failed', error_message = ?, updated_at = ?, version = version + 1 WHERE id = ?::uuid",
     );
     let rows_affected = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
@@ -229,7 +229,7 @@ pub async fn mark_derivative_stale(db: &Database, id: &str) -> Result<bool> {
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "UPDATE derivatives SET state = 'stale', updated_at = ?, version = version + 1 WHERE id = ? AND state != 'stale'",
-        "UPDATE derivatives SET state = 'stale', updated_at = ?::timestamptz, version = version + 1 WHERE id = ?::uuid AND state != 'stale'",
+        "UPDATE derivatives SET state = 'stale', updated_at = ?, version = version + 1 WHERE id = ?::uuid AND state != 'stale'",
     );
     let rows_affected = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
@@ -282,7 +282,7 @@ pub async fn touch_derivative_verified(db: &Database, id: &str) -> Result<bool> 
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "UPDATE derivatives SET verified_at = ?, updated_at = ?, version = version + 1 WHERE id = ?",
-        "UPDATE derivatives SET verified_at = ?::timestamptz, updated_at = ?::timestamptz, version = version + 1 WHERE id = ?::uuid",
+        "UPDATE derivatives SET verified_at = ?, updated_at = ?, version = version + 1 WHERE id = ?::uuid",
     );
     let rows_affected = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)

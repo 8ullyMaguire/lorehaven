@@ -177,7 +177,7 @@ pub async fn list_comments(
              FROM comments c
              JOIN pseuds pa ON pa.id::text = c.author_pseud
              LEFT JOIN comment_classifications cc ON cc.comment_id = c.id
-             WHERE c.subject_type = $1 AND c.subject_id = $2 AND c.deleted_at IS NULL AND c.created_at < $3::timestamptz
+             WHERE c.subject_type = $1 AND c.subject_id = $2 AND c.deleted_at IS NULL AND c.created_at < $3
                AND pa.account_id::text NOT IN (SELECT blocked FROM blocks WHERE blocker = $4 AND (scope = 'all' OR scope = 'comments'))
                AND pa.account_id::text NOT IN (SELECT blocker FROM blocks WHERE blocked = $4 AND (scope = 'all' OR scope = 'comments'))
                AND (cc.outcome IS NULL OR cc.outcome = 'delivered')
@@ -249,7 +249,7 @@ pub async fn soft_delete_comment(
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "UPDATE comments SET deleted_at = ?, body = '[deleted]' WHERE id = ? AND author_pseud = ? AND deleted_at IS NULL",
-        "UPDATE comments SET deleted_at = ?::timestamptz, body = '[deleted]' WHERE id = ? AND author_pseud = ? AND deleted_at IS NULL",
+        "UPDATE comments SET deleted_at = ?, body = '[deleted]' WHERE id = ? AND author_pseud = ? AND deleted_at IS NULL",
     );
     let rows = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
@@ -863,7 +863,7 @@ pub async fn list_topics_in_category(
     let sql = match cursor {
         Some(_) => db.sql(
             "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked, mode FROM forum_topics WHERE category_id = ? AND last_post_at < ? ORDER BY last_post_at DESC LIMIT ?",
-            "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked::int::bigint AS locked, mode FROM forum_topics WHERE category_id = $1 AND last_post_at < $2::timestamptz ORDER BY last_post_at DESC LIMIT $3",
+            "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked::int::bigint AS locked, mode FROM forum_topics WHERE category_id = $1 AND last_post_at < $2 ORDER BY last_post_at DESC LIMIT $3",
         ),
         None => db.sql(
             "SELECT id, category_id, author_pseud, title, created_at, last_post_at, locked, mode FROM forum_topics WHERE category_id = ? ORDER BY last_post_at DESC LIMIT ?",
@@ -1091,7 +1091,7 @@ pub async fn list_posts(
     let sql = if cursor.is_some() {
         db.sql(
             "SELECT id, topic_id, author_pseud, body, created_at, deleted_at FROM forum_posts WHERE topic_id = ? AND deleted_at IS NULL AND created_at > ? ORDER BY created_at ASC LIMIT ?",
-            "SELECT id, topic_id, author_pseud, body, created_at, deleted_at FROM forum_posts WHERE topic_id = $1 AND deleted_at IS NULL AND created_at > $2::timestamptz ORDER BY created_at ASC LIMIT $3",
+            "SELECT id, topic_id, author_pseud, body, created_at, deleted_at FROM forum_posts WHERE topic_id = $1 AND deleted_at IS NULL AND created_at > $2 ORDER BY created_at ASC LIMIT $3",
         )
     } else {
         db.sql(
@@ -1302,7 +1302,7 @@ pub async fn list_messages(
              ORDER BY sent_at ASC LIMIT ?4",
             "SELECT id, conversation_id, sender, body, sent_at, deleted_at
              FROM messages
-             WHERE conversation_id = $1 AND deleted_at IS NULL AND sent_at > $2::timestamptz
+             WHERE conversation_id = $1 AND deleted_at IS NULL AND sent_at > $2
                AND sender NOT IN (SELECT blocked FROM blocks WHERE blocker = $3 AND (scope = 'all' OR scope = 'messages'))
                AND sender NOT IN (SELECT blocker FROM blocks WHERE blocked = $3 AND (scope = 'all' OR scope = 'messages'))
              ORDER BY sent_at ASC LIMIT $4",

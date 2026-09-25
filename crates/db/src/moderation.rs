@@ -68,7 +68,7 @@ pub async fn check_sanction(
             "SELECT level, expires_at FROM forum_sanctions
              WHERE account = $1::uuid AND active = 1
              AND (category_id = $2 OR category_id IS NULL)
-             AND (expires_at IS NULL OR expires_at > $3::timestamptz)
+             AND (expires_at IS NULL OR expires_at > $3)
              ORDER BY created_at DESC LIMIT 1",
         )
     } else {
@@ -79,7 +79,7 @@ pub async fn check_sanction(
              ORDER BY created_at DESC LIMIT 1",
             "SELECT level, expires_at FROM forum_sanctions
              WHERE account = $1::uuid AND active = 1 AND category_id IS NULL
-             AND (expires_at IS NULL OR expires_at > $2::timestamptz)
+             AND (expires_at IS NULL OR expires_at > $2)
              ORDER BY created_at DESC LIMIT 1",
         )
     };

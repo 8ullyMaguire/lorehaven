@@ -685,7 +685,10 @@ async fn reorder_chapters(
         .await
         .map_err(from_content)?;
 
-    let chapters = content::chapters_for_work(state.db(), work.id).await?;
+    let chapters = trace_step(
+        "chapters",
+        content::chapters_for_work(state.db(), work.id).await,
+    )?;
     Ok(Json(chapters.into_iter().map(ChapterView::from).collect()))
 }
 
@@ -1171,24 +1174,42 @@ async fn author_view(
     })
 }
 
+/// Name the step that failed.
+///
+/// `public_view` fans out to four independent queries and any of them can be the
+/// one that faults. Without this the caller sees a 500 whose only detail is a
+/// PostgreSQL type error, and no indication of which query produced it -- which
+/// is the only part worth knowing when the failure is a dialect fault.
+fn trace_step<T, E: std::fmt::Debug>(what: &str, r: Result<T, E>) -> Result<T, E> {
+    if let Err(ref error) = r {
+        tracing::error!(step = what, ?error, "public view step failed");
+    }
+    r
+}
+
 async fn public_view(state: &AppState, work: &Work) -> ApiResult<PublicWorkView> {
     let chapters = content::chapters_for_work(state.db(), work.id).await?;
-    let authors = collaboration::public_contributors(state.db(), work.id)
-        .await?
-        .into_iter()
-        .map(|(handle, display_name, role)| PublicAuthor {
-            handle,
-            display_name,
-            role,
-        })
-        .collect();
+    let authors = trace_step(
+        "contributors",
+        collaboration::public_contributors(state.db(), work.id).await,
+    )?
+    .into_iter()
+    .map(|(handle, display_name, role)| PublicAuthor {
+        handle,
+        display_name,
+        role,
+    })
+    .collect();
 
     // Spec §9.5: the aggregate is shown only where the work's owner allows it,
     // only above the minimum count, and always with its count and its method.
     // A work whose owner has turned it off reports no aggregate at all rather
     // than a zero, which would read as "nobody liked this".
     let rating_summary = if work.show_public_ratings {
-        reading::public_rating_summary(state.db(), work.id).await?
+        trace_step(
+            "ratings",
+            reading::public_rating_summary(state.db(), work.id).await,
+        )?
     } else {
         None
     };
@@ -1196,7 +1217,10 @@ async fn public_view(state: &AppState, work: &Work) -> ApiResult<PublicWorkView>
     // The same owner preference gates the engagement counters: a work whose
     // owner has hidden public rating display hides the metric bar too.
     let metrics = if work.show_public_ratings {
-        let m = work_metrics::get_metrics(state.db(), &work.id).await?;
+        let m = trace_step(
+            "metrics",
+            work_metrics::get_metrics(state.db(), &work.id).await,
+        )?;
         Some(PublicWorkMetricsView {
             views: m.views,
             complete_reads: m.complete_reads,

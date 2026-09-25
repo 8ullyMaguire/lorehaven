@@ -90,7 +90,7 @@ pub async fn pending(db: &Database, limit: i64) -> Result<Vec<OutboxEvent>> {
           WHERE delivered_at IS NULL AND claimed_at IS NULL AND available_at <= ?
           ORDER BY created_at ASC LIMIT ?",
         "SELECT id::text AS id, topic, payload, attempts, created_at FROM outbox_events
-          WHERE delivered_at IS NULL AND claimed_at IS NULL AND available_at <= ?::timestamptz
+          WHERE delivered_at IS NULL AND claimed_at IS NULL AND available_at <= ?
           ORDER BY created_at ASC LIMIT ?",
     );
 
@@ -119,7 +119,7 @@ pub async fn mark_delivered(db: &Database, id: OutboxEventId) -> Result<()> {
     let sql = db.sql(
         "UPDATE outbox_events SET delivered_at = ?, claimed_at = NULL, attempts = attempts + 1
           WHERE id = ?",
-        "UPDATE outbox_events SET delivered_at = ?::timestamptz, claimed_at = NULL, attempts = attempts + 1
+        "UPDATE outbox_events SET delivered_at = ?, claimed_at = NULL, attempts = attempts + 1
           WHERE id::text = ?",
     );
     let now = now_rfc3339();
@@ -154,7 +154,7 @@ pub async fn mark_failed(
             SET attempts = attempts + 1, claimed_at = NULL, available_at = ?, last_error = ?
           WHERE id = ?",
         "UPDATE outbox_events
-            SET attempts = attempts + 1, claimed_at = NULL, available_at = ?::timestamptz, last_error = ?
+            SET attempts = attempts + 1, claimed_at = NULL, available_at = ?, last_error = ?
           WHERE id::text = ?",
     );
     match db.backend() {

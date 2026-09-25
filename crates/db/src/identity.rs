@@ -329,7 +329,7 @@ pub async fn set_password_hash(db: &Database, account_id: AccountId, phc: &str) 
     if existing > 0 {
         let sql = db.sql(
             "UPDATE password_credentials SET password_hash = ?, updated_at = ? WHERE account_id = ?",
-            "UPDATE password_credentials SET password_hash = ?, updated_at = ?::timestamptz WHERE account_id::text = ?",
+            "UPDATE password_credentials SET password_hash = ?, updated_at = ? WHERE account_id::text = ?",
         );
 
         match db.backend() {
@@ -795,7 +795,7 @@ pub async fn update_pseud(
         "UPDATE pseuds
             SET display_name = COALESCE(?, display_name),
                 bio = COALESCE(?, bio),
-                updated_at = ?::timestamptz, version = version + 1
+                updated_at = ?, version = version + 1
           WHERE id::text = ? AND account_id::text = ? AND version = ? AND deleted_at IS NULL",
     );
 
@@ -832,7 +832,7 @@ pub async fn set_pseud_bio(db: &Database, pseud_id: PseudId, bio: Option<&str>) 
     let now = now_rfc3339();
     let sql = db.sql(
         "UPDATE pseuds SET bio = ?, updated_at = ? WHERE id = ?",
-        "UPDATE pseuds SET bio = ?, updated_at = ?::timestamptz WHERE id::text = ?",
+        "UPDATE pseuds SET bio = ?, updated_at = ? WHERE id::text = ?",
     );
 
     match db.backend() {
@@ -865,7 +865,7 @@ pub async fn set_pseud_discoverability(
     let now = now_rfc3339();
     let sql = db.sql(
         "UPDATE pseuds SET discoverability = ?, updated_at = ? WHERE id = ?",
-        "UPDATE pseuds SET discoverability = ?, updated_at = ?::timestamptz WHERE id::text = ?",
+        "UPDATE pseuds SET discoverability = ?, updated_at = ? WHERE id::text = ?",
     );
 
     match db.backend() {

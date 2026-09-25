@@ -7,6 +7,15 @@
 //! the application layer — never by a trigger — so the dialect-parity test
 //! in `migrate.rs` stays green.
 
+/// Render "now" as the TEXT timestamp shape this schema stores.
+///
+/// Every timestamp column in this project's PostgreSQL schema is TEXT, mirroring
+/// SQLite, so a bare `now()` is a timestamptz being written into a text column
+/// and fails with `42804 cannot cast`. This renders it in exactly the form
+/// SQLite's `datetime('now')` produces -- UTC, no fractional seconds, no offset
+/// -- so a row written by either dialect sorts and compares identically.
+const NOW_TEXT: &str = "to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')";
+
 use anyhow::Result;
 use sqlx::FromRow;
 
@@ -235,9 +244,12 @@ pub async fn count_collection_adds(db: &Database, work_id: &str) -> Result<i64> 
         "SELECT COUNT(*) FROM collection_items ci
           JOIN collections c ON c.id = ci.collection_id
           WHERE ci.work_id = ? AND c.is_public = 1",
+        // `collections.is_public` is INTEGER, not a PostgreSQL boolean:
+        // `rating.is_public` and `review.is_public` are BOOLEAN and take `true`,
+        // and the two cannot be written the same way.
         "SELECT COUNT(*) FROM collection_items ci
           JOIN collections c ON c.id = ci.collection_id
-          WHERE ci.work_id::text = $1 AND c.is_public = true",
+          WHERE ci.work_id::text = $1 AND c.is_public = 1",
     );
     let count: i64 = match db.backend() {
         Backend::Sqlite => {
@@ -308,7 +320,7 @@ pub async fn record_view(
             .bind(work_id)
             .bind(viewer_hash)
             .bind(viewed_at)
-            .bind(is_automated)
+            .bind(i64::from(is_automated))
             .execute(db.sqlite_pool().expect("sqlite handle"))
             .await?
             .rows_affected(),
@@ -316,7 +328,11 @@ pub async fn record_view(
             .bind(work_id)
             .bind(viewer_hash)
             .bind(viewed_at)
-            .bind(is_automated)
+            // The column is INTEGER, not a PostgreSQL boolean: this project's
+            // convention is that a PostgreSQL migration mirrors the SQLite type
+            // exactly, and 19 flag columns here spell it BOOLEAN while this one
+            // does not. A Rust `bool` bind is rejected outright.
+            .bind(i64::from(is_automated))
             .execute(db.postgres_pool().expect("postgres handle"))
             .await?
             .rows_affected(),
@@ -372,7 +388,11 @@ async fn add_kudos(db: &Database, work_id: &str, account_id: &str) -> Result<()>
     let sql = db.sql(
         "INSERT INTO work_kudos (work_id, account_id, created_at) VALUES (?, ?, datetime('now'))
          ON CONFLICT(work_id, account_id) DO NOTHING",
-        "INSERT INTO work_kudos (work_id, account_id, created_at) VALUES ($1::uuid, $2::uuid, now())
+        // `created_at` is TEXT, not timestamptz, so `now()` needs an explicit
+        // text rendering. The form matches SQLite's `datetime('now')` so a row
+        // written by either dialect sorts and compares the same.
+        "INSERT INTO work_kudos (work_id, account_id, created_at)
+         VALUES ($1::uuid, $2::uuid, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
          ON CONFLICT(work_id, account_id) DO NOTHING",
     );
     match db.backend() {
@@ -448,10 +468,11 @@ async fn upsert_counter(db: &Database, work_id: &str, column: &str, delta: i64) 
         Backend::Postgres => format!(
             "INSERT INTO work_metric_aggregates
                (work_id, {column}, updated_at)
-             VALUES ($1, $2, now())
+             VALUES ($1, $2, {now_text})
              ON CONFLICT(work_id) DO UPDATE SET
                {column} = work_metric_aggregates.{column} + $3,
-               updated_at = now()",
+               updated_at = {now_text}",
+            now_text = NOW_TEXT,
         ),
     };
     match db.backend() {
@@ -501,7 +522,7 @@ pub async fn recompute_and_store(db: &Database, work_id: &str) -> Result<WorkMet
         "INSERT INTO work_metric_aggregates
            (work_id, views, complete_reads, reactions, kudos, bookmarks,
             collection_adds, reviews, updated_at)
-         VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, now())
+         VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
          ON CONFLICT(work_id) DO UPDATE SET
            views = excluded.views,
            complete_reads = excluded.complete_reads,
