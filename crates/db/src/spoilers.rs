@@ -50,7 +50,7 @@ pub async fn get_reader_progress(
 ) -> Result<Option<i64>> {
     let sql = db.sql(
         "SELECT last_chapter FROM reader_work_progress WHERE account = ? AND work_id = ?",
-        "SELECT last_chapter FROM reader_work_progress WHERE account = $1::uuid AND work_id = $2::uuid",
+        "SELECT CAST(last_chapter AS BIGINT) FROM reader_work_progress WHERE account = $1::uuid AND work_id = $2::uuid",
     );
     let row = match db.backend() {
         Backend::Sqlite => {
@@ -143,7 +143,7 @@ pub async fn add_content_warning(
 pub async fn list_content_warnings(db: &Database, post_id: &str) -> Result<Vec<ContentWarningRow>> {
     let sql = db.sql(
         "SELECT warning_type, severity, custom_text FROM content_warnings WHERE post_id = ?",
-        "SELECT warning_type, severity, custom_text FROM content_warnings WHERE post_id = $1",
+        "SELECT warning_type, CAST(severity AS BIGINT), custom_text FROM content_warnings WHERE post_id = $1",
     );
     let rows = match db.backend() {
         Backend::Sqlite => {

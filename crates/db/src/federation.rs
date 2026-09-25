@@ -305,7 +305,7 @@ pub async fn get_fingerprint(
         }
         Backend::Postgres => {
             sqlx::query_as::<_, (String, String, i64, String, Option<String>, String, String, String, String, String)>(
-                "SELECT id, instance_host, fingerprint_version, fingerprint_json, theme_vector, cultural_signals, content_signals, signature, valid_until, created_at FROM instance_fingerprints WHERE instance_host = $1 AND valid_until > $2 ORDER BY fingerprint_version DESC LIMIT 1"
+                "SELECT id, instance_host, CAST(fingerprint_version AS BIGINT), fingerprint_json, theme_vector, cultural_signals, content_signals, signature, valid_until, created_at FROM instance_fingerprints WHERE instance_host = $1 AND valid_until > $2 ORDER BY fingerprint_version DESC LIMIT 1"
             ).bind(instance_host).bind(&now).fetch_optional(db.postgres_pool().expect("postgres")).await?
         }
     };

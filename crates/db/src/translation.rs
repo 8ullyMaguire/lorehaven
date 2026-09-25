@@ -307,7 +307,7 @@ async fn lookup_memory_postgres(
     target_lang: &str,
     source_hash: &str,
 ) -> Result<Option<(String, i64, bool)>, sqlx::Error> {
-    let row = sqlx::query("SELECT target_text, quality_bp, shared FROM translation_memory WHERE owner = $1 AND source_lang = $2 AND target_lang = $3 AND source_hash = $4")
+    let row = sqlx::query("SELECT target_text, CAST(quality_bp AS BIGINT), CAST(shared AS BIGINT) FROM translation_memory WHERE owner = $1 AND source_lang = $2 AND target_lang = $3 AND source_hash = $4")
         .bind(owner).bind(source_lang).bind(target_lang).bind(source_hash)
         .fetch_optional(pool)
         .await?;
@@ -381,7 +381,7 @@ pub async fn list_memory(db: &Database, owner: &str) -> Result<Vec<Value>, sqlx:
                 .collect())
         }
         Backend::Postgres => {
-            let rows = sqlx::query("SELECT id, owner, source_lang, target_lang, source_hash, source_text, target_text, quality_bp, shared, created_at FROM translation_memory WHERE owner = $1 ORDER BY created_at DESC")
+            let rows = sqlx::query("SELECT id, owner, source_lang, target_lang, source_hash, source_text, target_text, CAST(quality_bp AS BIGINT), CAST(shared AS BIGINT), created_at FROM translation_memory WHERE owner = $1 ORDER BY created_at DESC")
                 .bind(owner)
                 .fetch_all(db.postgres_pool().expect("postgres"))
                 .await?;

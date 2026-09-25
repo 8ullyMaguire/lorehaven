@@ -70,7 +70,7 @@ async fn admin_overview_mixed_health() {
     .expect("insert ref-002");
     media_resilience::insert_availability_link(
         db,
-        "link-002",
+        &test_support::id("link-002"),
         &test_support::id("ref-002"),
         "https://example.com/img-002.png",
         lorehaven_domain::media_resilience::LinkProvider::Pinterest,
@@ -81,7 +81,7 @@ async fn admin_overview_mixed_health() {
     .expect("insert link");
     media_resilience::update_link_status(
         db,
-        "link-002",
+        &test_support::id("link-002"),
         lorehaven_domain::media_resilience::LinkStatus::Healthy,
         0,
     )
@@ -152,7 +152,7 @@ async fn link_rot_by_provider() {
 
     media_resilience::insert_availability_link(
         db,
-        "link-r1",
+        &test_support::id("link-r1"),
         &test_support::id("ref-rot-1"),
         "https://imgur.com/dead1",
         lorehaven_domain::media_resilience::LinkProvider::Imgur,
@@ -165,7 +165,7 @@ async fn link_rot_by_provider() {
     // Simulate rot: update status to dead (last_healthy_at remains NULL since never healthy)
     media_resilience::update_link_status(
         db,
-        "link-r1",
+        &test_support::id("link-r1"),
         lorehaven_domain::media_resilience::LinkStatus::Dead,
         5,
     )
@@ -207,7 +207,7 @@ async fn curator_leaderboard_with_entries() {
     .expect("insert");
     media_resilience::insert_availability_link(
         db,
-        "link-lb",
+        &test_support::id("link-lb"),
         &test_support::id("ref-lb"),
         "https://example.com/lb.png",
         lorehaven_domain::media_resilience::LinkProvider::Other,
@@ -222,7 +222,7 @@ async fn curator_leaderboard_with_entries() {
         "alice",
         lorehaven_domain::media_resilience::CuratorAction::MirrorAdd,
         Some(&test_support::id("ref-lb")),
-        Some("link-lb"),
+        Some(&test_support::id("link-lb")),
         15,
     )
     .await
@@ -233,7 +233,7 @@ async fn curator_leaderboard_with_entries() {
         "bob",
         lorehaven_domain::media_resilience::CuratorAction::Verify,
         Some(&test_support::id("ref-lb")),
-        Some("link-lb"),
+        Some(&test_support::id("link-lb")),
         5,
     )
     .await
@@ -311,7 +311,7 @@ async fn provider_reliability_with_data() {
     for i in 0..2 {
         media_resilience::insert_availability_link(
             db,
-            &format!("link-pa-{i}"),
+            &test_support::id(&format!("link-pa-{i}")),
             &test_support::id("ref-pr-1"),
             &format!("https://provider-a.com/img-{i}.png"),
             lorehaven_domain::media_resilience::LinkProvider::Imgur,
@@ -322,7 +322,7 @@ async fn provider_reliability_with_data() {
         .expect("insert link");
         media_resilience::update_link_status(
             db,
-            &format!("link-pa-{i}"),
+            &test_support::id(&format!("link-pa-{i}")),
             lorehaven_domain::media_resilience::LinkStatus::Healthy,
             0,
         )
@@ -333,7 +333,7 @@ async fn provider_reliability_with_data() {
     // 1 dead link on provider B
     media_resilience::insert_availability_link(
         db,
-        "link-pb",
+        &test_support::id("link-pb"),
         &test_support::id("ref-pr-1"),
         "https://provider-b.com/img.png",
         lorehaven_domain::media_resilience::LinkProvider::Pinterest,
@@ -344,7 +344,7 @@ async fn provider_reliability_with_data() {
     .expect("insert link");
     media_resilience::update_link_status(
         db,
-        "link-pb",
+        &test_support::id("link-pb"),
         lorehaven_domain::media_resilience::LinkStatus::Dead,
         3,
     )

@@ -58,7 +58,7 @@ async fn get_my_streak(
             .await
             .map_err(|e| ApiError(AppError::Internal(e.into())))?,
             lorehaven_db::Backend::Postgres => sqlx::query_as(
-                "SELECT current_streak, longest_streak, last_login_at, streak_freezes_used
+                "SELECT CAST(current_streak AS BIGINT), CAST(longest_streak AS BIGINT), last_login_at, CAST(streak_freezes_used AS BIGINT)
                  FROM streaks WHERE account_id = $1::uuid",
             )
             .bind(user.account_id.to_string())

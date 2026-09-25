@@ -54,10 +54,10 @@ async fn curator_list_active() {
     let tdb = test_support::TestDb::connect_with_dir("cur-list", &dir).await;
     let db = tdb.db();
 
-    media_resilience::opt_in_curator(db, "user-001")
+    media_resilience::opt_in_curator(db, &test_support::id("user-001"))
         .await
         .expect("opt in 1");
-    media_resilience::opt_in_curator(db, "user-002")
+    media_resilience::opt_in_curator(db, &test_support::id("user-002"))
         .await
         .expect("opt in 2");
 
@@ -65,18 +65,18 @@ async fn curator_list_active() {
         .await
         .expect("list curators");
     assert_eq!(curators.len(), 2);
-    assert!(curators.contains(&"user-001".to_string()));
-    assert!(curators.contains(&"user-002".to_string()));
+    assert!(curators.contains(&&test_support::id("user-001").to_string()));
+    assert!(curators.contains(&&test_support::id("user-002").to_string()));
 
     // Opt out one
-    media_resilience::opt_out_curator(db, "user-001")
+    media_resilience::opt_out_curator(db, &test_support::id("user-001"))
         .await
         .expect("opt out");
     let curators = media_resilience::list_active_curators(db)
         .await
         .expect("list curators");
     assert_eq!(curators.len(), 1);
-    assert!(!curators.contains(&"user-001".to_string()));
+    assert!(!curators.contains(&&test_support::id("user-001").to_string()));
 }
 
 #[tokio::test]
@@ -85,7 +85,7 @@ async fn link_verification_quorum() {
     let tdb = test_support::TestDb::connect_with_dir("cur-quorum", &dir).await;
     let db = tdb.db();
 
-    let link_id = test_support::id("link-001");
+    let link_id = test_support::id(&test_support::id("link-001"));
     let media_ref_id = test_support::id("ref-001");
 
     // No verifications yet
@@ -105,7 +105,7 @@ async fn link_verification_quorum() {
         &id1,
         &link_id,
         &media_ref_id,
-        "curator-a",
+        &test_support::id("curator-a"),
         VerificationType::ExactMatch,
         1.0,
     )
@@ -128,7 +128,7 @@ async fn link_verification_quorum() {
         &id2,
         &link_id,
         &media_ref_id,
-        "curator-b",
+        &test_support::id("curator-b"),
         VerificationType::PerceptualMatch,
         0.85,
     )
@@ -151,9 +151,9 @@ async fn curator_cannot_double_verify() {
     let tdb = test_support::TestDb::connect_with_dir("cur-double", &dir).await;
     let db = tdb.db();
 
-    let link_id = test_support::id("link-002");
+    let link_id = test_support::id(&test_support::id("link-002"));
     let media_ref_id = test_support::id("ref-002");
-    let curator_id = test_support::id("curator-x");
+    let curator_id = test_support::id(&test_support::id("curator-x"));
 
     let id1 = test_support::id("verify-010");
     media_resilience::record_link_verification(
@@ -223,7 +223,7 @@ async fn standing_bounty_matching() {
 
     media_resilience::insert_availability_link(
         db,
-        "link-bounty",
+        &test_support::id("link-bounty"),
         &media_ref_id,
         "https://example.com/b.png",
         lorehaven_domain::media_resilience::LinkProvider::Tumblr,

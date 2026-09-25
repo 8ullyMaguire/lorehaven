@@ -271,7 +271,7 @@ pub async fn record_warmth(
     // Now recompute tier based on accumulated warmth.
     let get_bp_sql = db.sql(
         "SELECT warmth_bp FROM interaction_warmth WHERE account_id = ? AND author_account = ?",
-        "SELECT warmth_bp FROM interaction_warmth WHERE account_id::text = $1 AND author_account::text = $2",
+        "SELECT CAST(warmth_bp AS BIGINT) FROM interaction_warmth WHERE account_id::text = $1 AND author_account::text = $2",
     );
     let bp: i64 = match db.backend() {
         Backend::Sqlite => {

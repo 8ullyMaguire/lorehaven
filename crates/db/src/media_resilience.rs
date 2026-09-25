@@ -802,7 +802,7 @@ pub async fn find_references_below_threshold(
          LIMIT ?"
             .to_string(),
         "SELECT m.id, m.perceptual_hash, m.content_hash, m.media_kind, m.first_seen_at,
-                m.width, m.height, m.duration_seconds, m.format, m.file_size_bytes,
+                CAST(m.width AS BIGINT), CAST(m.height AS BIGINT), CAST(m.duration_seconds AS BIGINT), m.format, CAST(m.file_size_bytes AS BIGINT),
                 m.content_notes, m.curator_verified,
                 m.created_at, m.updated_at
          FROM media_references m
@@ -921,14 +921,14 @@ pub async fn can_edit_work(
                     .await?
                     .unwrap_or(0)
             }
-            Backend::Postgres => {
-                sqlx::query_scalar("SELECT level FROM trust_levels WHERE account = $1")
-                    .bind(account_id)
-                    .fetch_optional(db.postgres_pool().expect("postgres"))
-                    .await?
-                    .map(|v: i32| v as i64)
-                    .unwrap_or(0)
-            }
+            Backend::Postgres => sqlx::query_scalar(
+                "SELECT CAST(level AS BIGINT) FROM trust_levels WHERE account = $1",
+            )
+            .bind(account_id)
+            .fetch_optional(db.postgres_pool().expect("postgres"))
+            .await?
+            .map(|v: i32| v as i64)
+            .unwrap_or(0),
         };
         level >= 5
     };
@@ -1399,11 +1399,14 @@ pub async fn find_matching_standing_bounties(
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             let rows = sqlx::query(
-                // `id` is UUID and the row reader takes Strings.
-                "SELECT id::text, name, reward, provider, healthy_links_below
+                // `id` is UUID and the row reader takes Strings. `reward` and
+                // `healthy_links_below` are INTEGER, which will not decode into
+                // an i64 without the widening -- an INT4 into i64 is the same
+                // class of fault as a NUMERIC one, and the same fix.
+                "SELECT id::text, name, reward::bigint, provider, healthy_links_below::bigint
                  FROM curator_standing_bounties
                  WHERE enabled = true
-                   AND (healthy_links_below IS NULL OR healthy_links_below > $1)
+                   AND (healthy_links_below IS NULL OR healthy_links_below > $1::int4)
                    AND (has_archive_link = false OR $2 = false)
                  ORDER BY reward DESC",
             )
@@ -3081,7 +3084,7 @@ pub async fn find_curator_bounty_queue(
             let pool = db.postgres_pool().expect("postgres");
             let rows = sqlx::query(
                 "SELECT m.id, m.perceptual_hash, m.content_hash, m.media_kind, m.first_seen_at,
-                        m.width, m.height, m.duration_seconds, m.format, m.file_size_bytes,
+                        CAST(m.width AS BIGINT), CAST(m.height AS BIGINT), CAST(m.duration_seconds AS BIGINT), m.format, CAST(m.file_size_bytes AS BIGINT),
                         m.content_notes, m.curator_verified, m.created_at, m.updated_at
                  FROM media_references m
                  WHERE (SELECT COUNT(*) FROM availability_links
@@ -3384,7 +3387,8 @@ pub async fn provider_reliability(db: &Database) -> Result<Vec<(String, i64, i64
                 COUNT(*) AS total
          FROM availability_links
          GROUP BY provider
-         ORDER BY (CAST(SUM(CASE WHEN status = 'healthy' THEN 1 ELSE 0 END) AS REAL) / total) DESC"
+         ORDER BY (CAST(SUM(CASE WHEN status = 'healthy' THEN 1 ELSE 0 END) AS REAL)
+                   / COUNT(*)) DESC"
             .to_string(),
     );
     let rows: Vec<(String, i64, i64)> = match db.backend() {

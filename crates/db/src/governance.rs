@@ -32,7 +32,7 @@ pub async fn trust_for(db: &Database, account: &str) -> Result<i64, sqlx::Error>
             fetch_level_sqlite(db.sqlite_pool().expect("sqlite"), sql, account).await
         }
         Backend::Postgres => {
-            let sql = "SELECT level FROM trust_levels WHERE account = $1";
+            let sql = "SELECT CAST(level AS BIGINT) FROM trust_levels WHERE account = $1";
             fetch_level_postgres(db.postgres_pool().expect("postgres"), sql, account).await
         }
     }
