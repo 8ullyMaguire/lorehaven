@@ -3048,7 +3048,7 @@ pub async fn find_curator_bounty_queue(
             let rows = sqlx::query(
                 "SELECT m.id, m.perceptual_hash, m.content_hash, m.media_kind, m.first_seen_at,
                         m.width, m.height, m.duration_seconds, m.format, m.file_size_bytes,
-                        m.content_notes, m.curator_verified, m.created_at, m.updated_at
+                        m.content_notes::text, m.curator_verified, m.created_at::text, m.updated_at::text
                  FROM media_references m
                  WHERE (SELECT COUNT(*) FROM availability_links
                         WHERE media_reference_id = m.id AND status = 'healthy') < ?
@@ -3085,7 +3085,8 @@ pub async fn find_curator_bounty_queue(
             let rows = sqlx::query(
                 "SELECT m.id::text, m.perceptual_hash, m.content_hash, m.media_kind, m.first_seen_at::text,
                         CAST(m.width AS BIGINT), CAST(m.height AS BIGINT), CAST(m.duration_seconds AS BIGINT), m.format, CAST(m.file_size_bytes AS BIGINT),
-                        m.content_notes, m.curator_verified, m.created_at, m.updated_at
+                        m.content_notes::text, m.curator_verified,
+                        m.created_at::text, m.updated_at::text
                  FROM media_references m
                  WHERE (SELECT COUNT(*) FROM availability_links
                         WHERE media_reference_id = m.id AND status = 'healthy') < $1

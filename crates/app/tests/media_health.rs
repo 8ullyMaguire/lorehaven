@@ -38,9 +38,12 @@ async fn admin_overview_mixed_health() {
     .await
     .expect("insert ref-001");
     for i in 0..3 {
+        // The id must be a UUID on PostgreSQL, and insert/update have to agree
+        // on it, so it is bound once per iteration.
+        let link_id = test_support::id(&format!("link-001-{i}"));
         media_resilience::insert_availability_link(
             db,
-            &test_support::id(&format!("link-001-{i}")),
+            &link_id,
             &test_support::id("ref-001"),
             &format!("https://example.com/img-001-{i}.png"),
             lorehaven_domain::media_resilience::LinkProvider::Imgur,
@@ -51,7 +54,7 @@ async fn admin_overview_mixed_health() {
         .expect("insert link");
         media_resilience::update_link_status(
             db,
-            &test_support::id(&format!("link-001-{i}")),
+            &link_id,
             lorehaven_domain::media_resilience::LinkStatus::Healthy,
             0,
         )
@@ -98,9 +101,11 @@ async fn admin_overview_mixed_health() {
     .await
     .expect("insert ref-003");
     for i in 0..2 {
+        // PostgreSQL needs a UUID here, and insert/update must agree on it.
+        let link_id = test_support::id(&format!("link-003-{i}"));
         media_resilience::insert_availability_link(
             db,
-            &format!("link-003-{i}"),
+            &link_id,
             &test_support::id("ref-003"),
             &format!("https://example.com/img-003-{i}.png"),
             lorehaven_domain::media_resilience::LinkProvider::Tumblr,
@@ -111,7 +116,7 @@ async fn admin_overview_mixed_health() {
         .expect("insert link");
         media_resilience::update_link_status(
             db,
-            &format!("link-003-{i}"),
+            &link_id,
             lorehaven_domain::media_resilience::LinkStatus::Healthy,
             0,
         )
@@ -219,7 +224,7 @@ async fn curator_leaderboard_with_entries() {
 
     media_resilience::insert_curator_reward(
         db,
-        "alice",
+        &test_support::id("alice"),
         lorehaven_domain::media_resilience::CuratorAction::MirrorAdd,
         Some(&test_support::id("ref-lb")),
         Some(&test_support::id("link-lb")),
