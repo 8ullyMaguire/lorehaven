@@ -186,21 +186,38 @@ test('exports: a finished export can be deleted (forgotten)', async ({ page }) =
   await page.locator('label.ack input[type=checkbox]').check();
   await page.click('button:text-is("Make the export")');
 
-  // Wait for Ready, not merely for a state to appear. "Queued" is visible
-  // immediately, and deleting mid-production asks the server to remove a
-  // row the worker still owns — which the test then reads as a failure to
-  // delete rather than as the race it actually is.
-  const ready = page
-    .locator('section[aria-labelledby=my-exports] .item .state')
-    .filter({ hasText: 'Ready' })
-    .first();
+  // Wait for the export this test created to reach Ready, so the Delete button
+  // belongs to it and not to another row. "Queued" is visible immediately, and
+  // deleting mid-production asks the server to remove a row the worker still
+  // owns — which the test then reads as a failure to delete rather than as the
+  // race it actually is.
+  //
+  // The row cannot be matched on the title: the list renders
+  // `job.label || job.format`, and a worker-produced export has no label, so
+  // its heading is "EPUB". The export's own id is the only stable handle —
+  // capture the download href, which embeds it, before deleting.
+  const section = page.locator('section[aria-labelledby=my-exports]');
+  const ready = section.locator('.item .state').filter({ hasText: 'Ready' }).first();
   await expect(ready).toBeVisible({ timeout: 60_000 });
 
-  await page
-    .locator('section[aria-labelledby=my-exports] .item button:text-is("Delete")')
-    .first()
-    .click();
-  await expect(page.getByText('No exports yet')).toBeVisible({ timeout: 15_000 });
+  const row = section.locator('.item').filter({ has: page.locator('a.download[href*="/api/v1/exports/"]') });
+  const href = await row.first().locator('a.download').getAttribute('href');
+  const exportId = new URL(href!, page.url()).pathname.split('/').pop()!;
+  expect(exportId).toBeTruthy();
+
+  const items = section.locator('.item');
+  const before = await items.count();
+
+  await row.first().locator('button:text-is("Delete")').click();
+
+  // That export's own download link is gone. Asserting "No exports yet" instead
+  // tested the shared account's history: the export-download test above leaves
+  // a second Ready export on the same account, so the empty state can never
+  // appear, and the test failed even though the delete worked.
+  await expect(page.locator(`a.download[href*="${exportId}"]`)).toHaveCount(0, {
+    timeout: 15_000,
+  });
+  await expect(items).toHaveCount(before - 1);
 });
 
 // ---------------------------------------------------------------------------
