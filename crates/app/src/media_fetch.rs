@@ -8,20 +8,16 @@
 //! one in `lorehaven_scrapers::safety` — the same list the importer uses — and
 //! not a second, weaker copy that can drift away from it.
 //!
-//! What this module does *not* do is decode images. A dHash needs grayscale
-//! pixels, and turning JPEG or PNG bytes into pixels is an image-decoder
-//! dependency the workspace does not have. So the two halves are split:
-//!
-//! - [`MediaFingerprint::from_grayscale`] fingerprints pixels a caller already
-//!   has, and is fully tested;
-//! - [`FetchOutcome::NeedsDecoding`] is what a fetched-but-undecodable body
-//!   produces, so a caller cannot mistake "fetched" for "fingerprinted" and
-//!   store an empty hash.
+//! Decoding lives here too, in [`fingerprint_encoded`], so a fetched body goes
+//! from bytes to both hashes in one call. A body that will not decode yields
+//! `None` rather than a guess, and the caller stores
+//! [`MediaFingerprint::without_perceptual_hash`] — the exact content hash is
+//! still correct, the perceptual one is honestly absent.
 //!
 //! Storing an empty perceptual hash would be worse than storing none: the dedup
 //! search skips `NULL` and skips malformed values, but it would happily compare
-//! two empty strings as distance 0 and merge every unfingerprinted reference
-//! into one.
+//! two empty strings as distance 0 and merge every undecodable reference into
+//! one.
 
 use lorehaven_domain::media_resilience::difference_hash;
 use sha2::{Digest, Sha256};
@@ -63,9 +59,6 @@ pub enum FetchOutcome {
     Transient { status: u16 },
     /// The resource is gone for good. The worker must not retry.
     Gone { status: u16 },
-    /// The body arrived but this build cannot decode it, so no perceptual hash
-    /// can be computed. The exact content hash still can be.
-    NeedsDecoding,
 }
 
 /// Both hashes of one media body, plus what is known about it.
@@ -117,6 +110,76 @@ impl MediaFingerprint {
         }
     }
 }
+
+/// Decode an encoded image body and fingerprint it.
+///
+/// This is the function that turns a real fetched JPEG or PNG into a real
+/// perceptual hash. It returns `None` — not a guess — for anything it cannot
+/// decode, and a caller should store [`MediaFingerprint::without_perceptual_hash`]
+/// in that case so the exact content hash is still kept and the perceptual one
+/// is honestly absent.
+///
+/// # Why `None` and not a best effort
+///
+/// An image decoder is lenient: a truncated file decodes to a partly-black
+/// picture, and a body whose declared height exceeds its row data decodes to
+/// fewer rows than it claims. Fingerprinting that produces a hash of a picture
+/// nobody attached, and — worse — one that matches other partly-black pictures.
+/// So every failure path is a refusal. The exact content hash is computed by
+/// the caller from the same bytes and remains correct regardless.
+///
+/// # Limits
+///
+/// `MAX_MEDIA_BYTES` bounds the input (callers enforce it while streaming), and
+/// decoding is bounded by [`MAX_DECODED_PIXELS`]: a small file can declare an
+/// enormous image, and a 50000x50000 PNG of solid colour would otherwise
+/// allocate 7.5 GB of grayscale buffer. A faceclaim or avatar is nowhere near
+/// that limit, so refusing beyond it costs nothing real.
+pub fn fingerprint_encoded(bytes: &[u8]) -> Option<MediaFingerprint> {
+    if bytes.is_empty() {
+        return None;
+    }
+    // The size limit is applied to the *decoder*, not checked after it. A
+    // decompression bomb — a few KB of PNG declaring a 20000x20000 image — has
+    // already allocated by the time a caller can measure the result, so a
+    // post-decode check documents the intent and prevents nothing.
+    //
+    // `load_from_memory` applies only the crate's default `max_alloc` (512 MiB)
+    // and leaves width and height unbounded, so an image under that allocation
+    // cap but far past ours still gets built.
+    let side = (MAX_DECODED_PIXELS as f64).sqrt() as u32;
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes));
+    // `Limits` is `#[non_exhaustive]`, so it is built from `Default` and the two
+    // fields set; it cannot be constructed with a struct literal.
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(side);
+    limits.max_image_height = Some(side);
+    reader.limits(limits);
+    let image = reader.with_guessed_format().ok()?.decode().ok()?;
+
+    // `color()` rather than a `dimensions()` call: the size is read off the
+    // buffer we are about to build, so the declared and actual sizes cannot
+    // disagree. A decoder that honours a bogus header here would allocate for a
+    // picture the file does not contain.
+    let luma = image.into_luma8();
+    let (width, height) = luma.dimensions();
+    let pixels = (width as u64).checked_mul(height as u64)?;
+    if pixels == 0 || pixels > MAX_DECODED_PIXELS {
+        return None;
+    }
+
+    // `into_luma8` is the rec.601 luma transform, so a colour image and its
+    // greyscale original agree — which matters, because the two are the same
+    // picture and a curator would expect them to deduplicate together.
+    MediaFingerprint::from_grayscale(bytes, luma.as_raw(), width, height)
+}
+
+/// The largest number of pixels a body may expand to before it is refused.
+///
+/// 80 megapixels is roughly an 11000x7300 photograph. It is deliberately well
+/// above any avatar, faceclaim or banner an instance stores, and low enough
+/// that a hostile 8 KB file cannot ask for gigabytes of grayscale buffer.
+pub const MAX_DECODED_PIXELS: u64 = 80_000_000;
 
 impl From<&MediaFingerprint> for lorehaven_db::media_resilience::Fingerprint {
     fn from(fp: &MediaFingerprint) -> Self {
