@@ -115,7 +115,12 @@ COMPARED = re.compile(
 # written with the column list on its own lines and a naive `VALUES (` match
 # misses the wrapped ones.
 VALUES_START = re.compile(r"VALUES\s*\(", re.IGNORECASE)
-INSERT_COLUMN = re.compile(r"^\s*([a-z_][a-z0-9_]*)\s*(?:\([^)]*\))?\s*(?:,|$)", re.IGNORECASE | re.MULTILINE)
+# Anchored at a comma or the start, not at `^` with MULTILINE: `^` under
+# MULTILINE matches only a line start, so this returned the first column
+# and nothing else, which silently disabled the whole INSERT branch.
+INSERT_COLUMN = re.compile(
+    r"(?:^|,)\s*([a-z_][a-z0-9_]*)\s*(?:\([^)]*\))?\s*(?=,|$)", re.IGNORECASE
+)
 
 STRING_LIT = re.compile(r'"((?:[^"\\]|\\.)*)"', re.DOTALL)
 
@@ -129,11 +134,29 @@ def referenced_columns(sql: str) -> set[str]:
 
 
 def insert_column_order(sql: str) -> list[str]:
-    """The column list of an INSERT, in order, so binds line up positionally."""
-    head = sql.split("VALUES", 1)
-    if len(head) < 2 or "(" not in head[0]:
+    """The column list of an INSERT, in order, so binds line up positionally.
+
+    Finds the *last* top-level `(` before the first top-level `VALUES`, not the
+    first `(` in the statement: `INSERT INTO t (a, b) SELECT ...` and a
+    function call in the target list both put an earlier paren there. The
+    original used `split("VALUES", 1)` and `rindex("(")`, which returned one
+    column for every INSERT -- so the INSERT branch of this script never fired,
+    and a statement like
+    `INSERT INTO user_devices (..., last_seen_at, created_at, updated_at)
+     VALUES (?::uuid, ?::uuid, ?, ?, ?, ?, ?)`
+    passed while binding three text values into TIMESTAMPTZ columns.
+    """
+    vm = VALUES_START.search(sql)
+    if not vm:
         return []
-    inner = head[0][head[0].rindex("(") + 1:]
+    before = sql[: vm.start()]
+    if "(" not in before:
+        return []
+    inner = before[before.rindex("(") + 1 :]
+    # Cut at the list's own closing paren. Left in place, the trailing `)`
+    # defeats the `(?=,|$)` lookahead and the last column -- usually
+    # `updated_at` -- was silently dropped.
+    inner = inner[: inner.rindex(")")] if ")" in inner else inner
     return [m.group(1).lower() for m in INSERT_COLUMN.finditer(inner)]
 
 
