@@ -21,6 +21,9 @@ use serde_json::json;
 ///
 /// Named because the row is read in several places and the ten-element tuple is
 /// otherwise unreadable. The element order must match the SELECT lists exactly.
+/// The two integer columns are `INTEGER` in PostgreSQL and widen to `i64` in
+/// the query. They decode as `i64` here only because the PostgreSQL arm casts;
+/// SQLite hands back `i64` for the same columns, so one type serves both.
 type BountyRow = (
     String,
     String,
@@ -223,7 +226,8 @@ pub async fn fetch_bounty(db: &Database, id: &str) -> Result<Option<Bounty>, sql
         crate::Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres handle");
             sqlx::query_as(
-                "SELECT id, type, job_kind, terms, amount, funded_amount, state, created_by, created_at, activated_at
+                "SELECT id, type, job_kind, terms, amount::bigint, funded_amount::bigint,
+                        state, created_by, created_at, activated_at
                  FROM bounties WHERE id = $1",
             )
             .bind(id)

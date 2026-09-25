@@ -442,42 +442,120 @@ pub async fn create_bounty(
     amount: i64,
     created_at: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    let sql = db.sql(
         "INSERT INTO bounties (id, job_kind, terms, escrow_transaction, state, claimant, created_by, created_at, account, amount) VALUES (?, ?, ?, 'pending', 'open', '', '', ?, ?, ?)",
-    )
-    .bind(id)
-    .bind(job_kind)
-    .bind(terms)
-    .bind(created_at)
-    .bind(account)
-    .bind(amount)
-    .execute(db.sqlite_pool().expect("sqlite"))
-    .await?;
+        "INSERT INTO bounties (id, job_kind, terms, escrow_transaction, state, claimant, created_by, created_at, account, amount) VALUES ($1, $2, $3, 'pending', 'open', '', '', $4, $5, $6)",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(id)
+                .bind(job_kind)
+                .bind(terms)
+                .bind(created_at)
+                .bind(account)
+                .bind(amount)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(id)
+                .bind(job_kind)
+                .bind(terms)
+                .bind(created_at)
+                .bind(account)
+                .bind(amount)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?;
+        }
+    }
     Ok(())
 }
 
+/// `amount` is `INTEGER` in the schema, so it decodes as `i32`; SQLite hands
+/// back `i64` for the same column. The row type is per-backend for that reason
+/// and nothing else -- decoding an INT4 column into an `i64` is the error
+/// "mismatched types; Rust type `i64` (as SQL type `INT8`) is not compatible with
+/// SQL type `INT4", which is what this table returned on PostgreSQL for as long
+/// as it had no PostgreSQL arm at all.
 type BountyRow = (String, String, String, String, Option<i64>, String, String);
 
+/// A row rendered as the JSON the API returns, so both arms agree.
+fn bounty_json(
+    id: &str,
+    account: &str,
+    job_kind: &str,
+    terms: &str,
+    amount: Option<i64>,
+    state: &str,
+    created_at: &str,
+) -> Value {
+    json!({
+        "id": id,
+        "account": account,
+        "job_kind": job_kind,
+        "terms": terms,
+        "amount": amount.unwrap_or(0),
+        "state": state,
+        "created_at": created_at,
+    })
+}
+
 pub async fn list_bounties(db: &Database) -> Result<Vec<Value>, sqlx::Error> {
-    let rows: Vec<BountyRow> = sqlx::query_as(
-        "SELECT id, account, job_kind, terms, amount, state, created_at FROM bounties WHERE state = 'open' ORDER BY created_at DESC LIMIT 50",
-    )
-    .fetch_all(db.sqlite_pool().expect("sqlite"))
-    .await?;
-    Ok(rows.into_iter().map(|r| json!({
-        "id": r.0, "account": r.1, "job_kind": r.2, "terms": r.3, "amount": r.4.unwrap_or(0), "state": r.5, "created_at": r.6
-    })).collect())
+    // `amount` is INTEGER (INT4) in PostgreSQL and `i64` in SQLite. The SQLite
+    // arm cannot spell a cast that SQLite rejects, so each arm gets its own
+    // text: widening in SQL is what lets a single row type decode both.
+    const SELECT_SQLITE: &str = "SELECT id, account, job_kind, terms, amount, state, created_at \
+                                 FROM bounties WHERE state = 'open' \
+                                 ORDER BY created_at DESC LIMIT 50";
+    const SELECT_POSTGRES: &str =
+        "SELECT id, account, job_kind, terms, amount::bigint, state, created_at \
+         FROM bounties WHERE state = 'open' \
+         ORDER BY created_at DESC LIMIT 50";
+    match db.backend() {
+        Backend::Sqlite => {
+            let rows: Vec<BountyRow> =
+                sqlx::query_as(SELECT_SQLITE).fetch_all(db.sqlite_pool().expect("sqlite")).await?;
+            Ok(rows
+                .into_iter()
+                .map(|r| bounty_json(&r.0, &r.1, &r.2, &r.3, r.4, &r.5, &r.6))
+                .collect())
+        }
+        Backend::Postgres => {
+            let rows: Vec<BountyRow> =
+                sqlx::query_as(SELECT_POSTGRES).fetch_all(db.postgres_pool().expect("postgres")).await?;
+            Ok(rows
+                .into_iter()
+                .map(|r| bounty_json(&r.0, &r.1, &r.2, &r.3, r.4, &r.5, &r.6))
+                .collect())
+        }
+    }
 }
 
 pub async fn claim_bounty(db: &Database, id: &str, fulfilled_by: &str) -> Result<(), sqlx::Error> {
     let now = crate::identity::now_rfc3339();
-    sqlx::query(
-        "UPDATE bounties SET state = 'claimed', fulfilled_at = ?, fulfilled_by = ? WHERE id = ? AND state = 'open'"
-    )
-    .bind(now)
-    .bind(fulfilled_by)
-    .bind(id)
-    .execute(db.sqlite_pool().expect("sqlite"))
-    .await?;
+    let sql = db.sql(
+        "UPDATE bounties SET state = 'claimed', fulfilled_at = ?, fulfilled_by = ? WHERE id = ? AND state = 'open'",
+        "UPDATE bounties SET state = 'claimed', fulfilled_at = $1, fulfilled_by = $2 WHERE id = $3 AND state = 'open'",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(now)
+                .bind(fulfilled_by)
+                .bind(id)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(now)
+                .bind(fulfilled_by)
+                .bind(id)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await?;
+        }
+    }
     Ok(())
 }
