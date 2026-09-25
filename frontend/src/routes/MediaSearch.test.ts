@@ -37,6 +37,10 @@ describe('MediaSearch', () => {
           perceptual_hash: 'abc123',
           content_hash: 'hash1',
           curator_verified: true,
+          match_kind: 'exact',
+          match_distance: 0,
+          match_confidence: 1,
+          auto_attach: true,
         },
       ],
       works: [

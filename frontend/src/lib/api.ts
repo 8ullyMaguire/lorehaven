@@ -3350,6 +3350,12 @@ export function postTargetedBounty(body: PostTargetedBountyBody): Promise<{ id: 
 export interface ReverseSearchBody {
   hash?: string;
   url?: string;
+  /**
+   * Which fingerprint the hash was computed with. Informational: the server
+   * reports an uncomputable comparison as no match rather than scoring it, so a
+   * wrong algorithm surfaces as no results instead of a wrong confident one.
+   */
+  algorithm?: string;
 }
 
 export interface ReverseSearchReference {
@@ -3358,6 +3364,23 @@ export interface ReverseSearchReference {
   perceptual_hash: string | null;
   content_hash: string;
   curator_verified: boolean;
+  /** "exact" when the content hash matched too, otherwise a perceptual match. */
+  match_kind: 'exact' | 'perceptual';
+  /**
+   * Bits of difference between the queried perceptual hash and this one.
+   * Null when the two hashes were not comparable - a missing or non-hex hash
+   * is not a similarity score, so the server omits both this and the
+   * confidence rather than reporting a large distance that reads as a verdict.
+   */
+  match_distance: number | null;
+  /**
+   * Hash similarity in 0..1, descending with match_distance. This measures the
+   * fingerprints, not the artworks: it says how alike two hashes are, not that
+   * two different pictures are the same image. A curator confirms the linkage.
+   */
+  match_confidence: number | null;
+  /** True only for a distance-0 match, the one case that may attach silently. */
+  auto_attach: boolean;
 }
 
 export interface ReverseSearchWork {

@@ -28,7 +28,7 @@ describe('AdminMirror', () => {
   it('submits search and shows references', async () => {
     const mockData: api.ReverseSearchView = {
       references: [
-        { id: 'ref-1', media_kind: 'image', perceptual_hash: 'abc', content_hash: 'hash1', curator_verified: true },
+        { id: 'ref-1', media_kind: 'image', perceptual_hash: 'abc', content_hash: 'hash1', curator_verified: true, match_kind: 'exact', match_distance: 0, match_confidence: 1, auto_attach: true },
       ],
       works: [],
     };
@@ -50,7 +50,7 @@ describe('AdminMirror', () => {
   it('manages reference when selected', async () => {
     const mockData: api.ReverseSearchView = {
       references: [
-        { id: 'ref-1', media_kind: 'image', perceptual_hash: 'abc', content_hash: 'hash1', curator_verified: false },
+        { id: 'ref-1', media_kind: 'image', perceptual_hash: 'abc', content_hash: 'hash1', curator_verified: false, match_kind: 'perceptual', match_distance: 4, match_confidence: 0.9375, auto_attach: false },
       ],
       works: [],
     };
@@ -80,7 +80,7 @@ describe('AdminMirror', () => {
   it('adds a local mirror', async () => {
     const mockData: api.ReverseSearchView = {
       references: [
-        { id: 'ref-1', media_kind: 'image', perceptual_hash: 'abc', content_hash: 'hash1', curator_verified: false },
+        { id: 'ref-1', media_kind: 'image', perceptual_hash: 'abc', content_hash: 'hash1', curator_verified: false, match_kind: 'perceptual', match_distance: 4, match_confidence: 0.9375, auto_attach: false },
       ],
       works: [],
     };
@@ -126,3 +126,49 @@ describe('AdminMirror', () => {
     });
   });
 });
+
+  it('shows how closely each reference matched, and which matches are exact', async () => {
+    const mockData: api.ReverseSearchView = {
+      references: [
+        {
+          id: 'ref-exact',
+          media_kind: 'image',
+          perceptual_hash: '00ff',
+          content_hash: 'hash1',
+          curator_verified: true,
+          match_kind: 'exact',
+          match_distance: 0,
+          match_confidence: 1,
+          auto_attach: true,
+        },
+        {
+          id: 'ref-near',
+          media_kind: 'image',
+          perceptual_hash: '00fc',
+          content_hash: 'hash2',
+          curator_verified: false,
+          match_kind: 'perceptual',
+          match_distance: 4,
+          match_confidence: 0.9375,
+          auto_attach: false,
+        },
+      ],
+      works: [],
+    };
+    (api.reverseMediaSearch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mockData);
+    (api.fetchLocalMirrors as ReturnType<typeof vi.fn>).mockResolvedValueOnce([]);
+    (api.fetchIpfsPins as ReturnType<typeof vi.fn>).mockResolvedValueOnce([]);
+
+    const { findByText, getAllByText, getByLabelText, getByText } = render(AdminMirror);
+    const input = getByLabelText('Perceptual hash') as HTMLInputElement;
+    await fireEvent.input(input, { target: { value: '00ff' } });
+    await fireEvent.click(getByText('Search'));
+
+    // An operator deciding whether to merge two media records needs to know
+    // whether this is the same image or something that merely looks like it.
+    await findByText('Exact match');
+    await findByText('94% similar');
+    // Both are shown, and the hash each row matched on is the visible handle.
+    expect(getAllByText('00ff').length).toBeGreaterThan(0);
+    expect(getAllByText('00fc').length).toBeGreaterThan(0);
+  });
