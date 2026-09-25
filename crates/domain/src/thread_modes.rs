@@ -3,9 +3,10 @@
 /// Each mode restructures one surface of a topic. `Plain` is the default and
 /// behaves exactly as a topic did before modes existed.
 use std::str::FromStr;
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ThreadMode {
     /// A plain topic: no restructuring, the default.
+    #[default]
     Plain,
     /// AMA / Q&A: questions float to the top; the author's replies render as
     /// highlighted cards.
@@ -55,12 +56,6 @@ impl ThreadMode {
     /// Whether this mode has a wiki pin.
     pub fn uses_wiki_pin(self) -> bool {
         matches!(self, Self::WikiPin)
-    }
-}
-
-impl Default for ThreadMode {
-    fn default() -> Self {
-        Self::Plain
     }
 }
 

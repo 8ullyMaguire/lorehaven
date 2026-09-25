@@ -421,10 +421,14 @@ async fn resolve_sort(
             )
             .await
             {
-                if let Some(pref) = pref {
-                    if let Some(sort) = lorehaven_domain::browse::Sort::parse(&pref.sort_value) {
-                        return sort.as_str().to_string();
-                    }
+                // Clippy suggests collapsing these into a let-chain, which
+                // needs edition 2024. This crate is 2021, so the combined
+                // Option does the same job without an edition bump.
+                if let Some(sort) = pref
+                    .as_ref()
+                    .and_then(|p| lorehaven_domain::browse::Sort::parse(&p.sort_value))
+                {
+                    return sort.as_str().to_string();
                 }
             }
         }

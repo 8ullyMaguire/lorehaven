@@ -1,6 +1,5 @@
 //! Author media tools (spec §32.7.8): preferences & targeted bounties.
 
-use lorehaven_app::config::Config;
 use lorehaven_db::media_resilience;
 use lorehaven_db::Backend;
 use std::path::PathBuf;

@@ -1,8 +1,5 @@
 //! Media curator role & bounty system (spec §32.7.5).
 
-use lorehaven_app::config::Config;
-use lorehaven_app::server::{self, set_trust_proxy};
-use lorehaven_app::state::AppState;
 use lorehaven_db::media_resilience;
 use lorehaven_domain::media_resilience::VerificationType;
 use std::path::PathBuf;
@@ -218,7 +215,7 @@ async fn standing_bounty_matching() {
     .await
     .expect("insert link");
 
-    let bounties = media_resilience::find_matching_standing_bounties(db, media_ref_id, 1, 0, false)
+    let bounties = media_resilience::find_matching_standing_bounties(db, 1, 0, false)
         .await
         .expect("find bounties");
     assert_eq!(bounties.len(), 1);

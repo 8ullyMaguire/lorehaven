@@ -249,7 +249,7 @@ async fn list_people(
     Ok(Json(serde_json::json!({ "items": items, "sort": sort })))
 }
 
-fn apply_sort(items: &mut Vec<PersonItem>, sort: &str) {
+fn apply_sort(items: &mut [PersonItem], sort: &str) {
     match sort {
         "new" => items.sort_by(|a, b| b.id.cmp(&a.id)),
         "updated" => items.sort_by(|a, b| b.id.cmp(&a.id)),
@@ -315,7 +315,7 @@ async fn list_tags(
     Ok(Json(serde_json::json!({ "items": items, "sort": sort })))
 }
 
-fn apply_tag_sort(items: &mut Vec<TagItem>, sort: &str) {
+fn apply_tag_sort(items: &mut [TagItem], sort: &str) {
     match sort {
         "new" => items.sort_by(|a, b| b.id.cmp(&a.id)),
         "updated" => items.sort_by(|a, b| b.id.cmp(&a.id)),
@@ -420,7 +420,7 @@ async fn list_fandoms(
     Ok(Json(serde_json::json!({ "items": items, "sort": sort })))
 }
 
-fn apply_fandom_sort(items: &mut Vec<FandomItem>, sort: &str) {
+fn apply_fandom_sort(items: &mut [FandomItem], sort: &str) {
     match sort {
         "new" => items.sort_by(|a, b| b.slug.cmp(&a.slug)),
         "updated" => items.sort_by(|a, b| b.slug.cmp(&a.slug)),
@@ -471,7 +471,7 @@ async fn list_works_by_fandom(
 
 // --- Works (shared) -----------------------------------------------------
 
-fn apply_works_sort(items: &mut Vec<WorksByTagItem>, sort: &str) {
+fn apply_works_sort(items: &mut [WorksByTagItem], sort: &str) {
     match sort {
         "new" => items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at)),
         "updated" => items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at)),

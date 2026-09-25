@@ -208,7 +208,6 @@ pub async fn get_matching_bounties(
 
     let bounties = media_resilience::find_matching_standing_bounties(
         state.db(),
-        &query.media_reference_id,
         healthy_count,
         0,
         has_archive,

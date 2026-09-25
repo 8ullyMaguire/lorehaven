@@ -133,6 +133,7 @@ impl SpoilerCheck {
 mod tests {
     use super::*;
 
+    #[test]
     fn test_display() {
         assert_eq!(WarningType::Spoilers.to_string(), "spoilers");
         assert_eq!(WarningAction::Blur.to_string(), "blur");

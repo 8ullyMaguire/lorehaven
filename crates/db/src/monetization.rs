@@ -877,9 +877,9 @@ pub async fn get_ai_declaration(
 }
 // DB functions take their parameters explicitly rather than a builder:
 // a builder here would only move the same fields one call deeper.
-#[allow(clippy::too_many_arguments)]
 
 /// Record a payment event with processor fee.
+#[allow(clippy::too_many_arguments)]
 pub async fn record_payment_event(
     db: &Database,
     kind: &str,
@@ -921,9 +921,9 @@ pub async fn record_payment_event(
 // ---------------------------------------------------------------------------
 // DB functions take their parameters explicitly rather than a builder:
 // a builder here would only move the same fields one call deeper.
-#[allow(clippy::too_many_arguments)]
 
 /// Record a Pool B distribution (idempotent via idempotency_key).
+#[allow(clippy::too_many_arguments)]
 pub async fn record_pool_b_distribution(
     db: &Database,
     period_start: &str,
@@ -1063,9 +1063,9 @@ pub async fn author_reading_time_in_period(
 }
 // DB functions take their parameters explicitly rather than a builder:
 // a builder here would only move the same fields one call deeper.
-#[allow(clippy::too_many_arguments)]
 
 /// Upsert a monetization period summary.
+#[allow(clippy::too_many_arguments)]
 pub async fn upsert_period_summary(
     db: &Database,
     period_start: &str,

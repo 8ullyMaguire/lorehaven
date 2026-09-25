@@ -187,10 +187,10 @@ pub async fn half_life_map(
         return Ok(Vec::new());
     }
     let ids: Vec<String> = work_ids.iter().map(|w| w.to_string()).collect();
-    let placeholders: Vec<String> = (0..ids.len())
-        .map(|i| format!("?{}", if i == 0 { "" } else { "" }))
-        .collect();
-    let placeholder_str = placeholders.join(",");
+    // The previous inline builder branched on `i == 0` with an empty string in
+    // both arms; `library::placeholders` is the house helper and says what it
+    // means. SQLite takes the same "?" for every bind.
+    let placeholder_str = crate::library::placeholders(ids.len(), false);
 
     let sql = format!("SELECT id, half_life_bp FROM works WHERE id IN ({placeholder_str})");
     let rows: Vec<(String, Option<i64>)> = match db.backend() {
