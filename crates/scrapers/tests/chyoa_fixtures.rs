@@ -36,7 +36,7 @@ fn the_story_page_parses_metadata_and_chapter_list() {
     assert!(
         work.author_url
             .as_ref()
-            .map_or(false, |u| u.contains("/user/Jerynboe")),
+            .is_some_and(|u| u.contains("/user/Jerynboe")),
         "author url should point to the contributor's profile"
     );
 

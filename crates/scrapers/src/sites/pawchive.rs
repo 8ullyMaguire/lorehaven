@@ -96,8 +96,10 @@ struct ApiPost {
     user: String,
     title: String,
     content: String,
-    /// The site returns either an array of tag names or — for posts with a
-    /// single tag — the string form `"{TagName}"`. Both shapes are accepted.
+    /// Pawchive serialises the tag set as a *string* shaped like a set
+    /// literal: `"{BIS,Commissioned,battletech}"` or
+    /// `'{"Free Write","No Sex",Marvel}'`. A real JSON array and `null` also
+    /// occur. All shapes are accepted and split into individual tags.
     #[serde(default, deserialize_with = "deserialize_tags")]
     tags: Vec<String>,
     #[serde(default)]
@@ -106,12 +108,75 @@ struct ApiPost {
     attachments: Option<Vec<serde_json::Value>>,
 }
 
-/// Accept `["a", "b"]`, `"{a}"` (string form), `null` and absence.
+/// Split Pawchive's set-literal tag string into individual tags.
+///
+/// Pawchive emits a mixed set literal: `{"Free Write","No Sex",Marvel}` — some
+/// entries quoted (those containing a comma or space), others bare. So the
+/// body is walked token by token: a quote starts a tag that runs to the next
+/// quote, and otherwise a tag runs to the next comma or closing brace. Only
+/// when the body has no quotes at all is a plain comma split used.
+///
+/// The previous behaviour — stripping braces and keeping the whole string —
+/// turned `{BIS,Commissioned,battletech,warhammer40k}` into one nonsense tag.
+fn split_tag_string(raw: &str) -> Vec<String> {
+    let body = raw
+        .trim()
+        .trim_start_matches(['{', '['])
+        .trim_end_matches(['}', ']']);
+
+    let mut parts: Vec<String> = Vec::new();
+    if body.contains('"') {
+        let mut current = String::new();
+        let mut in_quotes = false;
+        for ch in body.chars() {
+            match ch {
+                '"' => {
+                    if in_quotes {
+                        parts.push(std::mem::take(&mut current));
+                    }
+                    in_quotes = !in_quotes;
+                }
+                ',' if !in_quotes => {
+                    let trimmed = current.trim();
+                    if !trimmed.is_empty() {
+                        parts.push(trimmed.to_owned());
+                    }
+                    current.clear();
+                }
+                _ => current.push(ch),
+            }
+        }
+        let trimmed = current.trim();
+        if !trimmed.is_empty() {
+            parts.push(trimmed.to_owned());
+        }
+    } else if body.contains(',') {
+        parts = body.split(',').map(ToOwned::to_owned).collect();
+    } else {
+        parts.push(body.to_owned());
+    }
+
+    let mut out: Vec<String> = Vec::with_capacity(parts.len());
+    for part in parts {
+        let tag = part.trim().trim_matches('"').trim_matches('\'').trim();
+        if tag.is_empty() || tag.len() > 80 {
+            continue;
+        }
+        if !out
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(tag))
+        {
+            out.push(tag.to_owned());
+        }
+    }
+    out
+}
+
+/// Accept `["a", "b"]`, `"{a,b}"` (set-literal form), `null` and absence.
 fn deserialize_tags<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    use serde::de::Error as _;
     use serde::Deserialize as _;
     use serde_json::Value;
 
@@ -122,35 +187,37 @@ where
             let mut out = Vec::with_capacity(items.len());
             for item in items {
                 match item {
-                    Value::String(s) => out.push(s),
+                    Value::String(s) => out.extend(split_tag_string(&s)),
                     other => {
+                        use serde::de::Error as _;
                         return Err(D::Error::custom(format!(
                             "a tag list entry must be a string, got {}",
                             Value::to_string(&other)
-                        )))
+                        )));
                     }
                 }
             }
             Ok(out)
         }
-        Value::String(s) => {
-            // "{Magiscape}" -> "Magiscape"; a bare name passes through too.
-            let trimmed = s.trim().trim_matches('{').trim_matches('}').to_owned();
-            if trimmed.is_empty() {
-                Ok(Vec::new())
-            } else {
-                Ok(vec![trimmed])
-            }
+        Value::String(s) => Ok(split_tag_string(&s)),
+        other => {
+            use serde::de::Error as _;
+            Err(D::Error::custom(format!(
+                "tags must be an array or a string, got {}",
+                Value::to_string(&other)
+            )))
         }
-        other => Err(D::Error::custom(format!(
-            "tags must be an array or a string, got {}",
-            Value::to_string(&other)
-        ))),
     }
 }
 
 /// The JSON list response is just an array of posts.
 type ApiPostList = Vec<ApiPost>;
+
+/// `/api/v1/patreon/user/{uid}/profile` — the author's display name.
+#[derive(Debug, serde::Deserialize)]
+struct ApiProfile {
+    name: String,
+}
 
 #[async_trait]
 impl SourceAdapter for Pawchive {
@@ -228,12 +295,25 @@ impl SourceAdapter for Pawchive {
             }
         }
 
+        // The author's display name. Without this every work is credited to
+        // "Pawchive user 5149963" instead of "Cambrian".
+        let author_name = fetch
+            .get(&format!(
+                "https://pawchive.pw/api/v1/patreon/user/{uid}/profile"
+            ))
+            .await
+            .ok()
+            .and_then(|page| serde_json::from_str::<ApiProfile>(&page.body).ok())
+            .map(|profile| profile.name)
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| format!("Pawchive user {uid}"));
+
         Ok(SourceWork {
             source_key: self.key.clone(),
             source_work_key: uid.clone(),
             source_url: url.to_string(),
-            title: format!("Pawchive user {uid}"),
-            author_text: uid.clone(),
+            title: author_name.clone(),
+            author_text: author_name,
             author_url: Some(url.to_string()),
             summary: format!("{} posts on Pawchive", posts.len()),
             word_count: None,
@@ -341,10 +421,47 @@ fn collapse_whitespace(text: &str) -> String {
 
 #[cfg(test)]
 mod tag_tests {
-    use super::ApiPost;
+    use super::{ApiPost, ApiProfile};
 
     fn parse(json: &str) -> Result<ApiPost, serde_json::Error> {
         serde_json::from_str(json)
+    }
+
+    #[test]
+    fn tags_split_a_comma_separated_set_literal() {
+        // The shape pawchive actually returns for user 26677387. Before the
+        // comma split this produced one tag: "BIS,Commissioned,battletech,warhammer40k".
+        let post = parse(
+            r#"{"id":"1","user":"7","title":"t","content":"c",
+                "tags":"{BIS,Commissioned,battletech,warhammer40k}"}"#,
+        )
+        .expect("comma set-literal parses");
+        assert_eq!(
+            post.tags,
+            vec!["BIS", "Commissioned", "battletech", "warhammer40k"]
+        );
+    }
+
+    #[test]
+    fn tags_prefer_quoted_runs_so_a_comma_inside_a_tag_survives() {
+        // "Highschool CxC" carries no comma, but 'No Sex, Plot' style tags do.
+        let post = parse(
+            r#"{"id":"1","user":"7","title":"t","content":"c",
+                "tags":"{\"Free Write\",\"No Sex\",Marvel,\"Time Travel\"}"}"#,
+        )
+        .expect("quoted set-literal parses");
+        assert_eq!(
+            post.tags,
+            vec!["Free Write", "No Sex", "Marvel", "Time Travel"]
+        );
+    }
+
+    #[test]
+    fn tags_drop_duplicates_case_insensitively() {
+        let post =
+            parse(r#"{"id":"1","user":"7","title":"t","content":"c","tags":"{WIP,wip,WIP}"}"#)
+                .expect("duplicate tags parse");
+        assert_eq!(post.tags, vec!["WIP"]);
     }
 
     #[test]
@@ -352,6 +469,13 @@ mod tag_tests {
         let post = parse(r#"{"id":"1","user":"7","title":"t","content":"c","tags":["a","b"]}"#)
             .expect("array tags parse");
         assert_eq!(post.tags, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn tags_accept_a_bare_string_without_braces() {
+        let post = parse(r#"{"id":"1","user":"7","title":"t","content":"c","tags":"solo"}"#)
+            .expect("bare string tags parse");
+        assert_eq!(post.tags, vec!["solo"]);
     }
 
     #[test]
@@ -375,5 +499,14 @@ mod tag_tests {
     fn tags_reject_other_shapes() {
         let post = parse(r#"{"id":"1","user":"7","title":"t","content":"c","tags":42}"#);
         assert!(post.is_err());
+    }
+
+    #[test]
+    fn the_author_profile_carries_a_display_name() {
+        // The shape of /api/v1/patreon/user/5149963/profile.
+        let profile: ApiProfile =
+            serde_json::from_str(r#"{"id":"5149963","name":"Cambrian","service":"patreon"}"#)
+                .expect("profile parses");
+        assert_eq!(profile.name, "Cambrian");
     }
 }
