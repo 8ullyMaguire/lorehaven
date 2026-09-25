@@ -2539,6 +2539,40 @@ Private bookmark and rating data are not silently pooled. Use explicitly permitt
 
 **Feed reason transparency.** Every feed response may include, per item, the recipe reason — which of the reader's own recipe terms matched ("because: fandom:HP, tag:time travel"). This is the `reason` field of the engine contract (§16.1); surfacing it to its owner is the default. It is explicitly distinct from the administrator-influence secrecy rule (§0.3): truth about one's own feed costs nothing, and §16.5's dial governs the part that is not the reader's own. A reason may name an *instance-level* term only for a topic declared `public = true` (§0.4); otherwise it degrades to one undifferentiated line (§16.16.2).
 
+## 16.1b Per-user engine preference
+
+A reader may choose which recommendation strategy produces their recommendations,
+and the choice is remembered and honored everywhere a recommendation is
+produced.
+
+- **One preference per pseud, not per account.** A reader who wears two faces
+  may want different recommendations from each, and a preference attached to
+  the account would silently apply to both. This is the same per-pseud rule as
+  the search and content settings of §46.3.
+- **Stored as a setting, not a column** (`discovery.rec_engine`), in the same
+  per-pseud setting store as §46.3's other namespaces. The setting is one of
+  several per-pseud preferences, and a column would have to be re-migrated for
+  each.
+- **Unset means "instance default"**, never a null engine and never a silent
+  choice on the reader's behalf. An empty value is the instance default.
+- **Validated against the enabled strategy set at write time.** An engine the
+  operator has not enabled is a `400` naming the accepted values, on the same
+  reasoning as §0.4.7's instance mode: a setting that silently falls back is
+  worse than a setting that refuses.
+
+**The operator's enabled set wins, and the reader is told.** A preference
+recorded before an operator disabled that strategy is *remembered but not
+honored*, and the surface says so rather than quietly substituting another
+engine. A reader who chose `tag_graph` and finds it gone learns that the
+instance changed, rather than believing their choice is being applied. The
+stored value is not cleared on disable — re-enabling restores the choice, which
+is what "remembered" means.
+
+Every surface that produces a recommendation reads the preference through one
+resolver: discovery, feeds, search-as-you-type, the arena, and the author's own
+"more like this". A surface that produces its own recommendations without the
+resolver is a defect, not a variation.
+
 ## 16.2 Administrator taste profile
 
 Explicitly selected taste-source profile. Exclude moderation sessions, troubleshooting, import tests, accidental opens, activity marked private-from-learning.
