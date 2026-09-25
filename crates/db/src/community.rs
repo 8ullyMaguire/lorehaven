@@ -533,7 +533,8 @@ pub async fn create_group(db: &Database, name: &str, privacy: &str, owner: &str)
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "INSERT INTO groups (id, name, privacy, owner, created_at) VALUES (?, ?, ?, ?, ?)",
-        "INSERT INTO groups (id, name, privacy, owner, created_at) VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO groups (id, name, privacy, owner, created_at)
+         VALUES ($1::uuid, $2, $3, $4::uuid, $5)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -564,7 +565,7 @@ pub async fn create_group(db: &Database, name: &str, privacy: &str, owner: &str)
 pub async fn group_by_id(db: &Database, group_id: &str) -> Result<Option<Group>> {
     let sql = db.sql(
         "SELECT id, name, privacy, owner, created_at FROM groups WHERE id = ?",
-        "SELECT id, name, privacy, owner, created_at FROM groups WHERE id = $1",
+        "SELECT id::text, name, privacy, owner, created_at FROM groups WHERE id = $1::uuid",
     );
     let row = match db.backend() {
         Backend::Sqlite => sqlx::query_as::<_, GroupRow>(&sql)
@@ -611,11 +612,13 @@ pub async fn list_groups(db: &Database, viewer_account: &str, limit: i64) -> Res
             OR g.owner = ?
             OR EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = g.id AND gm.account = ?)
          ORDER BY g.created_at DESC LIMIT ?",
-        "SELECT g.id, g.name, g.privacy, g.owner, g.created_at
+        // `g.id` is read into a String, so cast to text; `owner` and
+        // `group_members.account` are UUID.
+        "SELECT g.id::text, g.name, g.privacy, g.owner, g.created_at
          FROM groups g
          WHERE g.privacy != 'hidden'
-            OR g.owner = $1
-            OR EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = g.id AND gm.account = $2)
+            OR g.owner = $1::uuid
+            OR EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = g.id AND gm.account = $2::uuid)
          ORDER BY g.created_at DESC LIMIT $3",
     );
     let rows = match db.backend() {
@@ -651,7 +654,8 @@ pub async fn add_group_member(
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "INSERT INTO group_members (group_id, account, role, joined_at) VALUES (?, ?, ?, ?)",
-        "INSERT INTO group_members (group_id, account, role, joined_at) VALUES ($1, $2, $3, $4)",
+        "INSERT INTO group_members (group_id, account, role, joined_at)
+         VALUES ($1::uuid, $2::uuid, $3, $4)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -680,7 +684,7 @@ pub async fn add_group_member(
 pub async fn member_role(db: &Database, group_id: &str, account: &str) -> Result<Option<String>> {
     let sql = db.sql(
         "SELECT role FROM group_members WHERE group_id = ? AND account = ?",
-        "SELECT role FROM group_members WHERE group_id = $1 AND account = $2",
+        "SELECT role FROM group_members WHERE group_id = $1::uuid AND account = $2::uuid",
     );
     let row: Option<(String,)> = match db.backend() {
         Backend::Sqlite => {
@@ -710,7 +714,7 @@ pub async fn update_member_role(
 ) -> Result<bool> {
     let sql = db.sql(
         "UPDATE group_members SET role = ? WHERE group_id = ? AND account = ?",
-        "UPDATE group_members SET role = $1 WHERE group_id = $2 AND account = $3",
+        "UPDATE group_members SET role = $1 WHERE group_id = $2::uuid AND account = $3::uuid",
     );
     let rows = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
@@ -735,7 +739,7 @@ pub async fn update_member_role(
 pub async fn remove_group_member(db: &Database, group_id: &str, account: &str) -> Result<bool> {
     let sql = db.sql(
         "DELETE FROM group_members WHERE group_id = ? AND account = ?",
-        "DELETE FROM group_members WHERE group_id = $1 AND account = $2",
+        "DELETE FROM group_members WHERE group_id = $1::uuid AND account = $2::uuid",
     );
     let rows = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)

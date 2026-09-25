@@ -87,8 +87,11 @@ def offending_lines(sql: str) -> bool:
 
 def scan(root: pathlib.Path) -> list[tuple[pathlib.Path, int, str]]:
     hits: list[tuple[pathlib.Path, int, str]] = []
-    for path in sorted(root.rglob("*.rs")):
-        if "/target/" in str(path):
+    # Accept a file as well as a directory, so a single module can be checked
+    # while working on it.
+    paths = [root] if root.is_file() else sorted(root.rglob("*.rs"))
+    for path in paths:
+        if path.suffix != ".rs" or "/target/" in str(path):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         for match in STRING_LIT.finditer(text):
