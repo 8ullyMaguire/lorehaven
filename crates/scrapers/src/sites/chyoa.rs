@@ -290,7 +290,7 @@ impl SourceAdapter for Chyoa {
                 .expect("static selector");
         let mut chapters = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        for (_i, a) in document.select(&chapter_sel).enumerate() {
+        for a in document.select(&chapter_sel) {
             let href = a.value().attr("href").unwrap_or("");
             let Some((_base, chap_id)) = href.rsplit_once("/chapter/") else {
                 continue;
