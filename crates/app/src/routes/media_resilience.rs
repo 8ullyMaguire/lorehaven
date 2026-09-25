@@ -55,6 +55,14 @@ pub async fn get_media_reference(
     MaybeSession(_session): MaybeSession,
     Path(reference_id): Path<String>,
 ) -> ApiResult<Json<Value>> {
+    // A segment that is not a UUID cannot name a row, and on PostgreSQL trying
+    // anyway is a database error rather than a miss. Answer 404 without asking.
+    if !lorehaven_db::is_uuid(&reference_id) {
+        return Err(ApiError(AppError::NotFound {
+            resource: "media_reference",
+        }));
+    }
+
     let Some(reference) = media_resilience::find_media_reference_by_id(state.db(), &reference_id)
         .await
         .map_err(|e| ApiError(AppError::Internal(e)))?

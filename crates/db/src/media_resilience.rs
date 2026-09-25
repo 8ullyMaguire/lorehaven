@@ -222,10 +222,13 @@ pub async fn find_media_reference_by_content_hash(
             .to_string(),
         // `id` is read back into a String: cast to text, or sqlx refuses to
         // decode UUID into String.
-        "SELECT id::text, perceptual_hash, content_hash, media_kind, first_seen_at,
-                width, height, duration_seconds, format, file_size_bytes,
-                content_notes, curator_verified,
-                created_at, updated_at
+        // Row reader takes Strings: `id` is UUID and the three timestamps are
+        // TIMESTAMPTZ on PostgreSQL, so both need casting.
+        "SELECT id::text, perceptual_hash, content_hash, media_kind,
+                first_seen_at::text, width::bigint, height::bigint,
+                duration_seconds::bigint, format,
+                file_size_bytes::bigint, content_notes::text, curator_verified,
+                created_at::text, updated_at::text
          FROM media_references WHERE content_hash = $1"
             .to_string(),
     );
@@ -257,10 +260,13 @@ pub async fn find_media_reference_by_id(db: &Database, id: &str) -> Result<Optio
             .to_string(),
         // `id` is read back into a String, so cast it to text: sqlx will not
         // decode UUID into String.
-        "SELECT id::text, perceptual_hash, content_hash, media_kind, first_seen_at,
-                width, height, duration_seconds, format, file_size_bytes,
-                content_notes, curator_verified,
-                created_at, updated_at
+        // Row reader takes Strings: `id` is UUID and the three timestamps are
+        // TIMESTAMPTZ on PostgreSQL, so both need casting.
+        "SELECT id::text, perceptual_hash, content_hash, media_kind,
+                first_seen_at::text, width::bigint, height::bigint,
+                duration_seconds::bigint, format,
+                file_size_bytes::bigint, content_notes::text, curator_verified,
+                created_at::text, updated_at::text
          FROM media_references WHERE id = $1::uuid"
             .to_string(),
     );
@@ -299,9 +305,11 @@ pub async fn insert_availability_link(
             (id, media_reference_id, url, provider, added_by, priority)
          VALUES (?, ?, ?, ?, ?, ?)"
             .to_string(),
+        // `availability_links.id` and `.media_reference_id` are UUID, and
+        // `.added_by` is a pseud uuid.
         "INSERT INTO availability_links
             (id, media_reference_id, url, provider, added_by, priority)
-         VALUES ($1, $2, $3, $4, $5, $6)"
+         VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6)"
             .to_string(),
     );
     match db.backend() {
@@ -344,11 +352,20 @@ pub async fn find_availability_links_for_reference(
          WHERE media_reference_id = ?
          ORDER BY priority DESC"
             .to_string(),
-        "SELECT id, media_reference_id, url, provider, status, last_checked_at,
-                last_healthy_at, consecutive_failures, added_by, verified_by,
-                reported_broken_by, priority, failure_details, created_at, updated_at
+        // The row struct is all String/i64, so cast everything PostgreSQL does
+        // not already store as text: two uuid columns, three timestamptz, two
+        // int4, one jsonb, and the two uuid[] columns. Those last two are
+        // rendered with `array_to_json` so the value is the same JSON array
+        // string the SQLite arm holds, and the row struct stays identical.
+        "SELECT id::text, media_reference_id::text, url, provider, status,
+                last_checked_at::text, last_healthy_at::text,
+                consecutive_failures::bigint, added_by::text,
+                array_to_json(verified_by)::text AS verified_by,
+                array_to_json(reported_broken_by)::text AS reported_broken_by,
+                priority::bigint, failure_details::text,
+                created_at::text, updated_at::text
          FROM availability_links
-         WHERE media_reference_id = $1
+         WHERE media_reference_id = $1::uuid
          ORDER BY priority DESC"
             .to_string(),
     );
@@ -386,7 +403,7 @@ pub async fn update_link_status(
          SET status = $1, consecutive_failures = $2,
              last_checked_at = NOW(),
              updated_at = NOW()
-         WHERE id = $3"
+         WHERE id = $3::uuid"
             .to_string(),
     );
     match db.backend() {
@@ -615,9 +632,11 @@ pub async fn insert_curator_reward(
             (id, account_id, action, media_reference_id, availability_link_id, amount)
          VALUES (?, ?, ?, ?, ?, ?)"
             .to_string(),
+        // Four uuid columns and an INTEGER `amount` that the bound value has
+        // to be told about explicitly.
         "INSERT INTO curator_rewards
             (id, account_id, action, media_reference_id, availability_link_id, amount)
-         VALUES ($1, $2, $3, $4, $5, $6)"
+         VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5::uuid, $6)"
             .to_string(),
     );
     match db.backend() {
@@ -655,9 +674,10 @@ pub async fn sum_curator_rewards_today(db: &Database, account_id: &str) -> Resul
          WHERE account_id = ?
            AND created_at >= datetime('now', 'start of day')"
             .to_string(),
-        "SELECT COALESCE(SUM(amount), 0) AS total
+        // `account_id` is UUID and `SUM(integer)` is NUMERIC against an i64 row type.
+        "SELECT COALESCE(SUM(amount), 0)::bigint AS total
          FROM curator_rewards
-         WHERE account_id = $1
+         WHERE account_id = $1::uuid
            AND created_at >= date_trunc('day', NOW())"
             .to_string(),
     );
@@ -689,7 +709,7 @@ pub async fn count_healthy_links(db: &Database, media_reference_id: &str) -> Res
          WHERE media_reference_id = ? AND status = 'healthy'"
             .to_string(),
         "SELECT COUNT(*) AS cnt FROM availability_links
-         WHERE media_reference_id = $1 AND status = 'healthy'"
+         WHERE media_reference_id = $1::uuid AND status = 'healthy'"
             .to_string(),
     );
     let row: (i64,) = match db.backend() {
@@ -723,9 +743,15 @@ pub async fn find_links_needing_check(
          ORDER BY last_checked_at ASC
          LIMIT ?"
             .to_string(),
-        "SELECT id, media_reference_id, url, provider, status, last_checked_at,
-                last_healthy_at, consecutive_failures, added_by, verified_by,
-                reported_broken_by, priority, failure_details, created_at, updated_at
+        // Same casts as the other availability_links select: see
+        // find_availability_links_for_reference.
+        "SELECT id::text, media_reference_id::text, url, provider, status,
+                last_checked_at::text, last_healthy_at::text,
+                consecutive_failures::bigint, added_by::text,
+                array_to_json(verified_by)::text AS verified_by,
+                array_to_json(reported_broken_by)::text AS reported_broken_by,
+                priority::bigint, failure_details::text,
+                created_at::text, updated_at::text
          FROM availability_links
          WHERE status IN ('healthy', 'degraded', 'pending_verification')
          ORDER BY last_checked_at ASC
@@ -2136,9 +2162,15 @@ pub async fn find_by_perceptual_hash(
          FROM media_references
          WHERE perceptual_hash IS NOT NULL"
             .to_string(),
-        "SELECT id, perceptual_hash, content_hash, media_kind, first_seen_at,
-                width, height, duration_seconds, format, file_size_bytes,
-                content_notes, curator_verified, created_at, updated_at
+        // The row reader takes Strings, so every column PostgreSQL does not
+        // already store as text has to be cast: `id` is UUID, and
+        // `first_seen_at`/`created_at`/`updated_at` are TIMESTAMPTZ. The SQLite
+        // arm needs none of this and stays as written.
+        "SELECT id::text, perceptual_hash, content_hash, media_kind,
+                first_seen_at::text, width::bigint, height::bigint,
+                duration_seconds::bigint, format,
+                file_size_bytes::bigint, content_notes::text, curator_verified,
+                created_at::text, updated_at::text
          FROM media_references
          WHERE perceptual_hash IS NOT NULL"
             .to_string(),

@@ -342,6 +342,21 @@ pub fn sql_owned(db: &Database, sqlite: String, postgres: String) -> String {
     }
 }
 
+/// Whether `id` can be a primary key on PostgreSQL.
+///
+/// Every id column in the PostgreSQL schema is `UUID`, so a path or body
+/// segment that is not one is a miss, not a database error. Handing the raw
+/// string to a `$1::uuid` cast instead turns a request for a nonexistent
+/// resource into a `22P02 invalid input syntax` error, which callers report as
+/// a 500. Check with this first and answer "not found" without querying.
+///
+/// SQLite stores the same ids as `TEXT` and therefore accepts anything, which
+/// is why this only ever fires under the PostgreSQL backend.
+#[must_use]
+pub fn is_uuid(id: &str) -> bool {
+    uuid::Uuid::parse_str(id).is_ok()
+}
+
 /// Rewrite `?` placeholders into PostgreSQL's `$1…$n` form.
 #[must_use]
 pub fn rewrite_placeholders(sql: &str) -> String {

@@ -12,6 +12,7 @@ use lorehaven_db::media_resilience;
 use lorehaven_domain::media_resilience::MediaKind;
 use std::path::Path;
 use std::path::PathBuf;
+use test_support::id;
 use tower::ServiceExt;
 
 fn scratch_dir(tag: &str) -> PathBuf {
@@ -31,13 +32,19 @@ fn config_for(dir: &std::path::Path) -> Config {
     config
 }
 
-async fn build_app(dir: &Path) -> axum::Router {
+/// The router, plus the database its `AppState` actually holds.
+///
+/// The two have to travel together: under PostgreSQL each `TestDb` creates its
+/// own scratch database, so a fixture written through a second `TestDb` would
+/// land in a database the router never queries, and the test would fail for
+/// reasons that have nothing to do with the code under test. Under SQLite the
+/// scratch file is shared, which hides the mistake.
+async fn build_app(dir: &Path) -> (axum::Router, test_support::TestDb) {
     let config = config_for(dir);
     let tdb = test_support::TestDb::connect_with_dir("mr", dir).await;
-    let db = tdb.db().clone();
-    let state = AppState::new(config, db);
+    let state = AppState::new(config, tdb.db().clone());
     set_trust_proxy(false);
-    server::build_router(state)
+    (server::build_router(state), tdb)
 }
 
 #[tokio::test]
@@ -58,17 +65,17 @@ async fn media_resilience_insert_and_fetch() {
     let tdb = test_support::TestDb::connect_with_dir("mr-crud", &dir).await;
     let db = tdb.db();
 
-    let ref_id = "test-ref-001";
+    let ref_id = id("test-ref-001");
     media_resilience::insert_media_reference(
         db,
-        ref_id,
+        &ref_id,
         "hash-abc",
         lorehaven_domain::media_resilience::MediaKind::Image,
     )
     .await
     .expect("insert reference");
 
-    let reference = media_resilience::find_media_reference_by_id(db, ref_id)
+    let reference = media_resilience::find_media_reference_by_id(db, &ref_id)
         .await
         .expect("find reference")
         .expect("reference exists");
@@ -83,30 +90,30 @@ async fn media_resilience_availability_link() {
     let tdb = test_support::TestDb::connect_with_dir("mr-link", &dir).await;
     let db = tdb.db();
 
-    let ref_id = "test-ref-002";
+    let ref_id = id("test-ref-002");
     media_resilience::insert_media_reference(
         db,
-        ref_id,
+        &ref_id,
         "hash-def",
         lorehaven_domain::media_resilience::MediaKind::Image,
     )
     .await
     .expect("insert reference");
 
-    let link_id = "test-link-001";
+    let link_id = id("test-link-001");
     media_resilience::insert_availability_link(
         db,
-        link_id,
-        ref_id,
+        &link_id,
+        &ref_id,
         "https://example.com/image.jpg",
         lorehaven_domain::media_resilience::LinkProvider::Other,
-        Some("user-001"),
+        Some(&id("user-001")),
         100,
     )
     .await
     .expect("insert link");
 
-    let links = media_resilience::find_availability_links_for_reference(db, ref_id)
+    let links = media_resilience::find_availability_links_for_reference(db, &ref_id)
         .await
         .expect("find links");
     assert_eq!(links.len(), 1);
@@ -119,14 +126,14 @@ async fn media_resilience_availability_link() {
     // Update status
     media_resilience::update_link_status(
         db,
-        link_id,
+        &link_id,
         lorehaven_domain::media_resilience::LinkStatus::Healthy,
         0,
     )
     .await
     .expect("update status");
 
-    let healthy = media_resilience::count_healthy_links(db, ref_id)
+    let healthy = media_resilience::count_healthy_links(db, &ref_id)
         .await
         .expect("count healthy");
     assert_eq!(healthy, 1);
@@ -138,11 +145,11 @@ async fn media_resilience_curator_rewards() {
     let tdb = test_support::TestDb::connect_with_dir("mr-rewards", &dir).await;
     let db = tdb.db();
 
-    let ref_id = "test-ref-003";
-    let link_id = "test-link-003";
+    let ref_id = id("test-ref-003");
+    let link_id = id("test-link-003");
     media_resilience::insert_media_reference(
         db,
-        ref_id,
+        &ref_id,
         "hash-ghi",
         lorehaven_domain::media_resilience::MediaKind::Image,
     )
@@ -150,8 +157,8 @@ async fn media_resilience_curator_rewards() {
     .expect("insert reference");
     media_resilience::insert_availability_link(
         db,
-        link_id,
-        ref_id,
+        &link_id,
+        &ref_id,
         "https://example.com/pic.png",
         lorehaven_domain::media_resilience::LinkProvider::Imgur,
         None,
@@ -162,16 +169,16 @@ async fn media_resilience_curator_rewards() {
 
     media_resilience::insert_curator_reward(
         db,
-        "user-001",
+        &id("user-001"),
         lorehaven_domain::media_resilience::CuratorAction::MirrorAdd,
-        Some(ref_id),
-        Some(link_id),
+        Some(&ref_id),
+        Some(&link_id),
         15,
     )
     .await
     .expect("insert reward");
 
-    let total = media_resilience::sum_curator_rewards_today(db, "user-001")
+    let total = media_resilience::sum_curator_rewards_today(db, &id("user-001"))
         .await
         .expect("sum rewards");
     assert_eq!(total, 15);
@@ -180,15 +187,13 @@ async fn media_resilience_curator_rewards() {
 #[tokio::test]
 async fn media_resilience_get_route() {
     let dir = scratch_dir("route");
-    let app = build_app(&dir).await;
-
-    let tdb = test_support::TestDb::connect_with_dir("mr-route2", &dir).await;
+    let (app, tdb) = build_app(&dir).await;
     let db = tdb.db();
 
-    let ref_id = "test-ref-004";
+    let ref_id = id("test-ref-004");
     media_resilience::insert_media_reference(
         db,
-        ref_id,
+        &ref_id,
         "hash-jkl",
         lorehaven_domain::media_resilience::MediaKind::Image,
     )
@@ -211,7 +216,7 @@ async fn media_resilience_get_route() {
 #[tokio::test]
 async fn media_resilience_missing_returns_404() {
     let dir = scratch_dir("missing");
-    let app = build_app(&dir).await;
+    let (app, _tdb) = build_app(&dir).await;
 
     let response = app
         .oneshot(
@@ -232,10 +237,10 @@ async fn media_resilience_links_needing_check() {
     let tdb = test_support::TestDb::connect_with_dir("mr-check", &dir).await;
     let db = tdb.db();
 
-    let ref_id = "test-ref-005";
+    let ref_id = id("test-ref-005");
     media_resilience::insert_media_reference(
         db,
-        ref_id,
+        &ref_id,
         "hash-mno",
         lorehaven_domain::media_resilience::MediaKind::Image,
     )
@@ -244,8 +249,8 @@ async fn media_resilience_links_needing_check() {
 
     media_resilience::insert_availability_link(
         db,
-        "link-005",
-        ref_id,
+        &id("link-005"),
+        &ref_id,
         "https://example.com/check.png",
         lorehaven_domain::media_resilience::LinkProvider::Other,
         None,
@@ -269,7 +274,8 @@ async fn set_perceptual_hash(db: &lorehaven_db::Database, reference_id: &str, ha
     use lorehaven_db::Backend;
     let sql = match db.backend() {
         Backend::Sqlite => "UPDATE media_references SET perceptual_hash = ? WHERE id = ?",
-        Backend::Postgres => "UPDATE media_references SET perceptual_hash = $1 WHERE id = $2",
+        // `media_references.id` is UUID on PostgreSQL.
+        Backend::Postgres => "UPDATE media_references SET perceptual_hash = $1 WHERE id = $2::uuid",
     };
     match db.backend() {
         Backend::Sqlite => {
@@ -301,17 +307,22 @@ async fn a_perceptual_match_within_the_threshold_is_found() {
     // (0x0 ^ 0x3 = two bits, 0xff ^ 0xfc = two bits), which is inside the
     // default threshold of 6. It is NOT an exact match, so the old
     // equality-only query returned nothing here.
-    media_resilience::insert_media_reference(db, "phash-near", "sha256:near", MediaKind::Image)
-        .await
-        .expect("insert near");
-    set_perceptual_hash(db, "phash-near", "00ffff00").await;
+    media_resilience::insert_media_reference(
+        db,
+        &id("phash-near"),
+        "sha256:near",
+        MediaKind::Image,
+    )
+    .await
+    .expect("insert near");
+    set_perceptual_hash(db, &id("phash-near"), "00ffff00").await;
 
     let found = media_resilience::find_by_perceptual_hash(db, "00fcff00", 6)
         .await
         .expect("perceptual search");
     assert_eq!(
         found.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
-        vec!["phash-near"],
+        vec![id("phash-near")],
         "a 4-bit difference is inside a threshold of 6"
     );
 }
@@ -323,10 +334,10 @@ async fn a_perceptual_match_outside_the_threshold_is_not_found() {
     let db = tdb.db();
 
     // 12 bits differ, well past a threshold of 6.
-    media_resilience::insert_media_reference(db, "phash-far", "sha256:far", MediaKind::Image)
+    media_resilience::insert_media_reference(db, &id("phash-far"), "sha256:far", MediaKind::Image)
         .await
         .expect("insert far");
-    set_perceptual_hash(db, "phash-far", "00ff00ff").await;
+    set_perceptual_hash(db, &id("phash-far"), "00ff00ff").await;
 
     let found = media_resilience::find_by_perceptual_hash(db, "ffff0000", 6)
         .await
@@ -345,10 +356,10 @@ async fn the_threshold_decides_what_is_found() {
     let db = tdb.db();
 
     // Two differing bits: hidden at a threshold of 1, visible at 2.
-    media_resilience::insert_media_reference(db, "phash-two", "sha256:two", MediaKind::Image)
+    media_resilience::insert_media_reference(db, &id("phash-two"), "sha256:two", MediaKind::Image)
         .await
         .expect("insert two");
-    set_perceptual_hash(db, "phash-two", "00ff").await;
+    set_perceptual_hash(db, &id("phash-two"), "00ff").await;
 
     let strict = media_resilience::find_by_perceptual_hash(db, "00fc", 1)
         .await
@@ -373,9 +384,14 @@ async fn a_reference_with_no_perceptual_hash_is_never_matched() {
     // perceptual_hash is nullable: a reference whose bytes were never fetched
     // has no hash. It must not match a query at any threshold, including one
     // large enough to accept every possible hash.
-    media_resilience::insert_media_reference(db, "phash-none", "sha256:none", MediaKind::Image)
-        .await
-        .expect("insert none");
+    media_resilience::insert_media_reference(
+        db,
+        &id("phash-none"),
+        "sha256:none",
+        MediaKind::Image,
+    )
+    .await
+    .expect("insert none");
 
     let found = media_resilience::find_by_perceptual_hash(db, "00ff", 32)
         .await
@@ -393,14 +409,19 @@ async fn a_malformed_stored_hash_does_not_match_and_does_not_fail_the_search() {
     let tdb = test_support::TestDb::connect_with_dir("mr-phash-malformed", &dir).await;
     let db = tdb.db();
 
-    media_resilience::insert_media_reference(db, "phash-bad", "sha256:bad", MediaKind::Image)
+    media_resilience::insert_media_reference(db, &id("phash-bad"), "sha256:bad", MediaKind::Image)
         .await
         .expect("insert bad");
-    set_perceptual_hash(db, "phash-bad", "not-a-hash").await;
-    media_resilience::insert_media_reference(db, "phash-good", "sha256:good", MediaKind::Image)
-        .await
-        .expect("insert good");
-    set_perceptual_hash(db, "phash-good", "00ff").await;
+    set_perceptual_hash(db, &id("phash-bad"), "not-a-hash").await;
+    media_resilience::insert_media_reference(
+        db,
+        &id("phash-good"),
+        "sha256:good",
+        MediaKind::Image,
+    )
+    .await
+    .expect("insert good");
+    set_perceptual_hash(db, &id("phash-good"), "00ff").await;
 
     // The unparseable value is skipped rather than folded into a large
     // distance, and the healthy reference beside it is still returned: one
@@ -410,7 +431,7 @@ async fn a_malformed_stored_hash_does_not_match_and_does_not_fail_the_search() {
         .expect("perceptual search");
     assert_eq!(
         found.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
-        vec!["phash-good"]
+        vec![id("phash-good")]
     );
 }
 
@@ -420,10 +441,10 @@ async fn a_malformed_query_hash_returns_nothing_rather_than_everything() {
     let tdb = test_support::TestDb::connect_with_dir("mr-phash-badquery", &dir).await;
     let db = tdb.db();
 
-    media_resilience::insert_media_reference(db, "phash-row", "sha256:row", MediaKind::Image)
+    media_resilience::insert_media_reference(db, &id("phash-row"), "sha256:row", MediaKind::Image)
         .await
         .expect("insert row");
-    set_perceptual_hash(db, "phash-row", "00ff").await;
+    set_perceptual_hash(db, &id("phash-row"), "00ff").await;
 
     let found = media_resilience::find_by_perceptual_hash(db, "zzz", 32)
         .await
@@ -441,14 +462,14 @@ async fn an_exact_match_is_still_found_and_sorts_first() {
     let tdb = test_support::TestDb::connect_with_dir("mr-phash-exact", &dir).await;
     let db = tdb.db();
 
-    media_resilience::insert_media_reference(db, "phash-exact", "sha256:e", MediaKind::Image)
+    media_resilience::insert_media_reference(db, &id("phash-exact"), "sha256:e", MediaKind::Image)
         .await
         .expect("insert exact");
-    set_perceptual_hash(db, "phash-exact", "00ff").await;
-    media_resilience::insert_media_reference(db, "phash-nearby", "sha256:n", MediaKind::Image)
+    set_perceptual_hash(db, &id("phash-exact"), "00ff").await;
+    media_resilience::insert_media_reference(db, &id("phash-nearby"), "sha256:n", MediaKind::Image)
         .await
         .expect("insert nearby");
-    set_perceptual_hash(db, "phash-nearby", "00fc").await;
+    set_perceptual_hash(db, &id("phash-nearby"), "00fc").await;
 
     // Closest first: a curator reviewing candidates reads the strongest match
     // at the top, and the exact match is the one that can auto-attach.
@@ -457,7 +478,7 @@ async fn an_exact_match_is_still_found_and_sorts_first() {
         .expect("perceptual search");
     assert_eq!(
         found.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
-        vec!["phash-exact", "phash-nearby"]
+        vec![id("phash-exact"), id("phash-nearby")]
     );
 }
 
@@ -524,10 +545,10 @@ async fn reverse_search_uses_the_configured_perceptual_threshold() {
             c.media_resilience.perceptual_match_threshold = threshold;
         })
         .await;
-        media_resilience::insert_media_reference(&db, "rs-t", "sha256:t", MediaKind::Image)
+        media_resilience::insert_media_reference(&db, &id("rs-t"), "sha256:t", MediaKind::Image)
             .await
             .expect("insert");
-        set_perceptual_hash(&db, "rs-t", "00ffff00").await;
+        set_perceptual_hash(&db, &id("rs-t"), "00ffff00").await;
 
         let body = post_reverse_search(&app, r#"{"hash":"00fcff00"}"#).await;
         let refs = body["references"].as_array().expect("references array");
@@ -570,15 +591,15 @@ async fn reverse_search_reports_a_confidence_score_per_match() {
     let tdb = test_support::TestDb::connect_with_dir("mr-rs-conf", &dir).await;
     let db = tdb.db().clone();
     // "rs-exact" stores the queried hash itself, so its distance is 0.
-    media_resilience::insert_media_reference(&db, "rs-exact", "sha256:1", MediaKind::Image)
+    media_resilience::insert_media_reference(&db, &id("rs-exact"), "sha256:1", MediaKind::Image)
         .await
         .expect("insert exact");
-    set_perceptual_hash(&db, "rs-exact", "00ff").await;
+    set_perceptual_hash(&db, &id("rs-exact"), "00ff").await;
     // "rs-near" differs in two bits: 0x0 ^ 0xc is two bits, the rest matches.
-    media_resilience::insert_media_reference(&db, "rs-near", "sha256:2", MediaKind::Image)
+    media_resilience::insert_media_reference(&db, &id("rs-near"), "sha256:2", MediaKind::Image)
         .await
         .expect("insert near");
-    set_perceptual_hash(&db, "rs-near", "00fc").await;
+    set_perceptual_hash(&db, &id("rs-near"), "00fc").await;
 
     let state = AppState::new(config, db);
     set_trust_proxy(false);
@@ -601,7 +622,8 @@ async fn reverse_search_reports_a_confidence_score_per_match() {
         );
     }
     assert_eq!(
-        refs[0]["id"], "rs-exact",
+        refs[0]["id"].as_str().unwrap(),
+        id("rs-exact"),
         "the closest match comes first: {body}"
     );
     let exact = refs[0]["match_confidence"].as_f64().expect("confidence");
@@ -622,7 +644,7 @@ async fn recording_a_fingerprint_fills_the_hashes_it_carries() {
     let tdb = test_support::TestDb::connect_with_dir("mr-record", &dir).await;
     let db = tdb.db();
 
-    media_resilience::insert_media_reference(db, "rec-1", "pending", MediaKind::Image)
+    media_resilience::insert_media_reference(db, &id("rec-1"), "pending", MediaKind::Image)
         .await
         .expect("insert");
 
@@ -632,11 +654,11 @@ async fn recording_a_fingerprint_fills_the_hashes_it_carries() {
         width: 800,
         height: 600,
     };
-    media_resilience::record_fingerprint(db, "rec-1", &(&fp).into())
+    media_resilience::record_fingerprint(db, &id("rec-1"), &(&fp).into())
         .await
         .expect("record fingerprint");
 
-    let stored = media_resilience::find_media_reference_by_id(db, "rec-1")
+    let stored = media_resilience::find_media_reference_by_id(db, &id("rec-1"))
         .await
         .expect("find")
         .expect("exists");
@@ -656,7 +678,7 @@ async fn recording_an_undecodable_body_stores_the_exact_hash_and_no_perceptual_o
     let tdb = test_support::TestDb::connect_with_dir("mr-record-nodec", &dir).await;
     let db = tdb.db();
 
-    media_resilience::insert_media_reference(db, "rec-2", "pending", MediaKind::Image)
+    media_resilience::insert_media_reference(db, &id("rec-2"), "pending", MediaKind::Image)
         .await
         .expect("insert");
 
@@ -665,11 +687,11 @@ async fn recording_an_undecodable_body_stores_the_exact_hash_and_no_perceptual_o
     // the dedup search see distance 0 against every other undecodable image and
     // merge them all into one reference.
     let fp = MediaFingerprint::without_perceptual_hash(b"\x89PNG not decodable here");
-    media_resilience::record_fingerprint(db, "rec-2", &(&fp).into())
+    media_resilience::record_fingerprint(db, &id("rec-2"), &(&fp).into())
         .await
         .expect("record fingerprint");
 
-    let stored = media_resilience::find_media_reference_by_id(db, "rec-2")
+    let stored = media_resilience::find_media_reference_by_id(db, &id("rec-2"))
         .await
         .expect("find")
         .expect("exists");
@@ -683,12 +705,12 @@ async fn an_undecodable_reference_is_never_returned_by_the_dedup_search() {
     let tdb = test_support::TestDb::connect_with_dir("mr-record-ns", &dir).await;
     let db = tdb.db();
 
-    for id in ["nodec-a", "nodec-b"] {
-        media_resilience::insert_media_reference(db, id, "pending", MediaKind::Image)
+    for ref_id in [id("nodec-a"), id("nodec-b")] {
+        media_resilience::insert_media_reference(db, &ref_id, "pending", MediaKind::Image)
             .await
             .expect("insert");
-        let fp = MediaFingerprint::without_perceptual_hash(id.as_bytes());
-        media_resilience::record_fingerprint(db, id, &(&fp).into())
+        let fp = MediaFingerprint::without_perceptual_hash(ref_id.as_bytes());
+        media_resilience::record_fingerprint(db, &ref_id, &(&fp).into())
             .await
             .expect("record");
     }
@@ -711,7 +733,7 @@ async fn a_recorded_fingerprint_is_found_by_the_search() {
     let tdb = test_support::TestDb::connect_with_dir("mr-record-found", &dir).await;
     let db = tdb.db();
 
-    media_resilience::insert_media_reference(db, "rec-3", "pending", MediaKind::Image)
+    media_resilience::insert_media_reference(db, &id("rec-3"), "pending", MediaKind::Image)
         .await
         .expect("insert");
     let fp = MediaFingerprint {
@@ -720,7 +742,7 @@ async fn a_recorded_fingerprint_is_found_by_the_search() {
         width: 64,
         height: 64,
     };
-    media_resilience::record_fingerprint(db, "rec-3", &(&fp).into())
+    media_resilience::record_fingerprint(db, &id("rec-3"), &(&fp).into())
         .await
         .expect("record");
 
@@ -732,7 +754,7 @@ async fn a_recorded_fingerprint_is_found_by_the_search() {
         .await
         .expect("search");
     assert_eq!(found.len(), 1);
-    assert_eq!(found[0].id, "rec-3");
+    assert_eq!(found[0].id, id("rec-3"));
 }
 
 #[tokio::test]
@@ -745,7 +767,7 @@ async fn recording_a_fingerprint_for_a_missing_reference_is_an_error_not_a_silen
     // A fetch that completes for a reference that no longer exists must say
     // so. Silently succeeding would report the media as mirrored when the row
     // it belongs to has gone.
-    let outcome = media_resilience::record_fingerprint(db, "no-such-ref", &(&fp).into()).await;
+    let outcome = media_resilience::record_fingerprint(db, &id("no-such-ref"), &(&fp).into()).await;
     assert!(
         outcome.is_err(),
         "recording against a missing row must fail"

@@ -64,19 +64,32 @@ ID_COLUMNS = re.compile(
 
 # `col = $n` -- the WHERE/ON form.
 COMPARED = re.compile(r"\b\w+\s*=\s*\$\d+", re.IGNORECASE)
-# `VALUES ($n` -- the INSERT form.
+# `VALUES ($n` -- the INSERT form. `\s*` spans the newline, because these
+# statements are often written with the column list on its own lines and a
+# naive `VALUES (` match misses the wrapped ones.
 INSERT_BIND = re.compile(r"VALUES\s*\(\s*\$\d+", re.IGNORECASE)
 
 STRING_LIT = re.compile(r'"((?:[^"\\]|\\.)*\$\d+(?:[^"\\]|\\.)*)"', re.DOTALL)
 
 
+# A bare `id` in the select list, read into a Rust String, is the read-side bug
+# even with no placeholder at all: `SELECT id, ... FROM works` hands sqlx a UUID
+# and the row reader wants a String.
+BARE_ID_SELECT = re.compile(r"\bSELECT\b[^;]*?\bid\s*(,|\s|$)", re.IGNORECASE | re.DOTALL)
+
+
 def offending_lines(sql: str) -> bool:
-    """True when this statement has a bare placeholder on a uuid-keyed table."""
+    """True when this statement has a bare placeholder or bare id on a uuid-keyed table."""
     if "::" in sql:
         return False  # already casts somewhere; not a bare-placeholder site
     lowered = sql.lower()
     if not any(re.search(rf"\b{t}\b", lowered) for t in UUID_KEYED_TABLES):
         return False
+    if not re.search(r"\$\d+", sql) and BARE_ID_SELECT.search(sql):
+        # No placeholder to cast, but the select list still names a bare `id`.
+        # Only worth reporting if it is actually projected.
+        if re.search(r"\bSELECT\s+id\s*[,;]|,\s*id\s*(,|FROM)", sql, re.IGNORECASE | re.DOTALL):
+            return True
     # The placeholder has to be next to something id-shaped. Comparing the
     # column on the left of `= $n` catches the WHERE form; the INSERT form is
     # caught by the presence of a VALUES tuple whose first bind is positional.
