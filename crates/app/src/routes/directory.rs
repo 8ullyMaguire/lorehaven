@@ -21,7 +21,7 @@ use lorehaven_db::directory as db;
 use lorehaven_domain::category_governance as cg;
 use lorehaven_domain::directory as domain;
 use lorehaven_domain::governance::TL_STEWARD;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
@@ -466,7 +466,7 @@ async fn is_operator_check(
     match account_id {
         Some(id) => Ok(lorehaven_db::governance::trust_for(state.db(), id)
             .await
-            .map_err(|e| anyhow::Error::from(e))?
+            .map_err(anyhow::Error::from)?
             >= 5),
         None => Ok(false),
     }
@@ -494,9 +494,7 @@ async fn governance_state(
     State(state): State<AppState>,
     MaybeSession(_session): MaybeSession,
 ) -> ApiResult<Json<Value>> {
-    let categories = cg_db::list_categories(state.db())
-        .await
-        .map_err(|e| anyhow::Error::from(e))?;
+    let categories = cg_db::list_categories(state.db()).await?;
     let frozen = state.config().directory.governance.frozen;
     let max = state.config().directory.governance.max_active_categories;
     let mut items: Vec<Value> = Vec::new();
@@ -541,7 +539,7 @@ async fn create_proposal(
     let account_id = session.account_id.to_string();
     let level = lorehaven_db::governance::trust_for(state.db(), &account_id)
         .await
-        .map_err(|e| anyhow::Error::from(e))?;
+        .map_err(anyhow::Error::from)?;
     if level < TL_STEWARD {
         return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
@@ -551,8 +549,7 @@ async fn create_proposal(
 
     // Validate action against current category state.
     let category = cg_db::get_category(state.db(), &body.category_slug)
-        .await
-        .map_err(|e| anyhow::Error::from(e))?
+        .await?
         .ok_or_else(|| bad_request("category not found"))?;
 
     let current_state = cg::CategoryState::parse(&category.state)
@@ -563,18 +560,14 @@ async fn create_proposal(
     }
 
     // Anti-churn: max 5 open proposals per category (§45.4).
-    let open_count = cg_db::count_open_proposals(state.db(), &body.category_slug)
-        .await
-        .map_err(|e| anyhow::Error::from(e))?;
+    let open_count = cg_db::count_open_proposals(state.db(), &body.category_slug).await?;
     if open_count >= cg::MAX_OPEN_PROPOSALS_PER_CATEGORY as i64 {
         return Err(bad_request("too many open proposals for this category"));
     }
 
     // Anti-churn: 72-hour cooldown per action per category (§45.4).
     if let Some(last_time) =
-        cg_db::last_proposal_time(state.db(), &body.category_slug, action.as_str())
-            .await
-            .map_err(|e| anyhow::Error::from(e))?
+        cg_db::last_proposal_time(state.db(), &body.category_slug, action.as_str()).await?
     {
         if let Ok(last) = chrono::DateTime::parse_from_rfc3339(&last_time) {
             let now = chrono::Utc::now();
@@ -585,16 +578,12 @@ async fn create_proposal(
         }
     }
 
-    let payload_str = serde_json::to_string(&body.payload).map_err(|e| anyhow::Error::from(e))?;
+    let payload_str = serde_json::to_string(&body.payload).map_err(anyhow::Error::from)?;
 
     // For create, validate the new slug doesn't already exist.
     if action == cg::ProposalAction::Create {
         if let Some(new_slug) = body.payload["slug"].as_str() {
-            if cg_db::get_category(state.db(), new_slug)
-                .await
-                .map_err(|e| anyhow::Error::from(e))?
-                .is_some()
-            {
+            if cg_db::get_category(state.db(), new_slug).await?.is_some() {
                 return Err(bad_request("category already exists"));
             }
         }
@@ -615,8 +604,7 @@ async fn create_proposal(
         &account_id,
         &now,
     )
-    .await
-    .map_err(|e| anyhow::Error::from(e))?;
+    .await?;
 
     // Log to changelog.
     cg_db::append_changelog(
@@ -627,8 +615,7 @@ async fn create_proposal(
         &payload_str,
         &now,
     )
-    .await
-    .map_err(|e| anyhow::Error::from(e))?;
+    .await?;
 
     Ok((
         StatusCode::CREATED,
@@ -648,8 +635,7 @@ async fn get_proposal(
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
     let proposal = cg_db::get_proposal(state.db(), &id)
-        .await
-        .map_err(|e| anyhow::Error::from(e))?
+        .await?
         .ok_or_else(|| bad_request("proposal not found"))?;
     Ok(Json(json!({
         "id": proposal.id,
@@ -689,7 +675,7 @@ async fn vote_proposal(
     let account_id = session.account_id.to_string();
     let level = lorehaven_db::governance::trust_for(state.db(), &account_id)
         .await
-        .map_err(|e| anyhow::Error::from(e))?;
+        .map_err(anyhow::Error::from)?;
     if level < TL_STEWARD {
         return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
@@ -699,17 +685,14 @@ async fn vote_proposal(
 
     // Check proposal is open.
     let proposal = cg_db::get_proposal(state.db(), &id)
-        .await
-        .map_err(|e| anyhow::Error::from(e))?
+        .await?
         .ok_or_else(|| bad_request("proposal not found"))?;
     if proposal.status != "open" {
         return Err(bad_request("proposal is not open"));
     }
 
     let now = chrono::Utc::now().to_rfc3339();
-    let decided = cg_db::vote_on_proposal(state.db(), &id, &account_id, value, &now)
-        .await
-        .map_err(|e| anyhow::Error::from(e))?;
+    let decided = cg_db::vote_on_proposal(state.db(), &id, &account_id, value, &now).await?;
 
     // Log vote to changelog.
     let payload = serde_json::json!({ "value": body.value });
@@ -721,8 +704,7 @@ async fn vote_proposal(
         &serde_json::to_string(&payload).unwrap_or_default(),
         &now,
     )
-    .await
-    .map_err(|e| anyhow::Error::from(e))?;
+    .await?;
 
     // Auto-execution on decision (§45.2).
     if let Some(passed) = decided {
@@ -737,8 +719,7 @@ async fn vote_proposal(
                     .to_string(),
                 &now,
             )
-            .await
-            .map_err(|e| anyhow::Error::from(e))?;
+            .await?;
         }
     }
 
@@ -753,7 +734,7 @@ async fn execute_proposal_action(
     db: &lorehaven_db::Database,
     proposal: &cg_db::CategoryProposal,
 ) -> Result<(), anyhow::Error> {
-    let now = chrono::Utc::now().to_rfc3339();
+    let _now = chrono::Utc::now().to_rfc3339();
     let payload: Value = serde_json::from_str(&proposal.payload).unwrap_or(json!({}));
 
     match proposal.action.as_str() {
@@ -800,8 +781,7 @@ async fn veto_proposal(
         &body.reason,
         &now,
     )
-    .await
-    .map_err(|e| anyhow::Error::from(e))?;
+    .await?;
 
     if !ok {
         return Err(bad_request("proposal not found or not open"));
@@ -816,9 +796,7 @@ async fn changelog(
     MaybeSession(_session): MaybeSession,
     Path(slug): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    let entries = cg_db::list_changelog(state.db(), &slug, 50)
-        .await
-        .map_err(|e| anyhow::Error::from(e))?;
+    let entries = cg_db::list_changelog(state.db(), &slug, 50).await?;
     let items: Vec<Value> = entries
         .iter()
         .map(|e| {
@@ -883,7 +861,7 @@ async fn propose_entry_mod(
     let account_id = session.account_id.to_string();
     let level = lorehaven_db::governance::trust_for(state.db(), &account_id)
         .await
-        .map_err(|e| anyhow::Error::from(e))?;
+        .map_err(anyhow::Error::from)?;
     if level < TL_STEWARD {
         return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
@@ -893,8 +871,7 @@ async fn propose_entry_mod(
 
     // Check entry exists.
     let entry = db::get_entry(state.db(), &entry_id, None, false)
-        .await
-        .map_err(|e| anyhow::Error::from(e))?
+        .await?
         .ok_or_else(|| bad_request("entry not found"))?;
     let _ = entry;
 
@@ -911,8 +888,7 @@ async fn propose_entry_mod(
         &account_id,
         &now,
     )
-    .await
-    .map_err(|e| anyhow::Error::from(e))?;
+    .await?;
 
     Ok((
         StatusCode::CREATED,
@@ -940,7 +916,7 @@ async fn vote_entry_mod(
     let account_id = session.account_id.to_string();
     let level = lorehaven_db::governance::trust_for(state.db(), &account_id)
         .await
-        .map_err(|e| anyhow::Error::from(e))?;
+        .map_err(anyhow::Error::from)?;
     if level < TL_STEWARD {
         return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
@@ -951,25 +927,20 @@ async fn vote_entry_mod(
         .ok_or_else(|| bad_request("invalid vote value"))?;
 
     // Find the open proposal for this entry.
-    let proposals = cg_db::list_entry_mod_proposals(state.db(), &entry_id)
-        .await
-        .map_err(|e| anyhow::Error::from(e))?;
+    let proposals = cg_db::list_entry_mod_proposals(state.db(), &entry_id).await?;
     let proposal = proposals
         .into_iter()
         .find(|p| p.status == "open")
         .ok_or_else(|| bad_request("no open moderation proposal for this entry"))?;
 
     let now = chrono::Utc::now().to_rfc3339();
-    let decided = cg_db::vote_on_entry_mod(state.db(), &proposal.id, &account_id, value, &now)
-        .await
-        .map_err(|e| anyhow::Error::from(e))?;
+    let decided =
+        cg_db::vote_on_entry_mod(state.db(), &proposal.id, &account_id, value, &now).await?;
 
     // Auto-execution on decision.
     if let Some(passed) = decided {
         if passed {
-            cg_db::apply_entry_mod_action(state.db(), &proposal.id, &now)
-                .await
-                .map_err(|e| anyhow::Error::from(e))?;
+            cg_db::apply_entry_mod_action(state.db(), &proposal.id, &now).await?;
         }
     }
 

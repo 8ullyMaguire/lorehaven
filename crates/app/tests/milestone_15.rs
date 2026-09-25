@@ -556,7 +556,7 @@ async fn payment_events_record_processor_fees() {
     .expect("record payment event");
     assert!(!event_id.is_empty());
 
-    let pool = match harness.tdb.db().backend() {
+    match harness.tdb.db().backend() {
         lorehaven_db::Backend::Sqlite => {
             let rows = sqlx::query("SELECT amount_minor, processor_fee_minor, net_minor, currency FROM payment_events WHERE id = ?")
                 .bind(&event_id)

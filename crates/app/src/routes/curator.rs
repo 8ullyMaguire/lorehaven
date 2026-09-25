@@ -92,11 +92,11 @@ pub async fn verify_link(
     // Cannot verify your own added links — anti-gaming check
     let links = media_resilience::find_availability_links_for_reference(state.db(), &reference_id)
         .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
     let link = links.iter().find(|l| l.id == body.availability_link_id);
     let Some(link) = link else {
         return Err(ApiError(AppError::NotFound {
-            resource: "availability_link".into(),
+            resource: "availability_link",
         }));
     };
     if link.added_by.as_deref() == Some(&curator_id) {
@@ -164,7 +164,7 @@ pub async fn get_quorum_status(
 ) -> ApiResult<Json<Value>> {
     let links = media_resilience::find_availability_links_for_reference(state.db(), &reference_id)
         .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     let mut link_statuses = Vec::new();
     for link in &links {
@@ -193,14 +193,14 @@ pub async fn get_matching_bounties(
     let healthy_count =
         media_resilience::count_healthy_links(state.db(), &query.media_reference_id)
             .await
-            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+            .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     let links = media_resilience::find_availability_links_for_reference(
         state.db(),
         &query.media_reference_id,
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
     let has_archive = links.iter().any(|l| {
         l.provider == lorehaven_domain::media_resilience::LinkProvider::InternetArchive.as_str()
             && l.status == lorehaven_domain::media_resilience::LinkStatus::Healthy.as_str()

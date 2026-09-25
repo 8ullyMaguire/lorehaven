@@ -1,9 +1,9 @@
 use crate::auth::{MaybeSession, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::{get, post, put};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use lorehaven_domain::AppError;
 use serde::Deserialize;
@@ -207,7 +207,7 @@ pub async fn get_author_media_health(
     let account_id = user.account_id.to_string();
     let report = media_resilience::author_media_health_report(state.db(), &account_id)
         .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     Ok(Json(json!({ "items": report })))
 }

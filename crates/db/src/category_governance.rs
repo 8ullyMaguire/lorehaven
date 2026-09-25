@@ -351,6 +351,9 @@ pub async fn hard_delete_category(db: &Database, slug: &str) -> Result<bool> {
 // --- Proposals ---------------------------------------------------------------
 
 /// Create a new category proposal (§45.2).
+// DB functions take their parameters explicitly rather than a builder:
+// a builder here would only move the same fields one call deeper.
+#[allow(clippy::too_many_arguments)]
 pub async fn create_proposal(
     db: &Database,
     category_slug: &str,

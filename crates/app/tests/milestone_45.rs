@@ -5,6 +5,7 @@
 //! for those flows. Here we verify the public board endpoint works after
 //! migration 0067.
 
+use std::path::Path;
 use std::path::PathBuf;
 
 use axum::body::Body;
@@ -14,7 +15,7 @@ use lorehaven_app::server;
 use lorehaven_app::state::AppState;
 use lorehaven_db::Database;
 use lorehaven_db::DatabaseConfig;
-use serde_json::{json, Value};
+use serde_json::Value;
 use tower::ServiceExt;
 
 fn scratch_dir(tag: &str) -> PathBuf {
@@ -28,7 +29,7 @@ fn scratch_dir(tag: &str) -> PathBuf {
     dir
 }
 
-fn config_for(dir: &PathBuf) -> Config {
+fn config_for(dir: &Path) -> Config {
     let mut config = Config::development_defaults();
     config.storage.root = dir.to_path_buf();
     config.database = DatabaseConfig::new(format!(

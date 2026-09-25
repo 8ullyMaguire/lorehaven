@@ -8,6 +8,7 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
+use std::str::FromStr;
 
 use lorehaven_domain::moderation::SanctionLevel;
 use lorehaven_domain::typed_votes::is_moderator;
@@ -55,7 +56,7 @@ async fn post_sanction(
     if !moderator_check(&state, &pseud_id.to_string()).await? {
         return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
-    let level = SanctionLevel::from_str(&body.level).ok_or_else(|| {
+    let level = SanctionLevel::from_str(&body.level).map_err(|_| {
         ApiError(lorehaven_domain::AppError::field(
             "level",
             "unknown sanction level",
@@ -71,7 +72,7 @@ async fn post_sanction(
         body.expires_at.as_deref(),
     )
     .await
-    .map_err(|e| internal(e.into()))?;
+    .map_err(internal)?;
     Ok(Json(json!({ "id": id, "applied": true })))
 }
 
@@ -89,7 +90,7 @@ async fn get_sanction_check(
     let sanction =
         moderation::check_sanction(state.db(), &query.account, query.category_id.as_deref())
             .await
-            .map_err(|e| internal(e.into()))?;
+            .map_err(internal)?;
     Ok(Json(match sanction {
         Some(s) => json!({
             "active": true,
@@ -117,7 +118,7 @@ async fn put_slow_mode(
 ) -> ApiResult<Json<serde_json::Value>> {
     let topic = lorehaven_db::community::topic_by_id(state.db(), &id)
         .await
-        .map_err(|e| internal(e.into()))?
+        .map_err(internal)?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
     if topic.author_pseud != pseud_id.to_string()
         && !moderator_check(&state, &pseud_id.to_string()).await?
@@ -126,7 +127,7 @@ async fn put_slow_mode(
     }
     moderation::set_slow_mode(state.db(), &id, body.seconds)
         .await
-        .map_err(|e| internal(e.into()))?;
+        .map_err(internal)?;
     Ok(Json(json!({ "slow_mode_seconds": body.seconds })))
 }
 
@@ -142,7 +143,7 @@ async fn put_federation_scope(
     Json(body): Json<FederationScopeBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let scope =
-        lorehaven_domain::moderation::FederationScope::from_str(&body.scope).ok_or_else(|| {
+        lorehaven_domain::moderation::FederationScope::from_str(&body.scope).map_err(|_| {
             ApiError(lorehaven_domain::AppError::field(
                 "scope",
                 "must be 'public', 'local', or 'unlisted'",
@@ -150,7 +151,7 @@ async fn put_federation_scope(
         })?;
     let topic = lorehaven_db::community::topic_by_id(state.db(), &id)
         .await
-        .map_err(|e| internal(e.into()))?
+        .map_err(internal)?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
     if topic.author_pseud != pseud_id.to_string()
         && !moderator_check(&state, &pseud_id.to_string()).await?
@@ -159,7 +160,7 @@ async fn put_federation_scope(
     }
     moderation::set_federation_scope(state.db(), &id, scope.as_str())
         .await
-        .map_err(|e| internal(e.into()))?;
+        .map_err(internal)?;
     Ok(Json(json!({ "federation_scope": scope.as_str() })))
 }
 
@@ -177,7 +178,7 @@ async fn post_feature(
     }
     moderation::feature_post(state.db(), &id, &pseud_id.to_string())
         .await
-        .map_err(|e| internal(e.into()))?;
+        .map_err(internal)?;
     Ok(Json(json!({ "featured": true })))
 }
 

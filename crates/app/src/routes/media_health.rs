@@ -1,9 +1,8 @@
-use crate::auth::{MaybeSession, RequireSession};
+use crate::auth::RequireSession;
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
-use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
-use axum::routing::{get, post};
+use axum::extract::{Query, State};
+use axum::routing::get;
 use axum::Json;
 use chrono::Duration;
 use chrono::Utc;
@@ -48,16 +47,16 @@ async fn media_health_overview(
 
     let total = lorehaven_db::media_resilience::count_total_references(state.db())
         .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     let well_mirrored = lorehaven_db::media_resilience::count_well_mirrored(state.db(), 3)
         .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     let below_threshold =
         lorehaven_db::media_resilience::count_references_below_threshold(state.db(), 3)
             .await
-            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+            .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     let health_pct = if total > 0 {
         (well_mirrored as f64 / total as f64 * 100.0).round()
@@ -69,7 +68,7 @@ async fn media_health_overview(
     let recent_rescues =
         lorehaven_db::media_resilience::count_references_below_threshold(state.db(), 3)
             .await
-            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+            .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     Ok(Json(json!({
         "total_references": total,
@@ -102,7 +101,7 @@ async fn link_rot_report(
 
     let rot = lorehaven_db::media_resilience::link_rot_by_provider(state.db(), &since)
         .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     let total_rot: i64 = rot.iter().map(|(_, c)| c).sum();
 
@@ -130,7 +129,7 @@ async fn curator_leaderboard(
 
     let leaders = lorehaven_db::media_resilience::curator_leaderboard(state.db(), limit)
         .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     Ok(Json(json!({
         "curators": leaders,
@@ -147,7 +146,7 @@ async fn bounty_status(
     let (active_count, total_amount) =
         lorehaven_db::media_resilience::standing_bounty_status(state.db())
             .await
-            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+            .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     Ok(Json(json!({
         "active_bounties": active_count,
@@ -165,11 +164,11 @@ async fn storage_status(
     let (mirror_count, total_bytes) =
         lorehaven_db::media_resilience::local_mirror_storage(state.db())
             .await
-            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+            .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     let ipfs_pins = lorehaven_db::media_resilience::count_active_ipfs_pins(state.db())
         .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     Ok(Json(json!({
         "local_mirrors": mirror_count,
@@ -187,7 +186,7 @@ async fn provider_reliability(
 
     let providers = lorehaven_db::media_resilience::provider_reliability(state.db())
         .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     let ranked: Vec<Value> = providers
         .iter()

@@ -29,7 +29,5 @@ pub async fn recompute_half_life(
     min_age_days: i64,
     window_days: i64,
 ) -> Result<u64> {
-    lorehaven_db::longevity::recompute_half_life(state.db(), min_age_days, window_days)
-        .await
-        .map_err(Into::into)
+    lorehaven_db::longevity::recompute_half_life(state.db(), min_age_days, window_days).await
 }

@@ -1,14 +1,11 @@
 //! Media curator role & bounty system (spec §32.7.5).
 
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
 use lorehaven_db::media_resilience;
 use lorehaven_domain::media_resilience::VerificationType;
 use std::path::PathBuf;
-use tower::ServiceExt;
 
 fn scratch_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -19,21 +16,6 @@ fn scratch_dir(tag: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
-}
-
-fn config_for(dir: &std::path::Path) -> Config {
-    let mut config = Config::development_defaults();
-    config.storage.root = dir.to_path_buf();
-    config
-}
-
-async fn build_app(dir: &PathBuf) -> axum::Router {
-    let config = config_for(dir);
-    let tdb = test_support::TestDb::connect_with_dir("cur", dir).await;
-    let db = tdb.db().clone();
-    let state = AppState::new(config, db);
-    set_trust_proxy(false);
-    server::build_router(state)
 }
 
 #[tokio::test]

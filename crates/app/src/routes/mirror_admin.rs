@@ -1,7 +1,7 @@
 use crate::auth::{MaybeSession, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get, post, put};
 use axum::Json;

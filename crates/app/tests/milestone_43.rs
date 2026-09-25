@@ -4,6 +4,7 @@
 //! the §43.4 stickiness API (GET /browse/sort/:surface, PUT, DELETE),
 //! and the per-surface default-sort contract.
 
+use std::path::Path;
 use std::path::PathBuf;
 
 use axum::body::Body;
@@ -26,7 +27,7 @@ fn scratch_dir(tag: &str) -> PathBuf {
     dir
 }
 
-fn config_for(dir: &PathBuf) -> Config {
+fn config_for(dir: &Path) -> Config {
     let mut config = Config::development_defaults();
     config.storage.root = dir.to_path_buf();
     config.database = DatabaseConfig::new(format!(

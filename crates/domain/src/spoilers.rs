@@ -1,5 +1,6 @@
 /// Spoiler, warning, and readability types (spec §35.4).
 use std::fmt;
+use std::str::FromStr;
 
 /// A content warning type (shares vocabulary with §15.16).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -22,17 +23,6 @@ impl WarningType {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "violence" => Some(Self::Violence),
-            "sexual_content" => Some(Self::SexualContent),
-            "self_harm" => Some(Self::SelfHarm),
-            "spoilers" => Some(Self::Spoilers),
-            "custom" => Some(Self::Custom),
-            _ => None,
-        }
-    }
-
     pub const ALL: [Self; 5] = [
         Self::Violence,
         Self::SexualContent,
@@ -40,6 +30,21 @@ impl WarningType {
         Self::Spoilers,
         Self::Custom,
     ];
+}
+
+impl FromStr for WarningType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "violence" => Ok(Self::Violence),
+            "sexual_content" => Ok(Self::SexualContent),
+            "self_harm" => Ok(Self::SelfHarm),
+            "spoilers" => Ok(Self::Spoilers),
+            "custom" => Ok(Self::Custom),
+            _ => Err(()),
+        }
+    }
 }
 
 impl fmt::Display for WarningType {
@@ -68,12 +73,16 @@ impl WarningAction {
             Self::Show => "show",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for WarningAction {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "blur" => Some(Self::Blur),
-            "show" => Some(Self::Show),
-            _ => None,
+            "blur" => Ok(Self::Blur),
+            "show" => Ok(Self::Show),
+            _ => Err(()),
         }
     }
 }

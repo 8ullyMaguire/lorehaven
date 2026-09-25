@@ -9,6 +9,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
+use std::str::FromStr;
 
 use lorehaven_domain::thread_modes::ThreadMode;
 use lorehaven_domain::typed_votes::is_moderator;
@@ -44,7 +45,7 @@ async fn get_mode(
 ) -> ApiResult<Json<serde_json::Value>> {
     let topic = lorehaven_db::community::topic_by_id(state.db(), &id)
         .await
-        .map_err(|e| internal(e.into()))?;
+        .map_err(internal)?;
     match topic {
         Some(t) => Ok(Json(json!({ "mode": t.mode }))),
         None => Err(ApiError(lorehaven_domain::AppError::NotFound {
@@ -64,7 +65,7 @@ async fn put_mode(
     Path(id): Path<String>,
     Json(body): Json<PutModeBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let mode = ThreadMode::from_str(&body.mode).ok_or_else(|| {
+    let mode = ThreadMode::from_str(&body.mode).map_err(|_| {
         ApiError(lorehaven_domain::AppError::field(
             "mode",
             "unknown thread mode",
@@ -72,7 +73,7 @@ async fn put_mode(
     })?;
     let topic = lorehaven_db::community::topic_by_id(state.db(), &id)
         .await
-        .map_err(|e| internal(e.into()))?
+        .map_err(internal)?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
     let trust = lorehaven_db::governance::trust_for(state.db(), &pseud_id.to_string())
         .await
@@ -82,7 +83,7 @@ async fn put_mode(
     }
     lorehaven_db::community::set_topic_mode(state.db(), &id, mode.as_str())
         .await
-        .map_err(|e| internal(e.into()))?;
+        .map_err(internal)?;
     Ok(Json(json!({ "mode": mode.as_str() })))
 }
 
@@ -97,7 +98,7 @@ async fn get_schedule(
 ) -> ApiResult<Json<serde_json::Value>> {
     let sections = thread_modes::get_schedule(state.db(), &id)
         .await
-        .map_err(|e| internal(e.into()))?;
+        .map_err(internal)?;
     Ok(Json(json!({ "sections": sections })))
 }
 
@@ -119,7 +120,7 @@ async fn add_schedule_section(
     // Only the topic author can add schedule sections.
     let topic = lorehaven_db::community::topic_by_id(state.db(), &id)
         .await
-        .map_err(|e| internal(e.into()))?
+        .map_err(internal)?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
     if topic.author_pseud != pseud_id.to_string() {
         return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
@@ -134,7 +135,7 @@ async fn add_schedule_section(
         &body.unlocks_at,
     )
     .await
-    .map_err(|e| internal(e.into()))?;
+    .map_err(internal)?;
     Ok(Json(json!({ "added": true })))
 }
 
@@ -149,7 +150,7 @@ async fn get_wiki_pin(
 ) -> ApiResult<Json<serde_json::Value>> {
     let pin = thread_modes::get_wiki_pin(state.db(), &id)
         .await
-        .map_err(|e| internal(e.into()))?;
+        .map_err(internal)?;
     Ok(Json(json!({ "wiki_pin": pin })))
 }
 
@@ -172,7 +173,7 @@ async fn post_wiki_pin(
             sqlx::query("INSERT INTO forum_posts (id, topic_id, author_pseud, body, created_at, deleted_at) VALUES (?, ?, ?, ?, ?, NULL)")
                 .bind(&post_id)
                 .bind(&id)
-                .bind(&pseud_id.to_string())
+                .bind(pseud_id.to_string())
                 .bind(&body.body)
                 .bind(&now)
                 .execute(state.db().sqlite_pool().expect("sqlite"))
@@ -183,7 +184,7 @@ async fn post_wiki_pin(
             sqlx::query("INSERT INTO forum_posts (id, topic_id, author_pseud, body, created_at, deleted_at) VALUES ($1::uuid, $2::uuid, $3, $4, $5, NULL)")
                 .bind(&post_id)
                 .bind(&id)
-                .bind(&pseud_id.to_string())
+                .bind(pseud_id.to_string())
                 .bind(&body.body)
                 .bind(&now)
                 .execute(state.db().postgres_pool().expect("postgres"))
@@ -193,7 +194,7 @@ async fn post_wiki_pin(
     }
     thread_modes::create_wiki_pin(state.db(), &id, &post_id, &body.body, &pseud_id.to_string())
         .await
-        .map_err(|e| internal(e.into()))?;
+        .map_err(internal)?;
     Ok(Json(json!({ "created": true, "post_id": post_id })))
 }
 
@@ -210,7 +211,7 @@ async fn approve_wiki_pin(
 ) -> ApiResult<Json<serde_json::Value>> {
     let topic = lorehaven_db::community::topic_by_id(state.db(), &id)
         .await
-        .map_err(|e| internal(e.into()))?
+        .map_err(internal)?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "topic" }))?;
     let trust = lorehaven_db::governance::trust_for(state.db(), &pseud_id.to_string())
         .await
@@ -220,7 +221,7 @@ async fn approve_wiki_pin(
     }
     thread_modes::approve_wiki_pin(state.db(), &id, &body.post_id, &pseud_id.to_string())
         .await
-        .map_err(|e| internal(e.into()))?;
+        .map_err(internal)?;
     Ok(Json(json!({ "approved": true })))
 }
 
@@ -235,7 +236,7 @@ async fn join_critique(
 ) -> ApiResult<Json<serde_json::Value>> {
     let position = thread_modes::join_critique(state.db(), &id, &pseud_id.to_string())
         .await
-        .map_err(|e| internal(e.into()))?;
+        .map_err(internal)?;
     Ok(Json(json!({ "joined": true, "position": position })))
 }
 
@@ -246,7 +247,7 @@ async fn get_critique_queue(
 ) -> ApiResult<Json<serde_json::Value>> {
     let queue = thread_modes::get_critique_queue(state.db(), &id)
         .await
-        .map_err(|e| internal(e.into()))?;
+        .map_err(internal)?;
     Ok(Json(json!({ "queue": queue })))
 }
 

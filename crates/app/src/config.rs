@@ -559,9 +559,10 @@ pub struct InstanceConfig {
 /// but puts a sign-in wall in front of it. `Private` is the operator's
 /// maintenance posture: the instance answers nobody but an administrator, and
 /// says so rather than pretending to be an empty public library.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InstanceMode {
     /// Anyone may browse. Writes still require a session.
+    #[default]
     Public,
     /// Browsing requires a session. The landing page and `/api/v1/meta` stay
     /// open, because a reader who cannot even see that sign-in exists cannot
@@ -614,12 +615,6 @@ impl InstanceMode {
             anonymous_reading_enabled: self.allows_anonymous_browsing(),
             ..lorehaven_domain::policy::AccessPolicy::default()
         }
-    }
-}
-
-impl Default for InstanceMode {
-    fn default() -> Self {
-        Self::Public
     }
 }
 

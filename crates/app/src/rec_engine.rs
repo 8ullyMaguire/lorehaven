@@ -33,7 +33,7 @@ pub fn build_registry(config: &crate::config::DiscoveryConfig) -> RecRegistry {
     let enabled = &config.rec_enabled_strategies;
 
     for name in available_strategies() {
-        if !enabled.is_empty() && !enabled.iter().any(|s| *s == name) {
+        if !enabled.is_empty() && !enabled.contains(&name) {
             continue;
         }
         if let Some(factory) = factories.get(&name) {

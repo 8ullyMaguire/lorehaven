@@ -1041,7 +1041,7 @@ async fn a_post_mention_creates_a_mention_event_and_notification() {
     let mut alice = harness.client();
     register(&mut alice, "alice@example.com", "Alice").await;
     let mut bob = harness.client();
-    let (_, bob_pseud) = register(&mut bob, "bob@example.com", "Bob").await;
+    let (_, _bob_pseud) = register(&mut bob, "bob@example.com", "Bob").await;
 
     // Seed a category.
     let cat_id = "11111111-1111-1111-1111-111111111111";

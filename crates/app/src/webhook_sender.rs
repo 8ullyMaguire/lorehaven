@@ -32,9 +32,7 @@ fn ipv4_addr(addr: &str) -> Ipv4Addr {
 
 fn ipv4_mapped_in_v6(v6: &Ipv6Addr) -> bool {
     // ::ffff:0:0/96
-    (v6.segments()[0] & 0xffff) == 0x0000
-        && (v6.segments()[1] & 0xffff) == 0x0000
-        && (v6.segments()[2] & 0xffff) == 0xffff
+    v6.segments()[0] == 0x0000 && v6.segments()[1] == 0x0000 && v6.segments()[2] == 0xffff
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -215,17 +213,17 @@ fn is_ip_blocked(ip: IpAddr) -> bool {
                 || v6.is_multicast()  // ff00::/8
                 || (v6.segments()[0] & 0xfe00) == 0xfc00  // Unique Local (fc00::/7)
                 || (v6.segments()[0] & 0xffc0) == 0xfe80  // Link-Local (fe80::/10)
-                || (v6.segments()[0] & 0xffff) == 0xfe00 && (v6.segments()[1] & 0xffc0) == 0xfb00  // Documentation (2001:db8::/32)
-                || (v6.segments()[0] & 0xffff) == 0xfe00 && (v6.segments()[1] & 0xffc0) == 0xfd00  // Deprecated site-local
+                || v6.segments()[0] == 0xfe00 && (v6.segments()[1] & 0xffc0) == 0xfb00  // Documentation (2001:db8::/32)
+                || v6.segments()[0] == 0xfe00 && (v6.segments()[1] & 0xffc0) == 0xfd00  // Deprecated site-local
                 || (v6.segments()[0] & 0xffc0) == 0xfd00 && (v6.segments()[1] & 0xffc0) == 0xfc00  // Unique Local (fd00::/8)
                 || (v6.segments()[0] & 0xffc0) == 0xfe00 && (v6.segments()[1] & 0xffc0) == 0xf800  // Teredo tunneling (2001::/32)
-                || (v6.segments()[0] & 0xffff) == 0x0000 && (v6.segments()[1] & 0xffff) == 0x0000 && (v6.segments()[2] & 0xffff) == 0x0000 && (v6.segments()[3] & 0xffff) == 0x0000  // Unspecified
-                || (v6.segments()[0] & 0xffff) == 0x0000 && (v6.segments()[1] & 0xffff) == 0x0000 && (v6.segments()[2] & 0xffff) == 0x0000 && (v6.segments()[3] & 0xffff) == 0x0001  // Loopback
-                || (v6.segments()[0] & 0xffff) == 0x0000 && (v6.segments()[1] & 0xffff) == 0x0000 && (v6.segments()[2] & 0xffff) == 0x0000 && (v6.segments()[3] & 0xffff) == 0x0002  // 6to4 relay anycast
-                || (v6.segments()[0] & 0xffff) == 0x2002 && (v6.segments()[1] & 0xffff) == 0x0000  // 6to4
+                || v6.segments()[0] == 0x0000 && v6.segments()[1] == 0x0000 && v6.segments()[2] == 0x0000 && v6.segments()[3] == 0x0000  // Unspecified
+                || v6.segments()[0] == 0x0000 && v6.segments()[1] == 0x0000 && v6.segments()[2] == 0x0000 && v6.segments()[3] == 0x0001  // Loopback
+                || v6.segments()[0] == 0x0000 && v6.segments()[1] == 0x0000 && v6.segments()[2] == 0x0000 && v6.segments()[3] == 0x0002  // 6to4 relay anycast
+                || v6.segments()[0] == 0x2002 && v6.segments()[1] == 0x0000  // 6to4
                 || (v6.segments()[0] & 0xffc0) == 0xfe80  // Link-local (fe80::/10) - duplicate check for clarity
-                || (v6.segments()[0] & 0xffff) == 0x0000 && (v6.segments()[1] & 0xffff) == 0x0000 && (v6.segments()[2] & 0xffff) == 0x0000 && (v6.segments()[3] & 0xffff) == 0x0009  // Discard
-                || (v6.segments()[0] & 0xffff) == 0x0000 && (v6.segments()[1] & 0xffff) == 0x0000 && (v6.segments()[2] & 0xffff) == 0x0000 && (v6.segments()[3] & 0xffff) == 0x000f  // Port Control Protocol
+                || v6.segments()[0] == 0x0000 && v6.segments()[1] == 0x0000 && v6.segments()[2] == 0x0000 && v6.segments()[3] == 0x0009  // Discard
+                || v6.segments()[0] == 0x0000 && v6.segments()[1] == 0x0000 && v6.segments()[2] == 0x0000 && v6.segments()[3] == 0x000f  // Port Control Protocol
                 || ipv4_mapped_in_v6(&v6) // IPv4-mapped IPv6 addresses (::ffff:0:0/96)
         }
     }

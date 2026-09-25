@@ -2,7 +2,7 @@ use crate::auth::{MaybeSession, RequirePseud};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
-use axum::routing::{delete, get};
+use axum::routing::get;
 use axum::{Json, Router};
 use lorehaven_domain::browse::Sort;
 use lorehaven_domain::AppError;
@@ -253,14 +253,14 @@ fn apply_sort(items: &mut Vec<PersonItem>, sort: &str) {
     match sort {
         "new" => items.sort_by(|a, b| b.id.cmp(&a.id)),
         "updated" => items.sort_by(|a, b| b.id.cmp(&a.id)),
-        "trending" => items.sort_by(|a, b| b.work_count.cmp(&a.work_count)),
-        "top" => items.sort_by(|a, b| b.work_count.cmp(&a.work_count)),
+        "trending" => items.sort_by_key(|i| std::cmp::Reverse(i.work_count)),
+        "top" => items.sort_by_key(|i| std::cmp::Reverse(i.work_count)),
         "az" => items.sort_by(|a, b| {
             a.display_name
                 .to_lowercase()
                 .cmp(&b.display_name.to_lowercase())
         }),
-        "for-you" => items.sort_by(|a, b| b.work_count.cmp(&a.work_count)),
+        "for-you" => items.sort_by_key(|i| std::cmp::Reverse(i.work_count)),
         _ => {}
     }
 }
@@ -319,10 +319,10 @@ fn apply_tag_sort(items: &mut Vec<TagItem>, sort: &str) {
     match sort {
         "new" => items.sort_by(|a, b| b.id.cmp(&a.id)),
         "updated" => items.sort_by(|a, b| b.id.cmp(&a.id)),
-        "trending" => items.sort_by(|a, b| b.work_count.cmp(&a.work_count)),
-        "top" => items.sort_by(|a, b| b.work_count.cmp(&a.work_count)),
-        "az" => items.sort_by(|a, b| a.canonical.to_lowercase().cmp(&b.canonical.to_lowercase())),
-        "for-you" => items.sort_by(|a, b| b.work_count.cmp(&a.work_count)),
+        "trending" => items.sort_by_key(|i| std::cmp::Reverse(i.work_count)),
+        "top" => items.sort_by_key(|i| std::cmp::Reverse(i.work_count)),
+        "az" => items.sort_by_key(|a| a.canonical.to_lowercase()),
+        "for-you" => items.sort_by_key(|i| std::cmp::Reverse(i.work_count)),
         _ => {}
     }
 }
@@ -424,10 +424,10 @@ fn apply_fandom_sort(items: &mut Vec<FandomItem>, sort: &str) {
     match sort {
         "new" => items.sort_by(|a, b| b.slug.cmp(&a.slug)),
         "updated" => items.sort_by(|a, b| b.slug.cmp(&a.slug)),
-        "trending" => items.sort_by(|a, b| b.work_count.cmp(&a.work_count)),
-        "top" => items.sort_by(|a, b| b.work_count.cmp(&a.work_count)),
-        "az" => items.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
-        "for-you" => items.sort_by(|a, b| b.work_count.cmp(&a.work_count)),
+        "trending" => items.sort_by_key(|i| std::cmp::Reverse(i.work_count)),
+        "top" => items.sort_by_key(|i| std::cmp::Reverse(i.work_count)),
+        "az" => items.sort_by_key(|a| a.name.to_lowercase()),
+        "for-you" => items.sort_by_key(|i| std::cmp::Reverse(i.work_count)),
         _ => {}
     }
 }
@@ -477,7 +477,7 @@ fn apply_works_sort(items: &mut Vec<WorksByTagItem>, sort: &str) {
         "updated" => items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at)),
         "trending" => items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at)),
         "top" => items.sort_by(|a, b| a.title.cmp(&b.title)),
-        "az" => items.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase())),
+        "az" => items.sort_by_key(|a| a.title.to_lowercase()),
         "for-you" => items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at)),
         _ => {}
     }

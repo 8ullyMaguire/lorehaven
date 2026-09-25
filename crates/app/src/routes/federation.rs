@@ -62,7 +62,7 @@ pub async fn get_instance_theme(
     let instance_host = state.config().site.base_url.clone();
     let theme = instance_theme::get_local_theme(state.db(), &instance_host)
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?
         .map(|t| {
             serde_json::json!({
                 "instance_id": t.instance_id,
@@ -98,18 +98,18 @@ pub async fn recompute_theme(
     // Aggregate tag weights from bookmarks and private_tags
     let theme_vector = compute_theme_from_engagement(state.db())
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
 
     // Keep existing visibility setting (default false)
     let existing = instance_theme::get_local_theme(state.db(), &instance_host)
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     let is_public = existing.as_ref().map(|t| t.public).unwrap_or(false);
 
     let now = lorehaven_db::identity::now_rfc3339();
     instance_theme::upsert_theme(state.db(), &instance_host, &theme_vector, is_public, &now)
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
 
     Ok(Json(serde_json::json!({
         "status": "recomputed",
@@ -134,7 +134,7 @@ pub async fn set_theme_visibility(
     let instance_host = state.config().site.base_url.clone();
     let existing = instance_theme::get_local_theme(state.db(), &instance_host)
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
 
     let tv = existing
         .as_ref()
@@ -143,7 +143,7 @@ pub async fn set_theme_visibility(
     let now = lorehaven_db::identity::now_rfc3339();
     instance_theme::upsert_theme(state.db(), &instance_host, &tv, body.public, &now)
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
 
     Ok(Json(serde_json::json!({
         "public": body.public,
@@ -255,7 +255,7 @@ pub async fn list_public_themes(
 ) -> ApiResult<Json<Value>> {
     let themes = instance_theme::list_public_themes(state.db())
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     Ok(Json(serde_json::json!(themes)))
 }
 
@@ -276,7 +276,7 @@ pub async fn list_peers(
     }
     let peers = fed::list_all_peers(state.db())
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     Ok(Json(serde_json::json!(peers)))
 }
 
@@ -294,7 +294,7 @@ pub async fn list_similar_peers(
     }
     let peers = fed::list_similar_peers(state.db(), query.threshold, query.limit)
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     Ok(Json(serde_json::json!(peers)))
 }
 
@@ -326,7 +326,7 @@ pub async fn set_peer_state(
         Some("admin"),
     )
     .await
-    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }
 
@@ -354,7 +354,7 @@ pub async fn ap_inbox(
     // Look up or create the remote actor
     let actor = fed::get_actor_by_ap_id(state.db(), actor_id)
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
 
     let actor_db_id = match actor {
         Some(a) => a.id,
@@ -373,7 +373,7 @@ pub async fn ap_inbox(
                 "unknown",
             )
             .await
-            .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
+            .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?
         }
     };
 
@@ -391,7 +391,7 @@ pub async fn ap_inbox(
         &activity,
     )
     .await
-    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
 
     Ok(Json(serde_json::json!({ "status": "received" })))
 }

@@ -11,7 +11,7 @@
 use std::path::Path;
 
 use axum::body::Body;
-use axum::http::{header, Method, Request, StatusCode};
+use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server;
 use lorehaven_app::state::AppState;
@@ -386,7 +386,7 @@ async fn a_recorded_choice_the_operator_later_disables_is_reported_not_hidden() 
     db.migrate().await.expect("migrations");
 
     // First boot: everything enabled, the reader chooses tag_graph.
-    let mut client = {
+    let client = {
         let app = server::build_router(AppState::new(config.clone(), db.clone()));
         let mut client = Client {
             app,

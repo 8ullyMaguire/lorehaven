@@ -17,6 +17,23 @@
 use crate::Database;
 use serde_json::json;
 
+/// The `bounties` row as selected by the read queries, in column order.
+///
+/// Named because the row is read in several places and the ten-element tuple is
+/// otherwise unreadable. The element order must match the SELECT lists exactly.
+type BountyRow = (
+    String,
+    String,
+    String,
+    String,
+    i64,
+    i64,
+    String,
+    String,
+    String,
+    Option<String>,
+);
+
 /// A bounty as the API renders it.
 #[derive(Debug, Clone)]
 pub struct Bounty {
@@ -192,18 +209,7 @@ async fn record_contribution(
 
 /// Fetch a single bounty by id.
 pub async fn fetch_bounty(db: &Database, id: &str) -> Result<Option<Bounty>, sqlx::Error> {
-    let row: Option<(
-        String,
-        String,
-        String,
-        String,
-        i64,
-        i64,
-        String,
-        String,
-        String,
-        Option<String>,
-    )> = match db.backend() {
+    let row: Option<BountyRow> = match db.backend() {
         crate::Backend::Sqlite => {
             let pool = db.sqlite_pool().expect("sqlite handle");
             sqlx::query_as(
@@ -257,18 +263,7 @@ pub async fn fetch_bounty(db: &Database, id: &str) -> Result<Option<Bounty>, sql
 
 /// List open (or funding) bounties, newest first.
 pub async fn list_flexible_bounties(db: &Database) -> Result<Vec<Value>, sqlx::Error> {
-    let rows: Vec<(
-        String,
-        String,
-        String,
-        String,
-        i64,
-        i64,
-        String,
-        String,
-        String,
-        Option<String>,
-    )> = match db.backend() {
+    let rows: Vec<BountyRow> = match db.backend() {
         crate::Backend::Sqlite => {
             let pool = db.sqlite_pool().expect("sqlite handle");
             sqlx::query_as(

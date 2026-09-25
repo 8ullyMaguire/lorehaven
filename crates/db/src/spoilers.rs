@@ -1,6 +1,7 @@
 use crate::{Backend, Database};
 use anyhow::Result;
 use lorehaven_domain::spoilers::{WarningAction, WarningType};
+use std::str::FromStr;
 
 /// Upsert a reader's progress through a work (spec §35.4).
 pub async fn upsert_reader_progress(
@@ -178,7 +179,7 @@ pub async fn upsert_draft(db: &Database, account: &str, topic_id: &str, body: &s
                  VALUES (?, ?, ?, ?, ?)
                  ON CONFLICT(account, topic_id) DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at"
             )
-            .bind(&uuid::Uuid::new_v4().to_string())
+            .bind(uuid::Uuid::new_v4().to_string())
             .bind(account)
             .bind(topic_id)
             .bind(body)
@@ -192,7 +193,7 @@ pub async fn upsert_draft(db: &Database, account: &str, topic_id: &str, body: &s
                  VALUES ($1, $2, $3, $4, $5)
                  ON CONFLICT(account, topic_id) DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at"
             )
-            .bind(&uuid::Uuid::new_v4().to_string())
+            .bind(uuid::Uuid::new_v4().to_string())
             .bind(account)
             .bind(topic_id)
             .bind(body)
@@ -313,7 +314,12 @@ pub async fn list_warning_prefs(
     };
     Ok(rows
         .into_iter()
-        .filter_map(|(t, a)| Some((WarningType::from_str(&t)?, WarningAction::from_str(&a)?)))
+        .filter_map(|(t, a)| {
+            Some((
+                WarningType::from_str(&t).ok()?,
+                WarningAction::from_str(&a).ok()?,
+            ))
+        })
         .collect())
 }
 

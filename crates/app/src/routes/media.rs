@@ -209,7 +209,7 @@ async fn direct_door_eligible(
     session: Option<&SessionUser>,
     token: Option<&TokenUser>,
 ) -> bool {
-    use lorehaven_domain::policy::{can_access_content, AccessPolicy, ContentFacts};
+    use lorehaven_domain::policy::{can_access_content, ContentFacts};
     // If a bearer token is presented, enforce API scopes (spec §23.1): the
     // token must carry ContentRead to read media. A session caller bypasses
     // scope checks (session authorization is established at login).
@@ -450,17 +450,14 @@ async fn media_collection_feed(
 
     // id here can be either a collection id or a kind like "public_domain"
     let items = if id == "public_domain" {
-        match lorehaven_db::media::list_media_by_license(db, "cc0", account_id.as_deref(), 50, None)
+        lorehaven_db::media::list_media_by_license(db, "cc0", account_id.as_deref(), 50, None)
             .await
-        {
-            Ok((items, _, _)) => items,
-            Err(_) => Vec::new(),
-        }
+            .map(|(items, _, _)| items)
+            .unwrap_or_default()
     } else {
-        match lorehaven_db::media::collection_media(db, &id, account_id.as_deref()).await {
-            Ok(items) => items,
-            Err(_) => Vec::new(),
-        }
+        lorehaven_db::media::collection_media(db, &id, account_id.as_deref())
+            .await
+            .unwrap_or_default()
     };
     media_feed_dc(items, "")
 }

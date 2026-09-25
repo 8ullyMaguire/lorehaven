@@ -188,7 +188,7 @@ pub async fn record_search_miss(db: &Database, query_hash: &str, query_text: &st
                  VALUES (?, ?, ?, ?, ?, 1)
                  ON CONFLICT(query_hash) DO UPDATE SET last_seen_at = excluded.last_seen_at, count = count + 1"
             )
-            .bind(&uuid::Uuid::new_v4().to_string())
+            .bind(uuid::Uuid::new_v4().to_string())
             .bind(query_hash)
             .bind(query_text)
             .bind(&now)
@@ -202,7 +202,7 @@ pub async fn record_search_miss(db: &Database, query_hash: &str, query_text: &st
                  VALUES ($1, $2, $3, $4, $5, 1)
                  ON CONFLICT(query_hash) DO UPDATE SET last_seen_at = excluded.last_seen_at, count = forum_search_misses.count + 1"
             )
-            .bind(&uuid::Uuid::new_v4().to_string())
+            .bind(uuid::Uuid::new_v4().to_string())
             .bind(query_hash)
             .bind(query_text)
             .bind(&now)

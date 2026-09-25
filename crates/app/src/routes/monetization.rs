@@ -737,8 +737,8 @@ pub async fn record_reading_session(
                 "INSERT INTO reading_sessions (id, account_id, work_id, seconds, started_at, ended_at)
                  VALUES (?, ?, ?, ?, ?, ?)"
             )
-            .bind(&session_id).bind(&user.account_id.to_string())
-            .bind(&work_id.to_canonical_string()).bind(body.seconds)
+            .bind(&session_id).bind(user.account_id.to_string())
+            .bind(work_id.to_canonical_string()).bind(body.seconds)
             .bind(&now).bind(&now)
             .execute(state.db().sqlite_pool().expect("sqlite")).await
             .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
@@ -748,8 +748,8 @@ pub async fn record_reading_session(
                 "INSERT INTO reading_sessions (id, account_id, work_id, seconds, started_at, ended_at)
                  VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?, ?)"
             )
-            .bind(&session_id).bind(&user.account_id.to_string())
-            .bind(&work_id.to_canonical_string()).bind(body.seconds)
+            .bind(&session_id).bind(user.account_id.to_string())
+            .bind(work_id.to_canonical_string()).bind(body.seconds)
             .bind(&now).bind(&now)
             .execute(state.db().postgres_pool().expect("postgres")).await
             .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;

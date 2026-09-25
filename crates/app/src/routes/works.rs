@@ -50,8 +50,7 @@ use lorehaven_domain::permission::{
     ExclusionTarget, LineageEdge, LineageKind, Permission, PermissionStatement,
 };
 use lorehaven_domain::policy::{
-    can_access_content, AccessPolicy, Actor, ContentFacts, Decision, DenyReason, Lifecycle,
-    Visibility,
+    can_access_content, Actor, ContentFacts, Decision, DenyReason, Lifecycle, Visibility,
 };
 use lorehaven_domain::{AppError, ChapterId, PseudId, RevisionId, WorkId};
 use serde::{Deserialize, Serialize};
@@ -1260,11 +1259,11 @@ async fn record_view_for_work(
         false,
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
     if is_new {
         work_metrics::increment_views(state.db(), &work_id.to_string())
             .await
-            .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+            .map_err(|e| ApiError(AppError::Internal(e)))?;
     }
     Ok(())
 }
@@ -1282,7 +1281,7 @@ async fn toggle_kudos(
         &user.account_id.to_string(),
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
     Ok(Json(serde_json::json!({ "kudoed": kudoed })))
 }
 
@@ -1624,43 +1623,6 @@ pub async fn list_lineage(
     Ok(Json(json!({ "items": items })))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn titles_are_trimmed_and_length_checked() {
-        assert_eq!(validate_title("  A Story  ", false).expect("ok"), "A Story");
-        assert_eq!(validate_title("", false).expect("ok"), "");
-        assert!(validate_title("", true).is_err());
-        assert!(validate_title(&"x".repeat(301), false).is_err());
-        assert!(validate_title("bell\u{7}", false).is_err());
-    }
-
-    #[test]
-    fn enumerated_fields_reject_anything_they_do_not_know() {
-        assert!(validate_rating("teen").is_ok());
-        assert!(validate_rating("Teen").is_err());
-        assert!(validate_rating("explicit-ish").is_err());
-        assert!(validate_visibility("unlisted").is_ok());
-        assert!(validate_visibility("secret").is_err());
-        assert!(validate_completion("hiatus").is_ok());
-        assert!(validate_completion("stalled").is_err());
-        assert!(validate_language("pt-BR").is_ok());
-        assert!(validate_language("english").is_err());
-    }
-
-    #[test]
-    fn an_unrecognised_stored_visibility_is_not_treated_as_listable() {
-        // `parse_visibility` defaults to Public for the *stored* value, which is
-        // safe because the column default is public; the risk it guards against
-        // is a *narrower* value being read as a wider one, and it never is.
-        assert_eq!(parse_visibility("public"), Visibility::Public);
-        assert_eq!(parse_visibility("unlisted"), Visibility::Unlisted);
-        assert_eq!(parse_visibility("restricted"), Visibility::Restricted);
-    }
-}
-
 /// Fork a work (spec §40.1). Creates a new empty draft owned by the caller,
 /// linked to the parent through a `remix` lineage edge, inheriting the
 /// parent's tags. No body text is copied — a fork starts empty.
@@ -1732,7 +1694,7 @@ async fn fork_work(
     }
 
     // Guard 4: visibility — read parent to inherit visibility.
-    let parent_work = content::find_work(state.db(), parent_id.clone())
+    let parent_work = content::find_work(state.db(), parent_id)
         .await?
         .ok_or_else(|| ApiError(AppError::NotFound { resource: "work" }))?;
 
@@ -1765,4 +1727,41 @@ async fn fork_work(
 
     let view = author_view(&state, &user, &new_work).await?;
     Ok((StatusCode::CREATED, Json(view)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn titles_are_trimmed_and_length_checked() {
+        assert_eq!(validate_title("  A Story  ", false).expect("ok"), "A Story");
+        assert_eq!(validate_title("", false).expect("ok"), "");
+        assert!(validate_title("", true).is_err());
+        assert!(validate_title(&"x".repeat(301), false).is_err());
+        assert!(validate_title("bell\u{7}", false).is_err());
+    }
+
+    #[test]
+    fn enumerated_fields_reject_anything_they_do_not_know() {
+        assert!(validate_rating("teen").is_ok());
+        assert!(validate_rating("Teen").is_err());
+        assert!(validate_rating("explicit-ish").is_err());
+        assert!(validate_visibility("unlisted").is_ok());
+        assert!(validate_visibility("secret").is_err());
+        assert!(validate_completion("hiatus").is_ok());
+        assert!(validate_completion("stalled").is_err());
+        assert!(validate_language("pt-BR").is_ok());
+        assert!(validate_language("english").is_err());
+    }
+
+    #[test]
+    fn an_unrecognised_stored_visibility_is_not_treated_as_listable() {
+        // `parse_visibility` defaults to Public for the *stored* value, which is
+        // safe because the column default is public; the risk it guards against
+        // is a *narrower* value being read as a wider one, and it never is.
+        assert_eq!(parse_visibility("public"), Visibility::Public);
+        assert_eq!(parse_visibility("unlisted"), Visibility::Unlisted);
+        assert_eq!(parse_visibility("restricted"), Visibility::Restricted);
+    }
 }

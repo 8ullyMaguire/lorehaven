@@ -4,6 +4,7 @@
 //! tags, the onboarding quiz (pick → vector → centroid distance), and taste
 //! probe engagement recording.
 
+use std::path::Path;
 use std::path::PathBuf;
 
 use axum::body::Body;
@@ -26,7 +27,7 @@ fn scratch_dir(tag: &str) -> PathBuf {
     dir
 }
 
-fn config_for(dir: &PathBuf) -> Config {
+fn config_for(dir: &Path) -> Config {
     let mut config = Config::development_defaults();
     config.storage.root = dir.to_path_buf();
     config.database = DatabaseConfig::new(format!(
@@ -339,15 +340,12 @@ async fn quiz_skip_leaves_account_without_vector() {
     let stored = lorehaven_db::taste_vectors::get_taste_vector(&db, &account)
         .await
         .expect("get vector");
-    match stored {
-        Some((ref v, _d, ref at)) => {
-            assert!(
-                v.is_empty(),
-                "skipped quiz should not store a non-empty vector"
-            );
-            assert!(at.is_empty(), "skipped quiz should not store a computed_at");
-        }
-        None => {}
+    if let Some((ref v, _d, ref at)) = stored {
+        assert!(
+            v.is_empty(),
+            "skipped quiz should not store a non-empty vector"
+        );
+        assert!(at.is_empty(), "skipped quiz should not store a computed_at");
     }
 }
 

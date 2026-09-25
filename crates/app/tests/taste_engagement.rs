@@ -4,6 +4,7 @@
 //! incentives (completion bonus, resurrection reward), and taste-weighted
 //! notification queueing.
 
+use std::path::Path;
 use std::path::PathBuf;
 
 use axum::body::Body;
@@ -26,7 +27,7 @@ fn scratch_dir(tag: &str) -> PathBuf {
     dir
 }
 
-fn config_for(dir: &PathBuf) -> Config {
+fn config_for(dir: &Path) -> Config {
     let mut config = Config::development_defaults();
     config.storage.root = dir.to_path_buf();
     config.database = DatabaseConfig::new(format!(
@@ -414,7 +415,7 @@ async fn days_to_iso_date_known_dates() {
 async fn login_records_streak_and_endpoint_reports_it() {
     let harness = Harness::new("streak-endpoint").await;
     let mut client = harness.client();
-    let account = register(&mut client, "streak3@t.test", "streak3").await;
+    let _account = register(&mut client, "streak3@t.test", "streak3").await;
 
     // Login again through the API to trigger record_login in the login route.
     let (status, _body) = client

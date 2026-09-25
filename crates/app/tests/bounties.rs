@@ -14,6 +14,7 @@ use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
 use lorehaven_db::DatabaseConfig;
 use serde_json::{json, Value};
+use std::path::Path;
 use std::path::PathBuf;
 use tower::ServiceExt;
 
@@ -28,7 +29,7 @@ fn scratch_dir(tag: &str) -> PathBuf {
     dir
 }
 
-fn config_for(dir: &PathBuf) -> Config {
+fn config_for(dir: &Path) -> Config {
     let mut config = Config::development_defaults();
     config.storage.root = dir.to_path_buf();
     config.database = DatabaseConfig::new(format!(
@@ -82,12 +83,6 @@ impl Client {
             app,
             cookies: Vec::new(),
         }
-    }
-    fn cookie(&self, name: &str) -> Option<&str> {
-        self.cookies
-            .iter()
-            .find(|(k, _)| k == name)
-            .map(|(_, v)| v.as_str())
     }
     fn capture(&mut self, response: &axum::response::Response) {
         for value in response.headers().get_all(header::SET_COOKIE) {

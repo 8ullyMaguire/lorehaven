@@ -236,7 +236,7 @@ async fn get_discovery(
     // Apply half-life ranking (silent reordering, spec §41.1).
     if state.config().discovery.enable_half_life {
         use lorehaven_db::longevity::half_life_map;
-        let ids: Vec<_> = blended.iter().map(|c| c.work_id.clone()).collect();
+        let ids: Vec<_> = blended.iter().map(|c| c.work_id).collect();
         let half_life_scores = half_life_map(state.db(), &ids)
             .await
             .map_err(|e| ApiError(AppError::Internal(e)))?;

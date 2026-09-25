@@ -57,20 +57,20 @@ pub async fn get_media_reference(
 ) -> ApiResult<Json<Value>> {
     let Some(reference) = media_resilience::find_media_reference_by_id(state.db(), &reference_id)
         .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?
+        .map_err(|e| ApiError(AppError::Internal(e)))?
     else {
         return Err(ApiError(AppError::NotFound {
-            resource: "media_reference".into(),
+            resource: "media_reference",
         }));
     };
 
     let links = media_resilience::find_availability_links_for_reference(state.db(), &reference.id)
         .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     let healthy = media_resilience::count_healthy_links(state.db(), &reference.id)
         .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     Ok(Json(reference_to_json(&reference, healthy, &links)))
 }
@@ -142,7 +142,7 @@ pub async fn add_media_reference(
         lorehaven_domain::media_resilience::MediaKind::Image,
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     media_resilience::insert_availability_link(
         state.db(),
@@ -154,7 +154,7 @@ pub async fn add_media_reference(
         100,
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     media_resilience::insert_work_media_reference(
         state.db(),
@@ -167,7 +167,7 @@ pub async fn add_media_reference(
         body.author_note.as_deref(),
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     Ok((
         StatusCode::CREATED,
@@ -187,15 +187,15 @@ pub struct ReportBrokenBody {
 
 pub async fn report_broken_link(
     State(state): State<AppState>,
-    RequireSession(user): RequireSession,
+    RequireSession(_user): RequireSession,
     Path(link_id): Path<String>,
 ) -> ApiResult<Json<Value>> {
     let links = media_resilience::find_links_needing_check(state.db(), 10000)
         .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
     let Some(link) = links.iter().find(|l| l.id == link_id) else {
         return Err(ApiError(AppError::NotFound {
-            resource: "availability_link".into(),
+            resource: "availability_link",
         }));
     };
 
@@ -207,7 +207,7 @@ pub async fn report_broken_link(
         link.consecutive_failures + 1,
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     Ok(Json(json!({ "status": "reported" })))
 }
@@ -247,10 +247,10 @@ pub async fn add_mirror_link(
     }
     let Some(_reference) = media_resilience::find_media_reference_by_id(state.db(), &reference_id)
         .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?
+        .map_err(|e| ApiError(AppError::Internal(e)))?
     else {
         return Err(ApiError(AppError::NotFound {
-            resource: "media_reference".into(),
+            resource: "media_reference",
         }));
     };
 
@@ -275,7 +275,7 @@ pub async fn add_mirror_link(
         priority,
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     // Award curator credits for mirror add
     media_resilience::insert_curator_reward(
@@ -287,7 +287,7 @@ pub async fn add_mirror_link(
         15,
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     Ok((
         StatusCode::CREATED,

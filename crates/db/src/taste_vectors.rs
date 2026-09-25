@@ -1,7 +1,6 @@
 //! M44 taste vectors — multi-dimensional user taste alignment (spec §16.17).
 //! DB functions for computing, storing, and querying taste vectors.
 
-use serde_json::{json, Value};
 use sqlx::Row;
 
 use crate::{Backend, Database};
@@ -163,11 +162,11 @@ pub async fn compute_and_store_taste_vector(
     match db.backend() {
         Backend::Sqlite => {
             let pool = db.sqlite_pool().ok_or(pool_err())?;
-            store_taste_vector_sqlite(pool, &account_id, &user_vector, distance, &now).await?
+            store_taste_vector_sqlite(pool, account_id, &user_vector, distance, &now).await?
         }
         Backend::Postgres => {
             let pool = db.postgres_pool().ok_or(pool_err())?;
-            store_taste_vector_postgres(pool, &account_id, &user_vector, distance, &now).await?
+            store_taste_vector_postgres(pool, account_id, &user_vector, distance, &now).await?
         }
     }
 
@@ -191,7 +190,7 @@ pub async fn update_taste_vector_incremental(
 
     // Compute old weight sum from stored data (simplified: use count of ratings)
     let old_weight_sum = fetch_user_rating_count(db, account_id).await? as f64;
-    let new_sum = taste_vector::update_vector_incremental(
+    let _new_sum = taste_vector::update_vector_incremental(
         &mut current_vec,
         work_vector,
         work_weight,
@@ -209,7 +208,7 @@ pub async fn update_taste_vector_incremental(
         Backend::Sqlite => {
             store_taste_vector_sqlite(
                 db.sqlite_pool().ok_or(pool_err())?,
-                &account_id,
+                account_id,
                 &current_vec,
                 distance,
                 &now,
@@ -219,7 +218,7 @@ pub async fn update_taste_vector_incremental(
         Backend::Postgres => {
             store_taste_vector_postgres(
                 db.postgres_pool().ok_or(pool_err())?,
-                &account_id,
+                account_id,
                 &current_vec,
                 distance,
                 &now,
@@ -271,10 +270,10 @@ pub async fn list_users_by_centroid_distance(
 /// Compute taste-weighted engagement signal for a set of works.
 /// Returns a map of work_id → taste_signal.
 pub async fn taste_signal_for_works(
-    db: &Database,
+    _db: &Database,
     work_ids: &[String],
-    mode: &str, // "egalitarian" | "taste_weighted" | "admin_only"
-    admin_weight: f64,
+    _mode: &str, // "egalitarian" | "taste_weighted" | "admin_only"
+    _admin_weight: f64,
 ) -> Result<std::collections::HashMap<String, f64>, sqlx::Error> {
     let mut result = std::collections::HashMap::new();
     if work_ids.is_empty() {
@@ -285,7 +284,7 @@ pub async fn taste_signal_for_works(
     let placeholders: Vec<String> = (1..=work_ids.len()).map(|i| format!("?{}", i)).collect();
     let placeholder_str = placeholders.join(",");
 
-    let query = format!(
+    let _query = format!(
         "SELECT w.id,
                 COALESCE(AVG(CASE WHEN a.taste_vector = '[]' THEN 0.0 ELSE a.taste_centroid_distance END), 0.0) as avg_distance,
                 COUNT(DISTINCT a.id) as engager_count
@@ -306,12 +305,9 @@ pub async fn taste_signal_for_works(
     Ok(result)
 }
 
-/// Weekly batch: recompute all taste vectors.
-
 // ---------------------------------------------------------------------------
 // Taste Calibration Arena (spec §0.4.2a)
 // ---------------------------------------------------------------------------
-
 /// Record an arena ballot and update per-dimension Elo ratings.
 pub async fn record_arena_ballot(
     db: &Database,
@@ -458,7 +454,7 @@ pub async fn get_arena_pool(
 ) -> Result<Vec<(String, String, String, String, Vec<String>, u32)>, sqlx::Error> {
     match db.backend() {
         Backend::Sqlite => {
-            let pool = db.sqlite_pool().ok_or(pool_err())?;
+            let _pool = db.sqlite_pool().ok_or(pool_err())?;
             let rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, i64)>(
                 "SELECT w.id, w.title, w.summary,
                         COALESCE((SELECT tn.canonical FROM taxonomy_nodes tn
@@ -548,6 +544,7 @@ pub async fn get_arena_pool(
     }
 }
 
+/// Weekly batch: recompute all taste vectors.
 pub async fn recompute_all_taste_vectors(db: &Database) -> Result<(), sqlx::Error> {
     let account_ids: Vec<(String,)> = match db.backend() {
         Backend::Sqlite => {
@@ -572,15 +569,15 @@ pub async fn recompute_all_taste_vectors(db: &Database) -> Result<(), sqlx::Erro
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-async fn get_admin_centroid(db: &Database) -> Option<Vec<f64>> {
+async fn get_admin_centroid(_db: &Database) -> Option<Vec<f64>> {
     // In a real implementation, this would fetch from config or compute from admin ratings.
     // For now, return a default neutral centroid.
     Some(vec![0.5, 0.5, 0.5, 0.5, 0.5])
 }
 
 async fn fetch_user_rated_work_vectors(
-    db: &Database,
-    account_id: &str,
+    _db: &Database,
+    _account_id: &str,
 ) -> Result<(Vec<Vec<f64>>, Vec<f64>), sqlx::Error> {
     // Fetch the user's ratings with associated work vectors.
     // Simplified: return empty for now (full implementation would join ratings with work metadata).

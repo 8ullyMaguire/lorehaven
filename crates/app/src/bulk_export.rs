@@ -108,18 +108,26 @@ pub async fn run_bulk(state: &AppState, payload: &Value) -> Result<(), HandlerEr
                 .await
                 .map_err(|error| HandlerError::Transient(error.to_string()))?;
 
-            store
+            let reference_result = store
                 .reference(
                     db,
                     &checksum,
                     crate::exports::EXPORT_OWNER_TYPE,
                     export_job_id,
                 )
-                .await
-                .map_err(|error| {
-                    let _ = store.delete_if_unreferenced(db, &checksum);
-                    HandlerError::Transient(error.to_string())
-                })?;
+                .await;
+            if let Err(error) = reference_result {
+                // Awaited, not fire-and-forget: a dropped future never runs, so
+                // the orphaned blob would stay on disk for the life of the volume.
+                if let Err(cleanup) = store.delete_if_unreferenced(db, &checksum).await {
+                    tracing::warn!(
+                        checksum = %checksum,
+                        error = %cleanup,
+                        "orphan cleanup failed after reference error"
+                    );
+                }
+                return Err(HandlerError::Transient(error.to_string()));
+            }
 
             lorehaven_db::exports::record_output(
                 db,
@@ -310,7 +318,7 @@ async fn produce_bulk(
     ));
 
     // Build the ZIP bundle.
-    let zip_bytes = build_zip(&zip_items).map_err(|error| BulkFailure::Transient(error))?;
+    let zip_bytes = build_zip(&zip_items).map_err(BulkFailure::Transient)?;
 
     Ok(Artifact {
         bytes: zip_bytes,

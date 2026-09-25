@@ -62,7 +62,7 @@ async fn clear_anomaly(
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
     let db = state.db();
-    let clearer = user.account_id.clone();
+    let clearer = user.account_id;
     rating_integrity::clear_rating_anomaly_event(db, &id, &clearer)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;

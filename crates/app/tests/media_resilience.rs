@@ -8,6 +8,7 @@ use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
 use lorehaven_db::media_resilience;
+use std::path::Path;
 use std::path::PathBuf;
 use tower::ServiceExt;
 
@@ -28,7 +29,7 @@ fn config_for(dir: &std::path::Path) -> Config {
     config
 }
 
-async fn build_app(dir: &PathBuf) -> axum::Router {
+async fn build_app(dir: &Path) -> axum::Router {
     let config = config_for(dir);
     let tdb = test_support::TestDb::connect_with_dir("mr", dir).await;
     let db = tdb.db().clone();
@@ -57,7 +58,7 @@ async fn media_resilience_insert_and_fetch() {
 
     let ref_id = "test-ref-001";
     media_resilience::insert_media_reference(
-        &db,
+        db,
         ref_id,
         "hash-abc",
         lorehaven_domain::media_resilience::MediaKind::Image,
@@ -65,7 +66,7 @@ async fn media_resilience_insert_and_fetch() {
     .await
     .expect("insert reference");
 
-    let reference = media_resilience::find_media_reference_by_id(&db, ref_id)
+    let reference = media_resilience::find_media_reference_by_id(db, ref_id)
         .await
         .expect("find reference")
         .expect("reference exists");
@@ -82,7 +83,7 @@ async fn media_resilience_availability_link() {
 
     let ref_id = "test-ref-002";
     media_resilience::insert_media_reference(
-        &db,
+        db,
         ref_id,
         "hash-def",
         lorehaven_domain::media_resilience::MediaKind::Image,
@@ -92,7 +93,7 @@ async fn media_resilience_availability_link() {
 
     let link_id = "test-link-001";
     media_resilience::insert_availability_link(
-        &db,
+        db,
         link_id,
         ref_id,
         "https://example.com/image.jpg",
@@ -103,7 +104,7 @@ async fn media_resilience_availability_link() {
     .await
     .expect("insert link");
 
-    let links = media_resilience::find_availability_links_for_reference(&db, ref_id)
+    let links = media_resilience::find_availability_links_for_reference(db, ref_id)
         .await
         .expect("find links");
     assert_eq!(links.len(), 1);
@@ -115,7 +116,7 @@ async fn media_resilience_availability_link() {
 
     // Update status
     media_resilience::update_link_status(
-        &db,
+        db,
         link_id,
         lorehaven_domain::media_resilience::LinkStatus::Healthy,
         0,
@@ -123,7 +124,7 @@ async fn media_resilience_availability_link() {
     .await
     .expect("update status");
 
-    let healthy = media_resilience::count_healthy_links(&db, ref_id)
+    let healthy = media_resilience::count_healthy_links(db, ref_id)
         .await
         .expect("count healthy");
     assert_eq!(healthy, 1);
@@ -138,7 +139,7 @@ async fn media_resilience_curator_rewards() {
     let ref_id = "test-ref-003";
     let link_id = "test-link-003";
     media_resilience::insert_media_reference(
-        &db,
+        db,
         ref_id,
         "hash-ghi",
         lorehaven_domain::media_resilience::MediaKind::Image,
@@ -146,7 +147,7 @@ async fn media_resilience_curator_rewards() {
     .await
     .expect("insert reference");
     media_resilience::insert_availability_link(
-        &db,
+        db,
         link_id,
         ref_id,
         "https://example.com/pic.png",
@@ -158,7 +159,7 @@ async fn media_resilience_curator_rewards() {
     .expect("insert link");
 
     media_resilience::insert_curator_reward(
-        &db,
+        db,
         "user-001",
         lorehaven_domain::media_resilience::CuratorAction::MirrorAdd,
         Some(ref_id),
@@ -168,7 +169,7 @@ async fn media_resilience_curator_rewards() {
     .await
     .expect("insert reward");
 
-    let total = media_resilience::sum_curator_rewards_today(&db, "user-001")
+    let total = media_resilience::sum_curator_rewards_today(db, "user-001")
         .await
         .expect("sum rewards");
     assert_eq!(total, 15);
@@ -184,7 +185,7 @@ async fn media_resilience_get_route() {
 
     let ref_id = "test-ref-004";
     media_resilience::insert_media_reference(
-        &db,
+        db,
         ref_id,
         "hash-jkl",
         lorehaven_domain::media_resilience::MediaKind::Image,
@@ -231,7 +232,7 @@ async fn media_resilience_links_needing_check() {
 
     let ref_id = "test-ref-005";
     media_resilience::insert_media_reference(
-        &db,
+        db,
         ref_id,
         "hash-mno",
         lorehaven_domain::media_resilience::MediaKind::Image,
@@ -240,7 +241,7 @@ async fn media_resilience_links_needing_check() {
     .expect("insert reference");
 
     media_resilience::insert_availability_link(
-        &db,
+        db,
         "link-005",
         ref_id,
         "https://example.com/check.png",
@@ -251,7 +252,7 @@ async fn media_resilience_links_needing_check() {
     .await
     .expect("insert link");
 
-    let needing_check = media_resilience::find_links_needing_check(&db, 100)
+    let needing_check = media_resilience::find_links_needing_check(db, 100)
         .await
         .expect("find links needing check");
     assert_eq!(needing_check.len(), 1);

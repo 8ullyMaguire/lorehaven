@@ -516,7 +516,7 @@ async fn filter_blocked_posts(
                 let author_account = pseud_info.account_id.to_string();
                 let viewer_blocks = lorehaven_db::community::is_blocked(
                     state.db(),
-                    &viewer_account_id,
+                    viewer_account_id,
                     &author_account,
                     BlockScope::Comments,
                 )
@@ -525,7 +525,7 @@ async fn filter_blocked_posts(
                 let author_blocks = lorehaven_db::community::is_blocked(
                     state.db(),
                     &author_account,
-                    &viewer_account_id,
+                    viewer_account_id,
                     BlockScope::Comments,
                 )
                 .await

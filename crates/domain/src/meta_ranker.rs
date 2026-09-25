@@ -564,7 +564,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(42);
         for _ in 0..1000 {
             let s = beta.sample(&mut rng);
-            assert!(s >= 0.0 && s <= 1.0, "sample {} out of bounds", s);
+            assert!((0.0..=1.0).contains(&s), "sample {} out of bounds", s);
         }
     }
 

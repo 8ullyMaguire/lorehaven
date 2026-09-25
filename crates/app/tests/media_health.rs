@@ -381,7 +381,7 @@ async fn admin_overview_route_requires_operator() {
     use tower::ServiceExt;
 
     let mut config = Config::development_defaults();
-    config.storage.root = dir.clone();
+    config.storage.root = dir.to_path_buf();
     let state = AppState::new(config, db.clone());
     set_trust_proxy(false);
     let app = server::build_router(state);
@@ -413,7 +413,7 @@ async fn admin_overview_route_operator_ok() {
     let db = tdb.db();
 
     let mut config = Config::development_defaults();
-    config.storage.root = dir.clone();
+    config.storage.root = dir.to_path_buf();
     let state = AppState::new(config, db.clone());
     set_trust_proxy(false);
     let app = server::build_router(state);

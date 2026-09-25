@@ -15,11 +15,13 @@ use serde::{Deserialize, Serialize};
 /// How discussion happens around a work (spec §35.0).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum WorkDiscussionMode {
     /// Typed-vote reaction bar on the work page; text discussion lives in
     /// the linked forum thread. The Lorehaven default.
     ThreadOnly,
     /// Inline work/chapter comments, no forum link (legacy surface).
+    #[default]
     CommentsOnly,
     /// Both surfaces; splits conversation and is admin-warned.
     Both,
@@ -53,15 +55,6 @@ impl WorkDiscussionMode {
     /// Whether the reaction bar and Discuss link are offered.
     pub fn thread_enabled(self) -> bool {
         matches!(self, Self::ThreadOnly | Self::Both)
-    }
-}
-
-impl Default for WorkDiscussionMode {
-    fn default() -> Self {
-        // Existing works keep today's behavior: the migration backfills
-        // `comments_only`, and flipping the instance default is an
-        // operator's deliberate act (spec §35.0 migration path).
-        Self::CommentsOnly
     }
 }
 

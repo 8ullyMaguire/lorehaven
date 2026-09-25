@@ -28,7 +28,6 @@ use lorehaven_domain::settings::{
 };
 use lorehaven_domain::{AppError, PseudId};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::auth::RequireSession;
 use crate::http::{ApiError, ApiResult};

@@ -423,7 +423,6 @@ pub async fn my_vote(db: &Database, entry_id: &str, account_id: &str) -> Result<
 /// Set, toggle or flip a vote and recompute the score in the SAME
 /// transaction (spec §39.4: the list never shows a stale score).
 /// Returns the new score and whether a live vote remains.
-
 /// The transactional core of [`set_vote`]. A macro because sqlx queries
 /// are typed per-dialect: the same SQL runs against both executors.
 macro_rules! vote_tx {

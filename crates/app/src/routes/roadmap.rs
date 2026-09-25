@@ -9,12 +9,12 @@ use serde_json::{json, Value};
 use crate::auth::{MaybeSession, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use lorehaven_db::{governance, roadmap};
-use lorehaven_domain::consensus::{stage_arena_eligible, K_FACTOR, START_RATING};
+use lorehaven_domain::consensus::{K_FACTOR, START_RATING};
 use lorehaven_domain::AppError;
 use std::collections::BTreeMap;
 

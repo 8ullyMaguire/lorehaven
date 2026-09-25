@@ -1,6 +1,6 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::{delete, get, post, put};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use lorehaven_domain::{dnf::DnfReason, AppError};
 use serde::{Deserialize, Serialize};
@@ -111,7 +111,7 @@ async fn upsert_dnf(
         &now,
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     let row = dnf::read_dnf(
         db,
@@ -119,7 +119,7 @@ async fn upsert_dnf(
         WorkId::from_uuid(work_id),
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?
+    .map_err(|e| ApiError(AppError::Internal(e)))?
     .ok_or_else(|| ApiError(AppError::NotFound { resource: "dnf" }))?;
 
     Ok(Json(row.into()))
@@ -142,7 +142,7 @@ async fn delete_dnf(
         &now,
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     if deleted {
         Ok(StatusCode::NO_CONTENT)
@@ -163,7 +163,7 @@ async fn get_dnf(
         WorkId::from_uuid(work_id),
     )
     .await
-    .map_err(|e| ApiError(AppError::Internal(e.into())))?
+    .map_err(|e| ApiError(AppError::Internal(e)))?
     .ok_or_else(|| ApiError(AppError::NotFound { resource: "dnf" }))?;
 
     Ok(Json(row.into()))
@@ -177,7 +177,7 @@ async fn get_dnf_reasons(
 ) -> ApiResult<Json<DnfReasonsResponse>> {
     let counts = dnf::aggregate_dnf_counts(state.db(), WorkId::from_uuid(work_id))
         .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     let reasons = counts
         .into_iter()
@@ -197,7 +197,7 @@ async fn list_my_dnf(
 ) -> ApiResult<Json<Vec<DnfResponse>>> {
     let rows = dnf::list_dnf_by_pseud(state.db(), PseudId::from_uuid(pseud.pseud_id.as_uuid()))
         .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
 
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }

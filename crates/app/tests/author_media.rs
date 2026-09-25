@@ -1,8 +1,6 @@
 //! Author media tools (spec §32.7.8): preferences & targeted bounties.
 
 use lorehaven_app::config::Config;
-use lorehaven_app::server::{self, set_trust_proxy};
-use lorehaven_app::state::AppState;
 use lorehaven_db::media_resilience;
 use lorehaven_db::Backend;
 use std::path::PathBuf;
@@ -16,12 +14,6 @@ fn scratch_dir(tag: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
-}
-
-fn config_for(dir: &std::path::Path) -> Config {
-    let mut config = Config::development_defaults();
-    config.storage.root = dir.to_path_buf();
-    config
 }
 
 #[tokio::test]
@@ -40,10 +32,10 @@ async fn author_preferences_crud() {
     let prefs = media_resilience::get_author_preferences(db, account_id)
         .await
         .expect("get prefs");
-    assert_eq!(prefs.auto_submit_to_archive, true);
-    assert_eq!(prefs.prefer_curator_verified, true);
+    assert!(prefs.auto_submit_to_archive);
+    assert!(prefs.prefer_curator_verified);
     assert_eq!(prefs.broken_link_notifications, "immediate");
-    assert_eq!(prefs.allow_curator_edits, true);
+    assert!(prefs.allow_curator_edits);
     assert_eq!(prefs.minimum_healthy_links, 5);
 
     // Update
@@ -54,7 +46,7 @@ async fn author_preferences_crud() {
     let prefs = media_resilience::get_author_preferences(db, account_id)
         .await
         .expect("get prefs");
-    assert_eq!(prefs.auto_submit_to_archive, false);
+    assert!(!prefs.auto_submit_to_archive);
     assert_eq!(prefs.minimum_healthy_links, 2);
 }
 
