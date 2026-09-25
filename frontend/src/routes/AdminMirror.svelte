@@ -173,6 +173,22 @@
               <div class="ref-info">
                 <code>{ref.perceptual_hash ?? ref.content_hash.slice(0, 16)}</code>
                 <span class="badge">{ref.media_kind}</span>
+                <!-- How well it matched, and whether that match is strong enough to
+                     attach on its own. An operator deciding whether to merge two
+                     records cannot tell an exact hit from a picture that merely
+                     resembles it, and a bare hash gives them nothing to go on. -->
+                {#if ref.match_kind === 'exact'}
+                  <span class="badge badge-ok">Exact match</span>
+                {:else if ref.match_confidence !== null}
+                  <span class="badge badge-warn">
+                    {Math.round(ref.match_confidence * 100)}% similar
+                  </span>
+                {:else}
+                  <span class="badge">Similarity unknown</span>
+                {/if}
+                {#if ref.auto_attach}
+                  <span class="badge badge-ok">Safe to link</span>
+                {/if}
                 {#if ref.curator_verified}
                   <span class="badge badge-ok">Curator verified</span>
                 {/if}
@@ -348,6 +364,10 @@
   .badge-ok {
     background: var(--color-success-bg);
     color: var(--color-success);
+  }
+  .badge-warn {
+    background: var(--color-warning-bg, var(--color-surface-alt));
+    color: var(--color-warning, var(--color-muted));
   }
   .status {
     font-size: 0.75rem;

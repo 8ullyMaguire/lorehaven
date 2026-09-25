@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, apiFetch } from './api';
+import { ApiError, apiFetch, reverseMediaSearch } from './api';
 
 /**
  * The client's job is to turn the server's documented error envelope into
@@ -159,5 +159,86 @@ describe('community list fetchers', () => {
     const blocks = await fetchBlocks();
     expect(blocks).toHaveLength(1);
     expect(blocks[0].blocked).toBe('acc-2');
+  });
+});
+
+/**
+ * Reverse media search (spec §32.7.2-32.7.3). The client has to be able to
+ * tell an exact match from a perceptual one, and must not be handed a
+ * confidence number for a comparison the server could not make: a missing or
+ * malformed hash is "not comparable", not "very different".
+ */
+describe('reverseMediaSearch', () => {
+  it('passes the hash and algorithm through and returns the matches in server order', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({
+        references: [
+          {
+            id: 'ref-exact',
+            media_kind: 'image',
+            perceptual_hash: '00ff',
+            content_hash: 'sha256:a',
+            curator_verified: false,
+            match_kind: 'exact',
+            match_distance: 0,
+            match_confidence: 1,
+            auto_attach: true,
+          },
+          {
+            id: 'ref-near',
+            media_kind: 'image',
+            perceptual_hash: '00fc',
+            content_hash: 'sha256:b',
+            curator_verified: false,
+            match_kind: 'perceptual',
+            match_distance: 2,
+            match_confidence: 0.96875,
+            auto_attach: false,
+          },
+        ],
+        works: [],
+      }),
+    );
+
+    const view = await reverseMediaSearch({ hash: '00ff', algorithm: 'phash' });
+
+    const body = JSON.parse(String(spy.mock.calls[0][1]?.body));
+    expect(body).toEqual({ hash: '00ff', algorithm: 'phash' });
+    // Order is the server's to decide and it is closest-first; the client must
+    // not re-sort, or it would lose the server's tiebreak.
+    expect(view.references.map((r) => r.id)).toEqual(['ref-exact', 'ref-near']);
+    expect(view.references[0].match_kind).toBe('exact');
+    expect(view.references[0].auto_attach).toBe(true);
+    expect(view.references[1].match_kind).toBe('perceptual');
+    expect(view.references[1].auto_attach).toBe(false);
+  });
+
+  it('reads an incomparable match as null rather than a confident low score', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({
+        references: [
+          {
+            id: 'ref-unknown',
+            media_kind: 'image',
+            perceptual_hash: null,
+            content_hash: 'sha256:c',
+            curator_verified: false,
+            match_kind: 'perceptual',
+            match_distance: null,
+            match_confidence: null,
+            auto_attach: false,
+          },
+        ],
+        works: [],
+      }),
+    );
+
+    const view = await reverseMediaSearch({ hash: '00ff' });
+    const ref = view.references[0];
+    expect(ref.match_distance).toBeNull();
+    expect(ref.match_confidence).toBeNull();
+    // A null confidence must never be read as 0, which would look like a
+    // confident "not a match" and could hide a real one.
+    expect(ref.auto_attach).toBe(false);
   });
 });
