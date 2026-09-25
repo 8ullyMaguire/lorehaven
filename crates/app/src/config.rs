@@ -378,8 +378,8 @@ pub struct DiscoveryConfig {
     pub rec_rrf_k: f64,
     /// Per-strategy resource ceiling: max results each strategy may contribute.
     pub rec_per_strategy_cap: usize,
-    /// Enabled strategy names for pluggable mode. Empty = all enabled.
-    pub rec_enabled_strategies: Vec<String>,
+    /// User's preferred recommendation engine, if any. Empty means use discovery.rec_mode.
+    pub preferred_rec_engine: String,
 }
 
 impl Default for DiscoveryConfig {
@@ -393,7 +393,7 @@ impl Default for DiscoveryConfig {
             rec_mode: "legacy".to_string(),
             rec_rrf_k: 60.0,
             rec_per_strategy_cap: 100,
-            rec_enabled_strategies: Vec::new(),
+            preferred_rec_engine: String::new(),
         }
     }
 }
