@@ -49,13 +49,14 @@ pub async fn notify(
     // Resolve delivery channel; None means the event is disabled for this account.
     let channel = match crate::settings::resolve_notification_channel(
         db,
-        uuid::Uuid::parse_str(account_id).map_err(|e| sqlx::Error::Protocol(format!("bad uuid: {e}")))?,
+        uuid::Uuid::parse_str(account_id)
+            .map_err(|e| sqlx::Error::Protocol(format!("bad uuid: {e}")))?,
         kind,
     )
     .await
     {
         Ok(Some(ch)) => ch,
-        Ok(None) => return Ok(id), // event disabled — silently drop
+        Ok(None) => return Ok(id),      // event disabled — silently drop
         Err(_) => "in_app".to_string(), // routing lookup failed — fall back to default
     };
 

@@ -10,8 +10,8 @@ use uuid::Uuid;
 use crate::auth::{MaybeSession, RequirePseud};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
-use lorehaven_domain::ids::{AccountId, PseudId, WorkId};
 use lorehaven_db::dnf;
+use lorehaven_domain::ids::{AccountId, PseudId, WorkId};
 
 #[derive(Debug, Deserialize)]
 struct DnfRequest {
@@ -53,7 +53,13 @@ impl From<dnf::DnfRow> for DnfResponse {
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/works/{id}/dnf", post(upsert_dnf).put(upsert_dnf).delete(delete_dnf).get(get_dnf))
+        .route(
+            "/works/{id}/dnf",
+            post(upsert_dnf)
+                .put(upsert_dnf)
+                .delete(delete_dnf)
+                .get(get_dnf),
+        )
         .route("/works/{id}/dnf/reasons", get(get_dnf_reasons))
         .route("/me/dnf", get(list_my_dnf))
 }
@@ -80,10 +86,12 @@ async fn upsert_dnf(
     let db = state.db();
 
     let reason_str = DnfReason::from_str(&req.reason)
-        .map_err(|e| ApiError(AppError::Validation {
-            message: e,
-            field_errors: Default::default(),
-        }))?
+        .map_err(|e| {
+            ApiError(AppError::Validation {
+                message: e,
+                field_errors: Default::default(),
+            })
+        })?
         .as_str()
         .to_string();
 
@@ -105,10 +113,14 @@ async fn upsert_dnf(
     .await
     .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
-    let row = dnf::read_dnf(db, PseudId::from_uuid(pseud.pseud_id.as_uuid()), WorkId::from_uuid(work_id))
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?
-        .ok_or_else(|| ApiError(AppError::NotFound { resource: "dnf" }))?;
+    let row = dnf::read_dnf(
+        db,
+        PseudId::from_uuid(pseud.pseud_id.as_uuid()),
+        WorkId::from_uuid(work_id),
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?
+    .ok_or_else(|| ApiError(AppError::NotFound { resource: "dnf" }))?;
 
     Ok(Json(row.into()))
 }
@@ -123,9 +135,14 @@ async fn delete_dnf(
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_default();
 
-    let deleted = dnf::delete_dnf(state.db(), PseudId::from_uuid(pseud.pseud_id.as_uuid()), WorkId::from_uuid(work_id), &now)
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    let deleted = dnf::delete_dnf(
+        state.db(),
+        PseudId::from_uuid(pseud.pseud_id.as_uuid()),
+        WorkId::from_uuid(work_id),
+        &now,
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
     if deleted {
         Ok(StatusCode::NO_CONTENT)
@@ -140,10 +157,14 @@ async fn get_dnf(
     Path(work_id): Path<Uuid>,
     State(state): State<AppState>,
 ) -> ApiResult<Json<DnfResponse>> {
-    let row = dnf::read_dnf(state.db(), PseudId::from_uuid(pseud.pseud_id.as_uuid()), WorkId::from_uuid(work_id))
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?
-        .ok_or_else(|| ApiError(AppError::NotFound { resource: "dnf" }))?;
+    let row = dnf::read_dnf(
+        state.db(),
+        PseudId::from_uuid(pseud.pseud_id.as_uuid()),
+        WorkId::from_uuid(work_id),
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?
+    .ok_or_else(|| ApiError(AppError::NotFound { resource: "dnf" }))?;
 
     Ok(Json(row.into()))
 }

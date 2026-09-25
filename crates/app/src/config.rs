@@ -2859,7 +2859,13 @@ mode = "quantum"
         // available, so a fresh instance must not be closed to readers.
         let config = Config::development_defaults();
         assert_eq!(config.instance.mode, InstanceMode::Public);
-        assert!(config.instance.mode.access_policy().anonymous_reading_enabled);
+        assert!(
+            config
+                .instance
+                .mode
+                .access_policy()
+                .anonymous_reading_enabled
+        );
     }
 
     #[test]
@@ -2876,7 +2882,11 @@ mode = "quantum"
 
     #[test]
     fn private_mode_is_at_least_as_closed_as_a_walled_garden() {
-        assert!(!InstanceMode::Private.access_policy().anonymous_reading_enabled);
+        assert!(
+            !InstanceMode::Private
+                .access_policy()
+                .anonymous_reading_enabled
+        );
     }
 
     #[test]
@@ -2913,7 +2923,13 @@ mode = "walled_garden"
         )
         .expect("loads");
         assert_eq!(config.instance.mode, InstanceMode::WalledGarden);
-        assert!(!config.instance.mode.access_policy().anonymous_reading_enabled);
+        assert!(
+            !config
+                .instance
+                .mode
+                .access_policy()
+                .anonymous_reading_enabled
+        );
     }
 
     #[test]

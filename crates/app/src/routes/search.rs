@@ -66,17 +66,21 @@ async fn resolve_search_defaults(
         defaults_map.insert(k.clone(), v.clone());
     }
 
-    let min_words = params.min_words.or_else(|| {
-        defaults_map.get("min_words").and_then(|v| v.as_i64())
-    });
-    let max_words = params.max_words.or_else(|| {
-        defaults_map.get("max_words").and_then(|v| v.as_i64())
-    });
+    let min_words = params
+        .min_words
+        .or_else(|| defaults_map.get("min_words").and_then(|v| v.as_i64()));
+    let max_words = params
+        .max_words
+        .or_else(|| defaults_map.get("max_words").and_then(|v| v.as_i64()));
     let sort = params.sort.clone().or_else(|| {
-        defaults_map.get("sort").and_then(|v| v.as_str().map(String::from))
+        defaults_map
+            .get("sort")
+            .and_then(|v| v.as_str().map(String::from))
     });
     let max_rating = params.max_rating.clone().or_else(|| {
-        defaults_map.get("max_rating").and_then(|v| v.as_str().map(String::from))
+        defaults_map
+            .get("max_rating")
+            .and_then(|v| v.as_str().map(String::from))
     });
 
     (min_words, max_words, sort, max_rating)

@@ -1,9 +1,8 @@
 //! M52-05 integration: recommendation strategies produce ranked results.
 
 use lorehaven_db::rec_strategy::{
-    author_graph_strategy, bandit_strategy, cooccurrence_strategy,
-    completion_weight_strategy, curator_prior_strategy, tag_graph_strategy,
-    time_decay_strategy, RecContext, RecRegistry,
+    author_graph_strategy, bandit_strategy, completion_weight_strategy, cooccurrence_strategy,
+    curator_prior_strategy, tag_graph_strategy, time_decay_strategy, RecContext, RecRegistry,
 };
 use lorehaven_db::Database;
 use std::time::Duration;
@@ -20,10 +19,7 @@ fn make_config(url: String) -> lorehaven_db::DatabaseConfig {
 /// Create a unique temp directory for an isolated test database.
 fn temp_db_dir() -> std::path::PathBuf {
     let mut dir = std::env::temp_dir();
-    dir.push(format!(
-        "lorehaven-test-{}",
-        uuid::Uuid::new_v4()
-    ));
+    dir.push(format!("lorehaven-test-{}", uuid::Uuid::new_v4()));
     dir
 }
 
@@ -31,10 +27,7 @@ async fn setup_db() -> (Database, std::path::PathBuf) {
     let dir = temp_db_dir();
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let url = format!(
-        "sqlite://{}/lorehaven.sqlite?mode=rwc",
-        dir.display()
-    );
+    let url = format!("sqlite://{}/lorehaven.sqlite?mode=rwc", dir.display());
     let config = make_config(url);
     let db = Database::connect(&config).await.unwrap();
     db.migrate().await.unwrap();

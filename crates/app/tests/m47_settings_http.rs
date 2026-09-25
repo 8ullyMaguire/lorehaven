@@ -5,7 +5,7 @@
 //! export/import, and the settings resolution hierarchy.
 
 use axum::body::Body;
-use axum::http::{Request, Method, StatusCode};
+use axum::http::{Method, Request, StatusCode};
 use lorehaven_app::config::Config;
 use lorehaven_app::server;
 use lorehaven_app::state::AppState;
@@ -61,12 +61,7 @@ impl Harness {
         server::build_router(AppState::new(self.config.clone(), self.db.clone()))
     }
 
-    async fn call(
-        &self,
-        method: Method,
-        path: &str,
-        body: Option<Value>,
-    ) -> (StatusCode, Value) {
+    async fn call(&self, method: Method, path: &str, body: Option<Value>) -> (StatusCode, Value) {
         let builder = Request::builder().uri(path).method(method);
         let req = if let Some(b) = body {
             builder
@@ -96,14 +91,18 @@ async fn test_search_settings_endpoints_unauthenticated() {
 #[tokio::test]
 async fn test_content_filters_endpoints_unauthenticated() {
     let h = Harness::new("filters-unauth").await;
-    let (status, _) = h.call(Method::GET, "/api/v1/settings/content-filters", None).await;
+    let (status, _) = h
+        .call(Method::GET, "/api/v1/settings/content-filters", None)
+        .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
 async fn test_notification_routes_endpoints_unauthenticated() {
     let h = Harness::new("notif-unauth").await;
-    let (status, _) = h.call(Method::GET, "/api/v1/settings/notifications", None).await;
+    let (status, _) = h
+        .call(Method::GET, "/api/v1/settings/notifications", None)
+        .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 

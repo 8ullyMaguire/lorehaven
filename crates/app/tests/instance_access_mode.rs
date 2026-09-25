@@ -43,7 +43,9 @@ impl Harness {
             dir.display()
         ));
         config.instance.mode = mode;
-        let db = Database::connect(&config.database).await.expect("db connect");
+        let db = Database::connect(&config.database)
+            .await
+            .expect("db connect");
         db.migrate().await.expect("migrations");
         Self {
             _dir: dir,
@@ -110,7 +112,11 @@ async fn a_walled_garden_refuses_an_anonymous_reader_at_a_work_door() {
     let (status, _) = h
         .get("/api/v1/works/11111111-1111-1111-1111-111111111111")
         .await;
-    assert_ne!(status, StatusCode::OK, "a walled garden must not serve content");
+    assert_ne!(
+        status,
+        StatusCode::OK,
+        "a walled garden must not serve content"
+    );
 }
 
 #[tokio::test]

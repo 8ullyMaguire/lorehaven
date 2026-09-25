@@ -786,13 +786,25 @@ async fn search_respects_content_filters() {
     match db.backend() {
         lorehaven_db::Backend::Sqlite => {
             sqlx::query(&sql_node)
-                .bind(&node_id).bind("tag").bind("enemies to lovers").bind("enemies to lovers").bind(&now)
-                .execute(db.sqlite_pool().unwrap()).await.unwrap();
+                .bind(&node_id)
+                .bind("tag")
+                .bind("enemies to lovers")
+                .bind("enemies to lovers")
+                .bind(&now)
+                .execute(db.sqlite_pool().unwrap())
+                .await
+                .unwrap();
         }
         lorehaven_db::Backend::Postgres => {
             sqlx::query(&sql_node)
-                .bind(&node_id).bind("tag").bind("enemies to lovers").bind("enemies to lovers").bind(&now)
-                .execute(db.postgres_pool().unwrap()).await.unwrap();
+                .bind(&node_id)
+                .bind("tag")
+                .bind("enemies to lovers")
+                .bind("enemies to lovers")
+                .bind(&now)
+                .execute(db.postgres_pool().unwrap())
+                .await
+                .unwrap();
         }
     }
     let sql_tag = db.sql(
@@ -802,13 +814,23 @@ async fn search_respects_content_filters() {
     match db.backend() {
         lorehaven_db::Backend::Sqlite => {
             sqlx::query(&sql_tag)
-                .bind(&alpha_id).bind(&node_id).bind(1i64).bind(&now)
-                .execute(db.sqlite_pool().unwrap()).await.unwrap();
+                .bind(&alpha_id)
+                .bind(&node_id)
+                .bind(1i64)
+                .bind(&now)
+                .execute(db.sqlite_pool().unwrap())
+                .await
+                .unwrap();
         }
         lorehaven_db::Backend::Postgres => {
             sqlx::query(&sql_tag)
-                .bind(&alpha_id).bind(&node_id).bind(1i64).bind(&now)
-                .execute(db.postgres_pool().unwrap()).await.unwrap();
+                .bind(&alpha_id)
+                .bind(&node_id)
+                .bind(1i64)
+                .bind(&now)
+                .execute(db.postgres_pool().unwrap())
+                .await
+                .unwrap();
         }
     }
 
@@ -854,13 +876,20 @@ async fn export_import_round_trip() {
 
     // Set a search preference.
     let (status, _) = client
-        .request("PATCH", "/api/v1/settings/search", Some(json!({ "changes": [{ "key": "search.default_sort", "value": "relevance" }] })))
+        .request(
+            "PATCH",
+            "/api/v1/settings/search",
+            Some(json!({ "changes": [{ "key": "search.default_sort", "value": "relevance" }] })),
+        )
         .await;
     assert_eq!(status, StatusCode::OK);
 
     // Add a content filter.
     let (status, _) = client
-        .post("/api/v1/settings/content-filters", json!({ "filter_type": "tag", "value": "spoilers" }))
+        .post(
+            "/api/v1/settings/content-filters",
+            json!({ "filter_type": "tag", "value": "spoilers" }),
+        )
         .await;
     assert_eq!(status, StatusCode::OK);
 
@@ -884,11 +913,19 @@ async fn export_import_round_trip() {
         "one search setting"
     );
     assert!(
-        export["namespaces"]["content_filters"].as_array().unwrap().len() == 1,
+        export["namespaces"]["content_filters"]
+            .as_array()
+            .unwrap()
+            .len()
+            == 1,
         "one content filter"
     );
     assert!(
-        export["namespaces"]["notifications"].as_array().unwrap().len() == 1,
+        export["namespaces"]["notifications"]
+            .as_array()
+            .unwrap()
+            .len()
+            == 1,
         "one notification route"
     );
 
@@ -921,15 +958,22 @@ async fn export_import_round_trip() {
 
     // Reject unsupported version.
     let (status, _) = tom_client
-        .post("/api/v1/settings/import", json!({
-            "data": {
-                "version": 99,
-                "exported_at": "2026-01-01T00:00:00Z",
-                "namespaces": {}
-            }
-        }))
+        .post(
+            "/api/v1/settings/import",
+            json!({
+                "data": {
+                    "version": 99,
+                    "exported_at": "2026-01-01T00:00:00Z",
+                    "namespaces": {}
+                }
+            }),
+        )
         .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "unsupported version must 400");
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "unsupported version must 400"
+    );
 
     harness.cleanup().await;
 }
