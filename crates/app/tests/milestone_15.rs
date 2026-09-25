@@ -542,17 +542,19 @@ async fn payment_events_record_processor_fees() {
     let harness = Harness::new("payment-fees").await;
     let _client = harness.client();
 
-    // `payment_events.account_id`/`work_id`/`author_account` are UUID on
-    // PostgreSQL, and `record_payment_event` casts them (`$3::uuid`), so these
-    // have to be real UUIDs. SQLite stores them as TEXT and would have
-    // accepted any string -- which is how this test shipped green on one
-    // dialect while failing with 22P02 on the other.
+    // The three subject columns are nullable and this test asserts only the fee
+    // arithmetic, so they stay NULL. Inventing UUIDs here needed a parent row
+    // for each: `migrations/postgres/0056` declares them as foreign keys and
+    // `migrations/sqlite/0056` declares no foreign key at all, so the fake ids
+    // were accepted on one dialect and rejected with 23503 on the other. A
+    // ledger row with no subject is also the ordinary shape for a processor
+    // callback that arrives before attribution.
     let event_id = monetization::record_payment_event(
         harness.tdb.db(),
         "purchase",
-        Some("00000000-0000-4000-8000-000000000001"),
-        Some("00000000-0000-4000-8000-000000000002"),
-        Some("00000000-0000-4000-8000-000000000003"),
+        None,
+        None,
+        None,
         10_000,
         1_500,
         "EUR",
@@ -575,7 +577,7 @@ async fn payment_events_record_processor_fees() {
             assert_eq!(rows[0].get::<String, _>("currency"), "EUR");
         }
         lorehaven_db::Backend::Postgres => {
-            let rows = sqlx::query("SELECT amount_minor, processor_fee_minor, net_minor, currency FROM payment_events WHERE id = $1")
+            let rows = sqlx::query("SELECT amount_minor::bigint, processor_fee_minor::bigint, net_minor::bigint, currency FROM payment_events WHERE id = $1::uuid")
                 .bind(&event_id)
                 .fetch_all(harness.tdb.db().postgres_pool().expect("postgres"))
                 .await

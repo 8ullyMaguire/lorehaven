@@ -729,8 +729,10 @@ pub async fn record_reading_session(
         .parse::<lorehaven_domain::WorkId>()
         .map_err(|_| ApiError(lorehaven_domain::AppError::NotFound { resource: "work" }))?;
     let now = lorehaven_db::identity::now_rfc3339();
-    let id = Uuid::new_v4().to_string();
-    let session_id = format!("{}-{}-{}", user.account_id, work_id, &id[..8]);
+    // A fresh UUID, not a concatenation. The previous line built
+    // `{account}-{work}-{8 hex}`, which SQLite stored happily as TEXT and
+    // PostgreSQL rejected with 22P02, since `reading_sessions.id` is UUID there.
+    let session_id = Uuid::new_v4().to_string();
     match state.db().backend() {
         Backend::Sqlite => {
             sqlx::query(
@@ -745,8 +747,12 @@ pub async fn record_reading_session(
         }
         Backend::Postgres => {
             sqlx::query(
+                // `$n` rather than `?`: this arm builds its own string instead
+                // of going through `db.sql`, so nothing rewrites the
+                // placeholders -- and a literal `?::uuid` is a syntax error on
+                // the SQLite arm of a shared statement.
                 "INSERT INTO reading_sessions (id, account_id, work_id, seconds, started_at, ended_at)
-                 VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?, ?)"
+                 VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6)"
             )
             .bind(&session_id).bind(user.account_id.to_string())
             .bind(work_id.to_canonical_string()).bind(body.seconds)

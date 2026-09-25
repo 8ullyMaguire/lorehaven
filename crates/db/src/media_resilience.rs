@@ -495,10 +495,13 @@ pub async fn find_work_media_references(
          FROM work_media_references
          WHERE work_id = ? AND deleted_at IS NULL"
             .to_string(),
-        "SELECT id, work_id, chapter_id, media_reference_id, context, display_url,
-                author_note, inserted_at, deleted_at
+        // `WorkMediaReference` is all String, so the three UUIDs and the two
+        // TIMESTAMPTZs are cast here as well as in the SQLite arm above.
+        "SELECT id::text, work_id::text, chapter_id::text, media_reference_id::text,
+                context, display_url, author_note,
+                inserted_at::text, deleted_at::text
          FROM work_media_references
-         WHERE work_id = $1 AND deleted_at IS NULL"
+         WHERE work_id = $1::uuid AND deleted_at IS NULL"
             .to_string(),
     );
     Ok(match db.backend() {
@@ -859,10 +862,12 @@ pub async fn opt_in_curator(db: &Database, account_id: &str) -> Result<(), sqlx:
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             sqlx::query(
+                // `account_id` and `opted_in_by` are TEXT here; the timestamp
+                // is TIMESTAMPTZ and `now` is an RFC 3339 string.
                 "INSERT INTO curator_roles (account_id, opted_in_at, opted_in_by)
-                 VALUES ($1, $2, 'self')
+                 VALUES ($1, $2::timestamptz, 'self')
                  ON CONFLICT(account_id)
-                 DO UPDATE SET opted_in_at = $2, opted_out_at = NULL",
+                 DO UPDATE SET opted_in_at = $2::timestamptz, opted_out_at = NULL",
             )
             .bind(account_id)
             .bind(&now)
@@ -887,11 +892,13 @@ pub async fn opt_out_curator(db: &Database, account_id: &str) -> Result<(), sqlx
         }
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
-            sqlx::query("UPDATE curator_roles SET opted_out_at = $1 WHERE account_id = $2")
-                .bind(&now)
-                .bind(account_id)
-                .execute(pool)
-                .await?;
+            sqlx::query(
+                "UPDATE curator_roles SET opted_out_at = $1::timestamptz WHERE account_id = $2",
+            )
+            .bind(&now)
+            .bind(account_id)
+            .execute(pool)
+            .await?;
         }
     }
     Ok(())
@@ -997,7 +1004,7 @@ pub async fn get_best_available_link(
             let pool = db.postgres_pool().expect("postgres");
             let url: Option<String> = sqlx::query_scalar(
                 "SELECT url FROM availability_links
-                 WHERE media_reference_id = $1
+                 WHERE media_reference_id = $1::uuid
                    AND status != 'dead'
                    AND last_result != 'failed'
                  ORDER BY priority DESC
@@ -1027,7 +1034,7 @@ pub async fn count_total_links(db: &Database, reference_id: &str) -> Result<i64,
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             let count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM availability_links WHERE media_reference_id = $1",
+                "SELECT COUNT(*) FROM availability_links WHERE media_reference_id = $1::uuid",
             )
             .bind(reference_id)
             .fetch_one(pool)
@@ -1085,9 +1092,11 @@ pub async fn list_work_media_references(
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             let rows = sqlx::query(
-                "SELECT id, work_id, chapter_id, context, display_url, author_note, inserted_at
+                // Read into Strings: three UUIDs and a TIMESTAMPTZ.
+                "SELECT id::text, work_id::text, chapter_id::text, context,
+                        display_url, author_note, inserted_at::text
                  FROM work_media_references
-                 WHERE work_id = $1 AND deleted_at IS NULL
+                 WHERE work_id = $1::uuid AND deleted_at IS NULL
                  ORDER BY inserted_at",
             )
             .bind(work_id)
@@ -1251,9 +1260,10 @@ pub async fn record_link_verification(
                 "INSERT INTO link_verifications
                     (id, availability_link_id, media_reference_id, curator_id,
                      verification_type, confidence, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz)
                  ON CONFLICT(availability_link_id, curator_id) DO UPDATE SET
-                     verification_type = $5, confidence = $6, created_at = $7",
+                     verification_type = $5, confidence = $6,
+                     created_at = $7::timestamptz",
             )
             .bind(id)
             .bind(availability_link_id)
@@ -1900,7 +1910,7 @@ pub async fn deactivate_local_mirror(db: &Database, mirror_id: &str) -> Result<(
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             sqlx::query(
-                "UPDATE local_mirrors SET status = 'removed', expires_at = $1 WHERE id = $2",
+                "UPDATE local_mirrors SET status = 'removed', expires_at = $1::timestamptz WHERE id = $2",
             )
             .bind(&now)
             .bind(mirror_id)
@@ -2109,7 +2119,7 @@ pub async fn resolve_dmca_takedown(
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             sqlx::query(
-                "UPDATE dmca_takedowns SET status = $1, resolved_at = $2, resolved_by = $3 WHERE id = $4",
+                "UPDATE dmca_takedowns SET status = $1, resolved_at = $2::timestamptz, resolved_by = $3 WHERE id = $4",
             )
             .bind(status)
             .bind(&now)
@@ -2487,7 +2497,8 @@ pub async fn link_rot_by_provider(db: &Database, since: &str) -> Result<Vec<(Str
          GROUP BY provider ORDER BY cnt DESC"
             .to_string(),
         "SELECT provider, COUNT(*) AS cnt FROM availability_links
-         WHERE updated_at > $1 AND status != 'healthy' AND last_healthy_at IS NOT NULL
+         WHERE updated_at > $1::timestamptz AND status != 'healthy'
+           AND last_healthy_at IS NOT NULL
          AND last_healthy_at < updated_at
          GROUP BY provider ORDER BY cnt DESC"
             .to_string(),
