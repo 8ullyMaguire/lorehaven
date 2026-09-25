@@ -127,6 +127,85 @@ pub async fn insert_media_reference(
     Ok(())
 }
 
+/// What a fetch learned about a media reference's bytes.
+///
+/// Deliberately a local type rather than a dependency on the app layer: the
+/// repository is below the fetcher, not above it, and a db function that took
+/// `app::media_fetch::MediaFingerprint` would invert the dependency for the
+/// sake of a type alias. The fields are what the row needs and nothing else.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fingerprint {
+    /// `sha256:` plus hex of the fetched bytes.
+    pub content_hash: String,
+    /// The perceptual hash, or `None` when the body could not be decoded to
+    /// pixels. Never an empty string: the dedup search skips `NULL` and skips
+    /// malformed values, but two empty strings are distance 0 apart and would
+    /// merge every undecodable image into one reference.
+    pub perceptual_hash: Option<String>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+}
+
+/// Record a fetched media reference's hashes and dimensions.
+///
+/// This is what makes the perceptual search real: `insert_media_reference`
+/// writes the placeholder `pending` because the bytes are not known until they
+/// are fetched, and this is the call that replaces it. The `content_hash`
+/// update and the `perceptual_hash` update are the same statement, because a
+/// reference that carries a perceptual hash while still claiming to be
+/// `pending` would be a row that lies about being unfetched.
+///
+/// # Errors
+/// An error when no such reference exists. A fetch that completed for a row
+/// that has since been deleted must say so rather than report success, or the
+/// caller records the media as mirrored when the reference it belonged to is
+/// gone.
+pub async fn record_fingerprint(
+    db: &Database,
+    reference_id: &str,
+    fingerprint: &Fingerprint,
+) -> Result<()> {
+    let sql = sql_owned(
+        db,
+        "UPDATE media_references
+         SET content_hash = ?, perceptual_hash = ?, width = ?, height = ?,
+             updated_at = datetime('now')
+         WHERE id = ?"
+            .to_string(),
+        "UPDATE media_references
+         SET content_hash = $1, perceptual_hash = $2, width = $3, height = $4,
+             updated_at = NOW()
+         WHERE id = $5"
+            .to_string(),
+    );
+    let affected = match db.backend() {
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(&fingerprint.content_hash)
+            .bind(&fingerprint.perceptual_hash)
+            .bind(fingerprint.width)
+            .bind(fingerprint.height)
+            .bind(reference_id)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(&fingerprint.content_hash)
+            .bind(&fingerprint.perceptual_hash)
+            .bind(fingerprint.width)
+            .bind(fingerprint.height)
+            .bind(reference_id)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?
+            .rows_affected(),
+    };
+    if affected == 0 {
+        // The crate's Result is anyhow's, not sqlx's, so the "no such row"
+        // signal is a message rather than a sentinel error type.
+        anyhow::bail!("no media reference with id {reference_id}");
+    }
+    Ok(())
+}
+
 pub async fn find_media_reference_by_content_hash(
     db: &Database,
     content_hash: &str,

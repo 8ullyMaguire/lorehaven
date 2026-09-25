@@ -90,6 +90,13 @@ vocabulary!(MediaContextKind, as_str, {
 // two of them is meaningful at all. They differ in what they tolerate: pHash is
 // the most robust to re-encoding and mild edits, dHash to structural shifts,
 // wHash to scaling, aHash to the mean pixel value.
+//
+// Only `Dhash` is implemented (see `media_resilience::difference_hash`), and it
+// is the default for that reason. The other three are accepted by config and
+// stored so an operator can record their intent, but a build that is asked to
+// compute one says so rather than writing a hash computed by a different
+// algorithm - a column of pHash-shaped strings produced by dHash would make the
+// dedup search compare numbers that do not mean what the setting claims.
 vocabulary!(PerceptualHashAlgorithm, as_str, {
     Phash => "phash",
     Dhash => "dhash",
@@ -155,6 +162,81 @@ const PERCEPTUAL_HASH_MAX_BITS: u32 = 64;
 pub fn perceptual_match_confidence(distance: u32) -> f64 {
     let remaining = PERCEPTUAL_HASH_MAX_BITS.saturating_sub(distance);
     f64::from(remaining) / f64::from(PERCEPTUAL_HASH_MAX_BITS)
+}
+
+/// A 64-bit difference hash (dHash) of a grayscale image, as 16 hex digits, or
+/// `None` when the image cannot produce one.
+///
+/// dHash is the one perceptual algorithm in this module that needs no image
+/// decoder. It downsamples the frame to a 9x8 grid, compares each sampled pixel
+/// with the one to its left, and keeps the answer as a bit - so it survives
+/// re-encoding, rescaling and a uniform brightness shift, the differences a
+/// curator does not care about, while still separating images that are actually
+/// different. pHash needs a DCT and wHash a wavelet, so both want a decoded
+/// pixel buffer; dHash wants only grayscale, which is the honest starting
+/// point, and the spec lists it as one of the choices
+/// (`perceptual_hash_algorithm = "dhash"`).
+///
+/// The input is row-major grayscale, one byte per pixel, which is what a decoder
+/// produces and what a caller can synthesise in a test. `width` and `height` must
+/// describe `pixels` exactly; a mismatch returns `None` rather than a partial
+/// hash, because a fingerprint of the wrong pixels is a fingerprint of nothing.
+///
+/// The grid is a fixed 9x8 regardless of the input size, which is what makes
+/// hashes of two different-sized copies of one image comparable: the bit count
+/// is 64 either way, so a Hamming distance between them means something. Bit *i*
+/// is 1 when the pixel to the right of a comparison is brighter, emitted
+/// most-significant first so the hex reads left to right.
+///
+/// The hash survives a uniform brightness or contrast shift only *approximately*:
+/// a shift that clips at white turns runs of pixels into ties, so the two hashes
+/// differ by a few bits rather than not at all. That is why
+/// [`hamming_distance`] and a threshold exist instead of string equality.
+pub fn difference_hash(pixels: &[u8], width: u32, height: u32) -> Option<String> {
+    let (w, h) = (width as usize, height as usize);
+    if w < 2 || h < 2 {
+        return None;
+    }
+    if pixels.len() != w.checked_mul(h)? {
+        return None;
+    }
+
+    // dHash compares each pixel with the one to its left on a 9x8 grid: 8 rows
+    // of 9 pixels give the 8x8 = 64 comparisons that make one 64-bit hash. The
+    // grid is fixed rather than derived from the input, which is what makes two
+    // hashes of the same image at different sizes comparable at all.
+    const COLS: usize = 9;
+    const ROWS: usize = 8;
+
+    let mut bits: u64 = 0;
+    for row in 0..ROWS {
+        for col in 0..COLS - 1 {
+            // Nearest-neighbour sample of the cell centred on this comparison.
+            // Nearest rather than an area average: averaging blurs the exact
+            // edge a difference hash is looking for, and the input is already
+            // downsampled grayscale by the caller.
+            let x0 = sample_column(col, COLS, w);
+            let x1 = sample_column(col + 1, COLS, w);
+            let y = sample_row(row, ROWS, h);
+            let here = pixels[y * w + x1];
+            let left = pixels[y * w + x0];
+            if here > left {
+                bits |= 1 << (63 - (row * (COLS - 1) + col));
+            }
+        }
+    }
+    Some(format!("{bits:016x}"))
+}
+
+/// The source column that grid cell `cell` of `cells` samples, mapping the
+/// cell across the full width rather than taking the first `cells` pixels.
+fn sample_column(cell: usize, cells: usize, width: usize) -> usize {
+    cell * (width - 1) / (cells - 1)
+}
+
+/// The source row that grid cell `cell` of `cells` samples.
+fn sample_row(cell: usize, cells: usize, height: usize) -> usize {
+    cell * (height - 1) / (cells - 1)
 }
 
 /// The Hamming distance between two hex-encoded perceptual hashes, or `None`
@@ -324,6 +406,115 @@ mod tests {
             assert_eq!(*fingerprint, parsed);
         }
         assert!("audiodraft".parse::<AudioFingerprint>().is_err());
+    }
+
+    #[test]
+    fn a_monotonic_ramp_is_its_own_perceptual_hash() {
+        // A dHash over a left-to-right brightness ramp: every pixel is brighter
+        // than its left neighbour, so every comparison says "brighter to the
+        // right" and all 64 bits are set. This is the one image a hash can be
+        // checked against without decoding anything.
+        let ramp: Vec<u8> = (0..256u16).map(|i| i as u8).collect();
+        let hash = difference_hash(&ramp, 16, 16);
+        assert_eq!(hash, Some("f".repeat(16)));
+    }
+
+    #[test]
+    fn a_flat_image_is_all_zero() {
+        // Every pixel equals its left neighbour, so no comparison differs.
+        let flat = vec![128u8; 256];
+        assert_eq!(difference_hash(&flat, 16, 16), Some("0".repeat(16)));
+    }
+
+    #[test]
+    fn a_ramp_is_unchanged_by_a_uniform_brightness_shift() {
+        // This is the property the whole algorithm exists for: the same image
+        // saved lighter or darker must produce the same fingerprint, or
+        // dedup would only ever catch byte-identical files.
+        let base: Vec<u8> = (0..256u16).map(|i| i as u8).collect();
+        // A brightness shift clips at white, so the top of the ramp turns into
+        // runs of equal pixels and those comparisons tie. That is why a dHash
+        // is compared by distance rather than by equality - the guarantee is
+        // "close", not "identical". Three clipped comparisons out of 64 is well
+        // inside the default threshold of 6.
+        let shifted: Vec<u8> = base.iter().map(|v| v.saturating_add(7)).collect();
+        let distance = hamming_distance(
+            &difference_hash(&base, 16, 16).expect("base"),
+            &difference_hash(&shifted, 16, 16).expect("shifted"),
+        )
+        .expect("both are valid hex");
+        assert!(
+            distance <= 6,
+            "a uniform brightness shift must stay within the default match threshold, got distance {distance}"
+        );
+    }
+
+    #[test]
+    fn a_vertical_ramp_differs_from_a_horizontal_one() {
+        let mut horizontal = Vec::new();
+        let mut vertical = Vec::new();
+        for y in 0..16u8 {
+            for x in 0..16u8 {
+                horizontal.push(x * 16);
+                vertical.push(y * 16);
+            }
+        }
+        assert_ne!(
+            difference_hash(&horizontal, 16, 16),
+            difference_hash(&vertical, 16, 16)
+        );
+    }
+
+    #[test]
+    fn a_hash_uses_the_whole_image_not_just_its_first_rows() {
+        // The first four rows ramp left-to-right and the last four invert it.
+        // A hash that read only the top of the image would see a plain ramp and
+        // score this the same as the all-ramp image; one that resamples the
+        // whole frame must not.
+        let mut split = Vec::new();
+        for y in 0..16u8 {
+            for x in 0..16u8 {
+                split.push(if y < 8 { x * 16 } else { 255 - x * 16 });
+            }
+        }
+        let all_ramp: Vec<u8> = (0..256u16).map(|i| i as u8).collect();
+        assert_ne!(
+            difference_hash(&split, 16, 16),
+            difference_hash(&all_ramp, 16, 16),
+            "a hash that only reads the top rows is blind to the bottom half"
+        );
+    }
+
+    #[test]
+    fn a_hash_of_a_non_square_image_is_some() {
+        // dHash resamples to 9x8, so it must not require a square input: a
+        // 32x18 faceclaim is a perfectly ordinary thing to attach.
+        let wide: Vec<u8> = (0..(32u32 * 18u32)).map(|i| (i % 251) as u8).collect();
+        let hash = difference_hash(&wide, 32, 18).expect("a 32x18 image fingerprints");
+        assert_eq!(hash.len(), 16);
+    }
+
+    #[test]
+    fn a_hash_of_a_tiny_image_is_some() {
+        // 2x2 is the smallest image dHash can difference, and it must still
+        // produce 64 bits rather than falling back to None.
+        let tiny = vec![0u8, 255, 255, 0];
+        let hash = difference_hash(&tiny, 2, 2).expect("2x2 can be differenced");
+        assert_eq!(hash.len(), 16);
+    }
+
+    #[test]
+    fn a_hash_of_the_wrong_pixel_count_is_none() {
+        // 15x16 is 240 pixels, not 256. Returning a hash anyway would compare
+        // a truncated image against a whole one and invent a distance.
+        let wrong = vec![10u8; 240];
+        assert_eq!(difference_hash(&wrong, 16, 16), None);
+    }
+
+    #[test]
+    fn a_degenerate_dimension_is_none() {
+        // A 16x0 image has no rows to compare, so there is no hash to speak of.
+        assert_eq!(difference_hash(&[], 16, 0), None);
     }
 
     #[test]
