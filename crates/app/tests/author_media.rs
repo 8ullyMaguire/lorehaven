@@ -3,6 +3,7 @@
 use lorehaven_db::media_resilience;
 use lorehaven_db::Backend;
 use std::path::PathBuf;
+use test_support::id;
 
 fn scratch_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -21,14 +22,14 @@ async fn author_preferences_crud() {
     let tdb = test_support::TestDb::connect_with_dir("am-prefs", &dir).await;
     let db = tdb.db();
 
-    let account_id = "author-001";
+    let account_id = id("author-001");
 
     // Upsert preferences
-    media_resilience::upsert_author_preferences(db, account_id, true, true, "immediate", true, 5)
+    media_resilience::upsert_author_preferences(db, &account_id, true, true, "immediate", true, 5)
         .await
         .expect("upsert prefs");
 
-    let prefs = media_resilience::get_author_preferences(db, account_id)
+    let prefs = media_resilience::get_author_preferences(db, &account_id)
         .await
         .expect("get prefs");
     assert!(prefs.auto_submit_to_archive);
@@ -38,11 +39,11 @@ async fn author_preferences_crud() {
     assert_eq!(prefs.minimum_healthy_links, 5);
 
     // Update
-    media_resilience::upsert_author_preferences(db, account_id, false, false, "weekly", false, 2)
+    media_resilience::upsert_author_preferences(db, &account_id, false, false, "weekly", false, 2)
         .await
         .expect("update prefs");
 
-    let prefs = media_resilience::get_author_preferences(db, account_id)
+    let prefs = media_resilience::get_author_preferences(db, &account_id)
         .await
         .expect("get prefs");
     assert!(!prefs.auto_submit_to_archive);
@@ -135,36 +136,36 @@ async fn author_media_health_report_tiers() {
     let tdb = test_support::TestDb::connect_with_dir("am-health", &dir).await;
     let db = tdb.db();
 
-    let account_id = "author-003";
-    let pseud_id = format!("{}-pseud", account_id);
+    let account_id = id("author-003");
+    let pseud_id = id(&format!("{}-pseud", account_id));
 
     // Seed account → pseud → works in FK order.
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query("INSERT INTO accounts (id, email, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))")
-                .bind(account_id)
+                .bind(&account_id)
                 .bind(format!("{}@test.dev", account_id))
                 .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
             sqlx::query("INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))")
-                .bind(&pseud_id).bind(account_id).bind(&pseud_id).bind(&pseud_id)
+                .bind(&pseud_id).bind(&account_id).bind(&pseud_id).bind(&pseud_id)
                 .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
             for (wid, title) in [("work-a", "Work A"), ("work-b", "Work B")] {
                 sqlx::query("INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at) VALUES (?, ?, ?, 'published', 'public', datetime('now'), datetime('now'))")
-                    .bind(wid).bind(title).bind(&pseud_id)
+                    .bind(id(wid)).bind(title).bind(&pseud_id)
                     .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
             }
         }
         Backend::Postgres => {
-            sqlx::query("INSERT INTO accounts (id, email, created_at, updated_at) VALUES ($1, $2, now(), now())")
-                .bind(account_id)
+            sqlx::query("INSERT INTO accounts (id, email, created_at, updated_at) VALUES ($1::uuid, $2, now(), now())")
+                .bind(&account_id)
                 .bind(format!("{}@test.dev", account_id))
                 .execute(db.postgres_pool().expect("postgres")).await.unwrap();
-            sqlx::query("INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at) VALUES ($1, $2, $3, $4, now(), now())")
-                .bind(&pseud_id).bind(account_id).bind(&pseud_id).bind(&pseud_id)
+            sqlx::query("INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, $4, now(), now())")
+                .bind(&pseud_id).bind(&account_id).bind(&pseud_id).bind(&pseud_id)
                 .execute(db.postgres_pool().expect("postgres")).await.unwrap();
             for (wid, title) in [("work-a", "Work A"), ("work-b", "Work B")] {
-                sqlx::query("INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at) VALUES ($1, $2, $3, 'published', 'public', now(), now())")
-                    .bind(wid).bind(title).bind(&pseud_id)
+                sqlx::query("INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at) VALUES ($1::uuid, $2, $3::uuid, 'published', 'public', now(), now())")
+                    .bind(id(wid)).bind(title).bind(&pseud_id)
                     .execute(db.postgres_pool().expect("postgres")).await.unwrap();
             }
         }
@@ -173,8 +174,8 @@ async fn author_media_health_report_tiers() {
     // Work A: one reference (new, so zero healthy links → broken tier).
     let (created_a, _) = media_resilience::upsert_media_reference_for_import(
         db,
-        "work-a",
-        Some("ch-1"),
+        &id("work-a"),
+        None,
         "https://example.com/a.png",
     )
     .await
@@ -184,15 +185,15 @@ async fn author_media_health_report_tiers() {
     // Work B: one reference (new, so zero healthy links → broken tier).
     let (created_b, _) = media_resilience::upsert_media_reference_for_import(
         db,
-        "work-b",
-        Some("ch-2"),
+        &id("work-b"),
+        None,
         "https://example.com/b.png",
     )
     .await
     .expect("upsert ref b");
     assert!(created_b);
 
-    let report = media_resilience::author_media_health_report(db, account_id)
+    let report = media_resilience::author_media_health_report(db, &account_id)
         .await
         .expect("health report");
 
