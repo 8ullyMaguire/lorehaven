@@ -247,3 +247,8 @@ M55-01,platform,OpenAPI specification generated from the router and published do
 M55-02,platform,Scoped-token issuance UI and deprecation policy,M55,implemented-fully-tested,--,Spec §23.1.
 M56-01,platform,Instance accessibility mode: public | walled_garden | private,M56,implemented-fully-tested,crates/app/tests/instance_access_mode.rs,Spec §0.4.7. Configured as [instance] mode; a typo stops startup rather than falling back to public.
 M52-09,discovery,Per-user recommendation engine preference remembered across every recommendation surface,M52,planned,--,Spec §16.1.5. Per pseud; validated against enabled strategies; instance default is the fallback.
+M11-17,platform,"Metadata exchange endpoint: version negotiation, signal submission and canonical retrieval, opt-in per instance",M57,planned,--,"Spec 11.17. Signal fields enforced by schema, not by trust. Post-external-AI-proposal triage 2026-09-25."
+M11-17a,taxonomy,"Auto-created canonical entities from signals are usable while unverified, with signal_count as review priority only",M57,planned,--,Spec 15.17. signal_count is never a demand weight (16.16) or a count of readers.
+M11-17b,governance,"Low bar to submit signals (TL1), high bar to curate canonical metadata (TL3); neither configurable",M57,planned,--,Spec 19.14. Bars are trust thresholds; 0.3 makes trust non-purchasable.
+M11-17c,discovery,"Latent demand: a signal for an unheld work creates or reinforces a demand item, once per work per instance",M57,planned,--,Spec 16.16.1 amendment. Never weighted by submitter count.
+M11-17d,platform,"Shared lore-metadata crate: serde-only wire types, version negotiation, no IO or database dependency",M57,planned,--,"Spec 2.3.1. Nothing in app/db depends on it, so it is order-independent."

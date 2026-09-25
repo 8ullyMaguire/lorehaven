@@ -11,11 +11,11 @@ canonical feature inventory and the roadmap-board seed).
 
 ## Where the build actually stands (2026-09-24, commit 97b24b0)
 
-The README's "M0–M5 complete, M6 partly built" note is stale. Verified state:
-**177 of 230 original requirement rows implemented** (172 locally-tested, 5
-fully-tested), **49 planned** (M45 taste-arena residuals + M47 settings
-surfaces), **4 deliberately unsupported**, 51 milestone test files through M45,
-migrations to 0071, 37 frontend routes, tags through `v0.51.0`. The
+The README's "M0–M5 complete, M6 partly built" note is stale. Verified state
+re-derived from `docs/requirements.csv` on 2026-09-25: **192 rows implemented**
+(172 locally-tested, 20 fully-tested), **57 planned**, **4 deliberately
+unsupported**, 253 rows total. 51 milestone test files through M45, migrations to
+0071, 37 frontend routes, tags through `v0.51.0`. The
 platform core (M0–M15), the forum series (M31–M35), media resilience
 (M48–M51), roadmap consensus (M45), browse ordering (M43), export CTAs
 (M42), user settings (M47 complete, 9/9 requirements implemented-fully-tested) are built. What remains to the
@@ -97,6 +97,114 @@ OpenAPI generated from the router, published docs page, scoped-token
 issuance UI, deprecation policy. The API itself exists (M18 built the
 surface); this milestone is the *publication contract*. ~3–4 days.
 
+### M57 — Metadata exchange (spec §11.17, §15.17, §19.14, §2.3.1, new)
+
+The community metadata exchange, adopted 2026-09-25 after triaging an external
+proposal (`docs/plans/metadata-exchange-triage.md`). Not the proposal's diff —
+its section citations were substantially wrong, and the corrections are recorded
+in the triage. The spec text is landed; these rows are the build order.
+
+Ordered by dependency, not by appeal:
+
+1. **`lore-metadata` crate** (§2.3.1) — serde-only wire types, version
+   negotiation, no IO. Nothing else depends on it, so it is genuinely
+   order-independent and can be written first or last. Publishing it early is
+   what keeps a compatible third-party implementation possible.
+2. **Signal submission** (§11.17) — the schema prohibition is the deliverable.
+   Fields outside `WorkSignal` must be refused *by name*, not silently trimmed,
+   and that needs a test that sends one and reads the error.
+3. **Auto-created canonical entities** (§15.17) — the unverified/curated split.
+   The load-bearing claim is that an unverified entity is usable immediately and
+   visibly so; the risk is shipping it as hidden-until-quorum, which stalls
+   organic growth.
+4. **Trust bars** (§19.14) — TL1 to submit, TL3 to curate, neither configurable.
+   Small, and it belongs with the curation surface rather than ahead of it.
+5. **Latent demand** (§16.16.1) — the one piece that touches ranking, so it
+   comes after the exchange itself works end to end.
+
+Build-order note: this goes **after M54/M55**, not beside them. The exchange is
+an API surface, and an API surface shaped before any external consumer exists is
+shaped by imagination. The bot is the first real client.
+
+**What is deliberately not in scope**, with the reason: no credits for
+submission (§0.3, §19.2 — a reward attached to a contribution is how a
+contribution becomes influence, and it is a spam vector); no reading data, ever
+(the field does not exist in the type, so no config widens it); no content or
+excerpts; no automatic application of received metadata (it feeds the existing
+tag-proposal queue, §15.11).
+
+### M57 — Metadata exchange (spec §11.17, §15.17, §19.14, §2.3.1, new)
+
+The community metadata exchange, adopted 2026-09-25 after triaging an external
+proposal (`docs/plans/metadata-exchange-triage.md`). Not the proposal's diff —
+its section citations were substantially wrong, and the corrections are recorded
+in the triage. The spec text is landed; these rows are the build order.
+
+Ordered by dependency, not by appeal:
+
+1. **`lore-metadata` crate** (§2.3.1) — serde-only wire types, version
+   negotiation, no IO. Nothing else depends on it, so it is genuinely
+   order-independent and can be written first or last. Publishing it early is
+   what keeps a compatible third-party implementation possible.
+2. **Signal submission** (§11.17) — the schema prohibition is the deliverable.
+   Fields outside `WorkSignal` must be refused *by name*, not silently trimmed,
+   and that needs a test that sends one and reads the error.
+3. **Auto-created canonical entities** (§15.17) — the unverified/curated split.
+   The load-bearing claim is that an unverified entity is usable immediately and
+   visibly so; the risk is shipping it as hidden-until-quorum, which stalls
+   organic growth.
+4. **Trust bars** (§19.14) — TL1 to submit, TL3 to curate, neither configurable.
+   Small, and it belongs with the curation surface rather than ahead of it.
+5. **Latent demand** (§16.16.1) — the one piece that touches ranking, so it
+   comes after the exchange itself works end to end.
+
+Build-order note: this goes **after M54/M55**, not beside them. The exchange is
+an API surface, and an API surface shaped before any external consumer exists is
+shaped by imagination. The bot is the first real client.
+
+**What is deliberately not in scope**, with the reason: no credits for
+submission (§0.3, §19.2 — a reward attached to a contribution is how a
+contribution becomes influence, and it is a spam vector); no reading data, ever
+(the field does not exist in the type, so no config widens it); no content or
+excerpts; no automatic application of received metadata (it feeds the existing
+tag-proposal queue, §15.11).
+
+### M57 — Metadata exchange (spec §11.17, §15.17, §19.14, §2.3.1, new)
+
+The community metadata exchange, adopted 2026-09-25 after triaging an external
+proposal (`docs/plans/metadata-exchange-triage.md`). Not the proposal's diff —
+its section citations were substantially wrong, and the corrections are recorded
+in the triage. The spec text is landed; these rows are the build order.
+
+Ordered by dependency, not by appeal:
+
+1. **`lore-metadata` crate** (§2.3.1) — serde-only wire types, version
+   negotiation, no IO. Nothing else depends on it, so it is genuinely
+   order-independent and can be written first or last. Publishing it early is
+   what keeps a compatible third-party implementation possible.
+2. **Signal submission** (§11.17) — the schema prohibition is the deliverable.
+   Fields outside `WorkSignal` must be refused *by name*, not silently trimmed,
+   and that needs a test that sends one and reads the error.
+3. **Auto-created canonical entities** (§15.17) — the unverified/curated split.
+   The load-bearing claim is that an unverified entity is usable immediately and
+   visibly so; the risk is shipping it as hidden-until-quorum, which stalls
+   organic growth.
+4. **Trust bars** (§19.14) — TL1 to submit, TL3 to curate, neither configurable.
+   Small, and it belongs with the curation surface rather than ahead of it.
+5. **Latent demand** (§16.16.1) — the one piece that touches ranking, so it
+   comes after the exchange itself works end to end.
+
+Build-order note: this goes **after M54/M55**, not beside them. The exchange is
+an API surface, and an API surface shaped before any external consumer exists is
+shaped by imagination. The bot is the first real client.
+
+**What is deliberately not in scope**, with the reason: no credits for
+submission (§0.3, §19.2 — a reward attached to a contribution is how a
+contribution becomes influence, and it is a spam vector); no reading data, ever
+(the field does not exist in the type, so no config widens it); no content or
+excerpts; no automatic application of received metadata (it feeds the existing
+tag-proposal queue, §15.11).
+
 ### M56 — Instance posture and the remaining planned rows
 
 M56-01 — **instance accessibility mode** (`public` | `walled_garden` |
@@ -105,9 +213,14 @@ translated once into an `AccessPolicy` rather than checked per handler, so
 every content surface honours it by construction. An unrecognised value stops
 startup.
 
-The rest of M56 is the 49 planned rows: taste-arena residuals (M45) and the
-settings surfaces (M47-02/05/07). These predate ADR 0024 and stay first-class.
-~1 week.
+The rest of M56 is the **46 planned M45 rows** (taste-arena residuals and
+category governance). These predate ADR 0024 and stay first-class. ~1 week.
+
+The M47 settings surfaces the earlier draft of this paragraph referred to are
+**no longer planned** — every M47 row is now `implemented-fully-tested`. The
+count changed without this paragraph being updated, which is exactly the status
+drift this file is supposed to prevent; the numbers above are re-derived from
+`docs/requirements.csv`, not carried forward.
 
 ### M45 gap — category governance voting is unreachable
 
@@ -150,7 +263,29 @@ open.
 
 M52 first (freezes neutral rec behavior before any further influence work),
 then M53 batch 1 (imports are the highest-leverage reader feature), M54/M55
-in parallel after, M56 interleaved. At the observed pace (~11
-requirements/day agent-driven), the concentrated estimate is 6–9 weeks;
-adapter batches beyond batch 1 stretch the tail by 2–3 weeks and can run in
-the background.
+in parallel after, M57 once there is a real API consumer, M56 interleaved. At
+the observed pace (~11 requirements/day agent-driven), the concentrated estimate
+is 6–9 weeks; adapter batches beyond batch 1 stretch the tail by 2–3 weeks and
+can run in the background.
+
+## Verification debt, stated plainly
+
+**172 of 253 rows are `implemented-locally-tested`, not
+`implemented-fully-tested`.** That is the largest soft spot in a green board, and
+it is why M57 is not simply next in line. A public write path built on
+machinery that has never been exercised through the full stack is a different
+risk from the one the external proposal named when it argued about sequencing —
+its argument was that M10 taxonomy and M14 trust were unbuilt, and both are
+built. The real constraint is verification depth, not milestone order.
+
+The number is not a claim that 172 rows are broken. It is a claim that 172 rows
+have not been held to the full-stack bar, and the honest way to find out which
+those are is a sweep that promotes or downgrades each row on evidence — not a
+re-read of this file. That sweep is unowned and unestimated; it is listed here so
+it is not mistaken for finished.
+
+One more thing worth stating plainly: a public write path is the first thing in
+this spec that lets data leave the instance. Everything else here is either
+local or an inbound fetch. The §0.3 signal prohibition is the reason that is
+survivable, and it is worth reading once before the endpoint is written, not
+after.

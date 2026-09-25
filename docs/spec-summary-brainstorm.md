@@ -853,4 +853,16 @@ Priority 1 extended userward: every user-visible behavior has a setting with a d
 
 ---
 
-*This summary covers the complete spec (§0–§46, including the §45 category governance and §46 user configuration additions) and the taste-gravitational amendment. Cross-references like §16.17 point to the canonical docs. Last updated: 2026-09-23.*
+## 30. Metadata exchange (§11.17, §15.17, §19.14)
+
+Added 2026-09-25. An instance can participate in a community metadata exchange: readers submit **signals** — facts about a work they hold, such as site identifiers, tags, author and counts — and receive **canonical** metadata back: community-curated entity names and corrections, with their review status visible.
+
+**The constraint that defines it: a signal is a fact about a work, never a fact about a reader.** Reading history, progress, ratings, notes, private library membership, pseud linkage and credentials are not fields the signal type has, so they cannot be sent by a conforming client and are refused by name by a non-conforming one. This is the first thing in the spec that lets data leave the instance at all.
+
+The other design decisions worth arguing about: **submitting is cheap and curating is expensive** (TL1 to send, TL3 to change what other readers receive), because the alternative is an endpoint nobody can write to; **a new name from a signal is usable immediately and visibly unverified**, because holding it behind quorum stalls organic growth; and **`signal_count` orders the review queue but is never a demand weight or a count of readers**, because one account submitting repeatedly is indistinguishable from many accounts submitting once. A signal for a work the instance does not hold is nonetheless real demand (§16.16.1) — it enters as a distinct-work signal, once per work per instance.
+
+**Open question worth the chatbot's attention:** what happens to a work's metadata when an instance *stops* participating, or when two instances disagree? Received canonical metadata is retained on opt-out (deleting it would degrade a library already curated with it), and a conflict is a per-field suggestion rather than a merge — but neither is settled.
+
+---
+
+*This summary covers the complete spec (§0–§46, including the §45 category governance, §46 user configuration and §30 metadata exchange additions) and the taste-gravitational amendment. Cross-references like §16.17 point to the canonical docs. Last updated: 2026-09-25.*

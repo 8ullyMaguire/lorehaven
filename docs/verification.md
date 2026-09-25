@@ -1321,6 +1321,38 @@ checkpoint (retries duplicate `bulk_export_items` rows), every `load_subject` er
 recorded as "skipped", no `has_entitlement` check, no `ContentRead` scope on the
 bulk route, and no test for the export path itself.
 
+---
+
+## 2026-09-25 — Metadata exchange specified (docs-only; nothing built)
+
+**No test was run for this change and none is claimed.** It is a specification
+landing: `docs/spec.md` §0.3, §2.3.1, §11.17, §15.17, §16.16.1 and §19.14, five
+`planned` rows in `docs/requirements.csv`, and the M57 build order in
+`docs/plans/remaining-work.md`. Every row is `planned` and every row is code
+that does not exist yet.
+
+| Claim | How it is verified | Result |
+|---|---|---|
+| New sections landed at non-colliding numbers | `grep -c '^## 11.17'`, `'^## 15.17'`, `'^## 19.14'` | 1 each |
+| No duplicate numbers introduced | `grep -cE '^## 11\.(1[7-9])'`, `'^## 15\.17'` | 1 each |
+| "quorum" not repurposed for signal counting | `grep -c 'auto_quorum' docs/spec.md` | 0 |
+| Markdown still parses | fence count via `awk` | 212, balanced |
+| No broken cross-references introduced | unresolved-`§x.y` set diffed against the pre-edit spec | 10 before, 10 after, **0 newly broken** |
+| Tracker row shape | `csv` re-parse, field count asserted, CRLF terminator preserved | 253 rows, 5 added, 5-line diff |
+
+The 10 pre-existing unresolved references (`§0.4`, `§10.4.1`, `§14.5`, `§14.9`,
+`§16.17`, `§16.18`, `§20.3.1`, `§24.15`, `§34.3`, `§34.5`) are **not fixed here**
+and are not this change's damage. They are recorded so a later pass can find
+them.
+
+**What a reviewer should check first**, because it is the part that is a design
+decision rather than a transcription: the TL1-submit / TL3-curate asymmetry in
+§19.14. The external proposal asserted a level without checking what TL3 gates
+elsewhere. If TL3 is already high enough to make the canonical layer unpopulated
+on a young instance, the whole exchange is an endpoint that answers empty.
+
+---
+
 **Webhook delivery is now being built** (`crates/app/src/webhook_delivery.rs`,
 uncommitted, 159 lines): `deliver_notification` calls `webhook_sender::send`,
 records each attempt through `marketplace::record_delivery` — closing the "no

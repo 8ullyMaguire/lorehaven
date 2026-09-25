@@ -43,6 +43,7 @@ These are not priorities that yield to others. They constrain every priority abo
 - No advertising, no third-party trackers, no sponsored placement anywhere in the product.
 - Third-party AI crawlers are refused by default (§24.14); a work's availability for AI training is the author's statement, not something the instance can enforce, and it is presented as such.
 - The administrator's taste profile must never be visible, inferable, or hinted at through any user-facing label, multiplier name, or credit breakdown.
+- **A metadata signal is a fact about a work, never a fact about a reader.** Whatever the exchange endpoint may accept (§11.17), reading history, progress, ratings, notes, private library membership, pseud linkage, drafts, source credentials and session identifiers are not among them, and this is enforced by the request schema rather than by trust in the sender. A sender that sends one is refused with a named error, not silently truncated.
 - Honest verification claims. Feature presence in this document is not evidence of implementation.
 
 ---
@@ -396,6 +397,21 @@ operator must select one whose content policy matches the instance's
 (§20.9). This is an operator compliance concern, not a platform feature.
 
 ## 2.3 Repository structure
+
+### 2.3.1 `lore_metadata` — the shared exchange contract
+
+`crates/lore-metadata` is a dependency-light crate — serde, no database types, no
+IO, no HTTP client — defining the wire types both sides compile against:
+`WorkSignal`, `CanonicalWork`, `EntityRef`, `SignalBatch`, `CanonicalBatch` and
+`ExchangeVersion`.
+
+It is separate from the server crates on purpose. Nothing in `lorehaven-app` or
+`lorehaven-db` depends on it, so it can be written and published at any point in
+the build order without waiting for the rest of the architecture, and a compatible
+third-party implementation never has to adopt Lorehaven's database. Version
+incompatibility is negotiated through `ExchangeVersion`; a client that cannot
+agree a version is refused with the range the server supports rather than being
+allowed to guess.
 
 ```text
 lorehaven/
@@ -1982,6 +1998,71 @@ is the FicNexus-era `fanfic-scrapers` crate (107-site FanFicFare parity);
   plan rows in `docs/plans/remaining-work.md`, never as a bulk import of
   unverified parsers.
 
+## 11.17 Metadata exchange endpoint
+
+An instance may participate in a community metadata exchange: readers offer
+extracted signals about works they hold, and receive community-curated canonical
+metadata back. The two directions are independent — a client may send, receive,
+or do neither. **Both sides are opt-in and independently so:** the client opts
+in per instance it is configured against, and the server exposes the endpoint
+only when its operator enabled it. No request shape turns on a server that did
+not enable it.
+
+```text
+GET  /api/v1/exchange/version      → supported ExchangeVersion range
+POST /api/v1/exchange/signals      → submit a SignalBatch
+GET  /api/v1/exchange/canonical    → fetch canonical metadata for works
+```
+
+**A signal is a fact about a work.** A `WorkSignal` may carry: site identifiers,
+title, author names, fandom, tag, character and relationship strings, content
+rating, word and chapter counts, completion status, content hash, language,
+source URL, and the extraction timestamp.
+
+**The schema refuses everything else.** Reading history, progress, position,
+reading status, ratings, notes, kudos, private library membership, pseud
+linkage, draft content, source credentials, session identifiers, IP addresses and
+file paths are not fields a `WorkSignal` has, so they cannot be sent by a
+conforming client and a non-conforming one is rejected by name rather than having
+its payload quietly trimmed. This is the §0.3 prohibition implemented as a type,
+not as a request filter.
+
+**Trust: low bar to submit, high bar to curate.** A TL1 account may submit
+signals. Becoming a canonical curator requires §19.14's bar. Trust buys
+authority over other people's metadata, never influence over a ranking (§0.3).
+
+**Rate limiting** is per account and per source IP, with a default of 1000
+submissions per hour, and the limit is configuration. A signal batch is
+deduplicated by content hash before it is stored, so a re-import costs a
+submitter nothing and creates no second record.
+
+**The response is canonical metadata only.** `GET /canonical` returns
+`CanonicalWork` values — canonical entity references with aliases, corrected
+metadata, quality signals, `curated_at`, and a `review_status` naming whether the
+value passed human quorum (§19.4) or is an unverified candidate. It never reveals
+who submitted a signal, and it never reveals how many accounts hold a work: a
+count of holders is not computable from the data the instance holds, and an
+endpoint that appeared to offer one would be offering a guess.
+
+### 11.17.1 What this section deliberately does not do
+
+- **No credits for submission.** Metadata contribution is not paid in credits.
+  This is the §19.2 credits/trust separation: a reward attached to a
+  contribution is how a contribution becomes influence, and §0.3 forbids that
+  purchase. Participation is opt-in and the submitter benefits directly, which is
+  the only incentive it needs. It would also be a spam vector against the rate
+  limit.
+- **No reading data, ever.** See the schema prohibition above. There is no
+  configuration that widens it, because a field that does not exist cannot be
+  configured into existence.
+- **No content, no excerpts.** A signal is metadata. Bodies never enter the
+  exchange (§11.15 governs what the instance itself retains).
+- **No automatic application of received metadata.** Canonical metadata is
+  offered as a suggestion through the existing tag-proposal queue (§15.11), never
+  written onto a work without the reader's acceptance.
+- **No single-implementation assumption.** The protocol does not name Lorehaven
+  as the only implementer. A compatible third party is a legitimate peer.
+
 ---
 
 # 12. Milestone 7: Positivity Filter and Feedback Delivery
@@ -2482,7 +2563,49 @@ Rules:
 - Content notes feed the filters (§15.7), saved views (§14.2) and the first-run flow (§7.8), and are the context the positivity filter uses when judging whether a comment is reacting to unmarked content (§12.2).
 - A note is never a judgement of the work, and no surface frames one as advice against reading it.
 
-## Acceptance fixture
+## 15.17 Auto-created canonical entities and their review state
+
+Signals arriving through the exchange (§11.17) name entities that the instance's
+controlled vocabulary does not contain yet: a tag nobody has used, a character,
+a pairing, a fandom variant. Those names are evidence, and refusing them
+strands the taxonomy the instance is trying to build.
+
+**A new name is usable immediately, and visibly so.** An entity created from a
+signal may be attached to a work, appear in the tag browser, and be searched —
+carrying `review_status = unverified` and a signal count. It is never presented
+as curated, and any surface showing it says so.
+
+**The unverified/curated split is what keeps growth organic.** The alternative —
+holding every new name behind quorum — makes a new tag invisible until enough
+people independently file it, which on a small instance is never, and it makes
+the queue so large that reviewing it becomes the whole job. A name that is
+unverified but usable gets eyes on it; a name that is hidden gets none.
+
+`signal_count` is **review priority, not demand.** It orders the queue — the
+name with forty distinct signals is examined before the name with one. It is
+never a demand weight (§16.16), never a ranking input, and never a count of
+readers: one account submitting repeatedly is indistinguishable from many
+accounts submitting once, so a "how many users have this" number is not
+derivable and any surface implying one is wrong.
+
+Curating a name is §19.4 quorum work: the reviewer sets the canonical form,
+merges aliases, and the entity becomes `review_status = curated`. The original
+signal row is retained as provenance, never rewritten, and a work whose entity is
+later split or merged records the change so a reader can see why a tag moved.
+
+### 15.17.1 Acceptance
+
+- A signal naming an unknown tag creates a usable, visibly-unverified entity.
+- An unverified entity is never rendered as curated.
+- A signal naming a known tag adds an alias rather than creating a duplicate.
+- `signal_count` orders the review queue and appears in no ranking or demand
+  computation.
+- No endpoint exposes a count of distinct accounts holding a work.
+- Curating an entity retains the originating signals.
+
+---
+
+# 16. Milestone 11: Discovery, Taste Influence, Recipes, and Dashboards
 
 Include contrasting works: A protagonist/B vampire, A vampire protagonist, A supporting vampire, A/B central, A/B background, A with unknown relationship metadata, A with confirmed no romantic/sexual relationship, a private imported body containing a unique phrase, a withdrawn work containing the same phrase, works with each mood tag.
 
@@ -2842,6 +2965,15 @@ This list is the specification. A metric outside it is a defect to fix, not a we
 | Curatorial labour that survived review: accepted canonicalisation (§15.11), approved quorum decisions (§19.4), §33.3's tag-wrangling queue | Votes or reports filed without review; sanctions issued; proposals rejected |
 | Positive feedback *delivered*: a comment that passed §12 and reached its author; a constructive review where the author opted in | Reactions alone, ratings alone, private bookmarks |
 | Recency-weighted quality: §41.1's half-life on the works involved | Account age, credit balance, subscription tier, bounty size, follower count |
+| **Latent demand:** a signal through the exchange (§11.17) for a work the instance does not hold | A count of submitters, as though it were a count of readers |
+
+Latent demand is the one form of demand that arrives from outside the instance's
+own user base, and it is genuinely additive: a reader on a sister instance who
+cannot find a work has told us something no local account could. It enters as a
+**distinct-work signal**, not as a vote — the demand item is created or
+reinforced once per work per submitting instance, and re-signalling the same work
+adds no weight. The count of submitters is never a count of readers (§15.17), so
+it cannot be read as a headcount and is never shown as one.
 
 Two clarifications, because both are easy to get wrong:
 
@@ -3425,6 +3557,33 @@ Feedback is not a substitute for appeals and is labeled as participant opinion.
 - Administrator overrides are logged with reason.
 - Shadowbans expire automatically without renewal.
 - DMCA counter-notices restore content on quorum reversal.
+- An account may submit exchange signals at TL1 and may not curate canonical
+  metadata below the §19.14 bar.
+- A signal carrying a field outside `WorkSignal` is refused by name.
+
+---
+
+## 19.14 Trust bar for canonical curation
+
+The exchange (§11.17) splits trust in two, deliberately: **a low bar to submit,
+a high bar to curate.**
+
+- **Submitting a signal requires TL1.** A signal is a claim about a work, not an
+  act of authority, and a wrong signal is corrected by the canonical record
+  rather than by refusing the submitter. Gating submission above TL1 would gate
+  participation, not quality.
+- **Curating canonical metadata requires TL3** (§19.2), plus §19.4's
+  review requirements: a change to a canonical value that other readers will
+  receive is a governance act, and it is held to the governance bar.
+- **No configuration lowers either bar.** Both are trust thresholds, and §0.3
+  makes trust non-purchasable; a config key that lowered them would be a
+  purchased moderation authority wearing a different name.
+
+The asymmetry is the design. If both bars were low, the instance would have a
+large supply of uncorrected claims. If both were high, it would have no signals
+at all on a young instance, and a canonical record nobody can write is an
+endpoint that answers empty. Cheap to participate, expensive to be believed —
+that is what makes the canonical layer worth reading.
 
 ---
 
