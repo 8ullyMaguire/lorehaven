@@ -33,7 +33,10 @@ async fn require_operator(
     if level >= 5 {
         Ok(())
     } else {
-        Err(ApiError(AppError::AuthRequired))
+        // Signed in but not a curator: 403, not 401. The session middleware has
+        // already authenticated the caller, so answering "authentication
+        // required" would send a logged-in reader back to the login page.
+        Err(ApiError(AppError::AccessDenied))
     }
 }
 

@@ -3317,6 +3317,20 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/media/references/{reference_id}/mirrors",
         audience: Audience::Pseudonymous,
     },
+    RouteEntry {
+        file: "media_resilience.rs",
+        handler: "list_match_proposals",
+        method: "GET",
+        path: "/media/match-proposals",
+        audience: Audience::Operator,
+    },
+    RouteEntry {
+        file: "media_resilience.rs",
+        handler: "resolve_match_proposal",
+        method: "POST",
+        path: "/media/match-proposals/{proposal_id}",
+        audience: Audience::Operator,
+    },
     // ------------------------------------------------------------------
     // Curator role (spec §32.7.5)
     // ------------------------------------------------------------------

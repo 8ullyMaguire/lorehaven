@@ -107,8 +107,12 @@ def tables_in(sql: str) -> set[str]:
 
 
 # `col = $n` / `col IN ($n...)` / `col <op> $n` -- the comparison form.
+# A column compared to a placeholder. The trailing negative lookahead is the
+# point: `$1::uuid` is already cast and cannot fail, and without this the check
+# fired on every statement that spelled a cast column in the SELECT list --
+# `SELECT id::text ... WHERE id = $1::uuid` is correct and was reported anyway.
 COMPARED = re.compile(
-    r"\b([a-z_][a-z0-9_.]*)\s*(?:=|<>|!=|>|<|like|ilike|in)\s*\$(\d+)",
+    r"\b([a-z_][a-z0-9_.]*)\s*(?:=|<>|!=|>|<|like|ilike|in)\s*\$\d+(?!\s*::)",
     re.IGNORECASE,
 )
 # The INSERT form. `\s*` spans the newline, because these statements are often
@@ -161,9 +165,16 @@ def insert_column_order(sql: str) -> list[str]:
 
 
 def offending_lines(sql: str, schema: dict[str, dict[str, str]]) -> bool:
-    """True when this statement hands text to a column the dialect types."""
-    if "::" in sql:
-        return False  # already casts somewhere; not a bare-placeholder site
+    """True when this statement hands text to a column the dialect types.
+
+    Note there is no `if "::" in sql: return False` guard here any more. It read
+    as reasonable -- "this statement already casts, so it is not a bare site" --
+    and it hid a real defect: `sessions::create_session` casts three UUID binds
+    and left three TIMESTAMPTZ binds bare in the same statement, so the whole
+    statement was skipped and the check reported OK. One cast anywhere in a
+    statement said nothing about the others. The per-placeholder check below is
+    what the guard was standing in for, badly.
+    """
     if not re.search(r"\$\d+", sql):
         # `?` is the SQLite spelling. The PostgreSQL arm is the one rewritten to
         # `$n`, so without a placeholder this is a SQLite arm and cannot fail.
@@ -182,16 +193,68 @@ def offending_lines(sql: str, schema: dict[str, dict[str, str]]) -> bool:
             if coltype and not _accepts_text(coltype):
                 return True
 
-    # INSERT form: a non-textual column in the list taking a positional bind.
+    # INSERT form: a non-textual column whose VALUES position is a bare bind.
     order = insert_column_order(sql)
-    if order and VALUES_START.search(sql):
+    values = values_expressions(sql)
+    if order and values and len(order) == len(values):
         for columns in known.values():
-            for col in order:
+            for col, expr in zip(order, values):
                 coltype = columns.get(col)
-                if coltype and not _accepts_text(coltype):
+                if coltype and not _accepts_text(coltype) and is_bare_bind(expr):
                     return True
 
+    # SET form: `SET col = $n`, which neither branch above covers.
+    for match in re.finditer(
+        r"(?:^|,|\bSET\s)\s*([a-z_][a-z0-9_]*)\s*=\s*\$(\d+)(?!\s*::)", sql, re.IGNORECASE
+    ):
+        col = match.group(1).lower()
+        for columns in known.values():
+            coltype = columns.get(col)
+            if coltype and not _accepts_text(coltype):
+                return True
+
     return False
+
+
+def is_bare_bind(expr: str) -> bool:
+    """True when a VALUES expression is a plain placeholder needing a cast."""
+    return bool(re.fullmatch(r"\$\d+", expr.strip()))
+
+
+def values_expressions(sql: str) -> list[str]:
+    """The top-level expressions in the INSERT's VALUES list, in order.
+
+    Split on commas at depth zero so a function call like `date_trunc('day', ?)`
+    stays one expression -- which matters, because a comma inside it is not a
+    column boundary and treating it as one shifts every later position.
+    """
+    vm = VALUES_START.search(sql)
+    if not vm:
+        return []
+    i = vm.end()  # just past the opening paren
+    depth = 1
+    out: list[str] = []
+    start = i
+    quote: str | None = None
+    while i < len(sql):
+        ch = sql[i]
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                out.append(sql[start:i])
+                return out
+        elif ch == "," and depth == 1:
+            out.append(sql[start:i])
+            start = i + 1
+        i += 1
+    return out
 
 
 def _accepts_text(coltype: str) -> bool:
