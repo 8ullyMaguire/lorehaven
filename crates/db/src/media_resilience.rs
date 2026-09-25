@@ -102,8 +102,9 @@ pub async fn insert_media_reference(
         "INSERT INTO media_references (id, content_hash, media_kind, first_seen_at)
          VALUES (?, ?, ?, datetime('now'))"
             .to_string(),
+        // `media_references.id` is UUID on PostgreSQL.
         "INSERT INTO media_references (id, content_hash, media_kind, first_seen_at)
-         VALUES ($1, $2, $3, NOW())"
+         VALUES ($1::uuid, $2, $3, NOW())"
             .to_string(),
     );
     match db.backend() {
@@ -175,7 +176,7 @@ pub async fn record_fingerprint(
         "UPDATE media_references
          SET content_hash = $1, perceptual_hash = $2, width = $3, height = $4,
              updated_at = NOW()
-         WHERE id = $5"
+         WHERE id = $5::uuid"
             .to_string(),
     );
     let affected = match db.backend() {
@@ -219,7 +220,9 @@ pub async fn find_media_reference_by_content_hash(
                 created_at, updated_at
          FROM media_references WHERE content_hash = ?"
             .to_string(),
-        "SELECT id, perceptual_hash, content_hash, media_kind, first_seen_at,
+        // `id` is read back into a String: cast to text, or sqlx refuses to
+        // decode UUID into String.
+        "SELECT id::text, perceptual_hash, content_hash, media_kind, first_seen_at,
                 width, height, duration_seconds, format, file_size_bytes,
                 content_notes, curator_verified,
                 created_at, updated_at
@@ -252,11 +255,13 @@ pub async fn find_media_reference_by_id(db: &Database, id: &str) -> Result<Optio
                 created_at, updated_at
          FROM media_references WHERE id = ?"
             .to_string(),
-        "SELECT id, perceptual_hash, content_hash, media_kind, first_seen_at,
+        // `id` is read back into a String, so cast it to text: sqlx will not
+        // decode UUID into String.
+        "SELECT id::text, perceptual_hash, content_hash, media_kind, first_seen_at,
                 width, height, duration_seconds, format, file_size_bytes,
                 content_notes, curator_verified,
                 created_at, updated_at
-         FROM media_references WHERE id = $1"
+         FROM media_references WHERE id = $1::uuid"
             .to_string(),
     );
     Ok(match db.backend() {
@@ -533,7 +538,7 @@ pub async fn upsert_media_reference_for_import(
          JOIN media_references mr ON al.media_reference_id = mr.id
          WHERE al.url = ? LIMIT 1"
             .to_string(),
-        "SELECT mr.id
+        "SELECT mr.id::text
          FROM availability_links al
          JOIN media_references mr ON al.media_reference_id = mr.id
          WHERE al.url = $1 LIMIT 1"
@@ -917,12 +922,14 @@ pub async fn can_edit_work(
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             let count: i64 = sqlx::query_scalar(
+                // `works.id`, `works.owner_pseud_id` and
+                // `work_contributors.pseud_id` are all UUID on PostgreSQL.
                 "SELECT COUNT(*) FROM works w
-                 WHERE w.id = $1 AND (
-                   w.owner_pseud_id = $2
+                 WHERE w.id = $1::uuid AND (
+                   w.owner_pseud_id = $2::uuid
                    OR EXISTS (
                      SELECT 1 FROM work_contributors c
-                     WHERE c.work_id = w.id AND c.pseud_id = $3
+                     WHERE c.work_id = w.id AND c.pseud_id = $3::uuid
                    )
                  )",
             )
@@ -2254,10 +2261,12 @@ pub async fn find_works_by_media_reference(
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             let rows = sqlx::query(
-                "SELECT w.id AS work_id, w.title AS work_title, wmr.display_url
+                // `work_id` is read into a String, so cast it to text; the
+                // bound `media_reference_id` is UUID.
+                "SELECT w.id::text AS work_id, w.title AS work_title, wmr.display_url
                  FROM work_media_references wmr
                  JOIN works w ON w.id = wmr.work_id
-                 WHERE wmr.media_reference_id = $1
+                 WHERE wmr.media_reference_id = $1::uuid
                    AND wmr.deleted_at IS NULL
                  ORDER BY w.title",
             )
@@ -2675,12 +2684,14 @@ pub async fn author_media_health_report(
          GROUP BY w.id, w.title
          ORDER BY w.title"
             .to_string(),
-        "SELECT w.id AS work_id,
+        // `work_id` is read into a String, so cast it to text. The three SUMs
+        // are NUMERIC on PostgreSQL, and the row type is i64, so cast them too.
+        "SELECT w.id::text AS work_id,
                 w.title AS work_title,
                 COUNT(wmr.id) AS total_references,
-                SUM(CASE WHEN COALESCE(healthy.cnt, 0) >= 3 THEN 1 ELSE 0 END) AS healthy_references,
-                SUM(CASE WHEN COALESCE(healthy.cnt, 0) BETWEEN 1 AND 2 THEN 1 ELSE 0 END) AS at_risk_references,
-                SUM(CASE WHEN COALESCE(healthy.cnt, 0) = 0 THEN 1 ELSE 0 END) AS broken_references
+                SUM(CASE WHEN COALESCE(healthy.cnt, 0) >= 3 THEN 1 ELSE 0 END)::bigint AS healthy_references,
+                SUM(CASE WHEN COALESCE(healthy.cnt, 0) BETWEEN 1 AND 2 THEN 1 ELSE 0 END)::bigint AS at_risk_references,
+                SUM(CASE WHEN COALESCE(healthy.cnt, 0) = 0 THEN 1 ELSE 0 END)::bigint AS broken_references
          FROM works w
          JOIN work_media_references wmr ON wmr.work_id = w.id AND wmr.deleted_at IS NULL
          LEFT JOIN (
@@ -2689,7 +2700,7 @@ pub async fn author_media_health_report(
              WHERE al.status = 'healthy'
              GROUP BY al.media_reference_id
          ) healthy ON healthy.media_reference_id = wmr.media_reference_id
-         WHERE w.owner_pseud_id IN (SELECT p.id FROM pseuds p WHERE p.account_id = $1)
+         WHERE w.owner_pseud_id IN (SELECT p.id FROM pseuds p WHERE p.account_id = $1::uuid)
          GROUP BY w.id, w.title
          ORDER BY w.title"
             .to_string(),
