@@ -734,15 +734,21 @@ pub async fn get_gifts_for_recipient(
 /// Total platform revenue (sum of `amount_minor` across all earnings rows),
 /// or 0 when the ledger is empty. ADR 0004: balanced ledger, idempotency keys.
 pub async fn total_platform_revenue(db: &Database) -> Result<i64, sqlx::Error> {
-    let sql = "SELECT COALESCE(SUM(amount_minor), 0) FROM author_earnings_ledger WHERE kind = 'platform_fee'";
+    // `SUM()` over a BIGINT column is NUMERIC on PostgreSQL, and sqlx will
+    // not decode that into i64. SQLite has no such promotion, so the two arms
+    // cannot share one string here.
     match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_scalar(sql)
+            sqlx::query_scalar(
+                "SELECT COALESCE(SUM(amount_minor), 0) FROM author_earnings_ledger WHERE kind = 'platform_fee'",
+            )
                 .fetch_one(db.sqlite_pool().expect("sqlite"))
                 .await
         }
         Backend::Postgres => {
-            sqlx::query_scalar(sql)
+            sqlx::query_scalar(
+                "SELECT COALESCE(SUM(amount_minor), 0)::bigint FROM author_earnings_ledger WHERE kind = 'platform_fee'",
+            )
                 .fetch_one(db.postgres_pool().expect("postgres"))
                 .await
         }
@@ -751,18 +757,22 @@ pub async fn total_platform_revenue(db: &Database) -> Result<i64, sqlx::Error> {
 
 /// Total pending payouts (sum of amount_minor across payouts not yet processed).
 pub async fn pending_payout_total(db: &Database) -> Result<i64, sqlx::Error> {
-    let sql = "SELECT COALESCE(SUM(amount_minor), 0) FROM payouts WHERE status = 'initiated'";
+    // `SUM()` over a BIGINT column is NUMERIC on PostgreSQL, and sqlx will
+    // not decode that into i64. SQLite has no such promotion, so the two arms
+    // cannot share one string here.
     match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_scalar(sql)
-                .fetch_one(db.sqlite_pool().expect("sqlite"))
-                .await
+            sqlx::query_scalar(
+                "SELECT COALESCE(SUM(amount_minor), 0) FROM payouts WHERE status = 'initiated'",
+            )
+            .fetch_one(db.sqlite_pool().expect("sqlite"))
+            .await
         }
-        Backend::Postgres => {
-            sqlx::query_scalar(sql)
-                .fetch_one(db.postgres_pool().expect("postgres"))
-                .await
-        }
+        Backend::Postgres => sqlx::query_scalar(
+            "SELECT COALESCE(SUM(amount_minor), 0)::bigint FROM payouts WHERE status = 'initiated'",
+        )
+        .fetch_one(db.postgres_pool().expect("postgres"))
+        .await,
     }
 }
 
