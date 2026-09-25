@@ -83,21 +83,61 @@ failures are assertion failures in tests written for SQLite semantics.
 
 ## The rule this establishes
 
-`TestDb::sql()` renumbers `?` to `$n` for PostgreSQL but **does not cast**. So a
-test that binds an id as `&str` into a `UUID` column passes on SQLite and dies
-on PG with 42804. The house pattern is the two-arm `db.sql(sqlite, postgres)`
-form, spelling the PostgreSQL arm's id placeholders `?::uuid` — exactly as
-`create_export` in `crates/db/src/exports.rs` does. `crates/app/tests/device_delivery_fk.rs`
-demonstrates it, and is the reference for fixing the rest.
+`Database::sql()` renumbers `?` to `$n` for PostgreSQL but **does not cast**, and
+sqlx sends a bound `&str` as `text`. So a statement that reads
+
+    SELECT dimension_key FROM arena_weights WHERE account_id = $1
+
+passes on SQLite and fails on PostgreSQL with 42804. The house pattern is the
+two-arm `db.sql(sqlite, postgres)` form, spelling the PostgreSQL arm's id
+placeholders `?::uuid` — exactly as `create_export` in `crates/db/src/exports.rs`
+does. `crates/app/tests/device_delivery_fk.rs` demonstrates it.
+
+## It is not only the tests
+
+Fixing the first file (`arena.rs`) surfaced the more important half: the same
+mistake is in **production code**, and the two failure modes are different.
+
+- **Writing**: a bare `$n` into a `uuid` column → 42804.
+- **Reading**: a `uuid` column into a Rust `String` → `ColumnDecode`, and sqlx
+  will not decode `UUID` into `String` or `INT4` into `i64`. The column has to be
+  cast in the `SELECT`: `w.id::text`, `matches_played::bigint`,
+  `COALESCE(wc.word_count, 0)::bigint`.
+
+`crates/db/src/taste_vectors.rs` had five of these, in `record_arena_ballot`,
+`get_arena_weights`, `update_arena_weights`, `get_arena_pool` and the work-rating
+count. They have never run on PostgreSQL at all, because nothing in the suite
+exercised them there before this.
+
+`scripts/check-uncast-pg-placeholders.py` finds them: **68 sites in 16 files**,
+of which 62 are genuine (the rest are false positives the script's own report
+identifies). It is a heuristic and reports where to look, not a verdict — a
+wrong cast on the wrong column still passes review. Run it after touching any
+`db/src` query.
+
+## Deterministic test ids
+
+Fixing fixtures also needed a shared helper. `test_support::id(label)` maps a
+readable slug (`"work-a1"`) to a stable UUID, so a fixture binds the same value
+when it inserts and looks it up later. Two details that cost time and will cost
+the next person time:
+
+- **FNV-1a with a fixed offset basis, not `DefaultHasher`.** `DefaultHasher` is
+  seeded per process, so two fixtures in one test binary produced colliding ids
+  and `works.id` failed UNIQUE on the second insert.
+- **Not `Uuid::new_v5`** — the workspace enables only uuid's `v4` feature, and
+  adding `v5` for a test helper would widen the dependency surface of every
+  crate.
 
 ## Next
 
-Fixing the 151 is mechanical but not small: each is a test fixture that needs
-the dual-arm form, plus the `boolean`/`timestamptz` column types, plus the stray
-`::` in `milestone_22.rs`. It is the last major piece of real PostgreSQL
-coverage, and it is worth doing as its own milestone with its own gate — run on
-both dialects every time, because the whole failure mode here was running only
-one.
+The 68 sites are the last major piece of real PostgreSQL coverage. They are
+mechanical (cast the placeholder, or cast the column in the SELECT) but they
+span 16 files, and each fix should be gated on both dialects. Order by the
+detector's output: `media_resilience` (8), `community` (7), then the rest.
+
+Run it as its own milestone, gated on both dialects every time — the whole
+failure mode here was running one.
 
 ## Running PG locally
 

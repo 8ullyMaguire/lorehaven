@@ -3330,6 +3330,7 @@ dependencies = [
  "lorehaven-db",
  "sqlx",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

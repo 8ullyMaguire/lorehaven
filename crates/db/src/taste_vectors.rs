@@ -342,8 +342,11 @@ pub async fn record_arena_ballot(
             let pool = db.postgres_pool().ok_or(pool_err())?;
             let tags_json = serde_json::to_value(reason_tags).unwrap_or(serde_json::json!([]));
             sqlx::query(
+                // `account_id`, `best_work_id` and `worst_work_id` are UUID on
+                // PostgreSQL, so the placeholders need casts. Without them the
+                // driver sends them as text and the insert fails 42804.
                 "INSERT INTO arena_ballots (account_id, best_work_id, worst_work_id, reason_tags)
-                 VALUES ($1, $2, $3, $4)",
+                 VALUES ($1::uuid, $2::uuid, $3::uuid, $4)",
             )
             .bind(account_id)
             .bind(best_work_id)
@@ -374,8 +377,11 @@ pub async fn get_arena_weights(
         }
         Backend::Postgres => {
             let rows = sqlx::query_as::<_, (String, f64, f64, i64)>(
-                "SELECT dimension_key, weight, elo_rating, matches_played
-                 FROM arena_weights WHERE account_id = $1",
+                // `matches_played` is INTEGER on PostgreSQL (INT4) but BIGINT on
+                // SQLite, and the row type is i64, so cast it: sqlx refuses to
+                // decode INT4 into i64 ("mismatched types ... not compatible").
+                "SELECT dimension_key, weight, elo_rating, matches_played::bigint
+                 FROM arena_weights WHERE account_id = $1::uuid",
             )
             .bind(account_id)
             .fetch_all(db.postgres_pool().ok_or(pool_err())?)
@@ -426,7 +432,7 @@ pub async fn update_arena_weights(
             let pool = db.postgres_pool().ok_or(pool_err())?;
             sqlx::query(
                 "INSERT INTO arena_weights (account_id, dimension_key, weight, elo_rating, matches_played)
-                 VALUES ($1, $2, $3, $4, $5)
+                 VALUES ($1::uuid, $2, $3, $4, $5)
                  ON CONFLICT (account_id, dimension_key) DO UPDATE SET
                    weight = EXCLUDED.weight,
                    elo_rating = EXCLUDED.elo_rating,
@@ -500,7 +506,9 @@ pub async fn get_arena_pool(
         }
         Backend::Postgres => {
             let rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, i64)>(
-                "SELECT w.id, w.title, w.summary,
+                // `w.id` is UUID on PostgreSQL and the row type is String, so cast
+                // it to text: sqlx will not decode UUID into String.
+                "SELECT w.id::text, w.title, w.summary,
                         COALESCE((SELECT tn.canonical FROM taxonomy_nodes tn
                                   JOIN work_tags wt ON tn.id = wt.node_id
                                   WHERE wt.work_id = w.id AND tn.kind = 'fandom'
@@ -509,7 +517,7 @@ pub async fn get_arena_pool(
                                   FROM taxonomy_nodes tn2
                                   JOIN work_tags wt2 ON tn2.id = wt2.node_id
                                   WHERE wt2.work_id = w.id AND tn2.kind = 'tag'), ''),
-                        COALESCE(wc.word_count, 0)
+                        COALESCE(wc.word_count, 0)::bigint
                  FROM works w
                  LEFT JOIN (
                      SELECT c.work_id, SUM(cr.word_count) as word_count
@@ -521,9 +529,9 @@ pub async fn get_arena_pool(
                    AND w.visibility = 'public'
                    AND w.deleted_at IS NULL
                    AND w.id NOT IN (
-                       SELECT best_work_id FROM arena_ballots WHERE account_id = $1
+                       SELECT best_work_id FROM arena_ballots WHERE account_id = $1::uuid
                        UNION
-                       SELECT worst_work_id FROM arena_ballots WHERE account_id = $1
+                       SELECT worst_work_id FROM arena_ballots WHERE account_id = $1::uuid
                    )
                  LIMIT $2",
             )
@@ -594,10 +602,11 @@ async fn fetch_user_rating_count(db: &Database, account_id: &str) -> Result<i64,
             row.get("cnt")
         }
         Backend::Postgres => {
-            let row = sqlx::query("SELECT COUNT(*) as cnt FROM work_ratings WHERE account_id = $1")
-                .bind(account_id)
-                .fetch_one(db.postgres_pool().ok_or(pool_err())?)
-                .await?;
+            let row =
+                sqlx::query("SELECT COUNT(*) as cnt FROM work_ratings WHERE account_id = $1::uuid")
+                    .bind(account_id)
+                    .fetch_one(db.postgres_pool().ok_or(pool_err())?)
+                    .await?;
             row.get("cnt")
         }
     };

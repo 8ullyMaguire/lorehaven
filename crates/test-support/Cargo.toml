@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
+uuid.workspace = true
 lorehaven-db = { path = "../db" }
 sqlx = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }
