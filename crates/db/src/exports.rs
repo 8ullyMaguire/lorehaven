@@ -228,11 +228,28 @@ const EXPORT_COLUMNS: &str =
 const GRANT_COLUMNS: &str =
     "id, export_job_id, token_hash, expires_at, used_at, single_use, created_at";
 
-const EXPORT_COLUMNS_PG: &str =
-    "id::text AS id, job_id::text AS job_id, account_id::text AS account_id,      subject_id::text AS subject_id, subject_type, format, options_json, privacy_acknowledged_at,      state, output_blob_checksum, output_bytes, converter_version, error_message,      created_at, updated_at, version";
+// The UUID columns were cast to text; the TIMESTAMPTZ and INTEGER ones were
+// not, and every export read failed to decode -- a 422 where the contract says
+// 202 or 404, on PostgreSQL only.
+//
+// The cast follows the Rust type, not the column: a TIMESTAMPTZ feeding a
+// String field needs ::text, while INTEGER feeding an i64 needs ::bigint. An
+// INTEGER read as String works on PostgreSQL and is still wrong, because the
+// struct says i64.
+const EXPORT_COLUMNS_PG: &str = concat!(
+    "id::text AS id, job_id::text AS job_id, account_id::text AS account_id, ",
+    "subject_id::text AS subject_id, subject_type, format, options_json, ",
+    "privacy_acknowledged_at::text AS privacy_acknowledged_at, state, ",
+    "output_blob_checksum, output_bytes, converter_version, error_message, ",
+    "created_at::text AS created_at, updated_at::text AS updated_at, ",
+    "version::bigint AS version",
+);
 
-const GRANT_COLUMNS_PG: &str =
-    "id::text AS id, export_job_id::text AS export_job_id, token_hash, expires_at,      used_at, single_use, created_at";
+const GRANT_COLUMNS_PG: &str = concat!(
+    "id::text AS id, export_job_id::text AS export_job_id, token_hash, ",
+    "expires_at::text AS expires_at, used_at::text AS used_at, single_use, ",
+    "created_at::text AS created_at",
+);
 
 // ---------------------------------------------------------------------------
 // Export jobs
@@ -269,7 +286,7 @@ pub async fn create_export(db: &Database, new: NewExport<'_>) -> Result<ExportJo
          VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 1)",
         "INSERT INTO export_jobs (id, job_id, account_id, subject_type, subject_id, format, \
          options_json, state, created_at, updated_at, version) \
-         VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?::uuid, ?, ?, 'queued', ?, ?, 1)",
+         VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?::uuid, ?, ?, 'queued', ?::timestamptz, ?::timestamptz, 1)",
     );
     run!(db, &sql, |query| {
         query
@@ -527,7 +544,8 @@ pub async fn acknowledge_privacy(db: &Database, id: &str) -> Result<()> {
     let sql = db.sql(
         "UPDATE export_jobs SET privacy_acknowledged_at = ?, updated_at = ?, version = version + 1 \
          WHERE id = ? AND privacy_acknowledged_at IS NULL",
-        "UPDATE export_jobs SET privacy_acknowledged_at = ?, updated_at = ?, version = version + 1 \
+        "UPDATE export_jobs SET privacy_acknowledged_at = ?::timestamptz, \
+         updated_at = ?::timestamptz, version = version + 1 \
          WHERE id::text = ? AND privacy_acknowledged_at IS NULL",
     );
     run!(db, &sql, |query| { query.bind(&now).bind(&now).bind(id) })
@@ -564,7 +582,7 @@ pub async fn purge_expired(
              ORDER BY created_at LIMIT ?"
         ),
         format!(
-            "SELECT {EXPORT_COLUMNS_PG} FROM export_jobs WHERE created_at < ? \
+            "SELECT {EXPORT_COLUMNS_PG} FROM export_jobs WHERE created_at < ?::timestamptz \
              ORDER BY created_at LIMIT ?"
         ),
     );
@@ -666,8 +684,8 @@ pub async fn redeem_grant(db: &Database, token_hash: &str, now: &str) -> Result<
         "UPDATE download_grants SET used_at = ? \
          WHERE token_hash = ? AND expires_at > ? AND used_at IS NULL \
          RETURNING export_job_id",
-        "UPDATE download_grants SET used_at = ? \
-         WHERE token_hash = ? AND expires_at > ? AND used_at IS NULL \
+        "UPDATE download_grants SET used_at = ?::timestamptz \
+         WHERE token_hash = ? AND expires_at > ?::timestamptz AND used_at IS NULL \
          RETURNING export_job_id::text AS export_job_id",
     );
     let row: Option<(String,)> = match db.backend() {
@@ -754,7 +772,7 @@ pub async fn delete_export(db: &Database, id: &str) -> Result<bool> {
 pub async fn purge_expired_grants(db: &Database, now: &str) -> Result<u64> {
     let sql = db.sql(
         "DELETE FROM download_grants WHERE expires_at <= ?",
-        "DELETE FROM download_grants WHERE expires_at <= ?",
+        "DELETE FROM download_grants WHERE expires_at <= ?::timestamptz",
     );
     let affected = run!(db, &sql, |query| query.bind(now))
         .await
@@ -786,7 +804,8 @@ pub async fn upsert_device(
          push_subscription_json = excluded.push_subscription_json, \
          last_seen_at = excluded.last_seen_at, updated_at = excluded.updated_at",
         "INSERT INTO user_devices (id, account_id, label, push_subscription_json, last_seen_at, \
-         created_at, updated_at) VALUES (?::uuid, ?::uuid, ?, ?, ?, ?, ?) \
+         created_at, updated_at) VALUES (?::uuid, ?::uuid, ?, ?::timestamptz, \
+         ?::timestamptz, ?::timestamptz, ?::timestamptz) \
          ON CONFLICT (id) DO UPDATE SET label = excluded.label, \
          push_subscription_json = excluded.push_subscription_json, \
          last_seen_at = excluded.last_seen_at, updated_at = excluded.updated_at",

@@ -667,7 +667,7 @@ pub async fn veto_proposal(
 pub async fn expire_proposal(db: &Database, proposal_id: &str, now: &str) -> Result<bool> {
     let sql = db.sql(
         "UPDATE category_proposals SET status = 'expired', decided_at = ? WHERE id = ? AND status = 'open' AND closes_at < ?",
-        "UPDATE category_proposals SET status = 'expired', decided_at = ? WHERE id = ? AND status = 'open' AND closes_at < ?",
+        "UPDATE category_proposals SET status = 'expired', decided_at = ? WHERE id = ? AND status = 'open' AND closes_at < ?::timestamptz",
     );
     match db.backend() {
         Backend::Sqlite => {
