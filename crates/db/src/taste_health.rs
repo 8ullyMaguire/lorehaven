@@ -289,7 +289,7 @@ pub async fn get_quiz_answers(
 ) -> Result<Vec<(String, bool)>, sqlx::Error> {
     let sql = db.sql(
         "SELECT work_id, picked FROM quiz_answers WHERE account_id = ?",
-        "SELECT work_id::text, picked FROM quiz_answers WHERE account_id = $1::uuid",
+        "SELECT work_id::text, CAST(picked AS BIGINT) FROM quiz_answers WHERE account_id = $1::uuid",
     );
     let rows: Vec<(String, i64)> = match db.backend() {
         Backend::Sqlite => {
