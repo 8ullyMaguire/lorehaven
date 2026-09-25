@@ -34,7 +34,7 @@ pub async fn apply_sanction(
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO forum_sanctions (id, account, category_id, level, reason, actor, created_at, expires_at, active)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1)"
+                 VALUES ($1, $2::uuid, $3, $4, $5, $6::uuid, $7, $8, 1)"
             )
             .bind(&id)
             .bind(account)
@@ -66,7 +66,7 @@ pub async fn check_sanction(
              AND (expires_at IS NULL OR expires_at > ?)
              ORDER BY created_at DESC LIMIT 1",
             "SELECT level, expires_at FROM forum_sanctions
-             WHERE account = $1 AND active = 1
+             WHERE account = $1::uuid AND active = 1
              AND (category_id = $2 OR category_id IS NULL)
              AND (expires_at IS NULL OR expires_at > $3::timestamptz)
              ORDER BY created_at DESC LIMIT 1",
@@ -78,7 +78,7 @@ pub async fn check_sanction(
              AND (expires_at IS NULL OR expires_at > ?)
              ORDER BY created_at DESC LIMIT 1",
             "SELECT level, expires_at FROM forum_sanctions
-             WHERE account = $1 AND active = 1 AND category_id IS NULL
+             WHERE account = $1::uuid AND active = 1 AND category_id IS NULL
              AND (expires_at IS NULL OR expires_at > $2::timestamptz)
              ORDER BY created_at DESC LIMIT 1",
         )
@@ -271,7 +271,7 @@ pub async fn mark_first_vote_notified(
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO forum_post_first_vote_notified (post_id, account, notified_at, vote_count)
-                 VALUES ($1, $2, $3, $4)
+                 VALUES ($1, $2::uuid, $3, $4)
                  ON CONFLICT(post_id, account) DO NOTHING"
             )
             .bind(post_id)

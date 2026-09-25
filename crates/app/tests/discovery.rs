@@ -34,13 +34,13 @@ async fn reverse_search_by_perceptual_hash() {
                 .unwrap();
         }
         lorehaven_db::Backend::Postgres => {
-            sqlx::query("UPDATE media_references SET perceptual_hash = $1 WHERE id = $2")
+            sqlx::query("UPDATE media_references SET perceptual_hash = $1 WHERE id = $2::uuid")
                 .bind("00ff00ff")
                 .bind("ref-rs-1")
                 .execute(db.postgres_pool().expect("postgres"))
                 .await
                 .unwrap();
-            sqlx::query("UPDATE media_references SET perceptual_hash = $1 WHERE id = $2")
+            sqlx::query("UPDATE media_references SET perceptual_hash = $1 WHERE id = $2::uuid")
                 .bind("00ff00ff")
                 .bind("ref-rs-2")
                 .execute(db.postgres_pool().expect("postgres"))
@@ -103,14 +103,14 @@ async fn find_works_by_media_reference() {
             }
         }
         lorehaven_db::Backend::Postgres => {
-            sqlx::query("INSERT INTO accounts (id, email, created_at, updated_at) VALUES ($1, $2, now(), now())")
+            sqlx::query("INSERT INTO accounts (id, email, created_at, updated_at) VALUES ($1::uuid, $2, now(), now())")
                 .bind(account_id).bind(format!("{}@test.dev", account_id))
                 .execute(db.postgres_pool().expect("postgres")).await.unwrap();
-            sqlx::query("INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at) VALUES ($1, $2, $3, $4, now(), now())")
+            sqlx::query("INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, $4, now(), now())")
                 .bind(&pseud_id).bind(account_id).bind(&pseud_id).bind(&pseud_id)
                 .execute(db.postgres_pool().expect("postgres")).await.unwrap();
             for wid in ["work-x", "work-y"] {
-                sqlx::query("INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at) VALUES ($1, $2, $3, 'published', 'public', now(), now())")
+                sqlx::query("INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at) VALUES ($1::uuid, $2, $3::uuid, 'published', 'public', now(), now())")
                     .bind(wid).bind(format!("Title {}", wid)).bind(&pseud_id)
                     .execute(db.postgres_pool().expect("postgres")).await.unwrap();
             }

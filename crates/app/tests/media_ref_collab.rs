@@ -24,7 +24,7 @@ async fn seed_work(db: &lorehaven_db::Database, work_id: &WorkId, title: &str, o
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at)
-                 VALUES ($1, $2, $3, 'published', 'public', NOW(), NOW())",
+                 VALUES ($1::uuid, $2, $3::uuid, 'published', 'public', NOW(), NOW())",
             )
             .bind(&id)
             .bind(title)
@@ -54,7 +54,7 @@ async fn seed_pseud(db: &lorehaven_db::Database, id: &str, account_id: &str, han
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, NOW(), NOW())",
+                 VALUES ($1::uuid, $2::uuid, $3, $4, NOW(), NOW())",
             )
             .bind(id)
             .bind(account_id)
@@ -84,7 +84,7 @@ async fn seed_bookmark(db: &lorehaven_db::Database, id: &str, account_id: &str, 
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO bookmarks (id, account_id, subject_type, subject_id, note, is_public, created_at, updated_at, version)
-                 VALUES ($1, $2, 'work', $3, '', 0, NOW(), NOW(), 1)",
+                 VALUES ($1::uuid, $2::uuid, 'work', $3::uuid, '', 0, NOW(), NOW(), 1)",
             )
             .bind(id)
             .bind(account_id)

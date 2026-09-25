@@ -187,7 +187,7 @@ pub async fn set_subscription_state(
             Ok(r.rows_affected())
         }
         Backend::Postgres => {
-            let r = sqlx::query("UPDATE content_subscriptions SET state = $1 WHERE id = $2")
+            let r = sqlx::query("UPDATE content_subscriptions SET state = $1 WHERE id = $2::uuid")
                 .bind(state)
                 .bind(id)
                 .execute(db.postgres_pool().expect("postgres"))
@@ -365,7 +365,7 @@ pub async fn delete_alert(db: &Database, id: &str) -> Result<u64, sqlx::Error> {
             Ok(r.rows_affected())
         }
         Backend::Postgres => {
-            let r = sqlx::query("DELETE FROM search_alerts WHERE id = $1")
+            let r = sqlx::query("DELETE FROM search_alerts WHERE id = $1::uuid")
                 .bind(id)
                 .execute(db.postgres_pool().expect("postgres"))
                 .await?;
@@ -387,7 +387,7 @@ pub async fn mark_alert_run(db: &Database, id: &str) -> Result<u64, sqlx::Error>
             Ok(r.rows_affected())
         }
         Backend::Postgres => {
-            let r = sqlx::query("UPDATE search_alerts SET last_run_at = $1 WHERE id = $2")
+            let r = sqlx::query("UPDATE search_alerts SET last_run_at = $1 WHERE id = $2::uuid")
                 .bind(&now)
                 .bind(id)
                 .execute(db.postgres_pool().expect("postgres"))

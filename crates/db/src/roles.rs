@@ -83,7 +83,7 @@ pub async fn revoke_vanguard(db: &Database, account_id: &str) -> Result<(), sqlx
         }
         Backend::Postgres => {
             let pool = db.postgres_pool().ok_or(pool_err())?;
-            sqlx::query("DELETE FROM vanguard_roles WHERE account_id = $1")
+            sqlx::query("DELETE FROM vanguard_roles WHERE account_id = $1::uuid")
                 .bind(account_id)
                 .execute(pool)
                 .await?;

@@ -126,7 +126,7 @@ pub async fn store_work_vector(
     let sql = db.sql(
         "INSERT INTO work_taste_vectors (work_id, vector, computed_at) VALUES (?, ?, ?)
          ON CONFLICT(work_id) DO UPDATE SET vector = excluded.vector, computed_at = excluded.computed_at",
-        "INSERT INTO work_taste_vectors (work_id, vector, computed_at) VALUES ($1::uuid, $2, $3)
+        "INSERT INTO work_taste_vectors (work_id, vector, computed_at) VALUES ($1::uuid, $2::jsonb, $3)
          ON CONFLICT(work_id) DO UPDATE SET vector = excluded.vector, computed_at = excluded.computed_at",
     );
     match db.backend() {

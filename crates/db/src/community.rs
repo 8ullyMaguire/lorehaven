@@ -1657,7 +1657,7 @@ pub async fn subscribe_to_topic(db: &Database, account_id: &str, topic_id: &str)
          VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ'))
          ON CONFLICT (account, topic_id) DO NOTHING",
         "INSERT INTO forum_topic_subscriptions (account, topic_id, created_at)
-         VALUES ($1, $3, now())
+         VALUES ($1::uuid, $3, now())
          ON CONFLICT (account, topic_id) DO NOTHING",
     );
     match db.backend() {
@@ -1687,7 +1687,7 @@ pub async fn unsubscribe_from_topic(
 ) -> Result<bool> {
     let sql = db.sql(
         "DELETE FROM forum_topic_subscriptions WHERE account = ? AND topic_id = ?",
-        "DELETE FROM forum_topic_subscriptions WHERE account = $1 AND topic_id = $2",
+        "DELETE FROM forum_topic_subscriptions WHERE account = $1::uuid AND topic_id = $2",
     );
     let affected = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
@@ -1719,7 +1719,7 @@ pub async fn mark_topic_read(
          WHERE account = ? AND topic_id = ?",
         "UPDATE forum_topic_subscriptions
          SET last_read_post_id = $3
-         WHERE account = $1 AND topic_id = $2",
+         WHERE account = $1::uuid AND topic_id = $2",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -1757,7 +1757,7 @@ pub async fn unread_count_in_topic(db: &Database, account_id: &str, topic_id: &s
         "SELECT COUNT(*)::bigint AS unread
          FROM forum_posts fp
          LEFT JOIN forum_topic_subscriptions fts ON fts.topic_id = fp.topic_id
-           AND fts.account = $1
+           AND fts.account = $1::uuid
          WHERE fp.topic_id = $2
            AND fp.deleted_at IS NULL
            AND (fts.last_read_post_id IS NULL
@@ -1948,7 +1948,7 @@ pub async fn record_mentions(
             "INSERT INTO mention_events (id, source_type, source_id, mentioned_pseud, mentioned_by, created_at)
              VALUES (?, ?, ?, ?, ?, ?)",
             "INSERT INTO mention_events (id, source_type, source_id, mentioned_pseud, mentioned_by, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6)",
+             VALUES ($1, $2, $3, $4::uuid, $5::uuid, $6)",
         );
         match db.backend() {
             Backend::Sqlite => {

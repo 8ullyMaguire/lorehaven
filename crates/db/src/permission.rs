@@ -19,7 +19,7 @@ pub async fn get_work_permission_statement(
 ) -> Result<PermissionStatement> {
     let sql = db.sql(
         "SELECT permission_statement FROM works WHERE id = ?",
-        "SELECT permission_statement FROM works WHERE id = $1",
+        "SELECT permission_statement FROM works WHERE id = $1::uuid",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -53,7 +53,7 @@ pub async fn set_work_permission_statement(
         serde_json::to_string(&statement).context("failed to serialize permission statement")?;
     let sql = db.sql(
         "UPDATE works SET permission_statement = ?, updated_at = ? WHERE id = ?",
-        "UPDATE works SET permission_statement = $1, updated_at = $2::timestamptz WHERE id = $3",
+        "UPDATE works SET permission_statement = $1, updated_at = $2::timestamptz WHERE id = $3::uuid",
     );
     let now = crate::identity::now_rfc3339();
     match db.backend() {
@@ -84,7 +84,7 @@ pub async fn get_account_permission_statement(
 ) -> Result<PermissionStatement> {
     let sql = db.sql(
         "SELECT permission_statement FROM accounts WHERE id = ?",
-        "SELECT permission_statement FROM accounts WHERE id = $1",
+        "SELECT permission_statement FROM accounts WHERE id = $1::uuid",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -118,7 +118,7 @@ pub async fn set_account_permission_statement(
         serde_json::to_string(&statement).context("failed to serialize permission statement")?;
     let sql = db.sql(
         "UPDATE accounts SET permission_statement = ?, updated_at = ? WHERE id = ?",
-        "UPDATE accounts SET permission_statement = $1, updated_at = $2::timestamptz WHERE id = $3",
+        "UPDATE accounts SET permission_statement = $1, updated_at = $2::timestamptz WHERE id = $3::uuid",
     );
     let now = crate::identity::now_rfc3339();
     match db.backend() {
@@ -148,7 +148,7 @@ pub async fn insert_lineage_edge(db: &Database, edge: &LineageEdge) -> Result<()
         "INSERT INTO derivative_lineage (id, from_work_id, to_work_id, kind, provenance, created_at) \
               VALUES (?, ?, ?, ?, ?, ?)",
         "INSERT INTO derivative_lineage (id, from_work_id, to_work_id, kind, provenance, created_at) \
-              VALUES ($1, $2, $3, $4, $5, $6)",
+              VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -186,7 +186,7 @@ pub async fn lineage_edges_for_work(db: &Database, work_id: &str) -> Result<Vec<
           ORDER BY created_at",
         "SELECT id, from_work_id, to_work_id, kind, provenance, created_at \
               FROM derivative_lineage \
-             WHERE from_work_id = $1 OR to_work_id = $1 \
+             WHERE from_work_id = $1::uuid OR to_work_id = $1::uuid \
           ORDER BY created_at",
     );
     let mut edges = Vec::new();
@@ -237,7 +237,7 @@ pub async fn insert_exclusion_entry(db: &Database, entry: &ExclusionEntry) -> Re
         "INSERT INTO exclusion_registry (id, target_type, target_id, reason, created_by, created_at) \
               VALUES (?, ?, ?, ?, ?, ?)",
         "INSERT INTO exclusion_registry (id, target_type, target_id, reason, created_by, created_at) \
-              VALUES ($1, $2, $3, $4, $5, $6)",
+              VALUES ($1::uuid, $2, $3::uuid, $4, $5::uuid, $6)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -274,7 +274,7 @@ pub async fn is_excluded(
 ) -> Result<bool> {
     let sql = db.sql(
         "SELECT id FROM exclusion_registry WHERE target_type = ? AND target_id = ?",
-        "SELECT id FROM exclusion_registry WHERE target_type = $1 AND target_id = $2",
+        "SELECT id FROM exclusion_registry WHERE target_type = $1 AND target_id = $2::uuid",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -310,7 +310,7 @@ pub async fn lineage_depth(db: &Database, work_id: &str) -> Result<u32> {
         }
         let sql = db.sql(
             "SELECT from_work_id FROM derivative_lineage WHERE to_work_id = ? AND kind = 'remix' LIMIT 1",
-            "SELECT from_work_id FROM derivative_lineage WHERE to_work_id = $1 AND kind = 'remix' LIMIT 1",
+            "SELECT from_work_id FROM derivative_lineage WHERE to_work_id = $1::uuid AND kind = 'remix' LIMIT 1",
         );
         let parent: Option<String> = match db.backend() {
             Backend::Sqlite => {

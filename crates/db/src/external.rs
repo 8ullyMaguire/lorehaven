@@ -160,7 +160,7 @@ pub async fn list_tokens(db: &Database, account: &str) -> Result<Vec<Value>, sql
                 .collect())
         }
         Backend::Postgres => {
-            let rows = sqlx::query("SELECT id::text, account_id, name, scopes, created_at, last_used_at, expires_at, revoked_at FROM api_tokens WHERE account_id = $1 AND revoked_at IS NULL ORDER BY created_at DESC")
+            let rows = sqlx::query("SELECT id::text, account_id, name, scopes, created_at, last_used_at, expires_at, revoked_at FROM api_tokens WHERE account_id = $1::uuid AND revoked_at IS NULL ORDER BY created_at DESC")
                 .bind(account)
                 .fetch_all(db.postgres_pool().expect("postgres"))
                 .await?;

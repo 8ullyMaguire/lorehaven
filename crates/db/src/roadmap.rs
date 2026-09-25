@@ -55,7 +55,7 @@ pub async fn upsert_card(db: &Database, card: &Card) -> Result<(), sqlx::Error> 
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO roadmap_cards (id, title, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz, $10::timestamptz)
                  ON CONFLICT(id) DO UPDATE SET
                    title=excluded.title,
                    category=excluded.category,
@@ -199,7 +199,7 @@ pub async fn create_ballot(
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO roadmap_ballots (id, card_ids, served_elo, account_id, created_at, voted_at)
-                 VALUES ($1, $2::jsonb, $3::jsonb, $4, $5, NULL)",
+                 VALUES ($1, $2::jsonb, $3::jsonb, $4::uuid, $5::timestamptz, NULL)",
             )
             .bind(ballot_id)
             .bind(&card_ids_json)
@@ -270,7 +270,7 @@ pub async fn mark_voted(db: &Database, ballot_id: &str) -> Result<bool, sqlx::Er
         }
         Backend::Postgres => {
             let result = sqlx::query(
-                "UPDATE roadmap_ballots SET voted_at = $1 WHERE id = $2 AND voted_at IS NULL",
+                "UPDATE roadmap_ballots SET voted_at = $1::timestamptz WHERE id = $2 AND voted_at IS NULL",
             )
             .bind(&now)
             .bind(ballot_id)
@@ -309,7 +309,7 @@ pub async fn apply_elo_and_counters(
             for (card_id, new_elo, is_best, is_worst) in updates {
                 sqlx::query(
                     "UPDATE roadmap_cards SET elo_rating = $1, matches_played = matches_played + 1,
-                     times_best = times_best + $2, times_worst = times_worst + $3, updated_at = $4 WHERE id = $5",
+                     times_best = times_best + $2, times_worst = times_worst + $3, updated_at = $4::timestamptz WHERE id = $5",
                 )
                 .bind(new_elo)
                 .bind(if *is_best { 1 } else { 0 })
@@ -354,7 +354,7 @@ pub async fn record_move(
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO roadmap_moves (id, card_id, from_stage, to_stage, reason, moved_by, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                 VALUES ($1, $2, $3, $4, $5, $6::uuid, $7::timestamptz)",
             )
             .bind(&id)
             .bind(card_id)
@@ -448,7 +448,7 @@ pub async fn insert_suggestion(
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO roadmap_suggestions (id, account_id, raw_text, card_id, created_at)
-                 VALUES ($1, $2, $3, $4, $5)",
+                 VALUES ($1, $2::uuid, $3, $4, $5::timestamptz)",
             )
             .bind(&id)
             .bind(account_id)
@@ -479,12 +479,14 @@ pub async fn update_card_stage(
                 .await?;
         }
         Backend::Postgres => {
-            sqlx::query("UPDATE roadmap_cards SET stage = $1, updated_at = $2 WHERE id = $3")
-                .bind(stage)
-                .bind(&now)
-                .bind(card_id)
-                .execute(db.postgres_pool().expect("postgres"))
-                .await?;
+            sqlx::query(
+                "UPDATE roadmap_cards SET stage = $1, updated_at = $2::timestamptz WHERE id = $3",
+            )
+            .bind(stage)
+            .bind(&now)
+            .bind(card_id)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?;
         }
     }
     Ok(())

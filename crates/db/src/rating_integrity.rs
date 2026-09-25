@@ -36,7 +36,7 @@ pub async fn get_trust_weighted_rating_summary(
                 COALESCE(SUM(COALESCE(tl.level, 1)), 0)::bigint AS total_weight \
            FROM rating \
            LEFT JOIN trust_levels tl ON rating.account_id::text = tl.account \
-          WHERE work_id = $1 AND is_public = TRUE AND deleted_at IS NULL \
+          WHERE work_id = $1::uuid AND is_public = TRUE AND deleted_at IS NULL \
           HAVING COUNT(*) >= $2",
     );
     let row = match db.backend() {
@@ -73,7 +73,7 @@ pub async fn insert_rating_anomaly_event(db: &Database, event: &RatingAnomalyEve
         "INSERT INTO rating_anomaly_events (id, work_id, cohort_id, kind, severity, detail, detected_at, cleared_at, cleared_by) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         "INSERT INTO rating_anomaly_events (id, work_id, cohort_id, kind, severity, detail, detected_at, cleared_at, cleared_by) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::jsonb, $7::timestamptz, $8::timestamptz, $9::uuid)",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -121,7 +121,7 @@ pub async fn clear_rating_anomaly_event(
 ) -> Result<()> {
     let sql = db.sql(
         "UPDATE rating_anomaly_events SET cleared_at = ?, cleared_by = ? WHERE id = ?",
-        "UPDATE rating_anomaly_events SET cleared_at = $1::timestamptz, cleared_by = $2 WHERE id = $3",
+        "UPDATE rating_anomaly_events SET cleared_at = $1::timestamptz, cleared_by = $2::uuid WHERE id = $3::uuid",
     );
     let now = crate::identity::now_rfc3339();
     match db.backend() {
@@ -157,7 +157,7 @@ pub async fn get_work_anomaly_events(
           ORDER BY detected_at DESC",
         "SELECT id, work_id, cohort_id, kind, severity, detail, detected_at, cleared_at, cleared_by \
            FROM rating_anomaly_events \
-          WHERE work_id = $1 AND cleared_at IS NULL \
+          WHERE work_id = $1::uuid AND cleared_at IS NULL \
           ORDER BY detected_at DESC",
     );
     let mut events = Vec::new();
@@ -212,7 +212,7 @@ pub async fn get_work_anomaly_events(
 pub async fn set_work_contested(db: &Database, work_id: &WorkId, reason: &str) -> Result<()> {
     let sql = db.sql(
         "UPDATE works SET contested = 1, contested_at = ?, contested_reason = ? WHERE id = ?",
-        "UPDATE works SET contested = 1, contested_at = $1::timestamptz, contested_reason = $2 WHERE id = $3",
+        "UPDATE works SET contested = 1, contested_at = $1::timestamptz, contested_reason = $2 WHERE id = $3::uuid",
     );
     let now = crate::identity::now_rfc3339();
     match db.backend() {
@@ -240,7 +240,7 @@ pub async fn set_work_contested(db: &Database, work_id: &WorkId, reason: &str) -
 pub async fn clear_work_contested(db: &Database, work_id: &WorkId) -> Result<()> {
     let sql = db.sql(
         "UPDATE works SET contested = 0, contested_at = NULL, contested_reason = NULL WHERE id = ?",
-        "UPDATE works SET contested = 0, contested_at = NULL, contested_reason = NULL WHERE id = $1",
+        "UPDATE works SET contested = 0, contested_at = NULL, contested_reason = NULL WHERE id = $1::uuid",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -263,7 +263,7 @@ pub async fn clear_work_contested(db: &Database, work_id: &WorkId) -> Result<()>
 pub async fn is_work_contested(db: &Database, work_id: &WorkId) -> Result<bool> {
     let sql = db.sql(
         "SELECT contested FROM works WHERE id = ?",
-        "SELECT contested FROM works WHERE id = $1",
+        "SELECT contested FROM works WHERE id = $1::uuid",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -383,7 +383,7 @@ mod tests {
             "INSERT INTO rating (id, account_id, pseud_id, work_id, stars, is_public, created_at, updated_at, version) \
              VALUES (?, ?, ?, ?, ?, 1, ?, ?, 1)",
             "INSERT INTO rating (id, account_id, pseud_id, work_id, stars, is_public, created_at, updated_at, version) \
-             VALUES ($1, $2, $3, $4, $5, TRUE, $6, $7, 1)",
+             VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, TRUE, $6, $7, 1)",
         );
         match db.backend() {
             Backend::Sqlite => {
