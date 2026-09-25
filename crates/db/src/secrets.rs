@@ -135,7 +135,7 @@ pub async fn retire_encryption_key(db: &Database, key_id: &str) -> Result<()> {
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "UPDATE encryption_keys SET retired_at = ? WHERE key_id = ?",
-        "UPDATE encryption_keys SET retired_at = ?::timestamptz WHERE key_id = ?",
+        "UPDATE encryption_keys SET retired_at = ? WHERE key_id = ?",
     );
     match db.backend() {
         Backend::Sqlite => {

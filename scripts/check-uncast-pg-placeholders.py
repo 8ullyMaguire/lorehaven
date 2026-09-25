@@ -181,6 +181,10 @@ def offending_lines(sql: str, schema: dict[str, dict[str, str]]) -> bool:
         return True
     if int4_sites(sql, schema):
         return True
+    if bool_literal_sites(sql, schema):
+        return True
+    if timestamptz_cast_sites(sql, schema):
+        return True
 
     if not re.search(r"\$\d+", sql):
         # `?` is the SQLite spelling. The PostgreSQL arm is the one rewritten to
@@ -284,6 +288,31 @@ def add_missing_casts(sql: str, known: dict[str, dict[str, str]]) -> str:
     `work$2::uuidd` -- a column name cut in half by a cast landing inside it.
     """
     edits: list[tuple[int, int, str]] = []
+
+    # The two faults this function's siblings report are *removals*, not
+    # additions: a cast that makes the bind the wrong type for its column. Both
+    # are handled before any cast is added, so a statement carrying both is
+    # judged on the column each placeholder actually feeds.
+    for site in timestamptz_cast_sites(sql, known):
+        table, column = site.split(".")[0], site.split(".")[1].split(" ")[0]
+        for pattern in (
+            rf"((?:{re.escape(table)}\s*\.\s*)?{re.escape(column)}\s*"
+            rf"(?:<=|>=|<|>|!=|<>|=)\s*\??\$?\w*)::timestamptz",
+            rf"((?:{re.escape(table)}\s*\.\s*)?{re.escape(column)}\s*=\s*\??\$?\w*)::timestamptz",
+        ):
+            for match in re.finditer(pattern, sql, re.IGNORECASE):
+                edits.append((match.end() - len("::timestamptz"), match.end(), ""))
+    # A boolean literal against an INTEGER column: `= 1`, not `= true`.
+    for site in bool_literal_sites(sql, known):
+        table, column = site.split(".")[0], site.split(".")[1].split(" ")[0]
+        pattern = (
+            rf"((?:{re.escape(table)}\s*\.\s*)?{re.escape(column)}\s*=\s*)"
+            rf"(?:true|false)"
+        )
+        for match in re.finditer(pattern, sql, re.IGNORECASE):
+            literal = match.group(0)[match.group(0).lower().rindex("true" if "true" in match.group(0).lower() else "false"):]
+            replacement = "1" if literal.lower() == "true" else "0"
+            edits.append((match.end() - len(literal), match.end(), replacement))
     for match in re.finditer(
         r"([a-z_][a-z0-9_]*)\s*(?:=|<>|!=|>|<|like|ilike|in)\s*(\$\d+)(?!\s*::)",
         sql,
@@ -439,6 +468,10 @@ def in_sql_pair(text: str, pos: int) -> str | None:
 # an earlier line-index edit of mine dropped the FROM clause from a SELECT, and
 # the resulting 500 took a while to trace to a half-applied patch rather than to
 # anything PostgreSQL-specific.
+# Column types that hold a timestamp as text. The PostgreSQL schema mirrors
+# the SQLite types, so this is the common case, not the exception.
+TEXT_KINDS = ("text", "character varying", "varchar")
+
 SQL_KEYWORDS = {
     "into", "values", "or", "replace", "ignore", "select", "default", "table",
     "set", "from", "where", "on", "conflict", "nothing", "constraint", "columns",
@@ -504,6 +537,94 @@ def incomplete_sites(sql: str) -> list[str]:
     return []
 
 
+# A JSONB or TIMESTAMPTZ column read into a String has the same shape as the INT4
+# case and the same fix: cast the column on output. The decode side is harder to
+# see from the SQL alone, so this reports the column and the reader decides.
+# A boolean literal against an INTEGER column. This is a per-column judgement,
+# not a blanket one: `rating.is_public` and `review.is_public` are BOOLEAN and
+# must be written `= true`, while `collections.is_public`, `recipes.is_public`
+# and `wishlists.is_public` are INTEGER and must be written `= 1`. Both spellings
+# appear in the same file, so nothing about the statement tells you which applies.
+def table_aliases(sql: str) -> dict[str, str]:
+    """Map each table alias in `sql` to the table it stands for.
+
+    `FROM collection_items ci JOIN collections c ON c.id = ci.collection_id`
+    gives `{"ci": "collection_items", "c": "collections"}`. Without this a
+    qualified column could not be attributed to a table, and every rule that
+    reads column types had to give up on joined statements.
+    """
+    out: dict[str, str] = {}
+    for match in re.finditer(
+        r"\b(?:FROM|JOIN|INTO|UPDATE)\s+([a-z_]\w*)"
+        r"(?:\s+(?:AS\s+)?([a-z_]\w*))?",
+        sql,
+        re.IGNORECASE,
+    ):
+        table, alias = match.group(1), match.group(2)
+        if not alias or alias.upper() in SQL_KEYWORDS:
+            continue
+        out[alias.lower()] = table
+    return out
+
+
+def bool_literal_sites(sql: str, known: dict[str, dict[str, str]]) -> list[str]:
+    out: list[str] = []
+    for match in re.finditer(
+        r"(?:([a-z_]\w*)\s*\.\s*)?([a-z_]\w*)\s*(?:=|<>|!=)\s*(true|false)\b",
+        sql,
+        re.IGNORECASE,
+    ):
+        qualifier, column, literal = match.group(1), match.group(2), match.group(3).lower()
+        # A qualifier is usually the table's alias (`JOIN collections c ON ...`
+        # then `c.is_public = true`), not the table name, so resolve it. Without
+        # this the rule only ever fired on unqualified columns and reported
+        # nothing for the joined reads where the fault actually lives.
+        table = None
+        if qualifier:
+            table = table_aliases(sql).get(qualifier.lower())
+        else:
+            # No qualifier: the column is judged against every table that has it.
+            matches = [t for t, cols in known.items() if cols.get(column)]
+            if len(matches) != 1:
+                continue
+            table = matches[0]
+        columns = known.get(table or "", {})
+        if columns.get(column) in INTEGER_KINDS:
+            out.append(f"{table}.{column} is INTEGER, not boolean: use 1/0 not {literal}")
+    return out
+
+
+# A `::timestamptz` cast on a placeholder that feeds a TEXT column.
+#
+# This project's PostgreSQL schema mirrors the SQLite types, so timestamps are
+# TEXT nearly everywhere; casting the bind makes it the wrong type for the column
+# and PostgreSQL reports `text <= timestamp with time zone`. A handful of tables
+# really do use TIMESTAMPTZ (`media_resilience`, `curator_roles`, `export_jobs`),
+# so the column type is looked up rather than assumed.
+#
+# Only a comparison or assignment is matched. A column merely named in a SELECT
+# list, next to a cast on some other placeholder, is not this bug.
+def timestamptz_cast_sites(sql: str, known: dict[str, dict[str, str]]) -> list[str]:
+    if "::timestamptz" not in sql.lower():
+        return []
+    text_tables = {
+        table: {name for name, kind in columns.items() if kind in TEXT_KINDS}
+        for table, columns in known.items()
+        if columns
+    }
+    out: list[str] = []
+    for table, text_columns in text_tables.items():
+        for name in text_columns:
+            # `col <= $1::timestamptz`, `col = $2::timestamptz`, `col > ?::timestamptz`
+            compare = rf"(?:{re.escape(table)}\s*\.\s*)?{re.escape(name)}\s*(?:<=|>=|<|>|!=|<>|=)\s*\??\$?\w*::timestamptz"
+            assign = rf"(?:{re.escape(table)}\s*\.\s*)?{re.escape(name)}\s*=\s*\??\$?\w*::timestamptz"
+            if re.search(compare, sql, re.IGNORECASE) or re.search(assign, sql, re.IGNORECASE):
+                out.append(
+                    f"{table}.{name} is TEXT, not timestamptz: drop the ::timestamptz cast"
+                )
+    return sorted(set(out))
+
+
 def scan(root: pathlib.Path, schema: dict[str, dict[str, str]]) -> list[tuple[pathlib.Path, int, str]]:
     hits: list[tuple[pathlib.Path, int, str]] = []
     # Accept a file as well as a directory, so a single module can be checked
@@ -539,7 +660,13 @@ def scan(root: pathlib.Path, schema: dict[str, dict[str, str]]) -> list[tuple[pa
             # Only production SQL. A test asserting on placeholder rewriting
             # legitimately has statements like `SELECT $1` with no FROM, and a
             # `#[cfg(test)]` literal is not a query that will ever run.
-            if '#[cfg(test)]' not in text[: match.start()]:
+            if known:
+                reasons.extend(bool_literal_sites(sql, known))
+                reasons.extend(timestamptz_cast_sites(sql, known))
+            # Only production SQL. A test asserting on placeholder rewriting
+            # legitimately has statements like `SELECT $1` with no FROM, and a
+            # `#[cfg(test)]` literal is not a query that will ever run.
+            if "#[cfg(test)]" not in text[: match.start()]:
                 reasons.extend(incomplete_sites(sql))
             if not reasons:
                 continue
@@ -555,11 +682,44 @@ SCHEMA = {
                       "updated_at": "timestamptz"},
     "progress": {"account": "uuid", "work_id": "uuid", "last_chapter": "integer",
                  "updated_at": "text"},
+    # The pair the two new rules turn on. `jobs` and `collections` are TEXT
+    # because the PostgreSQL schema mirrors the SQLite types; `local_mirrors`
+    # and `rating` are the genuinely-typed tables, which is what keeps the rules
+    # from reporting correct SQL.
+    "jobs": {"id": "uuid", "updated_at": "text", "available_at": "text"},
+    "collections": {"id": "uuid", "is_public": "bigint"},
+    "collection_items": {"collection_id": "uuid", "work_id": "uuid"},
+    "reviews": {"id": "uuid", "work_id": "uuid", "is_public": "boolean"},
+    "local_mirrors": {"id": "uuid", "expires_at": "timestamptz", "updated_at": "timestamptz"},
+    "rating": {"id": "uuid", "work_id": "uuid", "is_public": "boolean"},
 }
 
 # Each case is (SQL, should_report, note). The negative cases are the point:
 # a checker that flags correct SQL gets muted, and then it flags nothing.
 SELF_TEST_CASES: list[tuple[str, bool, str]] = [
+    # A `::timestamptz` cast on a bind feeding a TEXT timestamp column. The
+    # PostgreSQL schema mirrors the SQLite types, so timestamps are TEXT nearly
+    # everywhere and the cast is what breaks: `text <= timestamp with time zone`.
+    ("UPDATE jobs SET updated_at = $1::timestamptz WHERE id = $2::uuid", True,
+     "jobs.updated_at is TEXT: the timestamptz cast is the fault"),
+    ("UPDATE jobs SET updated_at = $1 WHERE id = $2::uuid", False,
+     "the same statement without the cast is correct"),
+    ("SELECT id FROM jobs WHERE available_at <= $1::timestamptz", True,
+     "a comparison against a TEXT timestamp column"),
+    # A table whose timestamps really are TIMESTAMPTZ must not be flagged.
+    ("UPDATE local_mirrors SET expires_at = $1::timestamptz WHERE id = $2::uuid",
+     False, "local_mirrors.expires_at really is TIMESTAMPTZ"),
+    # A column merely named in a SELECT list, beside a cast on another
+    # placeholder, is not this bug.
+    ("SELECT id, updated_at FROM local_mirrors WHERE id = $1::uuid", False,
+     "a column in the select list is not an assignment"),
+    # A boolean literal against an INTEGER column: `rating.is_public` is BOOLEAN
+    # and takes `true`, `collections.is_public` is INTEGER and takes 1.
+    ("SELECT COUNT(*) FROM collection_items ci JOIN collections c ON c.id = ci.collection_id "
+     "WHERE ci.work_id::text = $1 AND c.is_public = true", True,
+     "collections.is_public is INTEGER: `= true` is the fault"),
+    ("SELECT COUNT(*) FROM reviews WHERE work_id::text = $1 AND is_public = true", False,
+     "reviews.is_public is BOOLEAN: `= true` is correct"),
     ("SELECT title FROM works WHERE id = $1", True,
      "a UUID column with a bare bind"),
     ("SELECT title FROM works WHERE id = $1::uuid", False,
@@ -645,6 +805,11 @@ def sum_sites(sql: str, known: dict[str, dict[str, str]]) -> list[str]:
 # narrow: it only fires on a bare column reference in a SELECT list, because a
 # `COUNT(*)` or an already-cast `col::bigint` is fine and must not be reported.
 INT4_COLUMNS = ("integer", "smallint")
+
+# Every integer type. `INT4_COLUMNS` is the narrow set used to decide whether a
+# SUM needs a BIGINT widening, which is a different question from whether a
+# boolean literal fits: a flag spelled BIGINT still rejects `= true`.
+INTEGER_KINDS = ("integer", "smallint", "bigint", "int", "int2", "int4", "int8", "serial")
 SELECT_ITEM = re.compile(
     r"(?:^|\s|,)((?:[a-z_][\w]*\s*\.\s*)?)([a-z_][\w]*)(?=\s*(?:,|FROM|AS|$))",
     re.IGNORECASE | re.MULTILINE,

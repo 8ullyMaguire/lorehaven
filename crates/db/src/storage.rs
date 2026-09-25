@@ -447,7 +447,7 @@ impl BlobStore {
     async fn touch(&self, db: &Database, checksum: &str) -> Result<()> {
         let sql = db.sql(
             "UPDATE content_blobs SET last_referenced_at = ? WHERE checksum = ?",
-            "UPDATE content_blobs SET last_referenced_at = ?::timestamptz WHERE checksum = ?",
+            "UPDATE content_blobs SET last_referenced_at = ? WHERE checksum = ?",
         );
         let now = now_rfc3339();
         match db.backend() {

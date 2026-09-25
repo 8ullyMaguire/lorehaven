@@ -40,7 +40,7 @@ pub async fn set_work_discussion_mode(
 ) -> Result<bool> {
     let sql = db.sql(
         "UPDATE works SET discussion_mode = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
-        "UPDATE works SET discussion_mode = $1, updated_at = $2::timestamptz WHERE id::text = $3 AND deleted_at IS NULL",
+        "UPDATE works SET discussion_mode = $1, updated_at = $2 WHERE id::text = $3 AND deleted_at IS NULL",
     );
     let now = now_rfc3339();
     let affected = match db.backend() {
@@ -271,7 +271,7 @@ pub async fn set_reaction(
         (Some(_), Some(vt)) => {
             let sql = db.sql(
                 "UPDATE work_reactions SET vote_type = ?, updated_at = ? WHERE work_id = ? AND pseud = ?",
-                "UPDATE work_reactions SET vote_type = $1, updated_at = $2::timestamptz WHERE work_id::text = $3 AND pseud::text = $4",
+                "UPDATE work_reactions SET vote_type = $1, updated_at = $2 WHERE work_id::text = $3 AND pseud::text = $4",
             );
             match db.backend() {
                 Backend::Sqlite => {
@@ -366,7 +366,7 @@ pub async fn migrate_comments_to_topic(
         .await?;
         let delete = db.sql(
             "UPDATE comments SET deleted_at = ?, body = ? WHERE id = ?",
-            "UPDATE comments SET deleted_at = $1::timestamptz, body = $2 WHERE id = $3",
+            "UPDATE comments SET deleted_at = $1, body = $2 WHERE id = $3",
         );
         let now = now_rfc3339();
         match db.backend() {

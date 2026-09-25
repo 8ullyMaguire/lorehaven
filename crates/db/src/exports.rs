@@ -544,7 +544,7 @@ pub async fn acknowledge_privacy(db: &Database, id: &str) -> Result<()> {
     let sql = db.sql(
         "UPDATE export_jobs SET privacy_acknowledged_at = ?, updated_at = ?, version = version + 1 \
          WHERE id = ? AND privacy_acknowledged_at IS NULL",
-        "UPDATE export_jobs SET privacy_acknowledged_at = ?::timestamptz, \
+        "UPDATE export_jobs SET privacy_acknowledged_at = ?, \
          updated_at = ?::timestamptz, version = version + 1 \
          WHERE id::text = ? AND privacy_acknowledged_at IS NULL",
     );

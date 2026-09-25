@@ -2516,7 +2516,7 @@ pub async fn resolve_match_proposal(
             let changed = sqlx::query(
                 "UPDATE media_match_proposals
                     SET status = $1, resolved_by = $2, resolution_note = $3,
-                        resolved_at = $4::timestamptz, updated_at = $5::timestamptz
+                        resolved_at = $4, updated_at = $5
                   WHERE id = $6::uuid AND status = 'pending'",
             )
             .bind(status)

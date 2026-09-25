@@ -633,7 +633,7 @@ pub async fn update_work(
                 visibility = COALESCE(?, visibility),
                 completion = COALESCE(?, completion),
                 show_public_ratings = COALESCE(?, show_public_ratings),
-                updated_at = ?::timestamptz, version = version + 1
+                updated_at = ?, version = version + 1
           WHERE id::text = ? AND version = ? AND deleted_at IS NULL",
     );
 
@@ -840,7 +840,7 @@ pub async fn update_chapter(
             SET title = COALESCE(?, title), updated_at = ?, version = version + 1
           WHERE id = ? AND version = ? AND deleted_at IS NULL",
         "UPDATE chapters
-            SET title = COALESCE(?, title), updated_at = ?::timestamptz, version = version + 1
+            SET title = COALESCE(?, title), updated_at = ?, version = version + 1
           WHERE id::text = ? AND version = ? AND deleted_at IS NULL",
     );
 
@@ -876,7 +876,7 @@ pub async fn delete_chapter(db: &Database, id: ChapterId) -> Result<bool> {
     let sql = db.sql(
         "UPDATE chapters SET deleted_at = ?, updated_at = ?, version = version + 1
           WHERE id = ? AND deleted_at IS NULL",
-        "UPDATE chapters SET deleted_at = ?::timestamptz, updated_at = ?::timestamptz, version = version + 1
+        "UPDATE chapters SET deleted_at = ?, updated_at = ?, version = version + 1
           WHERE id::text = ? AND deleted_at IS NULL",
     );
 
@@ -923,7 +923,7 @@ pub async fn reorder_chapters(
     let now = now_rfc3339();
     let sql = db.sql(
         "UPDATE chapters SET order_key = ?, updated_at = ? WHERE id = ?",
-        "UPDATE chapters SET order_key = ?, updated_at = ?::timestamptz WHERE id::text = ?",
+        "UPDATE chapters SET order_key = ?, updated_at = ? WHERE id::text = ?",
     );
 
     match db.backend() {
@@ -1006,7 +1006,7 @@ pub async fn append_revision(
             SET current_revision_id = ?, updated_at = ?, version = version + 1
           WHERE id = ? AND version = ? AND deleted_at IS NULL",
         "UPDATE chapters
-            SET current_revision_id = ?::uuid, updated_at = ?::timestamptz, version = version + 1
+            SET current_revision_id = ?::uuid, updated_at = ?, version = version + 1
           WHERE id::text = ? AND version = ? AND deleted_at IS NULL",
     );
     let move_pointer_unchecked_sql = db.sql(
@@ -1014,12 +1014,12 @@ pub async fn append_revision(
             SET current_revision_id = ?, updated_at = ?, version = version + 1
           WHERE id = ? AND deleted_at IS NULL",
         "UPDATE chapters
-            SET current_revision_id = ?::uuid, updated_at = ?::timestamptz, version = version + 1
+            SET current_revision_id = ?::uuid, updated_at = ?, version = version + 1
           WHERE id::text = ? AND deleted_at IS NULL",
     );
     let touch_work_sql = db.sql(
         "UPDATE works SET updated_at = ? WHERE id = ?",
-        "UPDATE works SET updated_at = ?::timestamptz WHERE id::text = ?",
+        "UPDATE works SET updated_at = ? WHERE id::text = ?",
     );
     let outbox_sql = db.sql(
         "INSERT INTO outbox_events (id, topic, payload, dedupe_key, created_at, available_at, attempts)
@@ -1302,7 +1302,7 @@ pub async fn publish_work(
           WHERE id = ? AND version = ? AND deleted_at IS NULL",
         "UPDATE works
             SET lifecycle = 'published', published_at = COALESCE(published_at, ?),
-                withdrawn_at = NULL, updated_at = ?::timestamptz, version = version + 1
+                withdrawn_at = NULL, updated_at = ?, version = version + 1
           WHERE id::text = ? AND version = ? AND deleted_at IS NULL",
     );
     let event_sql = db.sql(
@@ -1435,7 +1435,7 @@ pub async fn withdraw_work(
             SET lifecycle = 'withdrawn', withdrawn_at = ?, updated_at = ?, version = version + 1
           WHERE id = ? AND version = ? AND deleted_at IS NULL",
         "UPDATE works
-            SET lifecycle = 'withdrawn', withdrawn_at = ?::timestamptz, updated_at = ?::timestamptz, version = version + 1
+            SET lifecycle = 'withdrawn', withdrawn_at = ?, updated_at = ?, version = version + 1
           WHERE id::text = ? AND version = ? AND deleted_at IS NULL",
     );
     let event_sql = db.sql(

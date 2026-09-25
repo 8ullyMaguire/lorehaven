@@ -637,7 +637,7 @@ pub async fn veto_proposal(
 ) -> Result<bool> {
     let sql = db.sql(
         "UPDATE category_proposals SET status = 'vetoed', decided_by = ?, decision_reason = ?, decided_at = ? WHERE id = ? AND status = 'open'",
-        "UPDATE category_proposals SET status = 'vetoed', decided_by = ?, decision_reason = ?, decided_at = ?::timestamptz WHERE id = ? AND status = 'open'",
+        "UPDATE category_proposals SET status = 'vetoed', decided_by = ?, decision_reason = ?, decided_at = ? WHERE id = ? AND status = 'open'",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -667,7 +667,7 @@ pub async fn veto_proposal(
 pub async fn expire_proposal(db: &Database, proposal_id: &str, now: &str) -> Result<bool> {
     let sql = db.sql(
         "UPDATE category_proposals SET status = 'expired', decided_at = ? WHERE id = ? AND status = 'open' AND closes_at < ?",
-        "UPDATE category_proposals SET status = 'expired', decided_at = ? WHERE id = ? AND status = 'open' AND closes_at < ?::timestamptz",
+        "UPDATE category_proposals SET status = 'expired', decided_at = ? WHERE id = ? AND status = 'open' AND closes_at < ?",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -1024,7 +1024,7 @@ pub async fn apply_entry_mod_action(db: &Database, proposal_id: &str, now: &str)
         "remove" => {
             let sql = db.sql(
                 "UPDATE directory_entries SET removed_at = ? WHERE id = ? AND removed_at IS NULL",
-                "UPDATE directory_entries SET removed_at = ?::timestamptz WHERE id = ? AND removed_at IS NULL",
+                "UPDATE directory_entries SET removed_at = ? WHERE id = ? AND removed_at IS NULL",
             );
             match db.backend() {
                 Backend::Sqlite => {

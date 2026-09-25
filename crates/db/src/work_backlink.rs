@@ -66,8 +66,11 @@ pub async fn work_for_topic(db: &Database, topic_id: &str) -> Result<Option<Link
           WHERE wc.work_id = ? AND wc.public_attribution = 1
           ORDER BY wc.created_at",
         "SELECT pe.handle FROM work_contributors wc
+             -- `public_attribution` is INTEGER: this schema's PostgreSQL
+             -- migrations mirror the SQLite types, so the flag takes 1 and
+             -- `= true` is `operator does not exist: bigint = boolean`.
              JOIN pseuds pe ON wc.pseud_id = pe.id::uuid
-          WHERE wc.work_id::text = $1 AND wc.public_attribution = true
+          WHERE wc.work_id::text = $1 AND wc.public_attribution = 1
           ORDER BY wc.created_at",
     );
     let handles: Vec<String> = match db.backend() {
