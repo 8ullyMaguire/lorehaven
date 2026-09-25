@@ -2001,83 +2001,144 @@ pub async fn resolve_dmca_takedown(
 
 /// Find media references by perceptual hash (dedup & reverse lookup).
 ///
-/// **Exact match only.** A Hamming-distance search is not implemented: it would
-/// need a pgcrypto extension or an application-side comparison, and neither
-/// exists. `max_distance` is accepted so callers can express intent and so the
-/// signature does not change when the search lands, but it is **not honoured** -
-/// a caller passing a large threshold still gets exact matches and nothing
-/// else. Do not read a result from this function as "these are similar".
+/// Find the media references whose perceptual hash is within `max_distance` bits
+/// of `hash` (spec §32.7.2), ordered closest first.
+///
+/// This is a Hamming-distance search, not an equality check: two images that
+/// differ by a re-encode, a resize or a mild edit produce different bytes and
+/// nearly the same fingerprint, and deduplicating them is the point. Exact
+/// matches are distance 0 and therefore always found.
+///
+/// The comparison is application-side, not in SQL. Neither backend can compute
+/// a Hamming distance on a hex string without a dialect-specific extension, and
+/// a query that half-works on one backend is worse than one that works on both.
+/// The candidate set is narrowed in SQL by `perceptual_hash IS NOT NULL`, which
+/// is also the one predicate worth an index, and the distance is then computed
+/// in Rust through `domain::media_resilience::hamming_distance`.
+///
+/// Three cases deliberately return nothing rather than guessing:
+///
+/// - a `NULL` perceptual_hash, which is a reference whose bytes were never
+///   fetched — not a hash to compare;
+/// - a stored or query hash that is not hex, which is not a fingerprint;
+/// - hashes of different digit counts, since a 64-bit pHash and a 128-bit wHash
+///   have no distance between them.
+///
+/// A malformed row is skipped and the search continues, so one bad value cannot
+/// hide every good match. `max_distance` is honoured: it is the threshold the
+/// caller configured, and a result here genuinely means "within N bits".
 pub async fn find_by_perceptual_hash(
     db: &Database,
     hash: &str,
-    _max_distance: i32,
+    max_distance: i32,
 ) -> Result<Vec<MediaReference>, sqlx::Error> {
-    match db.backend() {
+    // An unparseable query hash has no comparable candidate, and a negative
+    // threshold admits nothing. Both are answered without touching the table.
+    if hash.is_empty() || max_distance < 0 {
+        return Ok(Vec::new());
+    }
+    if lorehaven_domain::media_resilience::hamming_distance(hash, hash).is_none() {
+        return Ok(Vec::new());
+    }
+    let threshold = u32::try_from(max_distance).unwrap_or(u32::MAX);
+
+    let rows = sql_owned(
+        db,
+        "SELECT id, perceptual_hash, content_hash, media_kind, first_seen_at,
+                width, height, duration_seconds, format, file_size_bytes,
+                content_notes, curator_verified, created_at, updated_at
+         FROM media_references
+         WHERE perceptual_hash IS NOT NULL"
+            .to_string(),
+        "SELECT id, perceptual_hash, content_hash, media_kind, first_seen_at,
+                width, height, duration_seconds, format, file_size_bytes,
+                content_notes, curator_verified, created_at, updated_at
+         FROM media_references
+         WHERE perceptual_hash IS NOT NULL"
+            .to_string(),
+    );
+    // `sqlx::any::AnyRow` is unavailable in this workspace and the two backends
+    // return different concrete row types, so each arm reads its own columns
+    // and hands plain values to one shared scoring path. The `media_references`
+    // column list is repeated per arm rather than shared as a constant because
+    // the row types cannot be shared, and a single wrong column name here fails
+    // at runtime with a 500, not at compile time.
+    let candidates: Vec<(String, MediaReference)> = match db.backend() {
         Backend::Sqlite => {
-            let pool = db.sqlite_pool().expect("sqlite");
-            let rows = sqlx::query(
-                "SELECT id, perceptual_hash, content_hash, media_kind, first_seen_at,
-                        width, height, duration_seconds, format, file_size_bytes,
-                        content_notes, curator_verified, created_at, updated_at
-                 FROM media_references
-                 WHERE perceptual_hash = ?",
-            )
-            .bind(hash)
-            .fetch_all(pool)
-            .await?;
-            Ok(rows
-                .iter()
-                .map(|r| MediaReference {
-                    id: r.get::<String, _>("id"),
-                    perceptual_hash: r.get::<Option<String>, _>("perceptual_hash"),
-                    content_hash: r.get::<String, _>("content_hash"),
-                    media_kind: r.get::<String, _>("media_kind"),
-                    first_seen_at: r.get::<String, _>("first_seen_at"),
-                    width: r.get::<Option<i64>, _>("width"),
-                    height: r.get::<Option<i64>, _>("height"),
-                    duration_seconds: r.get::<Option<i64>, _>("duration_seconds"),
-                    format: r.get::<Option<String>, _>("format"),
-                    file_size_bytes: r.get::<Option<i64>, _>("file_size_bytes"),
-                    content_notes: r.get::<String, _>("content_notes"),
-                    curator_verified: r.get::<bool, _>("curator_verified"),
-                    created_at: r.get::<String, _>("created_at"),
-                    updated_at: r.get::<String, _>("updated_at"),
+            let rows = sqlx::query(&rows)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?;
+            rows.iter()
+                .filter_map(|r| {
+                    let stored = r.get::<Option<String>, _>("perceptual_hash")?;
+                    Some((
+                        stored.clone(),
+                        MediaReference {
+                            id: r.get::<String, _>("id"),
+                            perceptual_hash: Some(stored),
+                            content_hash: r.get::<String, _>("content_hash"),
+                            media_kind: r.get::<String, _>("media_kind"),
+                            first_seen_at: r.get::<String, _>("first_seen_at"),
+                            width: r.get::<Option<i64>, _>("width"),
+                            height: r.get::<Option<i64>, _>("height"),
+                            duration_seconds: r.get::<Option<i64>, _>("duration_seconds"),
+                            format: r.get::<Option<String>, _>("format"),
+                            file_size_bytes: r.get::<Option<i64>, _>("file_size_bytes"),
+                            content_notes: r.get::<String, _>("content_notes"),
+                            curator_verified: r.get::<bool, _>("curator_verified"),
+                            created_at: r.get::<String, _>("created_at"),
+                            updated_at: r.get::<String, _>("updated_at"),
+                        },
+                    ))
                 })
-                .collect())
+                .collect()
         }
         Backend::Postgres => {
-            let pool = db.postgres_pool().expect("postgres");
-            let rows = sqlx::query(
-                "SELECT id, perceptual_hash, content_hash, media_kind, first_seen_at,
-                        width, height, duration_seconds, format, file_size_bytes,
-                        content_notes, curator_verified, created_at, updated_at
-                 FROM media_references
-                 WHERE perceptual_hash = $1",
-            )
-            .bind(hash)
-            .fetch_all(pool)
-            .await?;
-            Ok(rows
-                .iter()
-                .map(|r| MediaReference {
-                    id: r.get::<String, _>("id"),
-                    perceptual_hash: r.get::<Option<String>, _>("perceptual_hash"),
-                    content_hash: r.get::<String, _>("content_hash"),
-                    media_kind: r.get::<String, _>("media_kind"),
-                    first_seen_at: r.get::<String, _>("first_seen_at"),
-                    width: r.get::<Option<i64>, _>("width"),
-                    height: r.get::<Option<i64>, _>("height"),
-                    duration_seconds: r.get::<Option<i64>, _>("duration_seconds"),
-                    format: r.get::<Option<String>, _>("format"),
-                    file_size_bytes: r.get::<Option<i64>, _>("file_size_bytes"),
-                    content_notes: r.get::<String, _>("content_notes"),
-                    curator_verified: r.get::<bool, _>("curator_verified"),
-                    created_at: r.get::<String, _>("created_at"),
-                    updated_at: r.get::<String, _>("updated_at"),
+            let rows = sqlx::query(&rows)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?;
+            rows.iter()
+                .filter_map(|r| {
+                    let stored = r.get::<Option<String>, _>("perceptual_hash")?;
+                    Some((
+                        stored.clone(),
+                        MediaReference {
+                            id: r.get::<String, _>("id"),
+                            perceptual_hash: Some(stored),
+                            content_hash: r.get::<String, _>("content_hash"),
+                            media_kind: r.get::<String, _>("media_kind"),
+                            first_seen_at: r.get::<String, _>("first_seen_at"),
+                            width: r.get::<Option<i64>, _>("width"),
+                            height: r.get::<Option<i64>, _>("height"),
+                            duration_seconds: r.get::<Option<i64>, _>("duration_seconds"),
+                            format: r.get::<Option<String>, _>("format"),
+                            file_size_bytes: r.get::<Option<i64>, _>("file_size_bytes"),
+                            content_notes: r.get::<String, _>("content_notes"),
+                            curator_verified: r.get::<bool, _>("curator_verified"),
+                            created_at: r.get::<String, _>("created_at"),
+                            updated_at: r.get::<String, _>("updated_at"),
+                        },
+                    ))
                 })
-                .collect())
+                .collect()
         }
-    }
+    };
+
+    // Score in one place: a malformed or absent hash is skipped, not folded
+    // into a large distance, and one bad row cannot hide every good match.
+    let mut scored: Vec<(u32, MediaReference)> = candidates
+        .into_iter()
+        .filter_map(|(stored, reference)| {
+            let distance = lorehaven_domain::media_resilience::hamming_distance(hash, &stored)?;
+            lorehaven_domain::media_resilience::is_within_perceptual_threshold(distance, threshold)
+                .then_some((distance, reference))
+        })
+        .collect();
+
+    // Closest first, then by id so two equally-close candidates have a stable
+    // order across calls and a paginating caller cannot loop.
+    scored.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.id.cmp(&b.1.id)));
+    Ok(scored.into_iter().map(|(_, reference)| reference).collect())
 }
 
 /// §32.7.3: find all works that reference a given media reference ID.

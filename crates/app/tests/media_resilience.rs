@@ -8,6 +8,7 @@ use lorehaven_app::config::Config;
 use lorehaven_app::server::{self, set_trust_proxy};
 use lorehaven_app::state::AppState;
 use lorehaven_db::media_resilience;
+use lorehaven_domain::media_resilience::MediaKind;
 use std::path::Path;
 use std::path::PathBuf;
 use tower::ServiceExt;
@@ -256,4 +257,356 @@ async fn media_resilience_links_needing_check() {
         .await
         .expect("find links needing check");
     assert_eq!(needing_check.len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// M32-07a: perceptual dedup (spec §32.7.2)
+// ---------------------------------------------------------------------------
+
+/// Set a reference's perceptual hash, on whichever backend the test DB is.
+async fn set_perceptual_hash(db: &lorehaven_db::Database, reference_id: &str, hash: &str) {
+    use lorehaven_db::Backend;
+    let sql = match db.backend() {
+        Backend::Sqlite => "UPDATE media_references SET perceptual_hash = ? WHERE id = ?",
+        Backend::Postgres => "UPDATE media_references SET perceptual_hash = $1 WHERE id = $2",
+    };
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(sql)
+                .bind(hash)
+                .bind(reference_id)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await
+                .expect("set phash");
+        }
+        Backend::Postgres => {
+            sqlx::query(sql)
+                .bind(hash)
+                .bind(reference_id)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await
+                .expect("set phash");
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_perceptual_match_within_the_threshold_is_found() {
+    let dir = scratch_dir("phash-within");
+    let tdb = test_support::TestDb::connect_with_dir("mr-phash-within", &dir).await;
+    let db = tdb.db();
+
+    // The stored hash differs from the query hash in exactly 4 bits
+    // (0x0 ^ 0x3 = two bits, 0xff ^ 0xfc = two bits), which is inside the
+    // default threshold of 6. It is NOT an exact match, so the old
+    // equality-only query returned nothing here.
+    media_resilience::insert_media_reference(db, "phash-near", "sha256:near", MediaKind::Image)
+        .await
+        .expect("insert near");
+    set_perceptual_hash(db, "phash-near", "00ffff00").await;
+
+    let found = media_resilience::find_by_perceptual_hash(db, "00fcff00", 6)
+        .await
+        .expect("perceptual search");
+    assert_eq!(
+        found.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        vec!["phash-near"],
+        "a 4-bit difference is inside a threshold of 6"
+    );
+}
+
+#[tokio::test]
+async fn a_perceptual_match_outside_the_threshold_is_not_found() {
+    let dir = scratch_dir("phash-outside");
+    let tdb = test_support::TestDb::connect_with_dir("mr-phash-outside", &dir).await;
+    let db = tdb.db();
+
+    // 12 bits differ, well past a threshold of 6.
+    media_resilience::insert_media_reference(db, "phash-far", "sha256:far", MediaKind::Image)
+        .await
+        .expect("insert far");
+    set_perceptual_hash(db, "phash-far", "00ff00ff").await;
+
+    let found = media_resilience::find_by_perceptual_hash(db, "ffff0000", 6)
+        .await
+        .expect("perceptual search");
+    assert!(
+        found.is_empty(),
+        "12 bits of difference must not match at a threshold of 6, got {:?}",
+        found.iter().map(|r| &r.id).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn the_threshold_decides_what_is_found() {
+    let dir = scratch_dir("phash-threshold");
+    let tdb = test_support::TestDb::connect_with_dir("mr-phash-threshold", &dir).await;
+    let db = tdb.db();
+
+    // Two differing bits: hidden at a threshold of 1, visible at 2.
+    media_resilience::insert_media_reference(db, "phash-two", "sha256:two", MediaKind::Image)
+        .await
+        .expect("insert two");
+    set_perceptual_hash(db, "phash-two", "00ff").await;
+
+    let strict = media_resilience::find_by_perceptual_hash(db, "00fc", 1)
+        .await
+        .expect("search at 1");
+    assert!(
+        strict.is_empty(),
+        "2 bits must not match at a threshold of 1"
+    );
+
+    let loose = media_resilience::find_by_perceptual_hash(db, "00fc", 2)
+        .await
+        .expect("search at 2");
+    assert_eq!(loose.len(), 1, "2 bits must match at a threshold of 2");
+}
+
+#[tokio::test]
+async fn a_reference_with_no_perceptual_hash_is_never_matched() {
+    let dir = scratch_dir("phash-null");
+    let tdb = test_support::TestDb::connect_with_dir("mr-phash-null", &dir).await;
+    let db = tdb.db();
+
+    // perceptual_hash is nullable: a reference whose bytes were never fetched
+    // has no hash. It must not match a query at any threshold, including one
+    // large enough to accept every possible hash.
+    media_resilience::insert_media_reference(db, "phash-none", "sha256:none", MediaKind::Image)
+        .await
+        .expect("insert none");
+
+    let found = media_resilience::find_by_perceptual_hash(db, "00ff", 32)
+        .await
+        .expect("perceptual search");
+    assert!(
+        found.is_empty(),
+        "a NULL perceptual_hash is not a hash to compare, got {:?}",
+        found.iter().map(|r| &r.id).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn a_malformed_stored_hash_does_not_match_and_does_not_fail_the_search() {
+    let dir = scratch_dir("phash-malformed");
+    let tdb = test_support::TestDb::connect_with_dir("mr-phash-malformed", &dir).await;
+    let db = tdb.db();
+
+    media_resilience::insert_media_reference(db, "phash-bad", "sha256:bad", MediaKind::Image)
+        .await
+        .expect("insert bad");
+    set_perceptual_hash(db, "phash-bad", "not-a-hash").await;
+    media_resilience::insert_media_reference(db, "phash-good", "sha256:good", MediaKind::Image)
+        .await
+        .expect("insert good");
+    set_perceptual_hash(db, "phash-good", "00ff").await;
+
+    // The unparseable value is skipped rather than folded into a large
+    // distance, and the healthy reference beside it is still returned: one
+    // bad row must not hide every good match.
+    let found = media_resilience::find_by_perceptual_hash(db, "00ff", 6)
+        .await
+        .expect("perceptual search");
+    assert_eq!(
+        found.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        vec!["phash-good"]
+    );
+}
+
+#[tokio::test]
+async fn a_malformed_query_hash_returns_nothing_rather_than_everything() {
+    let dir = scratch_dir("phash-badquery");
+    let tdb = test_support::TestDb::connect_with_dir("mr-phash-badquery", &dir).await;
+    let db = tdb.db();
+
+    media_resilience::insert_media_reference(db, "phash-row", "sha256:row", MediaKind::Image)
+        .await
+        .expect("insert row");
+    set_perceptual_hash(db, "phash-row", "00ff").await;
+
+    let found = media_resilience::find_by_perceptual_hash(db, "zzz", 32)
+        .await
+        .expect("perceptual search");
+    assert!(
+        found.is_empty(),
+        "an unparseable query hash cannot match anything, got {:?}",
+        found.iter().map(|r| &r.id).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn an_exact_match_is_still_found_and_sorts_first() {
+    let dir = scratch_dir("phash-exact");
+    let tdb = test_support::TestDb::connect_with_dir("mr-phash-exact", &dir).await;
+    let db = tdb.db();
+
+    media_resilience::insert_media_reference(db, "phash-exact", "sha256:e", MediaKind::Image)
+        .await
+        .expect("insert exact");
+    set_perceptual_hash(db, "phash-exact", "00ff").await;
+    media_resilience::insert_media_reference(db, "phash-nearby", "sha256:n", MediaKind::Image)
+        .await
+        .expect("insert nearby");
+    set_perceptual_hash(db, "phash-nearby", "00fc").await;
+
+    // Closest first: a curator reviewing candidates reads the strongest match
+    // at the top, and the exact match is the one that can auto-attach.
+    let found = media_resilience::find_by_perceptual_hash(db, "00ff", 6)
+        .await
+        .expect("perceptual search");
+    assert_eq!(
+        found.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        vec!["phash-exact", "phash-nearby"]
+    );
+}
+
+/// A router with media-resilience settings the test chooses, so the config
+/// actually reaches the route.
+async fn build_app_with_resilience(dir: &Path, tune: impl FnOnce(&mut Config)) -> axum::Router {
+    let mut config = config_for(dir);
+    tune(&mut config);
+    let tdb = test_support::TestDb::connect_with_dir("mr-cfg", dir).await;
+    let db = tdb.db().clone();
+    let state = AppState::new(config, db);
+    set_trust_proxy(false);
+    server::build_router(state)
+}
+
+async fn post_reverse_search(app: &axum::Router, body: &str) -> serde_json::Value {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/media/reverse-search")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_owned()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "reverse search should answer 200"
+    );
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    serde_json::from_slice(&bytes).expect("json body")
+}
+
+/// Build the router over one test DB, with a config the test can tune, and
+/// hand the DB back so the test can seed it before issuing requests.
+async fn app_and_db(
+    dir: &Path,
+    tune: impl FnOnce(&mut Config),
+) -> (axum::Router, lorehaven_db::Database) {
+    let mut config = config_for(dir);
+    tune(&mut config);
+    let tdb = test_support::TestDb::connect_with_dir("mr-rs", dir).await;
+    let db = tdb.db().clone();
+    let state = AppState::new(config, db.clone());
+    set_trust_proxy(false);
+    (server::build_router(state), db)
+}
+
+#[tokio::test]
+async fn reverse_search_uses_the_configured_perceptual_threshold() {
+    // A 2-bit difference (0x0 ^ 0xc): at or inside a threshold of 2 it is
+    // found, and below it is not. The same data must answer differently under
+    // each configuration, which is only true if the route reads config rather
+    // than hardcoding a number.
+    for (threshold, expected) in [(1, 0), (2, 1), (6, 1)] {
+        let dir = scratch_dir(&format!("rs-threshold-{threshold}"));
+        let (app, db) = app_and_db(&dir, |c| {
+            c.media_resilience.perceptual_match_threshold = threshold;
+        })
+        .await;
+        media_resilience::insert_media_reference(&db, "rs-t", "sha256:t", MediaKind::Image)
+            .await
+            .expect("insert");
+        set_perceptual_hash(&db, "rs-t", "00ffff00").await;
+
+        let body = post_reverse_search(&app, r#"{"hash":"00fcff00"}"#).await;
+        let refs = body["references"].as_array().expect("references array");
+        assert_eq!(
+            refs.len(),
+            expected,
+            "at a threshold of {threshold} a 2-bit difference should yield {expected} match(es): {body}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn reverse_search_rejects_a_request_with_neither_url_nor_hash() {
+    let dir = scratch_dir("rs-empty");
+    let app = build_app_with_resilience(&dir, |_| {}).await;
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/media/reverse-search")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"algorithm":"phash"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "a search with no hash and no url cannot be answered"
+    );
+}
+
+#[tokio::test]
+async fn reverse_search_reports_a_confidence_score_per_match() {
+    let dir = scratch_dir("rs-confidence");
+    let mut config = config_for(&dir);
+    config.media_resilience.perceptual_match_threshold = 6;
+    let tdb = test_support::TestDb::connect_with_dir("mr-rs-conf", &dir).await;
+    let db = tdb.db().clone();
+    // "rs-exact" stores the queried hash itself, so its distance is 0.
+    media_resilience::insert_media_reference(&db, "rs-exact", "sha256:1", MediaKind::Image)
+        .await
+        .expect("insert exact");
+    set_perceptual_hash(&db, "rs-exact", "00ff").await;
+    // "rs-near" differs in two bits: 0x0 ^ 0xc is two bits, the rest matches.
+    media_resilience::insert_media_reference(&db, "rs-near", "sha256:2", MediaKind::Image)
+        .await
+        .expect("insert near");
+    set_perceptual_hash(&db, "rs-near", "00fc").await;
+
+    let state = AppState::new(config, db);
+    set_trust_proxy(false);
+    let app = server::build_router(state);
+
+    let body = post_reverse_search(&app, r#"{"hash":"00ff"}"#).await;
+    let refs = body["references"].as_array().expect("references array");
+    assert_eq!(refs.len(), 2, "both references are within 2 bits: {body}");
+
+    // The spec requires a confidence score per perceptual match, and the exact
+    // match must be the one a curator can act on first.
+    for r in refs {
+        assert!(
+            r.get("match_confidence").is_some(),
+            "each match carries a confidence score: {r}"
+        );
+        assert!(
+            r.get("match_distance").is_some(),
+            "each match carries the distance that produced the score: {r}"
+        );
+    }
+    assert_eq!(
+        refs[0]["id"], "rs-exact",
+        "the closest match comes first: {body}"
+    );
+    let exact = refs[0]["match_confidence"].as_f64().expect("confidence");
+    let near = refs[1]["match_confidence"].as_f64().expect("confidence");
+    assert!(
+        exact > near,
+        "an exact match scores above a 2-bit match: {exact} vs {near}"
+    );
 }

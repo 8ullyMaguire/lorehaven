@@ -1402,6 +1402,89 @@ no data.
 
 ---
 
+## 2026-09-25 — M32-07a: perceptual-hash dedup, and the two dead things it uncovered
+
+A clippy warning from earlier today had flagged `find_by_perceptual_hash` as
+taking a `max_distance` it never used. It was renamed `_max_distance` and
+documented as exact-match-only rather than implemented, because the warning was
+right and the function was lying. Spec §32.7.2 requires threshold-based
+perceptual matching, so this implements it.
+
+### The search
+
+`db::media_resilience::find_by_perceptual_hash` is now an application-side
+Hamming-distance search, ordered closest first. Neither backend can score a hex
+string in SQL without a dialect-specific extension, so the query narrows to
+`perceptual_hash IS NOT NULL` — the one predicate worth the existing index — and
+the distance is computed in Rust.
+
+| Decision | Why |
+|---|---|
+| Distance in Rust, not SQL | A working SQLite expression and a working Postgres expression are two dialects to keep in step. One shared Rust path cannot drift. |
+| `NULL`, non-hex and mismatched-width hashes are skipped | A missing hash is not a hash; `not-a-hash` is not a fingerprint; a 64-bit pHash and a 128-bit wHash have no distance between them. Each would otherwise fold into a large distance, which is a similarity verdict invented from a malformed value. |
+| A malformed row is skipped, not fatal | One bad row must not hide every good match — pinned by `a_malformed_stored_hash_does_not_match_and_does_not_fail_the_search`. |
+| Closest first, then by id | A curator reads the strongest candidate at the top, and a stable tiebreak means a paginating caller cannot loop. |
+| Exact match is distance 0 | It is always found, and it is the only case that can auto-attach. |
+
+### What the tests caught
+
+Six behaviours, each written before the code:
+
+| Test | Pins |
+|---|---|
+| `a_perceptual_match_within_the_threshold_is_found` | 4 bits apart, threshold 6 → found. The old equality-only query returned nothing, so this was the RED that justified the work. |
+| `a_perceptual_match_outside_the_threshold_is_not_found` | 12 bits, threshold 6 → not found |
+| `the_threshold_decides_what_is_found` | the same pair found at 2 and hidden at 1 |
+| `a_reference_with_no_perceptual_hash_is_never_matched` | a `NULL` is not a hash, at any threshold |
+| `a_malformed_stored_hash_does_not_match_and_does_not_fail_the_search` | the healthy row beside a bad one is still returned |
+| `a_malformed_query_hash_returns_nothing_rather_than_everything` | an unparseable query cannot match the whole table |
+| `an_exact_match_is_still_found_and_sorts_first` | ordering, and that exact match survives |
+
+At the route: `reverse_search_uses_the_configured_perceptual_threshold` runs the
+same data at thresholds 1, 2 and 6 and asserts 0, 1 and 1 matches, which is only
+true if the handler reads config. `reverse_search_reports_a_confidence_score_per_match`
+pins the `match_distance` / `match_confidence` / `match_kind` / `auto_attach`
+fields the spec's curator workflow needs.
+
+### Two dead things found while implementing
+
+**`perceptual_match_threshold_is_valid` was dead code.** The domain validator
+for the threshold existed and was tested, and nothing called it. The config had
+no threshold, so there was nothing to validate. It is now called from
+`Config::validate()`, and an out-of-range value stops the instance instead of
+silently matching everything or nothing.
+
+**`load_from()` in the config tests could read a stale file.** It keys its
+scratch directory on `(pid, name)` and never clears it, so two tests passing the
+same name read the first one's config. My two refusal tests — "an unknown
+algorithm is refused" and "an out-of-range threshold is refused" — both
+inherited the directory of the passing parse test and loaded a valid config with
+`whash` and a threshold of 9. The helper now removes the directory first, and
+the three call sites have distinct names. Worth noting how it presented: the
+tests failed, which is correct, and the reason was the harness rather than the
+code under test.
+
+### Gate
+
+| Check | Result |
+|---|---|
+| `cargo clippy --workspace --all-targets` (stderr captured) | 0 warnings, 0 errors |
+| `cargo test --workspace --no-fail-fast` | see the count in the commit message |
+| `cargo test -p lorehaven-app --test media_resilience` | 17 passed |
+| `cargo test -p lorehaven-app --test discovery` | 3 passed |
+
+`crates/app/tests/discovery.rs` needed updating: its fixture stored the string
+`hash123` as a perceptual hash, which is not hex, so the new code correctly
+refuses it. The fixture is now a real fingerprint.
+
+### Still open
+
+M32-07b, filed: **nothing computes a perceptual hash.** The search and the
+config keys are real, but the column is only ever written by a test. The feature
+is correct on an empty column, and an importer is what makes it reachable.
+
+---
+
 ## 2026-09-25 — Two false green signals, both in gates, one hiding real defects
 
 A clippy gate reported clean while the tree held 30 warnings (covered above).

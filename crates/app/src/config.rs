@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use lorehaven_db::DatabaseConfig;
+use lorehaven_domain::media_resilience::{AudioFingerprint, PerceptualHashAlgorithm};
 use lorehaven_domain::AccountId;
 use serde::Deserialize;
 
@@ -189,6 +190,22 @@ pub struct MediaResilienceConfig {
     pub dead_threshold_failures: i64,
     /// How often to check links (in seconds).
     pub check_interval_secs: u64,
+    /// Whether media resilience runs on this instance at all (spec §32.7.2).
+    pub enabled: bool,
+    /// The perceptual hash algorithm used for images (spec §32.7.2).
+    pub perceptual_hash_algorithm: PerceptualHashAlgorithm,
+    /// Hamming distance at or below which two image hashes are offered as the
+    /// same image (spec §32.7.2, default 6).
+    pub perceptual_match_threshold: i64,
+    /// A perceptual match scoring below this confidence needs a curator to
+    /// confirm the linkage. Higher means more human review.
+    pub require_curator_confirmation_below: i64,
+    /// A perceptual match scoring at or above this confidence auto-attaches.
+    /// `0` — the spec's default — means no perceptual match auto-attaches; only
+    /// exact content-hash matches do.
+    pub require_curator_confirmation_above: i64,
+    /// The audio fingerprinting scheme (spec §32.7.2).
+    pub audio_fingerprint: AudioFingerprint,
 }
 
 impl Default for MediaResilienceConfig {
@@ -201,6 +218,12 @@ impl Default for MediaResilienceConfig {
             daily_credits_cap: 500,
             dead_threshold_failures: 5,
             check_interval_secs: 3600,
+            enabled: true,
+            perceptual_hash_algorithm: PerceptualHashAlgorithm::Phash,
+            perceptual_match_threshold: 6,
+            require_curator_confirmation_below: 3,
+            require_curator_confirmation_above: 0,
+            audio_fingerprint: AudioFingerprint::Chromaprint,
         }
     }
 }
@@ -1736,7 +1759,45 @@ impl Config {
                 device_email: d.device_email.clone(),
             }),
             // --- media_resilience (spec §32.7) -----------------------------------
-            media_resilience: MediaResilienceConfig::default(),
+            media_resilience: {
+                let d = MediaResilienceConfig::default();
+                let m = file.media_resilience.as_ref();
+                MediaResilienceConfig {
+                    enabled: m.and_then(|m| m.enabled).unwrap_or(d.enabled),
+                    perceptual_hash_algorithm: match m
+                        .and_then(|m| m.perceptual_hash_algorithm.as_deref())
+                    {
+                        Some(raw) => raw.parse().map_err(|e: String| {
+                            anyhow::anyhow!("media_resilience.perceptual_hash_algorithm: {e}")
+                        })?,
+                        None => d.perceptual_hash_algorithm,
+                    },
+                    perceptual_match_threshold: m
+                        .and_then(|m| m.perceptual_match_threshold)
+                        .unwrap_or(d.perceptual_match_threshold),
+                    require_curator_confirmation_below: m
+                        .and_then(|m| m.require_curator_confirmation_below)
+                        .unwrap_or(d.require_curator_confirmation_below),
+                    require_curator_confirmation_above: m
+                        .and_then(|m| m.require_curator_confirmation_above)
+                        .unwrap_or(d.require_curator_confirmation_above),
+                    audio_fingerprint: match m.and_then(|m| m.audio_fingerprint.as_deref()) {
+                        Some(raw) => raw.parse().map_err(|e: String| {
+                            anyhow::anyhow!("media_resilience.audio_fingerprint: {e}")
+                        })?,
+                        None => d.audio_fingerprint,
+                    },
+                    // The pre-existing keys have no TOML surface of their own;
+                    // they keep the defaults they have always had.
+                    min_healthy_links: d.min_healthy_links,
+                    mirror_add_credits: d.mirror_add_credits,
+                    archive_add_credits: d.archive_add_credits,
+                    verify_credits: d.verify_credits,
+                    daily_credits_cap: d.daily_credits_cap,
+                    dead_threshold_failures: d.dead_threshold_failures,
+                    check_interval_secs: d.check_interval_secs,
+                }
+            },
             // --- library (spec §38) --------------------------------------------
             library: LibraryConfig {
                 update_check_retention_days: file
@@ -1865,6 +1926,33 @@ impl Config {
         }
         if self.site.name.trim().is_empty() {
             anyhow::bail!("site.name must not be empty");
+        }
+        // Perceptual dedup settings (spec §32.7.2). A threshold outside the
+        // 1..=32 domain would either match nothing or match everything, and both
+        // are silent: the instance would claim to deduplicate and quietly not.
+        if !lorehaven_domain::media_resilience::perceptual_match_threshold_is_valid(
+            self.media_resilience.perceptual_match_threshold,
+        ) {
+            anyhow::bail!(
+                "media_resilience.perceptual_match_threshold must be between 1 and 32, got {}",
+                self.media_resilience.perceptual_match_threshold
+            );
+        }
+        for (key, value) in [
+            (
+                "require_curator_confirmation_below",
+                self.media_resilience.require_curator_confirmation_below,
+            ),
+            (
+                "require_curator_confirmation_above",
+                self.media_resilience.require_curator_confirmation_above,
+            ),
+        ] {
+            if !(0..=100).contains(&value) {
+                anyhow::bail!(
+                    "media_resilience.{key} is a confidence percentage and must be between 0 and 100, got {value}"
+                );
+            }
         }
         if !(13..=18).contains(&self.age.threshold) {
             anyhow::bail!(
@@ -2005,6 +2093,8 @@ struct FileConfig {
     /// Device delivery settings (spec §13.4 / M7-03).
     device: Option<DeviceSection>,
     library: Option<LibrarySection>,
+    /// Media resilience settings (spec §32.7).
+    media_resilience: Option<MediaResilienceSection>,
     theme: Option<ThemeSection>,
     /// Taste gravity settings (spec §0.4, §16.17).
     taste: Option<TasteSection>,
@@ -2130,6 +2220,24 @@ struct JobsSection {
 }
 
 /// The `[library]` table (spec §38): library update-check settings.
+/// The `[media_resilience]` table (spec §32.7): media resilience settings.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MediaResilienceSection {
+    /// Whether media resilience runs on this instance at all.
+    enabled: Option<bool>,
+    /// Image perceptual hash algorithm: phash | dhash | whash | ahash.
+    perceptual_hash_algorithm: Option<String>,
+    /// Hamming distance at or below which two image hashes are the same image.
+    perceptual_match_threshold: Option<i64>,
+    /// Perceptual matches below this confidence need curator confirmation.
+    require_curator_confirmation_below: Option<i64>,
+    /// Perceptual matches at or above this confidence auto-attach.
+    require_curator_confirmation_above: Option<i64>,
+    /// Audio fingerprinting scheme: chromaprint | acoustid.
+    audio_fingerprint: Option<String>,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LibrarySection {
@@ -2520,8 +2628,17 @@ port = 7000
 
     #[cfg(test)]
     fn load_from(name: &str, body: &str) -> Result<Config> {
+        // The directory is removed before the write. Reusing a directory keyed
+        // only by (pid, name) means a leftover file from an earlier run in the
+        // same process is read instead of the body passed in here: two tests
+        // sharing a name silently test the first one's config, and a refusal
+        // test then reads a valid file and loads successfully. That is how the
+        // perceptual-threshold refusal tests first "passed" a config with
+        // whash and a threshold of 9 while supposedly asserting that nonsense
+        // is rejected.
         let dir =
             std::env::temp_dir().join(format!("lorehaven-imports-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temp dir");
         let path = dir.join("lorehaven.toml");
         std::fs::write(&path, body).expect("write config");
@@ -2795,6 +2912,100 @@ port = 7000
         assert_eq!(
             config.theme.influence_sources[0].kind,
             InfluenceSourceKind::OperatorTopics
+        );
+    }
+
+    #[test]
+    fn media_resilience_section_is_parsed_from_toml() {
+        let config = load_from(
+            "media_resilience-parsed",
+            r#"
+[media_resilience]
+enabled = false
+perceptual_hash_algorithm = "whash"
+perceptual_match_threshold = 9
+require_curator_confirmation_below = 4
+require_curator_confirmation_above = 1
+audio_fingerprint = "acoustid"
+"#,
+        )
+        .expect("loads");
+        assert!(!config.media_resilience.enabled);
+        assert_eq!(
+            config.media_resilience.perceptual_hash_algorithm.as_str(),
+            "whash"
+        );
+        assert_eq!(config.media_resilience.perceptual_match_threshold, 9);
+        assert_eq!(
+            config.media_resilience.require_curator_confirmation_below,
+            4
+        );
+        assert_eq!(
+            config.media_resilience.require_curator_confirmation_above,
+            1
+        );
+        assert_eq!(
+            config.media_resilience.audio_fingerprint.as_str(),
+            "acoustid"
+        );
+    }
+
+    #[test]
+    fn media_resilience_defaults_match_the_spec_block() {
+        let config = Config::load(&GlobalArgs::default()).expect("loads");
+        // Spec §32.7.2 states these defaults; the earlier keys are the
+        // long-standing curator-credit and health-check values.
+        assert!(config.media_resilience.enabled);
+        assert_eq!(
+            config.media_resilience.perceptual_hash_algorithm.as_str(),
+            "phash"
+        );
+        assert_eq!(config.media_resilience.perceptual_match_threshold, 6);
+        assert_eq!(
+            config.media_resilience.require_curator_confirmation_below,
+            3
+        );
+        assert_eq!(
+            config.media_resilience.require_curator_confirmation_above,
+            0
+        );
+        assert_eq!(
+            config.media_resilience.audio_fingerprint.as_str(),
+            "chromaprint"
+        );
+    }
+
+    #[test]
+    fn an_unknown_perceptual_hash_algorithm_is_refused() {
+        // A typo'd algorithm must not load silently: the instance would then
+        // claim to deduplicate with a hash it never computes.
+        let err = load_from(
+            "media_resilience-unknown-algorithm",
+            r#"
+[media_resilience]
+perceptual_hash_algorithm = "nonsense"
+"#,
+        )
+        .expect_err("refuses an unknown algorithm");
+        assert!(
+            err.to_string().contains("perceptual_hash_algorithm"),
+            "unhelpful error: {err}"
+        );
+    }
+
+    #[test]
+    fn an_out_of_range_perceptual_threshold_is_refused() {
+        let err = load_from(
+            "media_resilience-bad-threshold",
+            r#"
+[media_resilience]
+perceptual_match_threshold = 64
+"#,
+        )
+        .expect_err("refuses a threshold above the 32-bit domain");
+        assert!(
+            err.to_string().contains("perceptual_match_threshold"),
+            "unhelpful error: {err}"
         );
     }
 

@@ -21,13 +21,13 @@ async fn reverse_search_by_perceptual_hash() {
     match db.backend() {
         lorehaven_db::Backend::Sqlite => {
             sqlx::query("UPDATE media_references SET perceptual_hash = ? WHERE id = ?")
-                .bind("hash123")
+                .bind("00ff00ff")
                 .bind("ref-rs-1")
                 .execute(db.sqlite_pool().expect("sqlite"))
                 .await
                 .unwrap();
             sqlx::query("UPDATE media_references SET perceptual_hash = ? WHERE id = ?")
-                .bind("hash123")
+                .bind("00ff00ff")
                 .bind("ref-rs-2")
                 .execute(db.sqlite_pool().expect("sqlite"))
                 .await
@@ -35,13 +35,13 @@ async fn reverse_search_by_perceptual_hash() {
         }
         lorehaven_db::Backend::Postgres => {
             sqlx::query("UPDATE media_references SET perceptual_hash = $1 WHERE id = $2")
-                .bind("hash123")
+                .bind("00ff00ff")
                 .bind("ref-rs-1")
                 .execute(db.postgres_pool().expect("postgres"))
                 .await
                 .unwrap();
             sqlx::query("UPDATE media_references SET perceptual_hash = $1 WHERE id = $2")
-                .bind("hash123")
+                .bind("00ff00ff")
                 .bind("ref-rs-2")
                 .execute(db.postgres_pool().expect("postgres"))
                 .await
@@ -49,7 +49,11 @@ async fn reverse_search_by_perceptual_hash() {
         }
     }
 
-    let found = media_resilience::find_by_perceptual_hash(db, "hash123", 0)
+    // The stored value is a hex perceptual hash, not an arbitrary string: the
+    // search compares fingerprints, so a non-hex value is not a hash to compare
+    // and is refused rather than scored. The threshold is the spec's default 6,
+    // and an identical hash is distance 0, so both references match.
+    let found = media_resilience::find_by_perceptual_hash(db, "00ff00ff", 6)
         .await
         .expect("reverse search");
     assert_eq!(found.len(), 2);

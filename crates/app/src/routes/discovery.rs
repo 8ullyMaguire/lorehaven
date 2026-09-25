@@ -797,19 +797,45 @@ pub async fn reverse_search(
         }));
     };
 
-    let refs = lorehaven_db::media_resilience::find_by_perceptual_hash(state.db(), &hash, 0)
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    // The threshold is the operator's, not a constant in the handler: a
+    // self-hosted instance tunes how aggressively it treats two images as the
+    // same (spec §32.7.2). The `algorithm` in the request is informational —
+    // a hash is only comparable with a hash made the same way, and the
+    // comparison below rejects a mismatched pair rather than scoring it.
+    let threshold = state.config().media_resilience.perceptual_match_threshold;
+    let refs = lorehaven_db::media_resilience::find_by_perceptual_hash(
+        state.db(),
+        &hash,
+        threshold as i32,
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
+    // The spec asks for a match confidence score the curator can act on, and a
+    // bare reference list cannot tell a re-encode of the same image from a
+    // different picture that happens to look alike. Distance and score travel
+    // together so a client can show both and the operator can set their own bar.
     let refs_json: Vec<serde_json::Value> = refs
         .iter()
         .map(|r| {
+            let distance = r.perceptual_hash.as_deref().and_then(|stored| {
+                lorehaven_domain::media_resilience::hamming_distance(&hash, stored)
+            });
+            let exact = r.content_hash == hash;
             serde_json::json!({
                 "id": r.id,
                 "media_kind": r.media_kind,
                 "perceptual_hash": r.perceptual_hash,
                 "content_hash": r.content_hash,
                 "curator_verified": r.curator_verified,
+                "match_kind": if exact { "exact" } else { "perceptual" },
+                "match_distance": distance,
+                "match_confidence": distance.map(
+                    lorehaven_domain::media_resilience::perceptual_match_confidence
+                ),
+                // The auto-attach decision the spec names, computed once here so
+                // the client and the operator agree on it.
+                "auto_attach": distance == Some(0),
             })
         })
         .collect();
