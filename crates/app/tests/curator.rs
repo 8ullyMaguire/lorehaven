@@ -1,8 +1,5 @@
 //! Media curator role & bounty system (spec §32.7.5).
 
-use darkhold_app::config::Config;
-use darkhold_app::server::{self, set_trust_proxy};
-use darkhold_app::state::AppState;
 use darkhold_db::media_resilience;
 use darkhold_domain::media_resilience::VerificationType;
 use std::path::PathBuf;
@@ -218,7 +215,7 @@ async fn standing_bounty_matching() {
     .await
     .expect("insert link");
 
-    let bounties = media_resilience::find_matching_standing_bounties(db, media_ref_id, 1, 0, false)
+    let bounties = media_resilience::find_matching_standing_bounties(db, 1, 0, false)
         .await
         .expect("find bounties");
     assert_eq!(bounties.len(), 1);

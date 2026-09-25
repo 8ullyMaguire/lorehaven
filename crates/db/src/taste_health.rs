@@ -200,17 +200,17 @@ pub async fn get_work_vectors(
     if work_ids.is_empty() {
         return Ok(out);
     }
-    let placeholders = crate::library::placeholders(work_ids.len(), false);
-    let sql =
-        format!("SELECT work_id, vector FROM work_taste_vectors WHERE work_id IN ({placeholders})");
-    let mut rows: Vec<(String, String)> = Vec::new();
-    match db.backend() {
+    let rows: Vec<(String, String)> = match db.backend() {
         Backend::Sqlite => {
+            let placeholders = crate::library::placeholders(work_ids.len(), false);
+            let sql = format!(
+                "SELECT work_id, vector FROM work_taste_vectors WHERE work_id IN ({placeholders})"
+            );
             let mut q = sqlx::query_as::<_, (String, String)>(&sql);
             for id in work_ids {
                 q = q.bind(id);
             }
-            rows = q.fetch_all(db.sqlite_pool().ok_or(pool_err())?).await?;
+            q.fetch_all(db.sqlite_pool().ok_or(pool_err())?).await?
         }
         Backend::Postgres => {
             // Rebuild with $n placeholders for PG.
@@ -224,9 +224,9 @@ pub async fn get_work_vectors(
             for id in work_ids {
                 q = q.bind(id);
             }
-            rows = q.fetch_all(db.postgres_pool().ok_or(pool_err())?).await?;
+            q.fetch_all(db.postgres_pool().ok_or(pool_err())?).await?
         }
-    }
+    };
     for (id, vec_str) in rows {
         let vec: Vec<f64> = serde_json::from_str(&vec_str).unwrap_or_default();
         out.insert(id, vec);

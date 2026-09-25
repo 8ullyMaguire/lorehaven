@@ -332,7 +332,6 @@ pub async fn update_link_status(
 // DB functions take their parameters explicitly rather than a builder:
 // a builder here would only move the same fields one call deeper.
 #[allow(clippy::too_many_arguments)]
-
 pub async fn insert_work_media_reference(
     db: &Database,
     id: &str,
@@ -1011,8 +1010,8 @@ pub async fn list_work_media_references(
 }
 // DB functions take their parameters explicitly rather than a builder:
 // a builder here would only move the same fields one call deeper.
-#[allow(clippy::too_many_arguments)]
 
+#[allow(clippy::too_many_arguments)]
 fn build_media_ref_view(
     id: String,
     work_id: String,
@@ -1235,10 +1234,15 @@ pub struct MatchedBounty {
     pub healthy_links_below: Option<i64>,
 }
 
-/// Find active standing bounties that match a given media reference.
+/// Find active standing bounties whose conditions the given state meets.
+///
+/// These are *standing* bounties, not per-reference ones: the table has no
+/// media reference column, so every caller sees the same global set, filtered
+/// only by health and archive state. An earlier signature took a
+/// `media_reference_id` and never used it, so the doc comment promised a
+/// per-reference match the query never performed.
 pub async fn find_matching_standing_bounties(
     db: &Database,
-    media_reference_id: &str,
     healthy_count: i64,
     _admin_rating: i64,
     has_archive_link: bool,
@@ -1452,9 +1456,9 @@ pub struct TargetedBounty {
 }
 // DB functions take their parameters explicitly rather than a builder:
 // a builder here would only move the same fields one call deeper.
-#[allow(clippy::too_many_arguments)]
 
 /// Post a targeted bounty for a specific work/media reference.
+#[allow(clippy::too_many_arguments)]
 pub async fn post_targeted_bounty(
     db: &Database,
     id: &str,
@@ -1631,9 +1635,9 @@ pub struct LocalMirror {
 }
 // DB functions take their parameters explicitly rather than a builder:
 // a builder here would only move the same fields one call deeper.
-#[allow(clippy::too_many_arguments)]
 
 /// Record a new local mirror.
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_local_mirror(
     db: &Database,
     id: &str,
@@ -1996,14 +2000,18 @@ pub async fn resolve_dmca_takedown(
 // ---------------------------------------------------------------------------
 
 /// Find media references by perceptual hash (dedup & reverse lookup).
-/// Searches for hashes within `distance` (Hamming distance threshold).
+///
+/// **Exact match only.** A Hamming-distance search is not implemented: it would
+/// need a pgcrypto extension or an application-side comparison, and neither
+/// exists. `max_distance` is accepted so callers can express intent and so the
+/// signature does not change when the search lands, but it is **not honoured** -
+/// a caller passing a large threshold still gets exact matches and nothing
+/// else. Do not read a result from this function as "these are similar".
 pub async fn find_by_perceptual_hash(
     db: &Database,
     hash: &str,
-    max_distance: i32,
+    _max_distance: i32,
 ) -> Result<Vec<MediaReference>, sqlx::Error> {
-    // Exact match first; fuzzy match is a placeholder for perceptual hash hamming distance
-    // which would require a pgcrypto extension or application-side comparison.
     match db.backend() {
         Backend::Sqlite => {
             let pool = db.sqlite_pool().expect("sqlite");

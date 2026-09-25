@@ -1,6 +1,5 @@
 //! Author media tools (spec §32.7.8): preferences & targeted bounties.
 
-use darkhold_app::config::Config;
 use darkhold_db::media_resilience;
 use darkhold_db::Backend;
 use std::path::PathBuf;
