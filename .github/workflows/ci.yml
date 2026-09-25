@@ -40,6 +40,32 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+  dialect-gates:
+    name: Dialect gates (static checks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # These are the checks that caught the PostgreSQL migration damage, and
+      # each of them had a silent hole at least once -- see the handoff. They
+      # are cheap, they need no database, and they run here so a regression is
+      # caught on the push rather than by a failing suite twenty minutes later.
+      - name: Timestamp-cast fixer self-test
+        run: python3 scripts/fix-timestamptz-binds.py --self-test
+
+      # No uncast placeholder may bind text to a UUID, TIMESTAMPTZ or JSONB
+      # column. Exits non-zero while any remain, so this stays red until the
+      # $n sites in permission.rs, rating_integrity.rs and roles.rs are fixed.
+      - name: Uncast placeholders
+        run: python3 scripts/check-uncast-pg-placeholders.py crates
+
+      - name: PostgreSQL arms must not use the SQLite pool
+        run: python3 scripts/check-pg-arm-uses-sqlite-pool.py crates
+
   frontend:
     name: Frontend (check, test, build)
     runs-on: ubuntu-latest

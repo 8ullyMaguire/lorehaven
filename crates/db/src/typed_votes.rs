@@ -421,7 +421,7 @@ pub async fn budget_spent(db: &Database, account_id: &str, window_start: &str) -
         "SELECT COALESCE(SUM(t.cost), 0) FROM forum_votes v \
          JOIN pseuds p ON p.id = v.pseud \
          JOIN forum_vote_types t ON t.id = v.vote_type \
-         WHERE p.account_id = $1 AND v.created_at > $2",
+         WHERE p.account_id = $1 AND v.created_at > $2::timestamptz",
     );
     let total: i64 = match db.backend() {
         Backend::Sqlite => {
@@ -453,7 +453,7 @@ pub async fn oldest_charge(
         "SELECT MIN(v.created_at) FROM forum_votes v \
          JOIN pseuds p ON p.id = v.pseud WHERE p.account_id = ? AND v.created_at > ?",
         "SELECT MIN(v.created_at) FROM forum_votes v \
-         JOIN pseuds p ON p.id = v.pseud WHERE p.account_id = $1 AND v.created_at > $2",
+         JOIN pseuds p ON p.id = v.pseud WHERE p.account_id = $1 AND v.created_at > $2::timestamptz",
     );
     let oldest: Option<String> = match db.backend() {
         Backend::Sqlite => {
@@ -480,7 +480,7 @@ pub async fn meta_mods_cast(db: &Database, account_id: &str, window_start: &str)
         "SELECT COUNT(*) FROM forum_meta_votes m \
          JOIN pseuds p ON p.id = m.pseud WHERE p.account_id = ? AND m.created_at > ?",
         "SELECT COUNT(*) FROM forum_meta_votes m \
-         JOIN pseuds p ON p.id = m.pseud WHERE p.account_id = $1 AND m.created_at > $2",
+         JOIN pseuds p ON p.id = m.pseud WHERE p.account_id = $1 AND m.created_at > $2::timestamptz",
     );
     let count: i64 = match db.backend() {
         Backend::Sqlite => {

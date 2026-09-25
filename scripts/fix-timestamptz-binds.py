@@ -43,49 +43,57 @@ TWO_ARM = re.compile(
 # The `?` feeds a timestamp column if the text before it on its own line ends
 # with `col =` or `col <op>` and col ends in _at.
 TS_BIND = re.compile(r"\w*_at\s*(?:=|<=|>=|<|>)\s*$")
-# Whole-literal fallback: catches arms written through format! or a const.
-ANY_TS_BIND = re.compile(r"(\w*_at)(\s*(?:=|<=|>=|<|>)\s*)(\?)")
+# The same, for a hand-built PostgreSQL arm that spells its own `$n` placeholders
+# because `db.sql`'s `?`->`$n` rewrite does not apply to it.
+TS_BIND_DOLLAR = re.compile(r"\w*_at\s*(?:=|<=|>=|<|>)\s*$")
+PLACEHOLDER = re.compile(r"\?|\$\d+")
+# Any timestamp column followed by a placeholder, used only as a cheap gate
+# before the precise line-based pass in cast_spans.
+TS_BIND_ANYWHERE = re.compile(r"\w*_at\s*(?:=|<=|>=|<|>)\s*(?:\?|\$\d+)")
 CAST = "::timestamptz"
 
 
-def cast_spans(sql: str) -> list[int]:
-    """Offsets of each `?` in `sql` that feeds a *_at column.
+def cast_spans(sql: str) -> list[tuple[int, int, str]]:
+    """[(start, end, replacement)] for each placeholder bound to a *_at column.
 
-    Line-based, which is what the SQL is actually formatted as: a `?` belongs to
-    the `col =` / `col <=` immediately before it on the same line. Falling back
-    to the whole-literal scan catches an arm where a `?` and its column are
-    separated by a `COALESCE(...)` or a comment -- but the fallback must not
-    then claim a `?` whose own line has no timestamp column, which is how
+    Handles both placeholder styles. Most PostgreSQL arms get `?` and rely on
+    `db.sql` to rewrite it to `$n`; a hand-built arm executed with `sqlx::query`
+    spells `$1` itself, because that rewrite does not apply to it. Casting
+    `$1::timestamptz` is the same fix in the same position.
+
+    Line-based, which is how the SQL is actually formatted: a placeholder belongs
+    to the `col =` / `col <=` immediately before it on the same line. The
+    whole-literal fallback catches a single-line arm, but must not then claim a
+    placeholder whose own line has no timestamp column -- that is how
     `UPDATE t SET state = ?, updated_at = ? WHERE k = ?` lost its one real edit.
     """
-    spans = []
-    for m in re.finditer(r"\?", sql):
+    spans: list[tuple[int, int, str]] = []
+    for m in PLACEHOLDER.finditer(sql):
         head = sql.rfind("\n", 0, m.start()) + 1
         if TS_BIND.search(sql[head : m.start()]):
-            spans.append(m.start())
+            spans.append((m.start(), m.end(), m.group(0) + CAST))
     if spans:
         return spans
-    # Single-line arm: pair each timestamp column with the `?` that follows it.
-    out = []
-    for m in ANY_TS_BIND.finditer(sql):
-        out.append(m.end(3) - 1)
-    return out
+    # Single-line arm: pair each timestamp column with the placeholder after it.
+    for m in re.finditer(r"(\w*_at)(\s*(?:=|<=|>=|<|>)\s*)(\?|\$\d+)", sql):
+        spans.append((m.end(3) - 1, m.end(3), m.group(3) + CAST))
+    return spans
 
 
 def needs_cast(sql: str) -> bool:
-    return bool(ANY_TS_BIND.search(sql)) and CAST not in sql
+    return bool(TS_BIND_ANYWHERE.search(sql)) and CAST not in sql
 
 
 def cast_sql(sql: str) -> str:
-    """Insert `::timestamptz` after each `?` bound to a *_at column."""
+    """Insert `::timestamptz` after each placeholder bound to a *_at column."""
     spans = cast_spans(sql)
     if not spans:
         return sql
     out, last = [], 0
-    for off in spans:
-        out.append(sql[last:off])
-        out.append("?" + CAST)
-        last = off + 1
+    for start, end, rep in spans:
+        out.append(sql[last:start])
+        out.append(rep)
+        last = end
     out.append(sql[last:])
     return "".join(out)
 
@@ -101,8 +109,8 @@ def candidates(src: str) -> list[tuple[int, int, str]]:
         # backend, so a cast in the PostgreSQL literal cannot reach SQLite. It
         # is correct for both -- SQLite never parses the arm it is not given.
         base = m.start(2)
-        for off in cast_spans(pg):
-            edits.append((base + off, base + off + 1, "?" + CAST))
+        for start, end, rep in cast_spans(pg):
+            edits.append((base + start, base + end, rep))
     return edits
 
 
@@ -113,16 +121,23 @@ def apply_edits(src: str, edits: list[tuple[int, int, str]]) -> str:
 
 
 def round_trips(old: str, new: str) -> bool:
-    """True iff every differing literal differs only by inserted `::timestamptz`."""
+    """True iff every differing literal differs only by inserted `::timestamptz`.
+
+    Undoes the cast for both placeholder styles: a rewritten arm may hold either
+    the `?` that `db.sql` will expand or a `$n` it already spells out, and the
+    check must not reject a correct edit merely because of which it is.
+    """
+    def undo(sql: str) -> str:
+        return re.sub(r"(\?|\$\d+)::timestamptz", r"\1", sql)
+
     o = [m.group(1) for m in LITERAL.finditer(old)]
     n = [m.group(1) for m in LITERAL.finditer(new)]
     if len(o) != len(n):
         return False
     for a, b in zip(o, n):
-        if a == b:
+        if a == b or undo(b) == a:
             continue
-        if b.replace("?" + CAST, "?") != a:
-            return False
+        return False
     return True
 
 
@@ -170,6 +185,14 @@ def self_test() -> int:
             '\n    "SELECT id::text FROM outbox_events WHERE available_at <= ? LIMIT ?",\n);',
             1,
             "SELECT id::text FROM outbox_events WHERE available_at <= ?::timestamptz LIMIT ?",
+        ),
+        (
+            "hand-built $n arm",
+            'let sql = db.sql(\n    "UPDATE works SET permission_statement = ?, updated_at = ? WHERE id = ?",'
+            '\n    "UPDATE works SET permission_statement = $1, updated_at = $2 WHERE id = $3",\n);',
+            1,
+            "UPDATE works SET permission_statement = $1, updated_at = $2::timestamptz"
+            " WHERE id = $3",
         ),
     ]
     failures = 0

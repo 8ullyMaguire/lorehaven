@@ -524,7 +524,7 @@ async fn finished_import_counts(
              COALESCE(SUM(CASE WHEN state = 'completed' THEN 1 ELSE 0 END), 0)::BIGINT AS completed,
              COALESCE(SUM(CASE WHEN state = 'failed'    THEN 1 ELSE 0 END), 0)::BIGINT AS failed
          FROM import_jobs
-         WHERE source_key = $1 AND updated_at >= $2
+         WHERE source_key = $1 AND updated_at >= $2::timestamptz
            AND state IN ('completed', 'failed')",
     );
 

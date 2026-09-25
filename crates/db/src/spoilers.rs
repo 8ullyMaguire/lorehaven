@@ -348,7 +348,7 @@ pub async fn schedule_post(db: &Database, post_id: &str, scheduled_at: &str) -> 
 pub async fn list_due_scheduled_posts(db: &Database, now: &str, limit: i64) -> Result<Vec<String>> {
     let sql = db.sql(
         "SELECT id FROM forum_posts WHERE published = 0 AND scheduled_at IS NOT NULL AND scheduled_at <= ? ORDER BY scheduled_at LIMIT ?",
-        "SELECT id FROM forum_posts WHERE published = 0 AND scheduled_at IS NOT NULL AND scheduled_at <= $1 ORDER BY scheduled_at LIMIT $2",
+        "SELECT id FROM forum_posts WHERE published = 0 AND scheduled_at IS NOT NULL AND scheduled_at <= $1::timestamptz ORDER BY scheduled_at LIMIT $2",
     );
     let rows = match db.backend() {
         Backend::Sqlite => {

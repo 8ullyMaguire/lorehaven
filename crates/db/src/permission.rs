@@ -53,7 +53,7 @@ pub async fn set_work_permission_statement(
         serde_json::to_string(&statement).context("failed to serialize permission statement")?;
     let sql = db.sql(
         "UPDATE works SET permission_statement = ?, updated_at = ? WHERE id = ?",
-        "UPDATE works SET permission_statement = $1, updated_at = $2 WHERE id = $3",
+        "UPDATE works SET permission_statement = $1, updated_at = $2::timestamptz WHERE id = $3",
     );
     let now = crate::identity::now_rfc3339();
     match db.backend() {
@@ -118,7 +118,7 @@ pub async fn set_account_permission_statement(
         serde_json::to_string(&statement).context("failed to serialize permission statement")?;
     let sql = db.sql(
         "UPDATE accounts SET permission_statement = ?, updated_at = ? WHERE id = ?",
-        "UPDATE accounts SET permission_statement = $1, updated_at = $2 WHERE id = $3",
+        "UPDATE accounts SET permission_statement = $1, updated_at = $2::timestamptz WHERE id = $3",
     );
     let now = crate::identity::now_rfc3339();
     match db.backend() {

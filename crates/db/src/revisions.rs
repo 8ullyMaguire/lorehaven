@@ -97,7 +97,7 @@ pub async fn find_fresh(db: &Database, key: &RevisionKey<'_>) -> Result<Option<R
         "SELECT checksum, etag, last_modified, expires_at
          FROM source_revision_cache_entries
          WHERE source_key = $1 AND revision_key = $2 AND adapter_version = $3
-           AND security_scope = $4 AND expires_at > $5",
+           AND security_scope = $4 AND expires_at > $5::timestamptz",
     );
     let row: Option<RevisionRow> = match db.backend() {
         Backend::Sqlite => {
@@ -206,7 +206,7 @@ pub async fn purge_expired(db: &Database) -> Result<u64> {
     let now = now_rfc3339();
     let sql = db.sql(
         "DELETE FROM source_revision_cache_entries WHERE expires_at <= ?",
-        "DELETE FROM source_revision_cache_entries WHERE expires_at <= $1",
+        "DELETE FROM source_revision_cache_entries WHERE expires_at <= $1::timestamptz",
     );
     let affected = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)

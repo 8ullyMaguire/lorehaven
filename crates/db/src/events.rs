@@ -524,7 +524,7 @@ pub async fn fulfil_claim(
     }
     let update_sql = db.sql(
         "UPDATE claims SET fulfilled_by_work = ?, fulfilled_at = ? WHERE request_id = ? AND claimant = ? AND fulfilled_at IS NULL",
-        "UPDATE claims SET fulfilled_by_work = $1, fulfilled_at = $2 WHERE request_id = $3 AND claimant = $4 AND fulfilled_at IS NULL",
+        "UPDATE claims SET fulfilled_by_work = $1, fulfilled_at = $2::timestamptz WHERE request_id = $3 AND claimant = $4 AND fulfilled_at IS NULL",
     );
     let rows = match db.backend() {
         Backend::Sqlite => sqlx::query(&update_sql)
@@ -565,7 +565,7 @@ pub async fn expire_claims(db: &Database, now: &str, grace_seconds: i64) -> Resu
         "UPDATE claims SET fulfilled_by_work = NULL, fulfilled_at = NULL
          WHERE fulfilled_at IS NULL AND claimed_at < ?",
         "UPDATE claims SET fulfilled_by_work = NULL, fulfilled_at = NULL
-         WHERE fulfilled_at IS NULL AND claimed_at < $1",
+         WHERE fulfilled_at IS NULL AND claimed_at < $1::timestamptz",
     );
     let expired: i64 = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
