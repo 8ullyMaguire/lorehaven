@@ -33,13 +33,16 @@
   }
 </script>
 
+<!-- Hoisted out of the markup so the arrow closure below sees a
+     narrowed string; `{#if linked}` does not narrow inside a closure. -->
 {#if !loading && linked}
+  {@const linkedId = linked.id}
   <div class="backlink-card">
     <h3 class="backlink-heading">Linked work</h3>
     <a
-      href={`/works/${linked.id}`}
+      href={`/works/${linkedId}`}
       class="backlink-title"
-      onclick={(event) => handleLinkClick(event, `/works/${linked.id}`)}
+      onclick={(event) => handleLinkClick(event, `/works/${linkedId}`)}
     >
       {linked.title}
     </a>

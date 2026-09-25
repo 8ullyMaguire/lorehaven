@@ -6,11 +6,14 @@
    * a plain topic is unaffected, and a reading-group topic gets a schedule of
    * sections. Only the topic author or a moderator can change the mode.
    */
-  import { fetchTopic, setTopicMode } from '../api';
-  import { session } from '../session.svelte.ts';
+  import { setTopicMode } from '../api';
   import ErrorSummary from './ErrorSummary.svelte';
 
-  let { topicId, mode: currentMode }: { topicId: string; mode: string } = $props();
+  let {
+    topicId,
+    mode: currentMode,
+    onsaved,
+  }: { topicId: string; mode: string; onsaved?: () => void } = $props();
 
   const MODES = [
     { value: 'plain', label: 'Plain', desc: 'Standard discussion thread' },
@@ -20,6 +23,12 @@
     { value: 'prompt', label: 'Prompt', desc: 'Writing prompt thread' },
   ] as const;
 
+  // Tracks this form's own pick. `currentMode` is the server's value, owned by
+  // the parent, so a server change arrives as a new prop after a reload rather
+  // than by mutating it here.
+  // svelte-ignore state_referenced_locally -- seeding from the prop's initial
+  // value is the point: a $derived would clobber the user's in-progress pick
+  // every time the parent refetches.
   let selected = $state(currentMode);
   let saving = $state(false);
   let error = $state<unknown>(null);
@@ -34,7 +43,9 @@
     try {
       await setTopicMode(topicId, selected);
       saved = true;
-      currentMode = selected;
+      // The parent owns `mode`; ask it to refetch so the comparison below
+      // sees the server's value rather than this component's guess.
+      onsaved?.();
     } catch (failure) {
       error = failure;
     } finally {
@@ -49,7 +60,7 @@
     <legend>Thread mode</legend>
     {#each MODES as m}
       <label class="mode-option">
-        <input type="radio" name="mode" bind={selected} value={m.value} disabled={saving} />
+        <input type="radio" name="mode" bind:group={selected} value={m.value} disabled={saving} />
         <span class="mode-name">{m.label}</span>
         <span class="mode-desc">{m.desc}</span>
       </label>

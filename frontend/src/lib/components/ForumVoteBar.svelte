@@ -12,7 +12,8 @@
     getPostVotes,
     getVoteBudget,
     getCategoryVoteTypes,
-    type ApiError,
+    ApiError,
+    type PostVotesResponse,
   } from '../api';
   import { session } from '../session.svelte.ts';
   import ErrorSummary from './ErrorSummary.svelte';
@@ -43,7 +44,7 @@
   let weightedBp = $state(0);
   let mine = $state<string | null>(null);
   let transparency = $state('aggregate');
-  let votes = $state<unknown[] | null>(null);
+  let votes = $state<PostVotesResponse['votes']>(null);
   let budget = $state<{ limit: number; spent: number; remaining: number; exhausted: boolean } | null>(
     null,
   );

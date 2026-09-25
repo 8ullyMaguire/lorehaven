@@ -7,7 +7,7 @@
    */
   import { getCritiqueQueue, joinCritique, type CritiqueEntry } from '../api';
 
-  let { topicId, isModerator }: { topicId: string; isModerator: boolean } = $props();
+  let { topicId }: { topicId: string } = $props();
 
   let queue = $state<CritiqueEntry[]>([]);
   let loading = $state(true);
@@ -54,9 +54,9 @@
       {#each queue as entry (entry.position)}
         <li>
           <span class="position">#{entry.position}</span>
-          <span class="author">{entry.author_handle ?? entry.author_pseud}</span>
-          {#if entry.work_title}
-            <span class="work">“{entry.work_title}”</span>
+          <span class="author">{entry.pseud}</span>
+          {#if entry.excerpt}
+            <span class="work">“{entry.excerpt}”</span>
           {/if}
         </li>
       {/each}

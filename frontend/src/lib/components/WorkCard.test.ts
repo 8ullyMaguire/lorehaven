@@ -1,20 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { render } from '@testing-library/svelte';
-import WorkCard from './WorkCard.svelte';
+import WorkCard, { type WorkSummary } from './WorkCard.svelte';
 
 /** A minimal work summary for the metric bar to render from. */
-function sampleWork(overrides: Record<string, unknown> = {}) {
+function sampleWork(overrides: Partial<WorkSummary> = {}): WorkSummary {
   return {
     id: 'w-1',
     title: 'A Test Work',
-    authors: [{ handle: 'alice', displayName: 'Alice', role: 'Creator' }],
-    rating: 'General',
-    warnings: [],
-    media: 'anime',
+    authorDisplayName: 'Alice',
+    completion: 'complete',
+    rating: 'general',
     centralRelationships: [],
-    genres: [],
-    freeformTags: ['fluff'],
-    language: 'en',
     wordCount: 5000,
     chapters: 3,
     ...overrides,

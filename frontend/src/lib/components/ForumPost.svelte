@@ -6,13 +6,9 @@
    * (blur or show). Blurred content is hidden behind a reveal button until
    * the reader chooses to see it.
    */
-  import {
-    addContentWarning,
-    getContentWarnings,
-    type ContentWarning,
-  } from '../api';
+  import { getContentWarnings, type ContentWarning } from '../api';
 
-  let { post, readerChapter }: { post: any; readerChapter: number } = $props();
+  let { post }: { post: any } = $props();
 
   let warnings = $state<ContentWarning[]>([]);
   let loading = $state(true);
@@ -35,18 +31,28 @@
     return warning.warning_type === 'spoiler';
   }
 
+  /**
+   * The server returns warning_type, severity and custom_text only. There is
+   * no per-warning id and no `action` field, so the identity a warning is
+   * keyed and revealed by is (warning_type, severity).
+   */
+  function warningKey(warning: ContentWarning): string {
+    return `${warning.warning_type}:${warning.severity}`;
+  }
+
+  function warningLabel(warning: ContentWarning): string {
+    return warning.custom_text ?? warning.warning_type;
+  }
+
   function shouldBlur(warning: ContentWarning): boolean {
-    if (warning.chapter_threshold && readerChapter < warning.chapter_threshold) {
-      return true;
-    }
-    return warning.action === 'blur';
+    return warning.severity > 0;
   }
 
   let revealed = $state<Record<string, boolean>>({});
 
   // Derived: are there any active spoiler warnings?
   let hasSpoilers = $derived(
-    !loading && warnings.some((w) => isSpoiler(w) && shouldBlur(w) && !revealed[w.id])
+    !loading && warnings.some((w) => isSpoiler(w) && shouldBlur(w) && !revealed[warningKey(w)])
   );
 </script>
 
@@ -59,11 +65,16 @@
   {#if loading}
     <p>Loading…</p>
   {:else}
-    {#each warnings.filter(isSpoiler) as warning (warning.id)}
-      {#if shouldBlur(warning) && !revealed[warning.id]}
+    {#if error}
+      <p class="warning-error" role="alert">
+        This post's content warnings could not be loaded, so it is shown unwarned.
+      </p>
+    {/if}
+    {#each warnings.filter(isSpoiler) as warning (warningKey(warning))}
+      {#if shouldBlur(warning) && !revealed[warningKey(warning)]}
         <div class="spoiler-zone">
-          <button class="reveal-btn" onclick={() => revealed[warning.id] = true}>
-            ⚠ {warning.label} — click to reveal (spoilers ahead)
+          <button class="reveal-btn" onclick={() => revealed[warningKey(warning)] = true}>
+            ⚠ {warningLabel(warning)} — click to reveal (spoilers ahead)
           </button>
         </div>
       {/if}
@@ -95,6 +106,11 @@
     font-weight: 600;
     margin-right: 0.5rem;
   }
+  .warning-error {
+    color: var(--danger, #b91c1c);
+    font-size: 0.875rem;
+    margin: 0 0 0.75rem;
+  }
   .spoiler-zone {
     padding: 1rem;
     background: var(--surface-muted, #f5f5f5);
@@ -111,13 +127,5 @@
   }
   .post-body {
     line-height: 1.6;
-  }
-  .warning-tag {
-    display: inline-block;
-    margin-top: 0.5rem;
-    padding: 0.25rem 0.5rem;
-    background: var(--accent-bg, #eef);
-    border-radius: 0.25rem;
-    font-size: 0.75rem;
   }
 </style>

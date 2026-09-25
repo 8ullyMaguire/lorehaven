@@ -1,8 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { searchForum, type ForumSearchResult } from '../lib/api';
-  import { session } from '../lib/session.svelte';
-
+    import { searchForum, type ForumSearchResult } from '../lib/api';
+  
   let query = '';
   let category = '';
   let author = '';
@@ -16,7 +14,9 @@
     loading = true;
     error = '';
     try {
-      const params: Record<string, string | number> = { q: query.trim(), limit: 20 };
+      // Typed as the API's own parameter object so `q` cannot be dropped;
+      // a bare Record loses the required-ness the server enforces.
+      const params: Parameters<typeof searchForum>[0] = { q: query.trim(), limit: 20 };
       if (category) params.category = category;
       if (author) params.author = author;
       results = await searchForum(params);

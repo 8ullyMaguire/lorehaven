@@ -17,6 +17,9 @@
     deleteNotificationRoute,
     exportSettings,
     importSettings,
+    fetchRecEngine,
+    patchRecEngine,
+    type RecEngineView,
     type ResolvedSetting,
     type ContentFilterView,
     type NotificationRouteView,
@@ -32,6 +35,7 @@
     { id: 'search', label: 'Search Defaults' },
     { id: 'content', label: 'Content Filters' },
     { id: 'notifications', label: 'Notifications' },
+    { id: 'recommendations', label: 'Recommendations' },
   ];
 
   let tab = $state('search');
@@ -48,6 +52,14 @@
   let filters = $state<ContentFilterView[]>([]);
   let newFilterType = $state('tag');
   let newFilterValue = $state('');
+
+  // Recommendation engine preference (M52-09, spec §16.1b)
+  let recEngine = $state<RecEngineView | null>(null);
+  let savingRecEngine = $state(false);
+  // The select's own value, seeded from the server once it loads. Separate
+  // from `recEngine.engine` so an in-progress choice is not overwritten by a
+  // re-render, and so the submit button can tell "unchanged" from "changed".
+  let newRecEngine = $state('');
 
   // Notification routes
   let routes = $state<NotificationRouteView[]>([]);
@@ -84,14 +96,19 @@
     loading = true;
     error = null;
     try {
-      const [search, notif] = await Promise.all([
+      const [search, notif, rec] = await Promise.all([
         fetchSearchSettings(),
         fetchNotificationRoutes(),
+        // A failure here must not blank the whole page: the other three tabs
+        // are still usable, and this one reports its own error inline.
+        fetchRecEngine().catch(() => null),
       ]);
       const cf = await fetchContentFilters();
       searchSettings = search.settings;
       filters = cf.filters;
       routes = notif.routes;
+      recEngine = rec;
+      newRecEngine = rec?.engine ?? '';
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to load settings';
     } finally {
@@ -271,6 +288,36 @@
       };
     }
     input.value = '';
+  }
+
+  /**
+   * Set or clear the reader's engine choice (M52-09, spec §16.1b).
+   *
+   * The server's message is shown verbatim on a 422, because it names the
+   * engines this instance accepts. Replacing it with "could not save" would
+   * hide the one piece of information that lets the reader fix it.
+   */
+  async function chooseRecEngine(engine: string) {
+    savingRecEngine = true;
+    notice = null;
+    try {
+      recEngine = await patchRecEngine(engine);
+      newRecEngine = recEngine.engine ?? '';
+      notice = {
+        message:
+          recEngine.choice.state === 'honored'
+            ? `Recommendations now come from ${recEngine.engine}.`
+            : 'Recommendations use the instance default.',
+        tone: 'success',
+      };
+    } catch (e) {
+      notice = {
+        message: e instanceof Error ? e.message : 'Could not change the engine',
+        tone: 'danger',
+      };
+    } finally {
+      savingRecEngine = false;
+    }
   }
 
   const sourceLabel = (source: string): string => {
@@ -484,6 +531,68 @@
         </ul>
       {/if}
     </div>
+  {:else if tab === 'recommendations'}
+    <div class="tab-content">
+      <div class="section-header">
+        <h2>Recommendation Engine</h2>
+        <p>
+          Choose which engine produces your recommendations, or leave it on the
+          instance default to follow this site's configuration.
+        </p>
+      </div>
+
+      {#if !recEngine}
+        <EmptyState
+          title="Not available"
+          description="This instance could not report its recommendation engines. Everything else in your settings still works."
+        />
+      {:else}
+        {#if recEngine.choice.state === 'unavailable'}
+          <!-- The case that matters: the operator disabled the engine this
+               reader chose. Say so, name both sides, and keep the stored
+               choice so re-enabling restores it. -->
+          <div class="notice notice-info" role="status">
+            <strong>{recEngine.choice.engine}</strong> is not enabled on this
+            instance any more, so your recommendations are coming from
+            {recEngine.choice.using.join(', ')} instead. Your choice is
+            remembered — it will take effect again if this is re-enabled.
+          </div>
+        {/if}
+
+        <form
+          class="add-form"
+          onsubmit={(e) => {
+            e.preventDefault();
+            chooseRecEngine(newRecEngine);
+          }}
+        >
+          <select bind:value={newRecEngine} aria-label="Recommendation engine" disabled={savingRecEngine}>
+            <option value="">Instance default</option>
+            {#each recEngine.available as name (name)}
+              <option value={name}>{name}</option>
+            {/each}
+          </select>
+          <Button type="submit" disabled={savingRecEngine || newRecEngine === (recEngine.engine ?? '')}>
+            {savingRecEngine ? 'Saving…' : 'Use this engine'}
+          </Button>
+        </form>
+
+        <p class="hint">
+          {#if recEngine.choice.state === 'honored'}
+            Your recommendations are coming from <code>{recEngine.choice.engine}</code>.
+          {:else if recEngine.choice.state === 'unavailable'}
+            Using <code>{recEngine.choice.using.join(', ')}</code> for now.
+          {:else}
+            Following this site's configuration:
+            <code>{recEngine.choice.using.join(', ')}</code>.
+          {/if}
+        </p>
+        <p class="hint">
+          This choice belongs to the face you are writing as, so a second face
+          can use a different engine.
+        </p>
+      {/if}
+    </div>
   {/if}
 </section>
 
@@ -562,6 +671,22 @@
     color: var(--text-muted);
     font-size: 0.875rem;
     margin: 0.5rem 0 0;
+  }
+
+  /* Explanatory copy under a control, as distinct from the control's own
+     label. Quiet enough to read twice, not so quiet it reads as chrome. */
+  .hint {
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    margin: 0.75rem 0 0;
+  }
+
+  .hint code {
+    background: var(--surface-raised, var(--surface));
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.05rem 0.3rem;
   }
 
   .section-header input[type='search'] {

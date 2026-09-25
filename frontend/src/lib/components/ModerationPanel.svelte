@@ -8,7 +8,6 @@
   import {
     applySanction,
     checkSanction,
-    featurePost,
     setFederationScope,
     setSlowMode,
     type Sanction,
@@ -133,7 +132,9 @@
       </button>
       {#if activeSanction}
         <p class="receipt">
-          Active: {activeSanction.level} — {activeSanction.reason}
+          Active: {activeSanction.level}{activeSanction.expires_at
+            ? ` — until ${activeSanction.expires_at}`
+            : ' — no expiry'}
         </p>
       {/if}
     </div>

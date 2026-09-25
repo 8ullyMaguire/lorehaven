@@ -87,9 +87,6 @@
     margin-left: 0.5rem;
     font-size: 0.875rem;
   }
-  .receipt {
-    color: var(--ok, #2a7a2a);
-  }
   .mode-tag {
     display: inline-block;
     padding: 0.1rem 0.4rem;

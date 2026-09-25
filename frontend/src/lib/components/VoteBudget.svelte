@@ -10,13 +10,13 @@
   import { session } from '../session.svelte.ts';
 
   interface Props {
-    /** When set, the component refreshes after a vote is cast here. */
-    postId?: string;
     /** Compact mode: show just the number, not the full badge. */
     compact?: boolean;
   }
 
-  let { postId, compact = false }: Props = $props();
+  // The vote budget is account-wide (spec §35.2), so there is no post to key
+  // on; a `postId` prop here would imply a per-post budget that does not exist.
+  let { compact = false }: Props = $props();
 
   let budget = $state<{
     trust: number;
