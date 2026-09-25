@@ -76,8 +76,12 @@ Nothing was compiled, because nothing outside `docs/` changed.
 - Production on thinkcentre is `active` and answering 200, on the **old**
   commit. Deploy means SSH to thinkcentre and building there, never through
   SSHFS.
-- `cargo clippy --workspace --all-targets`: 0 warnings, 0 errors (re-measured
-  this session; the 359-warning backlog is genuinely cleared).
+- `cargo clippy --workspace --all-targets`: 0 warnings, 0 errors. **A previous
+  version of this handoff claimed this too, and it was false** — that check ran
+  clippy with `2>/dev/null`, and rustc writes warnings to stderr, so the grep
+  counted an empty stdout. The 30 warnings were there all along. They are fixed
+  in `81bb104`, three of them real defects, and the figure above was measured
+  with stderr captured. See the "Correction" section below.
 
 ## Next, in order
 
@@ -89,6 +93,37 @@ Nothing was compiled, because nothing outside `docs/` changed.
    imagination, and the bot is the first real client.
 5. M56 — M45 category governance voting is still unreachable (no proposal list
    route, no UI). ~1 day, and §45 is unusable without it.
+
+## Correction — a false clean claim, and what it hid
+
+This handoff originally stated `cargo clippy --workspace --all-targets: 0
+warnings, 0 errors`. **That was wrong.** The command was run as
+`cargo clippy ... 2>/dev/null | grep -c`, and rustc emits warnings on **stderr**
+— so the pipe read an empty stdout and the count came back zero. Nothing was
+suppressed by accident later; the check itself was measuring nothing.
+
+Re-measured with `2>&1`, the tree had **30 warnings and 0 errors**, including
+three real defects:
+
+- `media_resilience::find_matching_standing_bounties` took a
+  `media_reference_id` it never used, while its doc comment promised a
+  per-reference match. The table has no such column.
+- `longevity::half_life_map` generated its SQL placeholders with
+  `if i == 0 { "" } else { "" }` — both arms empty. It worked by accident.
+- `media_resilience::find_by_perceptual_hash` accepted a `max_distance` and
+  ignored it, so a caller passing a large threshold got exact matches only
+  while the signature implied otherwise.
+
+Plus a test that had never run: `spoilers::test_display` had lost its `#[test]`
+attribute, so its assertions were dead code. Clippy was right to flag it and my
+first reaction — assuming it already had the attribute — was wrong.
+
+All fixed in `81bb104`; clippy now reports 0/0 with stderr captured, and the
+workspace suite is 1775 passed with one known rate-limit flake that passes alone.
+
+**The lesson worth inheriting:** a linter count is only evidence if you know
+which stream it came from. If a gate has never failed, suspect the gate before
+trusting it.
 
 ## Things not to trust
 
