@@ -101,7 +101,12 @@ impl<'a> Parser<'a> {
 
         loop {
             self.skip_whitespace();
-            if self.at_eof() {
+            // A closing parenthesis ends this group, not the whole query. The
+            // check has to live here rather than only in the implicit-AND
+            // branch below: a group whose last term is followed directly by
+            // `)` leaves the cursor on the bracket, which is neither EOF nor a
+            // term, and the free-text fallback would then spin on it forever.
+            if self.at_eof() || self.peek_char(')') {
                 break;
             }
 
@@ -114,9 +119,6 @@ impl<'a> Parser<'a> {
             if self.peek_keyword("OR") {
                 terms.push(QueryTerm::Boolean(BooleanOp::Or));
                 self.advance_keyword("OR");
-            } else if !self.at_eof() && !self.peek_char(')') {
-                // Implicit AND between terms (no explicit connector needed).
-                // Don't push And — implicit in the Vec ordering.
             }
         }
 
@@ -177,11 +179,22 @@ impl<'a> Parser<'a> {
         let field = self.parse_identifier()?;
         self.skip_whitespace();
 
-        // Parse operator.
-        let op = if self.peek_char(':') {
-            self.advance();
-            Operator::Equal
-        } else if self.peek_chars(">=") {
+        // `:` is the field/value separator, not itself the equality operator.
+        // What follows it may be an operator — `words:>10000`, `kudos:>=100`,
+        // `date:2026-01..2026-06` — or the value itself, in which case the
+        // term is an equality. Both `words: > 10000` and `words:>10000` are
+        // accepted, so the operator check happens after the separator and the
+        // two-character forms are tested first: `>=` starts with `>`, and
+        // testing the one-character form first would leave a bare `=100`
+        // value behind.
+        if !self.peek_char(':') {
+            // Bare field name with no separator — a free term.
+            return Ok(QueryTerm::Free(field));
+        }
+        self.advance();
+        self.skip_whitespace();
+
+        let op = if self.peek_chars(">=") {
             self.advance_n(2);
             Operator::GreaterEq
         } else if self.peek_chars("<=") {
@@ -194,14 +207,14 @@ impl<'a> Parser<'a> {
             self.advance();
             Operator::Less
         } else {
-            // Bare field name treated as a free term.
-            return Ok(QueryTerm::Free(field));
+            // No operator after the separator: this is an equality, and the
+            // cursor is already on the value.
+            Operator::Equal
         };
 
         self.skip_whitespace();
 
         // Parse value — check for range (value..value).
-        let _value_start = self.pos;
         let val1 = self.parse_value_text()?;
 
         self.skip_whitespace();
@@ -378,6 +391,12 @@ impl<'a> Parser<'a> {
 
     fn is_value_end(&self) -> bool {
         if self.at_eof() {
+            return true;
+        }
+        // `..` is the range separator, so it ends a value even though a `.`
+        // is part of a date or a decimal. A lone `.` is not a terminator:
+        // `2026-01` and `0.5` have to survive intact.
+        if self.peek_chars("..") {
             return true;
         }
         let c = self.current_char();
