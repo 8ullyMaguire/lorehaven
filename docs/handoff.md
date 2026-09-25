@@ -1,6 +1,20 @@
-# Handoff — a false clean gate hid three real defects; an E2E assertion was wrong, not the feature
+# Handoff — M32-07a perceptual dedup implemented; the column nothing populates
 
-Date: 2026-09-25 (tip `9cd3c71`). **The current, full handoff is
+Date: 2026-09-25 (tip `fd08762` + this docs commit). **The current, full handoff
+is
+`docs/handoffs/2026-09-25T153000+0200-m32-07a-perceptual-dedup-implemented-handoff.md`
+— read that one.** It records spec §32.7.2 perceptual deduplication: a
+Hamming-distance search ordered closest first, the `[media_resilience]` config
+table wired to TOML for the first time, per-match confidence and distance in
+the response and on the admin media page, and three dead things the feature's
+absence had been hiding — an uncalled domain validator, a config struct with no
+TOML surface, and a config test helper that could read a stale file. Gate:
+clippy 0/0, 1733 tests passed, svelte-check 0/0, 308 vitest passed. It is
+explicit that the feature is correct on an empty column: nothing computes a
+perceptual hash yet, which is filed as M32-07b and needs image decoding as a
+new dependency.
+
+Date: 2026-09-25 (tip `9cd3c71`). The previous full handoff is
 `docs/handoffs/2026-09-25T142500+0200-false-clean-gate-three-defects-e2e-assertion-fixed-handoff.md`
 — read that one.** It records a `cargo clippy` gate that reported 0 warnings
 because it piped stderr to `/dev/null` and rustc reports warnings there; the 30

@@ -194,29 +194,42 @@ test('exports: a finished export can be deleted (forgotten)', async ({ page }) =
   //
   // The row cannot be matched on the title: the list renders
   // `job.label || job.format`, and a worker-produced export has no label, so
-  // its heading is "EPUB". The export's own id is the only stable handle —
-  // capture the download href, which embeds it, before deleting.
+  // its heading is "EPUB". The download href is the only stable per-row handle.
+  //
+  // Assert on the whole href, not a fragment of it. An earlier version of this
+  // fix took the last path segment as an "export id" — but that segment is a
+  // download *token*, not the export id, so the substring matched every download
+  // link on the page and the assertion demanded 0 when 2 legitimate links
+  // remained. Compare the full attribute instead: it is unique per row, and a
+  // substring of it is not.
   const section = page.locator('section[aria-labelledby=my-exports]');
   const ready = section.locator('.item .state').filter({ hasText: 'Ready' }).first();
   await expect(ready).toBeVisible({ timeout: 60_000 });
 
+  const download = section.locator('a.download[href*="/api/v1/exports/"]');
   const row = section.locator('.item').filter({ has: page.locator('a.download[href*="/api/v1/exports/"]') });
   const href = await row.first().locator('a.download').getAttribute('href');
-  const exportId = new URL(href!, page.url()).pathname.split('/').pop()!;
-  expect(exportId).toBeTruthy();
+  expect(href).toBeTruthy();
+  // The href is `/api/v1/exports/{id}/download`, so the id is the second-to-last
+  // segment and the last one is the literal "download".
+  expect(href).toContain('/api/v1/exports/');
+  expect(href!.endsWith('/download')).toBe(true);
 
   const items = section.locator('.item');
   const before = await items.count();
 
   await row.first().locator('button:text-is("Delete")').click();
 
-  // That export's own download link is gone. Asserting "No exports yet" instead
+  // That row's own download link is gone. Asserting "No exports yet" instead
   // tested the shared account's history: the export-download test above leaves
   // a second Ready export on the same account, so the empty state can never
   // appear, and the test failed even though the delete worked.
-  await expect(page.locator(`a.download[href*="${exportId}"]`)).toHaveCount(0, {
+  await expect(page.locator(`a.download[href="${href}"]`)).toHaveCount(0, {
     timeout: 15_000,
   });
+  // And the surviving links belong to the other exports, not to a page that
+  // failed to re-render.
+  await expect(download).toHaveCount(before - 1);
   await expect(items).toHaveCount(before - 1);
 });
 
