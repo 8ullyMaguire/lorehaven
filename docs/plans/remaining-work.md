@@ -42,7 +42,7 @@ Port the FicNexus rec-platform design onto `discovery`.
   M52-01…07 are built (8 strategies, RRF blend, recipe composition, both
   modes wired). M52-08 (shadow-mode evaluation) is open.
 
-### M52-08 — Per-user recommendation engine preference (spec §16.1.5, new)
+### M52-09 — Per-user recommendation engine preference (spec §16.1b, new)
 
 A reader may choose a recommendation engine, and that choice is remembered and
 honoured everywhere a recommendation is produced. The instance default remains
@@ -52,9 +52,12 @@ that overrides both.
 - One preference per **pseud**, not per account: a reader who wears two faces
   may want different recommendations from each, and a choice attached to the
   account would silently apply to both.
-- Persisted in a `user_settings` key/value table (per pseud), not as a column:
-  the setting is one of several per-pseud preferences, and a column would have
-  to be re-migrated for each.
+- Persisted in the per-pseud `search_settings` store under the
+  `discovery.rec_engine` key, not as a column: the setting is one of several
+  per-pseud preferences, and a column would have to be re-migrated for each.
+  (The plan's earlier mention of a generic `user_settings` table was wrong —
+  migration 0070 explicitly rejects a JSONB mega-table in favour of per-domain
+  settings, and `discovery.*` keys already live in `search_settings`.)
 - Validated against the enabled strategy set at write time. An unavailable
   engine is a `400` with the accepted values named, never a silent fallback —
   the same reasoning as §0.4.7's instance mode.

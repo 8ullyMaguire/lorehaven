@@ -246,4 +246,4 @@ M54-02,integrations,"Bot link flow: short-lived challenge, Lorehaven-side pseud+
 M55-01,platform,OpenAPI specification generated from the router and published docs page,M55,implemented-fully-tested,--,Spec §23.1. API surface exists (M18); this is the publication contract.
 M55-02,platform,Scoped-token issuance UI and deprecation policy,M55,implemented-fully-tested,--,Spec §23.1.
 M56-01,platform,Instance accessibility mode: public | walled_garden | private,M56,implemented-fully-tested,crates/app/tests/instance_access_mode.rs,Spec §0.4.7. Configured as [instance] mode; a typo stops startup rather than falling back to public.
-M52-08,discovery,Per-user recommendation engine preference remembered across every recommendation surface,M52,planned,--,Spec §16.1.5. Per pseud; validated against enabled strategies; instance default is the fallback.
+M52-09,discovery,Per-user recommendation engine preference remembered across every recommendation surface,M52,planned,--,Spec §16.1.5. Per pseud; validated against enabled strategies; instance default is the fallback.
