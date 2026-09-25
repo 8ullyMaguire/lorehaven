@@ -109,6 +109,36 @@ The rest of M56 is the 49 planned rows: taste-arena residuals (M45) and the
 settings surfaces (M47-02/05/07). These predate ADR 0024 and stay first-class.
 ~1 week.
 
+### M45 gap — category governance voting is unreachable
+
+Found while clearing pre-existing `svelte-check` errors: the proposal *voting*
+half of §45 was never built, so the two halves do not meet.
+
+What exists: stewards can create a category proposal
+(`POST /directory/categories/governance/proposals`), and the database layer
+has `list_open_proposals`, `vote_on_proposal`, `veto_proposal`,
+`list_entry_mod_proposals` and `vote_entry_mod`. Steward-gated vote and veto
+handlers exist in `DirectoryGovernance.svelte`.
+
+What is missing: there is no `GET .../proposals` route, and the component never
+renders a proposal list. So a steward creates a proposal and then has no way to
+see, vote on, or veto it — the API can be driven by hand but the UI cannot.
+
+The dead handlers were removed rather than left to rot. Restoring this means:
+
+1. `GET /directory/categories/governance/proposals` (steward-gated) backed by
+   the existing `list_open_proposals`, and an equivalent for entry-moderation
+   proposals.
+2. A proposal list in `DirectoryGovernance.svelte` with yes/no controls, a
+   quorum indicator (`yes_votes` / `quorum_needed`), and the operator-only veto
+   box.
+3. The same for entry moderation: `handleProposeEntryMod` is wired to a button,
+   so an entry action can be proposed and then never voted on.
+4. Tests: the endpoint, and that a vote moves the tally and a veto is
+   operator-only.
+
+~1 day. Small, but §45 is not usable without it.
+
 ### Then — hardening and release
 
 E2E green (73/73 as of `d04a54a`), deploy to thinkcentre production (build
