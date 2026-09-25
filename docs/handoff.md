@@ -1,5 +1,11 @@
 # Handoff — ADR 0024 adopted: Lorehaven is the from-scratch base; docs realigned
 
+> **Superseded in part (2026-09-25).** The Pawchive import repair described in
+> `docs/handoffs/2026-09-25T230000+0200-pawchive-import-repair-handoff.md`
+> is newer work on the same tree. Read that one too — it documents the
+> `CARGO_BUILD_JOBS=2` requirement for `cargo test` and several schema
+> constraints that cost real time to rediscover.
+
 Date: 2026-09-24 (M52 tag `m52-rec-strategy`, export E2E fix). Previous handoff
 (M51 + M12 + M7, v0.51.0+2) is archived at
 `docs/handoffs/2026-09-23T112310+0200-m51-media-resilience-m12-mentions-m7-device-delivery-handoff.md`.
