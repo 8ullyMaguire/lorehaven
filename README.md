@@ -10,14 +10,26 @@ all live in this repository.
 
 ## Status
 
-**2026-09-24 (ADR 0024):** this repository is the base for the consolidated
-from-scratch specification. The honest one-line status: **177 of 230 original
-requirement rows implemented** (172 locally-tested, 5 fully-tested), **49
-planned** (M45 taste-arena residuals and M47 settings surfaces), **4
-deliberately unsupported**, tags through `v0.51.0`. What remains to the target
-spec is planned in `docs/plans/remaining-work.md`: the recommendation
-strategy registry (M52), adapter porting batches (M53+), the companion bot
-(M54), OpenAPI publication (M55), and the M45/M47 planned rows (M56).
+**2026-09-25 (ADR 0024):** this repository is the base for the consolidated
+from-scratch specification. The honest one-line status, re-derived from
+`docs/requirements.csv`: **192 of 253 requirement rows implemented**
+(172 locally-tested, 20 fully-tested), **57 planned**, **4 deliberately
+unsupported**, tags through `v0.51.0`. What remains is planned in
+`docs/plans/remaining-work.md`: the recommendation strategy registry (M52),
+adapter porting batches (M53+), the companion bot (M54), OpenAPI publication
+(M55), the metadata exchange (M57, new — see below), and the M45/M47 planned
+rows (M56).
+
+**The metadata exchange** (spec §11.17, §15.17, §19.14, §2.3.1) was adopted
+2026-09-25 after triaging an external proposal. Readers may offer metadata
+signals about works they hold and receive community-curated canonical metadata
+back. Its first rule is the one that matters: **a signal is a fact about a work,
+never a fact about a reader** — reading history, ratings, notes, private library
+membership and credentials are not fields the signal type has, so no
+configuration can widen what leaves the instance. It is opt-in per instance and
+independent of the analytics tier. The proposal as submitted could not be applied
+— roughly a third of its section citations were wrong — so the reasoning,
+corrections and rejections are in `docs/plans/metadata-exchange-triage.md`.
 
 The build is organized as worked milestones that do not correspond one-to-one
 to spec §-numbers — `docs/plans/junior-implementation-plan.md` §0 maps them.
@@ -33,6 +45,7 @@ records the evidence behind each claim.
 | M39–M47 | Directory, fork provenance, half-life, export CTAs, browse ordering, roadmap consensus (Elo board), work aggregates, user settings | Built (M45/M47 have planned residual rows) |
 | M48–M51 | Media resilience: import rescue, health dashboards, mirrors, reverse search | Built — tag `v0.51.0` |
 | M52–M55 | Rec strategy registry, adapter porting, companion bot, OpenAPI publication | Planned — `docs/plans/remaining-work.md` |
+| M57 | Metadata exchange: signals out, canonical metadata in, auto-created taxonomy entities | Specified (spec §11.17, §15.17, §19.14) — not built |
 
 No screen in this repository displays mock data. Pages that exist show real
 values from the server; routes that are linked but unbuilt say so plainly.
@@ -101,6 +114,10 @@ docs/
   tutorial/             build it yourself, milestone by milestone
   requirements.csv      every requirement and its status
   verification.md       what has actually been run, and what has not
+  plans/
+    remaining-work.md           the forward plan: what is left, in what order
+    metadata-exchange-triage.md an external proposal reviewed, corrected and partly adopted
+    junior-implementation-plan.md  the historical milestone map
 ```
 
 ## Design

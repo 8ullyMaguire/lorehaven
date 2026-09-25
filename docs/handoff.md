@@ -1,11 +1,14 @@
-# Handoff — M56-01 instance accessibility mode; build recovered; no 1.0 tag
+# Handoff — metadata exchange specified; docs synchronised; nothing built
 
-Date: 2026-09-25 (tip `5fb778e`). **The current, full handoff is
-`docs/handoffs/2026-09-25T110532+0200-m56-01-instance-access-mode-build-recovered-handoff.md`
-— read that one.** It records a build-breaking regression that was repaired
-(`921a59d` reset + DNF cherry-pick), what is now true, what was superseded,
-and what must be re-verified before deploying. This file remains the standing
-milestone history.
+Date: 2026-09-25 (tip `62aaab5` + this docs commit). **The current, full handoff
+is
+`docs/handoffs/2026-09-25T134127+0200-metadata-exchange-specified-docs-synced-handoff.md`
+— read that one.** It records the metadata-exchange spec landing (spec §0.3,
+§2.3.1, §11.17, §15.17, §16.16.1, §19.14; 5 `planned` rows; M57 build order),
+what was rejected and why, and the outstanding verification debt.
+
+Date: 2026-09-25 (tip `5fb778e`). The previous full handoff is
+`docs/handoffs/2026-09-25T110532+0200-m56-01-instance-access-mode-build-recovered-handoff.md`.
 
 Date: 2026-09-24 (M52 tag `m52-rec-strategy`, export E2E fix). Previous handoff
 (M51 + M12 + M7, v0.51.0+2) is archived at

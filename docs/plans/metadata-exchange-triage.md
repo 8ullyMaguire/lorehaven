@@ -1,8 +1,17 @@
 # External AI proposal triage — metadata exchange + curation pipeline
 
-**Status: proposed, not adopted.** This is a triage of a chatbot proposal pasted
-2026-09-25, not a spec edit. `docs/spec.md`, `docs/requirements.csv` and
-`docs/plans/remaining-work.md` are **unchanged** by this document.
+**Status: reviewed and adopted 2026-09-25 (Alvaro).** This began as a review
+draft of a chatbot proposal pasted 2026-09-25. The adopted items are now landed
+in `docs/spec.md` (§0.3, §2.3.1, §11.17, §15.17, §16.16.1, §19.14) with
+requirement rows in `docs/requirements.csv` and a build order in
+`docs/plans/remaining-work.md` (M57). The rejected items below stay rejected,
+with their reasons — a rejection that is not written down is a rejection the
+next session re-proposes.
+
+The section numbers in the correction table were correct as of 2026-09-25 and
+**§15.17 is the free number in ch15, not §15.16** — §15.16 was already Content
+notes when this was written, so the table's own recommendation was one number
+stale. Fixed in the applied landing. Everything else landed as tabulated.
 
 Two documents were under review:
 
