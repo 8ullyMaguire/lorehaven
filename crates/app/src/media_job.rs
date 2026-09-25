@@ -187,7 +187,105 @@ pub async fn handle_media_fetch(
     media_resilience::record_fingerprint(state.db(), reference_id, &(&fingerprint).into())
         .await
         .map_err(transient)?;
+    dedup_after_fetch(state, reference_id, &fingerprint).await;
     Ok(())
+}
+
+/// The §32.7.2 dedup decision, made once the bytes are known.
+///
+/// Two branches, and the order matters. An exact `content_hash` match is a fact,
+/// not a guess, so it attaches without asking anyone: the spec says "zero new
+/// storage cost" and that a single popular faceclaim image has *one*
+/// MediaReference. A perceptual match is not a fact -- pHash agrees across
+/// re-encodes and disagrees across different images that happen to share
+/// structure -- so it is written as a proposal for a curator and nothing is
+/// merged.
+///
+/// Best-effort by design. A dedup failure must not fail the fetch: the bytes
+/// are already mirrored and the reference already has its hashes, and losing
+/// that because a proposal could not be written would be a far worse outcome
+/// than a duplicate that a curator merges later. So this logs and continues
+/// rather than propagating.
+async fn dedup_after_fetch(state: &AppState, reference_id: &str, fingerprint: &MediaFingerprint) {
+    let db = state.db();
+    let exact = fingerprint.content_hash.clone();
+
+    // The exact-match branch: attach this reference's link to the reference that
+    // already holds these bytes. Skipped when the match is the reference itself,
+    // which is the case on a re-fetch.
+    match media_resilience::find_media_reference_by_content_hash(db, &exact)
+        .await
+        .map_err(transient)
+    {
+        Ok(Some(existing)) if existing.id != reference_id => {
+            if let Err(e) =
+                media_resilience::attach_reference_to_existing(db, &existing.id, reference_id).await
+            {
+                tracing::warn!(
+                    reference_id,
+                    existing_id = %existing.id,
+                    error = %e,
+                    "exact media match found but the link could not be attached"
+                );
+            }
+            return;
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!(reference_id, error = %e, "exact media match lookup failed"),
+    }
+
+    // The perceptual branch. No perceptual hash means nothing to compare, and an
+    // undecodable body legitimately has none.
+    let Some(perceptual) = fingerprint.perceptual_hash.as_deref() else {
+        return;
+    };
+    let config = state.config();
+    if !config.media_resilience.enabled {
+        return;
+    }
+    let threshold = config.media_resilience.perceptual_match_threshold;
+    let matches =
+        match media_resilience::find_by_perceptual_hash(db, perceptual, threshold as i32).await {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(reference_id, error = %e, "perceptual media match lookup failed");
+                return;
+            }
+        };
+    for candidate in matches {
+        if candidate.id == reference_id {
+            continue;
+        }
+        let Some(stored) = candidate.perceptual_hash.as_deref() else {
+            continue;
+        };
+        let Some(distance) =
+            lorehaven_domain::media_resilience::hamming_distance(perceptual, stored)
+        else {
+            continue;
+        };
+        // `find_by_perceptual_hash` already filtered on distance, so this is a
+        // re-assertion rather than a new check -- and `hamming_distance` is what
+        // the confidence is computed from, so the proposal records the number
+        // the curator will see.
+        if let Err(e) = media_resilience::record_match_proposal(
+            db,
+            reference_id,
+            &candidate.id,
+            &exact,
+            Some(perceptual),
+            distance,
+        )
+        .await
+        {
+            tracing::warn!(
+                reference_id,
+                existing_id = %candidate.id,
+                error = %e,
+                "perceptual media match could not be proposed"
+            );
+        }
+    }
 }
 
 /// Read a response body, refusing anything over the limit even when the server

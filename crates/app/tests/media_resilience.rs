@@ -1279,3 +1279,141 @@ async fn a_malformed_proposal_id_is_rejected_before_a_round_trip() {
         &uuid::Uuid::new_v4().to_string()
     ));
 }
+
+#[tokio::test]
+async fn an_exact_content_match_attaches_without_asking_anyone() {
+    let dir = scratch_dir("exact");
+    let tdb = test_support::TestDb::connect_with_dir("mr-exact", &dir).await;
+    let db = tdb.db();
+    let existing = id("existing-ref");
+    let candidate = id("candidate-ref");
+    // Same bytes, so the same content hash. The spec calls this the branch that
+    // needs no human: "Attach as a new AvailabilityLink to the existing
+    // MediaReference. Zero new storage cost."
+    for rid in [&existing, &candidate] {
+        media_resilience::insert_media_reference(
+            db,
+            rid,
+            "sha256:same",
+            lorehaven_domain::media_resilience::MediaKind::Image,
+        )
+        .await
+        .expect("insert reference");
+    }
+    for (rid, url) in [
+        (&existing, "https://cdn.example.com/a.png"),
+        (&candidate, "https://cdn.example.com/b.png"),
+    ] {
+        media_resilience::insert_availability_link(
+            db,
+            &id(url),
+            rid,
+            url,
+            lorehaven_domain::media_resilience::LinkProvider::Other,
+            None,
+            100,
+        )
+        .await
+        .expect("insert link");
+    }
+
+    let found = media_resilience::find_media_reference_by_content_hash(db, "sha256:same")
+        .await
+        .expect("lookup by content hash");
+    let found = found.expect("a reference holds those bytes");
+
+    assert!(
+        media_resilience::attach_reference_to_existing(db, &found.id, &candidate)
+            .await
+            .expect("attach")
+    );
+
+    // One reference, two links: the spec's claim that a popular image has one
+    // MediaReference and many AvailabilityLinks.
+    assert!(media_resilience::find_media_reference_by_id(db, &candidate)
+        .await
+        .expect("look up candidate")
+        .is_none());
+    assert_eq!(
+        media_resilience::count_total_links(db, &found.id)
+            .await
+            .expect("links"),
+        2
+    );
+}
+
+#[tokio::test]
+async fn attaching_a_reference_to_itself_does_nothing() {
+    let dir = scratch_dir("self-attach");
+    let tdb = test_support::TestDb::connect_with_dir("mr-self", &dir).await;
+    let db = tdb.db();
+    let reference = id("only-ref");
+    media_resilience::insert_media_reference(
+        db,
+        &reference,
+        "sha256:only",
+        lorehaven_domain::media_resilience::MediaKind::Image,
+    )
+    .await
+    .expect("insert reference");
+
+    // A re-fetch of the same URL is the ordinary case, not an error, and must not
+    // delete the reference it just fetched.
+    assert!(
+        !media_resilience::attach_reference_to_existing(db, &reference, &reference)
+            .await
+            .expect("self attach")
+    );
+    assert!(media_resilience::find_media_reference_by_id(db, &reference)
+        .await
+        .expect("look up")
+        .is_some());
+}
+
+#[tokio::test]
+async fn attaching_to_a_missing_reference_refuses_rather_than_half_moves() {
+    let dir = scratch_dir("attach-missing");
+    let tdb = test_support::TestDb::connect_with_dir("mr-attach-miss", &dir).await;
+    let db = tdb.db();
+    let candidate = id("candidate-ref");
+    media_resilience::insert_media_reference(
+        db,
+        &candidate,
+        "sha256:cand",
+        lorehaven_domain::media_resilience::MediaKind::Image,
+    )
+    .await
+    .expect("insert reference");
+    media_resilience::insert_availability_link(
+        db,
+        &id("candidate-link"),
+        &candidate,
+        "https://cdn.example.com/c.png",
+        lorehaven_domain::media_resilience::LinkProvider::Other,
+        None,
+        100,
+    )
+    .await
+    .expect("insert link");
+
+    // The surviving reference does not exist. Repointing the links anyway would
+    // leave them pointing at nothing, which is the one outcome worse than not
+    // deduplicating.
+    let ghost = uuid::Uuid::new_v4().to_string();
+    assert!(
+        !media_resilience::attach_reference_to_existing(db, &ghost, &candidate)
+            .await
+            .expect("attach to ghost")
+    );
+    // Nothing moved.
+    assert!(media_resilience::find_media_reference_by_id(db, &candidate)
+        .await
+        .expect("look up")
+        .is_some());
+    assert_eq!(
+        media_resilience::count_total_links(db, &candidate)
+            .await
+            .expect("links"),
+        1
+    );
+}
