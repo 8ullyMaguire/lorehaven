@@ -773,3 +773,509 @@ async fn recording_a_fingerprint_for_a_missing_reference_is_an_error_not_a_silen
         "recording against a missing row must fail"
     );
 }
+
+// ---------------------------------------------------------------------------
+// §32.7.2 Perceptual match proposals: the curator decision the spec requires.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_perceptual_match_is_proposed_with_its_confidence() {
+    let dir = scratch_dir("propose");
+    let tdb = test_support::TestDb::connect_with_dir("mr-propose", &dir).await;
+    let db = tdb.db();
+    let existing = id("existing-ref");
+    let candidate = id("candidate-ref");
+    for (rid, hash) in [(&existing, "sha256:aaa"), (&candidate, "sha256:bbb")] {
+        media_resilience::insert_media_reference(
+            db,
+            rid,
+            hash,
+            lorehaven_domain::media_resilience::MediaKind::Image,
+        )
+        .await
+        .expect("insert reference");
+    }
+
+    // Distance 2 out of 64 bits, which the spec's threshold of 6 admits.
+    assert!(media_resilience::record_match_proposal(
+        db,
+        &candidate,
+        &existing,
+        "sha256:bbb",
+        Some("0123456789abcdef"),
+        2,
+    )
+    .await
+    .expect("record proposal"));
+
+    let pending = media_resilience::list_pending_match_proposals(db, 50)
+        .await
+        .expect("list pending");
+    assert_eq!(pending.len(), 1);
+    let proposal = &pending[0].proposal;
+    assert_eq!(proposal.candidate_reference_id, candidate);
+    assert_eq!(proposal.existing_reference_id, existing);
+    assert_eq!(proposal.hamming_distance, 2);
+    assert_eq!(proposal.status, "pending");
+    // Confidence is stored, not recomputed, so the curator sees what the search
+    // used. 2 bits apart in a 64-bit hash is 62/64.
+    let expected = lorehaven_domain::media_resilience::perceptual_match_confidence(2);
+    assert!((proposal.match_confidence - expected).abs() < 1e-9);
+    assert!(
+        proposal.match_confidence > 0.9,
+        "{}",
+        proposal.match_confidence
+    );
+    assert_eq!(
+        media_resilience::count_pending_match_proposals(db)
+            .await
+            .expect("count"),
+        1
+    );
+}
+
+#[tokio::test]
+async fn re_proposing_the_same_pair_updates_rather_than_duplicates() {
+    let dir = scratch_dir("propose-idem");
+    let tdb = test_support::TestDb::connect_with_dir("mr-propose-idem", &dir).await;
+    let db = tdb.db();
+    let existing = id("existing-ref");
+    let candidate = id("candidate-ref");
+    for (rid, hash) in [(&existing, "sha256:aaa"), (&candidate, "sha256:bbb")] {
+        media_resilience::insert_media_reference(
+            db,
+            rid,
+            hash,
+            lorehaven_domain::media_resilience::MediaKind::Image,
+        )
+        .await
+        .expect("insert reference");
+    }
+
+    for distance in [1_u32, 3, 5] {
+        assert!(media_resilience::record_match_proposal(
+            db,
+            &candidate,
+            &existing,
+            "sha256:bbb",
+            Some("0123456789abcdef"),
+            distance,
+        )
+        .await
+        .expect("record proposal"));
+    }
+    // A fetch re-runs and re-hashes constantly. Three proposals for one pair of
+    // images would be three rows in the curator's queue describing one question.
+    let pending = media_resilience::list_pending_match_proposals(db, 50)
+        .await
+        .expect("list pending");
+    assert_eq!(pending.len(), 1);
+    // The latest search result wins.
+    assert_eq!(pending[0].proposal.hamming_distance, 5);
+}
+
+#[tokio::test]
+async fn confirming_a_proposal_moves_the_links_to_the_existing_reference() {
+    let dir = scratch_dir("confirm");
+    let tdb = test_support::TestDb::connect_with_dir("mr-confirm", &dir).await;
+    let db = tdb.db();
+    let existing = id("existing-ref");
+    let candidate = id("candidate-ref");
+    for (rid, hash) in [(&existing, "sha256:aaa"), (&candidate, "sha256:bbb")] {
+        media_resilience::insert_media_reference(
+            db,
+            rid,
+            hash,
+            lorehaven_domain::media_resilience::MediaKind::Image,
+        )
+        .await
+        .expect("insert reference");
+    }
+    let existing_link = id("existing-link");
+    let candidate_link = id("candidate-link");
+    media_resilience::insert_availability_link(
+        db,
+        &existing_link,
+        &existing,
+        "https://cdn.example.com/original.png",
+        lorehaven_domain::media_resilience::LinkProvider::Other,
+        None,
+        100,
+    )
+    .await
+    .expect("insert existing link");
+    media_resilience::insert_availability_link(
+        db,
+        &candidate_link,
+        &candidate,
+        "https://cdn.example.com/reencode.png",
+        lorehaven_domain::media_resilience::LinkProvider::Other,
+        None,
+        100,
+    )
+    .await
+    .expect("insert candidate link");
+
+    media_resilience::record_match_proposal(
+        db,
+        &candidate,
+        &existing,
+        "sha256:bbb",
+        Some("0123456789abcdef"),
+        1,
+    )
+    .await
+    .expect("record proposal");
+    let pending = media_resilience::list_pending_match_proposals(db, 50)
+        .await
+        .expect("list pending");
+    let proposal_id = pending[0].proposal.id.clone();
+
+    assert!(media_resilience::resolve_match_proposal(
+        db,
+        &proposal_id,
+        media_resilience::ProposalDecision::Confirm,
+        &id("curator-001"),
+        Some("same artwork, re-encoded"),
+    )
+    .await
+    .expect("resolve"));
+
+    // The point of deduplicating: both copies of the image now hang off one
+    // reference, so one dying link does not take the other with it.
+    let links = media_resilience::find_availability_links_for_reference(db, &existing)
+        .await
+        .expect("links on existing");
+    assert_eq!(
+        links.len(),
+        2,
+        "both links moved to the surviving reference"
+    );
+    let mut urls: Vec<String> = links.iter().map(|l| l.url.clone()).collect();
+    urls.sort();
+    assert_eq!(
+        urls,
+        vec![
+            "https://cdn.example.com/original.png".to_string(),
+            "https://cdn.example.com/reencode.png".to_string(),
+        ]
+    );
+
+    // And the duplicate reference is gone rather than left as an orphan.
+    assert!(media_resilience::find_media_reference_by_id(db, &candidate)
+        .await
+        .expect("look up candidate")
+        .is_none());
+
+    // The queue is empty. Note the proposal row itself does not survive: both
+    // foreign keys on media_match_proposals are ON DELETE CASCADE, so confirming
+    // deletes the candidate reference and the proposal goes with it. That is
+    // deliberate -- a merged pair has no question left -- but it means the audit
+    // trail for a confirmation is the surviving reference's link set, not the
+    // proposal.
+    assert_eq!(
+        media_resilience::count_pending_match_proposals(db)
+            .await
+            .expect("count"),
+        0
+    );
+}
+
+#[tokio::test]
+async fn rejecting_a_proposal_keeps_the_references_apart() {
+    let dir = scratch_dir("reject");
+    let tdb = test_support::TestDb::connect_with_dir("mr-reject", &dir).await;
+    let db = tdb.db();
+    let existing = id("existing-ref");
+    let candidate = id("candidate-ref");
+    for (rid, hash) in [(&existing, "sha256:aaa"), (&candidate, "sha256:bbb")] {
+        media_resilience::insert_media_reference(
+            db,
+            rid,
+            hash,
+            lorehaven_domain::media_resilience::MediaKind::Image,
+        )
+        .await
+        .expect("insert reference");
+    }
+    let candidate_link = id("candidate-link");
+    media_resilience::insert_availability_link(
+        db,
+        &candidate_link,
+        &candidate,
+        "https://cdn.example.com/different.png",
+        lorehaven_domain::media_resilience::LinkProvider::Other,
+        None,
+        100,
+    )
+    .await
+    .expect("insert candidate link");
+
+    media_resilience::record_match_proposal(
+        db,
+        &candidate,
+        &existing,
+        "sha256:bbb",
+        Some("0123456789abcdef"),
+        6,
+    )
+    .await
+    .expect("record proposal");
+    let proposal_id = media_resilience::list_pending_match_proposals(db, 50)
+        .await
+        .expect("list pending")[0]
+        .proposal
+        .id
+        .clone();
+
+    assert!(media_resilience::resolve_match_proposal(
+        db,
+        &proposal_id,
+        media_resilience::ProposalDecision::Reject,
+        &id("curator-001"),
+        Some("different artwork that happens to share structure"),
+    )
+    .await
+    .expect("resolve"));
+
+    // The candidate survives a rejection, and keeps its own link.
+    assert!(media_resilience::find_media_reference_by_id(db, &candidate)
+        .await
+        .expect("look up candidate")
+        .is_some());
+    assert_eq!(
+        media_resilience::count_total_links(db, &candidate)
+            .await
+            .expect("links"),
+        1
+    );
+    assert_eq!(
+        media_resilience::count_pending_match_proposals(db)
+            .await
+            .expect("count"),
+        0
+    );
+}
+
+#[tokio::test]
+async fn a_rejected_pair_is_not_proposed_again() {
+    let dir = scratch_dir("reject-again");
+    let tdb = test_support::TestDb::connect_with_dir("mr-reject-again", &dir).await;
+    let db = tdb.db();
+    let existing = id("existing-ref");
+    let candidate = id("candidate-ref");
+    for (rid, hash) in [(&existing, "sha256:aaa"), (&candidate, "sha256:bbb")] {
+        media_resilience::insert_media_reference(
+            db,
+            rid,
+            hash,
+            lorehaven_domain::media_resilience::MediaKind::Image,
+        )
+        .await
+        .expect("insert reference");
+    }
+    media_resilience::record_match_proposal(
+        db,
+        &candidate,
+        &existing,
+        "sha256:bbb",
+        Some("0123456789abcdef"),
+        4,
+    )
+    .await
+    .expect("record proposal");
+    let proposal_id = media_resilience::list_pending_match_proposals(db, 50)
+        .await
+        .expect("list pending")[0]
+        .proposal
+        .id
+        .clone();
+    media_resilience::resolve_match_proposal(
+        db,
+        &proposal_id,
+        media_resilience::ProposalDecision::Reject,
+        &id("curator-001"),
+        None,
+    )
+    .await
+    .expect("reject");
+
+    // The next fetch of the same image finds the same near-match. Re-asking
+    // would make a rejection impossible to honour, which is why the row is kept
+    // rather than deleted.
+    let reproposed = media_resilience::record_match_proposal(
+        db,
+        &candidate,
+        &existing,
+        "sha256:bbb",
+        Some("0123456789abcdef"),
+        4,
+    )
+    .await
+    .expect("re-propose");
+    assert!(!reproposed, "a rejected pair must not re-enter the queue");
+    assert_eq!(
+        media_resilience::count_pending_match_proposals(db)
+            .await
+            .expect("count"),
+        0
+    );
+}
+
+#[tokio::test]
+async fn resolving_twice_moves_nothing_the_second_time() {
+    let dir = scratch_dir("double-resolve");
+    let tdb = test_support::TestDb::connect_with_dir("mr-double", &dir).await;
+    let db = tdb.db();
+    let existing = id("existing-ref");
+    let candidate = id("candidate-ref");
+    for (rid, hash) in [(&existing, "sha256:aaa"), (&candidate, "sha256:bbb")] {
+        media_resilience::insert_media_reference(
+            db,
+            rid,
+            hash,
+            lorehaven_domain::media_resilience::MediaKind::Image,
+        )
+        .await
+        .expect("insert reference");
+    }
+    media_resilience::record_match_proposal(
+        db,
+        &candidate,
+        &existing,
+        "sha256:bbb",
+        Some("0123456789abcdef"),
+        2,
+    )
+    .await
+    .expect("record proposal");
+    let proposal_id = media_resilience::list_pending_match_proposals(db, 50)
+        .await
+        .expect("list pending")[0]
+        .proposal
+        .id
+        .clone();
+
+    assert!(media_resilience::resolve_match_proposal(
+        db,
+        &proposal_id,
+        media_resilience::ProposalDecision::Reject,
+        &id("curator-001"),
+        None,
+    )
+    .await
+    .expect("first resolve"));
+    // Two curators clicking at once, or a retried request. The second must be a
+    // no-op rather than a second merge.
+    assert!(!media_resilience::resolve_match_proposal(
+        db,
+        &proposal_id,
+        media_resilience::ProposalDecision::Confirm,
+        &id("curator-002"),
+        None,
+    )
+    .await
+    .expect("second resolve"));
+    // The rejection stands: a confirm must not be able to overturn it.
+    assert!(media_resilience::find_media_reference_by_id(db, &candidate)
+        .await
+        .expect("look up candidate")
+        .is_some());
+}
+
+#[tokio::test]
+async fn resolving_an_unknown_proposal_reports_nothing_to_do() {
+    let dir = scratch_dir("unknown");
+    let tdb = test_support::TestDb::connect_with_dir("mr-unknown", &dir).await;
+    let db = tdb.db();
+    // A well-formed id that was never proposed, and one that is not an id at all.
+    // Both are the same thing to a curator: there is nothing here to act on.
+    assert!(!media_resilience::resolve_match_proposal(
+        db,
+        &uuid::Uuid::new_v4().to_string(),
+        media_resilience::ProposalDecision::Confirm,
+        &id("curator-001"),
+        None,
+    )
+    .await
+    .expect("unknown id"));
+    assert!(!media_resilience::resolve_match_proposal(
+        db,
+        "not-a-uuid",
+        media_resilience::ProposalDecision::Confirm,
+        &id("curator-001"),
+        None,
+    )
+    .await
+    .expect("malformed id"));
+}
+
+#[tokio::test]
+async fn the_curator_queue_is_ordered_by_confidence_and_bounded() {
+    let dir = scratch_dir("queue");
+    let tdb = test_support::TestDb::connect_with_dir("mr-queue", &dir).await;
+    let db = tdb.db();
+    let existing = id("existing-ref");
+    media_resilience::insert_media_reference(
+        db,
+        &existing,
+        "sha256:aaa",
+        lorehaven_domain::media_resilience::MediaKind::Image,
+    )
+    .await
+    .expect("insert reference");
+    // Three candidates at widening distances, so the ordering is a real test of
+    // the sort rather than of insertion order.
+    for (i, distance) in [6_u32, 1, 3].into_iter().enumerate() {
+        let candidate = id(&format!("candidate-{i}"));
+        media_resilience::insert_media_reference(
+            db,
+            &candidate,
+            &format!("sha256:c{i}"),
+            lorehaven_domain::media_resilience::MediaKind::Image,
+        )
+        .await
+        .expect("insert candidate");
+        media_resilience::record_match_proposal(
+            db,
+            &candidate,
+            &existing,
+            &format!("sha256:c{i}"),
+            Some("0123456789abcdef"),
+            distance,
+        )
+        .await
+        .expect("record proposal");
+    }
+    let pending = media_resilience::list_pending_match_proposals(db, 50)
+        .await
+        .expect("list pending");
+    let distances: Vec<i32> = pending
+        .iter()
+        .map(|p| p.proposal.hamming_distance)
+        .collect();
+    assert_eq!(distances, vec![1, 3, 6], "closest match first");
+
+    // A limit is not a suggestion: a fetch storm on one popular image would
+    // otherwise grow the queue without bound.
+    let top = media_resilience::list_pending_match_proposals(db, 2)
+        .await
+        .expect("list top 2");
+    assert_eq!(top.len(), 2);
+    // A negative or zero limit must not mean "no limit" in either dialect.
+    for limit in [-1_i64, 0] {
+        let bounded = media_resilience::list_pending_match_proposals(db, limit)
+            .await
+            .expect("list with bad limit");
+        assert!(!bounded.is_empty() && bounded.len() <= 2, "limit {limit}");
+    }
+}
+
+#[tokio::test]
+async fn a_malformed_proposal_id_is_rejected_before_a_round_trip() {
+    assert!(!media_resilience::match_proposal_id_is_valid("not-a-uuid"));
+    assert!(!media_resilience::match_proposal_id_is_valid(""));
+    assert!(media_resilience::match_proposal_id_is_valid(
+        &uuid::Uuid::new_v4().to_string()
+    ));
+}

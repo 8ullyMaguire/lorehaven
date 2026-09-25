@@ -2133,6 +2133,639 @@ pub async fn resolve_dmca_takedown(
 }
 
 // ---------------------------------------------------------------------------
+// §32.7.2 Deduplication: the proposal half of a perceptual match
+// ---------------------------------------------------------------------------
+//
+// The spec is explicit about the shape of a perceptual match: "present the
+// curator with a match confidence score; they confirm or reject the linkage."
+// Everything upstream of that sentence already existed -- `record_fingerprint`
+// stores the dHash, `find_by_perceptual_hash` scores it, and
+// `perceptual_match_confidence` turns a distance into the number the curator
+// reads. What was missing is the row between them: without it a near-duplicate
+// and a distinct image are indistinguishable after the fetch, because the only
+// record of "these two looked alike" is the fingerprint itself.
+//
+// So this section is deliberately small. It does not re-implement the search or
+// the scoring, and it does not try to decide whether two images are the same --
+// pHash agrees across re-encodes and disagrees across distinct images that
+// happen to share structure, which is exactly why the spec routes this through
+// a human.
+
+/// A proposed linkage between a freshly fetched reference and an existing one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchProposal {
+    pub id: String,
+    /// The reference that was just fetched and hashed.
+    pub candidate_reference_id: String,
+    /// The existing reference the candidate appears to duplicate.
+    pub existing_reference_id: String,
+    pub content_hash: String,
+    pub perceptual_hash: Option<String>,
+    /// The Hamming distance the search matched on.
+    pub hamming_distance: i32,
+    /// `perceptual_match_confidence(hamming_distance)`, stored rather than
+    /// recomputed: the curator sees the number the search actually used, and a
+    /// later threshold change must not retroactively rewrite the history of what
+    /// they were shown.
+    pub match_confidence: f64,
+    /// `pending` | `confirmed` | `rejected`.
+    pub status: String,
+    pub resolved_by: Option<String>,
+    pub resolution_note: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub resolved_at: Option<String>,
+}
+
+/// Proposals a curator still has to act on, best candidate first.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingProposal {
+    pub proposal: MatchProposal,
+    /// The existing reference's title-less description for the curator's list:
+    /// its content hash, so the curator can tell two proposals apart when the
+    /// images are not rendered.
+    pub existing_content_hash: String,
+}
+
+/// `Some` when the id is well formed, so a caller can reject a bad id before
+/// spending a round trip.
+///
+/// A match proposal id is a UUID, because both dialect schemas declare the
+/// column that way and SQLite will store the string regardless -- which means
+/// SQLite accepts a non-UUID here and PostgreSQL answers 22P02. Validating in
+/// the domain keeps the route's error a 400 instead of a 500 on one backend.
+pub fn match_proposal_id_is_valid(id: &str) -> bool {
+    uuid::Uuid::parse_str(id).is_ok()
+}
+
+/// Record a proposed linkage. Idempotent per `(candidate, existing)` pair.
+///
+/// The pair is unique in both schemas, so re-running a fetch that finds the
+/// same near-match updates the pending row rather than accumulating duplicates
+/// -- which is what makes the `UNIQUE` constraint load-bearing rather than
+/// decorative. A pair a curator already *rejected* is left alone: re-proposing
+/// it on every fetch would be a curator-approval flow that never terminates,
+/// and the row is kept precisely so the rejection is remembered.
+///
+/// # Errors
+/// An error when no such reference exists, which is what a fetch completing
+/// against a deleted row looks like. Returning `Ok(false)` for that would let
+/// the caller record the media as mirrored.
+pub async fn record_match_proposal(
+    db: &Database,
+    candidate_reference_id: &str,
+    existing_reference_id: &str,
+    content_hash: &str,
+    perceptual_hash: Option<&str>,
+    hamming_distance: u32,
+) -> Result<bool> {
+    // A distance wider than the score can express has no confidence worth
+    // storing, and `i32` is what the column is declared as.
+    let Ok(distance) = i32::try_from(hamming_distance) else {
+        return Ok(false);
+    };
+    let confidence =
+        lorehaven_domain::media_resilience::perceptual_match_confidence(hamming_distance);
+    let now = crate::identity::now_rfc3339();
+
+    let sql = sql_owned(
+        db,
+        "INSERT INTO media_match_proposals
+             (id, candidate_reference_id, existing_reference_id, content_hash,
+              perceptual_hash, hamming_distance, match_confidence, status,
+              created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+         ON CONFLICT (candidate_reference_id, existing_reference_id) DO UPDATE
+            SET hamming_distance = excluded.hamming_distance,
+                match_confidence = excluded.match_confidence,
+                perceptual_hash = excluded.perceptual_hash,
+                content_hash = excluded.content_hash,
+                updated_at = excluded.updated_at
+         WHERE media_match_proposals.status = 'pending'"
+            .to_string(),
+        "INSERT INTO media_match_proposals
+             (id, candidate_reference_id, existing_reference_id, content_hash,
+              perceptual_hash, hamming_distance, match_confidence, status,
+              created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, 'pending',
+                 $8::timestamptz, $9::timestamptz)
+         ON CONFLICT (candidate_reference_id, existing_reference_id) DO UPDATE
+            SET hamming_distance = excluded.hamming_distance,
+                match_confidence = excluded.match_confidence,
+                perceptual_hash = excluded.perceptual_hash,
+                content_hash = excluded.content_hash,
+                updated_at = excluded.updated_at
+         WHERE media_match_proposals.status = 'pending'"
+            .to_string(),
+    );
+    let id = Uuid::new_v4().to_string();
+    let affected = match db.backend() {
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(&id)
+            .bind(candidate_reference_id)
+            .bind(existing_reference_id)
+            .bind(content_hash)
+            .bind(perceptual_hash)
+            .bind(distance)
+            .bind(confidence)
+            .bind(&now)
+            .bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(&id)
+            .bind(candidate_reference_id)
+            .bind(existing_reference_id)
+            .bind(content_hash)
+            .bind(perceptual_hash)
+            .bind(distance)
+            .bind(confidence)
+            .bind(&now)
+            .bind(&now)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?
+            .rows_affected(),
+    };
+    // 0 rows means one of the two references does not exist, or the pair was
+    // already rejected. Both are legitimate "nothing to do"; neither is an error,
+    // and reporting a failure for a remembered rejection would make every
+    // subsequent fetch of a known-bad pair look broken.
+    Ok(affected > 0)
+}
+
+/// A curator's decision on a proposal.
+///
+/// `Confirm` merges the candidate into the existing reference; `Reject` keeps
+/// them apart. The enum rather than a bool because `resolve_match_proposal`
+/// also acts on the confirmation, and a bare `true` there would read as
+/// "resolved?" rather than "same image?".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProposalDecision {
+    Confirm,
+    Reject,
+}
+
+impl ProposalDecision {
+    /// The value the `status` CHECK constraint allows.
+    pub fn as_status(self) -> &'static str {
+        match self {
+            ProposalDecision::Confirm => "confirmed",
+            ProposalDecision::Reject => "rejected",
+        }
+    }
+
+    pub fn is_confirmation(self) -> bool {
+        matches!(self, ProposalDecision::Confirm)
+    }
+}
+
+/// Resolve a proposal.
+///
+/// A confirmation is more than a status change: the candidate reference's
+/// availability links move to the existing one, so the work that pointed at the
+/// candidate is now served by the reference that has every other copy of the
+/// image. That is the whole point of deduplicating -- "one dying link doesn't
+/// affect the others" -- and doing it here rather than in the route keeps the
+/// move in the same transaction as the decision.
+///
+/// A rejection moves nothing.
+///
+/// Returns `false` when there is no pending proposal with that id, which covers
+/// a missing row, an already-resolved one, and a malformed id. The caller
+/// answers 404 for all three rather than distinguishing them, which is right:
+/// a curator cannot act on a proposal that is not there, and telling them it
+/// was already decided leaks whether someone else got there first.
+pub async fn resolve_match_proposal(
+    db: &Database,
+    proposal_id: &str,
+    decision: ProposalDecision,
+    resolved_by: &str,
+    note: Option<&str>,
+) -> Result<bool, sqlx::Error> {
+    // PostgreSQL raises 22P02 on a malformed id because the placeholder is cast
+    // to uuid, and SQLite happily matches nothing. Returning early is what makes
+    // the two agree, and it means a caller cannot turn a bad path parameter into
+    // a 500 by forgetting to validate it.
+    if !match_proposal_id_is_valid(proposal_id) {
+        return Ok(false);
+    }
+    let now = crate::identity::now_rfc3339();
+    let status = decision.as_status();
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            // The status guard is what makes this safe against two curators
+            // clicking at once: the second UPDATE matches no row and the link
+            // move never happens. Doing it in one statement keeps that true even
+            // without an explicit transaction.
+            let changed = sqlx::query(
+                "UPDATE media_match_proposals
+                    SET status = ?, resolved_by = ?, resolution_note = ?,
+                        resolved_at = ?, updated_at = ?
+                  WHERE id = ? AND status = 'pending'",
+            )
+            .bind(status)
+            .bind(resolved_by)
+            .bind(note)
+            .bind(&now)
+            .bind(&now)
+            .bind(proposal_id)
+            .execute(pool)
+            .await?
+            .rows_affected();
+            if changed == 0 {
+                return Ok(false);
+            }
+            if decision.is_confirmation() {
+                move_links_to_existing(db, proposal_id).await?;
+            }
+            Ok(true)
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            let changed = sqlx::query(
+                "UPDATE media_match_proposals
+                    SET status = $1, resolved_by = $2, resolution_note = $3,
+                        resolved_at = $4::timestamptz, updated_at = $5::timestamptz
+                  WHERE id = $6::uuid AND status = 'pending'",
+            )
+            .bind(status)
+            .bind(resolved_by)
+            .bind(note)
+            .bind(&now)
+            .bind(&now)
+            .bind(proposal_id)
+            .execute(pool)
+            .await?
+            .rows_affected();
+            if changed == 0 {
+                return Ok(false);
+            }
+            if decision.is_confirmation() {
+                move_links_to_existing(db, proposal_id).await?;
+            }
+            Ok(true)
+        }
+    }
+}
+
+/// Point every availability link at the existing reference, and drop the now
+/// duplicate candidate row.
+///
+/// The `ON CONFLICT DO UPDATE` is the point: two works can have attached the
+/// same URL to the same candidate, and moving both must not fail on the unique
+/// `(media_reference_id, url)`. A link that already exists on the target -- the
+/// exact-match branch attaches one, so this is the common case -- is updated
+/// rather than inserted twice.
+///
+/// `ON DELETE CASCADE` then removes the candidate reference itself, and with it
+/// any `work_media_references` rows pointing at it, which is why the work
+/// associations are repointed first.
+async fn move_links_to_existing(db: &Database, proposal_id: &str) -> Result<(), sqlx::Error> {
+    // Fetch, then map, per backend: the two arms return `SqliteRow` and `PgRow`,
+    // which have no common type, and `sqlx::any` is not enabled here. Building the
+    // tuple inside each arm after the `?` would still unify the two row types.
+    let pair: Option<(String, String)> = match db.backend() {
+        Backend::Sqlite => {
+            let row = sqlx::query(
+                "SELECT candidate_reference_id, existing_reference_id
+                   FROM media_match_proposals WHERE id = ?",
+            )
+            .bind(proposal_id)
+            .fetch_optional(db.sqlite_pool().expect("sqlite"))
+            .await?;
+            row.map(|r| {
+                (
+                    r.get::<String, _>("candidate_reference_id"),
+                    r.get::<String, _>("existing_reference_id"),
+                )
+            })
+        }
+        Backend::Postgres => {
+            let row = sqlx::query(
+                "SELECT candidate_reference_id::text, existing_reference_id::text
+                   FROM media_match_proposals WHERE id = $1::uuid",
+            )
+            .bind(proposal_id)
+            .fetch_optional(db.postgres_pool().expect("postgres"))
+            .await?;
+            row.map(|r| {
+                (
+                    r.get::<String, _>("candidate_reference_id"),
+                    r.get::<String, _>("existing_reference_id"),
+                )
+            })
+        }
+    };
+    let Some((candidate, existing)) = pair else {
+        return Err(sqlx::Error::RowNotFound);
+    };
+    // A proposal naming its own reference as both ends would delete the row it
+    // is reading from and repoint every link at a row about to disappear.
+    if candidate == existing {
+        return Ok(());
+    }
+
+    match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().expect("sqlite");
+            // Work associations first: the candidate row's cascade would take
+            // them with it.
+            sqlx::query(
+                "UPDATE OR IGNORE work_media_references
+                    SET media_reference_id = ?
+                  WHERE media_reference_id = ?",
+            )
+            .bind(&existing)
+            .bind(&candidate)
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "UPDATE OR REPLACE availability_links
+                    SET media_reference_id = ?
+                  WHERE media_reference_id = ?",
+            )
+            .bind(&existing)
+            .bind(&candidate)
+            .execute(pool)
+            .await?;
+            sqlx::query("DELETE FROM media_references WHERE id = ?")
+                .bind(&candidate)
+                .execute(pool)
+                .await?;
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().expect("postgres");
+            sqlx::query(
+                "UPDATE work_media_references
+                    SET media_reference_id = $1::uuid
+                  WHERE media_reference_id = $2::uuid",
+            )
+            .bind(&existing)
+            .bind(&candidate)
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "UPDATE availability_links
+                    SET media_reference_id = $1::uuid
+                  WHERE media_reference_id = $2::uuid",
+            )
+            .bind(&existing)
+            .bind(&candidate)
+            .execute(pool)
+            .await?;
+            // The candidate may itself be the candidate of another pending
+            // proposal -- two near-duplicates of the same image. Those are
+            // re-pointed at the surviving reference rather than left dangling,
+            // which the two foreign keys on media_match_proposals would
+            // otherwise refuse.
+            sqlx::query(
+                "UPDATE media_match_proposals
+                    SET candidate_reference_id = $1::uuid
+                  WHERE candidate_reference_id = $2::uuid",
+            )
+            .bind(&existing)
+            .bind(&candidate)
+            .execute(pool)
+            .await?;
+            sqlx::query("DELETE FROM media_references WHERE id = $1::uuid")
+                .bind(&candidate)
+                .execute(pool)
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+/// The proposals a curator still has to act on.
+///
+/// Ordered by confidence descending, then by id, so two equally-confident
+/// proposals have a stable order across calls and a paginating caller cannot
+/// loop. `LIMIT` is required: a fetch storm on one popular image produces a
+/// proposal per importing work, and a curator queue that grows without bound is
+/// the failure mode this function exists to avoid.
+pub async fn list_pending_match_proposals(
+    db: &Database,
+    limit: i64,
+) -> Result<Vec<PendingProposal>, sqlx::Error> {
+    // A negative limit is a caller's bug, not a query; `LIMIT -1` means "no
+    // limit" in both dialects, which is the opposite of what was asked for.
+    let limit = limit.clamp(1, 200);
+    // Fetch per backend, map in each arm, push into one `out`. A shared row
+    // mapper would need `sqlx::any::AnyRow`, and the `any` feature is not
+    // enabled in this workspace -- the same reason the neighbouring readers are
+    // written this way.
+    let mut out: Vec<PendingProposal> = Vec::new();
+    match db.backend() {
+        Backend::Sqlite => {
+            let rows = sqlx::query(
+                "SELECT p.id, p.candidate_reference_id, p.existing_reference_id,
+                        p.content_hash, p.perceptual_hash, p.hamming_distance,
+                        p.match_confidence, p.status, p.resolved_by,
+                        p.resolution_note, p.created_at, p.updated_at,
+                        p.resolved_at, mr.content_hash AS existing_content_hash
+                   FROM media_match_proposals p
+                   JOIN media_references mr ON mr.id = p.existing_reference_id
+                  WHERE p.status = 'pending'
+                  ORDER BY p.match_confidence DESC, p.id
+                  LIMIT ?",
+            )
+            .bind(limit)
+            .fetch_all(db.sqlite_pool().expect("sqlite"))
+            .await?;
+            for row in rows {
+                let id: String = row.get("id");
+                let candidate_reference_id: String = row.get("candidate_reference_id");
+                let existing_reference_id: String = row.get("existing_reference_id");
+                let content_hash: String = row.get("content_hash");
+                let perceptual_hash: Option<String> = row.get("perceptual_hash");
+                let hamming_distance: i32 = row.get("hamming_distance");
+                let match_confidence: f64 = row.get("match_confidence");
+                let status: String = row.get("status");
+                let resolved_by: Option<String> = row.get("resolved_by");
+                let resolution_note: Option<String> = row.get("resolution_note");
+                let created_at: String = row.get("created_at");
+                let updated_at: String = row.get("updated_at");
+                let resolved_at: Option<String> = row.get("resolved_at");
+                let existing_content_hash: String = row.get("existing_content_hash");
+                out.push(PendingProposal {
+                    proposal: MatchProposal {
+                        id,
+                        candidate_reference_id,
+                        existing_reference_id,
+                        content_hash,
+                        perceptual_hash,
+                        hamming_distance,
+                        match_confidence,
+                        status,
+                        resolved_by,
+                        resolution_note,
+                        created_at,
+                        updated_at,
+                        resolved_at,
+                    },
+                    existing_content_hash,
+                });
+            }
+        }
+        Backend::Postgres => {
+            // Read by name into Strings, so every column PostgreSQL does not
+            // already store as text is cast: the ids are UUID, the timestamps
+            // TIMESTAMPTZ, `hamming_distance` INT4 and `match_confidence` REAL.
+            let rows = sqlx::query(
+                "SELECT p.id::text, p.candidate_reference_id::text,
+                        p.existing_reference_id::text, p.content_hash,
+                        p.perceptual_hash, p.hamming_distance::int,
+                        p.match_confidence::float8, p.status, p.resolved_by,
+                        p.resolution_note, p.created_at::text,
+                        p.updated_at::text, p.resolved_at::text,
+                        mr.content_hash AS existing_content_hash
+                   FROM media_match_proposals p
+                   JOIN media_references mr ON mr.id = p.existing_reference_id
+                  WHERE p.status = 'pending'
+                  ORDER BY p.match_confidence DESC, p.id
+                  LIMIT $1",
+            )
+            .bind(limit)
+            .fetch_all(db.postgres_pool().expect("postgres"))
+            .await?;
+            for row in rows {
+                let id: String = row.get("id");
+                let candidate_reference_id: String = row.get("candidate_reference_id");
+                let existing_reference_id: String = row.get("existing_reference_id");
+                let content_hash: String = row.get("content_hash");
+                let perceptual_hash: Option<String> = row.get("perceptual_hash");
+                let hamming_distance: i32 = row.get("hamming_distance");
+                let match_confidence: f64 = row.get("match_confidence");
+                let status: String = row.get("status");
+                let resolved_by: Option<String> = row.get("resolved_by");
+                let resolution_note: Option<String> = row.get("resolution_note");
+                let created_at: String = row.get("created_at");
+                let updated_at: String = row.get("updated_at");
+                let resolved_at: Option<String> = row.get("resolved_at");
+                let existing_content_hash: String = row.get("existing_content_hash");
+                out.push(PendingProposal {
+                    proposal: MatchProposal {
+                        id,
+                        candidate_reference_id,
+                        existing_reference_id,
+                        content_hash,
+                        perceptual_hash,
+                        hamming_distance,
+                        match_confidence,
+                        status,
+                        resolved_by,
+                        resolution_note,
+                        created_at,
+                        updated_at,
+                        resolved_at,
+                    },
+                    existing_content_hash,
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Read one pending proposal's distance and confidence, for the auto-attach
+/// decision the spec's `require_curator_confirmation_above` config drives.
+///
+/// `None` when there is no such pending proposal.
+pub async fn find_match_proposal(
+    db: &Database,
+    proposal_id: &str,
+) -> Result<Option<MatchProposal>, sqlx::Error> {
+    // Same reason as `resolve_match_proposal`: `$1::uuid` raises on a malformed
+    // id while SQLite matches nothing, and the two must answer the same way.
+    if !match_proposal_id_is_valid(proposal_id) {
+        return Ok(None);
+    }
+    match db.backend() {
+        Backend::Sqlite => {
+            let row = sqlx::query(
+                "SELECT id, candidate_reference_id, existing_reference_id, content_hash,
+                        perceptual_hash, hamming_distance, match_confidence, status,
+                        resolved_by, resolution_note, created_at, updated_at, resolved_at
+                   FROM media_match_proposals WHERE id = ?",
+            )
+            .bind(proposal_id)
+            .fetch_optional(db.sqlite_pool().expect("sqlite"))
+            .await?;
+            Ok(row.map(|r| MatchProposal {
+                id: r.get("id"),
+                candidate_reference_id: r.get("candidate_reference_id"),
+                existing_reference_id: r.get("existing_reference_id"),
+                content_hash: r.get("content_hash"),
+                perceptual_hash: r.get("perceptual_hash"),
+                hamming_distance: r.get("hamming_distance"),
+                match_confidence: r.get("match_confidence"),
+                status: r.get("status"),
+                resolved_by: r.get("resolved_by"),
+                resolution_note: r.get("resolution_note"),
+                created_at: r.get("created_at"),
+                updated_at: r.get("updated_at"),
+                resolved_at: r.get("resolved_at"),
+            }))
+        }
+        Backend::Postgres => {
+            let row = sqlx::query(
+                "SELECT id::text, candidate_reference_id::text,
+                        existing_reference_id::text, content_hash, perceptual_hash,
+                        hamming_distance::int, match_confidence::float8, status,
+                        resolved_by, resolution_note, created_at::text,
+                        updated_at::text, resolved_at::text
+                   FROM media_match_proposals WHERE id = $1::uuid",
+            )
+            .bind(proposal_id)
+            .fetch_optional(db.postgres_pool().expect("postgres"))
+            .await?;
+            Ok(row.map(|r| MatchProposal {
+                id: r.get("id"),
+                candidate_reference_id: r.get("candidate_reference_id"),
+                existing_reference_id: r.get("existing_reference_id"),
+                content_hash: r.get("content_hash"),
+                perceptual_hash: r.get("perceptual_hash"),
+                hamming_distance: r.get("hamming_distance"),
+                match_confidence: r.get("match_confidence"),
+                status: r.get("status"),
+                resolved_by: r.get("resolved_by"),
+                resolution_note: r.get("resolution_note"),
+                created_at: r.get("created_at"),
+                updated_at: r.get("updated_at"),
+                resolved_at: r.get("resolved_at"),
+            }))
+        }
+    }
+}
+
+/// How many proposals are waiting. Distinct from `list_pending` because a count
+/// does not have to be bounded, and an unbounded count is what tells a curator
+/// the queue is growing.
+pub async fn count_pending_match_proposals(db: &Database) -> Result<i64, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let row = sqlx::query(
+                "SELECT COUNT(*) AS n FROM media_match_proposals WHERE status = 'pending'",
+            )
+            .fetch_one(db.sqlite_pool().expect("sqlite"))
+            .await?;
+            Ok(row.get::<i64, _>("n"))
+        }
+        Backend::Postgres => {
+            let row = sqlx::query(
+                "SELECT COUNT(*)::bigint AS n
+                   FROM media_match_proposals WHERE status = 'pending'",
+            )
+            .fetch_one(db.postgres_pool().expect("postgres"))
+            .await?;
+            Ok(row.get::<i64, _>("n"))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Phase 5 (§32.7.3 & §32.7.7): Reverse search & discovery
 // ---------------------------------------------------------------------------
 
