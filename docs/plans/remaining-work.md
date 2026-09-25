@@ -11,9 +11,9 @@ canonical feature inventory and the roadmap-board seed).
 
 ## Where the build actually stands (re-derived 2026-09-25)
 
-Verified from `docs/requirements.csv`: **195 rows implemented**
-(175 locally-tested, 20 fully-tested), **57 planned**, **4 deliberately
-unsupported**, 256 rows total. 51 milestone test files through M45, migrations to
+Verified from `docs/requirements.csv`: **196 rows implemented**
+(176 locally-tested, 20 fully-tested), **57 planned**, **4 deliberately
+unsupported**, 257 rows total. 51 milestone test files through M45, migrations to
 0071, 37 frontend routes, tags through `v0.51.0`. The
 platform core (M0–M15), the forum series (M31–M35), media resilience
 (M48–M51), roadmap consensus (M45), browse ordering (M43), export CTAs

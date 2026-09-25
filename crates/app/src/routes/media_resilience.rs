@@ -169,10 +169,19 @@ pub async fn add_media_reference(
     .await
     .map_err(|e| ApiError(AppError::Internal(e)))?;
 
+    // The hashing happens in the worker, not here: the URL is author-supplied
+    // and the fetch must not hold the author's request open. The payload names
+    // only the reference, so a job row never carries the URL, and a corrected
+    // link is picked up by a retry.
+    let job_id = crate::media_job::enqueue_media_fetch(state.db(), &reference_id)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+
     Ok((
         StatusCode::CREATED,
         Json(json!({
             "id": reference_id,
+            "fingerprint_job_id": job_id,
             "link_id": link_id,
             "status": "pending_verification"
         })),

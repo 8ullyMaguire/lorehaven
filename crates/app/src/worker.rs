@@ -108,6 +108,17 @@ pub enum HandlerError {
     Cancelled,
 }
 
+impl std::fmt::Display for HandlerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Transient(message) | Self::Fatal(message) => write!(f, "{message}"),
+            Self::Cancelled => f.write_str("cancelled"),
+        }
+    }
+}
+
+impl std::error::Error for HandlerError {}
+
 impl HandlerError {
     /// The message recorded against the attempt.
     #[must_use]
@@ -530,6 +541,10 @@ impl Worker {
             JobKind::Narration => {
                 let edition_id = Self::payload_id(&job.payload, "edition_id", kind.as_str())?;
                 crate::narration::handle_narration(state, id, &edition_id).await
+            }
+            JobKind::MediaFetch => {
+                let reference_id = Self::payload_id(&job.payload, "reference_id", kind.as_str())?;
+                crate::media_job::handle_media_fetch(state, &reference_id, None).await
             }
             JobKind::BulkExport => {
                 let payload = serde_json::from_str(&job.payload).map_err(|error| {

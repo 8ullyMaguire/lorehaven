@@ -214,7 +214,28 @@ pub fn content_hash(bytes: &[u8]) -> String {
 /// # Errors
 /// A message naming the reason, so the author's media row can say why it was
 /// not fetched rather than failing anonymously.
-pub fn plan_fetch(url: &reqwest::Url, _timeout: Duration) -> Result<FetchPlan, String> {
+pub fn plan_fetch(url: &reqwest::Url, timeout: Duration) -> Result<FetchPlan, String> {
+    plan_fetch_allowing(url, &[], timeout)
+}
+
+/// [`plan_fetch`], with a one-address allowlist that bypasses the *address* check
+/// for exactly those addresses.
+///
+/// The scheme, local-name and resolution checks all still run. This exists so a
+/// test can fetch from a loopback server without the guard being bypassed
+/// wholesale: an `if` around the whole check would leave a second, untested path
+/// through the most security-sensitive function in the chain, and a reviewer
+/// could not tell which branch production takes. Here production passes an empty
+/// allowlist and the refusal is the only path that exists for real traffic.
+///
+/// An allowlisted address still has to be one the server actually connects to,
+/// so this cannot be used to point a fetch at a *different* host than the URL
+/// names — the caller that resolves the host applies the same allowlist.
+pub fn plan_fetch_allowing(
+    url: &reqwest::Url,
+    allow: &[IpAddr],
+    _timeout: Duration,
+) -> Result<FetchPlan, String> {
     match url.scheme() {
         "http" | "https" => {}
         other => return Err(format!("{other} is not a fetchable scheme")),
@@ -229,17 +250,19 @@ pub fn plan_fetch(url: &reqwest::Url, _timeout: Duration) -> Result<FetchPlan, S
     // A literal address needs no resolver and must not get one.
     match host {
         url::Host::Ipv4(v4) => {
-            if is_forbidden(IpAddr::V4(v4)) {
+            if is_forbidden(IpAddr::V4(v4)) && !allow.contains(&IpAddr::V4(v4)) {
                 return Err(format!("{v4} is not a routable public address"));
             }
         }
         url::Host::Ipv6(v6) => {
-            if is_forbidden(IpAddr::V6(v6)) {
+            if is_forbidden(IpAddr::V6(v6)) && !allow.contains(&IpAddr::V6(v6)) {
                 return Err(format!("{v6} is not a routable public address"));
             }
         }
         url::Host::Domain(name) => {
-            if lorehaven_scrapers::safety::is_local_hostname(name) {
+            if lorehaven_scrapers::safety::is_local_hostname(name)
+                && !allowlisted_domain(name, allow)
+            {
                 return Err(format!("{name} is a local name"));
             }
         }
@@ -251,6 +274,18 @@ pub fn plan_fetch(url: &reqwest::Url, _timeout: Duration) -> Result<FetchPlan, S
         host,
         insecure: url.scheme() == "http",
     })
+}
+
+/// Whether a hostname is served by one of the allowlisted addresses.
+///
+/// Only a test ever passes a non-empty allowlist, and only ever against a bare
+/// loopback literal like `127.0.0.1` or `[::1]`, which `Url` reports as a
+/// `Host::Ipv4`/`Host::Ipv6` rather than a `Domain` — so a domain reaches this
+/// only when a caller allowlisted a literal, which is not the same address. The
+/// conservative answer is therefore `false`: a name is never allowlisted, and the
+/// test path keeps working through the address arms above.
+fn allowlisted_domain(_name: &str, _allow: &[IpAddr]) -> bool {
+    false
 }
 
 /// Whether an address must never be connected to.
@@ -320,4 +355,105 @@ pub fn classify_with_length(
         });
     }
     Ok(FetchOutcome::Media)
+}
+
+// ---------------------------------------------------------------------------
+// Test-support image builders
+// ---------------------------------------------------------------------------
+
+/// A real 4x4 RGB PNG, for tests that need bytes a decoder accepts.
+///
+/// Built by hand rather than checked in as a fixture binary: a 68-byte PNG is
+/// easier to review as code than as a blob, and it cannot drift from the
+/// encoding it is supposed to represent. `push_chunk` writes the CRC the PNG
+/// spec requires, and `zlib_store` emits *stored* (uncompressed) deflate blocks
+/// so no compressor dependency is needed either.
+#[must_use]
+pub fn test_support_png_4x4() -> Vec<u8> {
+    let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&4u32.to_be_bytes());
+    ihdr.extend_from_slice(&4u32.to_be_bytes());
+    ihdr.push(8); // bit depth
+    ihdr.push(2); // colour type: truecolour RGB
+    ihdr.extend_from_slice(&[0, 0, 0]);
+    push_chunk(&mut png, b"IHDR", &ihdr);
+
+    let mut raw = Vec::new();
+    for row in 0..4u8 {
+        raw.push(0); // filter: None
+        for col in 0..4u8 {
+            raw.push(col * 60); // red rises left to right
+            raw.push(row * 60); // green rises top to bottom
+            raw.push(128);
+        }
+    }
+    push_chunk(&mut png, b"IDAT", &zlib_store(&raw));
+    push_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+/// A 16x16 greyscale PNG whose brightness rises left to right on every row, so
+/// every one of dHash's 64 comparisons says "brighter to the right" and the
+/// perceptual hash is `ffffffffffffffff`.
+///
+/// That is the one image whose perceptual hash can be checked by hand, which is
+/// what makes it worth having separately from the 4x4 case.
+#[must_use]
+pub fn test_support_ramp_png() -> Vec<u8> {
+    let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&16u32.to_be_bytes());
+    ihdr.extend_from_slice(&16u32.to_be_bytes());
+    ihdr.push(8);
+    ihdr.push(0); // greyscale
+    ihdr.extend_from_slice(&[0, 0, 0]);
+    push_chunk(&mut png, b"IHDR", &ihdr);
+
+    let mut raw = Vec::with_capacity(16 * 17);
+    for _ in 0..16u32 {
+        raw.push(0);
+        raw.extend((0..16u16).map(|col| (col * 17) as u8));
+    }
+    push_chunk(&mut png, b"IDAT", &zlib_store(&raw));
+    push_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+fn push_chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    out.extend_from_slice(kind);
+    out.extend_from_slice(data);
+    out.extend_from_slice(&png_crc(kind, data));
+}
+
+/// The PNG CRC over the chunk type and its data, per the spec's polynomial.
+fn png_crc(kind: &[u8; 4], data: &[u8]) -> [u8; 4] {
+    let mut crc = 0xffff_ffffu32;
+    for byte in kind.iter().chain(data.iter()) {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            let mask = if crc & 1 != 0 { 0xedb8_8320 } else { 0 };
+            crc = (crc >> 1) ^ mask;
+        }
+    }
+    (crc ^ 0xffff_ffff).to_be_bytes()
+}
+
+/// zlib "stored" (uncompressed) deflate: a 2-byte header, stored blocks, and
+/// Adler-32. Valid zlib, so a real decoder accepts it, and small enough to
+/// write out by hand.
+fn zlib_store(data: &[u8]) -> Vec<u8> {
+    let mut out = vec![0x78, 0x01];
+    out.push(0x01); // final stored block
+    out.extend_from_slice(&(data.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(!(data.len() as u16)).to_le_bytes());
+    out.extend_from_slice(data);
+    let (mut a, mut b) = (1u32, 0u32);
+    for byte in data {
+        a = (a + u32::from(*byte)) % 65521;
+        b = (b + a) % 65521;
+    }
+    out.extend_from_slice(&((b << 16) | a).to_be_bytes());
+    out
 }

@@ -26,6 +26,7 @@ pub mod limiter;
 pub mod logging;
 pub mod longevity;
 pub mod media_fetch;
+pub mod media_job;
 pub mod narration;
 pub mod privacy;
 pub mod rec_engine;

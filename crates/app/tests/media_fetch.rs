@@ -263,73 +263,14 @@ fn classify_response_with_length(
 // real encoded image, because the whole point of adding a decoder is that a
 // fetched JPEG or PNG stops yielding a NULL perceptual hash.
 
-/// A 4x4 PNG built by hand: 8-byte signature, IHDR, 16 bytes of RGB rows,
-/// IEND. Small enough to inline and real enough to decode.
-fn tiny_png() -> Vec<u8> {
-    let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
-
-    let mut ihdr = Vec::new();
-    ihdr.extend_from_slice(&4u32.to_be_bytes()); // width
-    ihdr.extend_from_slice(&4u32.to_be_bytes()); // height
-    ihdr.push(8); // bit depth
-    ihdr.push(2); // colour type: truecolour RGB
-    ihdr.extend_from_slice(&[0, 0, 0]); // compression, filter, interlace
-    push_chunk(&mut png, b"IHDR", &ihdr);
-
-    // One filter byte (0 = None) then 4 pixels of 3 bytes each, per row.
-    let mut raw = Vec::new();
-    for row in 0..4u8 {
-        raw.push(0);
-        for col in 0..4u8 {
-            raw.push(col * 60); // red rises left to right
-            raw.push(row * 60); // green rises top to bottom
-            raw.push(128);
-        }
-    }
-    push_chunk(&mut png, b"IDAT", &zlib_store(&raw));
-    push_chunk(&mut png, b"IEND", &[]);
-    png
-}
-
-fn push_chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
-    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
-    out.extend_from_slice(kind);
-    out.extend_from_slice(data);
-    // CRC over type+data. zlib's crc32 is not in our dep tree, so use the PNG
-    // spec's polynomial directly - a 4x4 image is not worth a dependency for.
-    let mut crc = 0xffff_ffffu32;
-    for byte in kind.iter().chain(data.iter()) {
-        crc ^= u32::from(*byte);
-        for _ in 0..8 {
-            let mask = if crc & 1 != 0 { 0xedb8_8320 } else { 0 };
-            crc = (crc >> 1) ^ mask;
-        }
-    }
-    out.extend_from_slice(&(crc ^ 0xffff_ffff).to_be_bytes());
-}
-
-/// zlib "stored" (uncompressed) deflate: 2-byte header, stored blocks, Adler-32.
-fn zlib_store(data: &[u8]) -> Vec<u8> {
-    let mut out = vec![0x78, 0x01];
-    out.push(0x01); // final stored block
-    out.extend_from_slice(&(data.len() as u16).to_le_bytes());
-    out.extend_from_slice(&(!(data.len() as u16)).to_le_bytes());
-    out.extend_from_slice(data);
-    let (mut a, mut b) = (1u32, 0u32);
-    for byte in data {
-        a = (a + u32::from(*byte)) % 65521;
-        b = (b + a) % 65521;
-    }
-    out.extend_from_slice(&((b << 16) | a).to_be_bytes());
-    out
-}
-
 #[test]
 fn a_real_png_is_decoded_and_fingerprinted() {
     // Before a decoder existed this returned a NULL perceptual hash. A real
     // encoded image must now produce a real fingerprint with real dimensions.
-    let fp =
-        lorehaven_app::media_fetch::fingerprint_encoded(&tiny_png()).expect("a valid PNG decodes");
+    let fp = lorehaven_app::media_fetch::fingerprint_encoded(
+        &lorehaven_app::media_fetch::test_support_png_4x4(),
+    )
+    .expect("a valid PNG decodes");
     assert_eq!(fp.width, 4);
     assert_eq!(fp.height, 4);
     let perceptual = fp
@@ -350,7 +291,7 @@ fn a_png_and_a_re_encoded_copy_agree_within_the_default_threshold() {
     // not byte-identical but must be recognised. This is the end-to-end
     // property the dedup feature rests on, and it is only reachable with a
     // decoder in the tree.
-    let original = tiny_png();
+    let original = lorehaven_app::media_fetch::test_support_png_4x4();
     // A copy with different filter bytes and zlib framing but identical pixels
     // decodes to the same image, so the perceptual hashes must match.
     let copy = reencoded_copy(&original);
@@ -374,7 +315,7 @@ fn a_corrupt_image_decodes_to_nothing_rather_than_to_a_guess() {
     // A truncated PNG, and a body that is not an image at all. Both must be
     // refused: a perceptual hash of a partial image is a fingerprint of a
     // picture nobody attached.
-    let mut truncated = tiny_png();
+    let mut truncated = lorehaven_app::media_fetch::test_support_png_4x4();
     truncated.truncate(truncated.len() - 12);
     assert!(lorehaven_app::media_fetch::fingerprint_encoded(&truncated).is_none());
 
@@ -388,7 +329,7 @@ fn an_image_with_one_broken_row_does_not_silently_hash_the_rest() {
     // actual row data. Decoders are lenient here; a lenient decode produces a
     // fingerprint of a partly-black image, which then matches other partly-
     // black images. Refusing is the honest answer.
-    let mut png = tiny_png();
+    let mut png = lorehaven_app::media_fetch::test_support_png_4x4();
     // Rewrite the height to 64 while keeping 4 rows of data.
     let ihdr_len = (13u32).to_be_bytes();
     let pos = png
@@ -427,18 +368,18 @@ fn reencoded_copy(original: &[u8]) -> Vec<u8> {
     chunk.extend_from_slice(&(text.len() as u32).to_be_bytes());
     chunk.extend_from_slice(b"tEXt");
     chunk.extend_from_slice(text);
-    chunk.extend_from_slice(&png_crc(&chunk[4..]));
+    chunk.extend_from_slice(&local_png_crc(&chunk[4..]));
 
     copy.splice(iend..iend, chunk);
     copy
 }
 
 fn fix_ihdr_crc(png: &mut [u8], pos: usize) {
-    let crc = png_crc(&png[pos + 4..pos + 4 + 4 + 13]);
+    let crc = local_png_crc(&png[pos + 4..pos + 4 + 4 + 13]);
     png[pos + 4 + 4 + 13..pos + 4 + 4 + 13 + 4].copy_from_slice(&crc);
 }
 
-fn png_crc(bytes: &[u8]) -> [u8; 4] {
+fn local_png_crc(bytes: &[u8]) -> [u8; 4] {
     let mut crc = 0xffff_ffffu32;
     for byte in bytes {
         crc ^= u32::from(*byte);
@@ -522,4 +463,37 @@ fn png_of_size(width: u32, height: u32) -> Vec<u8> {
     push_chunk(&mut png, b"IDAT", &zlib_store(&raw));
     push_chunk(&mut png, b"IEND", &[]);
     png
+}
+
+// Local minimal PNG writers: the library's builders are fixed-size, and these
+// tests need images of a *declared* size (including sizes far larger than the
+// data present, which is what a decompression bomb looks like).
+fn push_chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    out.extend_from_slice(kind);
+    out.extend_from_slice(data);
+    let mut crc = 0xffff_ffffu32;
+    for byte in kind.iter().chain(data.iter()) {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            let mask = if crc & 1 != 0 { 0xedb8_8320 } else { 0 };
+            crc = (crc >> 1) ^ mask;
+        }
+    }
+    out.extend_from_slice(&(crc ^ 0xffff_ffff).to_be_bytes());
+}
+
+fn zlib_store(data: &[u8]) -> Vec<u8> {
+    let mut out = vec![0x78, 0x01];
+    out.push(0x01);
+    out.extend_from_slice(&(data.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(!(data.len() as u16)).to_le_bytes());
+    out.extend_from_slice(data);
+    let (mut a, mut b) = (1u32, 0u32);
+    for byte in data {
+        a = (a + u32::from(*byte)) % 65521;
+        b = (b + a) % 65521;
+    }
+    out.extend_from_slice(&((b << 16) | a).to_be_bytes());
+    out
 }
