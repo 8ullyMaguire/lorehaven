@@ -2,6 +2,7 @@
 
 pub mod account_permissions;
 pub mod admin;
+pub mod analytics;
 pub mod arena;
 pub mod audience;
 pub mod auth;

@@ -31,8 +31,17 @@ pub fn router() -> Router<AppState> {
 /// An empty query returns an empty page rather than every pseudonym on the
 /// instance, which on a large one is a phone book and a denial of service at
 /// the same time.
+///
+/// The `MaybeSession` extractor is declared but unused, and that is
+/// deliberate. This is an anonymous surface, so nothing about the viewer
+/// changes the result -- but a handler with no session extractor has no way
+/// to *become* viewer-aware later without someone noticing the query needs
+/// revisiting, and the route inventory asserts that a public route declares
+/// its audience. The extractor is how this route states "anonymous, on
+/// purpose".
 async fn users_search(
     State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
     Query(params): Query<UserSearchQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let results =
