@@ -3646,6 +3646,22 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/operator/taste-profile",
         audience: Audience::Authenticated,
     },
+    // F1/F2: the taste knobs are a versioned object, so the history and the
+    // rollback are operator doors like the settings they change.
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "get_admin_taste_profile_history",
+        method: "GET",
+        path: "/operator/taste-profile/history",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "rollback_admin_taste_profile",
+        method: "POST",
+        path: "/operator/taste-profile/history/{history_id}/rollback",
+        audience: Audience::Authenticated,
+    },
     RouteEntry {
         file: "discovery.rs",
         handler: "get_my_streak",

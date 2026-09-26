@@ -872,6 +872,150 @@ async fn an_untouched_instance_reports_the_config_it_is_running_on() {
     }
 }
 
+#[tokio::test]
+async fn an_operators_taste_knob_changes_are_remembered_so_they_can_be_rolled_back() {
+    // F1 asks for taste as a versioned object and F2 for config history and
+    // rollback. Both are unsatisfiable while the settings row is a singleton that
+    // overwrites: the previous value is gone before anyone can read it. So every
+    // write appends the state it replaced, and a rollback restores it.
+    let harness = Harness::with_operator("rollback", "Roller").await;
+    let mut operator = harness.reader("Roller").await;
+    let path = "/api/v1/operator/taste-profile";
+
+    let (status, body) = operator.put(path, json!({ "gravity_strength": 300 })).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let (status, body) = operator.put(path, json!({ "gravity_strength": 800 })).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+
+    // Two writes, so the history holds the state the second one replaced.
+    let (status, hist) = operator.get("/api/v1/operator/taste-profile/history").await;
+    assert_eq!(status, StatusCode::OK, "body: {hist}");
+    let items = hist["items"].as_array().expect("items");
+    assert_eq!(items.len(), 2, "one history entry per write: {hist}");
+    assert_eq!(items[0]["gravity_strength"], 300, "newest first: {hist}");
+    assert_eq!(items[0]["replaced_version"], 1);
+    assert_eq!(
+        items[1]["replaced_version"],
+        serde_json::Value::Null,
+        "the first write replaced the config file, not a version: {hist}"
+    );
+
+    // Roll back to the entry recording 300. Each row is the state a write
+    // *replaced*, so the row holding 300 was written by the second save -- which
+    // is why the list is newest-first.
+    let target = items[0]["history_id"]
+        .as_str()
+        .expect("history id")
+        .to_owned();
+    let (status, body) = operator
+        .post(
+            &format!("/api/v1/operator/taste-profile/history/{target}/rollback"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["status"], "rolled_back");
+    assert_eq!(
+        body["restored"]["gravity_strength"], 300,
+        "restored the old value"
+    );
+
+    // The instance is running the restored value.
+    let (_, now) = operator.get(path).await;
+    assert_eq!(
+        now["gravity_strength"], 300,
+        "the rollback took effect: {now}"
+    );
+}
+
+#[tokio::test]
+async fn a_rollback_is_itself_recorded_rather_than_erasing_the_trail() {
+    // A rollback that deleted its own evidence would leave a history claiming a
+    // change nobody made, and would make two rollbacks a toggle between two
+    // states instead of a walk backwards through the history.
+    let harness = Harness::with_operator("rollaudit", "Roller2").await;
+    let mut operator = harness.reader("Roller2").await;
+    let path = "/api/v1/operator/taste-profile";
+
+    for strength in [100, 200, 300] {
+        let (status, body) = operator
+            .put(path, json!({ "gravity_strength": strength }))
+            .await;
+        assert_eq!(status, StatusCode::OK, "body: {body}");
+    }
+
+    let (_, hist) = operator.get("/api/v1/operator/taste-profile/history").await;
+    let items = hist["items"].as_array().expect("items");
+    assert_eq!(items.len(), 3, "three writes, three entries: {hist}");
+    let target = items[2]["history_id"].as_str().expect("id").to_owned();
+    let (status, body) = operator
+        .post(
+            &format!("/api/v1/operator/taste-profile/history/{target}/rollback"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+
+    // A fourth entry, authored: the rollback is a write like any other.
+    let (_, hist) = operator.get("/api/v1/operator/taste-profile/history").await;
+    let items = hist["items"].as_array().expect("items");
+    assert_eq!(items.len(), 4, "the rollback is in the history: {hist}");
+    let account = account_of(&harness.db, "Roller2").await;
+    assert_eq!(
+        items[0]["changed_by"].as_str().expect("author"),
+        account.to_string(),
+        "and it says who did it"
+    );
+}
+
+#[tokio::test]
+async fn rolling_back_to_a_history_id_that_does_not_exist_is_a_404() {
+    // The caller named a thing that is not there. That is a client error, not
+    // an internal failure, and a 500 here would tell an operator the instance
+    // is broken when their link is stale.
+    let harness = Harness::with_operator("roll404", "Roller3").await;
+    let mut operator = harness.reader("Roller3").await;
+    let (status, _) = operator
+        .put(
+            "/api/v1/operator/taste-profile",
+            json!({ "gravity_strength": 100 }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = operator
+        .post(
+            "/api/v1/operator/taste-profile/history/00000000-0000-0000-0000-000000000000/rollback",
+            json!({}),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "a stale rollback link is a 404"
+    );
+}
+
+#[tokio::test]
+async fn a_reader_cannot_read_the_taste_history_or_roll_it_back() {
+    let harness = Harness::new("rollgate").await;
+    let mut reader = harness.reader("Nosy2").await;
+    let (status, _) = reader.get("/api/v1/operator/taste-profile/history").await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "the history is an operator door"
+    );
+
+    let (status, _) = reader
+        .post(
+            "/api/v1/operator/taste-profile/history/00000000-0000-0000-0000-000000000000/rollback",
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "so is the rollback");
+}
+
 // ---------------------------------------------------------------------------
 // (a) every slot explains itself
 // ---------------------------------------------------------------------------
