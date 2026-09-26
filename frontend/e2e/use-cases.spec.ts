@@ -11,11 +11,24 @@ import { expect, test, type Page } from '@playwright/test';
  * being notified, keeping preferences, picking an identity, posting to the
  * forum, exporting, and hitting a missing page.
  *
- * Each test is self-sufficient: it makes its own account and finds its own way
- * to the content, because Playwright restarts the worker after a failure and
- * anything held in a module variable would be gone. Finding the work through
- * the search box on the way in also means every test that needs it re-tests
- * that path.
+ * Each test makes its own account, because Playwright restarts the worker after
+ * a failure and anything held in a module variable would be gone. Finding the
+ * work through the search box on the way in also means every test that needs it
+ * re-tests that path.
+ *
+ * It is not self-sufficient in the way the comment here used to claim, and the
+ * difference is worth being precise about. The account is per-test; **the work
+ * is not**. `findWork` looks up `WORK_TITLE`, which test 7 publishes, and ten
+ * tests call it. So this file is order-dependent by design -- `workers: 1` plus
+ * a numbered sequence is what makes it work -- and selecting a subset with `-g`
+ * will fail any test that needs the work, with a timeout waiting for a link
+ * that will never appear.
+ *
+ * That is an acceptable trade for a breadth-over-depth suite: publishing a work
+ * per test would make twenty tests each pay for a full write-publish cycle and
+ * still leave every test sharing one instance. But it has to be *stated*, since
+ * the previous version of this comment asserted the opposite and sent me looking
+ * for a product bug that was not there.
  */
 
 const PASSPHRASE = 'use-case-passphrase-1';
