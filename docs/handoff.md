@@ -204,31 +204,58 @@ identical values for identical rules.
 
 ## Still open
 
-1. **`GET /discovery/slots/{slot_id}/explanation` is a stub.** Not an unfiltered
-   surface — a fabricated one. It returns hardcoded strings
-   (`"taste_signal: matching your reading history"`, `filter: Some("...")`) for
-   any `slot_id`, touches no database, and takes `MaybeSession(_session)` so it
-   cannot even tell who is asking. A filter is irrelevant here: there is no real
-   answer to filter. This needs implementing against the actual recommendation
-   run that produced the slot, which means the explanation has to be recorded at
-   selection time — the current blend is in-memory per request, so nothing about
-   a slot survives to be explained. That is the design decision to make first.
+1. **M29 recommendation transparency is not implemented at all.** Both endpoints
+   are fabricated, and this is the next milestone-sized piece of work.
 
-   Two things to decide, and neither is mine to assume: whether an explanation is
-   stored per slot (and how long — slots are per-request today, so this implies
-   persisting the candidate set), and whether a reader who has content-filtered
-   the work should get a filtered explanation or a 404. A 404 leaks that the work
-   exists; a filtered explanation that still names the tag leaks the same thing
-   by another route. The spec's §46.7.1 "never bypassable from a surface" does
-   not settle it, because the leak is in the *reason*, not the work.
+   `GET /discovery/slots/{slot_id}/explanation` returns a hardcoded
+   `SlotExplanation` for *any* `slot_id` — `"taste_signal: matching your reading
+   history"`, every other field `None` — touches no database, and takes
+   `MaybeSession(_session)`, so it cannot even tell who is asking.
+   `GET /me/attention-report` returns `{enabled: false, lines: null}` regardless
+   of the reader's settings.
 
-2. **Notifications still do not filter.** `notifications::list` and
-   `unread_count` return notification rows, not works, so a blocked tag does not
-   currently appear in one. But a notification whose `subject` is a work will
-   carry that work's title, and `unread_count` would still count it — so a reader
-   who blocked a tag can see an unread badge for it. Needs a decision on whether
-   the count is filtered too, since a filtered-but-counted badge is the same leak
-   through a smaller door.
+   Worse, there is nothing for either to be right about. Grepping the tree for
+   `slot_id` finds 5 hits in the route file and 1 in a test; there is no table,
+   no writer, and the discovery route never emits a slot id. The blend in
+   `routes/discovery.rs` is in-memory per request, so nothing about a slot
+   survives to be explained afterwards. The endpoint is unreachable in practice
+   *and* unanswerable — a client cannot obtain a `slot_id` to ask about.
+
+   What §33.3 actually requires, since it settles the shape:
+   "Every recommended slot can name its reader-side reasons"; the explanation
+   "must never reveal the administrator's taste"; and for the attention report,
+   "private to its reader, includes at least one 'held back by your own
+   settings' line, and stays disabled until the reader enables it." The
+   `instance_curation` field's comment ("always shown as one undifferentiated
+   line") is a §29.2 arena-language requirement already half-honoured in the
+   struct.
+
+   The design decision that has to come first, because everything else follows
+   it: **persist the candidate set, or compute the explanation on demand?**
+   Persisting means a new table keyed by slot with a retention window, and it is
+   the only way to answer "why *this* one" after the request that produced it has
+   gone. Computing on demand means re-running the blend for the slot's inputs and
+   recording what the inputs were, which is cheaper but only correct if the
+   engines are deterministic for a recorded input — and they are not obviously
+   so, since the RRF blend depends on a registry that can be reconfigured between
+   requests.
+
+   The second decision is narrower and I have a recommendation: for a work the
+   reader has content-filtered, the explanation should return 404, not a filtered
+   reason. A 404 leaks that the work exists, but a reason that names the matching
+   tag leaks the same fact more explicitly, and §46.7.1 is about the work never
+   reaching the client at all. The honest answer is that a filtered work should
+   not have a slot to explain, and that is achieved upstream by the filter work
+   in this commit.
+
+2. **Notifications still do not filter, and the count is the sharp edge.**
+   `notifications::list` returns notification rows, not works, so a blocked tag
+   does not currently appear in one. But a notification whose subject is a work
+   carries that work's title, and `unread_count` counts it regardless — so a
+   reader who blocked a tag can still see an unread badge naming it. The count is
+   the harder half: a badge that is filtered from the list but still counted is the
+   same leak through a smaller door, and filtering the count means the number no
+   longer matches the list, which needs a stated convention.
 2. **No lint for a bare `?` reaching a PG pool.** That is the defect class that
    broke filters. I tried a regex rule and abandoned it: "is this literal the
    PostgreSQL arm" is not decidable from the text (three legal call shapes,
@@ -255,6 +282,21 @@ export LOREHAVEN_TEST_PG_URL='postgres://lorehaven:<pw>@127.0.0.1:55433/postgres
 cargo test --workspace --no-fail-fast
 unset LOREHAVEN_TEST_PG_URL && cargo test --workspace --no-fail-fast
 ```
+
+**Give every checkout its own `CARGO_TARGET_DIR`, including `git worktree`.**
+Setting up a worktree of the previous commit to get a pre-change baseline, I left
+it on the default `CARGO_TARGET_DIR` — the same one the main tree used. Cargo
+keys its fingerprint cache on the *package path*, not the source root, so the
+worktree's build overwrote the main tree's `lorehaven-app` lib artifact with one
+compiled from three-argument engine calls. The main tree then reported
+`E0061: unexpected argument #3 of type Option<Uuid>` at a call site I had
+already fixed, in code I had already built clean minutes earlier. It cost about
+twenty minutes of chasing a nonexistent regression before I noticed that
+`/tmp/lh-prev/crates/db/src/discovery.rs` has the *old* three-argument signature.
+
+If a build error contradicts something you verified minutes ago, suspect a shared
+target dir before you suspect your own edit. Check with a build in a fresh
+`CARGO_TARGET_DIR`; if that passes, the error was never yours.
 
 Use `-- --test-threads=2` on both runs. Fully parallel, the suite starves the
 rate-limit test (83 s on its own) and it fails for timing, not logic.
