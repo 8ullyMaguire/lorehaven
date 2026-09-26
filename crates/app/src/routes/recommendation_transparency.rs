@@ -30,7 +30,7 @@ use lorehaven_domain::recommendation_transparency::{
     validate_proposal, AttentionReport, SlotExplanation, WranglingKind,
 };
 
-use crate::auth::RequireSession;
+use crate::auth::{MaybeSession, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -54,6 +54,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/admin/tag-wrangling/proposals/{id}/revert",
             post(revert_wrangling),
+        )
+        .route(
+            "/admin/tag-wrangling/proposals/{id}/reject",
+            post(reject_wrangling),
         )
         .route("/tag-wrangling/log", get(public_wrangling_log))
 }
@@ -251,6 +255,10 @@ async fn propose_wrangling(
 #[derive(Debug, Deserialize)]
 pub struct PageQuery {
     pub limit: Option<i64>,
+    /// Which proposals to list. Absent means the pending queue, which is what
+    /// the moderation surface opens on; a steward can also ask for what has
+    /// already been decided.
+    pub status: Option<String>,
 }
 
 /// The moderation queue.
@@ -270,7 +278,12 @@ async fn list_wrangling_proposals(
     }
 
     let limit = q.limit.unwrap_or(50).clamp(1, 200);
-    let items = slots::list_pending_wrangling(state.db(), limit)
+    // An unrecognised status is an empty queue rather than an error, but it is
+    // checked against the column's own CHECK constraint first: a typo'd filter
+    // that silently returned everything would be the more dangerous answer.
+    let known = ["pending", "approved", "rejected", "reverted"];
+    let status = q.status.as_deref().filter(|s| known.contains(s));
+    let items = slots::list_wrangling(state.db(), status, limit)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     Ok(Json(json!({ "items": items })))
@@ -294,6 +307,53 @@ async fn approve_wrangling(
     Ok(Json(json!({ "id": id, "status": "approved" })))
 }
 
+/// Reject a proposal (operator only).
+///
+/// Rejecting is not a delete: §19's audit rule says a curation decision is
+/// recorded even when the answer is "no", so the row stays with `rejected` and
+/// the reason. A proposal that is merely pending is different again -- that one
+/// is still a question, and approving or rejecting it says which way it went.
+/// Reject a proposal (operator only).
+///
+/// Rejecting is not a delete: §19's audit rule says a curation decision is
+/// recorded even when the answer is "no", so the row stays with `rejected` and
+/// the reason. "The operator reviewed this merge and declined" and "this merge
+/// was never reviewed" are different facts, and collapsing them loses the
+/// second one.
+async fn reject_wrangling(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Json<Value>> {
+    let trust = caller_trust(&state, &user.account_id.to_string()).await;
+    if trust < TL_STEWARD {
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
+    }
+    let pseud = user
+        .pseud_id
+        .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "pseud" }))?;
+    let reason = body
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .unwrap_or("no reason given")
+        .to_string();
+    slots::reject_wrangling(state.db(), &id, &reason, pseud.into(), trust)
+        .await
+        .map_err(wrangle_error_from_anyhow)?;
+    Ok(Json(
+        json!({ "id": id, "status": "rejected", "reason": reason }),
+    ))
+}
+
+/// Undo an approved merge (operator only).
+///
+/// The reversal is a replay of the merge actions in the opposite order, read
+/// from `tag_wrangler_merge_actions` -- not an inference about what a merge
+/// "should have" touched. That is the difference between a revert that is exact
+/// and one that is merely plausible: a merge that retargeted two tags and
+/// deleted one, because a third tag already pointed at the target, restores
+/// exactly that.
 async fn revert_wrangling(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
@@ -312,13 +372,12 @@ async fn revert_wrangling(
     Ok(Json(json!({ "id": id, "status": "reverted" })))
 }
 
-/// §19.12's public log: what has been merged, and what was undone.
-///
-/// Open to unauthenticated readers, because the point of a public log is that
-/// it is public. Approver trust is not included — the log says a merge happened,
-/// not who had the standing to have done it.
 async fn public_wrangling_log(
     State(state): State<AppState>,
+    // Explicit, not implied by its absence. A public door should say it is one:
+    // the route inventory reads this to decide the audience, and an omitted
+    // extractor is indistinguishable from a route someone forgot to guard.
+    MaybeSession(_session): MaybeSession,
     Query(q): Query<PageQuery>,
 ) -> ApiResult<Json<Value>> {
     let limit = q.limit.unwrap_or(50).clamp(1, 200);

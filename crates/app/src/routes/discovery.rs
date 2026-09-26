@@ -12,7 +12,7 @@ use lorehaven_db;
 use lorehaven_db::recommendation_slots::SlotRecord;
 use lorehaven_domain::ids::WorkId;
 use lorehaven_domain::recommendation_transparency::{
-    InstanceCuration, SlotExplanation, SlotReason, TasteSignal,
+    validate_dimensions, InstanceCuration, SlotExplanation, SlotReason, TasteDimension, TasteSignal,
 };
 use lorehaven_domain::AppError;
 use std::str::FromStr;
@@ -638,36 +638,199 @@ async fn get_admin_taste_profile(
     RequireSession(user): RequireSession,
 ) -> ApiResult<Json<serde_json::Value>> {
     require_operator(&state, &user)?;
-    let dimensions = state.config().taste.dimensions.clone();
-    Ok(Json(serde_json::json!({
-        "dimensions": dimensions,
-        "gravity_strength": state.config().taste.gravity_strength,
-        "signal_weight_mode": state.config().taste.signal_weight_mode,
-        "admin_weight": state.config().taste.admin_weight,
-        "diversity_injection_percent": state.config().taste.diversity_injection_percent,
-    })))
+    // A stored profile wins over the config file. The file is the starting
+    // point for an instance nobody has edited, and until one is written the
+    // config *is* the taste model -- so an operator looking at an untouched
+    // instance sees the dimensions it is actually running on rather than an
+    // empty list.
+    match lorehaven_db::instance_taste_profile::read(state.db())
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?
+    {
+        Some(stored) => Ok(Json(serde_json::json!({
+            "dimensions": stored.dimensions,
+            "exemplars": stored.exemplars,
+            "anti_examples": stored.anti_examples,
+            "gravity_strength": stored.gravity_strength,
+            "signal_weight_mode": stored.signal_weight_mode,
+            "admin_weight": stored.admin_weight,
+            "diversity_injection_percent": stored.diversity_injection_percent,
+            "updated_at": stored.updated_at,
+            "version": stored.version,
+            "source": "stored",
+        }))),
+        None => Ok(Json(serde_json::json!({
+            // The config carries names only; §0.4 as amended wants
+            // {key, label, admin_target, weight}. A name is reported as a key
+            // with a neutral target so the shape a client sees does not change
+            // the moment an operator first saves.
+            "dimensions": state
+                .config()
+                .taste
+                .dimensions
+                .iter()
+                .map(|d| serde_json::json!({
+                    "key": d,
+                    "label": d,
+                    "admin_target": 0.5,
+                    "weight": 0.0,
+                }))
+                .collect::<Vec<_>>(),
+            "exemplars": [],
+            "anti_examples": [],
+            "gravity_strength": state.config().taste.gravity_strength,
+            "signal_weight_mode": state.config().taste.signal_weight_mode,
+            "admin_weight": state.config().taste.admin_weight,
+            "diversity_injection_percent": state.config().taste.diversity_injection_percent,
+            "source": "config",
+        }))),
+    }
 }
 
-/// Update the admin taste profile (operator only).
+/// Update the instance Taste Profile (operator only).
+///
+/// This used to answer `{"status": "updated"}` and persist nothing: the
+/// dimensions were parsed out of the body, echoed back, and thrown away. An
+/// operator was told the instance's taste model had changed and it had not.
 async fn update_admin_taste_profile(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
     Json(body): Json<serde_json::Value>,
 ) -> ApiResult<Json<serde_json::Value>> {
     require_operator(&state, &user)?;
-    // TODO: persist updates to config file
+
+    // Dimensions are validated here rather than stored and discovered broken.
+    // A duplicate key or an out-of-range target is a mistake an operator makes
+    // once, and the cost of catching it is a 422 rather than a ranking that
+    // silently does nothing for as long as the mistake stands.
     let dimensions = body
         .get("dimensions")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect::<Vec<_>>()
+        .map(|v| {
+            serde_json::from_value::<Vec<TasteDimension>>(v.clone()).map_err(|e| {
+                ApiError(AppError::Validation {
+                    message: format!("dimensions are not a list of dimension objects: {e}"),
+                    field_errors: Default::default(),
+                })
+            })
         })
-        .unwrap_or_else(|| state.config().taste.dimensions.clone());
+        .transpose()?
+        .unwrap_or_default();
+    validate_dimensions(&dimensions).map_err(|message| {
+        ApiError(AppError::Validation {
+            message,
+            field_errors: Default::default(),
+        })
+    })?;
+
+    // A bare string list is accepted, because the config file's shape is a list
+    // of names and an operator editing through a form built from it would send
+    // one. It is converted rather than refused: refusing would make the obvious
+    // request the one that does not work.
+    let dimensions: Vec<TasteDimension> = if dimensions.is_empty() {
+        body.get("dimensions")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(|name| TasteDimension {
+                        key: name.to_string(),
+                        label: name.to_string(),
+                        admin_target: 0.5,
+                        weight: 0.0,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        dimensions
+    };
+
+    let current = lorehaven_db::instance_taste_profile::read(state.db())
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+
+    // Every field defaults to what is already in force, so a partial update is
+    // a partial update rather than a reset of everything the operator did not
+    // mention.
+    let as_int =
+        |key: &str, fallback: i64| body.get(key).and_then(|v| v.as_i64()).unwrap_or(fallback);
+    let as_str = |key: &str, fallback: &str| {
+        body.get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or(fallback)
+            .to_string()
+    };
+
+    let fallback_strength = current
+        .as_ref()
+        .map(|c| c.gravity_strength)
+        .unwrap_or_else(|| state.config().taste.gravity_strength as i64);
+    let fallback_mode = current
+        .as_ref()
+        .map(|c| c.signal_weight_mode.clone())
+        .unwrap_or_else(|| state.config().taste.signal_weight_mode.clone());
+    let fallback_admin_weight = current
+        .as_ref()
+        .map(|c| c.admin_weight)
+        .unwrap_or_else(|| state.config().taste.admin_weight as i64);
+    let fallback_diversity = current
+        .as_ref()
+        .map(|c| c.diversity_injection_percent)
+        .unwrap_or_else(|| (state.config().taste.diversity_injection_percent * 100.0) as i64);
+
+    let update = lorehaven_db::instance_taste_profile::TasteProfileUpdate {
+        dimensions: serde_json::to_value(&dimensions).unwrap_or(serde_json::Value::Array(vec![])),
+        exemplars: body
+            .get("exemplars")
+            .cloned()
+            .or_else(|| current.as_ref().map(|c| c.exemplars.clone()))
+            .unwrap_or(serde_json::Value::Array(vec![])),
+        anti_examples: body
+            .get("anti_examples")
+            .cloned()
+            .or_else(|| current.as_ref().map(|c| c.anti_examples.clone()))
+            .unwrap_or(serde_json::Value::Array(vec![])),
+        gravity_strength: as_int("gravity_strength", fallback_strength),
+        signal_weight_mode: as_str("signal_weight_mode", &fallback_mode),
+        admin_weight: as_int("admin_weight", fallback_admin_weight),
+        diversity_injection_percent: as_int("diversity_injection_percent", fallback_diversity),
+    };
+
+    // Refused rather than clamped: a percentage outside 0..=100 is a mistake,
+    // and silently rounding it to 100 would make the instance maximally
+    // diverse because someone typed 150.
+    if !(0..=100).contains(&update.diversity_injection_percent) {
+        return Err(ApiError(AppError::Validation {
+            message: "diversity_injection_percent must be between 0 and 100".to_string(),
+            field_errors: Default::default(),
+        }));
+    }
+    if update.admin_weight < 0 {
+        return Err(ApiError(AppError::Validation {
+            message: "admin_weight may not be negative".to_string(),
+            field_errors: Default::default(),
+        }));
+    }
+    let known_modes = ["taste_weighted", "balanced", "popularity", "uniform"];
+    if !known_modes.contains(&update.signal_weight_mode.as_str()) {
+        return Err(ApiError(AppError::Validation {
+            message: format!(
+                "signal_weight_mode must be one of {known_modes:?}, not {:?}",
+                update.signal_weight_mode
+            ),
+            field_errors: Default::default(),
+        }));
+    }
+
+    let version =
+        lorehaven_db::instance_taste_profile::write(state.db(), &update, user.account_id.into())
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e)))?;
+
     Ok(Json(serde_json::json!({
         "status": "updated",
-        "dimensions": dimensions,
+        "version": version,
+        "dimensions": update.dimensions,
     })))
 }
 

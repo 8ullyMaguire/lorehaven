@@ -77,6 +77,54 @@ struct Harness {
 }
 
 impl Harness {
+    /// A harness where the reader named `handle` is the instance operator.
+    ///
+    /// `require_operator` compares the session's account against
+    /// `config.administration.operator_account_id` -- not a trust tier, and not
+    /// a column on the account -- so the account has to exist before the config
+    /// can name it, and the reader has to exist before the config is final.
+    /// Hence this constructor rather than a helper that mutates the harness
+    /// afterwards.
+    async fn with_operator(tag: &str, handle: &str) -> Self {
+        let dir = scratch_dir(tag);
+        let mut config = config_for(&dir);
+        let db = Database::connect(&config.database)
+            .await
+            .expect("db connect");
+        db.migrate().await.expect("migrations");
+        // Register the account so its id exists, using a throwaway client: the
+        // config is built after this, and the tests sign in again afterwards.
+        let mut bootstrap = Client {
+            app: server::build_router(AppState::new(config.clone(), db.clone())),
+            cookies: Vec::new(),
+        };
+        let (status, body) = bootstrap
+            .post(
+                "/api/v1/auth/register",
+                json!({
+                    "email": format!("{handle}@example.com"),
+                    "password": GOOD_PASSWORD,
+                    "handle": handle,
+                    "display_name": handle,
+                    "age_band": "adult",
+                }),
+            )
+            .await;
+        // A collision here would mean the scratch dir is being reused, which
+        // would silently point the operator at the wrong account.
+        assert!(
+            status.is_success(),
+            "bootstrap register for {handle}: {status} {body}"
+        );
+        let account = account_of(&db, handle).await;
+        config.administration.operator_account_id = Some(account.into());
+        Self {
+            _dir: dir,
+            config,
+            db,
+        }
+    }
+
     async fn new(tag: &str) -> Self {
         let dir = scratch_dir(tag);
         let config = config_for(&dir);
@@ -113,8 +161,27 @@ impl Harness {
                 }),
             )
             .await;
-        assert_eq!(status, StatusCode::CREATED, "register body: {body}");
-        client
+        match status {
+            StatusCode::CREATED => client,
+            // `with_operator` already registered this handle to learn its id, so
+            // the account exists by the time a test signs in. A duplicate email
+            // is 422 in this codebase, not 409 -- a validation failure on the
+            // unique index, reported through the normal field-error path.
+            StatusCode::CONFLICT | StatusCode::UNPROCESSABLE_ENTITY => {
+                let (status, body) = client
+                    .post(
+                        "/api/v1/auth/login",
+                        json!({
+                            "email": format!("{handle}@example.com"),
+                            "password": GOOD_PASSWORD,
+                        }),
+                    )
+                    .await;
+                assert!(status.is_success(), "login body: {status} {body}");
+                client
+            }
+            other => panic!("register {handle}: {other} {body}"),
+        }
     }
 }
 
@@ -474,6 +541,295 @@ async fn set_trust(db: &Database, account: uuid::Uuid, level: i64) {
     lorehaven_db::governance::set_trust(db, &account.to_string(), level, "test")
         .await
         .expect("set trust");
+}
+
+#[tokio::test]
+async fn a_rejected_proposal_is_recorded_as_decided_rather_than_left_pending() {
+    // "The operator looked at this merge and said no" and "nobody looked at it"
+    // are different facts. A reject that only flipped a status column, or worse
+    // that deleted the row, would make the second one indistinguishable from the
+    // first -- and an un-reviewed queue is exactly what an operator needs to be
+    // able to find.
+    let harness = Harness::new("reject").await;
+    let mut curator = harness.reader("Curator").await;
+    let account = account_of(&harness.db, "Curator").await;
+    set_trust(
+        &harness.db,
+        account,
+        lorehaven_domain::governance::TL_STEWARD,
+    )
+    .await;
+    let from = make_node(&harness.db, "angst").await;
+    let to = make_node(&harness.db, "hurt").await;
+
+    let (status, body) = curator
+        .post(
+            "/api/v1/admin/tag-wrangling/proposals",
+            json!({
+                "kind": "alias",
+                "from_node_id": from.clone(),
+                "to_node_id": to.clone(),
+                "reason": "reads the same at the tag level",
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "body: {body}");
+    let id = body["id"].as_str().expect("proposal id").to_owned();
+
+    let (status, body) = curator
+        .post(
+            &format!("/api/v1/admin/tag-wrangling/proposals/{id}/reject"),
+            json!({ "reason": "these are genuinely different axes" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["status"], "rejected");
+
+    // The decision and the reason survive: the row is still there, decided.
+    let (status, queue) = curator
+        .get("/api/v1/admin/tag-wrangling/proposals?status=rejected")
+        .await;
+    assert_eq!(status, StatusCode::OK, "body: {queue}");
+    let items = queue["items"].as_array().expect("items");
+    assert_eq!(
+        items.len(),
+        1,
+        "the rejected proposal is still listed: {queue}"
+    );
+    assert_eq!(items[0]["id"], id.as_str());
+    assert_eq!(items[0]["reason"], "these are genuinely different axes");
+
+    // And it can no longer be approved: a decision is final.
+    let (status, _) = curator
+        .post(
+            &format!("/api/v1/admin/tag-wrangling/proposals/{id}/approve"),
+            json!({}),
+        )
+        .await;
+    assert!(
+        status == StatusCode::CONFLICT || status == StatusCode::NOT_FOUND,
+        "a decided proposal is not also approvable: {status}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// the instance taste profile
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn an_operators_taste_profile_change_is_remembered_rather_than_echoed() {
+    // This route used to answer {"status": "updated"} and persist nothing: the
+    // dimensions were parsed out of the body, echoed back, and thrown away. The
+    // test reads the profile back through a *fresh* GET rather than trusting the
+    // PUT's response, because the response was the thing that lied.
+    // A session is not the operator; the config is. So the harness is built
+    // around this account, which is the only way an operator route opens.
+    let harness = Harness::with_operator("tasteop", "Taster").await;
+    let mut operator = harness.reader("Taster").await;
+
+    let path = "/api/v1/operator/taste-profile";
+    let dims = json!([
+        {"key": "angst", "label": "Angst", "admin_target": 0.4, "weight": 1.0},
+        {"key": "prose_density", "label": "Prose density", "admin_target": 0.8, "weight": 0.5}
+    ]);
+
+    let (status, body) = operator
+        .put(path, json!({ "dimensions": dims, "gravity_strength": 750 }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["status"], "updated");
+    assert_eq!(body["version"], 1, "the first write is version 1");
+
+    // A separate request, so this is persistence rather than an echo.
+    let (status, read_back) = operator.get(path).await;
+    assert_eq!(status, StatusCode::OK, "body: {read_back}");
+    assert_eq!(read_back["source"], "stored");
+    assert_eq!(
+        read_back["dimensions"], dims,
+        "the operator's axes came back"
+    );
+    assert_eq!(read_back["gravity_strength"], 750);
+    assert_eq!(read_back["version"], 1);
+}
+
+#[tokio::test]
+async fn a_second_taste_profile_change_bumps_the_version_and_keeps_what_was_omitted() {
+    // A partial update is a partial update. An operator who changes one weight
+    // should not have to restate the whole model, and certainly should not
+    // silently lose the other axes by omitting them.
+    let harness = Harness::with_operator("taste2", "Taster2").await;
+    let mut operator = harness.reader("Taster2").await;
+
+    let path = "/api/v1/operator/taste-profile";
+    let first = json!([
+        {"key": "angst", "label": "Angst", "admin_target": 0.4, "weight": 1.0},
+        {"key": "pacing", "label": "Pacing", "admin_target": 0.6, "weight": 0.5}
+    ]);
+    let (status, body) = operator.put(path, json!({ "dimensions": first })).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["version"], 1);
+
+    // Now change only the weight.
+    let (status, body) = operator
+        .put(
+            path,
+            json!({
+                "dimensions": [
+                    {"key": "angst", "label": "Angst", "admin_target": 0.4, "weight": 0.9},
+                    {"key": "pacing", "label": "Pacing", "admin_target": 0.6, "weight": 0.5}
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["version"], 2, "the second write is version 2");
+
+    let (_, read_back) = operator.get(path).await;
+    assert_eq!(read_back["version"], 2);
+    assert_eq!(read_back["dimensions"][0]["weight"], 0.9);
+    // The gravity strength was never restated and is still the config default,
+    // not zero.
+    assert_eq!(
+        read_back["gravity_strength"],
+        json!(
+            lorehaven_app::config::Config::development_defaults()
+                .taste
+                .gravity_strength as i64
+        ),
+        "an omitted field keeps what was in force"
+    );
+}
+
+#[tokio::test]
+async fn a_malformed_taste_profile_is_refused_rather_than_stored() {
+    // A duplicate key would make a work's weight on an axis depend on row order,
+    // and an out-of-range target is not a position on the axis at all. Both are
+    // operator mistakes that are cheap to catch now and expensive to discover
+    // later as a ranking that quietly does nothing.
+    let harness = Harness::with_operator("tastebad", "Taster3").await;
+    let mut operator = harness.reader("Taster3").await;
+    let path = "/api/v1/operator/taste-profile";
+
+    // Duplicate keys.
+    let (status, body) = operator
+        .put(
+            path,
+            json!({"dimensions": [
+                {"key": "prose", "label": "Prose", "admin_target": 0.5, "weight": 1.0},
+                {"key": "prose", "label": "Writing", "admin_target": 0.7, "weight": 0.5}
+            ]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "body: {body}");
+
+    // A target outside the axis.
+    let (status, _) = operator
+        .put(
+            path,
+            json!({"dimensions": [
+                {"key": "prose", "label": "Prose", "admin_target": 1.5, "weight": 1.0}
+            ]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // A negative weight.
+    let (status, _) = operator
+        .put(
+            path,
+            json!({"dimensions": [
+                {"key": "prose", "label": "Prose", "admin_target": 0.5, "weight": -1.0}
+            ]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // And none of those attempts wrote anything.
+    let (_, read_back) = operator.get(path).await;
+    assert_eq!(
+        read_back["source"], "config",
+        "a refused profile leaves the instance on its config: {read_back}"
+    );
+}
+
+#[tokio::test]
+async fn a_percentage_outside_its_range_is_refused_rather_than_clamped() {
+    let harness = Harness::with_operator("tastepct", "Taster4").await;
+    let mut operator = harness.reader("Taster4").await;
+    let path = "/api/v1/operator/taste-profile";
+
+    // Clamping this to 100 would make the instance maximally diverse because
+    // someone typed 150, which is not what they meant.
+    let (status, _) = operator
+        .put(path, json!({ "diversity_injection_percent": 150 }))
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let (status, _) = operator.put(path, json!({ "admin_weight": -1 })).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // A signal-weight mode nobody implements is refused with the accepted set,
+    // rather than stored as a string no code path reads.
+    let (status, body) = operator
+        .put(path, json!({ "signal_weight_mode": "vibes" }))
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "body: {body}");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .expect("message")
+            .contains("taste_weighted"),
+        "the refusal names what is accepted: {body}"
+    );
+}
+
+#[tokio::test]
+async fn a_reader_who_is_not_the_operator_cannot_change_the_taste_profile() {
+    let harness = Harness::new("tastegate").await;
+    let mut reader = harness.reader("Nosy").await;
+    let (status, _) = reader
+        .put("/api/v1/operator/taste-profile", json!({"dimensions": []}))
+        .await;
+    // 404, not 403, and deliberately: `require_operator` does not confirm the
+    // route exists to an account that is not the operator. A 403 would tell a
+    // prober that /operator/* is real.
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "a reader is not the operator"
+    );
+}
+
+#[tokio::test]
+async fn an_untouched_instance_reports_the_config_it_is_running_on() {
+    // The config file is the starting point. An operator looking at an instance
+    // nobody has edited should see the dimensions it is actually running on, not
+    // an empty list that looks like a mistake.
+    let harness = Harness::with_operator("tastefresh", "Taster5").await;
+    let mut operator = harness.reader("Taster5").await;
+
+    let (status, body) = operator.get("/api/v1/operator/taste-profile").await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["source"], "config");
+    let dims = body["dimensions"].as_array().expect("dimensions");
+    let config_dims = lorehaven_app::config::Config::development_defaults()
+        .taste
+        .dimensions;
+    assert_eq!(
+        dims.len(),
+        config_dims.len(),
+        "the config's axes are reported: {body}"
+    );
+    // Reported in the amendment's shape so a client's parser does not have to
+    // change the moment an operator first saves.
+    for (entry, name) in dims.iter().zip(&config_dims) {
+        assert_eq!(entry["key"], name.as_str());
+        assert_eq!(entry["admin_target"], 0.5);
+        assert_eq!(
+            entry["weight"], 0.0,
+            "the config names an axis, it does not weight it"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

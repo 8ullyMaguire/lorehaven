@@ -37,6 +37,7 @@ pub mod forum_search;
 pub mod governance;
 pub mod identity;
 pub mod imports;
+pub mod instance_taste_profile;
 pub mod instance_theme;
 pub mod jobs;
 pub mod lending;

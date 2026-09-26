@@ -442,6 +442,74 @@ pub fn reasons_from_engines(engine_reasons: &[&str]) -> Vec<SlotReason> {
     SlotExplanation::normalized(parsed)
 }
 
+/// One axis of the instance Taste Profile.
+///
+/// Spec §0.4 as amended: a dimension is a named axis with an operator's target
+/// position on it and a weight saying how much it matters. The config file
+/// carries dimension *names* only, because the file is a starting point; this is
+/// what the operator actually sets, and it is why the profile is stored rather
+/// than read back from the config.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TasteDimension {
+    /// The axis's machine key, unique within the profile.
+    pub key: String,
+    /// What the reader sees this axis called.
+    pub label: String,
+    /// Where the operator wants works to sit on this axis, 0.0–1.0.
+    pub admin_target: f64,
+    /// How strongly the axis influences recommendations.
+    pub weight: f64,
+}
+
+impl TasteDimension {
+    /// Validate a dimension's shape.
+    ///
+    /// No configuration can make an out-of-range target or a negative weight
+    /// meaningful, so this is checked at the edge rather than trusted and
+    /// discovered later as a ranking that quietly does nothing.
+    pub fn validate(&self) -> Result<(), String> {
+        let key = self.key.trim();
+        if key.is_empty() {
+            return Err("a dimension must have a key".to_string());
+        }
+        if self.label.trim().is_empty() {
+            return Err(format!("dimension {key:?} must have a label"));
+        }
+        if !self.admin_target.is_finite() || !(0.0..=1.0).contains(&self.admin_target) {
+            return Err(format!(
+                "dimension {key:?} has admin_target {} which is not between 0.0 and 1.0",
+                self.admin_target
+            ));
+        }
+        if !self.weight.is_finite() || self.weight < 0.0 {
+            return Err(format!(
+                "dimension {key:?} has weight {} which is negative or not a number",
+                self.weight
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Validate a whole dimension list: each entry, and unique keys.
+///
+/// Two axes with the same key would make the weight of a work's alignment with
+/// "prose" depend on which row a query happened to read first, so the duplicate
+/// is refused rather than resolved.
+pub fn validate_dimensions(dimensions: &[TasteDimension]) -> Result<(), String> {
+    for d in dimensions {
+        d.validate()?;
+    }
+    let mut keys: Vec<&str> = dimensions.iter().map(|d| d.key.trim()).collect();
+    keys.sort_unstable();
+    for pair in keys.windows(2) {
+        if pair[0] == pair[1] {
+            return Err(format!("dimension {:?} is listed twice", pair[0]));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -698,4 +766,112 @@ mod tests {
         assert!(!json.contains("seeded_by"));
         assert!(json.contains("\"taste_signal\":\"strong\""));
     }
+}
+
+#[test]
+fn a_dimension_must_have_a_key_and_a_label() {
+    assert!(validate_dimensions(&[]).is_ok(), "no dimensions is valid");
+    let blank_key = TasteDimension {
+        key: "  ".into(),
+        label: "Angst".into(),
+        admin_target: 0.5,
+        weight: 1.0,
+    };
+    assert!(validate_dimensions(&[blank_key]).is_err());
+
+    let blank_label = TasteDimension {
+        key: "angst".into(),
+        label: "".into(),
+        admin_target: 0.5,
+        weight: 1.0,
+    };
+    assert!(validate_dimensions(&[blank_label]).is_err());
+}
+
+#[test]
+fn a_dimension_target_must_be_a_position_on_its_axis() {
+    for target in [-0.1, 1.1, f64::NAN, f64::INFINITY] {
+        let d = TasteDimension {
+            key: "prose".into(),
+            label: "Prose".into(),
+            admin_target: target,
+            weight: 1.0,
+        };
+        assert!(
+            validate_dimensions(&[d]).is_err(),
+            "target {target} is not a position on the axis"
+        );
+    }
+    for target in [0.0, 0.5, 1.0] {
+        let d = TasteDimension {
+            key: "prose".into(),
+            label: "Prose".into(),
+            admin_target: target,
+            weight: 1.0,
+        };
+        assert!(validate_dimensions(&[d]).is_ok(), "target {target} is fine");
+    }
+}
+
+#[test]
+fn a_dimension_weight_may_not_be_negative_or_nan() {
+    for weight in [-1.0, f64::NAN] {
+        let d = TasteDimension {
+            key: "pacing".into(),
+            label: "Pacing".into(),
+            admin_target: 0.5,
+            weight,
+        };
+        assert!(validate_dimensions(&[d]).is_err(), "weight {weight}");
+    }
+    let zero = TasteDimension {
+        key: "pacing".into(),
+        label: "Pacing".into(),
+        admin_target: 0.5,
+        weight: 0.0,
+    };
+    assert!(
+        validate_dimensions(&[zero]).is_ok(),
+        "a dimension the operator has switched off is valid, not an error"
+    );
+}
+
+#[test]
+fn two_dimensions_may_not_share_a_key() {
+    // Otherwise a work's weight on "prose" depends on row order.
+    let dims = vec![
+        TasteDimension {
+            key: "prose".into(),
+            label: "Prose".into(),
+            admin_target: 0.5,
+            weight: 1.0,
+        },
+        TasteDimension {
+            key: " prose ".into(),
+            label: "Writing".into(),
+            admin_target: 0.7,
+            weight: 0.5,
+        },
+    ];
+    assert!(
+        validate_dimensions(&dims).is_err(),
+        "a duplicate key is refused rather than resolved"
+    );
+}
+
+#[test]
+fn a_dimension_round_trips_through_json() {
+    let d = TasteDimension {
+        key: "trope_diversity".into(),
+        label: "Trope diversity".into(),
+        admin_target: 0.65,
+        weight: 0.25,
+    };
+    let json = serde_json::to_string(&d).expect("serialize");
+    assert_eq!(
+        json,
+        r#"{"key":"trope_diversity","label":"Trope diversity","admin_target":0.65,"weight":0.25}"#
+    );
+    let back: TasteDimension = serde_json::from_str(&json).expect("parse");
+    assert_eq!(back, d);
 }

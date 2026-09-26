@@ -604,35 +604,56 @@ pub async fn get_wrangling_proposal(db: &Database, id: &str) -> Result<Option<Wr
 }
 
 /// Pending proposals, oldest first, for the moderation queue.
-pub async fn list_pending_wrangling(db: &Database, limit: i64) -> Result<Vec<WranglingProposal>> {
+/// The moderation queue, optionally filtered by status.
+///
+/// A steward needs to see what has already been decided, not just what is
+/// waiting: "this was reviewed and declined" and "this was never reviewed" are
+/// different things, and a queue that only ever shows pending work makes the
+/// second one invisible. `status` is a bind rather than an interpolated string
+/// for the obvious reason.
+///
+/// An empty `status` means pending only, which is what the queue is for.
+pub async fn list_wrangling(
+    db: &Database,
+    status: Option<&str>,
+    limit: i64,
+) -> Result<Vec<WranglingProposal>> {
     let sql = db.sql(
         "SELECT id, kind, from_node_id, to_node_id, reason, status,
                 proposer_trust, approver_trust, created_at
            FROM tag_wrangling_proposals
-          WHERE status = 'pending'
+          WHERE status = COALESCE(?, 'pending')
           ORDER BY created_at ASC, id ASC LIMIT ?",
         "SELECT id::text, kind, from_node_id, to_node_id, reason, status,
                 proposer_trust::bigint AS proposer_trust, approver_trust::bigint AS approver_trust,
                 created_at::text AS created_at
            FROM tag_wrangling_proposals
-          WHERE status = 'pending'
+          WHERE status = COALESCE(?::text, 'pending')
           ORDER BY created_at ASC, id ASC LIMIT ?",
     );
+    let filter = status.unwrap_or("pending");
     let rows: Vec<ProposalRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
+                .bind(filter)
                 .bind(limit)
                 .fetch_all(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
             sqlx::query_as(&sql)
+                .bind(filter)
                 .bind(limit)
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
                 .await?
         }
     };
     Ok(rows.into_iter().map(ProposalRow::into_proposal).collect())
+}
+
+/// The pending queue, which is what the moderation surface opens on.
+pub async fn list_pending_wrangling(db: &Database, limit: i64) -> Result<Vec<WranglingProposal>> {
+    list_wrangling(db, None, limit).await
 }
 
 /// Approve a proposal, applying it and recording what it changed.
@@ -681,8 +702,12 @@ pub async fn approve_wrangling(
                 .await?;
         }
         Backend::Postgres => {
+            // Typed binds: the SQL casts each of these, and a `&str` against a
+            // `?::uuid` placeholder is a type error PostgreSQL reports at
+            // prepare time. The SQLite arm above takes the same values as text,
+            // which is why the two arms do not share a bind list.
             sqlx::query(&sql)
-                .bind(approved_by.to_string())
+                .bind(approved_by)
                 .bind(approver_trust)
                 .bind(&now)
                 .bind(id)
@@ -899,13 +924,72 @@ async fn apply_merge(
     Ok(())
 }
 
+/// Reject a proposal, recording who said no and why.
+///
+/// Rejecting is not a delete and not a defer. §19 requires a curation decision
+/// to be recorded even when the answer is "no", so the row stays with
+/// `rejected` and the reason: "the operator reviewed this merge and declined"
+/// and "this merge was never reviewed" are different facts, and collapsing them
+/// loses the second one.
+pub async fn reject_wrangling(
+    db: &Database,
+    id: &str,
+    reason: &str,
+    rejected_by: Uuid,
+    decider_trust: i64,
+) -> Result<()> {
+    let Some(proposal) = get_wrangling_proposal(db, id).await? else {
+        return Err(WrangleError::NotFound.into());
+    };
+    if proposal.status != "pending" {
+        return Err(WrangleError::WrongState("already decided").into());
+    }
+
+    let now = crate::identity::now_rfc3339();
+    // `approved_by`/`approver_trust` are the decider columns for either outcome
+    // -- the person who said yes and the person who said no are the same kind of
+    // fact, and a second pair of columns would make every read that wants "who
+    // decided this" a UNION.
+    let sql = db.sql(
+        "UPDATE tag_wrangling_proposals
+            SET status = 'rejected', reason = ?, approved_by = ?, approver_trust = ?, decided_at = ?
+          WHERE id = ? AND status = 'pending'",
+        "UPDATE tag_wrangling_proposals
+            SET status = 'rejected', reason = ?, approved_by = ?::uuid, approver_trust = ?,
+                decided_at = ?::timestamptz
+          WHERE id = ?::uuid AND status = 'pending'",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(reason)
+                .bind(rejected_by.to_string())
+                .bind(decider_trust)
+                .bind(&now)
+                .bind(id)
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(reason)
+                .bind(rejected_by)
+                .bind(decider_trust)
+                .bind(&now)
+                .bind(id)
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
 /// Revert an approved merge, restoring what it moved.
 ///
 /// Reads the recorded actions and puts each subject back where it came from, so
 /// the reversal is a read of what happened rather than a guess at what must
-/// have happened. The proposal is marked `reverted` and chained to its own
-/// successor, which is what §33.3's "merges keep their history" means in the
-/// data.
+/// have happened. The proposal is marked `reverted`, which is what §33.3's
+/// "merges keep their history" means in the data.
 pub async fn revert_wrangling(
     db: &Database,
     id: &str,
