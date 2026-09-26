@@ -40,11 +40,11 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
             // Deleted posts are excluded here for the same reason they are
             // excluded from the reply count: a reader cannot see them, so a
             // search must not find them either.
-            let sql = "(COALESCE(LOWER(forum_topics.title), '') LIKE LOWER(?) \
+            let sql = "(COALESCE(LOWER(forum_topics.title), '') LIKE LOWER(?) ESCAPE '\\' \
                        OR EXISTS (SELECT 1 FROM forum_posts tp \
                                  WHERE tp.topic_id = forum_topics.id \
                                    AND tp.deleted_at IS NULL \
-                                   AND COALESCE(LOWER(tp.body), '') LIKE LOWER(?)))";
+                                   AND COALESCE(LOWER(tp.body), '') LIKE LOWER(?) ESCAPE '\\'))";
             let pattern = format!("%{}%", escape_like(text));
             Ok(SqlFragment::new(sql)
                 .with_bind(pattern.clone())
@@ -57,7 +57,7 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
             let sql = "EXISTS (SELECT 1 FROM forum_posts pp \
                        WHERE pp.topic_id = forum_topics.id \
                          AND pp.deleted_at IS NULL \
-                         AND COALESCE(LOWER(pp.body), '') LIKE LOWER(?))";
+                         AND COALESCE(LOWER(pp.body), '') LIKE LOWER(?) ESCAPE '\\')";
             Ok(SqlFragment::new(sql).with_bind(format!("%{}%", escape_like(phrase))))
         }
         QueryAst::Fielded(field, value) => render_fielded(*field, value),

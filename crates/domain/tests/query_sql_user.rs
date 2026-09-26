@@ -242,6 +242,38 @@ fn a_negated_term_is_null_safe() {
 }
 
 #[test]
+fn a_like_pattern_declares_its_escape_character() {
+    // Without an `ESCAPE` clause the two backends disagree about what a
+    // backslash means: PostgreSQL treats it as the default LIKE escape, SQLite
+    // has no default at all. So `escape_like` -- which escapes every `%`, `_`
+    // and `\` -- produces a pattern that means one thing on one backend and
+    // something else on the other. A reader searching `100%` finds the right
+    // rows on PostgreSQL and none on SQLite, and neither is obviously wrong.
+    let (sql, binds) = render("100%");
+    assert!(
+        sql.contains("ESCAPE"),
+        "the escape character must be declared, or the dialects disagree: {sql}"
+    );
+    // Twice, because the free-text arm matches the handle and the display name
+    // with the same pattern.
+    assert_eq!(binds, vec!["%100\\%%".to_string(), "%100\\%%".to_string()]);
+    // The emitted clause, byte for byte. This is not pedantry: the SQL quote
+    // sits right after the backslash, so a single backslash in the Rust source
+    // is read as an escaped apostrophe and vanishes -- emitting `ESCAPE ''`,
+    // which SQLite rejects ("ESCAPE expression must be a single character")
+    // while PostgreSQL accepts it as an empty string. One backend errors, the
+    // other matches every row, and the source reads correctly either way.
+    assert!(
+        sql.contains("ESCAPE '") && sql.contains("'\\'"),
+        "the backslash must survive: {sql}"
+    );
+    assert!(
+        !sql.contains("ESCAPE ''"),
+        "an empty escape means every row matches: {sql}"
+    );
+}
+
+#[test]
 fn a_bound_value_cannot_reach_the_sql() {
     // An injection attempt that survives to be bound. It does not get as far as
     // a valid integer, so the parser refuses it -- which is the stronger
