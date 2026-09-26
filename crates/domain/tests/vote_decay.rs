@@ -113,7 +113,7 @@ fn the_cutoff_is_configurable() {
         enabled: true,
         cutoff_days: 30.0,
         min_votes: 20,
-        exponent: 2.0,
+        exponent: 2,
     };
     assert_eq!(decay(30.0, &d), 0.0);
     // A 30-day cutoff must beat a 60-day one at every shared age, or the
@@ -132,7 +132,7 @@ fn the_exponent_controls_the_shape() {
     // Linear (1.0) and quadratic (2.0) must both be available, and linear
     // must lose weight faster early -- which is why the default is 2.0.
     let linear = Decay {
-        exponent: 1.0,
+        exponent: 1,
         ..Decay::default()
     };
     let quadratic = Decay::default();
