@@ -911,6 +911,66 @@ residuals), M47 (3, settings surfaces), plus the new M52–M55.
   integration, the 40k rescrape and the webnovel-scraper port remain
   unstarted and unscheduled.
 
+## M29 — recommendation transparency (§33.3): decided, not stubbed
+
+**The design question, settled.** `GET /discovery/slots/{id}/explanation` was
+unreachable and had to be either *persisted* or *recomputed*. Recomputation is
+not available: `time_decay_strategy` scores with
+`1.0 / (1.0 + julianday('now') - julianday(created_at))`, so a replay returns
+different floats and would explain a ranking other than the one the reader
+received. Slots are recorded at serve time instead, in `recommendation_slots`
+(migration 0076), and the explanation is a read of that row.
+
+**Five stubs became real code.** `explain_slot`, `get_attention_report`,
+`propose_wrangling`, `list_wrangling_proposals`, `approve_wrangling` all
+returned hardcoded strings and touched no database. They now do the work, and
+two more doors were added: `PUT /me/attention-report` and
+`POST /admin/tag-wrangling/proposals/{id}/revert`.
+
+**The vocabulary is closed on purpose.** `SlotReason` has no operator-boost
+variant, `TasteSignal` is three buckets rather than a float, and
+`InstanceCuration` is two values with no magnitude. A `String` reason is how an
+admin multiplier reaches a reader's explanation — not by accident, but because
+someone eventually needs to say "the admin pushed this" and a `String` permits
+it. A test walks every variant's prose against a forbidden-word list.
+
+**Four bugs the tests found, all now pinned:**
+
+1. **The merge retarget was wrong on SQLite.** Written as `UPDATE OR IGNORE`
+   (SQLite) and `ON CONFLICT DO NOTHING` (PostgreSQL). Neither expresses the
+   rule: they suppress a *constraint violation*, not a *row that would become a
+   duplicate*. The SQLite form let the primary-key violation abort the
+   statement — the merge moved nothing and reported success. A work already
+   carrying the target also kept both spellings, which is the state a merge
+   exists to end. Now handled per row, identical on both backends.
+2. **An invalid transition was a 500.** `anyhow::bail!` on approving an
+   already-approved proposal told the client to retry something that could never
+   succeed. Now a typed `WrangleError` → 404 or 409.
+3. **The routes passed an account where the FK says pseud.** A proposal is
+   *authored* by a pseud; §19.1's trust gate is on the *account*. Both recorded.
+4. **`set_weight` was not in the migration's CHECK constraint.** Invented the
+   action after writing the schema, so every dedupe-path merge 500'd.
+
+**A vacuous test, caught by mutation.** The end-to-end test
+`a_served_recommendation_carries_a_slot_id_that_explains_itself` passed with
+the recording disabled — it iterated an empty `items` list because the instance
+had no published works. It now publishes three first. Verified by disabling the
+recording and watching it fail on the missing `slot_id`.
+
+**A latent injection pattern found on the way.** `rec_strategy.rs`
+string-interpolates `account_id` into SQL at six sites. It is a UUID today, so
+it is not exploitable, and it is unrelated to this work — but it is the exact
+shape that becomes injectable the moment anything non-UUID reaches it. Worth
+its own fix.
+
+**Retention is a job, not a hope.** `purge_slots` joins `purge_exports` in
+`MAINTENANCE_TASKS` and the worker's match arm; `jobs.slot_retention_days`
+defaults to 3 and is clamped to a day..year. A test pins that the name is in
+both places, because a task named in one list and not the other silently never
+runs.
+
+22 acceptance tests, green on both backends. 21 domain, 3 db unit.
+
 ## Environment quirks (unchanged)
 
 - **Work in local clone** `~/code-local/rust/lorehaven`. `~/code/rust/lorehaven` is SSHFS — never run git/cargo/npm through it.
