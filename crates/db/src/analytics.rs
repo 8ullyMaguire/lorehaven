@@ -21,9 +21,146 @@ use crate::{sql_owned, Backend, Database};
 
 /// The smallest count this dashboard reports exactly.
 ///
-/// Five is the same order as the public rating aggregate's minimum, so an
-/// author does not see a private number their readers' own surfaces hide.
-pub const CREATOR_DASHBOARD_FLOOR: i64 = 5;
+/// Ten, not five. Every count this dashboard bands — bookmarks, ratings,
+/// reviews, delivered comments — is a count of *other people* acting on
+/// someone's work, and §36.12 sets the floor for author-facing analytics at
+/// ten. The earlier value of five came from the public rating aggregate's
+/// order of magnitude, which is a floor on a number a reader is about
+/// themselves, not on a number about a room full of strangers.
+///
+/// The direction of the change matters: a reader whose own dashboard breaks
+/// down their own reading at five must not meet the same five people in an
+/// author's breakdown. The threshold has to move stricter as the subject gets
+/// less personal, never looser.
+pub const CREATOR_DASHBOARD_FLOOR: i64 = lorehaven_domain::analytics::K_OTHERS;
+
+/// A reader count, with the floor applied at the query.
+///
+/// # Why this type and not an `i64`
+///
+/// The obvious shape is "run the count, return a number, let the route band
+/// it" — which is what [`crate::analytics::creator_totals`] plus the route
+/// still does. That has already had the privacy incident before the route
+/// runs: the rows were read, the driver had them, and the access log saw the
+/// query. The question is never whether the *response* mentions the small
+/// number.
+///
+/// So this count is produced as an aggregate and the floor is applied to the
+/// aggregate, and the type makes the suppressed case unrepresentable as a
+/// number. There is no `count: 3` a caller could `unwrap_or(0)`, because
+/// "too few people to tell you" and "nobody did this" are different claims and
+/// only the first is true.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ReaderCount {
+    /// The capability's stable name, so a client can key its own copy on it.
+    pub scope: &'static str,
+    /// "self" or "other". For a work's audience this is always "other" — the
+    /// readers are not the author, even when the author is asking.
+    pub subject: &'static str,
+    /// The true count, or `None` below the floor.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub count: Option<i64>,
+    /// The floor, present exactly when `count` is absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fewer_than: Option<i64>,
+    /// §24.2's documented computation, carried with the number.
+    pub method: MethodDoc,
+    /// When this was computed. A number with no freshness looks live forever.
+    pub computed_at: String,
+}
+
+/// The three parts of §24.2's method requirement, on the wire.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct MethodDoc {
+    pub definition: &'static str,
+    pub freshness: &'static str,
+    pub approximation: &'static str,
+}
+
+impl MethodDoc {
+    fn of(scope: lorehaven_domain::analytics::Scope) -> Self {
+        let m = scope.method();
+        Self {
+            definition: m.definition,
+            freshness: m.freshness.as_str(),
+            approximation: m.approximation,
+        }
+    }
+}
+
+impl ReaderCount {
+    /// Build from a raw count, applying `scope`'s floor.
+    pub fn build(count: i64, scope: lorehaven_domain::analytics::Scope) -> Self {
+        use lorehaven_domain::analytics::{Reported, Subject};
+        let (exact, fewer_than) = match Reported::of(count, scope) {
+            Reported::Exact(n) => (Some(n), None),
+            Reported::BelowFloor { fewer_than } => (None, Some(fewer_than)),
+        };
+        Self {
+            scope: scope.as_str(),
+            subject: match scope.subject() {
+                Subject::Self_ => "self",
+                Subject::Other => "other",
+            },
+            count: exact,
+            fewer_than,
+            method: MethodDoc::of(scope),
+            computed_at: crate::sessions::now(),
+        }
+    }
+}
+
+const WORK_READERS_SQLITE: &str = "SELECT COUNT(DISTINCT pseud_id) \
+     FROM reading_history_entry \
+     WHERE subject_type = 'work' AND subject_id = ?";
+
+// `subject_id` is a UUID column on PostgreSQL, so a text bind compares uuid to
+// text and raises rather than matching nothing. Cast at the bind, not the
+// column: the column really is a uuid and pretending otherwise would break the
+// index.
+const WORK_READERS_POSTGRES: &str = "SELECT COUNT(DISTINCT pseud_id) \
+     FROM reading_history_entry \
+     WHERE subject_type = 'work' AND subject_id = ?::uuid";
+
+/// Distinct readers of a work, with the floor already applied.
+///
+/// A reader is a distinct **pseudonym** with a reading event, not an account
+/// and not a session:
+///
+/// * An account is one person, and counting accounts invites exactly the
+///   joins that §7.2 forbids.
+/// * A reader with two pseudonyms is two entries in this work's audience. A
+///   cosplayer is not half a reader; the number is about the work's reach.
+///
+/// `COUNT(DISTINCT …)` is what makes a reader who opens a work forty times
+/// count once. Counting events is how a small work invents an audience.
+///
+/// Note the absence of a `min_readers` parameter. Adding one would be a
+/// regression: a caller who can pass a floor of zero has the floor switched
+/// off, and the signature is the only thing preventing that.
+pub async fn work_reader_count(db: &Database, work_id: &str) -> anyhow::Result<ReaderCount> {
+    let scope = lorehaven_domain::analytics::Scope::OwnWorkBasic;
+    let sql = sql_owned(
+        db,
+        WORK_READERS_SQLITE.to_string(),
+        WORK_READERS_POSTGRES.to_string(),
+    );
+    let readers: i64 = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar(&sql)
+                .bind(work_id)
+                .fetch_one(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar(&sql)
+                .bind(work_id)
+                .fetch_one(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(ReaderCount::build(readers, scope))
+}
 
 /// The raw aggregates, before banding.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -271,10 +408,55 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_floor_is_the_public_aggregate_order() {
-        // Not a magic number: it is the same order as the public rating
-        // aggregate's minimum, so a creator cannot see through this door a
-        // number their readers' own surfaces hide.
-        assert_eq!(CREATOR_DASHBOARD_FLOOR, 5);
+    fn the_floor_is_the_stricter_others_value() {
+        // Not a magic number, and not five. Every count this module bands is a
+        // count of other people, and §36.12 puts author-facing analytics at
+        // ten. The earlier value of five matched the public rating aggregate's
+        // order of magnitude, which is a floor on a number a reader is about
+        // themselves -- not on a count of a room full of strangers.
+        assert_eq!(CREATOR_DASHBOARD_FLOOR, 10);
+        assert_eq!(
+            CREATOR_DASHBOARD_FLOOR,
+            lorehaven_domain::analytics::K_OTHERS
+        );
+    }
+
+    #[test]
+    fn a_suppressed_reader_count_is_not_a_number_on_the_wire() {
+        let v = ReaderCount::build(7, lorehaven_domain::analytics::Scope::OwnWorkBasic);
+        let json = serde_json::to_string(&v).unwrap();
+        assert!(!json.contains("\"count\""), "a count leaked: {json}");
+        assert!(json.contains("\"fewer_than\":10"), "{json}");
+    }
+
+    #[test]
+    fn an_exact_reader_count_carries_no_floor() {
+        let json = serde_json::to_string(&ReaderCount::build(
+            40,
+            lorehaven_domain::analytics::Scope::OwnWorkBasic,
+        ))
+        .unwrap();
+        assert!(json.contains("\"count\":40"), "{json}");
+        assert!(!json.contains("fewer_than"), "{json}");
+    }
+
+    #[test]
+    fn the_method_and_freshness_travel_with_the_number() {
+        // §24.2. A count with no definition and no timestamp is not
+        // reviewable, and a reader cannot tell a stale number from a wrong one.
+        let v = ReaderCount::build(7, lorehaven_domain::analytics::Scope::OwnWorkBasic);
+        assert!(v.method.definition.contains("pseudonym"));
+        assert!(!v.method.freshness.is_empty());
+        assert!(!v.method.approximation.is_empty());
+        assert!(!v.computed_at.is_empty());
+    }
+
+    #[test]
+    fn a_single_entity_fact_is_not_floored() {
+        // A work's own word count is not a k-anonymity problem, and
+        // "fewer than 10 words" would be absurd.
+        let v = ReaderCount::build(3, lorehaven_domain::analytics::Scope::PublicWorkBasic);
+        assert_eq!(v.count, Some(3));
+        assert_eq!(v.fewer_than, None);
     }
 }

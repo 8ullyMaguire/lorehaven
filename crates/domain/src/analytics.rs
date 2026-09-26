@@ -461,7 +461,6 @@ impl Scope {
             | OwnResonanceLabel
             | OwnReadingPercentile
             | OwnContributionHistory
-            | OwnWorkBasic
             | OwnWorkReactions
             | OwnWorkRetention
             | OwnWorkTimeOnPage
