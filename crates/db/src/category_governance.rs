@@ -257,14 +257,14 @@ pub async fn merge_categories(db: &Database, source_slug: &str, target_slug: &st
             let mut tx = pool.begin().await?;
             sqlx::query(
                 "UPDATE categories SET state = 'merged',
-                 merged_into = (SELECT id FROM categories WHERE slug = ?)
-                 WHERE slug = ?",
+                 merged_into = (SELECT id FROM categories WHERE slug = $1)
+                 WHERE slug = $2",
             )
             .bind(target_slug)
             .bind(source_slug)
             .execute(&mut *tx)
             .await?;
-            sqlx::query("UPDATE directory_entries SET category = ? WHERE category = ?")
+            sqlx::query("UPDATE directory_entries SET category = $3 WHERE category = $4")
                 .bind(target_slug)
                 .bind(source_slug)
                 .execute(&mut *tx)
@@ -328,7 +328,7 @@ pub async fn hard_delete_category(db: &Database, slug: &str) -> Result<bool> {
             let pool = db.postgres_pool().expect("postgres");
             let mut tx = pool.begin().await?;
             let has_entries: i64 = sqlx::query(
-                "SELECT COUNT(*) FROM directory_entries WHERE category = ? AND removed_at IS NULL",
+                "SELECT COUNT(*) FROM directory_entries WHERE category = $1 AND removed_at IS NULL",
             )
             .bind(slug)
             .fetch_one(&mut *tx)
@@ -338,7 +338,7 @@ pub async fn hard_delete_category(db: &Database, slug: &str) -> Result<bool> {
                 return Ok(false);
             }
             let result =
-                sqlx::query("DELETE FROM categories WHERE slug = ? AND source = 'community'")
+                sqlx::query("DELETE FROM categories WHERE slug = $2 AND source = 'community'")
                     .bind(slug)
                     .execute(&mut *tx)
                     .await?;
@@ -577,7 +577,7 @@ pub async fn vote_on_proposal(
             let mut tx = pool.begin().await?;
             sqlx::query(
                 "INSERT INTO category_votes (id, proposal_id, account_id, value, created_at)
-                 VALUES (?, ?, ?, ?, ?)
+                 VALUES ($1, $2, $3, $4, $5)
                  ON CONFLICT(proposal_id, account_id) DO NOTHING",
             )
             .bind(&vote_id)
@@ -589,9 +589,9 @@ pub async fn vote_on_proposal(
             .await?;
             sqlx::query(
                 "UPDATE category_proposals
-                 SET yes_votes = (SELECT COUNT(*) FROM category_votes WHERE proposal_id = ? AND value = 'yes'),
-                     no_votes = (SELECT COUNT(*) FROM category_votes WHERE proposal_id = ? AND value = 'no')
-                 WHERE id = ?",
+                 SET yes_votes = (SELECT COUNT(*) FROM category_votes WHERE proposal_id = $6 AND value = 'yes'),
+                     no_votes = (SELECT COUNT(*) FROM category_votes WHERE proposal_id = $7 AND value = 'no')
+                 WHERE id = $8",
             )
             .bind(proposal_id)
             .bind(proposal_id)
@@ -599,7 +599,7 @@ pub async fn vote_on_proposal(
             .execute(&mut *tx)
             .await?;
             let proposal: CategoryProposal =
-                sqlx::query_as("SELECT * FROM category_proposals WHERE id = ?")
+                sqlx::query_as("SELECT * FROM category_proposals WHERE id = $9")
                     .bind(proposal_id)
                     .fetch_one(&mut *tx)
                     .await?;
@@ -611,7 +611,7 @@ pub async fn vote_on_proposal(
             if let Some(passed) = decided {
                 let new_status = if passed { "passed" } else { "failed" };
                 sqlx::query(
-                    "UPDATE category_proposals SET status = ?, decided_by = ?, decided_at = ? WHERE id = ?",
+                    "UPDATE category_proposals SET status = $10, decided_by = $11, decided_at = $12 WHERE id = $13",
                 )
                 .bind(new_status)
                 .bind(account_id)
@@ -932,7 +932,7 @@ pub async fn vote_on_entry_mod(
             let mut tx = pool.begin().await?;
             sqlx::query(
                 "INSERT INTO entry_moderation_votes (id, proposal_id, account_id, value, created_at)
-                 VALUES (?, ?, ?, ?, ?)
+                 VALUES ($1, $2, $3, $4, $5)
                  ON CONFLICT(proposal_id, account_id) DO NOTHING",
             )
             .bind(&vote_id)
@@ -944,9 +944,9 @@ pub async fn vote_on_entry_mod(
             .await?;
             sqlx::query(
                 "UPDATE entry_moderation_proposals
-                 SET yes_votes = (SELECT COUNT(*) FROM entry_moderation_votes WHERE proposal_id = ? AND value = 'yes'),
-                     no_votes = (SELECT COUNT(*) FROM entry_moderation_votes WHERE proposal_id = ? AND value = 'no')
-                 WHERE id = ?",
+                 SET yes_votes = (SELECT COUNT(*) FROM entry_moderation_votes WHERE proposal_id = $6 AND value = 'yes'),
+                     no_votes = (SELECT COUNT(*) FROM entry_moderation_votes WHERE proposal_id = $7 AND value = 'no')
+                 WHERE id = $8",
             )
             .bind(proposal_id)
             .bind(proposal_id)
@@ -954,7 +954,7 @@ pub async fn vote_on_entry_mod(
             .execute(&mut *tx)
             .await?;
             let proposal: EntryModProposal =
-                sqlx::query_as("SELECT * FROM entry_moderation_proposals WHERE id = ?")
+                sqlx::query_as("SELECT * FROM entry_moderation_proposals WHERE id = $9")
                     .bind(proposal_id)
                     .fetch_one(&mut *tx)
                     .await?;
@@ -966,7 +966,7 @@ pub async fn vote_on_entry_mod(
             if let Some(passed) = decided {
                 let new_status = if passed { "passed" } else { "failed" };
                 sqlx::query(
-                    "UPDATE entry_moderation_proposals SET status = ?, decided_by = ?, decided_at = ? WHERE id = ?",
+                    "UPDATE entry_moderation_proposals SET status = $10, decided_by = $11, decided_at = $12 WHERE id = $13",
                 )
                 .bind(new_status)
                 .bind(account_id)
@@ -1023,8 +1023,8 @@ pub async fn apply_entry_mod_action(db: &Database, proposal_id: &str, now: &str)
         }
         "remove" => {
             let sql = db.sql(
-                "UPDATE directory_entries SET removed_at = ? WHERE id = ? AND removed_at IS NULL",
-                "UPDATE directory_entries SET removed_at = ? WHERE id = ? AND removed_at IS NULL",
+                "UPDATE directory_entries SET removed_at = $1 WHERE id = $2 AND removed_at IS NULL",
+                "UPDATE directory_entries SET removed_at = $3 WHERE id = $4 AND removed_at IS NULL",
             );
             match db.backend() {
                 Backend::Sqlite => {

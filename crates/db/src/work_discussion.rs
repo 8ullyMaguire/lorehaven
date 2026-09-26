@@ -76,7 +76,10 @@ pub struct TopicWorkLink {
 pub async fn linked_topic(db: &Database, work_id: &str) -> Result<Option<TopicWorkLink>> {
     let sql = db.sql(
         "SELECT id, topic_id, work_id, chapter_id, created_at FROM topic_work_links WHERE work_id = ? ORDER BY created_at LIMIT 1",
-        "SELECT id, topic_id, work_id, chapter_id::text AS chapter_id, created_at FROM topic_work_links WHERE work_id::text = $1 ORDER BY created_at LIMIT 1",
+        // `work_id` is UUID (0038) and the struct field is String, exactly like
+        // `chapter_id` on the next column -- both need the cast.
+        "SELECT id, topic_id, work_id::text AS work_id, chapter_id::text AS chapter_id, created_at \
+         FROM topic_work_links WHERE work_id::text = $1 ORDER BY created_at LIMIT 1",
     );
     let row = match db.backend() {
         Backend::Sqlite => {
