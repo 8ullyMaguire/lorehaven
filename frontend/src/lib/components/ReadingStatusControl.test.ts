@@ -185,6 +185,43 @@ describe('ReadingStatusControl', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Forget this' })).not.toBeInTheDocument());
   });
 
+  // -- the session that is not resolved yet --------------------------------
+
+  it('fetches the recorded state once an unknown session resolves to signed-in', async () => {
+    // The session starts as `unknown` and resolves asynchronously. A control
+    // that reads it only on mount sees "not signed in", gives up, and never
+    // fetches -- so a signed-in reader is shown five unselected buttons for a
+    // work they had in fact finished, and can save that impression. Found by
+    // the E2E: the click worked, and the state was gone after a reload.
+    session.status = 'unknown';
+    session.me = null as any;
+    (fetchWorkReadingStatus as any).mockResolvedValue(RECORD('finished'));
+
+    render(ReadingStatusControl, { props: { workId: 'work-1' } });
+    expect(fetchWorkReadingStatus).not.toHaveBeenCalled();
+
+    session.status = 'signed-in';
+    session.me = ME;
+    await waitFor(() => expect(fetchWorkReadingStatus).toHaveBeenCalledWith('work-1'));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Finished' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      ),
+    );
+  });
+
+  it('does not claim a session is anonymous while it is still resolving', async () => {
+    // The mirror image: treating `unknown` as "no session" shows the sign-in
+    // prompt to a reader who is signed in, and asks them to sign in again.
+    session.status = 'unknown';
+    (fetchWorkReadingStatus as any).mockResolvedValue(null);
+
+    render(ReadingStatusControl, { props: { workId: 'work-1' } });
+
+    expect(screen.queryByRole('link', { name: 'Sign in' })).not.toBeInTheDocument();
+  });
+
   // -- failures -------------------------------------------------------------
 
   it('reports a failed write and puts the previous state back', async () => {
