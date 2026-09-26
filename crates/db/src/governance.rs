@@ -609,7 +609,12 @@ pub async fn list_audit_log(
                 .collect())
         }
         Backend::Postgres => {
-            let rows = sqlx::query("SELECT id, actor, action, subject_type, subject_id, document, created_at FROM audit_log WHERE actor = $1 ORDER BY created_at DESC LIMIT $2")
+            // `audit_log.document` is `TEXT` in SQLite and `JSONB` in PostgreSQL
+            // (0016_governance.sql). The row is handed to a `String` reader, so
+            // the column is cast to text on that side only -- otherwise
+            // `r.get::<String>("document")` is a decode error and the whole audit
+            // trail 500s. The write side already binds a `Value` into JSONB.
+            let rows = sqlx::query("SELECT id, actor, action, subject_type, subject_id, document::text AS document, created_at FROM audit_log WHERE actor = $1 ORDER BY created_at DESC LIMIT $2")
                 .bind(account_id)
                 .bind(limit)
                 .fetch_all(db.postgres_pool().expect("postgres"))

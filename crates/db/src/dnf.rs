@@ -338,17 +338,22 @@ pub async fn aggregate_dnf_counts(db: &Database, work_id: WorkId) -> Result<Vec<
 
 /// Check if a work allows DNF feedback (author opt-in).
 pub async fn work_allows_dnf_feedback(db: &Database, work_id: WorkId) -> Result<bool> {
-    let sql = "SELECT allow_dnf_feedback FROM works WHERE id = ?";
+    // `db.sql`, not one literal for both arms: `?` is SQLite's placeholder and
+    // PostgreSQL rejects it, so a shared literal silently disables the read.
+    let sql = db.sql(
+        "SELECT allow_dnf_feedback FROM works WHERE id = ?",
+        "SELECT allow_dnf_feedback FROM works WHERE id = ?::uuid",
+    );
 
     let row: Option<(bool,)> = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as(sql)
+            sqlx::query_as(&sql)
                 .bind(work_id.to_string())
                 .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
-            sqlx::query_as(sql)
+            sqlx::query_as(&sql)
                 .bind(work_id.to_string())
                 .fetch_optional(db.postgres_pool().expect("postgres handle"))
                 .await?

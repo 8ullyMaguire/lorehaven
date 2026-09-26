@@ -66,6 +66,19 @@ jobs:
       - name: Uncast placeholders
         run: python3 scripts/check-uncast-pg-placeholders.py crates
 
+      # A `$n::uuid` bind is only right when the column it is compared against is
+      # actually UUID. `groups.owner`, `group_members.group_id`, and
+      # `taxonomy_nodes.id` are declared TEXT, and casting their binds was
+      # `operator does not exist: text = uuid` -- a 500 that only PostgreSQL ever
+      # showed. Six of these were live; four of the standing PG test failures
+      # traced here. The types come from the migrations, so a migration that
+      # changes a column is picked up without editing the check.
+      - name: UUID-cast checker self-test
+        run: python3 scripts/check-pg-uuid-casts.py --self-test
+
+      - name: UUID casts against TEXT columns
+        run: python3 scripts/check-pg-uuid-casts.py
+
       # fix-timestamptz-binds.py is disabled. It assumed the PostgreSQL
       # timestamp columns are TIMESTAMPTZ; they are TEXT, so every cast it
       # added was itself a defect. Only the self-test runs, which keeps the

@@ -2892,11 +2892,21 @@ pub async fn find_by_perceptual_hash(
         // already store as text has to be cast: `id` is UUID, and
         // `first_seen_at`/`created_at`/`updated_at` are TIMESTAMPTZ. The SQLite
         // arm needs none of this and stays as written.
-        "SELECT id::text, perceptual_hash, content_hash, media_kind,
-                first_seen_at::text, width::bigint, height::bigint,
-                duration_seconds::bigint, format,
-                file_size_bytes::bigint, content_notes::text, curator_verified,
-                created_at::text, updated_at::text
+        // Every cast carries its column name back as an alias, for the same
+        // reason as the SQLite arm: without it the result column is named after
+        // the expression, and the row reader's `r.get("width")` is
+        // `ColumnNotFound("width")`. `id::text` and the timestamps are cast to
+        // text because the reader takes Strings; the widths stay integral
+        // because the reader asks for an i64.
+        "SELECT id::text AS id, perceptual_hash, content_hash, media_kind,
+                first_seen_at::text AS first_seen_at,
+                width::bigint AS width,
+                height::bigint AS height,
+                duration_seconds::bigint AS duration_seconds,
+                format,
+                file_size_bytes::bigint AS file_size_bytes,
+                content_notes::text AS content_notes, curator_verified,
+                created_at::text AS created_at, updated_at::text AS updated_at
          FROM media_references
          WHERE perceptual_hash IS NOT NULL"
             .to_string(),

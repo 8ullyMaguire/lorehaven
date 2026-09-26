@@ -233,7 +233,7 @@ pub async fn accept_follow(db: &Database, follow_id: &str) -> Result<()> {
                 .await?;
         }
         Backend::Postgres => {
-            sqlx::query("UPDATE ap_follows SET accepted = TRUE WHERE id = $1::uuid")
+            sqlx::query("UPDATE ap_follows SET accepted = TRUE WHERE id = $1")
                 .bind(follow_id)
                 .execute(db.postgres_pool().expect("postgres"))
                 .await?;
@@ -584,8 +584,13 @@ pub async fn mark_queue_sent(db: &Database, id: &str) -> Result<()> {
             .await?;
         }
         Backend::Postgres => {
-            sqlx::query("UPDATE federation_queue SET status = 'sent', processed_at = $1 WHERE id = $2::uuid")
-                .bind(&now).bind(id).execute(db.postgres_pool().expect("postgres")).await?;
+            sqlx::query(
+                "UPDATE federation_queue SET status = 'sent', processed_at = $1 WHERE id = $2",
+            )
+            .bind(&now)
+            .bind(id)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?;
         }
     }
     Ok(())
@@ -598,7 +603,7 @@ pub async fn mark_queue_failed(db: &Database, id: &str) -> Result<()> {
                 .bind(id).execute(db.sqlite_pool().expect("sqlite")).await?;
         }
         Backend::Postgres => {
-            sqlx::query("UPDATE federation_queue SET status = 'failed', attempts = attempts + 1 WHERE id = $1::uuid")
+            sqlx::query("UPDATE federation_queue SET status = 'failed', attempts = attempts + 1 WHERE id = $1")
                 .bind(id).execute(db.postgres_pool().expect("postgres")).await?;
         }
     }
