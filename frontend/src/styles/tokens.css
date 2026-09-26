@@ -40,6 +40,18 @@
   --space-7: 3rem;
   --space-8: 4rem;
 
+  /*
+   * How much of the viewport a sticky element covers. Read by `app.css` for
+   * `scroll-padding-top`, so that scrolling anything into view — a keyboard
+   * focus, a skip link, an `id` anchor in the help pages — leaves it clear of
+   * the header instead of underneath it. Declared here because `html` cannot
+   * read a custom property set on its own descendant: custom properties
+   * inherit downwards, so a token defined on `.site-header` never reaches the
+   * root. Measured against the header's own padding and type, so if the header
+   * grows the number is the one thing to revisit.
+   */
+  --header-height: 4.0625rem;
+
   --radius-sm: 3px;
   --radius-md: 6px;
   --radius-lg: 10px;

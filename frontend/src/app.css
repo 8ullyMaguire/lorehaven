@@ -14,6 +14,19 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+
+  /*
+   * The site header is `position: sticky; top: 0`, and without this, anything
+   * scrolled to lands *underneath* it. That is not only a click-target problem:
+   * WCAG 2.4.7 (Focus Visible) fails for keyboard users, because focusing an
+   * element below the fold scrolls it exactly under the bar, and the browser's
+   * own focus scroll is not offset. The same applies to the skip link and to
+   * any `id` anchor a help page links to.
+   *
+   * Found by the analytics E2E run: Playwright scrolled "Start a draft" to the
+   * top of the viewport, where the header intercepted the pointer.
+   */
+  scroll-padding-top: var(--header-height);
 }
 
 body {

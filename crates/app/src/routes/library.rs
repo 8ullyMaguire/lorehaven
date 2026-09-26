@@ -718,6 +718,14 @@ async fn add_item_tag(
             field_errors: Default::default(),
         })
     })?;
+    // Same subject check as the status door: a tag on a subject that is not
+    // the reader's item is a write into nobody's namespace, and the row it
+    // leaves behind survives the item being removed.
+    if !library::library_item_exists(state.db(), &user.account_id.to_string(), &id).await? {
+        return Err(ApiError(AppError::NotFound {
+            resource: "library item",
+        }));
+    }
     library::add_private_tag(
         state.db(),
         &user.account_id.to_string(),
@@ -813,6 +821,16 @@ async fn set_status(
             field_errors: Default::default(),
         }));
     };
+    // The subject has to be a thing the reader actually has. Without this the
+    // door accepts any UUID in the instance, writes a `reading_status` row
+    // against a subject that does not exist, and answers 200 -- and the
+    // reader's own dashboard then shows a zero that nothing on the page can
+    // explain. A status with no subject is a client bug, not a stored fact.
+    if !library::library_item_exists(state.db(), &user.account_id.to_string(), &id).await? {
+        return Err(ApiError(AppError::NotFound {
+            resource: "library item",
+        }));
+    }
     let row = library::set_reading_status(
         state.db(),
         &user.account_id.to_string(),

@@ -1807,3 +1807,54 @@ in ORDER BY when it wraps a subquery.
 Read ADR 0024, then `docs/plans/remaining-work.md` §M52 — it names the spec
 section (§16.1a), the rows (M52-01…08), and the port source. Start with the
 golden legacy-parity test.
+
+## M57B — The analytics page is reachable; a status needed a subject
+
+`/analytics` existed as a component with twenty unit tests and was not in the
+router. A component that is not in `FIXED_ROUTES` is invisible, and a test that
+renders it directly cannot tell an unreachable page from a reachable one, so all
+twenty were green while no reader could open the page. Four coordinated edits
+plus a nav entry; the nav entry matters, because a page reachable only by typing
+its URL is not a page a reader has.
+
+### A data-integrity bug this found
+
+`PUT /library/items/{id}/status` trusted `id`. Any UUID in the instance got a
+200 and left a `reading_status` row for a subject that does not exist. The
+reader's own dashboard then counted nothing, for reasons visible nowhere on the
+page. Two problems, one predicate: the subject must exist, and it must be
+*this reader's* item — without `account_id` in the check, a reader who learned
+another reader's item id could write a status against it. `library_item_exists`
+does both; `add_item_tag` had the identical hole and gets the same guard. Four
+tests, including a happy path, because a gate that refuses everyone is
+indistinguishable from a gate that works.
+
+Refusals are 404 rather than 403 on purpose: a 403 confirms the item exists,
+which is a small leak across accounts.
+
+### A layout bug that predates the analytics work
+
+The desktop nav had `flex-wrap: wrap` and sixteen items, so at 1280px it wrapped
+to three rows and a `position: sticky` header measured **177px** — a quarter of
+a 720px viewport — covering everything scrolled to underneath it. Found because
+Playwright could not click a control the header sat on. Fixed by pinning the nav
+to one row with `flex-wrap: nowrap` and horizontal scroll, which is what makes
+`--header-height` a true constant instead of a function of how many items fit.
+Header is now 65px. The E2E asserts `scroll-padding-top >= header height`, so a
+drift in the token fails a test rather than quietly clipping a keyboard reader's
+focus ring.
+
+The whole analytics E2E file went from 4 minutes (three tests timing out at 180s)
+to 14 seconds once the header was fixed.
+
+### Still open, deliberately
+
+`library_items` is created in exactly one place: `imports::upsert_library_item`,
+called by the import runner. A work published on this instance never gets a
+library row, so a reader who finishes one has no subject to mark and
+`own.reading.basic` shows them a permanent zero. `library_items.work_id` exists
+and is nullable precisely for the materialised case, so the model anticipated
+this and the write path was never built. Tracked as M57A-09.
+
+The E2E asserts the honest 404 rather than working around it, and the comment
+says why — a workaround is what hid this in the first place.

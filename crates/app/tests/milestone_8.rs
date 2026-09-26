@@ -1080,3 +1080,187 @@ async fn the_update_check_is_queued_as_a_job() {
 
     harness.cleanup().await;
 }
+
+// ---------------------------------------------------------------------------
+// A status needs a subject
+// ---------------------------------------------------------------------------
+//
+// Found by the analytics E2E run, and it is a data-integrity bug rather than a
+// cosmetic one.
+//
+// `PUT /library/items/{id}/status` trusted `id`. A caller that named any UUID
+// in the instance -- a *work* id, say, because the shape of the path looks
+// like a work -- got a 200 and left behind a `reading_status` row for a subject
+// that does not exist. The reader's own dashboard then counted nothing, for
+// reasons visible nowhere on the page: the row that had been "saved" is keyed
+// on a subject the query filters out.
+//
+// The second half of the same predicate is ownership. Without `account_id` in
+// the check, a reader who learned another reader's item id could write a
+// reading status against it -- the same subject id, attributed to the wrong
+// owner. That is a write into somebody else's namespace, and the row outlives
+// the item.
+
+#[tokio::test]
+async fn a_reading_status_for_a_subject_that_is_not_an_item_is_refused() {
+    let harness = Harness::new("status-orphan").await;
+    let mut client = harness.client();
+    let account = register(
+        &mut client,
+        "orphan-subject@lorehaven.test",
+        "OrphanSubject",
+    )
+    .await;
+
+    // A well-formed UUID that is not in this reader's library. This is the
+    // exact mistake the E2E made: a real id from the instance, just not an
+    // item id.
+    let some_other_id = uuid_like();
+
+    let (status, body) = client
+        .put(
+            &format!("/api/v1/library/items/{some_other_id}/status"),
+            json!({ "status": "finished" }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "a status against a subject that is not the reader's item must be          refused, not stored: {body}"
+    );
+
+    // The part that matters: a refusal that still writes the row is a refusal
+    // in name only. Assert the table is untouched rather than trusting the
+    // status code.
+    let rows = count_rows(&harness, "reading_status").await;
+    assert_eq!(rows, 0, "a refused status must leave no row behind");
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_reading_status_cannot_be_written_against_another_readers_item() {
+    let harness = Harness::new("status-cross-account").await;
+
+    // Two readers. The second learns the first's item id.
+    let mut owner_client = harness.client();
+    let owner = register(
+        &mut owner_client,
+        "owner-of-item@lorehaven.test",
+        "OwnerOfItem",
+    )
+    .await;
+    let item = seed_item(&harness, &owner, "an-item", "An Item").await;
+    drop(owner_client);
+
+    let mut other_client = harness.client();
+    let other = register(
+        &mut other_client,
+        "other-reader@lorehaven.test",
+        "OtherReader",
+    )
+    .await;
+    assert_ne!(other, owner, "two distinct accounts");
+
+    // The id is real, and it belongs to somebody else. 404 rather than 403 on
+    // purpose: a 403 would confirm the item exists, which is itself a small
+    // leak across accounts.
+    let (status, body) = other_client
+        .put(
+            &format!("/api/v1/library/items/{item}/status"),
+            json!({ "status": "dropped" }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "another reader's item must not be writable: {body}"
+    );
+
+    let rows = count_rows(&harness, "reading_status").await;
+    assert_eq!(rows, 0, "a cross-account refusal must leave no row behind");
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_status_for_a_real_item_is_still_accepted() {
+    // The guard must not be a door that refuses everyone. A gate that refuses
+    // everything is indistinguishable from a gate that works, and the only way
+    // to tell the difference is a test that expects the success.
+    let harness = Harness::new("status-happy").await;
+    let mut client = harness.client();
+    let account = register(&mut client, "happy-status@lorehaven.test", "HappyStatus").await;
+    let item = seed_item(&harness, &account, "a-readable-item", "A Readable Item").await;
+
+    let (status, body) = client
+        .put(
+            &format!("/api/v1/library/items/{item}/status"),
+            json!({ "status": "finished" }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a real item must be writable: {body}"
+    );
+    assert_eq!(body["status"], "finished");
+
+    let rows = count_rows(&harness, "reading_status").await;
+    assert_eq!(rows, 1, "the accepted status must be stored");
+
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_tag_cannot_be_attached_to_a_subject_that_is_not_an_item() {
+    // The tag door had the identical hole, so it gets the identical check.
+    let harness = Harness::new("tag-orphan").await;
+    let mut client = harness.client();
+    let _account = register(&mut client, "orphan-tag@lorehaven.test", "OrphanTag").await;
+
+    let (status, body) = client
+        .put(
+            &format!("/api/v1/library/items/{}/tags/to-read", uuid_like()),
+            json!({}),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "a tag on a subject that is not the reader's item must be refused: {body}"
+    );
+
+    let rows = count_rows(&harness, "private_tags").await;
+    assert_eq!(rows, 0, "a refused tag must leave no row behind");
+
+    harness.cleanup().await;
+}
+
+/// A UUID that is in no table. Shaped like a real id on purpose: the bug was
+/// never that the value was malformed, it was that nothing checked what it
+/// pointed at.
+fn uuid_like() -> String {
+    "00000000-0000-4000-8000-000000000001".to_owned()
+}
+
+/// Rows in one of the two library tables, counted directly.
+///
+/// `identity::count` interpolates its table name and is right to allowlist it,
+/// so widening that allowlist for two read-only assertions would trade a real
+/// guard for a convenient one. The table name here is a literal in this file,
+/// never a caller-supplied string, which is the property the allowlist exists
+/// to protect.
+async fn count_rows(harness: &Harness, table: &str) -> i64 {
+    let sql = format!("SELECT COUNT(*) FROM {table}");
+    match harness.tdb.db().backend() {
+        lorehaven_db::Backend::Sqlite => sqlx::query_scalar(&sql)
+            .fetch_one(harness.tdb.db().sqlite_pool().expect("sqlite handle"))
+            .await
+            .expect("count rows"),
+        lorehaven_db::Backend::Postgres => sqlx::query_scalar(&sql)
+            .fetch_one(harness.tdb.db().postgres_pool().expect("postgres handle"))
+            .await
+            .expect("count rows"),
+    }
+}

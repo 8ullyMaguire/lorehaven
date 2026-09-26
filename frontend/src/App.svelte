@@ -466,12 +466,36 @@
     letter-spacing: -0.01em;
   }
 
+  /*
+   * The desktop nav scrolls sideways rather than wrapping.
+   *
+   * It used to `flex-wrap: wrap`, which is correct for a handful of items and
+   * wrong for sixteen: at 1280px the row wrapped to three lines, and because
+   * the header is `position: sticky`, a 177px header ate a quarter of a 720px
+   * viewport and covered anything scrolled to underneath it. Found by the
+   * analytics E2E run, where Playwright could not click a control the header
+   * was sitting on top of.
+   *
+   * Wrapping was never a good fallback here: a header that changes height with
+   * its content cannot have a correct `scroll-padding-top`, because the number
+   * is a function of how many items fit. Pinning it to one row makes the header
+   * a fixed height, which is what lets `--header-height` be a true constant
+   * rather than a guess. The overflow scroll is the escape hatch for a
+   * narrow window; the items are reachable by keyboard and by tab either way.
+   */
   .desktop {
     display: none;
     gap: var(--space-5);
     margin-left: var(--space-5);
     flex: 1;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  /* A nav that scrolls should not advertise a scrollbar it hides. */
+  .desktop::-webkit-scrollbar {
+    display: none;
   }
 
   .desktop a {
