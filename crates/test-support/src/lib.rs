@@ -376,6 +376,10 @@ impl TestClient {
         self.request("POST", uri.as_ref(), Some(body)).await
     }
 
+    pub async fn put(&mut self, uri: impl AsRef<str>, body: Value) -> (StatusCode, Value) {
+        self.request("PUT", uri.as_ref(), Some(body)).await
+    }
+
     pub fn cookie(&self, name: &str) -> Option<&str> {
         self.cookies
             .iter()

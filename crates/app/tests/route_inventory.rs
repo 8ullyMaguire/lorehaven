@@ -1540,6 +1540,15 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/presence/stream",
         audience: Audience::Authenticated,
     },
+    // Presence being opt-in is only true if a person can decline it, so the
+    // flag has to be settable by its owner.
+    RouteEntry {
+        file: "community.rs",
+        handler: "set_presence_preference",
+        method: "PUT",
+        path: "/me/presence",
+        audience: Audience::Authenticated,
+    },
     // ------------------------------------------------------------------
     // Taxonomy — public reads, session-scoped writes
     // ------------------------------------------------------------------
