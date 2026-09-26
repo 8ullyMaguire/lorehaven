@@ -153,13 +153,17 @@ const READER_TOTALS_SQLITE: &str = "SELECT
      (SELECT COUNT(*) FROM bookmarks b JOIN works w ON w.id = b.subject_id
        WHERE w.owner_pseud_id = ? AND b.subject_type = 'work') AS bookmarks";
 
+// `rating.is_public` and `review.is_public` are BOOLEAN on PostgreSQL and
+// INTEGER in the SQLite twin (0004), so the two arms need different
+// literals: `= 1` is a type error here, and `= TRUE` is not valid
+// SQLite. Same split for `owner_pseud_id`, which is UUID here.
 const READER_TOTALS_POSTGRES: &str = "SELECT
      (SELECT COUNT(*) FROM rating r JOIN works w ON w.id = r.work_id
-       WHERE w.owner_pseud_id = ?::uuid AND r.is_public = 1 AND r.deleted_at IS NULL) AS ratings,
+       WHERE w.owner_pseud_id = ?::uuid AND r.is_public = TRUE AND r.deleted_at IS NULL) AS ratings,
      (SELECT COALESCE(CAST(SUM(r.stars) AS BIGINT), 0) FROM rating r JOIN works w ON w.id = r.work_id
-       WHERE w.owner_pseud_id = ?::uuid AND r.is_public = 1 AND r.deleted_at IS NULL) AS rating_stars,
+       WHERE w.owner_pseud_id = ?::uuid AND r.is_public = TRUE AND r.deleted_at IS NULL) AS rating_stars,
      (SELECT COUNT(*) FROM review rv JOIN works w ON w.id = rv.work_id
-       WHERE w.owner_pseud_id = ?::uuid AND rv.is_public = 1
+       WHERE w.owner_pseud_id = ?::uuid AND rv.is_public = TRUE
          AND rv.published_at IS NOT NULL AND rv.deleted_at IS NULL) AS reviews,
      (SELECT COUNT(*) FROM bookmarks b JOIN works w ON w.id = b.subject_id
        WHERE w.owner_pseud_id = ?::uuid AND b.subject_type = 'work') AS bookmarks";
@@ -219,12 +223,16 @@ const COMMENT_TOTALS_SQLITE: &str = "SELECT
  LEFT JOIN comment_classifications cc ON cc.comment_id = c.id
  WHERE w.owner_pseud_id = ? AND c.subject_type = 'work' AND c.deleted_at IS NULL";
 
+// `comments.subject_id` is TEXT on both engines (0013) and `works.id` is
+// UUID on PostgreSQL, so the join needs the *text* side cast --
+// "operator does not exist: uuid = text". `cc.comment_id` and
+// `comments.id` are both TEXT, so that join is left alone.
 const COMMENT_TOTALS_POSTGRES: &str = "SELECT
      COUNT(*) AS comments,
      COALESCE(SUM(CASE WHEN cc.outcome IS NULL OR cc.outcome = 'delivered' THEN 1 ELSE 0 END), 0)
          AS comments_delivered
  FROM comments c
- JOIN works w ON w.id = c.subject_id
+ JOIN works w ON w.id = c.subject_id::uuid
  LEFT JOIN comment_classifications cc ON cc.comment_id = c.id
  WHERE w.owner_pseud_id = ?::uuid AND c.subject_type = 'work' AND c.deleted_at IS NULL";
 

@@ -82,7 +82,11 @@ pub async fn get_sort_preference(
         }
         Backend::Postgres => {
             sqlx::query_as::<_, SortPreferenceRow>(
-                "SELECT pseud_id, surface, sort_value, updated_at FROM reader_sort_preferences WHERE pseud_id = $1::uuid AND surface = $2",
+                // `pseud_id` is UUID and SortPreferenceRow.pseud_id is a String,
+                // so the SELECT list needs the cast -- the opposite direction from
+                // the `$1::uuid` in the same statement's WHERE.
+                "SELECT pseud_id::text AS pseud_id, surface, sort_value, updated_at::text \
+                 FROM reader_sort_preferences WHERE pseud_id = $1::uuid AND surface = $2",
             )
             .bind(pseud_id)
             .bind(surface)
