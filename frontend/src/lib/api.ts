@@ -2626,6 +2626,38 @@ export async function searchForum(
   return page.items;
 }
 
+
+/** One pseudonym matching a user search. */
+export interface UserSearchResult {
+  pseud_id: string;
+  handle: string;
+  display_name: string | null;
+  joined_at: string | null;
+}
+
+/**
+ * Search pseudonyms with the shared query language.
+ *
+ * The query is built by the caller from the filter boxes, using the same
+ * syntax the works and forum searches take. The server refuses a field that
+ * belongs to another surface with a 422 that names where it does belong, so
+ * there is no structured-parameter translation here: every filter is already
+ * a term a reader can see and edit in the box.
+ */
+export async function searchUsers(
+  q: string,
+  limit = 20,
+  signal?: AbortSignal,
+): Promise<{ total: number; items: UserSearchResult[] }> {
+  const sp = new URLSearchParams();
+  sp.set('q', q);
+  if (limit) sp.set('limit', String(limit));
+  return apiFetch<{ total: number; items: UserSearchResult[] }>(
+    `/users/search?${sp.toString()}`,
+    { signal },
+  );
+}
+
 export async function fetchGroups(signal?: AbortSignal): Promise<Group[]> {
   const page = await apiFetch<{ items: Group[] }>('/groups', { signal });
   return page.items;
