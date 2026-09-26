@@ -83,12 +83,39 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
         }
         QueryAst::Not(inner) => {
             let inner = render_node(inner)?;
+            // `NOT NULL` is NULL, not true, so a negated predicate over columns
+            // that may be NULL -- `works.summary`, `works_index.body_text` --
+            // silently matches nothing at all. COALESCE resolves the unknown to
+            // a definite false *before* the negation, which is what the reader
+            // meant by "not spoiler": no match, rather than no answer.
+            //
+            // A taxonomy term is an `EXISTS (...)`, which is never NULL, and
+            // coalescing there would only add noise -- so the coalesce is
+            // applied to the inner fragment only when it can be NULL.
+            let coalesce = needs_null_guard(&inner.sql);
+            let sql = if coalesce {
+                format!("NOT COALESCE({}, false)", inner.sql)
+            } else {
+                format!("NOT ({})", inner.sql)
+            };
             Ok(SqlFragment {
-                sql: format!("NOT ({})", inner.sql),
+                sql,
                 binds: inner.binds,
             })
         }
     }
+}
+
+/// Whether a rendered predicate can evaluate to NULL rather than true/false.
+///
+/// A `LIKE` against a nullable column is the only source. `EXISTS` and the
+/// numeric comparisons are already total: `EXISTS` is a definite false when it
+/// finds nothing, and every comparison this module emits sits inside a
+/// `COALESCE`. Deciding it from the text is a heuristic, and a wrong `false`
+/// only means an extra `COALESCE` -- which is safe -- whereas missing a `true`
+/// is the bug this guards against.
+fn needs_null_guard(sql: &str) -> bool {
+    sql.contains(" LIKE ")
 }
 
 fn quality_threshold(value: &str) -> Result<String, QueryError> {
@@ -155,11 +182,16 @@ fn numeric_column(field: &QueryField) -> Result<&'static str, QueryError> {
              WHERE c.work_id = works.id AND c.deleted_at IS NULL), 0)"
         }
         other => {
+            // Name both halves: what is wrong, and where the field does belong.
+            // "not a comparable field on the works surface (comparable here:
+            // words, kudos)" leaves a reader who typed `replies:>50` with no
+            // idea that the forum search is the place for it.
             return Err(QueryError::new(
                 format!(
-                    "{} is not a comparable field on the works surface \
+                    "{} is a {} field, not a comparable works field \
                      (comparable here: words, kudos)",
-                    other.as_str()
+                    other.as_str(),
+                    other.entity().as_str()
                 ),
                 0,
             ))
@@ -340,6 +372,66 @@ mod tests {
     use crate::query::parse_query;
 
     #[test]
+    fn a_negated_free_text_term_is_null_safe() {
+        // `NOT (title LIKE ? OR summary LIKE ? OR body LIKE ?)` is NULL --
+        // not true -- whenever any of the three arms is NULL. A work with a
+        // NULL `summary` and no index row therefore matches *no* negated free
+        // text, silently, and the reader's `NOT spoiler` filter does nothing
+        // for it. COALESCE turns the unknown into a definite false first, so
+        // the negation is about what actually matched rather than about what
+        // the database happened to know.
+        let ast = parse_query("NOT spoiler").unwrap();
+        let frag = render_query(&ast).unwrap();
+        assert!(
+            frag.sql.contains("COALESCE"),
+            "a negated free-text term must coalesce, rendered: {}",
+            frag.sql
+        );
+        // A *positive* term must not grow the same treatment: `title LIKE ?`
+        // against a NULL title is correctly false, and coalescing there would
+        // only add noise.
+        let positive = render_query(&parse_query("spoiler").unwrap()).unwrap();
+        assert!(
+            !positive.sql.contains("COALESCE"),
+            "the positive form is already null-safe, rendered: {}",
+            positive.sql
+        );
+    }
+
+    #[test]
+    fn a_negated_phrase_is_null_safe() {
+        let ast = parse_query("NOT \"we were never alone\"").unwrap();
+        let frag = render_query(&ast).unwrap();
+        assert!(
+            frag.sql.contains("COALESCE"),
+            "a negated phrase reads body_text, which is NULL when unindexed: {}",
+            frag.sql
+        );
+    }
+
+    #[test]
+    fn a_negated_fielded_term_is_null_safe() {
+        // `summary:` has the same three columns behind it.
+        let ast = parse_query("NOT summary:anything").unwrap();
+        let frag = render_query(&ast).unwrap();
+        assert!(frag.sql.contains("COALESCE"), "rendered: {}", frag.sql);
+    }
+
+    #[test]
+    fn a_negated_taxonomy_term_is_null_safe() {
+        // The taxonomy predicates are `EXISTS (...)`, which is never NULL --
+        // it is a definite false. Asserting they were left alone keeps the
+        // COALESCE from creeping onto a subquery that does not need it.
+        let ast = parse_query("NOT tag:spoiler").unwrap();
+        let frag = render_query(&ast).unwrap();
+        assert!(
+            !frag.sql.contains("COALESCE"),
+            "EXISTS is never NULL, so a negated taxonomy term needs no coalesce: {}",
+            frag.sql
+        );
+    }
+
+    #[test]
     fn render_text_produces_like() {
         let ast = parse_query("winter").unwrap();
         let frag = render_query(&ast).unwrap();
@@ -500,10 +592,29 @@ mod tests {
         let ast = parse_query("replies:>50").unwrap();
         let err = render_query(&ast).unwrap_err();
         assert!(
-            err.message.contains("replies") && err.message.contains("works surface"),
+            err.message.contains("replies") && err.message.contains("works"),
             "got: {}",
             err.message
         );
+    }
+
+    #[test]
+    fn a_comparison_error_names_the_surface_the_field_belongs_to() {
+        // The actionable half of the message: a reader who typed `replies:>50`
+        // needs to learn the forum search is where it goes.
+        for (query, entity) in [
+            ("replies:>50", "forum"),
+            ("rank:>100", "directory"),
+            ("works:>10", "user"),
+        ] {
+            let ast = parse_query(query).unwrap();
+            let err = render_query(&ast).unwrap_err();
+            assert!(
+                err.message.contains(entity),
+                "{query} should say the field belongs to {entity}, got: {}",
+                err.message
+            );
+        }
     }
 
     #[test]

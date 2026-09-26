@@ -2,6 +2,7 @@
 //! filtering. Both dialects.
 
 use super::content_filter_sql::{self, FilterRule};
+use super::query_error::SearchError;
 use crate::search::SearchResult;
 use crate::{sql_owned, Backend, Database};
 use anyhow::Result;
@@ -55,12 +56,11 @@ async fn search_works_ast_impl(
     let (user_where, user_binds) = if query.trim().is_empty() {
         ("1=1".to_owned(), Vec::new())
     } else {
-        let ast = parse_query(query).map_err(|e| {
-            anyhow::anyhow!("query parse error: {} at offset {}", e.message, e.offset)
-        })?;
-        let fragment = render_query(&ast).map_err(|e| {
-            anyhow::anyhow!("query render error: {} at offset {}", e.message, e.offset)
-        })?;
+        // A bad query is the reader's mistake, not a server fault, so it gets a
+        // typed error the route can turn into a 422 carrying the reason. It was
+        // an `anyhow!` string before, which made every typo a 500.
+        let ast = parse_query(query).map_err(|e| SearchError::parse(e.message, e.offset))?;
+        let fragment = render_query(&ast).map_err(|e| SearchError::render(e.message))?;
         (fragment.sql, fragment.binds)
     };
 
