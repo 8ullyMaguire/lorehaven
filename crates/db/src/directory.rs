@@ -404,7 +404,8 @@ pub async fn get_entry(
 pub async fn my_vote(db: &Database, entry_id: &str, account_id: &str) -> Result<Option<i64>> {
     let sql = db.sql(
         "SELECT vote_value FROM directory_votes WHERE entry_id = ? AND account_id = ?",
-        "SELECT vote_value FROM directory_votes WHERE entry_id = ? AND account_id = ?",
+        // `vote_value` is INTEGER; the `?` had also never been rewritten.
+        "SELECT CAST(vote_value AS BIGINT) FROM directory_votes WHERE entry_id = $1 AND account_id = $2",
     );
     let row: Option<(i64,)> = match db.backend() {
         Backend::Sqlite => {
@@ -428,13 +429,22 @@ pub async fn my_vote(db: &Database, entry_id: &str, account_id: &str) -> Result<
 /// Set, toggle or flip a vote and recompute the score in the SAME
 /// transaction (spec §39.4: the list never shows a stale score).
 /// Returns the new score and whether a live vote remains.
-/// The transactional core of [`set_vote`]. A macro because sqlx queries
-/// are typed per-dialect: the same SQL runs against both executors.
+/// The transactional core of [`set_vote`].
+///
+/// A macro because the two executors want different placeholder syntax, and a
+/// macro lets one body serve both. The original version used `?` throughout on
+/// the assumption that sqlx rewrites it per-dialect. It does not: `?` is SQLite
+/// syntax, and on PostgreSQL `WHERE entry_id = ? AND account_id = ?` is a syntax
+/// error, so every entry vote on a PostgreSQL instance was a 500. The macro now
+/// takes both forms, exactly like [`crate::Database::sql`].
 macro_rules! vote_tx {
-    ($tx:expr, $entry_id:expr, $account_id:expr, $value:expr, $weight:expr, $now:expr) => {{
-        let existing: Option<(i64,)> = sqlx::query_as(
-            "SELECT vote_value FROM directory_votes WHERE entry_id = ? AND account_id = ?",
-        )
+    ($db:expr, $tx:expr, $entry_id:expr, $account_id:expr, $value:expr, $weight:expr, $now:expr) => {{
+        // `vote_value` is INTEGER (INT4); reading it as i64 needs the cast on
+        // both engines, so both forms carry it.
+        let existing: Option<(i64,)> = sqlx::query_as(&$db.sql(
+            "SELECT CAST(vote_value AS BIGINT) FROM directory_votes WHERE entry_id = ? AND account_id = ?",
+            "SELECT CAST(vote_value AS BIGINT) FROM directory_votes WHERE entry_id = $1 AND account_id = $2",
+        ))
         .bind($entry_id)
         .bind($account_id)
         .fetch_optional(&mut *$tx)
@@ -442,32 +452,45 @@ macro_rules! vote_tx {
         let live: bool = match existing {
             Some((current,)) if current == $value => {
                 // Same value again: toggle off.
-                sqlx::query("DELETE FROM directory_votes WHERE entry_id = ? AND account_id = ?")
-                    .bind($entry_id)
-                    .bind($account_id)
-                    .execute(&mut *$tx)
-                    .await?;
+                sqlx::query(&$db.sql(
+                    "DELETE FROM directory_votes WHERE entry_id = ? AND account_id = ?",
+                    "DELETE FROM directory_votes WHERE entry_id = $1 AND account_id = $2",
+                ))
+                .bind($entry_id)
+                .bind($account_id)
+                .execute(&mut *$tx)
+                .await?;
                 false
             }
             Some(_) => {
                 // Other value: flip in place.
-                sqlx::query("UPDATE directory_votes SET vote_value = ?, weight = ?, voted_at = ? WHERE entry_id = ? AND account_id = ?")
-                    .bind($value).bind($weight).bind($now).bind($entry_id).bind($account_id)
-                    .execute(&mut *$tx)
-                    .await?;
+                sqlx::query(&$db.sql(
+                    "UPDATE directory_votes SET vote_value = ?, weight = ?, voted_at = ? WHERE entry_id = ? AND account_id = ?",
+                    "UPDATE directory_votes SET vote_value = $1, weight = $2, voted_at = $3 WHERE entry_id = $4 AND account_id = $5",
+                ))
+                .bind($value).bind($weight).bind($now).bind($entry_id).bind($account_id)
+                .execute(&mut *$tx)
+                .await?;
                 true
             }
             None => {
-                sqlx::query("INSERT INTO directory_votes (entry_id, account_id, vote_value, weight, voted_at) VALUES (?, ?, ?, ?, ?)")
-                    .bind($entry_id).bind($account_id).bind($value).bind($weight).bind($now)
-                    .execute(&mut *$tx)
-                    .await?;
+                sqlx::query(&$db.sql(
+                    "INSERT INTO directory_votes (entry_id, account_id, vote_value, weight, voted_at) VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO directory_votes (entry_id, account_id, vote_value, weight, voted_at) VALUES ($1, $2, $3, $4, $5)",
+                ))
+                .bind($entry_id).bind($account_id).bind($value).bind($weight).bind($now)
+                .execute(&mut *$tx)
+                .await?;
                 true
             }
         };
-        sqlx::query(
-            "UPDATE directory_entries SET score = (SELECT COALESCE(SUM(vote_value * weight), 0) FROM directory_votes WHERE entry_id = ?), updated_at = ? WHERE id = ?",
-        )
+        // `score` is REAL, and SUM() of a REAL is double precision on PostgreSQL
+        // but REAL on SQLite, so the assignment is cast to the column's own type
+        // rather than the expression's.
+        sqlx::query(&$db.sql(
+            "UPDATE directory_entries SET score = CAST((SELECT COALESCE(SUM(vote_value * weight), 0) FROM directory_votes WHERE entry_id = ?) AS REAL), updated_at = ? WHERE id = ?",
+            "UPDATE directory_entries SET score = CAST((SELECT COALESCE(SUM(vote_value * weight), 0) FROM directory_votes WHERE entry_id = $1) AS REAL), updated_at = $2 WHERE id = $3",
+        ))
         .bind($entry_id)
         .bind($now)
         .bind($entry_id)
@@ -491,7 +514,7 @@ pub async fn set_vote(
         Backend::Sqlite => {
             let pool = db.sqlite_pool().expect("sqlite");
             let mut tx = pool.begin().await?;
-            let live = vote_tx!(tx, entry_id, account_id, value, weight, now)?;
+            let live = vote_tx!(db, tx, entry_id, account_id, value, weight, now)?;
             tx.commit().await?;
             let score = entry_score(db, entry_id).await?;
             Ok((score, live))
@@ -499,7 +522,7 @@ pub async fn set_vote(
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             let mut tx = pool.begin().await?;
-            let live = vote_tx!(tx, entry_id, account_id, value, weight, now)?;
+            let live = vote_tx!(db, tx, entry_id, account_id, value, weight, now)?;
             tx.commit().await?;
             let score = entry_score(db, entry_id).await?;
             Ok((score, live))
@@ -633,7 +656,7 @@ pub async fn set_account_trust_for_tests(db: &Database, account_id: &str, level:
 pub async fn votes_for_tests(db: &Database, entry_id: &str) -> Vec<(String, i64)> {
     let sql = db.sql(
         "SELECT account_id, vote_value FROM directory_votes WHERE entry_id = ?",
-        "SELECT account_id, vote_value FROM directory_votes WHERE entry_id = $1",
+        "SELECT account_id, CAST(vote_value AS BIGINT) FROM directory_votes WHERE entry_id = $1",
     );
     match db.backend() {
         Backend::Sqlite => sqlx::query_as(&sql)
