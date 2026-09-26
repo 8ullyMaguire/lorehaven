@@ -295,9 +295,35 @@ pub async fn remove_entry(db: &Database, id: &str) -> Result<bool> {
 /// List entries. The visibility rule (approved, or the viewer's own
 /// pending, or everything for the operator — spec §39.3) is expressed in
 /// SQL so pagination counts agree with the page.
+/// Entries for the list, ranked and scored with vote decay applied.
+///
+/// This is the list the product should serve. [`list_entries`] remains for
+/// callers that genuinely want the stored snapshot — nothing in the request
+/// path does any more.
+pub async fn list_entries_with_decay(
+    db: &Database,
+    filter: &DirectoryEntryFilter,
+    decay: &Decay,
+) -> Result<Vec<DirectoryEntry>> {
+    list_entries_inner(db, filter, Some(decay)).await
+}
+
+/// Entries ranked by the stored, undecayed `score` column.
+///
+/// Kept because the denormalised column is still what the vote transaction
+/// writes, and the two are asserted equal for a below-threshold entry in
+/// `vote_list_ranking`. Prefer [`list_entries_with_decay`].
 pub async fn list_entries(
     db: &Database,
     filter: &DirectoryEntryFilter,
+) -> Result<Vec<DirectoryEntry>> {
+    list_entries_inner(db, filter, None).await
+}
+
+async fn list_entries_inner(
+    db: &Database,
+    filter: &DirectoryEntryFilter,
+    decay: Option<&Decay>,
 ) -> Result<Vec<DirectoryEntry>> {
     let mut where_parts: Vec<String> = vec!["e.removed_at IS NULL".to_string()];
     if let Some(list_id) = &filter.list_id {
@@ -325,12 +351,52 @@ pub async fn list_entries(
         (None, false) => where_parts.push("e.approved_by IS NOT NULL".to_string()),
         (_, true) => {}
     }
+    // The decayed score is a correlated subquery per entry, and it is used in
+    // both the projection and the ORDER BY. PostgreSQL will not let a SELECT
+    // alias be referenced in ORDER BY when it is an expression over a
+    // subquery, so the expression is written out twice rather than aliased --
+    // the two must agree, and `vote_list_ranking` fails if they ever do not.
+    //
+    // The undecayed column is used verbatim when decay is off, so turning it
+    // off costs nothing and the statement stays as simple as it was.
+    let (score_expr, order_score) = match decay {
+        None => (
+            "CAST(e.score AS DOUBLE PRECISION)".to_string(),
+            "e.score".to_string(),
+        ),
+        Some(cfg) => {
+            let d = match db.backend() {
+                Backend::Sqlite => Dialect::Sqlite,
+                Backend::Postgres => Dialect::Postgres,
+            };
+            // A correlated subquery cannot bind `e.id` as a parameter, so the
+            // column reference is written into the statement. It is a
+            // reference, not a value: quoting it would make the subquery
+            // compare every row against the literal string "e.id" and silently
+            // return the same count for the whole list.
+            let per_entry = |id_expr: &str| -> String {
+                // The threshold is per entry, so the count and the sum are one
+                // CASE over the entry's own votes rather than two passes.
+                let sum = vote_decay_sql::decayed_score_sum_sql(cfg, d, id_expr);
+                let count = vote_decay_sql::vote_count_sql(d, id_expr);
+                format!(
+                    "CASE WHEN {count} >= {} THEN {sum} ELSE CAST((SELECT COALESCE(SUM(v.vote_value * v.base_weight), 0) FROM directory_votes{alias} WHERE v.entry_id = {id_expr}) AS DOUBLE PRECISION) END",
+                    cfg.min_votes,
+                    alias = match d {
+                        Dialect::Sqlite => " v",
+                        Dialect::Postgres => " AS v",
+                    },
+                )
+            };
+            (per_entry("e.id"), per_entry("e.id"))
+        }
+    };
     let order = match filter.sort {
-        DirectorySort::Top => "e.score DESC, e.created_at ASC",
-        DirectorySort::New => "e.created_at DESC",
+        DirectorySort::Top => format!("{order_score} DESC, e.created_at ASC"),
+        DirectorySort::New => "e.created_at DESC".to_string(),
     };
     let sql = format!(
-        "SELECT e.id, e.list_id, e.kind, e.category, e.title, e.url, e.description, e.ref_id, e.tags_json, e.submitted_by, e.approved_by, CAST(e.score AS DOUBLE PRECISION) AS score, e.created_at \
+        "SELECT e.id, e.list_id, e.kind, e.category, e.title, e.url, e.description, e.ref_id, e.tags_json, e.submitted_by, e.approved_by, CAST({score_expr} AS DOUBLE PRECISION) AS score, e.created_at \
          FROM directory_entries e WHERE {} ORDER BY {order} LIMIT {} OFFSET {}",
         where_parts.join(" AND "),
         filter.limit.max(1),

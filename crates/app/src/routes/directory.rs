@@ -219,9 +219,10 @@ async fn list_entries(
         viewer,
         is_operator,
     };
-    let entries = db::list_entries(state.db(), &filter)
-        .await
-        .map_err(internal)?;
+    let entries =
+        db::list_entries_with_decay(state.db(), &filter, &state.config().directory.decay())
+            .await
+            .map_err(internal)?;
     Ok(Json(json!({ "items": entries })))
 }
 
