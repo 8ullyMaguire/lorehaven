@@ -322,4 +322,31 @@ describe('AnalyticsDashboard', () => {
     expect(screen.queryByText('Chapters read')).toBeNull();
     expect(screen.queryByText('Time reading')).toBeNull();
   });
+  // -- signed out ------------------------------------------------------------
+  //
+  // The door is `RequirePseud`, so an anonymous visitor gets a 401. Rendering
+  // that as a failure string tells somebody they can do nothing about, on a
+  // page that is specifically about *their own* numbers.
+
+  it('offers a way in when nobody is signed in, rather than an error', async () => {
+    const { ApiError } = await import('../lib/api');
+    vi.spyOn(api, 'fetchAnalytics').mockRejectedValue(new ApiError(401, 'AUTH_REQUIRED', 'no session'));
+
+    render(AnalyticsDashboard);
+    await waitFor(() => expect(screen.getByText(/need an account/i)).toBeTruthy());
+    expect(screen.getByRole('link', { name: 'Sign in' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('still reports a genuine server failure as an error', async () => {
+    // The signed-out branch must not swallow a 500. A page that answers
+    // "please sign in" when the server is down sends the reader to the wrong
+    // door.
+    const { ApiError } = await import('../lib/api');
+    vi.spyOn(api, 'fetchAnalytics').mockRejectedValue(new ApiError(500, 'INTERNAL', 'boom'));
+
+    render(AnalyticsDashboard);
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+    expect(screen.queryByText(/need an account/i)).toBeNull();
+  });
 });

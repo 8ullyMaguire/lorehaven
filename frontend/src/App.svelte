@@ -7,6 +7,7 @@
   import AdminJobs from './routes/AdminJobs.svelte';
   import AdminMediaHealth from './routes/AdminMediaHealth.svelte';
   import AdminMirror from './routes/AdminMirror.svelte';
+  import Analytics from './routes/AnalyticsDashboard.svelte';
   import AuthorMedia from './routes/AuthorMedia.svelte';
   import Community from './routes/Community.svelte';
   import Docs from './routes/Docs.svelte';
@@ -61,6 +62,7 @@
     { href: '/media', label: 'Media', primary: false },
     { href: '/library', label: 'Library', primary: true },
     { href: '/library/history', label: 'History', primary: false },
+    { href: '/analytics', label: 'Analytics', primary: false },
     { href: '/import', label: 'Import', primary: true },
     { href: '/exports', label: 'Exports', primary: false },
     { href: '/write', label: 'Write', primary: true },
@@ -340,6 +342,8 @@
     <Roadmap />
   {:else if route.id === 'directory'}
     <Directory />
+  {:else if route.id === 'analytics'}
+    <Analytics />
   {:else if route.id === 'planned' && route.planned}
     <Planned route={route.planned} />
   {:else}
