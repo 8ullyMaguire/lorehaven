@@ -148,7 +148,13 @@ pub async fn run(cli: Cli) -> Result<ExitCode> {
 /// A list rather than a match arm so the CLI and the worker's task names cannot
 /// drift: this is the only place a task name is written for scheduling, and the
 /// worker's own `match` refuses anything it does not know.
-pub const MAINTENANCE_TASKS: [&str; 3] = ["reap_jobs", "collect_blobs", "purge_exports"];
+/// The recurring maintenance jobs the CLI can queue by name.
+///
+/// `purge_slots` is here for the same reason `purge_exports` is: a retention
+/// rule nobody runs is not a retention rule. The worker's match arm and this
+/// list have to agree, and `milestone_7.rs` pins that they do.
+pub const MAINTENANCE_TASKS: [&str; 4] =
+    ["reap_jobs", "collect_blobs", "purge_exports", "purge_slots"];
 
 /// What one `worker --once` pass did, for an operator watching the queue move.
 fn print_pass_report(report: &worker::PassReport) {

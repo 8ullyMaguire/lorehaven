@@ -315,24 +315,33 @@ pub async fn list_response_slots(
         .collect())
 }
 
-/// Delete slots older than `cutoff_iso`, returning how many went.
+/// Delete slots older than `cutoff`, returning how many went.
 ///
 /// Retention is not optional here: a slot is a record of what a reader was
 /// shown, and keeping it forever is a profile the reader never asked for. §33.3
 /// asks for "why am I seeing this", which is a question about the recent past.
-pub async fn prune_slots_before(db: &Database, cutoff_iso: &str) -> Result<u64> {
+///
+/// The cutoff is a `time::OffsetDateTime` rather than a string, matching
+/// `purge_terminal_jobs`, so a caller cannot pass a malformed timestamp and
+/// prune the wrong rows.
+pub async fn prune_slots_before(db: &Database, cutoff: &time::OffsetDateTime) -> Result<u64> {
     let sql = db.sql(
         "DELETE FROM recommendation_slots WHERE created_at < ?",
         "DELETE FROM recommendation_slots WHERE created_at < ?::timestamptz",
     );
+    // SQLite stores the timestamp as TEXT, so it is formatted for that arm and
+    // bound as a datetime on the PostgreSQL one.
+    let cutoff_iso = cutoff
+        .format(&time::format_description::well_known::Rfc3339)
+        .map_err(|e| anyhow::anyhow!("formatting the slot cutoff: {e}"))?;
     let affected = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
-            .bind(cutoff_iso)
+            .bind(&cutoff_iso)
             .execute(db.sqlite_pool().expect("sqlite handle"))
             .await?
             .rows_affected(),
         Backend::Postgres => sqlx::query(&sql)
-            .bind(cutoff_iso)
+            .bind(cutoff)
             .execute(db.postgres_pool().expect("postgres handle"))
             .await?
             .rows_affected(),

@@ -755,6 +755,117 @@ async fn an_anonymous_recommendation_carries_no_slot_id() {
 }
 
 // ---------------------------------------------------------------------------
+// retention
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_slot_older_than_the_retention_window_is_pruned_and_a_fresh_one_is_kept() {
+    // A recorded slot is a record of what a reader was shown. Keeping it
+    // forever would be a profile they never asked for, and a retention rule
+    // nobody runs is not a retention rule -- so this asserts the prune actually
+    // separates the two, in both directions.
+    let harness = Harness::new("prune").await;
+    let mut reader = harness.reader("Pruner").await;
+    let account = account_of(&harness.db, "Pruner").await;
+    let pseud = pseud_of(&harness.db, &account.to_string()).await;
+    let work = make_work(&harness.db, &pseud.to_string()).await;
+
+    let fresh = record_a_slot(&harness.db, pseud, &work).await;
+    // Backdate one past the window.
+    let old = uuid::Uuid::new_v4().to_string();
+    let backdated = "2020-01-01T00:00:00Z";
+    let insert = harness.db.sql(
+        "INSERT INTO recommendation_slots
+           (id, pseud_id, work_id, request_id, position, reasons, instance_curation,
+            blend_score, created_at)
+         VALUES (?, ?, ?, ?, 0, '[\"popular\"]', 'not_involved', 0, ?)",
+        "INSERT INTO recommendation_slots
+           (id, pseud_id, work_id, request_id, position, reasons, instance_curation,
+            blend_score, created_at)
+         VALUES (?::uuid, ?::uuid, ?::uuid, ?::uuid, 0, ?::jsonb, 'not_involved', 0, ?::timestamptz)",
+    );
+    match harness.db.backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query(&insert)
+                .bind(&old)
+                .bind(pseud.to_string())
+                .bind(&work)
+                .bind(uuid::Uuid::new_v4().to_string())
+                .bind(backdated)
+                .execute(harness.db.sqlite_pool().expect("sqlite"))
+                .await
+                .expect("backdated slot");
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query(&insert)
+                .bind(&old)
+                .bind(pseud.to_string())
+                .bind(&work)
+                .bind(uuid::Uuid::new_v4().to_string())
+                .bind(r#"[\"popular\"]"#)
+                .bind(backdated)
+                .execute(harness.db.postgres_pool().expect("postgres"))
+                .await
+                .expect("backdated slot");
+        }
+    }
+
+    // Both are explainable before the sweep: retention is a policy, not a
+    // correctness requirement, and a reader mid-window keeps their answer.
+    let (status, _) = reader
+        .get(&format!("/api/v1/discovery/slots/{old}/explanation"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "a slot inside the window answers");
+
+    let cutoff = time::OffsetDateTime::now_utc() - time::Duration::days(3);
+    let pruned = slots::prune_slots_before(&harness.db, &cutoff)
+        .await
+        .expect("prune");
+    assert_eq!(pruned, 1, "exactly the backdated slot went: {pruned}");
+
+    let (status, _) = reader
+        .get(&format!("/api/v1/discovery/slots/{old}/explanation"))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "a pruned slot stops answering"
+    );
+    let (status, body) = reader
+        .get(&format!("/api/v1/discovery/slots/{fresh}/explanation"))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "and the fresh one still does: {body}"
+    );
+}
+
+#[tokio::test]
+async fn the_slot_sweep_is_a_named_maintenance_task() {
+    // The CLI queues maintenance by name and the worker matches on the same
+    // string. A task in one list and not the other is a retention rule that
+    // silently never runs.
+    assert!(
+        lorehaven_app::MAINTENANCE_TASKS.contains(&"purge_slots"),
+        "the sweep is queueable by name"
+    );
+}
+
+#[tokio::test]
+async fn the_default_slot_window_is_short_enough_to_be_a_policy() {
+    // Not a test of behaviour but of intent: a default of zero would prune a
+    // slot before the reader could ask, and a default of a year would not be
+    // retention at all.
+    let config = lorehaven_app::config::Config::development_defaults();
+    assert!(
+        (1..=30).contains(&config.jobs.slot_retention_days),
+        "the default window is days, not minutes or years: {}",
+        config.jobs.slot_retention_days
+    );
+}
+
+// ---------------------------------------------------------------------------
 // (b) the attention report
 // ---------------------------------------------------------------------------
 

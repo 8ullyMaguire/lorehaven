@@ -663,6 +663,29 @@ impl Worker {
                 tracing::info!(removed, "maintenance removed expired exports");
                 Ok(())
             }
+            // Spec §33.3a: a served slot is kept only as long as a reader
+            // might still ask about it. Without this the table grows into a
+            // record of what everyone was shown, which is not a thing the
+            // reader agreed to keep.
+            "purge_slots" => {
+                let retention = Duration::from_secs(
+                    u64::try_from(
+                        state.config().jobs.slot_retention_days.clamp(1, 365) * 24 * 60 * 60,
+                    )
+                    .unwrap_or(3 * 24 * 60 * 60),
+                );
+                let days = state.config().jobs.slot_retention_days;
+                let cutoff = OffsetDateTime::now_utc() - retention;
+                let pruned =
+                    lorehaven_db::recommendation_slots::prune_slots_before(state.db(), &cutoff)
+                        .await
+                        .map_err(transient)?;
+                jobs::progress(state.db(), job, 1000, Some("pruned"))
+                    .await
+                    .map_err(transient)?;
+                tracing::info!(pruned, days, "maintenance pruned old recommendation slots");
+                Ok(())
+            }
             "verify_derivatives" => self.verify_derivatives(state, job, &payload).await,
             // Spec §41.1: nightly half-life recompute for discovery ranking.
             "recompute_half_life" => {
