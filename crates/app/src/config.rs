@@ -706,12 +706,21 @@ impl Default for RevisionsConfig {
 pub struct JobsConfig {
     /// How long terminal jobs are kept after completion/failure, in days.
     pub terminal_retention_days: i64,
+    /// How long a served recommendation slot is kept so a reader can still ask
+    /// why they saw something (spec §33.3a).
+    ///
+    /// A slot is a record of what a reader was shown. Keeping it indefinitely
+    /// would be a profile they never asked for, and "why am I seeing this" is a
+    /// question about the recent past. Three days is long enough to cover a
+    /// reader who notices a recommendation and goes looking for it the next day.
+    pub slot_retention_days: i64,
 }
 
 impl Default for JobsConfig {
     fn default() -> Self {
         Self {
             terminal_retention_days: 30,
+            slot_retention_days: 3,
         }
     }
 }
@@ -1747,6 +1756,11 @@ impl Config {
             },
             // --- jobs (spec §38) ----------------------------------------------
             jobs: JobsConfig {
+                slot_retention_days: file
+                    .jobs
+                    .as_ref()
+                    .and_then(|j| j.slot_retention_days)
+                    .unwrap_or_else(|| JobsConfig::default().slot_retention_days),
                 terminal_retention_days: file
                     .jobs
                     .as_ref()
@@ -2217,6 +2231,8 @@ struct RevisionsSection {
 struct JobsSection {
     /// How long terminal jobs are kept, in days. Default 30.
     terminal_retention_days: Option<i64>,
+    /// How long a served recommendation slot is kept, in days. Default 3.
+    slot_retention_days: Option<i64>,
 }
 
 /// The `[library]` table (spec §38): library update-check settings.
