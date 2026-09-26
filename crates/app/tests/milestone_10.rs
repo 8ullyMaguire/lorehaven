@@ -867,6 +867,173 @@ async fn search_respects_content_filters() {
 
     harness.cleanup().await;
 }
+/// Content filters apply *before* paging, not after (spec §46.4, §46.7.1).
+///
+/// The sibling test `search_respects_content_filters` seeds two works and asks
+/// for a one-item page, so both a correct implementation and one that filters
+/// after the `LIMIT` answer with the single unblocked work. It cannot tell them
+/// apart. This one is built so they differ.
+///
+/// Ordering is `score DESC, updated_at DESC`, and the term index is empty for
+/// these works, so every score is 0 and the effective order is newest-first.
+/// The blocked works are therefore created *last*, so they occupy the front of
+/// the unfiltered page. With `limit=5`:
+///
+///   * filtering before the limit returns the five unblocked works;
+///   * filtering after it returns nothing, because the first five rows are all
+///     blocked and the filter then removes every one of them.
+///
+/// The old implementation returned the empty list.
+#[tokio::test]
+async fn content_filters_narrow_the_page_instead_of_shortening_it() {
+    const UNBLOCKED: usize = 5;
+    const BLOCKED: usize = 7;
+    const PAGE: i64 = 5;
+
+    let harness = Harness::new("search-content-filter-paging").await;
+
+    // Unblocked first, so they sort *after* the blocked works below.
+    for i in 0..UNBLOCKED {
+        published_work(
+            &harness,
+            &format!("keep{i}@example.com"),
+            &format!("KeepAuthor{i}"),
+            &format!("Kept Work {i}"),
+        )
+        .await;
+    }
+    let mut blocked_ids = Vec::new();
+    for i in 0..BLOCKED {
+        blocked_ids.push(
+            published_work(
+                &harness,
+                &format!("drop{i}@example.com"),
+                &format!("DropAuthor{i}"),
+                &format!("Dropped Work {i}"),
+            )
+            .await,
+        );
+    }
+
+    // One taxonomy node, linked to every blocked work.
+    let now = chrono::Utc::now().to_rfc3339();
+    let node_id = uuid::Uuid::new_v4().to_string();
+    let db = harness.tdb.db();
+    let sql_node = db.sql(
+        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES ($1::uuid, $2, $3, $4, $5::timestamptz)",
+    );
+    let sql_tag = db.sql(
+        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES ($1::uuid, $2, $3, $4::timestamptz)",
+    );
+
+    match db.backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query(&sql_node)
+                .bind(&node_id)
+                .bind("tag")
+                .bind("slow burn")
+                .bind("slow burn")
+                .bind(&now)
+                .execute(db.sqlite_pool().unwrap())
+                .await
+                .unwrap();
+            for work_id in &blocked_ids {
+                sqlx::query(&sql_tag)
+                    .bind(work_id)
+                    .bind(&node_id)
+                    .bind(1i64)
+                    .bind(&now)
+                    .execute(db.sqlite_pool().unwrap())
+                    .await
+                    .unwrap();
+            }
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query(&sql_node)
+                .bind(&node_id)
+                .bind("tag")
+                .bind("slow burn")
+                .bind("slow burn")
+                .bind(&now)
+                .execute(db.postgres_pool().unwrap())
+                .await
+                .unwrap();
+            for work_id in &blocked_ids {
+                sqlx::query(&sql_tag)
+                    .bind(work_id)
+                    .bind(&node_id)
+                    .bind(1i64)
+                    .bind(&now)
+                    .execute(db.postgres_pool().unwrap())
+                    .await
+                    .unwrap();
+            }
+        }
+    }
+
+    // Site search answers `items`; the `titles` helper above reads `results`,
+    // which is the in-work search's envelope.
+    let item_titles = |body: &Value| -> Vec<String> {
+        body["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .map(|i| i["title"].as_str().unwrap_or_default().to_owned())
+            .collect()
+    };
+
+    // Baseline: an anonymous search sees a full page, and it is the blocked
+    // works. Without this the filtered assertion could pass for the wrong
+    // reason -- an empty index would also answer with the right count.
+    let mut anon = harness.client();
+    let (status, body) = anon.get("/api/v1/search?q=Work&limit=5").await;
+    assert_eq!(status, StatusCode::OK, "baseline search: {body}");
+    let baseline = item_titles(&body);
+    assert_eq!(
+        baseline.len(),
+        PAGE as usize,
+        "baseline page must be full: {body}"
+    );
+    assert!(
+        baseline.iter().all(|t| t.starts_with("Dropped Work")),
+        "the newest works must lead the unfiltered page, or this test proves \
+         nothing about ordering: {baseline:?}"
+    );
+
+    // A reader who blocks the tag.
+    let mut client = harness.client();
+    register(&mut client, "reader@example.com", "Reader").await;
+    let (status, body) = client
+        .post(
+            "/api/v1/settings/content-filters",
+            json!({ "filter_type": "tag", "value": "slow burn" }),
+        )
+        .await;
+    assert!(
+        status == StatusCode::OK || status == StatusCode::CREATED,
+        "add filter: {status} {body}"
+    );
+
+    // Filtered: a full page of the unblocked works, not the empty page that
+    // post-limit filtering produces.
+    let (status, body) = client.get("/api/v1/search?q=Work&limit=5").await;
+    assert_eq!(status, StatusCode::OK, "filtered search: {body}");
+    let returned = item_titles(&body);
+    assert_eq!(
+        returned.len(),
+        PAGE as usize,
+        "the page must be full after filtering, not short: {returned:?}"
+    );
+    assert!(
+        returned.iter().all(|t| t.starts_with("Kept Work")),
+        "no blocked work may reach the client: {returned:?}"
+    );
+
+    harness.cleanup().await;
+}
+
 /// Export/import round-trip (M47-08, §46.4).
 #[tokio::test]
 async fn export_import_round_trip() {
@@ -973,6 +1140,156 @@ async fn export_import_round_trip() {
         status,
         StatusCode::UNPROCESSABLE_ENTITY,
         "unsupported version must 400"
+    );
+
+    harness.cleanup().await;
+}
+
+/// A content filter has to bind every surface, not just search.
+///
+/// Spec §46.4 says filters are enforced "on every query, feed, recommendation,
+/// and notification pipeline" and §46.7.1 restates it as an invariant. Until
+/// this, `list_content_filters` was called from exactly one place -- the search
+/// route -- so a reader who blocked a tag still saw it in `/api/v1/discovery`,
+/// served by three recommendation engines.
+///
+/// This exercises the two that read the works table. The third
+/// (`media_reference_collaborative_recommendations`) correlates on
+/// `work_media_references.work_id` rather than on `works`, and is covered in
+/// `media_ref_collab.rs`, because proving it needs a media reference and a
+/// bookmark to hang one off.
+///
+/// The reader is signed in, otherwise they have no filters to apply and the
+/// test would pass for the wrong reason.
+#[tokio::test]
+async fn content_filters_reach_the_recommendation_surface() {
+    let harness = Harness::new("discovery-content-filter").await;
+
+    // Three published works. `public_recommendations` orders by `updated_at
+    // DESC`, so all of them would be returned unfiltered.
+    let mut ids = Vec::new();
+    for i in 0..3 {
+        ids.push(
+            published_work(
+                &harness,
+                &format!("disc{i}@example.com"),
+                &format!("DiscAuthor{i}"),
+                &format!("Discoverable {i}"),
+            )
+            .await,
+        );
+    }
+
+    // Tag two of them; the third stays clean.
+    let now = chrono::Utc::now().to_rfc3339();
+    let node_id = uuid::Uuid::new_v4().to_string();
+    let db = harness.tdb.db();
+    let sql_node = db.sql(
+        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES ($1::uuid, $2, $3, $4, $5::timestamptz)",
+    );
+    let sql_tag = db.sql(
+        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES ($1::uuid, $2, $3, $4::timestamptz)",
+    );
+    match db.backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query(&sql_node)
+                .bind(&node_id)
+                .bind("tag")
+                .bind("spoilers")
+                .bind("spoilers")
+                .bind(&now)
+                .execute(db.sqlite_pool().unwrap())
+                .await
+                .unwrap();
+            for work_id in ids.iter().take(2) {
+                sqlx::query(&sql_tag)
+                    .bind(work_id)
+                    .bind(&node_id)
+                    .bind(1i64)
+                    .bind(&now)
+                    .execute(db.sqlite_pool().unwrap())
+                    .await
+                    .unwrap();
+            }
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query(&sql_node)
+                .bind(&node_id)
+                .bind("tag")
+                .bind("spoilers")
+                .bind("spoilers")
+                .bind(&now)
+                .execute(db.postgres_pool().unwrap())
+                .await
+                .unwrap();
+            for work_id in ids.iter().take(2) {
+                sqlx::query(&sql_tag)
+                    .bind(work_id)
+                    .bind(&node_id)
+                    .bind(1i64)
+                    .bind(&now)
+                    .execute(db.postgres_pool().unwrap())
+                    .await
+                    .unwrap();
+            }
+        }
+    }
+
+    // The reader registers on one client and must use *that* client for the
+    // filter call -- `harness.client()` makes a fresh unauthenticated one, which
+    // is a 401 and a test that passes for the wrong reason.
+    let mut reader = harness.client();
+    let (_account, pseud) = register(&mut reader, "disc@reader.example", "DiscReader").await;
+    let pseud_id: uuid::Uuid = pseud.parse().expect("pseud id is a uuid");
+    // The engines take the *pseud*, not the account: a filter belongs to a
+    // pseud, and which pseud a session acts as is `sessions.active_pseud_id`.
+    // The route resolves it the same way, so the filter set these engines read is
+    // the set the reader just wrote.
+    // The engines return `WorkId`; the helper hands back the wire-form string, so
+    // compare as strings rather than re-parsing what is already in hand.
+    let as_strings = |ids: &[lorehaven_domain::ids::WorkId]| -> Vec<String> {
+        ids.iter().map(|id| id.to_string()).collect()
+    };
+    let all = as_strings(
+        &lorehaven_db::discovery::public_recommendations(db, Some(pseud_id), 50)
+            .await
+            .expect("unfiltered recommendations"),
+    );
+    for work_id in &ids {
+        assert!(
+            all.contains(work_id),
+            "work {work_id} should appear before the filter exists"
+        );
+    }
+
+    // Now block the tag.
+    let (status, body) = reader
+        .post(
+            "/api/v1/settings/content-filters",
+            json!({ "filter_type": "tag", "value": "spoilers" }),
+        )
+        .await;
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "add content filter: {status} {body}"
+    );
+
+    let filtered = as_strings(
+        &lorehaven_db::discovery::public_recommendations(db, Some(pseud_id), 50)
+            .await
+            .expect("filtered recommendations"),
+    );
+    for work_id in ids.iter().take(2) {
+        assert!(
+            !filtered.contains(work_id),
+            "blocked work {work_id} reached the recommendation surface"
+        );
+    }
+    assert!(
+        filtered.contains(&ids[2]),
+        "the untagged work must still be recommended"
     );
 
     harness.cleanup().await;

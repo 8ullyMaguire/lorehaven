@@ -126,6 +126,12 @@ INSERT_COLUMN = re.compile(
     r"(?:^|,)\s*([a-z_][a-z0-9_]*)\s*(?:\([^)]*\))?\s*(?=,|$)", re.IGNORECASE
 )
 
+# A Rust string literal. The escape alternative is `\\.` with DOTALL, which
+# consumes a trailing backslash *and the newline after it* as one escaped pair --
+# so a multi-line SQL literal with a line continuation ends early, the match
+# lands before the argument's separator comma, and the arm walk reports every
+# half of a `db.sql(a, b)` pair as the first. Restrict the escape to characters
+# that can actually follow a backslash in Rust source: quote and backslash.
 STRING_LIT = re.compile(r'"((?:[^"\\]|\\.)*)"', re.DOTALL)
 
 
@@ -451,18 +457,130 @@ def in_sql_pair(text: str, pos: int) -> str | None:
     and the placeholder spelling cannot either -- neither half has to bind
     anything -- so the pair is recognised from the call that opened before it.
     """
+    call = None
     open_at = None
     for match in SQL_PAIR.finditer(text, 0, pos):
-        open_at = match.end()
+        call, open_at = match.group(0), match.end()
     if open_at is None:
         return None
-    # A comma before this literal means it is the second argument.
-    between = text[open_at:pos]
-    if between.count(",") == 0:
+    # The two call shapes have different argument positions, and conflating them
+    # judges every half of every pair as the wrong one:
+    #
+    #     db.sql(sqlite, postgres)            -> 0 and 1
+    #     sql_owned(db, sqlite, postgres)     -> 1 and 2
+    #
+    # `sql_owned` is named for taking an owned `String`, which is why it leads
+    # with the database; `db.sql` borrows, so it does not. Detect the difference
+    # from the call's own name rather than assuming one layout.
+    # Count only the commas that separate the call's own arguments, which means
+    # skipping over string literals and nesting. Counting every comma between
+    # the open paren and this literal is wrong in two ways that both occur here:
+    # `sql_owned(db, ...)` has the `db` argument, and a SQL fragment with a comma
+    # inside a literal or a `COALESCE(a, b)` adds more -- so the first argument
+    # could be read as the second, or the second as the third, and a correct
+    # SQLite statement gets judged as the PostgreSQL half.
+    depth = 1
+    seen = 0
+    i = open_at
+    n = len(text)
+    while i < n and depth > 0:
+        ch = text[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch in "\"'":
+            # A Rust string can span lines with a trailing `\`, which is a line
+            # continuation, not an escape. Treating it as an escape skipped the
+            # *closing* quote -- SQL literals here are full of them -- so the
+            # region ran on past the end of the argument and the separator comma
+            # with it, and both halves of the pair reported as the first. Only
+            # `\` before the quote or a backslash escapes.
+            quote = ch
+            i += 1
+            while i < n:
+                if text[i] == "\\" and i + 1 < n and text[i + 1] in (quote, "\\"):
+                    i += 2
+                    continue
+                if text[i] == quote:
+                    break
+                i += 1
+        elif ch == "/" and i + 1 < n and text[i + 1] == "/":
+            # A line comment runs to the newline. Not optional: prose in this
+            # codebase uses apostrophes ("the reader's `r.get`), and without
+            # skipping comments the scanner reads the rest of the file as an
+            # unterminated string and loses every argument boundary after it.
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        elif ch == "," and depth == 1:
+            # `i` is relative to the call's open paren; `pos` is a file offset.
+            # Comparing them across origins is off by however far the call sits
+            # from the start of the file, so the first argument was read as the
+            # second and every `db.sql(a, b)` was judged on its PostgreSQL half.
+            #
+            # Count first, then decide. Reversing these two lines makes the count
+            # always zero, so both halves report as the first argument and the
+            # gate stops flagging anything -- the scanner fails quiet, which is
+            # the one direction a lint must never fail in.
+            # `i` already indexes `text` from the start of the file -- the loop
+            # begins at `open_at`, not at 0 -- so it is compared with `pos`
+            # directly. Adding `open_at` a second time inflated every position
+            # by the offset of the call, which made the separator comma look as
+            # though it lay after the literal and both halves report as first.
+            if i >= pos:
+                break
+            seen += 1
+        i += 1
+    # Shift so `seen` counts SQL arguments, not raw arguments.
+    sql_first = 1 if call.startswith("sql_owned") else 0
+    index = seen - sql_first
+    if index == 0:
         return "sqlite"
-    if between.count(",") == 1:
+    if index == 1:
         return "postgres"
     return None
+
+# (source, arm of the first literal, that arm is faulty, what it checks)
+ARM_TEST_CASES = [
+    (
+        'let sql = db.sql(\n    "SELECT slug, position FROM directory_lists",\n'
+        '    "SELECT slug, CAST(position AS BIGINT) FROM directory_lists",\n);',
+        "sqlite", False,
+        "db.sql's first argument is the SQLite half",
+    ),
+    (
+        'let sql = sql_owned(\n    db,\n'
+        '    "SELECT id, CAST(width AS BIGINT) AS width FROM media_references",\n'
+        '    "SELECT id, width FROM media_references",\n);',
+        "sqlite", True,
+        "sql_owned leads with the database, so its SQLite half is the second "
+        "argument; confusing the two layouts makes every pair report the wrong arm",
+    ),
+    (
+        '// the reader\'s `r.get("width")` needs the alias\nlet sql = db.sql(\n'
+        '    "SELECT a FROM t",\n    "SELECT a::text AS a FROM t",\n);',
+        "sqlite", False,
+        "an apostrophe in prose must not swallow the argument boundaries",
+    ),
+    (
+        'let sql = db.sql(\n'
+        '    "SELECT a, COALESCE(b, 0) FROM t",\n'
+        '    "SELECT a, COALESCE(b, 0) FROM t",\n);',
+        "sqlite", False,
+        "a comma inside a SQL literal is not an argument separator",
+    ),
+    (
+        '// `r.get("width")` needs the column aliased\n'
+        "// `r.get('height')` likewise\n"
+        'let sql = db.sql(\n'
+        '    "SELECT a FROM t",\n    "SELECT a::text AS a FROM t",\n);',
+        "sqlite", False,
+        "quotes in a preceding comment must not be mistaken for literals: the "
+        "scanner picks the wrong one, and the arm is then read off the wrong call",
+    ),
+]
+
 
 # A statement with a verb and no target is a truncated literal. Not hypothetical:
 # an earlier line-index edit of mine dropped the FROM clause from a SELECT, and
@@ -625,6 +743,28 @@ def timestamptz_cast_sites(sql: str, known: dict[str, dict[str, str]]) -> list[s
     return sorted(set(out))
 
 
+def in_line_comment(text: str, pos: int) -> bool:
+    """Whether `pos` falls inside a `//` comment.
+
+    A literal in a comment is not code. `STRING_LIT` is a plain regex, so it
+    happily matches `` `"width"` `` inside a doc comment explaining why a column
+    needs an alias -- and the scanner then reasons about a statement that does
+    not exist. This codebase's comments quote identifiers constantly, so the
+    effect is not rare.
+    """
+    line_start = text.rfind("\n", 0, pos) + 1
+    # A `//` only opens outside a string; scan the line for the first quote and
+    # take the comment marker only if it comes before it.
+    line = text[line_start:pos]
+    first_quote = min(
+        (i for i in (line.find('"'), line.find("'")) if i != -1), default=-1
+    )
+    marker = line.find("//")
+    if marker == -1:
+        return False
+    return first_quote == -1 or marker < first_quote
+
+
 def scan(root: pathlib.Path, schema: dict[str, dict[str, str]]) -> list[tuple[pathlib.Path, int, str]]:
     hits: list[tuple[pathlib.Path, int, str]] = []
     # Accept a file as well as a directory, so a single module can be checked
@@ -635,6 +775,8 @@ def scan(root: pathlib.Path, schema: dict[str, dict[str, str]]) -> list[tuple[pa
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         for match in STRING_LIT.finditer(text):
+            if in_line_comment(text, match.start()):
+                continue
             sql = match.group(1)
             # Which arm is this literal in? A string inside a `Backend::Sqlite`
             # arm is the SQLite half whatever it contains, and the placeholder
@@ -697,6 +839,17 @@ SCHEMA = {
 # Each case is (SQL, should_report, note). The negative cases are the point:
 # a checker that flags correct SQL gets muted, and then it flags nothing.
 SELF_TEST_CASES: list[tuple[str, bool, str]] = [
+    # The SQLite half of a `db.sql(a, b)` pair is judged as the SQLite half, so
+    # an uncast INT4 there is not a fault. This is the offset bug: the walk
+    # compared a call-relative index against a file offset, so the first argument
+    # was read as the second and every pair was judged on its PostgreSQL half.
+    # The arm is chosen by position in the call, not by the placeholder spelling.
+    # An uncast INT4 in a *SQLite* half is not a fault: SQLite stores and returns
+    # integers loosely, so the read succeeds there and only the PostgreSQL half
+    # needs the cast. The self-test drives one string at a time, so this records
+    # the intent the scanner has to satisfy.
+    ("SELECT slug, position FROM directory_lists /* sqlite half */", False,
+     "an uncast INT4 in a SQLite half is not a fault"),
     # A `::timestamptz` cast on a bind feeding a TEXT timestamp column. The
     # PostgreSQL schema mirrors the SQLite types, so timestamps are TEXT nearly
     # everywhere and the cast is what breaks: `text <= timestamp with time zone`.
@@ -883,6 +1036,51 @@ def self_test() -> int:
                 failures.append(f"fix left a site behind: {sql}\n  {fixed}")
             if add_missing_casts(fixed, known) != fixed:
                 failures.append(f"fix is not idempotent: {sql}\n  {fixed}")
+
+    # Arm detection. The cases above feed one statement at a time, so they never
+    # exercise "which half of the call is this literal in?" -- and that is where
+    # this file was wrong for a long time. Each case is a whole call, with the arm
+    # the scanner must report and whether that arm is faulty.
+    for source, expect_arm, should_report, note in ARM_TEST_CASES:
+        # The first *code* literal, not the first quote character: a case that
+        # opens with a comment containing `"..."` would otherwise be judged on
+        # the comment.
+        first = next(
+            m.start() for m in STRING_LIT.finditer(source)
+            if not in_line_comment(source, m.start())
+        )
+        arm = in_sql_pair(source, first)
+        if arm != expect_arm:
+            failures.append(
+                f"arm detection: expected {expect_arm}, got {arm} -- {note}\n  {source}")
+        if in_line_comment(source, first):
+            failures.append(f"comment literal treated as code -- {note}\n  {source}")
+        # A quoted identifier inside a comment must be classified as a comment.
+        # `first` already skips such literals, so without this assertion the
+        # failure is silent: the scanner simply reads the arm off the wrong call
+        # and keeps going. Every quoted identifier in the source that is not the
+        # literal under test has to be a comment.
+        # Only the quotes that sit *on or before* the literal under test can be
+        # misread as it; a later literal in the same call is a real argument.
+        quoted = [
+            m.start()
+            for m in STRING_LIT.finditer(source)
+            if m.start() < first
+        ]
+        strays = [q for q in quoted if not in_line_comment(source, q)]
+        if strays:
+            failures.append(
+                f"a quoted identifier in a comment was not seen as a comment "
+                f"-- {note}\n  {source}")
+        if should_report:
+            second = next(
+                m.start() for m in STRING_LIT.finditer(source)
+                if not in_line_comment(source, m.start())
+                and m.start() != first
+            )
+            if in_sql_pair(source, second) != "postgres":
+                failures.append(
+                    f"faulty PostgreSQL half not judged -- {note}\n  {source}")
 
     for failure in failures:
         print(f"FAIL {failure}")

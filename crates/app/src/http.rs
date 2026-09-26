@@ -17,6 +17,14 @@ use lorehaven_domain::ids::RequestId;
 
 tokio::task_local! {
     static CURRENT_REQUEST_ID: String;
+    /// "GET /api/v1/works/abc" for the in-flight request.
+    ///
+    /// A 500 carrying a bare PostgreSQL type error names no route, and the first
+    /// question about one is always which route produced it. The correlation id
+    /// alone does not answer that -- it is an opaque UUID, and nothing joins it
+    /// back to a path in the log. Carrying the method and path alongside it in
+    /// the same task-local keeps the two in the same line.
+    static CURRENT_ROUTE: String;
 }
 
 /// Run `future` with `request_id` installed as the current correlation id.
@@ -25,6 +33,20 @@ where
     F: Future<Output = T>,
 {
     CURRENT_REQUEST_ID.scope(request_id, future).await
+}
+
+/// Run `future` with `route` ("GET /api/v1/works/abc") as the current route.
+pub async fn with_route<F, T>(route: String, future: F) -> T
+where
+    F: Future<Output = T>,
+{
+    CURRENT_ROUTE.scope(route, future).await
+}
+
+/// The method and path of the in-flight request, if we are inside one.
+#[must_use]
+pub fn current_route() -> Option<String> {
+    CURRENT_ROUTE.try_with(|route| route.clone()).ok()
 }
 
 /// The correlation id of the in-flight request, if we are inside one.
@@ -107,7 +129,12 @@ impl IntoResponse for ApiError {
         // error is masked by design, so the diagnostic detail only appears in
         // the `Debug` rendering.
         if error.is_fault() {
-            tracing::error!(error = ?error, code = code.as_str(), "request failed");
+            tracing::error!(
+                route = ?current_route(),
+                error = ?error,
+                code = code.as_str(),
+                "request failed"
+            );
         } else {
             tracing::debug!(code = code.as_str(), "request rejected");
         }

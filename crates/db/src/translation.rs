@@ -314,8 +314,12 @@ async fn lookup_memory_postgres(
     Ok(row.map(|r| {
         (
             r.get::<String, _>("target_text"),
-            r.get::<i32, _>("quality_bp") as i64,
-            r.get::<i32, _>("shared") != 0,
+            // The SELECT casts both to BIGINT, so the reader is `i64`. Reading
+            // them as `i32` is `INT4 is not compatible with INT8` -- a decode
+            // error, not a truncation. The SQLite arm selects the columns
+            // uncast and correctly reads `i32`.
+            r.get::<i64, _>("quality_bp"),
+            r.get::<i64, _>("shared") != 0,
         )
     }))
 }

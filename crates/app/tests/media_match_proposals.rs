@@ -404,6 +404,6 @@ async fn the_queue_limit_is_the_callers_and_cannot_be_asked_for_everything() {
             .await;
         assert_eq!(status, StatusCode::OK, "limit {limit}: {body}");
         let shown = body["pending"].as_array().expect("array").len();
-        assert!(shown >= 1 && shown <= 200, "limit {limit} returned {shown}");
+        assert!((1..=200).contains(&shown), "limit {limit} returned {shown}");
     }
 }

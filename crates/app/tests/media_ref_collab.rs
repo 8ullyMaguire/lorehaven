@@ -136,6 +136,7 @@ async fn media_ref_collab_empty_account() {
     let recs = lorehaven_db::discovery::media_reference_collaborative_recommendations(
         db,
         &test_support::id("nobody"),
+        None,
         10,
     )
     .await
@@ -223,10 +224,11 @@ async fn media_ref_collab_finds_shared_media() {
     )
     .await;
 
-    let recs =
-        lorehaven_db::discovery::media_reference_collaborative_recommendations(db, &account_a, 10)
-            .await
-            .expect("recommendations");
+    let recs = lorehaven_db::discovery::media_reference_collaborative_recommendations(
+        db, &account_a, None, 10,
+    )
+    .await
+    .expect("recommendations");
 
     let ids: Vec<String> = recs.iter().map(|w| w.to_string()).collect();
     assert!(
@@ -330,10 +332,11 @@ async fn media_ref_collab_ranks_by_shared_count() {
     )
     .await;
 
-    let recs =
-        lorehaven_db::discovery::media_reference_collaborative_recommendations(db, &account_a, 10)
-            .await
-            .expect("recommendations");
+    let recs = lorehaven_db::discovery::media_reference_collaborative_recommendations(
+        db, &account_a, None, 10,
+    )
+    .await
+    .expect("recommendations");
 
     // W2 (2 shared refs) should rank above W3 (1 shared ref).
     assert_eq!(recs.len(), 2, "both W2 and W3 should be recommended");
@@ -394,10 +397,11 @@ async fn media_ref_collab_excludes_own_works() {
     )
     .await;
 
-    let recs =
-        lorehaven_db::discovery::media_reference_collaborative_recommendations(db, &account_a, 10)
-            .await
-            .expect("recommendations");
+    let recs = lorehaven_db::discovery::media_reference_collaborative_recommendations(
+        db, &account_a, None, 10,
+    )
+    .await
+    .expect("recommendations");
 
     // W2 is owned by A → excluded even though it shares ref-1.
     let ids: Vec<String> = recs.iter().map(|w| w.to_string()).collect();
@@ -438,9 +442,166 @@ async fn media_ref_collab_no_bookmarks() {
     .await;
 
     // No bookmarks for A → no recommendations.
-    let recs =
-        lorehaven_db::discovery::media_reference_collaborative_recommendations(db, &account_a, 10)
-            .await
-            .expect("recommendations");
+    let recs = lorehaven_db::discovery::media_reference_collaborative_recommendations(
+        db, &account_a, None, 10,
+    )
+    .await
+    .expect("recommendations");
     assert!(recs.is_empty());
+}
+
+/// A content filter has to reach the media-reference engine too.
+///
+/// This is the one recommendation surface whose work id does *not* live on
+/// `works`: it selects `work_media_references` and groups on `wmr.work_id`, so
+/// the exclusion has to correlate there instead of on `w.id`. A predicate written
+/// for the `works` shape correlates against a column that does not exist, which
+/// is a 500 on PostgreSQL and a silently-unfiltered result on SQLite -- and this
+/// file's other tests all pass `None`, so nothing else would have caught it.
+///
+/// Reader A bookmarks W1; W2 and W3 both share a media reference with it, so both
+/// are recommended. Tagging W3 must remove exactly W3.
+#[tokio::test]
+async fn media_ref_collab_applies_content_filters() {
+    let dir = test_support::scratch_dir("mrc_filter");
+    let tdb = test_support::TestDb::connect_with_dir("mrc-filter", &dir).await;
+    let db = tdb.db();
+
+    use lorehaven_db::identity::{create_account, AccountStatus};
+    use lorehaven_domain::policy::AgeState;
+    let account_a = create_account(
+        db,
+        "fa@mrc.test",
+        AgeState::DeclaredAdult,
+        AccountStatus::Active,
+    )
+    .await
+    .expect("create A")
+    .to_string();
+    let account_b = create_account(
+        db,
+        "fb@mrc.test",
+        AgeState::DeclaredAdult,
+        AccountStatus::Active,
+    )
+    .await
+    .expect("create B")
+    .to_string();
+    let pseud_a = test_support::id("pseud-fa");
+    let pseud_b = test_support::id("pseud-fb");
+    seed_pseud(db, &pseud_a, &account_a, "handle-fa").await;
+    seed_pseud(db, &pseud_b, &account_b, "handle-fb").await;
+
+    let bookmarked = WorkId::new();
+    let allowed = WorkId::new();
+    let blocked = WorkId::new();
+    seed_work(db, &bookmarked, "Bookmarked", &pseud_a).await;
+    seed_work(db, &allowed, "Allowed", &pseud_b).await;
+    seed_work(db, &blocked, "Blocked", &pseud_b).await;
+
+    seed_media_ref(db, &test_support::id("fref-1")).await;
+    seed_work_media_link(
+        db,
+        &test_support::id("fwmr-1"),
+        &bookmarked,
+        &test_support::id("fref-1"),
+    )
+    .await;
+    seed_work_media_link(
+        db,
+        &test_support::id("fwmr-2"),
+        &allowed,
+        &test_support::id("fref-1"),
+    )
+    .await;
+    seed_work_media_link(
+        db,
+        &test_support::id("fwmr-3"),
+        &blocked,
+        &test_support::id("fref-1"),
+    )
+    .await;
+    seed_bookmark(
+        db,
+        &test_support::id("fbm-1"),
+        &account_a,
+        &bookmarked.to_string(),
+    )
+    .await;
+
+    // Tag only the blocked work.
+    let now = chrono::Utc::now().to_rfc3339();
+    let node_id = uuid::Uuid::new_v4().to_string();
+    let sql_node = db.sql(
+        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES ($1::uuid, $2, $3, $4, $5::timestamptz)",
+    );
+    let sql_tag = db.sql(
+        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES ($1::uuid, $2, $3, $4::timestamptz)",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql_node)
+                .bind(&node_id)
+                .bind("tag")
+                .bind("gore")
+                .bind("gore")
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await
+                .expect("node");
+            sqlx::query(&sql_tag)
+                .bind(blocked.to_string())
+                .bind(&node_id)
+                .bind(1i64)
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await
+                .expect("tag");
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql_node)
+                .bind(&node_id)
+                .bind("tag")
+                .bind("gore")
+                .bind("gore")
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await
+                .expect("node");
+            sqlx::query(&sql_tag)
+                .bind(blocked.to_string())
+                .bind(&node_id)
+                .bind(1i64)
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await
+                .expect("tag");
+        }
+    }
+
+    // The reader's pseud owns the filter, exactly as the settings route stores it.
+    let pseud_id: uuid::Uuid = pseud_a.parse().expect("pseud id is a uuid");
+    lorehaven_db::settings::add_content_filter(db, pseud_id, "tag", "gore", &now)
+        .await
+        .expect("store the filter under the reader's pseud");
+
+    let recs = lorehaven_db::discovery::media_reference_collaborative_recommendations(
+        db,
+        &account_a,
+        Some(pseud_id),
+        10,
+    )
+    .await
+    .expect("recommendations");
+
+    assert!(
+        !recs.contains(&blocked),
+        "the blocked work must not be recommended"
+    );
+    assert!(
+        recs.contains(&allowed),
+        "the untagged work sharing the reference must still be recommended: {recs:?}"
+    );
 }

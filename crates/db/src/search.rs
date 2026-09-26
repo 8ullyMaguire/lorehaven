@@ -8,6 +8,7 @@ use lorehaven_domain::ids::WorkId;
 use serde::Serialize;
 
 mod ast_search;
+pub mod content_filter_sql;
 
 pub use ast_search::search_works_ast;
 pub use ast_search::search_works_ast_filtered;
@@ -96,19 +97,38 @@ async fn rebuild_work_index_postgres(
     let pool = db.postgres_pool().expect("postgres");
     let mut tx = pool.begin().await.context("begin transaction")?;
 
-    sqlx::query("DELETE FROM works_index_terms WHERE work_id::text = ?")
+    // Every statement here goes through `db.sql`. This arm used to hand-write
+    // the same text as the SQLite one and rely on `?` still working, but
+    // `sqlx` does not accept `?` against PostgreSQL: it arrived as
+    // `syntax error at end of input` and the whole reindex job failed
+    // terminally, so a published work was never indexed and the public search
+    // door had an empty index. `db.sql` rewrites `?` to `$n` and keeps the
+    // `::uuid` cast the column needs.
+    let delete_terms = db.sql(
+        "DELETE FROM works_index_terms WHERE work_id = ?",
+        "DELETE FROM works_index_terms WHERE work_id = ?::uuid",
+    );
+    sqlx::query(&delete_terms)
         .bind(work_id.to_string())
         .execute(&mut *tx)
         .await
         .context("delete old index terms")?;
 
-    sqlx::query("DELETE FROM works_index WHERE work_id::text = ?")
+    let delete_row = db.sql(
+        "DELETE FROM works_index WHERE work_id = ?",
+        "DELETE FROM works_index WHERE work_id = ?::uuid",
+    );
+    sqlx::query(&delete_row)
         .bind(work_id.to_string())
         .execute(&mut *tx)
         .await
         .context("delete old index row")?;
 
-    sqlx::query("INSERT INTO works_index (work_id, body_text) VALUES (?::uuid, ?)")
+    let insert_row = db.sql(
+        "INSERT INTO works_index (work_id, body_text) VALUES (?, ?)",
+        "INSERT INTO works_index (work_id, body_text) VALUES (?::uuid, ?)",
+    );
+    sqlx::query(&insert_row)
         .bind(work_id.to_string())
         .bind(body_text)
         .execute(&mut *tx)
@@ -127,8 +147,12 @@ async fn rebuild_work_index_postgres(
         .filter(|(t, _)| !t.is_empty())
         .collect();
 
+    let insert_term = db.sql(
+        "INSERT INTO works_index_terms (work_id, term, pos) VALUES (?, ?, ?)",
+        "INSERT INTO works_index_terms (work_id, term, pos) VALUES (?::uuid, ?, ?)",
+    );
     for (term, pos) in &terms {
-        sqlx::query("INSERT INTO works_index_terms (work_id, term, pos) VALUES (?::uuid, ?, ?)")
+        sqlx::query(&insert_term)
             .bind(work_id.to_string())
             .bind(term)
             .bind(pos)

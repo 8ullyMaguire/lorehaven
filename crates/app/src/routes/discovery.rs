@@ -105,6 +105,19 @@ async fn get_discovery(
 ) -> ApiResult<Json<serde_json::Value>> {
     let limit = 20;
     let account_id: Option<String> = session.as_ref().map(|s| s.account_id.to_string());
+    // Content filters belong to the pseud the session is acting as, and which
+    // pseud that is a session property (`sessions.active_pseud_id`), not an
+    // account one. Passing the account here would pick an arbitrary pseud out of
+    // the account's several, or none at all -- and a filter that applies to
+    // search but not to recommendations is exactly the bug this closes. The
+    // fallback to the account id mirrors `routes/settings.rs`, so the two agree
+    // on what a filter without a pseud means.
+    let viewer_pseud: Option<uuid::Uuid> = session.as_ref().map(|s| {
+        s.pseud_id
+            .as_ref()
+            .map(|p| p.as_uuid())
+            .unwrap_or_else(|| s.account_id.as_uuid())
+    });
 
     // Resolve the effective sort (spec §43.4): query param > stored preference > default.
     let effective_sort =
@@ -115,10 +128,14 @@ async fn get_discovery(
 
     if let Some(ref account_id) = account_id {
         // Engine 1: tag-based personalization (from taste profile).
-        let personalized =
-            lorehaven_db::discovery::personalized_recommendations(state.db(), account_id, limit)
-                .await
-                .map_err(|e| ApiError(AppError::Internal(e)))?;
+        let personalized = lorehaven_db::discovery::personalized_recommendations(
+            state.db(),
+            account_id,
+            viewer_pseud,
+            limit,
+        )
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
         engines.push(
             personalized
                 .into_iter()
@@ -135,7 +152,7 @@ async fn get_discovery(
     }
 
     // Engine 2: popularity-based (public engine).
-    let popular = lorehaven_db::discovery::public_recommendations(state.db(), limit)
+    let popular = lorehaven_db::discovery::public_recommendations(state.db(), viewer_pseud, limit)
         .await
         .map_err(|e| ApiError(AppError::Internal(e)))?;
     engines.push(
@@ -159,6 +176,7 @@ async fn get_discovery(
         let media_collab = lorehaven_db::discovery::media_reference_collaborative_recommendations(
             state.db(),
             account_id,
+            viewer_pseud,
             limit,
         )
         .await

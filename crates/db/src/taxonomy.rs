@@ -205,7 +205,7 @@ pub async fn search_nodes_fuzzy(
 pub async fn node_by_id(db: &Database, id: &str) -> Result<Option<TaxonomyNode>> {
     let sql = db.sql(
         "SELECT id, kind, canonical, norm, created_at FROM taxonomy_nodes WHERE id = ?",
-        "SELECT id::text, kind, canonical, norm, created_at FROM taxonomy_nodes WHERE id = $1::uuid",
+        "SELECT id, kind, canonical, norm, created_at FROM taxonomy_nodes WHERE id = $1",
     );
     let row = match db.backend() {
         Backend::Sqlite => {

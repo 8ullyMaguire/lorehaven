@@ -65,8 +65,8 @@ async fn curator_list_active() {
         .await
         .expect("list curators");
     assert_eq!(curators.len(), 2);
-    assert!(curators.contains(&&test_support::id("user-001").to_string()));
-    assert!(curators.contains(&&test_support::id("user-002").to_string()));
+    assert!(curators.contains(&test_support::id("user-001").to_string()));
+    assert!(curators.contains(&test_support::id("user-002").to_string()));
 
     // Opt out one
     media_resilience::opt_out_curator(db, &test_support::id("user-001"))
@@ -76,7 +76,7 @@ async fn curator_list_active() {
         .await
         .expect("list curators");
     assert_eq!(curators.len(), 1);
-    assert!(!curators.contains(&&test_support::id("user-001").to_string()));
+    assert!(!curators.contains(&test_support::id("user-001").to_string()));
 }
 
 #[tokio::test]

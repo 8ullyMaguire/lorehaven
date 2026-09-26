@@ -62,16 +62,26 @@ pub async fn upsert_search_setting(
 
 /// Read all search settings for a pseud.
 pub async fn read_search_settings(db: &Database, pseud_id: Uuid) -> Result<Vec<(String, Value)>> {
-    let sql = "SELECT key, value FROM search_settings WHERE pseud_id = ?";
+    // `db.sql`, not one literal for both arms: `?` is SQLite's placeholder
+    // and PostgreSQL rejects it outright (`syntax error at end of input`), so
+    // a shared literal silently disables the whole read on that backend.
+    let sql = db.sql(
+        "SELECT key, value FROM search_settings WHERE pseud_id = ?",
+        // `search_settings.value` is `JSONB` in PostgreSQL (0070_user_settings.sql)
+        // and the row is read as a `String`, so the column is cast on that side
+        // only. Without it the whole settings read is a decode error and every
+        // stored preference is unreachable -- including the export round-trip.
+        "SELECT key, value::text AS value FROM search_settings WHERE pseud_id = ?::uuid",
+    );
     let rows = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, (String, String)>(sql)
+            sqlx::query_as::<_, (String, String)>(&sql)
                 .bind(pseud_id.to_string())
                 .fetch_all(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, (String, String)>(sql)
+            sqlx::query_as::<_, (String, String)>(&sql)
                 .bind(pseud_id.to_string())
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
                 .await?
@@ -96,7 +106,7 @@ pub async fn delete_search_setting(db: &Database, pseud_id: Uuid, key: &str) -> 
                 .rows_affected()
         }
         Backend::Postgres => {
-            sqlx::query("DELETE FROM search_settings WHERE pseud_id = ? AND key = ?")
+            sqlx::query("DELETE FROM search_settings WHERE pseud_id = ?::uuid AND key = ?")
                 .bind(pseud_id.to_string())
                 .bind(key)
                 .execute(db.postgres_pool().expect("postgres handle"))
@@ -181,7 +191,7 @@ pub async fn remove_content_filter(
         .await?
         .rows_affected(),
         Backend::Postgres => sqlx::query(
-            "DELETE FROM content_filters WHERE pseud_id = ? AND filter_type = ? AND value = ?",
+            "DELETE FROM content_filters WHERE pseud_id = ?::uuid AND filter_type = ? AND value = ?",
         )
         .bind(pseud_id.to_string())
         .bind(filter_type)
@@ -196,16 +206,22 @@ pub async fn remove_content_filter(
 
 /// List all content filters for a pseud.
 pub async fn list_content_filters(db: &Database, pseud_id: Uuid) -> Result<Vec<ContentFilterRow>> {
-    let sql = "SELECT filter_type, value FROM content_filters WHERE pseud_id = ? ORDER BY filter_type, value";
+    // `db.sql`, not one literal for both arms: `?` is SQLite's placeholder
+    // and PostgreSQL rejects it outright (`syntax error at end of input`), so
+    // a shared literal silently disables the whole read on that backend.
+    let sql = db.sql(
+        "SELECT filter_type, value FROM content_filters WHERE pseud_id = ? ORDER BY filter_type, value",
+        "SELECT filter_type, value FROM content_filters WHERE pseud_id = ?::uuid ORDER BY filter_type, value",
+    );
     let rows = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, (String, String)>(sql)
+            sqlx::query_as::<_, (String, String)>(&sql)
                 .bind(pseud_id.to_string())
                 .fetch_all(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, (String, String)>(sql)
+            sqlx::query_as::<_, (String, String)>(&sql)
                 .bind(pseud_id.to_string())
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
                 .await?
@@ -325,16 +341,22 @@ pub async fn read_notification_routes(
     db: &Database,
     account_id: Uuid,
 ) -> Result<Vec<NotificationRouteRow>> {
-    let sql = "SELECT event_type, channel, enabled FROM notification_routes WHERE account_id = ? ORDER BY event_type";
+    // `db.sql`, not one literal for both arms: `?` is SQLite's placeholder and
+    // PostgreSQL rejects it outright (`syntax error at end of input`), so a
+    // shared literal silently disables the whole read on that backend.
+    let sql = db.sql(
+        "SELECT event_type, channel, enabled FROM notification_routes WHERE account_id = ? ORDER BY event_type",
+        "SELECT event_type, channel, enabled FROM notification_routes WHERE account_id = ?::uuid ORDER BY event_type",
+    );
     let rows = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, (String, String, bool)>(sql)
+            sqlx::query_as::<_, (String, String, bool)>(&sql)
                 .bind(account_id.to_string())
                 .fetch_all(db.sqlite_pool().expect("sqlite handle"))
                 .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, (String, String, bool)>(sql)
+            sqlx::query_as::<_, (String, String, bool)>(&sql)
                 .bind(account_id.to_string())
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
                 .await?

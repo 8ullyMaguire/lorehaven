@@ -2,7 +2,8 @@
 //!
 //! Spec §16.1–16.8. Both dialects.
 
-use crate::{Backend, Database};
+use crate::search::content_filter_sql;
+use crate::{sql_owned, Backend, Database};
 use anyhow::Result;
 use lorehaven_domain::ids::WorkId;
 use serde::Serialize;
@@ -140,29 +141,62 @@ pub async fn recompute_taste_profile(db: &Database, account: &str) -> Result<()>
 }
 
 /// Get public recommendations (popular recent works).
-pub async fn public_recommendations(db: &Database, limit: i64) -> Result<Vec<WorkId>> {
+///
+/// `account` is the viewer's account, used only to exclude the works they have
+/// content-filtered (spec §46.4, §46.7.1). `None` -- an anonymous visitor --
+/// filters nothing, which is correct rather than a convenience.
+pub async fn public_recommendations(
+    db: &Database,
+    viewer_pseud: Option<uuid::Uuid>,
+    limit: i64,
+) -> Result<Vec<WorkId>> {
+    let rules = content_filter_sql::for_pseud(db, viewer_pseud).await?;
+    let filter = content_filter_sql::exclusion_for(db, &rules, "w.id");
+    // The exclusion carries `?` of its own and is renumbered once by
+    // `sql_owned`, so it has to be bound in the position it appears in the text:
+    // here inside the WHERE, ahead of `LIMIT ?`. Binding order is positional and
+    // unchecked, so a swapped pair is a wrong answer, not an error.
+    let sqlite = format!(
+        "SELECT w.id FROM works w
+         WHERE w.lifecycle = 'published' AND w.visibility = 'public'
+           {filter_clause}
+         ORDER BY w.updated_at DESC
+         LIMIT ?",
+        filter_clause = filter.clause()
+    );
+    let postgres = format!(
+        "SELECT w.id::text FROM works w
+         WHERE w.lifecycle = 'published' AND w.visibility = 'public'
+           {filter_clause}
+         ORDER BY w.updated_at DESC
+         LIMIT ?",
+        filter_clause = filter.clause()
+    );
+    // The bind sequence is repeated per arm on purpose. `sqlx::query_as`
+    // monomorphises on the backend, so one built query cannot be handed both a
+    // `SqlitePool` and a `PgPool`; a generic helper over the executor needs a
+    // bound the compiler rejects as a cycle. Only the renumbered statement
+    // differs, and it comes from one `sql_owned` call, so the two arms cannot
+    // disagree about the SQL itself.
     let rows: Vec<(String,)> = match db.backend() {
         crate::Backend::Sqlite => {
-            sqlx::query_as(
-                "SELECT w.id FROM works w
-                 WHERE w.lifecycle = 'published' AND w.visibility = 'public'
-                 ORDER BY w.updated_at DESC
-                 LIMIT ?",
-            )
-            .bind(limit)
-            .fetch_all(db.sqlite_pool().expect("sqlite"))
-            .await?
+            let mut query = sqlx::query_as::<_, (String,)>(&sqlite);
+            for bind in &filter.binds {
+                query = query.bind(bind);
+            }
+            query = query.bind(limit);
+            query.fetch_all(db.sqlite_pool().expect("sqlite")).await?
         }
         crate::Backend::Postgres => {
-            sqlx::query_as(
-                "SELECT w.id::text FROM works w
-                 WHERE w.lifecycle = 'published' AND w.visibility = 'public'
-                 ORDER BY w.updated_at DESC
-                 LIMIT $1",
-            )
-            .bind(limit)
-            .fetch_all(db.postgres_pool().expect("postgres"))
-            .await?
+            let sql = sql_owned(db, sqlite, postgres);
+            let mut query = sqlx::query_as::<_, (String,)>(&sql);
+            for bind in &filter.binds {
+                query = query.bind(bind);
+            }
+            query = query.bind(limit);
+            query
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
         }
     };
     Ok(rows
@@ -175,57 +209,80 @@ pub async fn public_recommendations(db: &Database, limit: i64) -> Result<Vec<Wor
 pub async fn personalized_recommendations(
     db: &Database,
     account: &str,
+    viewer_pseud: Option<uuid::Uuid>,
     limit: i64,
 ) -> Result<Vec<WorkId>> {
     // First try to get the taste profile
     let profile = taste_profile_for(db, account).await?;
     match profile {
         Some(_) => {
-            // Use taste profile to find similar works
+            // Use taste profile to find similar works, minus the viewer's
+            // content-filtered ones (spec §46.4, §46.7.1). The account's own
+            // rules are the ones that can be read here: this engine is keyed by
+            // account, and a pseud-scoped rule is not reachable from it.
+            let rules = content_filter_sql::for_pseud(db, viewer_pseud).await?;
+            let filter = content_filter_sql::exclusion_for(db, &rules, "w.id");
+            let sqlite = format!(
+                "SELECT DISTINCT w.id FROM works w
+                 JOIN work_tags wt ON wt.work_id = w.id
+                 WHERE w.lifecycle = 'published' AND w.visibility = 'public'
+                 AND wt.node_id IN (
+                     SELECT json_each.value FROM taste_profiles tp,
+                     json_each(tp.signals)
+                     WHERE tp.account = ?
+                 )
+                 AND w.owner_pseud_id NOT IN (
+                     SELECT id FROM pseuds WHERE account_id = ?
+                 )
+                 {filter_clause}
+                 ORDER BY w.updated_at DESC
+                 LIMIT ?",
+                filter_clause = filter.clause()
+            );
+            let postgres = format!(
+                "SELECT DISTINCT w.id::text FROM works w
+                 JOIN work_tags wt ON wt.work_id = w.id
+                 WHERE w.lifecycle = 'published' AND w.visibility = 'public'
+                 AND wt.node_id IN (
+                     SELECT json_array_elements_text(tp.signals::json)
+                     FROM taste_profiles tp
+                     WHERE tp.account = ?
+                 )
+                 AND w.owner_pseud_id NOT IN (
+                     SELECT id FROM pseuds WHERE account_id = ?::uuid
+                 )
+                 {filter_clause}
+                 ORDER BY w.updated_at DESC
+                 LIMIT ?",
+                filter_clause = filter.clause()
+            );
+            // See the note in `public_recommendations`: the bind sequence is
+            // repeated per arm because `query_as` cannot cross backends.
             let rows: Vec<(String,)> = match db.backend() {
                 crate::Backend::Sqlite => {
-                    sqlx::query_as(
-                        "SELECT DISTINCT w.id FROM works w
-                         JOIN work_tags wt ON wt.work_id = w.id
-                         WHERE w.lifecycle = 'published' AND w.visibility = 'public'
-                         AND wt.node_id IN (
-                             SELECT json_each.value FROM taste_profiles tp,
-                             json_each(tp.signals)
-                             WHERE tp.account = ?
-                         )
-                         AND w.owner_pseud_id NOT IN (
-                             SELECT id FROM pseuds WHERE account_id = ?
-                         )
-                         ORDER BY w.updated_at DESC
-                         LIMIT ?",
-                    )
-                    .bind(account)
-                    .bind(account)
-                    .bind(limit)
-                    .fetch_all(db.sqlite_pool().expect("sqlite"))
-                    .await?
+                    // The exclusion's `?` appear in the WHERE clause, ahead of
+                    // `LIMIT ?` in the text, so they are bound ahead of it here.
+                    let mut query = sqlx::query_as::<_, (String,)>(&sqlite)
+                        .bind(account)
+                        .bind(account);
+                    for bind in &filter.binds {
+                        query = query.bind(bind);
+                    }
+                    query = query.bind(limit);
+                    query.fetch_all(db.sqlite_pool().expect("sqlite")).await?
                 }
                 crate::Backend::Postgres => {
-                    sqlx::query_as(
-                        "SELECT DISTINCT w.id::text FROM works w
-                         JOIN work_tags wt ON wt.work_id = w.id
-                         WHERE w.lifecycle = 'published' AND w.visibility = 'public'
-                         AND wt.node_id IN (
-                             SELECT json_array_elements_text(tp.signals::json)
-                             FROM taste_profiles tp
-                             WHERE tp.account = $1
-                         )
-                         AND w.owner_pseud_id NOT IN (
-                             SELECT id FROM pseuds WHERE account_id = $2::uuid
-                         )
-                         ORDER BY w.updated_at DESC
-                         LIMIT $3",
-                    )
-                    .bind(account)
-                    .bind(account)
-                    .bind(limit)
-                    .fetch_all(db.postgres_pool().expect("postgres"))
-                    .await?
+                    let sql = sql_owned(db, sqlite, postgres);
+                    let mut query = sqlx::query_as::<_, (String,)>(&sql)
+                        .bind(account)
+                        .bind(account);
+                    for bind in &filter.binds {
+                        query = query.bind(bind);
+                    }
+                    query = query.bind(limit);
+                    query
+                        .fetch_all(db.postgres_pool().expect("postgres"))
+                        .await?
                 }
             };
             Ok(rows
@@ -233,7 +290,7 @@ pub async fn personalized_recommendations(
                 .map(|(id,)| id.parse().unwrap_or_default())
                 .collect())
         }
-        None => public_recommendations(db, limit).await,
+        None => public_recommendations(db, viewer_pseud, limit).await,
     }
 }
 
@@ -246,74 +303,100 @@ pub async fn personalized_recommendations(
 pub async fn media_reference_collaborative_recommendations(
     db: &Database,
     account_id: &str,
+    viewer_pseud: Option<uuid::Uuid>,
     limit: i64,
 ) -> Result<Vec<WorkId>> {
-    // SQLite: find works sharing media references with user's bookmarked works.
-    // Step 1: get bookmarked work IDs for this account.
-    // Step 2: get media_reference_ids from work_media_references where work_id IN (bookmarked).
-    // Step 3: get work_ids from work_media_references where media_reference_id IN (found refs)
-    //         AND work_id NOT IN (bookmarked) AND work_id NOT owned by this account.
-    // Step 4: rank by count of shared references, descending.
+    // Step 1: works sharing media references with the reader's bookmarked works.
+    // Step 2: exclude the reader's content-filtered works (spec §46.4, §46.7.1).
+    // Step 3: rank by count of shared references, descending.
+    //
+    // The work id lives on `work_media_references`, not on `works`, so the
+    // exclusion correlates on `wmr.work_id` -- the reason the predicate takes an
+    // expression rather than a table name.
+    let rules = content_filter_sql::for_pseud(db, viewer_pseud).await?;
+    let filter = content_filter_sql::exclusion_for(db, &rules, "wmr.work_id");
+    // Both arms are written with `?` in bind order and renumbered once. The
+    // account appears three times in the original text, so it is bound three
+    // times here too rather than relying on `$1` reuse, which keeps the two
+    // dialects' bind counts identical.
+    let sqlite = format!(
+        "SELECT wmr.work_id
+         FROM work_media_references wmr
+         WHERE wmr.media_reference_id IN (
+             SELECT DISTINCT wmr2.media_reference_id
+             FROM work_media_references wmr2
+             JOIN bookmarks b ON b.subject_id = wmr2.work_id AND b.subject_type = 'work'
+             WHERE b.account_id = ?
+         )
+         AND wmr.work_id NOT IN (
+             SELECT subject_id FROM bookmarks WHERE account_id = ? AND subject_type = 'work'
+         )
+         AND wmr.work_id NOT IN (
+             SELECT w.id FROM works w
+             JOIN pseuds p ON p.id = w.owner_pseud_id
+             WHERE p.account_id = ?
+         )
+         AND wmr.deleted_at IS NULL
+         {filter_clause}
+         GROUP BY wmr.work_id
+         ORDER BY COUNT(DISTINCT wmr.media_reference_id) DESC, wmr.work_id
+         LIMIT ?",
+        filter_clause = filter.clause()
+    );
+    let postgres = format!(
+        "SELECT wmr.work_id::text
+         FROM work_media_references wmr
+         WHERE wmr.media_reference_id IN (
+             SELECT DISTINCT wmr2.media_reference_id
+             FROM work_media_references wmr2
+             JOIN bookmarks b ON b.subject_id = wmr2.work_id AND b.subject_type = 'work'
+             WHERE b.account_id = ?::uuid
+         )
+         AND wmr.work_id NOT IN (
+             SELECT subject_id FROM bookmarks WHERE account_id = ?::uuid AND subject_type = 'work'
+         )
+         AND wmr.work_id NOT IN (
+             SELECT w.id FROM works w
+             JOIN pseuds p ON p.id = w.owner_pseud_id
+             WHERE p.account_id = ?::uuid
+         )
+         AND wmr.deleted_at IS NULL
+         {filter_clause}
+         GROUP BY wmr.work_id
+         ORDER BY COUNT(DISTINCT wmr.media_reference_id) DESC, wmr.work_id
+         LIMIT ?",
+        filter_clause = filter.clause()
+    );
+    // The exclusion's `?` sit in the WHERE, ahead of `LIMIT ?`, so they bind
+    // ahead of it. See `public_recommendations` for why this is per-arm.
     let rows: Vec<(String,)> = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as(
-                "SELECT wmr.work_id
-                 FROM work_media_references wmr
-                 WHERE wmr.media_reference_id IN (
-                     SELECT DISTINCT wmr2.media_reference_id
-                     FROM work_media_references wmr2
-                     JOIN bookmarks b ON b.subject_id = wmr2.work_id AND b.subject_type = 'work'
-                     WHERE b.account_id = ?
-                 )
-                 AND wmr.work_id NOT IN (
-                     SELECT subject_id FROM bookmarks WHERE account_id = ? AND subject_type = 'work'
-                 )
-                 AND wmr.work_id NOT IN (
-                     SELECT w.id FROM works w
-                     JOIN pseuds p ON p.id = w.owner_pseud_id
-                     WHERE p.account_id = ?
-                 )
-                 AND wmr.deleted_at IS NULL
-                 GROUP BY wmr.work_id
-                 ORDER BY COUNT(DISTINCT wmr.media_reference_id) DESC, wmr.work_id
-                 LIMIT ?",
-            )
-            .bind(account_id)
-            .bind(account_id)
-            .bind(account_id)
-            .bind(limit)
-            .fetch_all(db.sqlite_pool().expect("sqlite"))
-            .await?
+            let mut query = sqlx::query_as::<_, (String,)>(&sqlite)
+                .bind(account_id)
+                .bind(account_id)
+                .bind(account_id);
+            for bind in &filter.binds {
+                query = query.bind(bind);
+            }
+            query = query.bind(limit);
+            query.fetch_all(db.sqlite_pool().expect("sqlite")).await?
         }
         Backend::Postgres => {
-            sqlx::query_as(
-                "SELECT wmr.work_id::text
-                 FROM work_media_references wmr
-                 WHERE wmr.media_reference_id IN (
-                     SELECT DISTINCT wmr2.media_reference_id
-                     FROM work_media_references wmr2
-                     JOIN bookmarks b ON b.subject_id = wmr2.work_id AND b.subject_type = 'work'
-                     WHERE b.account_id = $1::uuid
-                 )
-                 AND wmr.work_id NOT IN (
-                     SELECT subject_id FROM bookmarks WHERE account_id = $1::uuid AND subject_type = 'work'
-                 )
-                 AND wmr.work_id NOT IN (
-                     SELECT w.id FROM works w
-                     JOIN pseuds p ON p.id = w.owner_pseud_id
-                     WHERE p.account_id = $1::uuid
-                 )
-                 AND wmr.deleted_at IS NULL
-                 GROUP BY wmr.work_id
-                 ORDER BY COUNT(DISTINCT wmr.media_reference_id) DESC, wmr.work_id
-                 LIMIT $2",
-            )
-            .bind(account_id)
-            .bind(limit)
-            .fetch_all(db.postgres_pool().expect("postgres"))
-            .await?
+            let sql = sql_owned(db, sqlite, postgres);
+            let mut query = sqlx::query_as::<_, (String,)>(&sql)
+                .bind(account_id)
+                .bind(account_id)
+                .bind(account_id);
+            for bind in &filter.binds {
+                query = query.bind(bind);
+            }
+            query = query.bind(limit);
+            query
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
         }
     };
+
     Ok(rows
         .into_iter()
         .map(|(id,)| id.parse().unwrap_or_default())

@@ -1,3 +1,267 @@
+# Handoff — content filters finally hold: paging, PostgreSQL, and a gate that lied
+
+## The short version
+
+Content filters were broken in two ways that mattered, both of them invisible on
+SQLite. Fixed, tested on both backends, and the exclusion now runs *inside* the
+paged statement instead of after it.
+
+The product gap is still open and is larger than the bugs I fixed: **filters are
+enforced on exactly one surface of four.** That is the next work item, and it is
+a direct violation of the spec's own invariant.
+
+## The two bugs
+
+**Filtering ran after `LIMIT`.** `search_works_ast_filtered` paged first and
+applied the filter in Rust, so a page of 20 that lost 15 works to a filter
+answered with 5 rows. A reader who blocked a common tag saw a short page and no
+indication that more matched. The exclusion is now a correlated `NOT EXISTS`
+against `work_tags`/`taxonomy_nodes`, rendered inside the statement, so it applies
+before the limit — which also removes the N+1 (it cost one query per result row).
+
+**Content filters did nothing at all on PostgreSQL.** `work_tag_values`'s PG arm
+used `wt.work_id::text = ?` — a bare `?`, which is not a bind parameter in
+PostgreSQL at all. The server answered `syntax error at end of input`, the caller
+swallowed it with `unwrap_or_default()`, and every reader's filters were silently
+empty.
+
+**And my fix for that reintroduced the same class of fault one layer up.** The
+old code's `::text` was on the *bind* side, which is why it was legal: it turned
+a String bind into something comparable to a UUID column. When I rewrote the
+predicate I put `::text` on the *column* side, `cf_wt.work_id::text`, reasoning
+that `work_tags.work_id` was `TEXT` like its sibling `node_id`. It is `UUID` —
+`node_id` is the `TEXT` one, so the table holds one of each — and the comparison
+became `text = uuid`. All four content-filter tests 500'd on PostgreSQL and passed
+on SQLite. It sat in a commit for one run before PG caught it.
+
+The gate's self-test now pins `work_tags.work_id` as `uuid` and
+`work_tags.node_id` as `text` so that inference cannot come back. And a regex
+detail worth copying: `(?<![:\w])` before the column name in the cast rule.
+Without it, `work_id::text = $1::uuid` matches with the column read as `text`,
+so a self-test asserting on this exact bug passes against a gate looking at the
+wrong column — which is exactly what happened on the first attempt. Same defect in four `settings.rs` reads (search settings, content filters,
+notification routes, and both DELETEs) and one `dnf.rs` read. All now go through
+`db.sql`.
+
+Two latent bugs surfaced while fixing them, both in the signed-in PG arm that had
+never run: `blocks.blocked = pseuds.account_id` compares `TEXT` to `UUID`
+(`operator does not exist: uuid = text`), and `SUM(word_count)` returns `NUMERIC`
+in PostgreSQL so the `::bigint` cast is load-bearing for decoding. Both are fixed
+per-dialect with the reason in a comment.
+
+## The new file
+
+`crates/db/src/search/content_filter_sql.rs` — one place that knows how to render
+the exclusion, so a surface cannot forget a dialect. `predicate` / `predicate_pg`,
+`binds`, `for_pseud`, `by_type`. Both statements are written with positional `?`
+and handed to `sql_owned`, which renumbers only the PG one; the previous code
+renumbered just the user fragment and hand-computed the `LIMIT` index, and the two
+arms bound the viewer a different number of times, which is the kind of asymmetry
+that works until a bind moves.
+
+## The test that makes the paging fix provable
+
+`content_filters_narrow_the_page_instead_of_shortening_it` (milestone_10.rs). The
+existing `search_respects_content_filters` seeds two works and asks for a
+one-item page, so a correct implementation and a post-`LIMIT` one both answer with
+the single unblocked work — it cannot tell them apart. The new one seeds 12,
+blocks 7, orders them so the blocked works lead the unfiltered page (empty term
+index ⇒ every score is 0 ⇒ the order is `updated_at DESC`), and asserts a *full*
+page of clean works. Under the old implementation it returned nothing. Verified
+by reverting the exclusion and watching it fail.
+
+Note: site search answers `items`; the `titles` helper in that file reads
+`results`, which is the in-work search envelope.
+
+## The checker was wrong, and that mattered more than the bugs
+
+`scripts/check-uncast-pg-placeholders.py` was green for a long time while judging
+the **SQLite** arm of every `db.sql(a, b)` pair. Root cause: the argument walk
+compared a call-relative index against a file offset, adding `open_at` to a value
+that was already absolute. So the separator comma looked as though it lay after
+the literal, and both halves reported as the first.
+
+Three related defects in the same function, all found the same way:
+
+- `sql_owned(db, a, b)` leads with the database, so its SQLite half is argument
+  **1**, not 0. Conflating the two layouts judges every pair backwards.
+- Apostrophes in prose (`the reader's`) opened what the scanner read as an
+  unterminated string, losing every argument boundary after them.
+- Quoted identifiers inside comments were matched as literals.
+
+Four of my own "fixes" to this function made things worse before I found the
+actual cause — the tell was that the gate went from flagging 1 site to flagging
+**none**, and a lint that fails quiet is worse than no lint. `in_line_comment`
+and the `sql_owned` offset are now covered by `ARM_TEST_CASES`, which feeds whole
+calls instead of single strings. Two of those cases do not yet fail when the
+logic they cover is broken — a real coverage gap, noted rather than papered over.
+
+**Lesson worth keeping: prove a gate goes red before trusting it green.** Every
+"the gate passes" claim in a handoff should name a site it caught.
+
+## Baseline, measured
+
+Six PostgreSQL failures were standing at the start of this change, each
+confirmed against a clean HEAD by `git stash` and a re-run. They were real
+defects, and five of the six are now **fixed** rather than baselined:
+
+    export_import_round_trip            JSONB read as String  -> cast to ::text
+    my_audit_log_filters_by_account     JSONB read as String  -> cast to ::text
+    translation_memory_...              BIGINT read as i32    -> read i64
+    a_group_is_created_...              text = uuid          -> drop the casts
+    curator_bounty_queue_...            text = uuid          -> drop the casts
+    repeated_login_attempts_...         not a defect; timing, see above
+
+The last one is worth knowing: it takes 83 s on its own and is starved by a
+parallel suite. Use `-- --test-threads=2` for a full run on this machine, and
+treat "0 passed; N filtered out" as a filter that matched nothing, not a pass.
+
+Do not "verify" a baseline by guessing which file a test lives in — two of the
+six read as passing under a `--test` filter that matched no test at all, which
+is how a baseline check quietly proves nothing. Match the test *name* to its
+file with `grep -rl` first.
+
+## A second gate, and six more PostgreSQL-only 500s
+
+Fixing the four `::uuid`-on-a-`TEXT`-column bugs was not a lucky guess. I built
+the column type map straight out of `migrations/postgres` (1,804 columns, 297 of
+them `uuid`) and scanned every SQL string for `$n::uuid` compared against a
+column declared `TEXT`. Six were live:
+
+    community.rs      groups.id, groups.owner, group_members.account x2, group_id
+    federation.rs     ap_follows.id, federation_queue.id x2
+    taxonomy.rs       taxonomy_nodes.id  (its `id::text` cast went too)
+
+Each is a 500 that only ever appears on PostgreSQL. This is what the
+"baseline" of six failing tests was made of: the three group/audit/translation
+ones are now **fixed**, not baselined. `repeated_login_attempts_are_rate_limited`
+is not a defect — it needs 83 s alone and starves when the suite runs
+`-j`-wide; it passes in isolation and under `--test-threads=2`.
+
+The script is `scripts/check-pg-uuid-casts.py`, wired into CI next to the
+placeholder checker. Two things it has to get right, both of which I got wrong
+first:
+
+- **Alias resolution.** A statement touching six tables must not blame all six.
+  `p.account_id = $1::uuid` where `p` is `pseuds` is correct even though
+  `category_votes.account_id` is `TEXT`. Naive cross-matching reported **81**
+  findings, most of them false; alias-aware reports 6, all real.
+- **Unqualified columns are only reported when every table in the statement
+  agrees** they are `TEXT`, so a join cannot manufacture a finding.
+
+Its `--self-test` is 6 cases and it is verified to go red: reinstating the
+`federation_queue` cast flips it to rc=1, and the tree is clean at rc=0.
+
+## Filters now bind the recommendation surface — and the pseud is the key
+
+All three recommendation engines enforce content filters. The interesting part
+was not the SQL.
+
+**`for_pseud` is the only lookup, and that is a design decision, not an
+omission.** A filter belongs to a pseud; which pseud is a *session* property
+(`sessions.active_pseud_id`, switchable per session) while an account can have
+several. I first wrote a `for_account` that resolved account → pseud, then
+deleted it: there is no such column, and picking an arbitrary pseud from the
+account's several means applying that reader's *wrong* filter set. So the engines
+take `Option<Uuid>` — the pseud the session is acting as — and the route resolves
+it exactly the way `routes/settings.rs` does, including the fall back to the
+account id when a session carries no pseud. The two must agree: if they did not,
+a filter would apply to search and not to recommendations, which is the bug.
+
+**The exclusion correlates on an expression, not a table.** Two engines write
+`FROM works w`; the media-reference engine selects `work_media_references` and
+groups on `wmr.work_id`. So the predicate takes a work-id *expression*. This is
+not a stylistic choice: passing `w.id` to the media-reference query is
+`no such column: works.id` on PostgreSQL, and the whole route 500s. I got this
+wrong first — the search path's default was `"works"`, not `"works.id"`, which
+SQLite tolerates and PostgreSQL rejects. Verified by mutation in both directions.
+
+**`Exclusion::clause()` exists because a spliced empty predicate is a footgun.**
+The first version wrote `AND {filter_pred}`, and with no filters the statement
+ended in a dangling `AND` — a syntax error in the common case, the one no positive
+test covers. The fragment now renders its own conjunction, so a caller writes
+`{filter_clause}` and cannot get it wrong.
+
+**Bind order is positional and unchecked.** The exclusion's `?` sit in the WHERE,
+ahead of `LIMIT ?`, so they bind ahead of it. I had this backwards in three
+places at once; a swapped pair is a wrong answer, not an error. The reason it
+cannot be shared into a helper: `sqlx::query_as` monomorphises on the backend, so
+one built query cannot cross a `SqlitePool` and a `PgPool`, and the generic
+helper that would fix the duplication is rejected as a bound cycle. The
+duplication is commented as deliberate.
+
+Two new tests, each verified to go red by mutation:
+
+- `content_filters_reach_the_recommendation_surface` (milestone_10.rs) — the two
+  `works`-shaped engines. Removing the enforcement restores the blocked work.
+- `media_ref_collab_applies_content_filters` (media_ref_collab.rs) — the engine
+  whose work id is not on `works`. Correlating on `works.id` there gives
+  `no such column: works.id`. Note every other test in that file passes `None`,
+  so nothing else would have caught the wrong expression.
+
+Plus 7 unit tests on the predicate itself, including one that both dialects bind
+identical values for identical rules.
+
+## Still open
+
+1. **`GET /discovery/slots/{slot_id}/explanation` is a stub.** Not an unfiltered
+   surface — a fabricated one. It returns hardcoded strings
+   (`"taste_signal: matching your reading history"`, `filter: Some("...")`) for
+   any `slot_id`, touches no database, and takes `MaybeSession(_session)` so it
+   cannot even tell who is asking. A filter is irrelevant here: there is no real
+   answer to filter. This needs implementing against the actual recommendation
+   run that produced the slot, which means the explanation has to be recorded at
+   selection time — the current blend is in-memory per request, so nothing about
+   a slot survives to be explained. That is the design decision to make first.
+
+   Two things to decide, and neither is mine to assume: whether an explanation is
+   stored per slot (and how long — slots are per-request today, so this implies
+   persisting the candidate set), and whether a reader who has content-filtered
+   the work should get a filtered explanation or a 404. A 404 leaks that the work
+   exists; a filtered explanation that still names the tag leaks the same thing
+   by another route. The spec's §46.7.1 "never bypassable from a surface" does
+   not settle it, because the leak is in the *reason*, not the work.
+
+2. **Notifications still do not filter.** `notifications::list` and
+   `unread_count` return notification rows, not works, so a blocked tag does not
+   currently appear in one. But a notification whose `subject` is a work will
+   carry that work's title, and `unread_count` would still count it — so a reader
+   who blocked a tag can see an unread badge for it. Needs a decision on whether
+   the count is filtered too, since a filtered-but-counted badge is the same leak
+   through a smaller door.
+2. **No lint for a bare `?` reaching a PG pool.** That is the defect class that
+   broke filters. I tried a regex rule and abandoned it: "is this literal the
+   PostgreSQL arm" is not decidable from the text (three legal call shapes,
+   literals on the line after their binding, fragments interpolated into callers'
+   statements), and four heuristics in a row each reported 100–500 correct
+   statements as faults. A reachability check is the right shape; a regex is not.
+3. **Keyword filters and shareable/followable filter lists** — neither exists and
+   the spec describes neither. Answers in the thread above; the design decision
+   that needs your call is copy-on-follow vs live subscription, whether a list may
+   carry *user* blocks (it should not — `blocks` already owns that with four mute
+   scopes), and who authors a matched block for appeal purposes.
+
+## How to resume
+
+```
+cd /home/alvaro/code-local/rust/lorehaven
+export CARGO_TARGET_DIR=$HOME/.cargo-target/lorehaven-pg
+cargo fmt --all && cargo build --workspace --tests
+for g in check-uncast-pg-placeholders check-pg-uuid-casts; do
+  python3 scripts/$g.py --self-test    # 25 and 6 cases respectively
+  python3 scripts/$g.py                # must be silent and exit 0
+done
+export LOREHAVEN_TEST_PG_URL='postgres://lorehaven:<pw>@127.0.0.1:55433/postgres'
+cargo test --workspace --no-fail-fast
+unset LOREHAVEN_TEST_PG_URL && cargo test --workspace --no-fail-fast
+```
+
+Use `-- --test-threads=2` on both runs. Fully parallel, the suite starves the
+rate-limit test (83 s on its own) and it fails for timing, not logic.
+
+The PG URL lives in the session env; the container needs `--shm-size=512m` or
+scratch-DB creation starves and every binary reports 0 passed.
+
 # Handoff — the same class of fault, run in the opposite direction
 
 ## The short version

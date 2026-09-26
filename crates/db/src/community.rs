@@ -565,7 +565,7 @@ pub async fn create_group(db: &Database, name: &str, privacy: &str, owner: &str)
 pub async fn group_by_id(db: &Database, group_id: &str) -> Result<Option<Group>> {
     let sql = db.sql(
         "SELECT id, name, privacy, owner, created_at FROM groups WHERE id = ?",
-        "SELECT id::text, name, privacy, owner, created_at FROM groups WHERE id = $1::uuid",
+        "SELECT id, name, privacy, owner, created_at FROM groups WHERE id = $1",
     );
     let row = match db.backend() {
         Backend::Sqlite => sqlx::query_as::<_, GroupRow>(&sql)
@@ -617,8 +617,8 @@ pub async fn list_groups(db: &Database, viewer_account: &str, limit: i64) -> Res
         "SELECT g.id::text, g.name, g.privacy, g.owner, g.created_at
          FROM groups g
          WHERE g.privacy != 'hidden'
-            OR g.owner = $1::uuid
-            OR EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = g.id AND gm.account = $2::uuid)
+            OR g.owner = $1
+            OR EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = g.id AND gm.account = $2)
          ORDER BY g.created_at DESC LIMIT $3",
     );
     let rows = match db.backend() {
@@ -684,7 +684,7 @@ pub async fn add_group_member(
 pub async fn member_role(db: &Database, group_id: &str, account: &str) -> Result<Option<String>> {
     let sql = db.sql(
         "SELECT role FROM group_members WHERE group_id = ? AND account = ?",
-        "SELECT role FROM group_members WHERE group_id = $1::uuid AND account = $2::uuid",
+        "SELECT role FROM group_members WHERE group_id = $1 AND account = $2",
     );
     let row: Option<(String,)> = match db.backend() {
         Backend::Sqlite => {
@@ -714,7 +714,7 @@ pub async fn update_member_role(
 ) -> Result<bool> {
     let sql = db.sql(
         "UPDATE group_members SET role = ? WHERE group_id = ? AND account = ?",
-        "UPDATE group_members SET role = $1 WHERE group_id = $2::uuid AND account = $3::uuid",
+        "UPDATE group_members SET role = $1 WHERE group_id = $2 AND account = $3",
     );
     let rows = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
@@ -739,7 +739,7 @@ pub async fn update_member_role(
 pub async fn remove_group_member(db: &Database, group_id: &str, account: &str) -> Result<bool> {
     let sql = db.sql(
         "DELETE FROM group_members WHERE group_id = ? AND account = ?",
-        "DELETE FROM group_members WHERE group_id = $1::uuid AND account = $2::uuid",
+        "DELETE FROM group_members WHERE group_id = $1 AND account = $2",
     );
     let rows = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)

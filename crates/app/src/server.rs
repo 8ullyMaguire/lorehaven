@@ -799,21 +799,27 @@ pub async fn request_context(mut request: Request, next: Next) -> Response {
     );
 
     let echo = request_id_text.clone();
+    // The route goes into a task-local as well as the span, because the error
+    // path is reached from `IntoResponse`, which has no access to the request.
+    let route = format!("{method} {path}");
     let response = with_request_id(request_id_text, async move {
-        let started = Instant::now();
-        let mut response = next.run(request).await;
-        let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        crate::http::with_route(route.clone(), async move {
+            let started = Instant::now();
+            let mut response = next.run(request).await;
+            let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
 
-        tracing::info!(
-            status = response.status().as_u16(),
-            latency_ms,
-            "request completed"
-        );
+            tracing::info!(
+                status = response.status().as_u16(),
+                latency_ms,
+                "request completed"
+            );
 
-        if let Ok(value) = HeaderValue::from_str(&echo) {
-            response.headers_mut().insert(header_name, value);
-        }
-        response
+            if let Ok(value) = HeaderValue::from_str(&echo) {
+                response.headers_mut().insert(header_name, value);
+            }
+            response
+        })
+        .await
     })
     .instrument(span)
     .await;
