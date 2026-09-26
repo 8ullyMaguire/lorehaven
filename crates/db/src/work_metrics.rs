@@ -311,8 +311,9 @@ pub async fn record_view(
         "INSERT INTO work_view_log (work_id, viewer_hash, viewed_at, is_automated)
          VALUES (?, ?, ?, ?)
          ON CONFLICT(work_id, viewer_hash, viewed_at) DO NOTHING",
+        // `work_view_log.work_id` is UUID; $1 arrives as text.
         "INSERT INTO work_view_log (work_id, viewer_hash, viewed_at, is_automated)
-         VALUES ($1, $2, $3, $4)
+         VALUES ($1::uuid, $2, $3, $4)
          ON CONFLICT(work_id, viewer_hash, viewed_at) DO NOTHING",
     );
     let rows = match db.backend() {

@@ -214,8 +214,11 @@ pub async fn get_work_vectors(
         }
         Backend::Postgres => {
             // Rebuild with $n placeholders for PG.
-            let pg_placeholders: Vec<String> =
-                (1..=work_ids.len()).map(|i| format!("${i}")).collect();
+            // The binds are `&str`; `work_taste_vectors.work_id` is UUID, so each
+            // placeholder needs the cast or the IN list is `uuid = text`.
+            let pg_placeholders: Vec<String> = (1..=work_ids.len())
+                .map(|i| format!("${i}::uuid"))
+                .collect();
             let sql = format!(
                 "SELECT work_id::text AS work_id, vector::text AS vector FROM work_taste_vectors WHERE work_id IN ({})",
                 pg_placeholders.join(", ")

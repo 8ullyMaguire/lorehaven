@@ -50,6 +50,19 @@ async fn fetch_taste_vector_postgres(
     .fetch_optional(pool)
     .await?;
     match row {
+        // An account that skipped the quiz has a row but no vector: every one of
+        // `taste_vector`, `taste_centroid_distance` and the computed_at that
+        // `to_char` derives from it is NULL. SQLite returns an empty string for
+        // the stored NULL so it never hits this, but PostgreSQL decodes a NULL
+        // into a decode error on a non-optional `String`. "No vector" is the
+        // honest answer here, and it is what the SQLite arm already returns.
+        Some(r)
+            if r.get::<Option<serde_json::Value>, _>("taste_vector")
+                .is_none()
+                || r.get::<Option<f64>, _>("taste_centroid_distance").is_none() =>
+        {
+            Ok(None)
+        }
         Some(r) => {
             let vec_json: serde_json::Value = r.get("taste_vector");
             let vec: Vec<f64> = match vec_json {
@@ -57,7 +70,16 @@ async fn fetch_taste_vector_postgres(
                 _ => vec![],
             };
             let dist: f64 = r.get("taste_centroid_distance");
-            let computed_at: String = r.get("computed_at");
+            // `taste_vector_computed_at` is nullable and nothing backfills it, so
+            // a vector written by a path that predates the column reads back with
+            // no timestamp. Report the empty string rather than failing the whole
+            // read: the vector itself is the useful part, and callers that care
+            // about the timestamp already treat "" as unknown.
+            let computed_at: String = r
+                .try_get::<Option<String>, _>("computed_at")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
             Ok(Some((vec, dist, computed_at)))
         }
         None => Ok(None),

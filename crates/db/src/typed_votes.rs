@@ -122,7 +122,12 @@ pub async fn post_context(db: &Database, post_id: &str) -> Result<Option<PostCon
         "SELECT p.id AS post_id, p.topic_id, p.author_pseud, t.category_id, p.votes_visible \
          FROM forum_posts p JOIN forum_topics t ON t.id = p.topic_id \
          WHERE p.id = ? AND p.deleted_at IS NULL",
-        "SELECT p.id AS post_id, p.topic_id, p.author_pseud, t.category_id, p.votes_visible \
+        // `votes_visible::bigint`: the column is INTEGER on PostgreSQL and the
+        // struct field is i64, and sqlx will not decode an INT4 into an i64.
+        // SQLite's untyped integers decode into anything, so only the PG run
+        // caught this -- every cast vote on a PostgreSQL instance was a 500.
+        "SELECT p.id AS post_id, p.topic_id, p.author_pseud, t.category_id, \
+                p.votes_visible::bigint AS votes_visible \
          FROM forum_posts p JOIN forum_topics t ON t.id = p.topic_id \
          WHERE p.id = $1 AND p.deleted_at IS NULL",
     );
@@ -418,8 +423,9 @@ pub async fn budget_spent(db: &Database, account_id: &str, window_start: &str) -
          JOIN pseuds p ON p.id = v.pseud \
          JOIN forum_vote_types t ON t.id = v.vote_type \
          WHERE p.account_id = ? AND v.created_at > ?",
+        // `v.pseud` is TEXT (0039), `pseuds.id` is UUID (0001).
         "SELECT COALESCE(CAST(SUM(t.cost) AS BIGINT), 0) FROM forum_votes v \
-         JOIN pseuds p ON p.id = v.pseud \
+         JOIN pseuds p ON p.id = v.pseud::uuid \
          JOIN forum_vote_types t ON t.id = v.vote_type \
          WHERE p.account_id = $1::uuid AND v.created_at > $2",
     );
@@ -452,8 +458,11 @@ pub async fn oldest_charge(
     let sql = db.sql(
         "SELECT MIN(v.created_at) FROM forum_votes v \
          JOIN pseuds p ON p.id = v.pseud WHERE p.account_id = ? AND v.created_at > ?",
+        // `v.pseud` is TEXT (0039) and `pseuds.id` is UUID (0001), so the cast is
+        // on the TEXT side. Casting in the SQLite arm instead is a no-op there
+        // but reads as if the two dialects differ for another reason.
         "SELECT MIN(v.created_at) FROM forum_votes v \
-         JOIN pseuds p ON p.id = v.pseud WHERE p.account_id = $1::uuid AND v.created_at > $2",
+         JOIN pseuds p ON p.id = v.pseud::uuid WHERE p.account_id = $1::uuid AND v.created_at > $2",
     );
     let oldest: Option<String> = match db.backend() {
         Backend::Sqlite => {
@@ -479,8 +488,9 @@ pub async fn meta_mods_cast(db: &Database, account_id: &str, window_start: &str)
     let sql = db.sql(
         "SELECT COUNT(*) FROM forum_meta_votes m \
          JOIN pseuds p ON p.id = m.pseud WHERE p.account_id = ? AND m.created_at > ?",
+        // `m.pseud` is TEXT (0039), `pseuds.id` is UUID (0001).
         "SELECT COUNT(*) FROM forum_meta_votes m \
-         JOIN pseuds p ON p.id = m.pseud WHERE p.account_id = $1::uuid AND m.created_at > $2",
+         JOIN pseuds p ON p.id = m.pseud::uuid WHERE p.account_id = $1::uuid AND m.created_at > $2",
     );
     let count: i64 = match db.backend() {
         Backend::Sqlite => {
