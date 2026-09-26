@@ -57,4 +57,3 @@ pub mod work_discussion;
 
 pub use error::{AppError, ErrorCode, Result};
 pub use ids::*;
-pub mod search;
