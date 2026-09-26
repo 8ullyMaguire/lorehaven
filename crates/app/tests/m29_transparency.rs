@@ -297,15 +297,28 @@ async fn record_a_slot(db: &Database, pseud: uuid::Uuid, work: &str) -> String {
 /// `work_tags.work_id` are both foreign keys onto `works` and an invented uuid
 /// is rejected by both backends.
 async fn make_work(db: &Database, owner_pseud: &str) -> String {
+    make_work_with(db, owner_pseud, "draft", "public").await
+}
+
+/// A work the discovery route will actually serve.
+///
+/// `lifecycle = 'published'` and `visibility = 'public'` are what the public
+/// engine selects on, so a draft here would make a test that asserts on served
+/// items pass vacuously. Tests that mean to exercise the serving path call this
+/// one; tests that only need a foreign-key target call `make_work`.
+async fn make_published_work(db: &Database, owner_pseud: &str, title: &str) -> String {
     let id = uuid::Uuid::new_v4().to_string();
     let sql = db.sql(
-        "INSERT INTO works (id, owner_pseud_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        "INSERT INTO works (id, owner_pseud_id, created_at, updated_at) VALUES (?::uuid, ?::uuid, ?::timestamptz, ?::timestamptz)",
+        "INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at)
+         VALUES (?, ?, ?, 'published', 'public', ?, ?)",
+        "INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at)
+         VALUES (?::uuid, ?, ?::uuid, 'published', 'public', ?::timestamptz, ?::timestamptz)",
     );
     match db.backend() {
         lorehaven_db::Backend::Sqlite => {
             sqlx::query(&sql)
                 .bind(&id)
+                .bind(title)
                 .bind(owner_pseud)
                 .bind("2026-01-01T00:00:00Z")
                 .bind("2026-01-01T00:00:00Z")
@@ -316,7 +329,48 @@ async fn make_work(db: &Database, owner_pseud: &str) -> String {
         lorehaven_db::Backend::Postgres => {
             sqlx::query(&sql)
                 .bind(&id)
+                .bind(title)
                 .bind(owner_pseud)
+                .bind("2026-01-01T00:00:00Z")
+                .bind("2026-01-01T00:00:00Z")
+                .execute(db.postgres_pool().expect("postgres"))
+                .await
+                .expect("work");
+        }
+    }
+    id
+}
+
+async fn make_work_with(
+    db: &Database,
+    owner_pseud: &str,
+    lifecycle: &str,
+    visibility: &str,
+) -> String {
+    let id = uuid::Uuid::new_v4().to_string();
+    let sql = db.sql(
+        "INSERT INTO works (id, owner_pseud_id, lifecycle, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO works (id, owner_pseud_id, lifecycle, visibility, created_at, updated_at) VALUES (?::uuid, ?::uuid, ?, ?, ?::timestamptz, ?::timestamptz)",
+    );
+    match db.backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind(owner_pseud)
+                .bind(lifecycle)
+                .bind(visibility)
+                .bind("2026-01-01T00:00:00Z")
+                .bind("2026-01-01T00:00:00Z")
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await
+                .expect("work");
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind(owner_pseud)
+                .bind(lifecycle)
+                .bind(visibility)
                 .bind("2026-01-01T00:00:00Z")
                 .bind("2026-01-01T00:00:00Z")
                 .execute(db.postgres_pool().expect("postgres"))
@@ -618,6 +672,86 @@ async fn the_explanation_is_the_recorded_row_and_not_a_replay_of_the_blend() {
         .get(&format!("/api/v1/discovery/slots/{slot_id}/explanation"))
         .await;
     assert_eq!(body, again, "an explanation is stable across reads");
+}
+
+// ---------------------------------------------------------------------------
+// (a) the recording that makes an explanation possible
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_served_recommendation_carries_a_slot_id_that_explains_itself() {
+    // The end-to-end version of criterion (a). A slot id the reader can only
+    // obtain from a response is the whole mechanism, so this drives the real
+    // discovery route and then asks the explanation door about what it returned.
+    let harness = Harness::new("e2e").await;
+    let mut reader = harness.reader("Served").await;
+    let account = account_of(&harness.db, "Served").await;
+    let pseud = pseud_of(&harness.db, &account.to_string()).await;
+    // Published and public, so the public engine actually serves them. Without
+    // this the loop below iterates zero times and the test passes having
+    // asserted nothing -- which it did, once.
+    for n in 0..3 {
+        make_published_work(&harness.db, &pseud.to_string(), &format!("Served {n}")).await;
+    }
+
+    let (status, body) = reader.get("/api/v1/discovery").await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let items = body["items"].as_array().expect("items");
+    assert!(
+        !items.is_empty(),
+        "three published works are served to a signed-in reader: {body}"
+    );
+
+    assert!(
+        body["request_id"].is_string(),
+        "a response names the request its slots belong to: {body}"
+    );
+
+    for item in items {
+        let slot_id = item["slot_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("every served item carries a slot id: {item}"));
+
+        let (status, explanation) = reader
+            .get(&format!("/api/v1/discovery/slots/{slot_id}/explanation"))
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "the slot id in the response explains itself: {explanation}"
+        );
+        // The explanation is about the same work the item named.
+        assert_eq!(explanation["work_id"], item["work_id"]);
+        // And it names at least one reader-side reason: §33.3(a) says every
+        // recommended slot does, and an empty list would be a slot that cannot
+        // explain itself at all.
+        assert!(
+            !explanation["reasons"]
+                .as_array()
+                .expect("reasons")
+                .is_empty(),
+            "§33.3(a): every recommended slot names its reasons: {explanation}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_anonymous_recommendation_carries_no_slot_id() {
+    // A slot is a record of what a *reader* was shown, so there is nothing to
+    // record for someone who is not one. Emitting an id nobody can later
+    // explain would be a worse answer than emitting none.
+    let harness = Harness::new("anonrec").await;
+    let mut anon = harness.client();
+
+    let (status, body) = anon.get("/api/v1/discovery").await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let items = body["items"].as_array().expect("items");
+    for item in items {
+        assert!(
+            item["slot_id"].is_null(),
+            "an anonymous reader gets no slot to explain: {item}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

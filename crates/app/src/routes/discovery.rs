@@ -9,7 +9,11 @@ use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use lorehaven_db;
+use lorehaven_db::recommendation_slots::SlotRecord;
 use lorehaven_domain::ids::WorkId;
+use lorehaven_domain::recommendation_transparency::{
+    InstanceCuration, SlotExplanation, SlotReason, TasteSignal,
+};
 use lorehaven_domain::AppError;
 use std::str::FromStr;
 
@@ -407,9 +411,100 @@ async fn get_discovery(
         }
     }
 
+    // Record what was actually served, and hand the reader the slot id that
+    // will explain it (spec §33.3a). This is the write that makes the
+    // explanation possible: `time_decay_strategy` reads the clock while it
+    // scores, so a later replay would not be obliged to agree with this
+    // response. The reasons are collected from *every* engine that claimed the
+    // work, because `blend` keeps only the first and would otherwise explain a
+    // three-engine hit as a one-engine hit.
+    //
+    // Recording is best-effort by design: a reader who cannot be given an
+    // explanation should still get their recommendations, so a write failure
+    // leaves the items untouched and simply withholds the slot ids.
+    let request_id = uuid::Uuid::new_v4();
+    if let Some(viewer) = viewer_pseud {
+        if !items.is_empty() {
+            let claimed: std::collections::HashMap<String, Vec<SlotReason>> = engines
+                .iter()
+                .flatten()
+                .fold(std::collections::HashMap::new(), |mut acc, c| {
+                    if let Some(reason) = SlotReason::from_engine_reason(&c.reason) {
+                        acc.entry(c.work_id.to_string()).or_default().push(reason);
+                    }
+                    acc
+                });
+            let signals: std::collections::HashMap<String, f64> = engines
+                .iter()
+                .flatten()
+                .map(|c| (c.work_id.to_string(), c.taste_signal))
+                .collect();
+
+            let records: Vec<SlotRecord> = items
+                .iter()
+                .enumerate()
+                .filter_map(|(position, item)| {
+                    let work_id = item["work_id"].as_str()?;
+                    let reasons = claimed.get(work_id).cloned().unwrap_or_else(|| {
+                        // The pluggable path's candidates carry no per-engine
+                        // claim map, so a strategy hit is the honest reason and
+                        // not an absence of one.
+                        vec![SlotReason::Strategy]
+                    });
+                    Some(SlotRecord {
+                        pseud_id: viewer,
+                        work_id: WorkId::from_str(work_id).ok()?.as_uuid(),
+                        request_id,
+                        position: position as i64,
+                        reasons: SlotExplanation::normalized(reasons),
+                        taste_signal: signals
+                            .get(work_id)
+                            .filter(|s| **s > 0.0)
+                            .map(|s| TasteSignal::from_score(*s)),
+                        seeded_by: None,
+                        recipe_stage: None,
+                        // §16.16.2's undifferentiated line: the operator may have
+                        // moved this work and the reader is told so, without a
+                        // magnitude and without the affinity that caused it.
+                        instance_curation: if !affinity_map.is_empty()
+                            && affinity_map.contains_key(work_id)
+                        {
+                            InstanceCuration::Involved
+                        } else {
+                            InstanceCuration::NotInvolved
+                        },
+                        blend_score: 0,
+                    })
+                })
+                .collect();
+
+            match lorehaven_db::recommendation_slots::record_response(
+                state.db(),
+                viewer,
+                request_id,
+                &records,
+            )
+            .await
+            {
+                Ok(ids) => {
+                    for (item, slot_id) in items.iter_mut().zip(ids) {
+                        item["slot_id"] = serde_json::Value::String(slot_id);
+                    }
+                }
+                Err(e) => {
+                    // Logged rather than swallowed silently, because a reader
+                    // silently losing "why?" is exactly the failure this
+                    // milestone exists to prevent.
+                    tracing::warn!("could not record recommendation slots: {e}");
+                }
+            }
+        }
+    }
+
     Ok(Json(serde_json::json!({
         "items": items,
         "sort": effective_sort,
+        "request_id": request_id.to_string(),
     })))
 }
 
