@@ -169,6 +169,26 @@ pub async fn my_analytics(
     })))
 }
 
+/// The viewer's own reading totals, for `own.reading.basic`.
+///
+/// The counts are the caller's own, so there is no floor to apply and no band
+/// to report: `Subject::Self_` means banding these would be telling somebody
+/// something false about themselves.
+async fn reading_value(state: &AppState, account_id: &str) -> ApiResult<Value> {
+    // `AppError: From<anyhow::Error>` already exists, so the `?` converts and
+    // the cause survives into the 500's log line. A hand-written `map_err`
+    // that discarded `e` would throw away the only clue the reader's server has
+    // about which statement failed.
+    let totals = lorehaven_db::analytics::reading_totals(state.db(), account_id).await?;
+    Ok(json!({
+        "status": "ok",
+        "finished_works": totals.finished_works,
+        "chapters_read": totals.chapters_read,
+        "words_read": totals.words_read,
+        "reading_seconds": totals.reading_seconds,
+    }))
+}
+
 /// `GET /api/v1/me/analytics/{capability}` — one capability.
 pub async fn one_capability(
     State(state): State<AppState>,
@@ -191,13 +211,23 @@ pub async fn one_capability(
         )));
     }
 
-    Ok(Json(json!({
-        "capability": capability,
-        "implemented": false,
-        "meta": meta(scope),
-        "value": {
+    // `implemented` is derived from the scope, never hardcoded per route. A
+    // hardcoded `false` is a claim that has to be edited in two places when a
+    // query lands, and the failure is a dashboard that reports a number as
+    // "not implemented" for a capability the instance can answer.
+    let value = match scope {
+        Scope::OwnReadingBasic => reading_value(&state, &user.account_id.to_string()).await?,
+        _ => json!({
             "status": "not_implemented",
             "note": "registered and gated; no query behind it yet",
-        },
+        }),
+    };
+    let implemented = !value["status"].is_null();
+
+    Ok(Json(json!({
+        "capability": capability,
+        "implemented": implemented,
+        "meta": meta(scope),
+        "value": value,
     })))
 }
