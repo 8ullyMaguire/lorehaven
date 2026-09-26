@@ -202,22 +202,192 @@ impl QueryField {
     /// Whether this field carries an ordering, so `>`, `<` and `..` mean
     /// something on it.
     ///
-    /// This lives on the field rather than in a renderer because the parser
-    /// needs it to reject `title:a..b` at the point the mistake is made. When
-    /// the four remaining renderers land, a field that is comparable here but
-    /// unmapped there is a renderer bug, not a query bug -- which is the right
-    /// way round for the failure to be.
+    /// Whether this field carries an ordering, so `>`, `<` and `..` mean
+    /// something on it.
+    ///
+    /// An allowlist rather than a denylist of the text fields: the failure mode
+    /// of a denylist is that a new field is not-orderable by omission, and the
+    /// reader gets "no ordering" for a field that has one. The allowlist makes
+    /// adding a comparable field a deliberate act.
+    ///
+    /// It does not call `comparison_value`, which asks this in turn -- a mutual
+    /// call recurses until the stack gives out.
     pub fn is_comparable(self) -> bool {
         matches!(
             self,
-            Self::Words
-                | Self::Kudos
-                | Self::Replies
-                | Self::Rank
-                | Self::Works
-                | Self::MinQuality
-                | Self::Quality
+            QueryField::Words
+                | QueryField::Kudos
+                | QueryField::Replies
+                | QueryField::Rank
+                | QueryField::Works
+                | QueryField::MinQuality
+                | QueryField::Quality
+                | QueryField::Active
+                | QueryField::Published
+                | QueryField::Updated
+                | QueryField::Joined
+                | QueryField::Bookmarked
         )
+    }
+
+    /// What kind of value this field's comparison operators take.
+    ///
+    /// The parser needs this to reject `words:>"many"` before building a node,
+    /// and it is the reason the parser does *not* simply require an integer:
+    /// `active:>2026-01-15` is an ordered comparison on a timestamp column, and
+    /// a parser that insisted on an integer made it unwritable. The renderer
+    /// re-checks against the actual column, because it is the only layer that
+    /// knows what is behind the name.
+    pub fn comparison_value(self) -> ValueKind {
+        match self {
+            Self::Active | Self::Published | Self::Updated | Self::Joined | Self::Bookmarked => {
+                ValueKind::Date
+            }
+            _ if self.is_comparable() => ValueKind::Number,
+            _ => ValueKind::Text,
+        }
+    }
+}
+
+/// The kind of value a field's comparison operator accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueKind {
+    /// An ordered comparison on a number: `words:>10000`.
+    Number,
+    /// An ordered comparison on a timestamp: `active:>2026-01-15`.
+    Date,
+    /// Not orderable. A comparison on one of these is a category error.
+    Text,
+}
+
+/// The noun a field's value kind takes in an error message.
+fn describe_kind(kind: ValueKind) -> &'static str {
+    match kind {
+        ValueKind::Number => "numeric",
+        ValueKind::Date => "date",
+        ValueKind::Text => "single-value",
+    }
+}
+
+/// Whether a comparison or range value is usable for this kind of column.
+fn valid_bound(kind: ValueKind, value: &str) -> bool {
+    match kind {
+        ValueKind::Number => value.parse::<i64>().is_ok(),
+        ValueKind::Date => is_iso_dateish(value),
+        ValueKind::Text => false,
+    }
+}
+
+/// Whether the value is an ISO-8601 date or timestamp prefix.
+///
+/// Timestamps are stored as `TEXT` in `YYYY-MM-DD HH:MM:SS` on both backends,
+/// so there is no date type to lean on and no reason to add a dependency to
+/// this crate. ISO-8601 orders lexicographically -- `2026-01-15` sorts before
+/// `2026-01-16` because the character that differs is the one that decides --
+/// which is what makes the lexicographic comparison in `bounds_descend`
+/// correct. It also means a bare `2026-01` compares correctly against a stored
+/// `2026-01-15 ...`: the month prefix sorts before every day in it, so
+/// `active:>=2026-01` includes the whole month, which is what a reader means.
+///
+/// Accepted shapes: `YYYY`, `YYYY-MM`, `YYYY-MM-DD`, and either of those
+/// followed by `THH:MM:SS` or ` HH:MM:SS`. A full calendar check follows, so
+/// `2026-13` is refused rather than quietly matching nothing.
+fn is_iso_dateish(value: &str) -> bool {
+    let (date, time) = match value.split_once(['T', ' ']) {
+        Some((d, t)) => (d, Some(t)),
+        None => (value, None),
+    };
+
+    let parts: Vec<&str> = date.split('-').collect();
+    let (year, month, day) = match parts.as_slice() {
+        [y] => (y, None, None),
+        [y, m] => (y, Some(*m), None),
+        [y, m, d] => (y, Some(*m), Some(*d)),
+        _ => return false,
+    };
+
+    let Ok(year) = year.parse::<i32>() else {
+        return false;
+    };
+    if !(1..=9999).contains(&year) {
+        return false;
+    }
+
+    // A bare `YYYY` is a year, and a bare `YYYY-MM` is a month. Both are
+    // useful: a year prefix sorts before every timestamp in it, so
+    // `active:>=2026` means all of 2026 and `active:>=2026-01` all of January.
+    let month_number = match month {
+        Some(text) => {
+            let Ok(month_number) = text.parse::<u32>() else {
+                return false;
+            };
+            if !(1..=12).contains(&month_number) {
+                return false;
+            }
+            month_number
+        }
+        // A year with a day, or a year with a time, is not a shape that exists.
+        None => return day.is_none() && time.is_none(),
+    };
+
+    if let Some(text) = day {
+        let Ok(day) = text.parse::<u32>() else {
+            return false;
+        };
+        // Days-in-month, leap years included. A crate with no date dependency
+        // still has to know February is not 31 days, or `active:2026-02-30`
+        // would be accepted and then match nothing.
+        let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+        let lengths = [
+            31,
+            if leap { 29 } else { 28 },
+            31,
+            30,
+            31,
+            30,
+            31,
+            31,
+            30,
+            31,
+            30,
+            31,
+        ];
+        if !(1..=lengths[month_number as usize - 1]).contains(&day) {
+            return false;
+        }
+    }
+
+    let Some(t) = time else {
+        return true;
+    };
+    let Some((h, rest)) = t.split_once(':') else {
+        return false;
+    };
+    let Some((m, s)) = rest.split_once(':') else {
+        return false;
+    };
+    h.parse::<u32>().is_ok_and(|h| h < 24)
+        && m.parse::<u32>().is_ok_and(|m| m < 60)
+        && s.parse::<u32>().is_ok_and(|s| s < 60)
+}
+
+/// Whether a range's low bound comes after its high bound.
+///
+/// Numbers compare numerically and dates lexicographically, and mixing the two
+/// is the bug: `"10000" > "5000"` is *false* as a string, because `1` sorts
+/// before `5`, so a purely lexicographic check reports `10000..5000` as a
+/// valid range and the query then matches nothing. Which comparison applies is
+/// the caller's decision because only it knows the column's type.
+///
+/// Called after both bounds have been validated as the same kind, so there is
+/// no mixed-kind case to answer here.
+fn bounds_descend(kind: ValueKind, low: &str, high: &str) -> bool {
+    match kind {
+        ValueKind::Number => low.parse::<i64>().unwrap_or(0) > high.parse::<i64>().unwrap_or(0),
+        // ISO-8601 orders lexicographically, and the year-month-day prefixes
+        // sort before everything inside them -- which is why a bare `2026-01`
+        // behaves as "January 2026" against a stored `2026-01-15 09:00:00`.
+        ValueKind::Date | ValueKind::Text => low > high,
     }
 }
 
@@ -508,33 +678,63 @@ impl<'a> Parser<'a> {
                 };
 
                 if let Some(op) = op {
-                    if value.is_empty() {
-                        return Err(QueryError::new(
-                            format!("{} {} needs a numeric value", f.as_str(), op.as_str()),
-                            self.pos,
-                        ));
-                    }
-                    if value.starts_with('"') {
+                    // The quoted check looks at the *input*, not at `value`.
+                    // The term scan stopped at the opening quote, so `value` is
+                    // already empty here and the `"` is the next character in
+                    // the input -- testing `value` for emptiness first would
+                    // report "needs a value" for what is really a category
+                    // error, and send the reader looking for a missing number
+                    // they did type.
+                    let quoted_value = value.is_empty() && self.input[self.pos..].starts_with('"');
+                    if quoted_value || value.starts_with('"') {
                         // `words:>"many"` is a category error, not a zero result.
                         return Err(QueryError::new(
                             format!(
-                                "{} {} takes a numeric value, not a quoted phrase",
+                                "{} {} takes a {} value, not a quoted phrase",
                                 f.as_str(),
-                                op.as_str()
+                                op.as_str(),
+                                describe_kind(f.comparison_value())
                             ),
                             self.pos,
                         ));
                     }
-                    if value.parse::<i64>().is_err() {
+                    if value.is_empty() {
                         return Err(QueryError::new(
-                            format!(
-                                "{} {} takes an integer, got {:?}",
-                                f.as_str(),
-                                op.as_str(),
-                                value
-                            ),
+                            format!("{} {} needs a value", f.as_str(), op.as_str()),
                             self.pos,
                         ));
+                    }
+                    // The value is checked against the *field's* kind, not
+                    // against "is it an integer". `active:>2026-01-15` is an
+                    // ordered comparison on a timestamp column, and a parser
+                    // that demanded an integer made it unwritable. The renderer
+                    // re-checks, because it is the only layer that knows what
+                    // is behind the field name.
+                    match f.comparison_value() {
+                        ValueKind::Number if value.parse::<i64>().is_err() => {
+                            return Err(QueryError::new(
+                                format!(
+                                    "{} {} takes an integer, got {:?}",
+                                    f.as_str(),
+                                    op.as_str(),
+                                    value
+                                ),
+                                self.pos,
+                            ));
+                        }
+                        ValueKind::Text => {
+                            return Err(QueryError::new(
+                                format!(
+                                    "{} has no ordering, so {} cannot be compared -- \
+                                     it is a {} field",
+                                    f.as_str(),
+                                    op.as_str(),
+                                    f.entity().as_str()
+                                ),
+                                self.pos,
+                            ));
+                        }
+                        ValueKind::Number | ValueKind::Date => {}
                     }
                     return Ok(QueryAst::Comparison(f, op, value.to_owned()));
                 }
@@ -586,6 +786,10 @@ impl<'a> Parser<'a> {
             return Ok(None);
         };
 
+        // A range is only meaningful where the values order, and only on a
+        // column of one type -- so a range on a text field, or one mixing a
+        // number and a date, is refused here rather than half-rendered.
+        let kind = field.comparison_value();
         if !field.is_comparable() {
             return Err(QueryError::new(
                 format!(
@@ -605,11 +809,12 @@ impl<'a> Parser<'a> {
         }
 
         for bound in [low, high].into_iter().filter(|b| !b.is_empty()) {
-            if bound.parse::<i64>().is_err() {
+            if !valid_bound(kind, bound) {
                 return Err(QueryError::new(
                     format!(
-                        "{} range bounds must be whole numbers, got {bound:?}",
-                        field.as_str()
+                        "{} range bounds must be {}, got {bound:?}",
+                        field.as_str(),
+                        describe_kind(kind)
                     ),
                     offset,
                 ));
@@ -626,20 +831,17 @@ impl<'a> Parser<'a> {
 
         // A backwards range can never match. Saying so is the difference
         // between a sentence the reader can act on and an empty result page
-        // they have to reverse-engineer.
-        if parts.len() == 2 {
-            let low_n: i64 = low.parse().expect("checked above");
-            let high_n: i64 = high.parse().expect("checked above");
-            if low_n > high_n {
-                return Err(QueryError::new(
-                    format!(
-                        "{} range starts at {low_n} and ends at {high_n}, \
-                         so it can never match",
-                        field.as_str()
-                    ),
-                    offset,
-                ));
-            }
+        // they have to reverse-engineer. Only meaningful when both bounds are
+        // the same kind of thing, which `valid_bound` has already ensured.
+        if parts.len() == 2 && bounds_descend(kind, low, high) {
+            return Err(QueryError::new(
+                format!(
+                    "{} range starts at {low} and ends at {high}, \
+                     so it can never match",
+                    field.as_str()
+                ),
+                offset,
+            ));
         }
 
         Ok(Some(if parts.len() == 1 {
@@ -677,6 +879,14 @@ impl<'a> Parser<'a> {
         self.pos += kw.len();
     }
 }
+
+impl std::fmt::Display for QueryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} at offset {}", self.message, self.offset)
+    }
+}
+
+impl std::error::Error for QueryError {}
 
 #[cfg(test)]
 mod tests {
