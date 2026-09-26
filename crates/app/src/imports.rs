@@ -396,10 +396,7 @@ fn tag_labels(tags: &[String]) -> Vec<String> {
         if label.is_empty() || label.len() > 100 {
             continue;
         }
-        if out
-            .iter()
-            .any(|seen| seen.eq_ignore_ascii_case(label))
-        {
+        if out.iter().any(|seen| seen.eq_ignore_ascii_case(label)) {
             continue;
         }
         out.push(label.to_owned());
@@ -1089,7 +1086,6 @@ fn report(plan: &ImportPlan, stored: &[StoredChapter], dry_run: bool) -> String 
     })
     .to_string()
 }
-
 
 #[cfg(test)]
 mod tag_tests {
