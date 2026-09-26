@@ -16,8 +16,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::WorkId;
-
 /// Why this work appeared in this slot, in reader-side terms.
 ///
 /// The closed set is the point. A free-form reason string is how an operator
@@ -251,7 +249,7 @@ impl SlotExplanation {
     /// asking twice would get two different lists. Ordering by the enum's
     /// declaration order rather than alphabetically keeps the vocabulary's
     /// priority — taste before popularity — which is the order §33.3(a) lists.
-    pub fn normalized(mut reasons: Vec<SlotReason>) -> Vec<SlotReason> {
+    pub fn normalized(reasons: Vec<SlotReason>) -> Vec<SlotReason> {
         SlotReason::all()
             .iter()
             .copied()
