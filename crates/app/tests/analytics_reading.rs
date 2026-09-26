@@ -1,6 +1,6 @@
 //! §9.6 reading stats, the first capability with a real query behind it.
 //!
-//! The registry lists 57 capabilities and the single-metric route answered
+//! The registry lists 63 capabilities and the single-metric route answered
 //! `implemented: false` for every one of them, so the dashboard was a list of
 //! definitions rather than numbers. `own.reading.basic` is the first one to
 //! answer with a query, and §9.6 is what it answers.
@@ -29,7 +29,9 @@
 //! expects 72000 seconds is testing arithmetic; one that expects 1800 is
 //! testing the cap, which is the part a reader can actually feel.
 
+// For `NaiveDate::weekday`, used to assert the reported weeks are Mondays.
 use axum::http::StatusCode;
+use chrono::Datelike as _;
 use lorehaven_app::config::Config;
 use lorehaven_app::server;
 use lorehaven_app::state::AppState;
@@ -52,6 +54,16 @@ struct Reader {
     tdb: test_support::TestDb,
     account: String,
     client: test_support::TestClient,
+}
+
+impl Reader {
+    /// The database behind this reader's router, for seeding rows the UI cannot
+    /// create. Grows a reference for the same reason the client is a field: a
+    /// test that seeds a row and then reads it through a door is proving the
+    /// door works, and one that seeds and reads through SQL is not.
+    fn db(&self) -> &lorehaven_db::Database {
+        self.tdb.db()
+    }
 }
 
 /// A registered reader with a session, on a fresh scratch database.
@@ -397,6 +409,13 @@ async fn seed_progress_gap(db: &lorehaven_db::Database, account: &str, gap_secon
 ///
 /// Fixed rather than random so a failing test names the same rows on a rerun,
 /// and a real UUID rather than a name because PostgreSQL rejects the latter.
+/// A deterministic UUID whose first group is `letter` repeated.
+///
+/// `letter` must be a hex digit. It is not checked here on purpose -- a
+/// non-hex letter is a *Postgres* failure (`invalid input syntax for type
+/// uuid`) while SQLite accepts any text, so an unchecked helper means a fixture
+/// bug that a SQLite-only run reports as green. The letters in use are `a`
+/// through `f`.
 fn uuid_for(letter: char, n: u32) -> String {
     format!(
         "{letter}{letter}{letter}{letter}{letter}{letter}{letter}{letter}-0000-4000-8000-{n:012}"
@@ -721,4 +740,388 @@ async fn the_status_door_requires_a_session() {
     );
 
     tdb.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// own.reading.trend (spec §9.6) — reads per week over time
+// ---------------------------------------------------------------------------
+//
+// # Why these tests learn the weeks instead of naming them
+//
+// The endpoint reports the trailing four weeks relative to *now*, so a test
+// cannot assert a hard-coded `2026-09-21` and stay honest: a suite run on a
+// Monday and the same suite run on a Sunday would disagree, and one of them
+// would be wrong about the product. So each test reads the weeks the endpoint
+// reports and seeds rows relative to those — "in the reported week two back",
+// not "on 2026-09-07". The dates the endpoint returns are still asserted
+// (a Monday, ascending, seven days apart), so the shape is checked; only the
+// anchor moves with the clock.
+
+/// Raise a reader to TL1, the level `own.reading.trend` is gated behind.
+///
+/// Written to `trust_levels` rather than promoted through the product, because
+/// the promotion ladder is its own subject and this test is about the gate
+/// accepting a reader who qualifies.
+async fn at_tl1(db: &lorehaven_db::Database, account: &str) {
+    let sql = db.sql(
+        "INSERT INTO trust_levels (account, level, computed_at, basis) VALUES (?, 1, datetime('now'), 'test')",
+        "INSERT INTO trust_levels (account, level, computed_at, basis) VALUES ($1::uuid, 1, now(), 'test')",
+    );
+    let result = match db.backend() {
+        lorehaven_db::Backend::Sqlite => sqlx::query(sql.as_ref())
+            .bind(account)
+            .execute(db.sqlite_pool().expect("sqlite handle"))
+            .await
+            .map(|_| ()),
+        lorehaven_db::Backend::Postgres => sqlx::query(sql.as_ref())
+            .bind(account)
+            .execute(db.postgres_pool().expect("postgres handle"))
+            .await
+            .map(|_| ()),
+    };
+    result.expect("raise the reader to TL1");
+}
+
+/// A reader at TL1 with a session, on a fresh scratch database.
+async fn trend_reader(tag: &str) -> Reader {
+    let r = reader(tag).await;
+    at_tl1(r.db(), &r.account).await;
+    r
+}
+
+/// A progress update `days` before the Monday of `week`, counted from today.
+///
+/// `row_n` makes the primary key unique per call site.
+///
+/// Both obvious derivations collide, and each collision reads as a product bug:
+/// from the account alone, every second seed in a test is a primary-key
+/// violation; from the work alone, two readers sharing a work collide. So the
+/// counter is the caller's, and the `d` letter keeps these ids clear of the `b`
+/// and `c` works the tests seed. Hexadecimal, because Postgres casts the column
+/// to `uuid` and `r` is not a hex digit -- a SQLite-only run would have passed. Two readers in one test are on two *separate*
+/// databases -- each `reader()` gets its own scratch directory -- so only the
+/// rows within a single database have to be distinct, and they are.
+async fn seed_progress_on(
+    db: &lorehaven_db::Database,
+    account: &str,
+    work: &str,
+    stamp: &str,
+    row_n: u32,
+) {
+    let row = uuid_for('d', row_n);
+    let result = match db.backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query(
+                "INSERT INTO reading_progress
+                     (id, account_id, subject_type, subject_id, chapter_id, position_permille, created_at, updated_at, version)
+                 VALUES (?, ?, 'work', ?, NULL, 0, ?, ?, 1)",
+            )
+            .bind(&row)
+            .bind(account)
+            .bind(work)
+            .bind(stamp)
+            .bind(stamp)
+            .execute(db.sqlite_pool().expect("sqlite handle"))
+            .await
+            .map(|_| ())
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query(
+                "INSERT INTO reading_progress
+                     (id, account_id, subject_type, subject_id, chapter_id, position_permille, created_at, updated_at, version)
+                 VALUES ($1::uuid, $2::uuid, 'work', $3::uuid, NULL, 0, $4, $5, 1)",
+            )
+            .bind(&row)
+            .bind(account)
+            .bind(work)
+            .bind(stamp)
+            .bind(stamp)
+            .execute(db.postgres_pool().expect("postgres handle"))
+            .await
+            .map(|_| ())
+        }
+    };
+    result.expect("seed a progress update");
+}
+
+/// The Monday of the reported week `weeks_back` from the current one.
+fn monday_of(weeks: &[serde_json::Value], weeks_back: usize) -> String {
+    weeks[weeks.len() - 1 - weeks_back]["week_start"]
+        .as_str()
+        .expect("week_start is a string")
+        .to_owned()
+}
+
+/// An RFC3339 stamp at midday on the Monday of `weeks_back`, plus `days`.
+///
+/// Midday rather than midnight because a UTC-midnight stamp can fall on the
+/// Sunday in some timezone's local calendar, and the test is about which
+/// *week* a row lands in, not about timezone handling.
+fn midday(weeks: &[serde_json::Value], weeks_back: usize, days: i64) -> String {
+    let date = chrono::NaiveDate::parse_from_str(&monday_of(weeks, weeks_back), "%Y-%m-%d")
+        .expect("week_start parses");
+    rfc3339(
+        (date + chrono::Duration::days(days))
+            .and_hms_opt(12, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp(),
+    )
+}
+
+/// How many progress rows the fixture actually wrote for this reader.
+///
+/// Exists because a fixture that writes nothing and a query that counts
+/// nothing produce the *same* payload — four weeks of zeroes — and only one of
+/// them is a product bug. This one caught that confusion directly: the trend
+/// reported zeroes over a table that held the reader's rows, and without this
+/// check the failure reads as "the query is wrong" rather than "the query is
+/// right and the binds are not".
+async fn seeded_count(subject: &Reader) -> i64 {
+    let sql = subject.db().sql(
+        "SELECT COUNT(*) FROM reading_progress WHERE account_id = ?",
+        "SELECT COUNT(*) FROM reading_progress WHERE account_id = $1::uuid",
+    );
+    match subject.db().backend() {
+        lorehaven_db::Backend::Sqlite => sqlx::query_scalar(sql.as_ref())
+            .bind(&subject.account)
+            .fetch_one(subject.db().sqlite_pool().expect("sqlite handle"))
+            .await
+            .expect("count the seeded progress rows"),
+        lorehaven_db::Backend::Postgres => sqlx::query_scalar(sql.as_ref())
+            .bind(&subject.account)
+            .fetch_one(subject.db().postgres_pool().expect("postgres handle"))
+            .await
+            .expect("count the seeded progress rows"),
+    }
+}
+
+/// The weeks the trend endpoint reports, oldest first.
+async fn trend(subject: &mut Reader) -> Vec<serde_json::Value> {
+    let (status, body) = subject
+        .client
+        .get("/api/v1/me/analytics/own.reading.trend")
+        .await;
+    assert_eq!(status, StatusCode::OK, "trend: {body}");
+    assert_eq!(
+        body["implemented"],
+        json!(true),
+        "trend must be implemented: {body}"
+    );
+    // Nested under `value.reading`, alongside `own.reading.basic`: the `value`
+    // object is shared by every capability, and flat keys would collide.
+    body["value"]["reading"]["trend"]
+        .as_array()
+        .unwrap_or_else(|| panic!("trend is an array of weeks, got: {body}"))
+        .clone()
+}
+
+#[tokio::test]
+async fn a_reader_with_no_reads_is_given_weeks_rather_than_a_gap() {
+    let mut subject = trend_reader("trend-empty").await;
+
+    // The shape question, before the numbers: a reader who has read nothing
+    // must not receive an empty array. An empty array is indistinguishable from
+    // a broken query, and it draws a reader to conclude the dashboard is wrong
+    // rather than that they have not read anything this week.
+    let weeks = trend(&mut subject).await;
+    assert!(
+        !weeks.is_empty(),
+        "a reader with no reads still gets weeks: an empty trend reads as a bug, not as a fact"
+    );
+    assert!(
+        weeks.iter().all(|w| w["reads"] == json!(0)),
+        "every week is zero: {weeks:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_below_trust_reader_is_refused_rather_than_shown_a_trend() {
+    let mut subject = reader("trend-below-floor").await;
+    // Not raised to TL1. The gate is the subject of this test, and a suite that
+    // only ever exercises the permitted case cannot tell a working gate from a
+    // missing one.
+    let (status, body) = subject
+        .client
+        .get("/api/v1/me/analytics/own.reading.trend")
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "TL0 is below the floor: {body}"
+    );
+    assert_eq!(body["error"]["code"], "ACCESS_DENIED", "{body}");
+}
+
+#[tokio::test]
+async fn reads_are_counted_into_the_week_they_happened() {
+    let mut subject = trend_reader("trend-count").await;
+    // Learn the weeks first, then seed against them. Three reads in three
+    // different reported weeks, and one outside the window entirely.
+    let weeks = trend(&mut subject).await;
+    let stamps = [
+        midday(&weeks, 0, 1), // this week
+        midday(&weeks, 0, 3), // this week too
+        midday(&weeks, 2, 1), // two weeks back
+    ];
+    for (n, stamp) in stamps.iter().enumerate() {
+        seed_progress_on(
+            subject.db(),
+            &subject.account,
+            &uuid_for('b', n as u32),
+            stamp,
+            n as u32,
+        )
+        .await;
+    }
+    // Six weeks back: outside the four-week window, and must not appear.
+    let outside = chrono::Utc::now() - chrono::Duration::days(42);
+    seed_progress_on(
+        subject.db(),
+        &subject.account,
+        &uuid_for('b', 9),
+        &outside.format("%Y-%m-%dT12:00:00Z").to_string(),
+        9,
+    )
+    .await;
+
+    // The seeds landed. Asserted before the numbers, because a fixture that
+    // silently wrote nothing produces exactly the same payload as a query that
+    // counts nothing -- and the second is a product bug while the first is not.
+    assert_eq!(seeded_count(&subject).await, 4, "all four seeds are stored");
+
+    let weeks = trend(&mut subject).await;
+    assert_eq!(
+        weeks[weeks.len() - 1]["reads"],
+        json!(2),
+        "both of this week's: {weeks:?}"
+    );
+    assert_eq!(
+        weeks[0]["reads"],
+        json!(0),
+        "the oldest reported week: {weeks:?}"
+    );
+    assert_eq!(
+        weeks[weeks.len() - 3]["reads"],
+        json!(1),
+        "two weeks back: {weeks:?}"
+    );
+
+    // The read 42 days old is in no reported week at all. Asserting the
+    // absence is the point: a window that silently included everything would
+    // make a reader's four-week history mean "all time".
+    assert!(
+        weeks
+            .iter()
+            .all(|w| w["reads"] == json!(0) || w["reads"] == json!(1) || w["reads"] == json!(2)),
+        "the out-of-window read is not counted anywhere: {weeks:?}"
+    );
+}
+
+#[tokio::test]
+async fn weeks_are_mondays_ascending_and_seven_days_apart() {
+    let mut subject = trend_reader("trend-ascending").await;
+    seed_progress_on(
+        subject.db(),
+        &subject.account,
+        &uuid_for('b', 1),
+        &chrono::Utc::now().format("%Y-%m-%dT12:00:00Z").to_string(),
+        1,
+    )
+    .await;
+
+    let weeks = trend(&mut subject).await;
+    assert_eq!(weeks.len(), 4, "four weeks: {weeks:?}");
+
+    for (n, week) in weeks.iter().enumerate() {
+        let start =
+            chrono::NaiveDate::parse_from_str(week["week_start"].as_str().unwrap(), "%Y-%m-%d")
+                .expect("week_start parses");
+        assert_eq!(
+            start.weekday(),
+            chrono::Weekday::Mon,
+            "a week starts on Monday: {weeks:?}"
+        );
+        if n > 0 {
+            let previous = chrono::NaiveDate::parse_from_str(
+                weeks[n - 1]["week_start"].as_str().unwrap(),
+                "%Y-%m-%d",
+            )
+            .expect("week_start parses");
+            assert_eq!(
+                (start - previous).num_days(),
+                7,
+                "weeks are seven days apart and none is skipped: {weeks:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn another_readers_reads_never_reach_this_trend() {
+    let mut subject = trend_reader("trend-mine").await;
+    let mut other = trend_reader("trend-other").await;
+
+    let weeks = trend(&mut subject).await;
+    let mine = midday(&weeks, 0, 1);
+    seed_progress_on(subject.db(), &subject.account, &uuid_for('b', 1), &mine, 1).await;
+    for n in 0..5u32 {
+        seed_progress_on(
+            other.db(),
+            &other.account,
+            &uuid_for('c', n),
+            &midday(&weeks, 0, 2),
+            n,
+        )
+        .await;
+    }
+
+    let mine_after = trend(&mut subject).await;
+    assert_eq!(
+        mine_after[mine_after.len() - 1]["reads"],
+        json!(1),
+        "another reader's five reads are not mine: {mine_after:?}"
+    );
+
+    let theirs = trend(&mut other).await;
+    assert_eq!(
+        theirs[theirs.len() - 1]["reads"],
+        json!(5),
+        "and their own trend still counts theirs: {theirs:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_status_written_against_another_accounts_work_stays_out_of_my_trend() {
+    // The same claim as the row count, but with the work id forged rather than
+    // the account: the query filters on `account_id` and never on the work, so
+    // a reader pointing at somebody else's work gains nothing.
+    let mut subject = trend_reader("trend-forged").await;
+    let other = trend_reader("trend-forged-other").await;
+
+    let weeks = trend(&mut subject).await;
+    let shared = uuid_for('b', 1);
+    seed_progress_on(
+        subject.db(),
+        &subject.account,
+        &shared,
+        &midday(&weeks, 0, 1),
+        1,
+    )
+    .await;
+    seed_progress_on(
+        other.db(),
+        &other.account,
+        &shared,
+        &midday(&weeks, 0, 1),
+        2,
+    )
+    .await;
+
+    let mine = trend(&mut subject).await;
+    assert_eq!(
+        mine[mine.len() - 1]["reads"],
+        json!(1),
+        "one read of my own, on a work we share: {mine:?}"
+    );
 }

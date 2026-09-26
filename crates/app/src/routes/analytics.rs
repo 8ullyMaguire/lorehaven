@@ -40,8 +40,10 @@
 //! without hardcoding a number.
 
 use axum::extract::{Path, State};
+// For `NaiveDate::weekday`, which the trend's Monday arithmetic needs.
 use axum::routing::get;
 use axum::{Json, Router};
+use chrono::Datelike as _;
 use serde_json::{json, Value};
 
 use crate::auth::RequirePseud;
@@ -196,6 +198,31 @@ async fn reading_value(state: &AppState, account_id: &str) -> ApiResult<Value> {
     }))
 }
 
+/// The viewer's own reading trend, for `own.reading.trend`.
+///
+/// Nested under its own key for the same reason `reading_value` nests under
+/// `reading`: the `value` object is shared by every capability, and a bare
+/// `trend` array from one and a flat count from another would collide.
+async fn trend_value(state: &AppState, account_id: &str) -> ApiResult<Value> {
+    // The most recent Monday, in UTC. Computed here because `lorehaven-db` has
+    // no clock dependency and this is a fact about the request, not the
+    // database: "the trailing four weeks" means four weeks from when the
+    // reader asked, not four weeks from when the server booted.
+    let today = chrono::Utc::now().date_naive();
+    // `num_days_from_monday` comes from `Datelike`; 0 is Monday, 6 is Sunday.
+    // Module-level import rather than a `use` inside the fn, because the
+    // reflowed call site is what made the inner import easy to lose.
+    let from_monday = today.weekday().num_days_from_monday();
+    let week_start = (today - chrono::Duration::days(i64::from(from_monday)))
+        .format("%Y-%m-%d")
+        .to_string();
+    let weeks = lorehaven_db::analytics::reading_trend(state.db(), account_id, &week_start).await?;
+    Ok(json!({
+        "status": "ok",
+        "reading": { "trend": weeks },
+    }))
+}
+
 /// `GET /api/v1/me/analytics/{capability}` — one capability.
 pub async fn one_capability(
     State(state): State<AppState>,
@@ -224,6 +251,7 @@ pub async fn one_capability(
     // "not implemented" for a capability the instance can answer.
     let value = match scope {
         Scope::OwnReadingBasic => reading_value(&state, &user.account_id.to_string()).await?,
+        Scope::OwnReadingTrend => trend_value(&state, &user.account_id.to_string()).await?,
         _ => json!({
             "status": "not_implemented",
             "note": "registered and gated; no query behind it yet",

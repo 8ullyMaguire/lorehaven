@@ -92,6 +92,25 @@ static RATE_LIMIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Take the lock and return a clean bucket set. The guard lives as long as the
 /// binding, so `let _guard = rate_limit_guard();` scopes the exclusion to the
 /// test that asked for it.
+/// Believe forwarded headers for the lifetime of the returned guard.
+///
+/// `server::set_trust_proxy` writes a process-wide `AtomicBool`, not per-router
+/// state, so a test that turns it on without turning it off changes the rate
+/// limiting of every test that runs after it in the same binary. Restoring on
+/// drop makes the scope explicit and leak-proof.
+struct TrustProxyGuard;
+
+impl Drop for TrustProxyGuard {
+    fn drop(&mut self) {
+        set_trust_proxy(false);
+    }
+}
+
+fn trust_proxy() -> TrustProxyGuard {
+    set_trust_proxy(true);
+    TrustProxyGuard
+}
+
 fn rate_limit_guard() -> std::sync::MutexGuard<'static, ()> {
     let guard = RATE_LIMIT_LOCK.lock();
     // A poisoned lock means another test panicked while holding it. Recovering
@@ -104,8 +123,51 @@ fn rate_limit_guard() -> std::sync::MutexGuard<'static, ()> {
 
 fn tight_config_for(dir: &Path) -> Config {
     let mut config = config_for(dir);
-    config.rate_limits = lorehaven_app::limiter::Limits::default();
+    config.rate_limits = burst_only();
     config
+}
+
+/// A burst-only allowance: a small burst and **no refill**.
+///
+/// `Limits::default()` is not tight enough to test with. The limiter is a token
+/// bucket, and its refill rate is `per_minute / 60`, so the default auth budget
+/// (burst 10, per_minute 30) hands back half a token every second. A test loop
+/// that spends one token per request therefore empties the bucket only if it
+/// runs faster than 0.5 requests a second -- and under load, with a SQLite
+/// password hash per attempt, it does not. The loop then completes all 200
+/// attempts without ever seeing a 429, and the test fails intermittently:
+/// three consecutive runs gave 87.8s FAIL, 84.4s FAIL, 60.1s PASS, because the
+/// passing run was the fastest.
+///
+/// `per_minute: 0` is not a corner case here: `Bucket::take` treats a zero
+/// refill rate as "never refills" and returns a day-long `Retry-After`, which is
+/// exactly what a rate limit should do to a credential-stuffing run. A test that
+/// cannot observe a 429 is not testing the limiter.
+fn burst_only() -> lorehaven_app::limiter::Limits {
+    let defaults = lorehaven_app::limiter::Limits::default();
+    lorehaven_app::limiter::Limits {
+        auth: lorehaven_app::limiter::Quota {
+            burst: 10,
+            per_minute: 0,
+        },
+        write: lorehaven_app::limiter::Quota {
+            burst: 20,
+            per_minute: 0,
+        },
+        search: lorehaven_app::limiter::Quota {
+            burst: 30,
+            per_minute: 0,
+        },
+        export: lorehaven_app::limiter::Quota {
+            burst: 30,
+            per_minute: 0,
+        },
+        default: lorehaven_app::limiter::Quota {
+            burst: 120,
+            per_minute: 0,
+        },
+        address_multiplier: defaults.address_multiplier,
+    }
 }
 
 /// A client that keeps cookies and echoes the CSRF token, like a browser would.
@@ -114,6 +176,9 @@ struct Client {
     cookies: Vec<(String, String)>,
     /// Set when a request should deliberately omit the CSRF header.
     omit_csrf: bool,
+    /// Reported as the client address, so this client gets its own rate-limit
+    /// bucket. See `with_address`.
+    address: Option<String>,
 }
 
 impl Client {
@@ -122,6 +187,7 @@ impl Client {
             app,
             cookies: Vec::new(),
             omit_csrf: false,
+            address: None,
         }
     }
 
@@ -168,6 +234,9 @@ impl Client {
         if !cookies.is_empty() {
             builder = builder.header(header::COOKIE, cookies);
         }
+        if let Some(address) = &self.address {
+            builder = builder.header("x-forwarded-for", address.clone());
+        }
 
         // A real client echoes the CSRF token on state-changing requests,
         // reading it from the readable cookie.
@@ -206,6 +275,17 @@ impl Client {
 
     async fn get(&mut self, uri: &str) -> (StatusCode, Value) {
         self.request("GET", uri, None).await
+    }
+
+    /// Send every subsequent request from `address`, as a proxy would report.
+    ///
+    /// Needs `config.security.trust_proxy` to be on, since without it the
+    /// forwarded header is deliberately ignored. Used to give a test its own
+    /// rate-limit bucket; see the credential-stuffing test for why that
+    /// matters.
+    fn with_address(mut self, address: &str) -> Self {
+        self.address = Some(address.to_owned());
+        self
     }
 
     async fn post(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
@@ -1328,6 +1408,13 @@ async fn requesting_a_second_reset_invalidates_the_first_link() {
 // Rate limiting
 // ---------------------------------------------------------------------------
 
+// The guard deliberately spans awaits: holding it across the request loop is the
+// entire mechanism, since the bucket is a process-wide static and a sibling test
+// in this file spends the same one. Clippy's `await_holding_lock` fires because
+// a `std::sync::Mutex` is not async-aware, but `#[tokio::test]` runs on the
+// current-thread runtime, so nothing else is running while this test holds it.
+// A `tokio::sync::Mutex` would silence the lint and add nothing.
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn repeated_login_attempts_are_rate_limited() {
     let harness = Harness::new("ratelimit").await;
@@ -1337,12 +1424,32 @@ async fn repeated_login_attempts_are_rate_limited() {
     // without ever returning 429.
     let _guard = rate_limit_guard();
     let config = tight_config_for(&harness.dir);
+    // Give this test an address of its own, so its bucket cannot be spent or
+    // refilled by anything else in the process.
+    //
+    // Without `ConnectInfo` -- which an in-process router never has -- every
+    // request in the whole test binary lands on one shared address key, and
+    // `limiter::client_address` falls back to the literal string `unknown` for
+    // all of them. One bucket is then shared by all 27 tests in this file: a
+    // neighbour that declared the wide 1000-token auth limit creates the bucket
+    // at that size, and it is never resized, so the 40 tokens this test is
+    // trying to drain are never reached. The 200 attempts all return
+    // `AUTH_REQUIRED` and the assertion fails. That was the intermittency: the
+    // same code and the same limits, a different neighbour order.
+    //
+    // The bucket is keyed on a per-test forwarded address, which means the
+    // limiter has to believe forwarded headers. It reads that from a
+    // process-wide `AtomicBool` published by `set_trust_proxy` during startup,
+    // **not** from the config passed to `build_router` -- so setting
+    // `config.security.trust_proxy` here would look right and do nothing.
+    let _proxy = trust_proxy();
     let app = server::build_router(AppState::new(config, harness.tdb.db().clone()));
-    let mut client = Client::new(app);
+    let mut client = Client::new(app).with_address("203.0.113.7");
 
     // The auth burst is 10 per account, multiplied by the address multiplier
     // (4 by default) for an anonymous caller, so the address bucket holds 40
-    // tokens. Failures cost one each.
+    // tokens. Failures cost one each. With `per_minute: 0` the bucket never
+    // refills, so 41 requests is the worst case and 200 is a wide margin.
     let mut saw_limit = false;
     let mut last_body = Value::Null;
     for _ in 0..200 {
@@ -1368,6 +1475,10 @@ async fn repeated_login_attempts_are_rate_limited() {
     harness.cleanup().await;
 }
 
+// Same reasoning as `repeated_login_attempts_are_rate_limited`: the shared
+// process-wide bucket is the thing under test, so the guard must outlive every
+// await in the body. See that test for why this is not a `tokio::sync::Mutex`.
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn the_limiter_refuses_a_route_that_declares_no_class() {
     // Two properties, checked separately because they are enforced in
@@ -1387,6 +1498,12 @@ async fn the_limiter_refuses_a_route_that_declares_no_class() {
     // the 600-request loop run to completion without a 429.
     let _guard = rate_limit_guard();
     let config = tight_config_for(&harness.dir);
+    // Its own address, for the reason spelled out in
+    // `repeated_login_attempts_are_rate_limited`: an in-process router has no
+    // `ConnectInfo`, so all 27 tests in this file would otherwise share the one
+    // bucket keyed `unknown`, and this 600-request loop would hand tokens back
+    // to the sibling test trying to drain them.
+    let _proxy = trust_proxy();
     let state = AppState::new(config, harness.tdb.db().clone());
 
     let unclassified: axum::Router<AppState> =

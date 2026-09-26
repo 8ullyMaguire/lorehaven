@@ -618,3 +618,172 @@ mod tests {
         assert_eq!(v.fewer_than, None);
     }
 }
+
+// -- own.reading.trend (spec §9.6) -------------------------------------------
+
+/// How many weeks `own.reading.trend` reports.
+///
+/// Four, matching the `Method` text's "trailing window". A reader wants to see
+/// "this week so far" beside a comparable recent run, and a longer series
+/// mostly shows a reader their own absence.
+pub const READING_TREND_WEEKS: i64 = 4;
+
+/// One week of a reader's own reading.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TrendWeek {
+    /// The Monday of the week, as `YYYY-MM-DD`. A date and not an instant
+    /// because a week is a calendar thing, and a reader in any timezone reads
+    /// the same Monday.
+    pub week_start: String,
+    /// Progress updates in the week. §9.6's "reads": advances, not opens.
+    pub reads: i64,
+    /// Finished works in the week, from `reading_status`. A decision, so it
+    /// moves at most once per work per week.
+    pub finished_works: i64,
+}
+
+// ISO weeks start on Monday. On both backends the floor is computed as
+// "the most recent Monday at or before the row's date", so the two agree on
+// which week a row belongs to rather than merely producing a similar
+// distribution.
+//
+// SQLite: `strftime('%w')` is 0 for Sunday and 6 for Saturday, so the offset
+// to the preceding Monday is `(%w + 6) % 7`. Postgres: `date_trunc('week', …)`
+// is already Monday-based, and `EXTRACT(ISODOW …)` agrees with it.
+//
+// The weeks themselves come from a generated series rather than from the rows,
+// so a week with no reads is still reported. That is the whole point of the
+// capability: a reader who has read nothing this week must see a zero for it,
+// not a gap that reads as missing data.
+// Two SQLite details, both found the hard way.
+//
+// **No `weeks` modifier.** SQLite's date modifiers are `NNN days`, `NNN hours`,
+// `NNN minutes`, `NNN seconds`, `NNN months`, `NNN years` — there is no
+// `weeks`, in any version. `date('2026-09-21', '-1 weeks')` returns NULL,
+// silently: no error, no warning, just a series of empty week labels and a
+// trend of four zeroes, which looks exactly like a working query against an
+// empty database.
+//
+// **All placeholders anonymous, never `?1` mixed with `?`.** libsqlite3 numbers
+// anonymous placeholders from the highest explicit index it has already seen,
+// so a statement mixing `?1` with bare `?` does not number the bare ones the
+// way a reader expects, and the binds land in the wrong slots. With the week
+// anchor bound in first and the account twice after, the account id was
+// compared against the *date*, every week matched nothing, and the capability
+// reported four zeroes over a table that demonstrably held the reader's rows.
+// Every placeholder here is a bare `?`, bound positionally, which is the only
+// form that is unambiguous.
+const READING_TREND_SQLITE: &str = "WITH weeks(week_start) AS (
+     SELECT date(?, '-' || (value * 7) || ' days')
+       FROM (SELECT 0 AS value UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3)
+   )
+   SELECT w.week_start AS week_start,
+          (SELECT COUNT(*) FROM reading_progress rp
+             WHERE rp.account_id = ?
+               AND rp.subject_type = 'work'
+               AND date(rp.created_at) >= w.week_start
+               AND date(rp.created_at) < date(w.week_start, '+7 days')) AS reads,
+          (SELECT COUNT(*) FROM reading_status rs
+             WHERE rs.account_id = ?
+               AND rs.subject_type = 'work'
+               AND rs.status = 'finished'
+               AND date(rs.updated_at) >= w.week_start
+               AND date(rs.updated_at) < date(w.week_start, '+7 days')) AS finished_works
+     FROM weeks w
+    ORDER BY w.week_start";
+
+// `rp.created_at::timestamptz`, not `rp.created_at`.
+//
+// Every timestamp column in this schema is TEXT on both backends -- RFC 3339 in
+// a TEXT column, which is what lets one seed string be stored either way. So a
+// Postgres comparison against a `date` needs the cast spelled out, and omitting
+// it is a hard error rather than a wrong answer:
+//
+//     ERROR: operator does not exist: text >= date
+//
+// which surfaces to the reader as a 500, not as an empty trend. `::timestamptz`
+// is the same cast `reading_totals` already uses on this file for the same
+// column, so the two capabilities cannot drift apart.
+const READING_TREND_POSTGRES: &str = "WITH weeks(week_start) AS (
+     SELECT $2::date - (value * 7)::int AS week_start
+       FROM (VALUES (0), (1), (2), (3)) AS seq(value)
+   )
+   SELECT to_char(w.week_start, 'YYYY-MM-DD') AS week_start,
+          (SELECT COUNT(*) FROM reading_progress rp
+             WHERE rp.account_id = $1::uuid
+               AND rp.subject_type = 'work'
+               AND rp.created_at::timestamptz >= w.week_start
+               AND rp.created_at::timestamptz < w.week_start + 7) AS reads,
+          (SELECT COUNT(*) FROM reading_status rs
+             WHERE rs.account_id = $1::uuid
+               AND rs.subject_type = 'work'
+               AND rs.status = 'finished'
+               AND rs.updated_at::timestamptz >= w.week_start
+               AND rs.updated_at::timestamptz < w.week_start + 7) AS finished_works
+     FROM weeks w
+    ORDER BY w.week_start";
+
+/// The caller's own reading trend, one entry per week, oldest first.
+///
+/// `account_id` is filtered in SQL for the same reason as `reading_totals`: a
+/// post-filter has already read the rows, and this is the leak the whole
+/// registry exists to prevent.
+/// `week_start` is the most recent Monday, as `YYYY-MM-DD`, and the caller
+/// supplies it.
+///
+/// Passed in rather than read from a clock here: `lorehaven-db` has no `chrono`
+/// dependency, and the alternative is adding one to the crate for a single date
+/// arithmetic that every caller already needs to do. It also makes the query
+/// testable — a test can ask for the weeks around a known Monday.
+pub async fn reading_trend(
+    db: &Database,
+    account_id: &str,
+    week_start: &str,
+) -> anyhow::Result<Vec<TrendWeek>> {
+    let sql = sql_owned(
+        db,
+        READING_TREND_SQLITE.to_string(),
+        READING_TREND_POSTGRES.to_string(),
+    );
+    // The week series is generated by the query, so the result is never empty
+    // and a reader who has read nothing still gets their zeros. That is a
+    // property of the SQL, and this assert states it rather than trusting it.
+    macro_rules! collect {
+        ($rows:expr) => {{
+            let rows = $rows;
+            let weeks: Vec<TrendWeek> = rows
+                .iter()
+                .map(|row| TrendWeek {
+                    week_start: row.get::<String, _>("week_start"),
+                    reads: row.get::<i64, _>("reads"),
+                    finished_works: row.get::<i64, _>("finished_works"),
+                })
+                .collect();
+            anyhow::ensure!(
+                weeks.len() as i64 == READING_TREND_WEEKS,
+                "the trend must report {READING_TREND_WEEKS} weeks, got {}",
+                weeks.len()
+            );
+            weeks
+        }};
+    }
+    match db.backend() {
+        Backend::Sqlite => {
+            let rows = sqlx::query(&sql)
+                .bind(week_start)
+                .bind(account_id)
+                .bind(account_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+            Ok(collect!(rows))
+        }
+        Backend::Postgres => {
+            let rows = sqlx::query(&sql)
+                .bind(account_id)
+                .bind(week_start)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?;
+            Ok(collect!(rows))
+        }
+    }
+}
