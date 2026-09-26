@@ -2585,7 +2585,17 @@ export interface ForumSearchResult {
   score: number;
 }
 
-/** Search forum posts and topics (spec §17.4). */
+/**
+ * Search forum posts and topics (spec §17.4).
+ *
+ * `q` is a query-language query and the server parses it, so a filter can be
+ * typed straight into the box (`replies:>50 category:meta`) as well as passed
+ * as a structured parameter. The structured parameters are translated into
+ * query terms server-side and conjoined with `q`, so a reader who sets both
+ * means both.
+ *
+ * `category` is a category *name*, which is what the dropdown holds.
+ */
 export async function searchForum(
   params: {
     q: string;
@@ -2593,6 +2603,8 @@ export async function searchForum(
     author?: string;
     from?: string;
     to?: string;
+    /** Minimum reply count. Omitted when unset rather than sent as 0. */
+    min_replies?: number;
     limit?: number;
   },
   signal?: AbortSignal,
@@ -2603,6 +2615,9 @@ export async function searchForum(
   if (params.author) sp.set('author', params.author);
   if (params.from) sp.set('from', params.from);
   if (params.to) sp.set('to', params.to);
+  if (params.min_replies !== undefined) {
+    sp.set('min_replies', String(params.min_replies));
+  }
   if (params.limit) sp.set('limit', String(params.limit));
   const page = await apiFetch<{ items: ForumSearchResult[] }>(
     `/search?${sp.toString()}`,

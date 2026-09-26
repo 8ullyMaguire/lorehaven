@@ -9,10 +9,12 @@ use serde::Serialize;
 
 mod ast_search;
 pub mod content_filter_sql;
+pub mod forum_ast_search;
 pub mod query_error;
 
 pub use ast_search::search_works_ast;
 pub use ast_search::search_works_ast_filtered;
+pub use forum_ast_search::{search_forum_ast, ForumSearchResult};
 pub use query_error::{QueryProblem, SearchError};
 
 /// A single search result.

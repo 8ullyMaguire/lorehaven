@@ -1,16 +1,37 @@
 <script lang="ts">
-    import { searchForum, type ForumSearchResult } from '../lib/api';
-  
+  import { onMount } from 'svelte';
+  import { fetchForums, searchForum, type Forum, type ForumSearchResult } from '../lib/api';
+
   let query = '';
   let category = '';
   let author = '';
+  let minReplies: number | null = null;
+  let forums: Forum[] = [];
   let results: ForumSearchResult[] = [];
   let loading = false;
+  let searched = false;
   let error = '';
   let totalResults = 0;
 
+  onMount(async () => {
+    // The category list comes from the instance rather than being hardcoded.
+    // The previous list was invented -- `general`, `fanworks`, `discussion`,
+    // `help` -- and none of them is a category a fresh instance creates, so a
+    // reader who picked "General" and got nothing had no way to tell the
+    // dropdown was lying. A failed fetch leaves the filter out entirely: an
+    // empty dropdown that filters to nothing is worse than no dropdown, and the
+    // query box still works.
+    try {
+      forums = await fetchForums();
+    } catch {
+      forums = [];
+    }
+  });
+
   async function doSearch() {
-    if (!query.trim()) return;
+    // A filter with no text is a complete query -- `category:meta` alone. The
+    // old guard required text, which made the filters look broken.
+    if (!query.trim() && !category && !author && minReplies === null) return;
     loading = true;
     error = '';
     try {
@@ -19,11 +40,17 @@
       const params: Parameters<typeof searchForum>[0] = { q: query.trim(), limit: 20 };
       if (category) params.category = category;
       if (author) params.author = author;
+      if (minReplies !== null && Number.isFinite(minReplies)) params.min_replies = minReplies;
       results = await searchForum(params);
       totalResults = results.length;
+      searched = true;
     } catch (e: any) {
+      // A rejected query is a 422 carrying why. Replacing that with "Search
+      // failed" throws away the only useful part of the response -- the
+      // reason the reader can act on.
       error = e?.message || 'Search failed';
       results = [];
+      searched = true;
     } finally {
       loading = false;
     }
@@ -51,32 +78,50 @@
         type="search"
         bind:value={query}
         placeholder="Search posts and topics..."
+        aria-label="Search posts and topics"
         class="search-input"
       />
-      <button type="submit" disabled={loading || !query.trim()}>
+      <button type="submit" disabled={loading}>
         {#if loading}Searching...{:else}Search{/if}
       </button>
     </div>
     <div class="filters">
       <label>
         Category
-        <select bind:value={category}>
+        <select bind:value={category} aria-label="Category">
           <option value="">All</option>
-          <option value="general">General</option>
-          <option value="fanworks">Fanworks</option>
-          <option value="discussion">Discussion</option>
-          <option value="help">Help</option>
+          {#each forums as f (f.id)}
+            <option value={f.name}>{f.name}</option>
+          {/each}
         </select>
       </label>
       <label>
         Author
-        <input type="text" bind:value={author} placeholder="Filter by author" />
+        <input type="text" bind:value={author} aria-label="Author" placeholder="Filter by author" />
+      </label>
+      <label>
+        Min replies
+        <input
+          type="number"
+          min="0"
+          step="1"
+          bind:value={minReplies}
+          aria-label="Min replies"
+          placeholder="Any"
+        />
       </label>
     </div>
+    <p class="help">
+      You can also type filters directly: <code>replies:&gt;50</code>,
+      <code>category:meta</code>, <code>author:nightowl</code>,
+      <code>active:&gt;2026-01</code>, <code>locked:true</code>. Combine with
+      <code>AND</code>, <code>OR</code> and <code>NOT</code>; quote a phrase with
+      <code>"like this"</code>.
+    </p>
   </form>
 
   {#if error}
-    <p class="error">{error}</p>
+    <p class="error" role="alert">{error}</p>
   {/if}
 
   {#if totalResults > 0}
@@ -94,7 +139,7 @@
             <span>by {r.author_pseud}</span>
             <span>{formatDate(r.created_at)}</span>
             {#if r.score > 0}
-              <span class="score">score: {r.score}</span>
+              <span class="score">{r.score} replies</span>
             {/if}
           </div>
         </div>
@@ -102,8 +147,8 @@
     {/each}
   </ul>
 
-  {#if !loading && query && results.length === 0 && !error}
-    <p class="no-results">No results found for "{query}"</p>
+  {#if !loading && searched && !error && results.length === 0}
+    <p class="no-results">No results found for "{query || 'that search'}"</p>
   {/if}
 </div>
 
@@ -162,6 +207,17 @@
     border-radius: 4px;
     background: var(--bg-elevated);
     color: var(--text);
+  }
+  .help {
+    margin: 0.75rem 0 0;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    line-height: 1.6;
+  }
+  .help code {
+    background: var(--bg-elevated);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
   }
   .results {
     list-style: none;

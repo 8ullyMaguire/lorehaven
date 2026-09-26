@@ -32,7 +32,12 @@ fn render_err(q: &str) -> String {
 fn free_text_matches_the_topic_title_or_the_post_body() {
     let (sql, binds) = render("winter");
     assert!(sql.contains("forum_topics.title"), "{sql}");
-    assert!(sql.contains("forum_posts.body"), "{sql}");
+    // The body arm is a correlated EXISTS, not a join: the result set is
+    // topics, and a join to forum_posts would return a thread once per matching
+    // reply -- the same title repeated, with no way for the reader to tell why.
+    assert!(sql.contains("EXISTS") && sql.contains("tp.body"), "{sql}");
+    // Deleted posts are not searchable for the same reason they are not replies.
+    assert!(sql.contains("tp.deleted_at IS NULL"), "{sql}");
     assert_eq!(binds, vec!["%winter%".to_string(), "%winter%".to_string()]);
 }
 
@@ -41,7 +46,7 @@ fn a_phrase_searches_the_body_only() {
     // A quoted phrase is a phrase: matching it against a topic title would
     // return topics for a phrase the reader asked to find in posts.
     let (sql, binds) = render("\"we were never alone\"");
-    assert!(sql.contains("forum_posts.body"), "{sql}");
+    assert!(sql.contains("pp.body"), "{sql}");
     assert!(!sql.contains("forum_topics.title"), "{sql}");
     assert_eq!(binds, vec!["%we were never alone%".to_string()]);
 }
@@ -80,10 +85,13 @@ fn each_reply_operator_renders_its_own_sql() {
     let (gte, _) = render("replies:>=10");
     let (lt, _) = render("replies:<10");
     let (lte, _) = render("replies:<=10");
-    assert!(gt.contains("> ?") && !gt.contains(">= ?"), "{gt}");
-    assert!(gte.contains(">= ?") && !gte.contains("> ? ?"), "{gte}");
-    assert!(lt.contains("< ?") && !lt.contains("<= ?"), "{lt}");
-    assert!(lte.contains("<= ?"), "{lte}");
+    assert!(
+        gt.contains("> CAST(? AS BIGINT)") && !gt.contains(">= "),
+        "{gt}"
+    );
+    assert!(gte.contains(">= CAST(? AS BIGINT)"), "{gte}");
+    assert!(lt.contains("< CAST(? AS BIGINT)"), "{lt}");
+    assert!(lte.contains("<= CAST(? AS BIGINT)"), "{lte}");
 }
 
 #[test]
@@ -110,7 +118,11 @@ fn author_matches_the_post_author_not_the_topic_author() {
     // A reader searching their own handle means their posts. Mapping to the
     // topic's author would return only the threads they started.
     let (sql, _) = render("author:nightowl");
-    assert!(sql.contains("forum_posts.author_pseud"), "{sql}");
+    // `author_pseud` holds an id, and the reader types a handle, so the
+    // pseudonym row is joined inside the EXISTS. Comparing the column to the
+    // literal "nightowl" would match nothing and read as "I have no posts".
+    assert!(sql.contains("ap.author_pseud"), "{sql}");
+    assert!(sql.contains("aps.handle"), "{sql}");
 }
 
 #[test]
