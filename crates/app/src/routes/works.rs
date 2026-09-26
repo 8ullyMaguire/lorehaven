@@ -40,12 +40,14 @@ use lorehaven_db::content::{
     self, ContentError, PublicationOutcome, RevisionInput, RevisionSummary, Work, WorkPatch,
 };
 use lorehaven_db::identity;
+use lorehaven_db::library;
 use lorehaven_db::permission;
 use lorehaven_db::reading;
 use lorehaven_db::taxonomy;
 use lorehaven_db::work_metrics;
 use lorehaven_domain::content::Contributor;
 use lorehaven_domain::document::Document;
+use lorehaven_domain::library::{ReadingStatus, SUBJECT_WORK};
 use lorehaven_domain::permission::{
     ExclusionTarget, LineageEdge, LineageKind, Permission, PermissionStatement,
 };
@@ -72,6 +74,12 @@ pub fn router() -> Router<AppState> {
         .route("/works", get(list_works).post(create_work))
         .route("/works/{id}", patch(update_work))
         .route("/works/{id}/kudos", post(toggle_kudos))
+        .route(
+            "/works/{id}/reading-status",
+            get(read_work_status)
+                .put(set_work_status)
+                .delete(clear_work_status),
+        )
         .route("/works/{id}/publish", post(publish_work))
         .route("/works/{id}/withdraw", post(withdraw_work))
         .route("/works/{id}/chapters", post(add_chapter))
@@ -1351,6 +1359,127 @@ async fn toggle_kudos(
     .await
     .map_err(|e| ApiError(AppError::Internal(e)))?;
     Ok(Json(serde_json::json!({ "kudoed": kudoed })))
+}
+
+// ---------------------------------------------------------------------------
+// Reading status on a work
+// ---------------------------------------------------------------------------
+//
+// Reading status used to exist only against a library item, and a library item
+// is created in exactly one place: `imports::upsert_library_item`, called by the
+// import runner. So a reader who finished a work *published on this instance*
+// had nothing to mark, and 9.6's own.reading.basic -- which counts
+// `reading_status` rows with `subject_type = 'work'` -- showed them a permanent
+// zero for reading local fiction.
+//
+// The data model already anticipated this. `SUBJECT_WORK` exists, and
+// `reading_progress` is keyed on works. Only the door was missing, so this is
+// the door.
+//
+// Visibility is decided by the same `reading_decision` the read door uses, not
+// by "does the row exist". Without it a reader who learned the id of an
+// unlisted work could write a reading status against it and confirm its
+// existence by the difference between 404 and 403.
+//
+// A work status is the reader's own record and is not a review, a rating or a
+// kudos, so it needs no trust floor: it is a statement about themselves.
+
+#[derive(Deserialize)]
+struct WorkStatusBody {
+    status: String,
+}
+
+/// The reader's status for this work, or null.
+async fn read_work_status(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let work_id = parse_work_id(&id)?;
+    ensure_readable(&state, &user, work_id).await?;
+    match library::reading_status_for(
+        state.db(),
+        &user.account_id.to_string(),
+        SUBJECT_WORK,
+        &work_id.to_string(),
+    )
+    .await?
+    {
+        Some(record) => Ok(Json(library::status_json(&record))),
+        None => Ok(Json(Value::Null)),
+    }
+}
+
+/// Record that the reader finished, is reading, or dropped this work.
+async fn set_work_status(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(body): Json<WorkStatusBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let work_id = parse_work_id(&id)?;
+    ensure_readable(&state, &user, work_id).await?;
+    let Some(status) = ReadingStatus::parse(&body.status) else {
+        return Err(ApiError(AppError::Validation {
+            message: format!("`{}` is not a reading status this build knows", body.status),
+            field_errors: Default::default(),
+        }));
+    };
+    let row = library::set_reading_status(
+        state.db(),
+        &user.account_id.to_string(),
+        SUBJECT_WORK,
+        &work_id.to_string(),
+        status,
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
+    Ok(Json(library::status_json(&row)))
+}
+
+/// Forget the reader's status for this work.
+async fn clear_work_status(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    let work_id = parse_work_id(&id)?;
+    ensure_readable(&state, &user, work_id).await?;
+    let removed = library::clear_reading_status(
+        state.db(),
+        &user.account_id.to_string(),
+        SUBJECT_WORK,
+        &work_id.to_string(),
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
+    if !removed {
+        return Err(ApiError(AppError::NotFound {
+            resource: "reading status",
+        }));
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The work exists and this reader is allowed to see it.
+///
+/// Refuses with the same 404 as a missing work, because a 403 on an unlisted
+/// work is itself the answer to a question nobody should be able to ask.
+async fn ensure_readable(state: &AppState, user: &SessionUser, work_id: WorkId) -> ApiResult<()> {
+    let work = content::find_work(state.db(), work_id)
+        .await?
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "work" }))?;
+    let contributors = collaboration::contributors_for_work(state.db(), work_id).await?;
+    // Through `actor_for`, because that is what resolves the acting pseud, and
+    // because it answers honestly when the session has none selected: a
+    // reader with no active pseud is the public reader, and gets the public
+    // answer rather than a panic on the unwrap.
+    if let Reading::Denied(error) =
+        reading_decision(state, actor_for(Some(user)).as_ref(), &work, &contributors).await
+    {
+        return Err(ApiError(error));
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

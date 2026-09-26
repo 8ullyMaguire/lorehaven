@@ -909,6 +909,22 @@ pub async fn tags_for(
     Ok(rows)
 }
 
+/// The wire shape of a reading status.
+///
+/// Lives here rather than in the route that first needed it, because two routes
+/// now return one and a duplicated serialiser is a duplicated contract: a field
+/// added to the record and not to one copy of this is a response that is missing
+/// something the other route sends.
+pub fn status_json(row: &ReadingStatusRecord) -> serde_json::Value {
+    serde_json::json!({
+        "status": row.status.as_str(),
+        "started_at": row.started_at,
+        "finished_at": row.finished_at,
+        "updated_at": row.updated_at,
+        "version": row.version,
+    })
+}
+
 /// Whether `subject_id` is an item in *this* account's library.
 ///
 /// The status and tag doors are keyed on a subject id, and both used to trust

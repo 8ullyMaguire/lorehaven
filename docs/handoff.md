@@ -1847,14 +1847,29 @@ focus ring.
 The whole analytics E2E file went from 4 minutes (three tests timing out at 180s)
 to 14 seconds once the header was fixed.
 
-### Still open, deliberately
+### The gap underneath that, now closed
 
 `library_items` is created in exactly one place: `imports::upsert_library_item`,
-called by the import runner. A work published on this instance never gets a
-library row, so a reader who finishes one has no subject to mark and
-`own.reading.basic` shows them a permanent zero. `library_items.work_id` exists
-and is nullable precisely for the materialised case, so the model anticipated
-this and the write path was never built. Tracked as M57A-09.
+called by the import runner. A work published on this instance never got a
+library row, so a reader who finished one had no subject to mark and
+`own.reading.basic` showed them a permanent zero for reading local fiction.
 
-The E2E asserts the honest 404 rather than working around it, and the comment
-says why — a workaround is what hid this in the first place.
+The data model had already anticipated the fix — `SUBJECT_WORK` existed, the
+analytics query already filtered on `subject_type = 'work'`, and
+`reading_progress` is keyed on works. Only the door was missing, so that is all
+that was built: `GET/PUT/DELETE /api/v1/works/{id}/reading-status`.
+
+Two decisions worth keeping:
+
+* **Visibility goes through `reading_decision`**, the same gate the read door
+  uses, not a bare existence check. Without it a reader who learned the id of an
+  unlisted work could write a status against it and confirm it exists from the
+  difference between 404 and 403. The refusal is 404, not 403, for the same
+  reason.
+* **No trust floor.** A reading status is the reader recording something about
+  themselves — not a review, a rating or a kudos — so it is the reader's own
+  data and needs no permission to write.
+
+Every test in `analytics_reading.rs` seeds `reading_status` with raw SQL. The
+seven new ones go through the door instead, which is the whole point: a fixture
+that inserts the row cannot catch a door that refuses to write it.

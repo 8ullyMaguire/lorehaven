@@ -1105,7 +1105,7 @@ async fn the_update_check_is_queued_as_a_job() {
 async fn a_reading_status_for_a_subject_that_is_not_an_item_is_refused() {
     let harness = Harness::new("status-orphan").await;
     let mut client = harness.client();
-    let account = register(
+    let _account = register(
         &mut client,
         "orphan-subject@lorehaven.test",
         "OrphanSubject",

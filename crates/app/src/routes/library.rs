@@ -43,6 +43,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD as BASE64;
 use base64::Engine as _;
 use serde::Deserialize;
 
+use lorehaven_db::library::status_json;
 use lorehaven_db::storage::BlobStore;
 use lorehaven_db::{imports, jobs, library};
 use lorehaven_domain::library::{
@@ -771,16 +772,6 @@ async fn remove_item_tag(
 #[derive(Debug, Deserialize)]
 struct StatusBody {
     status: String,
-}
-
-fn status_json(row: &library::ReadingStatusRecord) -> serde_json::Value {
-    serde_json::json!({
-        "status": row.status.as_str(),
-        "started_at": row.started_at,
-        "finished_at": row.finished_at,
-        "updated_at": row.updated_at,
-        "version": row.version,
-    })
 }
 
 /// The reader's status for one item.
