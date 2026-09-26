@@ -1571,6 +1571,74 @@ and the assertion was vacuous. Both presence tests now assert the account is
 assertion ("X is absent") is only meaningful if a positive one ("X was there")
 precedes it in the same test.
 
+## M57 — Trust-gated analytics (in progress)
+
+Spec: `docs/spec-amendments/trust-gated-analytics.md`. Five commits:
+`9a8d924` registry, `f7bcf09` floor at the query, `cf55d5c` the HTTP gate,
+`b529d8d` the dashboard.
+
+**The shape.** Analytics are a capability registry, not a list of metrics.
+`crates/domain/src/analytics.rs` has 57 named `Scope`s; a dashboard asks
+`visible_to(trust, role, preset)` and renders what it is told. The reason is
+failure mode, not elegance: with a per-route `if trust >= 3`, adding a metric
+and forgetting the check produces a 200, and 57 hand-written checks is 57
+chances to be the one that forgot.
+
+**Three separate authorisations, never conflated:**
+
+- `trust_level` from `trust_levels`
+- `Role` from `operator_role` — a grant, not a score
+- `Preset` from `config.instance.preset` — an *upper bound* that can only
+  remove capabilities
+
+### The traps in here
+
+- **The floor was 5 and had to become 10.** `CREATOR_DASHBOARD_FLOOR` was
+  justified as "the same order as the public rating aggregate" — but every
+  count it bands (bookmarks, ratings, comments) counts *other people*, and
+  §36.12 puts author-facing analytics at 10. There are two floors now:
+  `K_SELF = 5`, `K_OTHERS = 10`. The threshold must move *stricter* as the
+  subject gets less personal.
+- **Banding in the route is too late.** `routes/dashboard.rs` still bands after
+  the query. The rows were read either way. New metrics apply the floor where
+  the aggregate is produced (`ReaderCount`), so a suppressed count is not
+  representable as a number.
+- **`stats::apply_k_anonymity` leaked.** It returned a coarsened *key* with
+  the **true count** alongside. Now returns 0 below the floor.
+- **`Scope::OwnWorkBasic` is `Subject::Other`.** It is your work, but its
+  headline number counts your *readers*, and the subject of a number is what
+  picks the floor.
+- **Registration creates no `trust_levels` row.** A fixture that UPDATEs the
+  level matches nothing and every reader looks like TL0 — a gate that refuses
+  everyone is indistinguishable from a gate that works. Use
+  `governance::set_trust` (an upsert).
+- **`Config::development_defaults()` is `curated_boutique`** → `Preset::Gallery`
+  → withholds every `community.*`. Tests of the trust ladder must pin
+  `open_library` or they are testing the wrong instance.
+- **`basis` is `jsonb` on PostgreSQL**, `TEXT` on SQLite. `set_trust` takes
+  `"{}"`.
+- **`/users/search` had no session extractor** and was missing from
+  `ROUTE_TABLE`; both fixed. `MaybeSession` is declared and unused on purpose
+  — it is how an anonymous route states that it is anonymous.
+
+### Testing it
+
+```bash
+# both backends
+cargo test -p lorehaven-app --test analytics_gate --test analytics_k_anonymity
+cargo test -p lorehaven-domain --test analytics_registry
+cd frontend && npx vitest run src/routes/AnalyticsDashboard.test.ts
+```
+
+The PostgreSQL test container is `lh-m32e-pg` on port 55433. Set
+`LOREHAVEN_TEST_PG_URL` to run the dual-backend path; without it those tests
+silently run on SQLite only, which is how a `::uuid` cast bug survives.
+
+**Not done:** only `own.work.basic` has a query behind it. The other 56
+report `implemented: false`, which is honest but means the dashboard is
+mostly a list of definitions. Next is a real metric per capability, starting
+with the reading ones the §9.6 dashboard already promises.
+
 ## Environment quirks (unchanged)
 
 - **Work in local clone** `~/code-local/rust/lorehaven`. `~/code/rust/lorehaven` is SSHFS — never run git/cargo/npm through it.
