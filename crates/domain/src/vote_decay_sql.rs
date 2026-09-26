@@ -171,7 +171,7 @@ pub fn decayed_score_sum_sql(cfg: &Decay, d: Dialect, entry_param: &str) -> Stri
 /// reason as [`decayed_score_sum_sql`]. `COUNT(*)` is `int8` on both engines,
 /// so the `CAST` is belt-and-braces rather than a requirement.
 #[must_use]
-pub fn vote_count_sql(d: Dialect, entry_param: &str) -> String {
+pub fn vote_count_sql(d: Dialect, entry_param: &str, wrapped: bool) -> String {
     // `AS v` on PostgreSQL because `v.entry_id` needs a name to qualify
     // against, and the alias is spelled per dialect rather than shared: the
     // SQLite form without it is also valid on PostgreSQL, but having one
@@ -180,12 +180,18 @@ pub fn vote_count_sql(d: Dialect, entry_param: &str) -> String {
         Dialect::Sqlite => " v",
         Dialect::Postgres => " AS v",
     };
-    // The wrapping parentheses are load-bearing: the caller uses this as the
-    // left operand of a `CASE WHEN <here> >= n`, and a bare `SELECT` there is a
-    // syntax error on both engines. A parameter placeholder needs no
-    // parentheses but a correlated column reference in an ORDER BY does, and
-    // one form for both is one thing to keep correct.
-    format!(
-        "(SELECT CAST(COUNT(*) AS BIGINT) FROM directory_votes{alias} WHERE v.entry_id = {entry_param})"
-    )
+    // `wrapped` exists because the two uses need different text. As the left
+    // operand of `CASE WHEN <here> >= n` a bare SELECT is a syntax error on
+    // both engines, so that caller needs the parentheses; as a statement in its
+    // own right a leading `(` is a syntax error on SQLite. Asking the builder
+    // which shape is wanted is clearer than stripping a character afterwards
+    // and hoping the string was what the caller thought it was.
+    let stmt = format!(
+        "SELECT CAST(COUNT(*) AS BIGINT) FROM directory_votes{alias} WHERE v.entry_id = {entry_param}"
+    );
+    if wrapped {
+        format!("({stmt})")
+    } else {
+        stmt
+    }
 }
