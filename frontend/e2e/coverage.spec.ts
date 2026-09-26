@@ -183,13 +183,23 @@ test('exports: a finished export can be deleted (forgotten)', async ({ page }) =
 
   await page.goto(`/exports?subject_type=work&subject_id=${workId}&title=Disposable`);
   await page.locator('#new-export').waitFor();
+
+  // How many rows exist *before* this test queues its own. The account is
+  // shared across the spec files, so "the first Ready export" is not this
+  // test's export: an earlier spec leaves one behind, `.first()` picks that
+  // one, and the test deletes a row it did not create while its own export
+  // flips Queued -> Ready underneath the wait -- which is how the item count
+  // came back *higher* than it started rather than one lower.
+  const section = page.locator('section[aria-labelledby=my-exports]');
+  const queuedBefore = await section.locator('.item').count();
+
   await page.locator('label.ack input[type=checkbox]').check();
   await page.click('button:text-is("Make the export")');
 
   // Wait for the export this test created to reach Ready, so the Delete button
   // belongs to it and not to another row. "Queued" is visible immediately, and
   // deleting mid-production asks the server to remove a row the worker still
-  // owns — which the test then reads as a failure to delete rather than as the
+  // owns -- which the test then reads as a failure to delete rather than as the
   // race it actually is.
   //
   // The row cannot be matched on the title: the list renders
@@ -202,23 +212,25 @@ test('exports: a finished export can be deleted (forgotten)', async ({ page }) =
   // link on the page and the assertion demanded 0 when 2 legitimate links
   // remained. Compare the full attribute instead: it is unique per row, and a
   // substring of it is not.
-  const section = page.locator('section[aria-labelledby=my-exports]');
+  // This test's own export is the row that appeared, not the first Ready one.
+  await expect(section.locator('.item')).toHaveCount(queuedBefore + 1, { timeout: 60_000 });
   const ready = section.locator('.item .state').filter({ hasText: 'Ready' }).first();
   await expect(ready).toBeVisible({ timeout: 60_000 });
 
   const download = section.locator('a.download[href*="/api/v1/exports/"]');
+  // The last row is the one this test just queued. A worker-produced export has
+  // no label, so its heading is "EPUB" and the title cannot identify it; the
+  // download href is the only stable per-row handle, and the newest row is the
+  // only one known to be this test's.
   const row = section.locator('.item').filter({ has: page.locator('a.download[href*="/api/v1/exports/"]') });
-  const href = await row.first().locator('a.download').getAttribute('href');
+  const href = await row.last().locator('a.download').getAttribute('href');
   expect(href).toBeTruthy();
   // The href is `/api/v1/exports/{id}/download`, so the id is the second-to-last
   // segment and the last one is the literal "download".
   expect(href).toContain('/api/v1/exports/');
   expect(href!.endsWith('/download')).toBe(true);
 
-  const items = section.locator('.item');
-  const before = await items.count();
-
-  await row.first().locator('button:text-is("Delete")').click();
+  await row.last().locator('button:text-is("Delete")').click();
 
   // That row's own download link is gone. Asserting "No exports yet" instead
   // tested the shared account's history: the export-download test above leaves
@@ -229,8 +241,8 @@ test('exports: a finished export can be deleted (forgotten)', async ({ page }) =
   });
   // And the surviving links belong to the other exports, not to a page that
   // failed to re-render.
-  await expect(download).toHaveCount(before - 1);
-  await expect(items).toHaveCount(before - 1);
+  await expect(download).toHaveCount(queuedBefore);
+  await expect(section.locator('.item')).toHaveCount(queuedBefore);
 });
 
 // ---------------------------------------------------------------------------
