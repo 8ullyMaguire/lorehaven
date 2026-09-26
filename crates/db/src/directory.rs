@@ -160,7 +160,9 @@ pub async fn list_lists(db: &Database) -> Result<Vec<DirectoryList>> {
 pub async fn list_by_slug(db: &Database, slug: &str) -> Result<Option<DirectoryList>> {
     let sql = db.sql(
         "SELECT id, slug, title, description, kind, is_instance_list, position, created_by, created_at FROM directory_lists WHERE slug = ?",
-        "SELECT id, slug, title, description, kind, is_instance_list, position, created_by, created_at FROM directory_lists WHERE slug = ?",
+        // `position` is INTEGER; the struct field is i64, so sqlx needs the cast.
+        "SELECT id, slug, title, description, kind, is_instance_list, CAST(position AS BIGINT), created_by, created_at \
+         FROM directory_lists WHERE slug = $1",
     );
     let row: Option<DirectoryList> = match db.backend() {
         Backend::Sqlite => {
@@ -326,7 +328,7 @@ pub async fn list_entries(
         DirectorySort::New => "e.created_at DESC",
     };
     let sql = format!(
-        "SELECT e.id, e.list_id, e.kind, e.category, e.title, e.url, e.description, e.ref_id, e.tags_json, e.submitted_by, e.approved_by, e.score, e.created_at \
+        "SELECT e.id, e.list_id, e.kind, e.category, e.title, e.url, e.description, e.ref_id, e.tags_json, e.submitted_by, e.approved_by, CAST(e.score AS DOUBLE PRECISION) AS score, e.created_at \
          FROM directory_entries e WHERE {} ORDER BY {order} LIMIT {} OFFSET {}",
         where_parts.join(" AND "),
         filter.limit.max(1),
@@ -364,8 +366,11 @@ pub async fn get_entry(
     let sql = db.sql(
         "SELECT id, list_id, kind, category, title, url, description, ref_id, tags_json, submitted_by, approved_by, score, created_at \
          FROM directory_entries WHERE id = ? AND removed_at IS NULL",
-        "SELECT id, list_id, kind, category, title, url, description, ref_id, tags_json, submitted_by, approved_by, score, created_at \
-         FROM directory_entries WHERE id = ? AND removed_at IS NULL",
+        // `score` is REAL, i.e. FLOAT4, and the field is f64 (FLOAT8). The PG arm
+        // used to be a verbatim copy of the SQLite one, so it also kept the `?`.
+        "SELECT id, list_id, kind, category, title, url, description, ref_id, tags_json, submitted_by, approved_by, \
+                CAST(score AS DOUBLE PRECISION) AS score, created_at \
+         FROM directory_entries WHERE id = $1 AND removed_at IS NULL",
     );
     let row: Option<DirectoryEntry> = match db.backend() {
         Backend::Sqlite => {
@@ -506,7 +511,9 @@ pub async fn set_vote(
 pub async fn entry_score(db: &Database, entry_id: &str) -> Result<f64> {
     let sql = db.sql(
         "SELECT score FROM directory_entries WHERE id = ?",
-        "SELECT score FROM directory_entries WHERE id = ?",
+        // `score` is REAL (FLOAT4); sqlx will not decode that into the f64 the
+        // tuple asks for. The PG arm was a verbatim copy of the SQLite one.
+        "SELECT CAST(score AS DOUBLE PRECISION) FROM directory_entries WHERE id = $1",
     );
     let row: Option<(f64,)> = match db.backend() {
         Backend::Sqlite => {
@@ -551,7 +558,8 @@ pub async fn pending_entries(db: &Database) -> Result<Vec<DirectoryEntry>> {
     let sql = db.sql(
         "SELECT id, list_id, kind, category, title, url, description, ref_id, tags_json, submitted_by, approved_by, score, created_at \
          FROM directory_entries WHERE approved_by IS NULL AND removed_at IS NULL ORDER BY created_at ASC LIMIT 200",
-        "SELECT id, list_id, kind, category, title, url, description, ref_id, tags_json, submitted_by, approved_by, score, created_at \
+        "SELECT id, list_id, kind, category, title, url, description, ref_id, tags_json, submitted_by, approved_by, \
+                CAST(score AS DOUBLE PRECISION) AS score, created_at \
          FROM directory_entries WHERE approved_by IS NULL AND removed_at IS NULL ORDER BY created_at ASC LIMIT 200",
     );
     let rows: Vec<DirectoryEntry> = match db.backend() {
