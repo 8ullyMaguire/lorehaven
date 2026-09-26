@@ -317,7 +317,7 @@ pub async fn tag_work(db: &Database, work_id: &str, node_id: &str, weight: i64) 
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?, ?, ?, ?)",
-        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES ($1::uuid, $2::uuid, $3, $4)",
+        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES ($1::uuid, $2, $3, $4)",
     );
     match db.backend() {
         Backend::Sqlite => {

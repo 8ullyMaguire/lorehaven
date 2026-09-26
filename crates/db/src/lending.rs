@@ -201,7 +201,7 @@ pub async fn grant_loan(
              revoked_at = NULL,
              expired_at = NULL,
              updated_at = excluded.updated_at,
-             version = version + 1
+             version = work_loans.version + 1
          RETURNING id::text AS id",
     );
     // A re-grant keeps the row's original id, so the id comes back from the

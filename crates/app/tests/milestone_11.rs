@@ -616,7 +616,7 @@ async fn theme_boost_tag_raises_work_score() {
     let node = darkhold_db::taxonomy::create_node(harness.tdb.db(), "tag", "adventure")
         .await
         .expect("node");
-    let _ = darkhold_db::taxonomy::tag_work(harness.tdb.db(), &w2, &node.id, 1)
+    darkhold_db::taxonomy::tag_work(harness.tdb.db(), &w2, &node.id, 1)
         .await
         .expect("tag");
 

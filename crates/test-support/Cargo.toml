@@ -12,3 +12,4 @@ serde_json.workspace = true
 sqlx = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }
 tower.workspace = true
+tracing-subscriber.workspace = true
