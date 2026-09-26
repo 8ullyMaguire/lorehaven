@@ -89,6 +89,18 @@ jobs:
       - name: PostgreSQL arms must not use the SQLite pool
         run: python3 scripts/check-pg-arm-uses-sqlite-pool.py crates
 
+      # `?` is SQLite syntax. A hand-written `Backend::Postgres` arm that
+      # copied the SQLite arm's query literal is a syntax error at the first
+      # `AND` on PostgreSQL -- a 500 -- and is green on SQLite. Eleven such
+      # statements shipped in this repo before this check existed; it caught two
+      # more within minutes of being written, both times a fix aimed at the
+      # wrong (adjacent, near-identical) arm.
+      - name: PostgreSQL backend-arm placeholder check (self-test)
+        run: python3 scripts/check-pg-backend-arm-placeholders.py --self-test
+
+      - name: PostgreSQL backend-arm placeholders must be $n
+        run: python3 scripts/check-pg-backend-arm-placeholders.py
+
   frontend:
     name: Frontend (check, test, build)
     runs-on: ubuntu-latest
