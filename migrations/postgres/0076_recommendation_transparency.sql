@@ -108,7 +108,7 @@ CREATE INDEX idx_tag_wrangling_proposals_from ON tag_wrangling_proposals (from_n
 CREATE TABLE IF NOT EXISTS tag_wrangler_merge_actions (
     id                  UUID PRIMARY KEY,
     proposal_id         UUID NOT NULL REFERENCES tag_wrangling_proposals(id) ON DELETE CASCADE,
-    action              TEXT NOT NULL CHECK (action IN ('retarget_tags','retarget_aliases','rewrite_canonical')),
+    action              TEXT NOT NULL CHECK (action IN ('retarget_tags','retarget_aliases','rewrite_canonical','set_weight','dedupe_tags')),
     -- The previous value, as text. `node_id` before a retarget, the canonical
     -- before a rewrite.
     previous_value      TEXT,

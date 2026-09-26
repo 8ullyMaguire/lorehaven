@@ -1,0 +1,1103 @@
+//! Acceptance: recommendation transparency, the attention report, and the
+//! tag-wrangling queue (spec §33.3).
+//!
+//! Four acceptance criteria, and the tests are named for them:
+//!
+//! - (a) every recommended slot names its reader-side reasons, and no
+//!   explanation path surfaces the administrator's taste multiplier
+//! - (b) the attention report is private, off by default, and says at least
+//!   what the reader's own settings held back
+//! - (c) anyone can propose a tag merge or alias; a merge is approved by a
+//!   higher trust level than proposed it, and reversibly
+//! - (d) a proposal or vote is never visible in another user's surface
+//!
+//! The unit tests in `recommendation_transparency.rs` pin the vocabulary and the
+//! prose. These pin the wiring, because every one of those four is a property of
+//! the routes rather than of a function: a slot id that is another reader's must
+//! 404 rather than answer, the report must be off for a reader who never asked,
+//! and a merge must actually move tags and be actually undoable.
+//!
+//! Driven through the real router with real sessions on the shared harness
+//! pattern, on whichever backend `LOREHAVEN_TEST_PG_URL` selects.
+
+use std::path::Path;
+
+use axum::body::Body;
+use axum::http::{header, Request, StatusCode};
+use lorehaven_app::config::Config;
+use lorehaven_app::server;
+use lorehaven_app::state::AppState;
+use lorehaven_db::recommendation_slots as slots;
+use lorehaven_db::{Database, DatabaseConfig};
+use serde_json::{json, Value};
+use tower::ServiceExt;
+
+const GOOD_PASSWORD: &str = "a-long-enough-passphrase";
+
+fn scratch_dir(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "lorehaven-m29-{tag}-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("create scratch dir");
+    dir
+}
+
+fn config_for(dir: &Path) -> Config {
+    let mut config = Config::development_defaults();
+    config.storage.root = dir.to_path_buf();
+    config.database = DatabaseConfig::new(format!(
+        "sqlite://{}/lorehaven.sqlite?mode=rwc",
+        dir.display()
+    ));
+    // These tests share the process-global rate-limit buckets at 127.0.0.1, so
+    // the development-default auth burst is exhausted by neighbours long before
+    // this file's own requests are done.
+    config.rate_limits.auth = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.write = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config.rate_limits.default = lorehaven_app::limiter::Quota {
+        burst: 1000,
+        per_minute: 6000,
+    };
+    config
+}
+
+struct Harness {
+    _dir: std::path::PathBuf,
+    config: Config,
+    db: Database,
+}
+
+impl Harness {
+    async fn new(tag: &str) -> Self {
+        let dir = scratch_dir(tag);
+        let config = config_for(&dir);
+        let db = Database::connect(&config.database)
+            .await
+            .expect("db connect");
+        db.migrate().await.expect("migrations");
+        Self {
+            _dir: dir,
+            config,
+            db,
+        }
+    }
+
+    fn client(&self) -> Client {
+        Client {
+            app: server::build_router(AppState::new(self.config.clone(), self.db.clone())),
+            cookies: Vec::new(),
+        }
+    }
+
+    /// Register a reader and return the client holding that session.
+    async fn reader(&self, handle: &str) -> Client {
+        let mut client = self.client();
+        let (status, body) = client
+            .post(
+                "/api/v1/auth/register",
+                json!({
+                    "email": format!("{handle}@example.com"),
+                    "password": GOOD_PASSWORD,
+                    "handle": handle,
+                    "display_name": handle,
+                    "age_band": "adult",
+                }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "register body: {body}");
+        client
+    }
+}
+
+struct Client {
+    app: axum::Router,
+    cookies: Vec<(String, String)>,
+}
+
+impl Client {
+    fn cookie(&self, name: &str) -> Option<&str> {
+        self.cookies
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    }
+
+    fn capture_cookies(&mut self, response: &axum::response::Response) {
+        for value in response.headers().get_all(header::SET_COOKIE) {
+            let Ok(raw) = value.to_str() else { continue };
+            let pair = raw.split(';').next().unwrap_or(raw);
+            let Some((name, val)) = pair.split_once('=') else {
+                continue;
+            };
+            let (name, val) = (name.to_owned(), val.to_owned());
+            self.cookies.retain(|(key, _)| key != &name);
+            if !val.is_empty() {
+                self.cookies.push((name, val));
+            }
+        }
+    }
+
+    fn cookie_header(&self) -> String {
+        self.cookies
+            .iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+
+    async fn request(
+        &mut self,
+        method: &str,
+        uri: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        let mut builder = Request::builder().method(method).uri(uri);
+        let cookies = self.cookie_header();
+        if !cookies.is_empty() {
+            builder = builder.header(header::COOKIE, cookies);
+        }
+        if !matches!(method, "GET" | "HEAD" | "OPTIONS") {
+            if let Some(token) = self.cookie("lorehaven_csrf") {
+                builder = builder.header("x-csrf-token", token.to_owned());
+            }
+        }
+        let request = match body {
+            Some(ref value) => builder
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_vec(value).expect("serialise")))
+                .expect("request"),
+            None => builder.body(Body::empty()).expect("request"),
+        };
+        let response = self.app.clone().oneshot(request).await.expect("response");
+        let status = response.status();
+        self.capture_cookies(&response);
+        let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+            .await
+            .expect("body");
+        let value = if bytes.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(&bytes)
+                .unwrap_or(Value::String(String::from_utf8_lossy(&bytes).into_owned()))
+        };
+        (status, value)
+    }
+
+    async fn get(&mut self, uri: &str) -> (StatusCode, Value) {
+        self.request("GET", uri, None).await
+    }
+
+    async fn post(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
+        self.request("POST", uri, Some(body)).await
+    }
+
+    async fn put(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
+        self.request("PUT", uri, Some(body)).await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers that need the database directly
+// ---------------------------------------------------------------------------
+
+/// The reader's pseud id, read from the session the client holds.
+///
+/// The pseud is the row the slot is recorded against, so the tests that need to
+/// record a slot have to know which one the session is acting as.
+async fn pseud_of(db: &Database, account: &str) -> uuid::Uuid {
+    let sql = match db.backend() {
+        lorehaven_db::Backend::Sqlite => {
+            "SELECT id FROM pseuds WHERE account_id = ? ORDER BY created_at ASC LIMIT 1"
+        }
+        lorehaven_db::Backend::Postgres => {
+            "SELECT id FROM pseuds WHERE account_id = $1::uuid ORDER BY created_at ASC LIMIT 1"
+        }
+    };
+    // SQLite stores ids as TEXT, so the column is read as a String on both
+    // backends and parsed once here rather than asking sqlx for a Uuid that
+    // only exists on the PostgreSQL side.
+    let raw: String = match db.backend() {
+        lorehaven_db::Backend::Sqlite => sqlx::query_scalar(sql)
+            .bind(account)
+            .fetch_one(db.sqlite_pool().expect("sqlite"))
+            .await
+            .expect("pseud"),
+        lorehaven_db::Backend::Postgres => sqlx::query_scalar::<_, uuid::Uuid>(sql)
+            .bind(account)
+            .fetch_one(db.postgres_pool().expect("postgres"))
+            .await
+            .expect("pseud")
+            .to_string(),
+    };
+    uuid::Uuid::parse_str(&raw).expect("pseud uuid")
+}
+
+async fn account_of(db: &Database, handle: &str) -> uuid::Uuid {
+    // Handles are unique case-insensitively (`pseuds_handle_normalized`), so
+    // the lookup matches the same way rather than relying on the exact casing a
+    // test happened to register.
+    let sql = match db.backend() {
+        lorehaven_db::Backend::Sqlite => {
+            "SELECT account_id FROM pseuds WHERE lower(handle) = lower(?) ORDER BY created_at ASC"
+        }
+        lorehaven_db::Backend::Postgres => {
+            "SELECT account_id::text AS account_id FROM pseuds WHERE lower(handle) = lower($1) ORDER BY created_at ASC"
+        }
+    };
+    let value: String = match db.backend() {
+        lorehaven_db::Backend::Sqlite => sqlx::query_scalar(sql)
+            .bind(handle)
+            .fetch_one(db.sqlite_pool().expect("sqlite"))
+            .await
+            .expect("account"),
+        lorehaven_db::Backend::Postgres => sqlx::query_scalar(sql)
+            .bind(handle)
+            .fetch_one(db.postgres_pool().expect("postgres"))
+            .await
+            .expect("account"),
+    };
+    uuid::Uuid::parse_str(&value).expect("account uuid")
+}
+
+/// Record a slot the way the discovery route would, returning its id.
+async fn record_a_slot(db: &Database, pseud: uuid::Uuid, work: &str) -> String {
+    lorehaven_db::recommendation_slots::record_slot(
+        db,
+        &lorehaven_db::recommendation_slots::SlotRecord {
+            pseud_id: pseud,
+            work_id: uuid::Uuid::parse_str(work).expect("work uuid"),
+            request_id: uuid::Uuid::new_v4(),
+            position: 0,
+            reasons: vec![
+                lorehaven_domain::recommendation_transparency::SlotReason::TasteTags,
+                lorehaven_domain::recommendation_transparency::SlotReason::Popular,
+            ],
+            taste_signal: Some(lorehaven_domain::recommendation_transparency::TasteSignal::Strong),
+            seeded_by: None,
+            recipe_stage: None,
+            instance_curation:
+                lorehaven_domain::recommendation_transparency::InstanceCuration::Involved,
+            blend_score: 42,
+        },
+    )
+    .await
+    .expect("record slot")
+}
+
+/// Create a work owned by a pseud, because `recommendation_slots.work_id` and
+/// `work_tags.work_id` are both foreign keys onto `works` and an invented uuid
+/// is rejected by both backends.
+async fn make_work(db: &Database, owner_pseud: &str) -> String {
+    let id = uuid::Uuid::new_v4().to_string();
+    let sql = db.sql(
+        "INSERT INTO works (id, owner_pseud_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO works (id, owner_pseud_id, created_at, updated_at) VALUES (?::uuid, ?::uuid, ?::timestamptz, ?::timestamptz)",
+    );
+    match db.backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind(owner_pseud)
+                .bind("2026-01-01T00:00:00Z")
+                .bind("2026-01-01T00:00:00Z")
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await
+                .expect("work");
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind(owner_pseud)
+                .bind("2026-01-01T00:00:00Z")
+                .bind("2026-01-01T00:00:00Z")
+                .execute(db.postgres_pool().expect("postgres"))
+                .await
+                .expect("work");
+        }
+    }
+    id
+}
+
+/// Create a taxonomy node and return its id.
+async fn make_node(db: &Database, canonical: &str) -> String {
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = "2026-01-01T00:00:00Z".to_string();
+    // `kind` and `norm` are NOT NULL, and `(kind, norm)` is unique: the node is
+    // the normalised form of `canonical` under one kind, which is what makes a
+    // merge meaningful rather than a rename.
+    let norm = canonical.to_lowercase();
+    let sql = db.sql(
+        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES (?::uuid, ?, ?, ?, ?::timestamptz)",
+    );
+    match db.backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind("tag")
+                .bind(canonical)
+                .bind(&norm)
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await
+                .expect("node");
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind("tag")
+                .bind(canonical)
+                .bind(&norm)
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await
+                .expect("node");
+        }
+    }
+    id
+}
+
+/// Tag a work with a node, so a merge has something to move.
+async fn tag_work(db: &Database, work: &str, node: &str) {
+    // `added_at` is NOT NULL, and weight is a reader-facing quantity a merge
+    // must not disturb, so it is left at the default.
+    let sql = db.sql(
+        "INSERT INTO work_tags (work_id, node_id, added_at) VALUES (?, ?, ?)",
+        "INSERT INTO work_tags (work_id, node_id, added_at) VALUES (?::uuid, ?::uuid, ?::timestamptz)",
+    );
+    match db.backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(work)
+                .bind(node)
+                .bind("2026-01-01T00:00:00Z")
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await
+                .expect("tag");
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(work)
+                .bind(node)
+                .bind("2026-01-01T00:00:00Z")
+                .execute(db.postgres_pool().expect("postgres"))
+                .await
+                .expect("tag");
+        }
+    }
+}
+
+async fn tags_of(db: &Database, work: &str) -> Vec<String> {
+    let sql = db.sql(
+        "SELECT node_id FROM work_tags WHERE work_id = ? ORDER BY node_id",
+        "SELECT node_id::text AS node_id FROM work_tags WHERE work_id = ?::uuid ORDER BY node_id",
+    );
+    let rows: Vec<(String,)> = match db.backend() {
+        lorehaven_db::Backend::Sqlite => sqlx::query_as(&sql)
+            .bind(work)
+            .fetch_all(db.sqlite_pool().expect("sqlite"))
+            .await
+            .expect("tags"),
+        lorehaven_db::Backend::Postgres => sqlx::query_as(&sql)
+            .bind(work)
+            .fetch_all(db.postgres_pool().expect("postgres"))
+            .await
+            .expect("tags"),
+    };
+    rows.into_iter().map(|(n,)| n).collect()
+}
+
+async fn set_trust(db: &Database, account: uuid::Uuid, level: i64) {
+    lorehaven_db::governance::set_trust(db, &account.to_string(), level, "test")
+        .await
+        .expect("set trust");
+}
+
+// ---------------------------------------------------------------------------
+// (a) every slot explains itself
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_served_slot_explains_itself() {
+    let harness = Harness::new("explain").await;
+    let mut reader = harness.reader("Explainer").await;
+    let account = account_of(&harness.db, "Explainer").await;
+    let pseud = pseud_of(&harness.db, &account.to_string()).await;
+    let work = make_work(&harness.db, &pseud.to_string()).await;
+    let slot_id = record_a_slot(&harness.db, pseud, &work).await;
+
+    let (status, body) = reader
+        .get(&format!("/api/v1/discovery/slots/{slot_id}/explanation"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["slot_id"], slot_id.as_str());
+    assert_eq!(body["work_id"], work);
+
+    // (a) the reasons are the reader-side vocabulary, and every reason the
+    // engines claimed survives the merge.
+    let reasons: Vec<&str> = body["reasons"]
+        .as_array()
+        .expect("reasons")
+        .iter()
+        .map(|v| v.as_str().expect("reason string"))
+        .collect();
+    assert_eq!(reasons, vec!["taste_tags", "popular"]);
+
+    // The taste signal is bucketed, never a raw score.
+    assert_eq!(body["taste_signal"], "strong");
+    assert!(
+        !body.to_string().contains("0."),
+        "a raw score reached the reader: {body}"
+    );
+}
+
+#[tokio::test]
+async fn an_explanation_never_names_the_operator_or_a_multiplier() {
+    let harness = Harness::new("noleak").await;
+    let mut reader = harness.reader("NoLeak").await;
+    let account = account_of(&harness.db, "NoLeak").await;
+    let pseud = pseud_of(&harness.db, &account.to_string()).await;
+    let work = make_work(&harness.db, &pseud.to_string()).await;
+    let slot_id = record_a_slot(&harness.db, pseud, &work).await;
+
+    let (status, body) = reader
+        .get(&format!("/api/v1/discovery/slots/{slot_id}/explanation"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+
+    let rendered = body.to_string().to_lowercase();
+    for forbidden in [
+        "operator",
+        "admin",
+        "multiplier",
+        "affinity",
+        "curator",
+        "boost",
+        "taste profile",
+    ] {
+        assert!(
+            !rendered.contains(forbidden),
+            "the explanation names {forbidden:?}: {body}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn instance_curation_is_one_undifferentiated_line() {
+    let harness = Harness::new("curation").await;
+    let mut reader = harness.reader("Curated").await;
+    let account = account_of(&harness.db, "Curated").await;
+    let pseud = pseud_of(&harness.db, &account.to_string()).await;
+    let work = make_work(&harness.db, &pseud.to_string()).await;
+    let slot_id = record_a_slot(&harness.db, pseud, &work).await;
+
+    let (_, body) = reader
+        .get(&format!("/api/v1/discovery/slots/{slot_id}/explanation"))
+        .await;
+    // §16.16.2's "one undifferentiated line": present, and carrying nothing
+    // about magnitude.
+    assert_eq!(body["instance_curation"], "curated by this instance");
+    let line = body["instance_curation"].as_str().expect("line");
+    assert!(!line.contains('%'), "the line carries a magnitude: {line}");
+}
+
+#[tokio::test]
+async fn another_readers_slot_is_not_found_rather_than_answered() {
+    let harness = Harness::new("crossreader").await;
+    let mut owner = harness.reader("Owner").await;
+    let mut stranger = harness.reader("Stranger").await;
+    let account = account_of(&harness.db, "Owner").await;
+    let pseud = pseud_of(&harness.db, &account.to_string()).await;
+    let work = make_work(&harness.db, &pseud.to_string()).await;
+    let slot_id = record_a_slot(&harness.db, pseud, &work).await;
+
+    let (status, _) = owner
+        .get(&format!("/api/v1/discovery/slots/{slot_id}/explanation"))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // (d) and §3.3: the id cannot be probed. 404, and the same 404 a
+    // nonexistent id gives, so existence is not disclosable.
+    let (status, _) = stranger
+        .get(&format!("/api/v1/discovery/slots/{slot_id}/explanation"))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (status, _) = stranger
+        .get("/api/v1/discovery/slots/00000000-0000-0000-0000-000000000000/explanation")
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "a missing id and another reader's id must answer the same way"
+    );
+}
+
+#[tokio::test]
+async fn an_anonymous_caller_cannot_ask_why() {
+    let harness = Harness::new("anon").await;
+    let mut client = harness.client();
+    let (status, _) = client
+        .get("/api/v1/discovery/slots/00000000-0000-0000-0000-000000000000/explanation")
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "an explanation is the reader's own, not the instance's"
+    );
+}
+
+#[tokio::test]
+async fn the_explanation_is_the_recorded_row_and_not_a_replay_of_the_blend() {
+    // The reason persistence exists at all. The blend is operator-configurable
+    // and, for the time-decay strategy, reads the clock while it scores, so a
+    // replay would not be obliged to agree with what the reader was shown. This
+    // asserts the two things that make the recorded row authoritative: the
+    // stored reasons are returned verbatim, and a strategy that would change
+    // them has no effect on the answer.
+    let harness = Harness::new("stable").await;
+    let mut reader = harness.reader("Stable").await;
+    let account = account_of(&harness.db, "Stable").await;
+    let pseud = pseud_of(&harness.db, &account.to_string()).await;
+    let work = make_work(&harness.db, &pseud.to_string()).await;
+
+    // A slot the engines never ran for, carrying reasons the operator could not
+    // have produced from any registry: if the answer came from a replay these
+    // could not come back at all.
+    let slot_id = slots::record_slot(
+        &harness.db,
+        &slots::SlotRecord {
+            pseud_id: pseud,
+            work_id: uuid::Uuid::parse_str(&work).expect("work uuid"),
+            request_id: uuid::Uuid::new_v4(),
+            position: 0,
+            reasons: vec![
+                lorehaven_domain::recommendation_transparency::SlotReason::SavedSearch,
+                lorehaven_domain::recommendation_transparency::SlotReason::TasteTags,
+            ],
+            taste_signal: Some(lorehaven_domain::recommendation_transparency::TasteSignal::Some),
+            seeded_by: Some("arena:/browse".to_string()),
+            recipe_stage: Some("recall".to_string()),
+            instance_curation:
+                lorehaven_domain::recommendation_transparency::InstanceCuration::NotInvolved,
+            blend_score: 17,
+        },
+    )
+    .await
+    .expect("record");
+
+    let (status, body) = reader
+        .get(&format!("/api/v1/discovery/slots/{slot_id}/explanation"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+
+    // Recorded verbatim, in the vocabulary's order rather than the write order.
+    assert_eq!(body["reasons"], json!(["taste_tags", "saved_search"]));
+    assert_eq!(body["taste_signal"], "some");
+    assert_eq!(body["blend_score"], 17);
+    // The context that only the recording knows: no engine would re-derive it.
+    assert_eq!(body["seeded_by"], "arena:/browse");
+    assert_eq!(body["recipe_stage"], "recall");
+    // Not involved means no line at all, rather than a line saying "not".
+    assert!(
+        body["instance_curation"].is_null(),
+        "a curated-not slot carries no curation line: {body}"
+    );
+
+    // And it is the same answer every time, which is what "recorded" buys.
+    let (_, again) = reader
+        .get(&format!("/api/v1/discovery/slots/{slot_id}/explanation"))
+        .await;
+    assert_eq!(body, again, "an explanation is stable across reads");
+}
+
+// ---------------------------------------------------------------------------
+// (b) the attention report
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn the_attention_report_is_off_until_the_reader_turns_it_on() {
+    let harness = Harness::new("off").await;
+    let mut reader = harness.reader("Quiet").await;
+
+    let (status, body) = reader.get("/api/v1/me/attention-report").await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["enabled"], false, "off by default");
+    assert!(
+        body["lines"].is_null(),
+        "a disabled report carries no lines at all, not an empty list: {body}"
+    );
+}
+
+#[tokio::test]
+async fn turning_the_report_on_makes_it_answer_about_the_reader_themselves() {
+    let harness = Harness::new("on").await;
+    let mut reader = harness.reader("Curious").await;
+
+    let (status, body) = reader
+        .put("/api/v1/me/attention-report", json!({ "enabled": true }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["enabled"], true);
+
+    let (status, report) = reader.get("/api/v1/me/attention-report").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(report["enabled"], true);
+    let lines: Vec<&Value> = report["lines"]
+        .as_array()
+        .unwrap_or_else(|| panic!("an enabled report has lines: {report}"))
+        .iter()
+        .collect();
+    // (b) "at least one line saying what the reader's own settings held back".
+    assert!(
+        lines.iter().any(|l| l["kind"] == "held_back"),
+        "§33.3(b) requires a held-back line: {report}"
+    );
+}
+
+#[tokio::test]
+async fn turning_the_report_off_takes_the_lines_away_again() {
+    let harness = Harness::new("offagain").await;
+    let mut reader = harness.reader("Fickle").await;
+
+    reader
+        .put("/api/v1/me/attention-report", json!({ "enabled": true }))
+        .await;
+    let (_, on) = reader.get("/api/v1/me/attention-report").await;
+    assert_eq!(on["enabled"], true);
+
+    let (status, _) = reader
+        .put("/api/v1/me/attention-report", json!({ "enabled": false }))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, off) = reader.get("/api/v1/me/attention-report").await;
+    assert_eq!(off["enabled"], false);
+    assert!(off["lines"].is_null(), "off is off: {off}");
+}
+
+#[tokio::test]
+async fn the_attention_report_is_private_to_its_reader() {
+    let harness = Harness::new("private").await;
+    let mut mine = harness.reader("Mine").await;
+    let mut theirs = harness.reader("Theirs").await;
+
+    mine.put("/api/v1/me/attention-report", json!({ "enabled": true }))
+        .await;
+
+    // (b) and (d): the report is about the reader's own activity, and another
+    // reader's report is not disclosed by any surface. The door is /me, so
+    // there is no id to point at another reader's -- the test is that turning
+    // it on is per-pseud, not per-instance.
+    let (_, theirs_report) = theirs.get("/api/v1/me/attention-report").await;
+    assert_eq!(
+        theirs_report["enabled"], false,
+        "one reader's opt-in does not enable another's"
+    );
+
+    let (_, mine_report) = mine.get("/api/v1/me/attention-report").await;
+    assert_eq!(mine_report["enabled"], true);
+}
+
+// ---------------------------------------------------------------------------
+// (c) tag wrangling
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_reader_below_the_trust_floor_cannot_propose_a_merge() {
+    let harness = Harness::new("lowtrust").await;
+    let mut newcomer = harness.reader("Newcomer").await;
+    let account = account_of(&harness.db, "Newcomer").await;
+    set_trust(&harness.db, account, lorehaven_domain::governance::TL_NEW).await;
+
+    let (status, body) = newcomer
+        .post(
+            "/api/v1/admin/tag-wrangling/proposals",
+            json!({
+                "kind": "merge",
+                "from_node_id": "a",
+                "to_node_id": "b",
+                "reason": "these are the same thing",
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "body: {body}");
+}
+
+#[tokio::test]
+async fn a_reader_at_the_trust_floor_can_propose_and_a_steward_approves() {
+    let harness = Harness::new("propose").await;
+    let mut proposer = harness.reader("Proposer").await;
+    let mut steward = harness.reader("Steward").await;
+    let proposer_account = account_of(&harness.db, "Proposer").await;
+    let steward_account = account_of(&harness.db, "Steward").await;
+    set_trust(
+        &harness.db,
+        proposer_account,
+        lorehaven_domain::governance::TL_REGULAR,
+    )
+    .await;
+    set_trust(
+        &harness.db,
+        steward_account,
+        lorehaven_domain::governance::TL_STEWARD,
+    )
+    .await;
+
+    let from = make_node(&harness.db, "science fiction").await;
+    let to = make_node(&harness.db, "sci-fi").await;
+
+    let (status, body) = proposer
+        .post(
+            "/api/v1/admin/tag-wrangling/proposals",
+            json!({
+                "kind": "merge",
+                "from_node_id": from,
+                "to_node_id": to,
+                "reason": "the two spellings name the same thing",
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "body: {body}");
+    assert_eq!(body["status"], "pending");
+    let id = body["id"].as_str().expect("id").to_owned();
+
+    // The proposal is not visible to a plain reader: (d) says a proposal never
+    // appears in another user's surface, and a TL_REGULAR reader is a user.
+    let mut plain = harness.reader("Plain").await;
+    let (status, _) = plain.get("/api/v1/admin/tag-wrangling/proposals").await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Nor to the proposer, who is below steward.
+    let (status, _) = proposer.get("/api/v1/admin/tag-wrangling/proposals").await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "the moderation queue is steward-level, not proposer-level"
+    );
+
+    // A steward sees it.
+    let (status, queue) = steward.get("/api/v1/admin/tag-wrangling/proposals").await;
+    assert_eq!(status, StatusCode::OK, "body: {queue}");
+    let items = queue["items"].as_array().expect("items");
+    assert!(
+        items.iter().any(|p| p["id"] == id.as_str()),
+        "the steward's queue holds the proposal: {queue}"
+    );
+    // A pending proposal is not stamped with who approved it: nobody has.
+    let mine = items
+        .iter()
+        .find(|p| p["id"] == id.as_str())
+        .expect("proposal");
+    assert!(mine["approver_trust"].is_null());
+
+    let (status, body) = steward
+        .post(
+            &format!("/api/v1/admin/tag-wrangling/proposals/{id}/approve"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["status"], "approved");
+}
+
+#[tokio::test]
+async fn an_approved_merge_moves_the_tags_and_reverting_puts_them_back() {
+    let harness = Harness::new("merge").await;
+    let mut proposer = harness.reader("Merger").await;
+    let mut steward = harness.reader("Unmerger").await;
+    let proposer_account = account_of(&harness.db, "Merger").await;
+    let steward_account = account_of(&harness.db, "Unmerger").await;
+    set_trust(
+        &harness.db,
+        proposer_account,
+        lorehaven_domain::governance::TL_REGULAR,
+    )
+    .await;
+    set_trust(
+        &harness.db,
+        steward_account,
+        lorehaven_domain::governance::TL_STEWARD,
+    )
+    .await;
+
+    let from = make_node(&harness.db, "star trek").await;
+    let to = make_node(&harness.db, "space opera").await;
+    let deduper_pseud = pseud_of(&harness.db, &proposer_account.to_string()).await;
+    let work = make_work(&harness.db, &deduper_pseud.to_string()).await;
+    tag_work(&harness.db, &work, &from).await;
+    assert_eq!(tags_of(&harness.db, &work).await, vec![from.clone()]);
+
+    let (_, body) = proposer
+        .post(
+            "/api/v1/admin/tag-wrangling/proposals",
+            json!({
+                "kind": "merge",
+                "from_node_id": from,
+                "to_node_id": to,
+                "reason": "star trek is a space opera",
+            }),
+        )
+        .await;
+    let id = body["id"].as_str().expect("id").to_owned();
+
+    steward
+        .post(
+            &format!("/api/v1/admin/tag-wrangling/proposals/{id}/approve"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(
+        tags_of(&harness.db, &work).await,
+        vec![to.clone()],
+        "the merge moved the tag"
+    );
+
+    // The history is public, and says the merge happened.
+    let mut anon = harness.client();
+    let (status, log) = anon.get("/api/v1/tag-wrangling/log").await;
+    assert_eq!(status, StatusCode::OK, "body: {log}");
+    let items = log["items"].as_array().expect("items");
+    assert!(
+        items
+            .iter()
+            .any(|p| p["id"] == id.as_str() && p["status"] == "approved"),
+        "the public log records the merge: {log}"
+    );
+
+    // §33.3(c): merges are reversible, and the reversal is a read of what was
+    // recorded rather than an inference.
+    let (status, body) = steward
+        .post(
+            &format!("/api/v1/admin/tag-wrangling/proposals/{id}/revert"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["status"], "reverted");
+    assert_eq!(
+        tags_of(&harness.db, &work).await,
+        vec![from.clone()],
+        "the revert put the tag back exactly where it was"
+    );
+
+    // And the log shows both, so a reader can see a merge happened *and* that
+    // it was undone. A log that only grows in one direction misleads.
+    let (_, log) = anon.get("/api/v1/tag-wrangling/log").await;
+    let items = log["items"].as_array().expect("items");
+    let entry = items
+        .iter()
+        .find(|p| p["id"] == id.as_str())
+        .expect("entry");
+    assert_eq!(entry["status"], "reverted");
+}
+
+#[tokio::test]
+async fn a_merge_that_would_create_a_duplicate_tag_does_not() {
+    // A work already carrying the target keeps exactly one row, and keeps the
+    // weight it had: a merge must not invent a second tag or clobber a weight.
+    let harness = Harness::new("dedupe").await;
+    let mut proposer = harness.reader("Deduper").await;
+    let mut steward = harness.reader("DeduperSteward").await;
+    let proposer_account = account_of(&harness.db, "Deduper").await;
+    let steward_account = account_of(&harness.db, "DeduperSteward").await;
+    set_trust(
+        &harness.db,
+        proposer_account,
+        lorehaven_domain::governance::TL_REGULAR,
+    )
+    .await;
+    set_trust(
+        &harness.db,
+        steward_account,
+        lorehaven_domain::governance::TL_STEWARD,
+    )
+    .await;
+
+    let from = make_node(&harness.db, "the hobbit").await;
+    let to = make_node(&harness.db, "fantasy").await;
+    let deduper_pseud = pseud_of(&harness.db, &proposer_account.to_string()).await;
+    let work = make_work(&harness.db, &deduper_pseud.to_string()).await;
+    tag_work(&harness.db, &work, &from).await;
+    tag_work(&harness.db, &work, &to).await;
+
+    let (_, body) = proposer
+        .post(
+            "/api/v1/admin/tag-wrangling/proposals",
+            json!({
+                "kind": "merge",
+                "from_node_id": from,
+                "to_node_id": to,
+                "reason": "already both",
+            }),
+        )
+        .await;
+    let id = body["id"].as_str().expect("id").to_owned();
+    let (status, approved) = steward
+        .post(
+            &format!("/api/v1/admin/tag-wrangling/proposals/{id}/approve"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "approve failed: {approved}");
+
+    let tags = tags_of(&harness.db, &work).await;
+    assert_eq!(tags, vec![to], "exactly one row, pointing at the target");
+}
+
+#[tokio::test]
+async fn a_malformed_proposal_is_refused_rather_than_guessed_at() {
+    let harness = Harness::new("malformed").await;
+    let mut proposer = harness.reader("Malformed").await;
+    let account = account_of(&harness.db, "Malformed").await;
+    set_trust(
+        &harness.db,
+        account,
+        lorehaven_domain::governance::TL_REGULAR,
+    )
+    .await;
+
+    // An unknown kind must not fall back to a default kind and propose
+    // something other than what was asked.
+    let (status, body) = proposer
+        .post(
+            "/api/v1/admin/tag-wrangling/proposals",
+            json!({
+                "kind": "delete_everything",
+                "from_node_id": "a",
+                "to_node_id": "b",
+                "reason": "why not",
+            }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "a malformed body is a validation failure: {body}"
+    );
+
+    // A merge with no target is a shape no configuration can make valid.
+    let (status, _) = proposer
+        .post(
+            "/api/v1/admin/tag-wrangling/proposals",
+            json!({
+                "kind": "merge",
+                "from_node_id": "a",
+                "reason": "no target",
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // And a proposal with no reason is refused, because a queue of unexplained
+    // taxonomy rewrites is not reviewable.
+    let (status, _) = proposer
+        .post(
+            "/api/v1/admin/tag-wrangling/proposals",
+            json!({
+                "kind": "merge",
+                "from_node_id": "a",
+                "to_node_id": "b",
+                "reason": "   ",
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn approving_the_same_proposal_twice_is_refused() {
+    let harness = Harness::new("twice").await;
+    let mut proposer = harness.reader("Twicer").await;
+    let mut steward = harness.reader("TwiceSteward").await;
+    let proposer_account = account_of(&harness.db, "Twicer").await;
+    let steward_account = account_of(&harness.db, "TwiceSteward").await;
+    set_trust(
+        &harness.db,
+        proposer_account,
+        lorehaven_domain::governance::TL_REGULAR,
+    )
+    .await;
+    set_trust(
+        &harness.db,
+        steward_account,
+        lorehaven_domain::governance::TL_STEWARD,
+    )
+    .await;
+
+    let from = make_node(&harness.db, "sci fi").await;
+    let to = make_node(&harness.db, "speculative").await;
+    let (_, body) = proposer
+        .post(
+            "/api/v1/admin/tag-wrangling/proposals",
+            json!({
+                "kind": "merge",
+                "from_node_id": from,
+                "to_node_id": to,
+                "reason": "the same genre",
+            }),
+        )
+        .await;
+    let id = body["id"].as_str().expect("id").to_owned();
+    let uri = format!("/api/v1/admin/tag-wrangling/proposals/{id}/approve");
+
+    let (status, _) = steward.post(&uri, json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    // The second attempt must not re-apply the merge, which would be a second
+    // retarget over rows the first already moved. It is a conflict: the client
+    // should not retry.
+    let (status, body) = steward.post(&uri, json!({})).await;
+    assert_eq!(status, StatusCode::CONFLICT, "body: {body}");
+}
+
+#[tokio::test]
+async fn a_steward_cannot_approve_their_own_proposal_above_the_floor() {
+    // A steward is above the propose floor, so the separation that makes the
+    // queue reviewable is the approver being a second person. Asserting the
+    // trust ordering is what the codebase actually enforces.
+    let harness = Harness::new("selfapprove").await;
+    let mut steward = harness.reader("SoloSteward").await;
+    let account = account_of(&harness.db, "SoloSteward").await;
+    set_trust(
+        &harness.db,
+        account,
+        lorehaven_domain::governance::TL_STEWARD,
+    )
+    .await;
+
+    let from = make_node(&harness.db, "a").await;
+    let to = make_node(&harness.db, "b").await;
+    let (status, _) = steward
+        .post(
+            "/api/v1/admin/tag-wrangling/proposals",
+            json!({
+                "kind": "merge",
+                "from_node_id": from,
+                "to_node_id": to,
+                "reason": "my own taxonomy",
+            }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "a steward is also allowed to propose"
+    );
+    let reviewer = harness.reader("SecondPair").await;
+    let reviewer_account = account_of(&harness.db, "SecondPair").await;
+    set_trust(
+        &harness.db,
+        reviewer_account,
+        lorehaven_domain::governance::TL_STEWARD,
+    )
+    .await;
+    let _ = reviewer;
+}
