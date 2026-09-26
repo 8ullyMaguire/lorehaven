@@ -1127,6 +1127,59 @@ export function toggleKudos(workId: string): Promise<{ kudoed: boolean }> {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Reading status on a work (spec §9.6)
+// ---------------------------------------------------------------------------
+//
+// The reader's own record of how far they got. Separate from a rating, a review
+// and kudos, and deliberately so: those are statements about the work, this is a
+// statement about the reader, which is why it needs no trust level and why it
+// lives under `/works/{id}/reading-status` rather than under the library.
+//
+// Not to be confused with `PUT /library/items/{id}/status`, which keys on a
+// *library item* -- a private copy made by an import. Both are named
+// `/…/{id}/…status` and they key on different rows; the library door was
+// accepting a work id and storing a row against a subject that did not exist.
+//
+// Reuses the `ReadingStatus` union declared further down this file, which is
+// kebab-case to match the server's `as_str`. An earlier version of this comment
+// block declared its own four-state union with `on_hold`, which `svelte-check`
+// caught as a duplicate identifier and which would have sent the server a
+// vocabulary it does not parse -- and would have dropped `want-to-read`, which
+// is a real state. The server's `ReadingStatus::parse` is the authority; the
+// client mirrors it and nothing else.
+
+export interface WorkReadingStatus {
+  status: ReadingStatus;
+  started_at: string | null;
+  finished_at: string | null;
+  updated_at: string;
+  version: number;
+}
+
+/** The reader's status for this work, or null when they have not recorded one. */
+export function fetchWorkReadingStatus(workId: string): Promise<WorkReadingStatus | null> {
+  return apiFetch<WorkReadingStatus | null>(
+    `/works/${encodeURIComponent(workId)}/reading-status`,
+  );
+}
+
+export function setWorkReadingStatus(
+  workId: string,
+  status: ReadingStatus,
+): Promise<WorkReadingStatus> {
+  return apiFetch<WorkReadingStatus>(`/works/${encodeURIComponent(workId)}/reading-status`, {
+    method: 'PUT',
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function clearWorkReadingStatus(workId: string): Promise<void> {
+  return apiFetch<void>(`/works/${encodeURIComponent(workId)}/reading-status`, {
+    method: 'DELETE',
+  });
+}
+
 // M32 — Typed votes, budgets, meta-moderation, karma (spec §35.2)
 
 export interface CategoryVoteType {
