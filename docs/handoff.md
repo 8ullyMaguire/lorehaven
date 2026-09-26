@@ -971,6 +971,62 @@ runs.
 
 22 acceptance tests, green on both backends. 21 domain, 3 db unit.
 
+### The taste profile was faked, and now is stored (migration 0077)
+
+`PUT /operator/taste-profile` answered `{"status": "updated"}` and persisted
+nothing. The dimensions were parsed out of the body, echoed back, and dropped on
+the floor, so an operator was told the instance's taste model had changed and it
+had not. The `// TODO: persist updates to config file` above it was not a
+loose end so much as the whole story: a running instance does not rewrite its own
+configuration, and the API has no business editing a file it may not be able to
+write. Migration 0077 gives it a table.
+
+`GET` falls back to the config when no row exists, which is the right default in
+both directions — an untouched instance reports the axes it is *actually* running
+on rather than an empty list that reads like a bug, and a configured instance
+does not pretend to have a stored profile.
+
+The amendment wants `{key, label, admin_target, weight}`; the config carries bare
+names. So `TasteDimension` validates at the edge, and two of its rules are worth
+knowing about:
+
+- **Duplicate keys are refused, not resolved.** Two axes called "prose" would
+  make a work's weight on that axis depend on which row a query read first.
+- **A target outside 0..1 is refused.** It is not a position on the axis.
+  Similarly, `diversity_injection_percent: 150` is a 422 rather than clamped to
+  100 — clamping would make the instance maximally diverse because someone typed
+  a number.
+
+### Three defects the route inventory found, none of them mine originally
+
+1. **`reject_wrangling` had no route.** The DB-layer function was written during
+   the transparency work and never wired up. The route inventory caught the gap,
+   which is precisely what it is for. It records the decision and the reason
+   rather than deleting the row: "reviewed and declined" and "never reviewed"
+   are different facts, and an un-reviewed queue is what an operator needs to find.
+2. **`list_pending_wrangling` ignored a status filter.** A steward could only
+   ever see what was waiting, never what had been decided. Now `list_wrangling`
+   takes the status as a *bind*, pending by default.
+3. **`approve_wrangling`'s PostgreSQL arm bound `&str` against `?::uuid`.** It
+   was unreachable — nothing called it — which is exactly how a type error
+   survives in a function only its own tests exercise.
+
+Also a pre-existing table error, present since the stub days:
+`/discovery/slots/{id}/explanation` was tabled as `Audience::Public` while the
+handler takes `RequireSession`. Corrected. `public_wrangling_log` now takes
+`MaybeSession` explicitly rather than being public by omission — the inventory
+cannot tell an intentionally public route from one someone forgot to guard.
+
+### A flake that is not a regression
+
+`milestone_2::repeated_login_attempts_are_rate_limited` failed in a parallel
+full-suite run and passes alone, and passes as a whole suite. The limiter is
+process-global and `clear_buckets()` is called by several tests, so under
+`--test-threads=2` another test refills the bucket between the clear and the
+loop. It is a test-isolation problem, not a product one; run that suite on its
+own when it matters. Do not "fix" it by widening the limits — the test exists to
+trip them.
+
 ## Environment quirks (unchanged)
 
 - **Work in local clone** `~/code-local/rust/lorehaven`. `~/code/rust/lorehaven` is SSHFS — never run git/cargo/npm through it.
