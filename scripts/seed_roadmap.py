@@ -57,6 +57,14 @@ STAGES = (
 # silently mislabel a card).
 STATUS_TO_STAGE = {
     "implemented-locally-tested": "shipped",
+    "implemented-verified-e2e": "shipped",
+    # Added after the seeder was found hard-erroring on it: 39 rows carried this
+    # status and the script refused to process the file at all. A status that
+    # describes the *strongest* claim in the vocabulary being the one the tool
+    # rejects is how a tracker stops being trustworthy -- the next person adds
+    # another one, and the failure mode is a tool that has never run end to end
+    # on the current data.
+    "implemented-fully-tested": "shipped",
     "implemented-fixture-tested": "shipped",
     "implemented-but-not-executed": "shipped",
     "external-integration-not-live": "finished",
@@ -316,5 +324,41 @@ def main() -> int:
     return 0
 
 
+def self_test() -> int:
+    """Every status in the CSV must be a status this script understands.
+
+    The vocabulary grew without the map growing with it: 39 rows carried
+    `implemented-fully-tested` -- the *strongest* claim the file makes -- and
+    `load_csv` hard-errored on the first one, so the seeder had never run
+    against the current data. A tracker whose strongest claim its own tooling
+    rejects is worse than one that admits it is incomplete, because the failure
+    surfaces as an error on a tool nobody runs on every change.
+
+    So the check is a check, not a comment: a new status without a mapping is a
+    failing exit code.
+    """
+    statuses: dict[str, int] = {}
+    for row in read_rows():
+        statuses[row["status"]] = statuses.get(row["status"], 0) + 1
+
+    unknown = {s: n for s, n in statuses.items() if s not in STATUS_TO_STAGE}
+    if unknown:
+        detail = ", ".join(f"{s!r} x{n}" for s, n in sorted(unknown.items()))
+        print(f"error: statuses with no stage mapping: {detail}", file=sys.stderr)
+        print("add each to STATUS_TO_STAGE, or correct the spelling in the CSV", file=sys.stderr)
+        return 1
+
+    print("status vocabulary ok: " + ", ".join(f"{s} ({n})" for s, n in sorted(statuses.items())))
+    return 0
+
+
+def read_rows() -> list[dict[str, str]]:
+    """CSV rows as dicts, without the stage mapping this module also needs."""
+    with open(CSV_PATH, newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
+
+
 if __name__ == "__main__":
+    if "--self-test" in sys.argv:
+        raise SystemExit(self_test())
     raise SystemExit(main())
