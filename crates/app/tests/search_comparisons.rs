@@ -33,7 +33,7 @@ async fn seed_work(db: &lorehaven_db::Database, slug: &str, title: &str, words: 
     match db.backend() {
         lorehaven_db::Backend::Sqlite => {
             sqlx::query("INSERT INTO accounts (id, email, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))")
-                .bind(&account_id).bind(&format!("{slug}@test.dev"))
+                .bind(&account_id).bind(format!("{slug}@test.dev"))
                 .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
             sqlx::query("INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))")
                 .bind(&pseud_id).bind(&account_id).bind(&pseud_id).bind(&pseud_id)
@@ -56,7 +56,7 @@ async fn seed_work(db: &lorehaven_db::Database, slug: &str, title: &str, words: 
         }
         lorehaven_db::Backend::Postgres => {
             sqlx::query("INSERT INTO accounts (id, email, created_at, updated_at) VALUES ($1::uuid, $2, now(), now())")
-                .bind(&account_id).bind(&format!("{slug}@test.dev"))
+                .bind(&account_id).bind(format!("{slug}@test.dev"))
                 .execute(db.postgres_pool().expect("postgres")).await.unwrap();
             sqlx::query("INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, $4, now(), now())")
                 .bind(&pseud_id).bind(&account_id).bind(&pseud_id).bind(&pseud_id)
@@ -92,7 +92,7 @@ async fn seed_emptied_work(db: &lorehaven_db::Database, slug: &str, title: &str)
     match db.backend() {
         lorehaven_db::Backend::Sqlite => {
             sqlx::query("INSERT INTO accounts (id, email, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))")
-                .bind(&account_id).bind(&format!("{slug}@test.dev"))
+                .bind(&account_id).bind(format!("{slug}@test.dev"))
                 .execute(db.sqlite_pool().expect("sqlite")).await.unwrap();
             sqlx::query("INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))")
                 .bind(&pseud_id).bind(&account_id).bind(&pseud_id).bind(&pseud_id)
@@ -103,7 +103,7 @@ async fn seed_emptied_work(db: &lorehaven_db::Database, slug: &str, title: &str)
         }
         lorehaven_db::Backend::Postgres => {
             sqlx::query("INSERT INTO accounts (id, email, created_at, updated_at) VALUES ($1::uuid, $2, now(), now())")
-                .bind(&account_id).bind(&format!("{slug}@test.dev"))
+                .bind(&account_id).bind(format!("{slug}@test.dev"))
                 .execute(db.postgres_pool().expect("postgres")).await.unwrap();
             sqlx::query("INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, $4, now(), now())")
                 .bind(&pseud_id).bind(&account_id).bind(&pseud_id).bind(&pseud_id)
@@ -560,5 +560,150 @@ async fn a_trailing_not_is_accepted_over_http() {
         .collect();
     assert!(titles.contains(&"Huge"), "{body}");
     assert!(!titles.contains(&"Tiny"), "{body}");
+    tdb.cleanup().await;
+}
+
+// --- `..` ranges -------------------------------------------------------------
+//
+// A range is sugar for two comparisons, so at the database level these repeat
+// what the comparison tests above already show. They are kept because the point
+// of the slice is the spelling: `words:5000..50000` reaching the database is a
+// different claim from `words:>=5000 AND words:<=50000` doing so, and only
+// these prove the former. The 422 cases are not repetition at all.
+
+#[tokio::test]
+async fn a_closed_range_returns_the_works_inside_it() {
+    let dir = test_support::scratch_dir("range_closed");
+    let tdb = test_support::TestDb::connect_with_dir("range-closed", &dir).await;
+    seed_spectrum(tdb.db()).await;
+
+    let mut found = titles(tdb.db(), "words:5000..50000").await;
+    found.sort();
+    // Inclusive at both ends. The seed is 500 / 5 000 / 50 000 / 0 words, so
+    // the 5 000-word work sits exactly on the lower bound and the 50 000-word
+    // work exactly on the upper: both are in, the 500-word and zero-word works
+    // are out. If either bound rendered exclusive, this fails.
+    assert_eq!(
+        found,
+        vec!["Huge".to_string(), "Mid".to_string()],
+        "both bounds are inclusive"
+    );
+    tdb.cleanup().await;
+}
+
+#[tokio::test]
+async fn an_open_range_leaves_that_side_unbounded() {
+    let dir = test_support::scratch_dir("range_open");
+    let tdb = test_support::TestDb::connect_with_dir("range-open", &dir).await;
+    seed_spectrum(tdb.db()).await;
+
+    let mut over = titles(tdb.db(), "words:5000..").await;
+    over.sort();
+    assert_eq!(
+        over,
+        vec!["Huge".to_string(), "Mid".to_string()],
+        "no upper bound: the 5 000-word work and the 50 000-word one"
+    );
+
+    let mut under = titles(tdb.db(), "words:..5000").await;
+    under.sort();
+    // Inclusive, so the 500-word and 5 000-word works are both in and only the
+    // 50 000-word one is out. An exclusive upper bound would drop Mid.
+    assert_eq!(
+        under,
+        vec!["Empty".to_string(), "Mid".to_string(), "Tiny".to_string()],
+        "no lower bound, inclusive upper"
+    );
+    tdb.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_range_composes_with_a_free_text_term() {
+    let dir = test_support::scratch_dir("range_compose");
+    let tdb = test_support::TestDb::connect_with_dir("range-compose", &dir).await;
+    seed_spectrum(tdb.db()).await;
+
+    // `Huge` is the only work whose title carries the term, and it is inside
+    // the range, so both the free text and the bounds are doing work.
+    assert_eq!(
+        titles(tdb.db(), "Huge words:5000..50000").await,
+        vec!["Huge".to_string()]
+    );
+    // The complement is the assertion that would catch a dropped range: a term
+    // no work carries, combined with a range that the in-range works do
+    // satisfy. If the range were ignored rather than applied, or if the free
+    // text were ignored, the in-range work would come back and this fails.
+    assert!(
+        titles(tdb.db(), "winter words:5000..50000")
+            .await
+            .is_empty(),
+        "a title no work carries must not come back just because it is in range"
+    );
+    // And the mirror: a work in range whose title does not match stays out.
+    assert!(
+        titles(tdb.db(), "Mid words:5000..50000").await.len() == 1,
+        "Mid is in range and its own title matches, so it is the one that returns"
+    );
+    tdb.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_backwards_range_is_a_422_over_http() {
+    let dir = test_support::scratch_dir("range_backwards");
+    let tdb = test_support::TestDb::connect_with_dir("range-backwards", &dir).await;
+    seed_spectrum(tdb.db()).await;
+
+    // A range that cannot match is a 422, not an empty result page: the
+    // difference between "you wrote it backwards" and "no such work".
+    let (status, body) = get_status(
+        router_for(&tdb, &dir),
+        "/api/v1/search?q=words%3A10000..5000",
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    tdb.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_range_on_a_text_field_is_a_422() {
+    let dir = test_support::scratch_dir("range_text");
+    let tdb = test_support::TestDb::connect_with_dir("range-text", &dir).await;
+
+    // `title:abc..def` is a category error -- there is no ordering on a string.
+    let (status, body) =
+        get_status(router_for(&tdb, &dir), "/api/v1/search?q=title%3Aabc..def").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    tdb.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_broken_term_after_a_good_one_is_not_silently_dropped() {
+    let dir = test_support::scratch_dir("range_dropped");
+    let tdb = test_support::TestDb::connect_with_dir("range-dropped", &dir).await;
+    seed_spectrum(tdb.db()).await;
+
+    // `winter` parses; `words:many..5000` does not. The implicit-conjunction
+    // loop used to break out on the error and return `winter` alone, so the
+    // search answered 200 with results for a query that had failed -- the
+    // reader sees a plausible result set and no indication that half their
+    // query was discarded.
+    let (status, body) = get_status(
+        router_for(&tdb, &dir),
+        "/api/v1/search?q=winter%20words%3Amany..5000",
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    tdb.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_range_with_no_bounds_is_a_422() {
+    let dir = test_support::scratch_dir("range_empty");
+    let tdb = test_support::TestDb::connect_with_dir("range-empty", &dir).await;
+
+    // `words:..` bounds nothing. Accepting it would widen the results to
+    // everything while looking like a filter.
+    let (status, body) = get_status(router_for(&tdb, &dir), "/api/v1/search?q=words%3A..").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     tdb.cleanup().await;
 }

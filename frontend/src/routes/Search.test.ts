@@ -70,13 +70,15 @@ describe('Search page word-count range', () => {
     expect(searchWorks.mock.calls[0][0]).toBe('words:<=50000');
   });
 
-  it('combines both bounds', async () => {
+  it('combines both bounds as one range', async () => {
     render(Search);
     await type('Min words', '1000');
     await type('Max words', '5000');
     await submit();
     await waitFor(() => expect(searchWorks).toHaveBeenCalled());
-    expect(searchWorks.mock.calls[0][0]).toBe('words:>=1000 AND words:<=5000');
+    // One `..` term rather than two comparisons: it is the spelling the query
+    // language documents, and the server expands it to the same pair.
+    expect(searchWorks.mock.calls[0][0]).toBe('words:1000..5000');
   });
 
   it('ANDs the range with free text', async () => {
@@ -104,6 +106,18 @@ describe('Search page word-count range', () => {
     // `type="number"` is a hint, not a guarantee: a pasted value can still
     // reach the handler, and the query must not carry it either way.
     await type('Min words', 'ten thousand');
+    await submit();
+    expect(searchWorks).not.toHaveBeenCalled();
+  });
+
+  it('drops a range whose bounds are the wrong way round', async () => {
+    render(Search);
+    // The server rejects `1000..5000` with a 422, and it is right to: the
+    // range can never match. Rather than let the reader submit a query that is
+    // guaranteed to fail, the form leaves the range out -- the same shape as
+    // any other unreadable value, and the free text below still searches.
+    await type('Min words', '5000');
+    await type('Max words', '1000');
     await submit();
     expect(searchWorks).not.toHaveBeenCalled();
   });
