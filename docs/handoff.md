@@ -1088,6 +1088,30 @@ failed with the config baseline instead of the expected value, and switching to
 the version — unique and strictly increasing — fixed it. Verified by mutating the
 order back and watching the test go red.
 
+### Mutes and blocks were stored but never enforced (commit `fad9b1a`)
+
+M2-06 was recorded as deferred to M12; M12 shipped the rows and not the effect.
+`is_muted` had **zero callers** in the tree, `presence_visible_to` was dead code,
+and `GET /presence/stream` returned every presence row unfiltered — so someone you
+blocked still appeared as online, and a mute was a list item that did nothing.
+
+- `hidden_accounts()` fetches both lists in two queries. Not `is_blocked` per row:
+  the caller filters a whole list, and a per-row check turns one query into N.
+- The stream routes the answer through `presence_visible_to`, so the decision
+  lives in the domain layer where it was already written. The viewer's own row
+  survives — muting someone does not hide you from yourself.
+- **Presence was opt-in with no way to decline.** The `enabled` column existed, no
+  route set it, and the stream passed `enabled = true` on every poll — so wiring a
+  toggle through the existing upsert would have made the opt-out last exactly one
+  poll. `PUT /me/presence` sets it; the stream now reads the flag back.
+
+**The block test passed against code with block-filtering disabled.** The blocked
+account had never polled the stream, so there was no row for a filter to remove
+and the assertion was vacuous. Both presence tests now assert the account is
+*present* before the block or mute is applied. Worth remembering: a negative
+assertion ("X is absent") is only meaningful if a positive one ("X was there")
+precedes it in the same test.
+
 ## Environment quirks (unchanged)
 
 - **Work in local clone** `~/code-local/rust/lorehaven`. `~/code/rust/lorehaven` is SSHFS — never run git/cargo/npm through it.
