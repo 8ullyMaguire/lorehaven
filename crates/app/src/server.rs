@@ -734,6 +734,16 @@ async fn add_trust_proxy_flag(mut request: Request, next: Next) -> Response {
 /// Whether `X-Forwarded-For` may be believed. Fixed for the process lifetime.
 static TRUST_PROXY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Whether `X-Forwarded-For` is currently believed.
+///
+/// Exists because the flag is process-wide, so a test that sets it must be able
+/// to read it back: a hardcoded `false` on restore would clobber a legitimate
+/// `true` left by a neighbour.
+#[must_use]
+pub fn current_trust_proxy() -> bool {
+    TRUST_PROXY.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Publish the trust-proxy decision. Called once during startup, before the
 /// listener is bound.
 pub fn set_trust_proxy(trusted: bool) {
