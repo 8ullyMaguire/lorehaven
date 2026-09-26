@@ -1,3 +1,118 @@
+# Handoff — the query language grows a comparison, and two of its bugs surface
+
+## The short version
+
+The unified-search work has a foundation and a first user-visible slice:
+comparison operators (`>`, `>=`, `<`, `<=`) on the live parser, a cross-entity
+field registry, a 422 instead of a 500 for a bad query, and a word-count range
+in the search UI.
+
+Two of the fixes are pre-existing bugs that the new tests exposed rather than
+introduced. One of them was silent and total: **`NOT spoiler` matched nothing
+at all**, for any work with a NULL summary or an unindexed body.
+
+**Still open, and it is the bulk of the feature:** `..` range syntax is not
+implemented; the forum, user, bookmark and directory renderers do not exist yet;
+per-entity backends and shared taste-gravity ranking are not started; and four of
+the five specialized filter UIs are not written. What exists today is the
+language plus one surface.
+
+## What the query language supports now
+
+`crates/domain/src/query.rs` is the parser, `crates/domain/src/query_sql.rs` the
+renderer. Both are the live path — they are what `search_works_ast` calls.
+
+- `field:value` and `field:"quoted phrase"`, case-normalized
+- Comparison operators on numeric fields: `words:>10000`, `kudos:>=50`
+- `AND`, `OR`, `NOT`, parentheses
+- Trailing `NOT` in an implicit conjunction: `a NOT b` means `a AND NOT b`
+- Cross-entity fields are *recognized* by the parser and carry their owning
+  entity, so the parser can tell `replies:>50` (forum) from `words:>10000`
+  (works)
+
+Two deliberate design choices, both load-bearing:
+
+**`QueryAst::Comparison` is its own variant, not an overload of `Fielded`.** A
+renderer that inferred the operator by inspecting a value string would have to
+re-parse `">10000"` and guess. Keeping the operator in the AST means no renderer
+ever guesses.
+
+**A field on the wrong surface is an error, not an empty result.** Rendering
+`replies:>50` against the works table returns a `QueryError` naming the surface
+the field belongs to. Silently ignoring it would have produced "no results" for a
+query the reader could see was well-formed — the worst possible failure, because
+it looks like a correct answer.
+
+## The two bugs
+
+**A reader's typo was a 500.** `search_works_ast_impl` raised parse and render
+failures with `anyhow!`, so the route mapped them all to `AppError::Internal` —
+a server fault, with the message masked by design. Typing `replies:>50` into the
+works search produced something that was neither the reader's error nor the
+server's. There is now a `SearchError` carrying a `QueryProblem` (parse, with an
+offset, or render), and the route downcasts to it: 422 with the reason, and
+everything else still 500.
+
+`anyhow`'s blanket `impl<E: StdError> From<E> for anyhow::Error` is what carries
+the concrete type through, so there is deliberately **no** manual `From` impl in
+`query_error.rs`. Adding one is a conflicting-impl error, which is noted in the
+file so the next reader does not "fix" it.
+
+**`NOT spoiler` matched nothing, silently.** The free-text predicate is
+`title LIKE ? OR summary LIKE ? OR body_text LIKE ?`. `works.summary` is
+nullable, and `works_index.body_text` is NULL for any work the indexer has not
+reached. `NOT (false OR NULL OR NULL)` evaluates to NULL — not true — so a
+negated free-text term excluded *every* such work, with no error and nothing the
+reader could see. Confirmed against PostgreSQL directly before fixing: the
+coalesced form returns true, the bare form returns NULL.
+
+`render_query` now emits `NOT COALESCE(<inner>, false)`, and only where the inner
+fragment can be NULL. A taxonomy term is an `EXISTS`, which is a definite false
+and does not need the guard — the test suite pins both directions, so the
+coalesce cannot creep onto a subquery that does not need it.
+
+## A test of mine that passed on nothing
+
+`a_comparison_composes_with_a_negated_term` asserted only that the result did not
+contain `"Tiny"`, which is true when the result is *empty* — and it was empty,
+for the reason above. It now asserts the un-negated term first (exactly one
+match), then the negated term (everything else), so a regression to the empty
+result fails it.
+
+Worth carrying forward: an assertion of the form `assert!(!result.contains(x))`
+is vacuous when `result` is empty. Assert the positive case first.
+
+## Ordering is not a contract
+
+Two integration assertions had to compare membership rather than order, because
+the rows tie on `score` and the `updated_at DESC` tiebreak resolves differently
+on each backend. This has now bitten twice in one file. Do not assert row order
+where scores tie.
+
+## Verification
+
+- `cargo test -p lorehaven-domain --lib -- query` — 57 pass
+- `cargo test -p lorehaven-app --test search_comparisons` — 19 pass, and all 19
+  pass again on PostgreSQL
+- `cargo clippy -p lorehaven-domain -p lorehaven-db --all-targets` — 0 warnings
+- `npx vitest run` — 316 pass; `svelte-check` clean
+
+PostgreSQL test container: `lh-m32e-pg` on port `55433`.
+
+## Next, in order
+
+1. `..` range syntax in the parser and renderer (`words:10000..50000`).
+2. The forum renderer — `replies:>50`, `after:2026-01` are already parsed, they
+   just have nowhere to go.
+3. User, bookmark and directory renderers, same shape.
+4. Per-entity indices, and the shared taste-gravity ranking the spec calls for.
+   Right now ranking is works-only; the point of this work is that it is not.
+5. The four remaining filter UIs. The works one now has a word-count range; the
+   other four do not exist.
+6. E2E coverage for search across surfaces, once there is more than one.
+
+---
+
 # Handoff — content filters finally hold: paging, PostgreSQL, and a gate that lied
 
 ## The short version
