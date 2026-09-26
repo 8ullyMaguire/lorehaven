@@ -403,3 +403,65 @@ test('notifications: the inbox renders for a signed-in reader', async ({ page })
     page.getByRole('heading', { name: /notifications/i }).first(),
   ).toBeVisible();
 });
+
+// --- M43: the browse sort vocabulary is reachable from a browser -----------
+// The server had Sort, ?sort= on the routes, and a sticky per-pseud preference
+// before any of it had a control. A requirement that says "for-you default on
+// every browse surface" is not met by a default no surface can change, so this
+// drives the control rather than asserting the API alone.
+
+test('browse sort: a reader changes the order and it sticks', async ({ page }) => {
+  const sorter = who('CovSorter21', 'Cover Sorter');
+  await page.goto('/register');
+  await page.fill('#register-email', sorter.email);
+  await page.fill('#register-password', sorter.password);
+  await page.fill('#register-handle', sorter.handle);
+  await page.fill('#register-display-name', sorter.displayName);
+  await page.selectOption('#register-age-band', 'adult');
+  await page.click('button[type=submit]');
+  await page.waitForURL(/\/account/, { timeout: 8000 }).catch(async () => {
+    // The address is taken: this handle already exists in this run.
+    await page.goto('/sign-in');
+    await page.fill('#sign-in-email', sorter.email);
+    await page.fill('#sign-in-password', sorter.password);
+    await page.click('button[type=submit]');
+    await page.waitForURL(/\/account/);
+  });
+
+  await page.goto('/discover');
+  const control = page.getByTestId('sort-control');
+  await expect(control).toBeVisible();
+
+  // Discover's own default is for-you (spec §43.2), so that is what a reader
+  // with no stored preference should see.
+  const sort = control.getByLabel('Sort');
+  await expect(sort).toHaveValue('for-you');
+
+  // The list is re-queried with the choice, not just shown as selected.
+  const requeued = page.waitForResponse(
+    (r) => r.url().includes('/discovery') && r.url().includes('sort=az') && r.status() === 200,
+  );
+  await sort.selectOption('az');
+  await requeued;
+
+  // A signed-in reader's choice is remembered (§43.4), so the affordance to
+  // undo it exists. An anonymous reader would never see this.
+  const back = control.getByRole('button', { name: 'Back to default' });
+  await expect(back).toBeVisible();
+
+  // Sticky: a fresh visit comes back in the stored order, not the default.
+  await page.goto('/discover');
+  await expect(page.getByTestId('sort-control').getByLabel('Sort')).toHaveValue('az');
+
+  await back.click();
+  await expect(page.getByTestId('sort-control').getByLabel('Sort')).toHaveValue('for-you');
+});
+
+test('browse sort: an anonymous reader can change the order for this visit', async ({ page }) => {
+  await page.goto('/discover');
+  const control = page.getByTestId('sort-control');
+  await expect(control).toBeVisible();
+  // Nothing to store for a reader with no pseud, so the control must not
+  // promise a reset it cannot honour.
+  await expect(control.getByRole('button', { name: 'Back to default' })).toHaveCount(0);
+});

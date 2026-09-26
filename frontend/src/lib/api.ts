@@ -1180,6 +1180,69 @@ export function clearWorkReadingStatus(workId: string): Promise<void> {
   });
 }
 
+// M43 — Shared browse sort (spec §43.2, §43.4)
+
+/**
+ * The browse sort vocabulary, in the server's own words.
+ *
+ * `Sort::parse` in `crates/domain/src/browse.rs` is the authority and this list
+ * matches `Sort::ALL` exactly, in the same order. It is spelled out here rather
+ * than fetched so the control renders its options on first paint, before any
+ * request resolves -- a reader should not watch an empty select fill itself in.
+ */
+export const SORT_VALUES = [
+  'for-you',
+  'new',
+  'updated',
+  'top',
+  'trending',
+  'best-match',
+  'az',
+] as const;
+
+export type SortValue = (typeof SORT_VALUES)[number];
+
+/** Reader-facing labels. The wire value is never shown raw. */
+export const SORT_LABELS: Record<SortValue, string> = {
+  'for-you': 'For you',
+  new: 'Newest',
+  updated: 'Recently updated',
+  top: 'Top rated',
+  trending: 'Trending',
+  'best-match': 'Best match',
+  az: 'A–Z',
+};
+
+export interface SortState {
+  surface: string;
+  sort: string;
+  /** `preference` when the reader chose it, `default` when the surface decided. */
+  source: 'preference' | 'default';
+}
+
+/** The effective sort for a surface, and where that value came from. */
+export function fetchSort(surface: string): Promise<SortState> {
+  return apiFetch<SortState>(`/browse/sort/${encodeURIComponent(surface)}`);
+}
+
+/**
+ * Remember a sort choice for this pseud on this surface (§43.4).
+ *
+ * PUT rather than a query parameter, because the point is stickiness: the
+ * reader chooses once and every later visit to the surface uses it.
+ */
+export function setSort(surface: string, sort: SortValue): Promise<SortState> {
+  return apiFetch<SortState>(`/browse/sort/${encodeURIComponent(surface)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ sort }),
+  });
+}
+
+/** Return the surface to its own default. */
+export function clearSort(surface: string): Promise<void> {
+  return apiFetch<void>(`/browse/sort/${encodeURIComponent(surface)}`, { method: 'DELETE' });
+}
+
 // M32 — Typed votes, budgets, meta-moderation, karma (spec §35.2)
 
 export interface CategoryVoteType {
@@ -2464,8 +2527,21 @@ export interface DiscoveryFeed {
   items: DiscoveryItem[];
 }
 
-export async function fetchDiscoveryFeed(signal?: AbortSignal): Promise<DiscoveryFeed> {
-  return apiFetch<DiscoveryFeed>('/discovery', { signal });
+/**
+ * The discovery feed, optionally in a chosen order (spec §43.2).
+ *
+ * `sort` is passed through only when the reader has picked one. Omitting it
+ * entirely is what lets the server apply its own resolution -- query param >
+ * stored preference > surface default -- and that ordering is the requirement.
+ * Sending an explicit default instead would override a stored preference with
+ * the surface default, silently undoing §43.4.
+ */
+export async function fetchDiscoveryFeed(
+  sort?: SortValue,
+  signal?: AbortSignal,
+): Promise<DiscoveryFeed> {
+  const query = sort ? `?sort=${encodeURIComponent(sort)}` : '';
+  return apiFetch<DiscoveryFeed>(`/discovery${query}`, { signal });
 }
 
 export async function recomputeTasteProfile(): Promise<void> {
