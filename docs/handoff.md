@@ -979,7 +979,22 @@ the floor, so an operator was told the instance's taste model had changed and it
 had not. The `// TODO: persist updates to config file` above it was not a
 loose end so much as the whole story: a running instance does not rewrite its own
 configuration, and the API has no business editing a file it may not be able to
-write. Migration 0077 gives it a table.
+write.
+
+**The first version of the fix was itself a defect, and the shape of the data is
+why.** I created `instance_taste_profile` with a `dimensions` JSONB column —
+which is a *second* home for a concept that has had a home since M17:
+`admin_taste_profile` (0054) already holds
+`dimension_key, label, admin_target, weight`, and
+`taste_health::save_admin_taste_profile` already writes it, with a roundtrip
+test. Two stores for one concept means the one that loses is whichever a future
+reader happens to find, and nothing in either schema says so.
+
+So 0077 is now `instance_taste_settings` and holds only what config carried and
+no table did: `gravity_strength`, `signal_weight_mode`, `admin_weight`,
+`diversity_injection_percent`. The split is by *shape* — a set of rows versus one
+row — which is also the property worth having: a PUT that touches only the
+dimensions does not reset the knobs, and vice versa. A test pins both directions.
 
 `GET` falls back to the config when no row exists, which is the right default in
 both directions — an untouched instance reports the axes it is *actually* running
@@ -1016,6 +1031,21 @@ Also a pre-existing table error, present since the stub days:
 handler takes `RequireSession`. Corrected. `public_wrangling_log` now takes
 `MaybeSession` explicitly rather than being public by omission — the inventory
 cannot tell an intentionally public route from one someone forgot to guard.
+
+### A leak assertion that was itself the bug
+
+`a_served_slot_explains_itself` asserted "no raw score reached the reader" as
+`!body.to_string().contains("0.")`. That is a substring test, and a slot id, a
+timestamp or a `blend_score` of 42 can all contain those two characters by
+chance — so it passed on SQLite and failed on PostgreSQL, which served a slot
+whose id happened to spell one. `blend_score` is *deliberately* reader-visible:
+it is the reader's own rank, echoed from the discovery response, and §29.2 shows
+a close call above it. The assertion is now field-level — it forbids
+`weight`, `weights`, `operator_affinity`, `affinity`, `score_detail` by name and
+range-checks `blend_score` as the 0–100 rank it is.
+
+The general rule: an assertion that a *field* is absent must name the field.
+`contains("0.")` is a claim about text, and text is not the thing under test.
 
 ### A flake that is not a regression
 
