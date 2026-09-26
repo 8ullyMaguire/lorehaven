@@ -3831,9 +3831,29 @@ export interface AnalyticsCount {
   fewer_than?: number;
 }
 
+/**
+ * §9.6's own reading totals, as `own.reading.basic` answers.
+ *
+ * These are the first capability with named fields rather than one count, and
+ * the difference is not cosmetic: a band is for a count of *other people*, and
+ * these are facts about the reader asking. A zero here is a true zero, so the
+ * fields are plain numbers and never optional -- `number | undefined` on
+ * `finished_works` would be a `?? 0` waiting to happen, and `?? 0` on a
+ * suppressed count is how "we hid this" becomes "nobody did this".
+ */
+export interface ReadingTotals {
+  finished_works: number;
+  chapters_read: number;
+  words_read: number;
+  /** An estimate: capped wall-clock between progress updates. */
+  reading_seconds: number;
+}
+
 export interface AnalyticsValue extends AnalyticsCount {
   status?: string;
   note?: string;
+  /** Present when the capability answers with named fields. */
+  reading?: ReadingTotals;
 }
 
 export interface AnalyticsList {

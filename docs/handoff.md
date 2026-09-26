@@ -1571,6 +1571,55 @@ and the assertion was vacuous. Both presence tests now assert the account is
 assertion ("X is absent") is only meaningful if a positive one ("X was there")
 precedes it in the same test.
 
+## M57A — The first real metric (`own.reading.basic`)
+
+Commit `e1c68e8`. Seven tests in `crates/app/tests/analytics_reading.rs`, green
+on SQLite and PostgreSQL.
+
+The registry landed with 57 scopes and a hardcoded `"implemented": false` in
+`one_capability`, so the dashboard was a list of definitions. `own.reading.basic`
+is the first with a query behind it, and it answers §9.6: finished works,
+chapters read, words read, capped reading seconds.
+
+**Two spec sentences decide the whole shape, and both are load-bearing:**
+
+- *§9.6: "Do not count opens as proof of reading."* So nothing derives from
+  `reading_history_entry` or from `reading_progress.created_at` — an open writes
+  both. Finished works come from `reading_status`, which records a decision.
+  The test seeds `finished` / `reading` / `dropped` side by side so a query that
+  forgets `status = 'finished'` fails.
+- *§9.6: "Label estimates as such."* `reading_seconds` is an estimate, so it
+  travels with `Method`, and the test asserts the 30-minute cap is *disclosed*
+  rather than trusting it.
+
+**The bug worth remembering.** My first query measured each `reading_progress`
+row's own `created_at → updated_at` window. The method says "wall-clock between
+two progress updates on the same chapter" — a gap *between consecutive rows*, so
+it needs a self-join on `(account_id, subject_id)` with a strictly increasing
+stamp. The single-row form answered 599 seconds against a seeded 72000-second
+gap: a real number, a plausible one, and the wrong one. Six of the seven tests
+were green throughout, including the one asserting `implemented`.
+
+That is the failure class the registry cannot catch on its own — the shape of
+the answer is right and the value is wrong. A plausible number is the hard case,
+not a null.
+
+**What changed structurally:** `implemented` is now derived from the scope
+rather than hardcoded in the route. A hardcoded flag is a claim in two places,
+and the failure is a dashboard reporting `not_implemented` for a capability the
+instance can answer. Adding the 2nd..57th metric is now a `_ =>` arm plus a
+query, and nothing else.
+
+**Still open:** the other 56 report `not_implemented`, which is honest but
+means the dashboard is still mostly definitions. Next is a real metric per
+capability, starting with `own.reading.trend` (the same tables, bucketed by
+ISO week) and `own.work.retention` (the per-chapter drop-off curve, which has
+its own spec text). No browser E2E for the analytics page. The SQLite/PostgreSQL
+question is also still open and unanswered — see the ADR conversation; my
+recommendation is to drop SQLite, because the local product it served is not in
+the roadmap and the SQLite-as-default-gate is a blind spot for Postgres-only
+defects.
+
 ## M57 — Trust-gated analytics (in progress)
 
 Spec: `docs/spec-amendments/trust-gated-analytics.md`. Five commits:

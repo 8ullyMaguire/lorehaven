@@ -26,6 +26,7 @@
     fetchCapability,
     type AnalyticsMeta,
     type AnalyticsDetail,
+    type ReadingTotals,
   } from '../lib/api';
 
   let loading = true;
@@ -90,6 +91,41 @@
     return null;
   }
 
+  /**
+   * §9.6's reading totals, or `null` for any other capability.
+   *
+   * Keyed off the capability's own name rather than off "does the value have
+   * these fields", so a capability whose fields happen to overlap cannot be
+   * rendered with another one's shape. The server is the only thing that knows
+   * which shape a capability answers in; this is the client half of that
+   * agreement, and the `detail.capability` string is what both sides key on.
+   */
+  function readingTotals(d: AnalyticsDetail | null): ReadingTotals | null {
+    if (!d || d.capability !== 'own.reading.basic') return null;
+    return d.value.reading ?? null;
+  }
+
+  /**
+   * Reading time as text.
+   *
+   * Hours and minutes rather than a raw seconds count, because a bare 1800
+   * tells a reader nothing and invites them to divide by 3600 in their head.
+   */
+  function durationText(seconds: number): string {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.round((seconds % 3600) / 60);
+    if (hours === 0) return `${minutes} min`;
+    if (minutes === 0) return `${hours} h`;
+    return `${hours} h ${minutes} min`;
+  }
+
+  /** Words with a magnitude, so a reader is not reading raw digits. */
+  function wordsText(words: number): string {
+    if (words >= 1_000_000) return `${(words / 1_000_000).toFixed(1)} million`;
+    if (words >= 1000) return `${(words / 1000).toFixed(1)} thousand`;
+    return String(words);
+  }
+
   function subjectLabel(m: AnalyticsMeta): string {
     return m.subject === 'other' ? 'about other people' : 'about you';
   }
@@ -148,8 +184,28 @@
                   it.
                 </p>
               {:else if detail}
+                {@const totals = readingTotals(detail)}
                 {@const shown = countText(detail)}
-                {#if shown}
+                {#if totals}
+                  <dl class="reading">
+                    <div>
+                      <dt>Works finished</dt>
+                      <dd>{totals.finished_works.toLocaleString()}</dd>
+                    </div>
+                    <div>
+                      <dt>Chapters read</dt>
+                      <dd>{totals.chapters_read.toLocaleString()}</dd>
+                    </div>
+                    <div>
+                      <dt>Words read</dt>
+                      <dd>{wordsText(totals.words_read)}</dd>
+                    </div>
+                    <div>
+                      <dt>Time reading</dt>
+                      <dd>{durationText(totals.reading_seconds)}</dd>
+                    </div>
+                  </dl>
+                {:else if shown}
                   <p class="count">{shown}</p>
                 {/if}
                 <p class="approximation">{detail.meta.approximation}</p>
@@ -239,6 +295,23 @@
     font-size: 1.6rem;
     font-weight: 600;
     margin: 0 0 0.25rem;
+  }
+  .reading {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    gap: 0.75rem 1.25rem;
+    margin: 0 0 0.5rem;
+  }
+  .reading dt {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted, #666);
+  }
+  .reading dd {
+    margin: 0.15rem 0 0;
+    font-size: 1.3rem;
+    font-weight: 600;
   }
   .approximation {
     font-size: 0.8rem;
