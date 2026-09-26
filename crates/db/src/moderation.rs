@@ -167,12 +167,20 @@ pub async fn feature_post(db: &Database, post_id: &str, curator: &str) -> Result
                 .await?;
         }
         Backend::Postgres => {
-            sqlx::query("UPDATE forum_posts SET featured = 1, featured_by = $1, featured_at = $2 WHERE id = $3")
-                .bind(curator)
-                .bind(&now)
-                .bind(post_id)
-                .execute(db.postgres_pool().expect("postgres"))
-                .await?;
+            // `featured_by` really is a UUID (0042), so this cast is the
+            // opposite of the `thread_modes` case: there the column was TEXT and
+            // the cast was wrong, here it is UUID and the cast is required. The
+            // bind is a `&str` from the session, so the conversion has to be
+            // spelled out.
+            sqlx::query(
+                "UPDATE forum_posts SET featured = 1, featured_by = $1::uuid, featured_at = $2
+                  WHERE id = $3",
+            )
+            .bind(curator)
+            .bind(&now)
+            .bind(post_id)
+            .execute(db.postgres_pool().expect("postgres"))
+            .await?;
         }
     }
     Ok(())
