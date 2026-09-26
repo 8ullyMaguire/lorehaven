@@ -136,24 +136,6 @@ async fn search(
     })))
 }
 
-/// Turn a search failure into the right response.
-///
-/// A query the reader got wrong -- a typo'd operator, a field that belongs to
-/// the forum search typed into the works search -- is `422` carrying the reason.
-/// It used to be an `anyhow!` string, so every one of them was a `500`: the
-/// reader learned nothing and the operator saw a server fault that was neither.
-///
-/// Everything else stays `500`, because it is one.
-fn search_failure(error: anyhow::Error) -> ApiError {
-    match error.downcast_ref::<SearchError>() {
-        Some(search) => ApiError(lorehaven_domain::AppError::Validation {
-            message: search.problem.message().to_owned(),
-            field_errors: Default::default(),
-        }),
-        None => ApiError(lorehaven_domain::AppError::Internal(error)),
-    }
-}
-
 async fn in_work(
     State(state): State<AppState>,
     MaybeSession(_session): MaybeSession,
@@ -167,4 +149,27 @@ async fn in_work(
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     Ok(Json(results))
+}
+
+/// Turn a search failure into the right response.
+///
+/// A query the reader got wrong -- a typo'd operator, a field that belongs to
+/// the forum search typed into the works search -- is `422` carrying the reason.
+///
+/// Public because the forum search needs the same mapping and the whole point
+/// of the shared query language is that a mistake reads the same on every
+/// surface. Two copies would drift, and the drift would show up as one surface
+/// answering 422 and the other 500 for the identical typo.
+/// It used to be an `anyhow!` string, so every one of them was a `500`: the
+/// reader learned nothing and the operator saw a server fault that was neither.
+///
+/// Everything else stays `500`, because it is one.
+pub fn search_failure(error: anyhow::Error) -> ApiError {
+    match error.downcast_ref::<SearchError>() {
+        Some(search) => ApiError(lorehaven_domain::AppError::Validation {
+            message: search.problem.message().to_owned(),
+            field_errors: Default::default(),
+        }),
+        None => ApiError(lorehaven_domain::AppError::Internal(error)),
+    }
 }

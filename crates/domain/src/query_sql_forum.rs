@@ -26,11 +26,25 @@ pub fn render_forum_query(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
 fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
     match ast {
         QueryAst::Text(text) => {
-            // Both arms are coalesced. `forum_posts.body` is NOT NULL by the
-            // schema, but a post whose topic row is gone would still be NULL on
-            // the title arm, and the `NOT` below would then drop the row.
+            // Both arms are coalesced. The title is NOT NULL by the schema, but
+            // the `NOT` below reaches the whole expression, and one NULL arm
+            // makes the whole thing NULL, which `NOT` then drops -- so a topic
+            // whose post body is missing would be excluded from `NOT winter`.
+            //
+            // The body arm is a correlated `EXISTS`, not a join and not a
+            // subquery in the SELECT list: the result set is topics, and a join
+            // to `forum_posts` would return the same thread once per matching
+            // reply. `EXISTS` says "some post says this" and leaves the row
+            // count alone, and it short-circuits on the first match.
+            //
+            // Deleted posts are excluded here for the same reason they are
+            // excluded from the reply count: a reader cannot see them, so a
+            // search must not find them either.
             let sql = "(COALESCE(LOWER(forum_topics.title), '') LIKE LOWER(?) \
-                       OR COALESCE(LOWER(forum_posts.body), '') LIKE LOWER(?))";
+                       OR EXISTS (SELECT 1 FROM forum_posts tp \
+                                 WHERE tp.topic_id = forum_topics.id \
+                                   AND tp.deleted_at IS NULL \
+                                   AND COALESCE(LOWER(tp.body), '') LIKE LOWER(?)))";
             let pattern = format!("%{}%", escape_like(text));
             Ok(SqlFragment::new(sql)
                 .with_bind(pattern.clone())
@@ -40,7 +54,10 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
             // A quoted phrase is a phrase: matching it against a topic title
             // would return topics for a phrase the reader asked to find in
             // posts.
-            let sql = "COALESCE(LOWER(forum_posts.body), '') LIKE LOWER(?)";
+            let sql = "EXISTS (SELECT 1 FROM forum_posts pp \
+                       WHERE pp.topic_id = forum_topics.id \
+                         AND pp.deleted_at IS NULL \
+                         AND COALESCE(LOWER(pp.body), '') LIKE LOWER(?))";
             Ok(SqlFragment::new(sql).with_bind(format!("%{}%", escape_like(phrase))))
         }
         QueryAst::Fielded(field, value) => render_fielded(*field, value),
@@ -109,9 +126,33 @@ fn render_fielded(field: QueryField, value: &str) -> Result<SqlFragment, QueryEr
         // The *post's* author, not the topic's. A reader searching their own
         // handle means their posts; the topic author would return only the
         // threads they started.
-        QueryField::Author => {
-            Ok(SqlFragment::new("LOWER(forum_posts.author_pseud) = LOWER(?)").with_bind(value))
-        }
+        //
+        // Two things make this arm different from the other `forum_posts`
+        // lookups, and both come from the schema rather than the query:
+        //
+        //   * `author_pseud` holds an id and the reader types a *handle*, so
+        //     `pseuds` has to be joined. Comparing the column to the literal
+        //     "nightowl" would match nothing and read as "I have no posts",
+        //     which is a much worse answer than an error.
+        //   * that join is an id-to-id comparison across a schema divergence:
+        //     `pseuds.id` is `UUID` on PostgreSQL and `TEXT` on SQLite, while
+        //     `forum_posts.author_pseud` is `TEXT` on both. `pseuds.id =
+        //     ap.author_pseud` is therefore rejected by PostgreSQL with
+        //     `operator does not exist: uuid = text` and accepted by SQLite.
+        //
+        // `CAST(... AS TEXT)` is the one spelling both dialects accept:
+        // uuid-to-text on PostgreSQL, text-to-text on SQLite. `::text` is not --
+        // SQLite has no `::` operator and rejects the statement outright. So
+        // this fragment needs no dialect parameter, which is what keeps it
+        // usable by the shared renderer.
+        QueryField::Author => Ok(SqlFragment::new(
+            "EXISTS (SELECT 1 FROM forum_posts ap \
+               JOIN pseuds aps ON CAST(aps.id AS TEXT) = ap.author_pseud \
+             WHERE ap.topic_id = forum_topics.id \
+               AND ap.deleted_at IS NULL \
+               AND LOWER(aps.handle) = LOWER(?))",
+        )
+        .with_bind(value)),
         QueryField::Title => {
             Ok(SqlFragment::new("LOWER(forum_topics.title) = LOWER(?)").with_bind(value))
         }
@@ -157,15 +198,28 @@ fn render_comparison(
         // reply counter, and a subquery is correct on the first day rather
         // than correct until someone forgets to update the counter. Deleted
         // posts are not replies a reader can see.
+        //
+        // `CAST(? AS BIGINT)` is not decoration. The bound value is a `String`,
+        // and SQLite's comparison affinity leaves a text value on the right of
+        // an integer as text: `3 > '1'` is *false* in SQLite, so without the
+        // cast every `replies:>N` returns nothing and reads as "this category
+        // is empty". PostgreSQL coerces the same way from the other side, so the
+        // cast is what makes one fragment correct on both backends.
         QueryField::Replies => format!(
             "(SELECT COUNT(*) FROM forum_posts r \
-             WHERE r.topic_id = forum_topics.id AND r.deleted_at IS NULL) {} ?",
+             WHERE r.topic_id = forum_topics.id AND r.deleted_at IS NULL) \
+             {} CAST(? AS BIGINT)",
             op.as_str()
         ),
         // `last_post_at` is NULL for a topic nobody has replied to, and NULL
         // compares false against every operator -- so a brand-new thread would
         // vanish from `active:>2020-01-01`, which is exactly backwards. Fall
         // back to the topic's own creation.
+        //
+        // No `CAST` here: both sides are timestamps stored as ISO-8601 text, and
+        // they order lexicographically. Casting a date to an integer would
+        // compare `2026-01-15` as the number 2026 and silently return the wrong
+        // threads.
         QueryField::Active => {
             if value.parse::<i64>().is_ok() {
                 return Err(QueryError::new(

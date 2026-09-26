@@ -7,6 +7,7 @@ use axum::http::StatusCode;
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use lorehaven_db::community::ForumPost;
+use lorehaven_db::search::search_forum_ast;
 use lorehaven_domain::blocking::BlockScope;
 use serde::Deserialize;
 use std::str::FromStr;
@@ -1112,11 +1113,18 @@ fn parse_datetime(s: &str) -> Option<OffsetDateTime> {
 
 #[derive(Debug, Deserialize)]
 pub struct ForumSearchQuery {
+    /// The query-language query. Defaults to empty so a dropdown-only search --
+    /// category alone, author alone -- is a valid URL, which it was before the
+    /// query language existed.
+    #[serde(default)]
     pub q: String,
     pub category: Option<String>,
     pub author: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
+    /// A reply-count floor, the one filter common enough to deserve a box of
+    /// its own rather than making everyone learn `replies:>N`.
+    pub min_replies: Option<i64>,
     #[serde(default = "default_search_limit")]
     pub limit: i64,
 }
@@ -1126,24 +1134,111 @@ fn default_search_limit() -> i64 {
 }
 
 /// Full-text search across forum posts and topics.
+///
+/// `q` is a query-language query, the same one the works search takes:
+/// `replies:>50`, `category:meta`, `author:nightowl`, `active:>2026-01-15`,
+/// `locked:true`, and the `..` range. A field belonging to another surface is a
+/// `422` naming it, because an empty list is indistinguishable from "no such
+/// category" and the reader would have no way to learn they used the wrong box.
+///
+/// The `category`, `author`, `from` and `to` parameters are translated into
+/// query terms and conjoined with `q`. They are not a second filter mechanism:
+/// a reader who types `winter` *and* picks a category from the dropdown means
+/// both, and quietly honouring only one is a filter that lies. Keeping them
+/// means no existing link or form breaks.
+///
+/// `category` is a *name*, not an id. The frontend types it as free text, so
+/// matching an id could only ever return nothing -- and "no results" from a
+/// dropdown the reader can see is the worst possible answer.
 async fn forum_search(
     State(state): State<AppState>,
     MaybeSession(_session): MaybeSession,
     Query(params): Query<ForumSearchQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let results = lorehaven_db::forum_search::search_forum(
-        state.db(),
-        &params.q,
-        params.category.as_deref(),
-        params.author.as_deref(),
-        params.from.as_deref(),
-        params.to.as_deref(),
-        params.limit,
-    )
-    .await
-    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    // A negative bound can never match, and "no results" for it is a worse
+    // answer than a reason. The parser would reject `replies:>=-1` on its own --
+    // the value is not an integer -- but saying it here names the parameter the
+    // reader actually set.
+    if params.min_replies.is_some_and(|n| n < 0) {
+        return Err(ApiError(lorehaven_domain::AppError::Validation {
+            message: format!(
+                "min_replies is a count and cannot be {}",
+                params.min_replies.expect("checked above")
+            ),
+            field_errors: Default::default(),
+        }));
+    }
 
-    Ok(Json(serde_json::json!({ "items": results })))
+    let query = compose_forum_query(&params);
+    let results = search_forum_ast(state.db(), &query, params.limit)
+        .await
+        .map_err(crate::routes::search::search_failure)?;
+
+    // The response shape is unchanged -- `kind`, `id`, `title`, `snippet`,
+    // `author_pseud`, `created_at`, `score` -- because the frontend reads
+    // exactly those fields. A topic-level search result maps onto it: the topic
+    // is the hit, the snippet says where it lives and who started it, and the
+    // score is the reply count, which is the only ordering signal a topic has.
+    let items: Vec<serde_json::Value> = results
+        .into_iter()
+        .map(|r| {
+            serde_json::json!({
+                "kind": "topic",
+                "id": r.topic_id,
+                "title": r.title,
+                "snippet": format!(
+                    "{} · {} · {} replies",
+                    r.category,
+                    r.author_handle,
+                    r.reply_count
+                ),
+                "author_pseud": r.author_handle,
+                "created_at": r.last_post_at,
+                "score": r.reply_count,
+            })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({ "items": items })))
+}
+
+/// Fold the legacy parameters into the query-language string.
+///
+/// A quoted phrase is used for the free-text values, because `category:meta` and
+/// a search for the word `meta` are different queries and only one of them is
+/// what the dropdown meant. An empty `q` is fine: a bare `category:meta` is a
+/// complete query.
+///
+/// The dates need no quoting -- they are already bare ISO-8601 -- and are
+/// emitted as `active:>=` / `active:<=`, which is the same bound `from`/`to`
+/// always meant.
+fn compose_forum_query(params: &ForumSearchQuery) -> String {
+    let mut terms: Vec<String> = Vec::new();
+    if !params.q.trim().is_empty() {
+        terms.push(params.q.trim().to_owned());
+    }
+    for (value, term) in [
+        (params.category.as_deref(), "category"),
+        (params.author.as_deref(), "author"),
+    ] {
+        if let Some(value) = value.filter(|v| !v.trim().is_empty()) {
+            terms.push(format!("{term}:\"{}\"", value.trim()));
+        }
+    }
+    if let Some(from) = params.from.as_deref().filter(|v| !v.trim().is_empty()) {
+        terms.push(format!("active:>={from}"));
+    }
+    if let Some(to) = params.to.as_deref().filter(|v| !v.trim().is_empty()) {
+        terms.push(format!("active:<={to}"));
+    }
+    // `0` is a real bound -- "threads with no replies" is a question people ask
+    // -- so the filter is on `is_some`, not on being positive. A negative
+    // number is refused: it can never match, and silently returning nothing is
+    // a worse answer than saying so.
+    if let Some(min_replies) = params.min_replies {
+        terms.push(format!("replies:>={min_replies}"));
+    }
+    terms.join(" AND ")
 }
 
 // ---------------------------------------------------------------------------
