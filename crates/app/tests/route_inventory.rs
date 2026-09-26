@@ -386,6 +386,13 @@ const ROUTE_TABLE: &[RouteEntry] = &[
     },
     RouteEntry {
         file: "works.rs",
+        handler: "delete_chapter",
+        method: "DELETE",
+        path: "/chapters/{id}",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "works.rs",
         handler: "list_revisions",
         method: "GET",
         path: "/chapters/{id}/revisions",

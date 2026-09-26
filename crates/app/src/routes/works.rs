@@ -82,7 +82,10 @@ pub fn router() -> Router<AppState> {
         )
         .route("/works/{id}/lineage", get(list_lineage).post(add_lineage))
         .route("/works/{id}/fork", post(fork_work))
-        .route("/chapters/{id}", patch(update_chapter))
+        .route(
+            "/chapters/{id}",
+            patch(update_chapter).delete(delete_chapter),
+        )
         .route("/chapters/{id}/revisions", get(list_revisions))
         .route("/chapters/{id}/restore-revision", post(restore_revision))
 }
@@ -571,6 +574,47 @@ async fn add_chapter(
     let chapter = content::create_chapter(state.db(), work.id, &title).await?;
 
     Ok((StatusCode::CREATED, Json(ChapterView::from(chapter))))
+}
+
+/// Soft-delete a chapter (owner or contributor).
+///
+/// A chapter is never removed outright: a reader's saved position may point at
+/// one, and the revision history is what makes an accidental deletion
+/// recoverable. The row stays, `deleted_at` is set, and reads already filter on
+/// it -- so the chapter disappears from the work without the row that readers
+/// point at disappearing underneath them.
+async fn delete_chapter(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    let chapter_id = parse_chapter_id(&id)?;
+    let chapter = content::find_chapter(state.db(), chapter_id)
+        .await?
+        .ok_or_else(|| {
+            ApiError(AppError::NotFound {
+                resource: "chapter",
+            })
+        })?;
+
+    // Same authorization as an edit: loading the parent work through the acting
+    // pseud means a stranger's chapter is not found rather than found-and-refused.
+    let (_work, contributors) = author_work(&state, &user, &chapter.work_id.to_string()).await?;
+    if let Decision::Deny(reason) = can_edit(&user, &contributors) {
+        return Err(refusal(reason));
+    }
+
+    // `find_chapter` already excludes soft-deleted rows, so a chapter that
+    // reached here was live a moment ago. The `false` branch is therefore
+    // unreachable in practice and is handled as a 404 rather than panicking --
+    // it becomes reachable the moment a delete races two concurrent requests, and
+    // the second one should get "not found", not a 500.
+    if !content::delete_chapter(state.db(), chapter_id).await? {
+        return Err(ApiError(AppError::NotFound {
+            resource: "chapter",
+        }));
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn update_chapter(
