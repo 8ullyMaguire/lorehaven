@@ -290,6 +290,18 @@ If a build error contradicts something you verified minutes ago, suspect a share
 target dir before you suspect your own edit. Check with a build in a fresh
 `CARGO_TARGET_DIR`; if that passes, the error was never yours.
 
+**Compare full runs only, and always against the baseline commit.** Mid-run I
+diffed a partial current run against a *previous partial* run and read the
+difference as 7 new regressions. They were not: all 7 (`milestone_32` voting,
+karma, taxonomy override) fail identically at the baseline commit, where they
+were simply buried inside the 54. Against the real baseline the honest number is
+6 fixed, 0 regressions, 48 still failing.
+
+The lesson is narrow and worth keeping: a set difference between two runs is
+only meaningful if both runs completed. A truncated run is a subset, and
+`A - B` over subsets produces phantom regressions that cost an hour of chasing
+a 500 through code I had never touched.
+
 **The unread count is filtered, and that is a deliberate mismatch.** A reader
 who blocks a tag sees `unread_count` drop below the number of entries in the
 list. That looks like a bug and is not: the alternative is a badge that counts
