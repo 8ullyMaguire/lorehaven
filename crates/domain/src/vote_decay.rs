@@ -54,8 +54,16 @@ pub struct Decay {
     pub cutoff_days: f64,
     /// Entries with fewer *live* votes than this never decay. Default 20.
     pub min_votes: i64,
-    /// The curve's shape. 1.0 is linear, 2.0 the default gentle-then-sharp.
-    pub exponent: f64,
+    /// The curve's shape: 1 is linear, 2 the default gentle-then-sharp.
+    ///
+    /// An **integer**, and that is not an aesthetic choice. The score query
+    /// computes this curve in SQL, and sqlx's bundled SQLite has *no* math
+    /// functions at all — `POWER`, `exp`, `ln` and `sqrt` all fail with
+    /// "no such function" — so the only curves expressible in portable SQL
+    /// are integer powers, which are plain repeated multiplication. A
+    /// fractional exponent would be computable in Rust and unreachable in SQL,
+    /// and the two would then disagree on the score with nothing to report it.
+    pub exponent: u32,
 }
 
 impl Default for Decay {
@@ -64,7 +72,7 @@ impl Default for Decay {
             enabled: true,
             cutoff_days: 60.0,
             min_votes: 20,
-            exponent: 2.0,
+            exponent: 2,
         }
     }
 }
@@ -76,12 +84,14 @@ impl Decay {
     /// configuration mistake an operator would only find by noticing a list
     /// that stopped ranking. It falls back to the default instead.
     #[must_use]
-    pub fn from_config(enabled: bool, cutoff_days: f64, min_votes: i64, exponent: f64) -> Self {
+    pub fn from_config(enabled: bool, cutoff_days: f64, min_votes: i64, exponent: u32) -> Self {
         Self {
             enabled,
             cutoff_days: if cutoff_days > 0.0 { cutoff_days } else { 60.0 },
             min_votes: min_votes.max(0),
-            exponent: if exponent > 0.0 { exponent } else { 2.0 },
+            // 0 would make every live vote worth `1.0` regardless of age,
+            // which is the linear curve inverted into a constant.
+            exponent: exponent.max(1),
         }
     }
 }
@@ -106,7 +116,14 @@ pub fn decay(age_days: f64, cfg: &Decay) -> f64 {
         return 0.0;
     }
     let remaining = 1.0 - (age / cfg.cutoff_days);
-    remaining.powf(cfg.exponent)
+    // Repeated multiplication, not `powf`, so the Rust curve and the SQL curve
+    // are the same operation. `powf(2.0)` and `t * t` agree to the last bit,
+    // but `powf` would leave a reader wondering which one the database runs.
+    let mut w = 1.0;
+    for _ in 0..cfg.exponent {
+        w *= remaining;
+    }
+    w
 }
 
 /// Whether an entry with `live_votes` currently-voting accounts decays at all.
@@ -175,9 +192,21 @@ mod tests {
     }
 
     #[test]
-    fn a_malformed_exponent_falls_back_to_the_default() {
-        assert_eq!(Decay::from_config(true, 60.0, 20, 0.0).exponent, 2.0);
-        assert_eq!(Decay::from_config(true, 60.0, 20, -1.0).exponent, 2.0);
+    fn a_zero_exponent_clamps_to_one() {
+        // Exponent 0 would make `w` stay at 1.0 for every age -- the linear
+        // curve inverted into a constant, so nothing would ever decay.
+        assert_eq!(Decay::from_config(true, 60.0, 20, 0).exponent, 1);
+    }
+
+    #[test]
+    fn the_curve_matches_an_explicit_power() {
+        // The multiplication loop has to agree with the mathematical power it
+        // stands for, or "squared" is a name rather than a description.
+        let cfg = Decay::default();
+        for day in [0.0, 1.0, 17.0, 45.0, 59.0] {
+            let t = 1.0 - day / 60.0;
+            assert!((decay(day, &cfg) - t * t).abs() < 1e-12, "day {day}");
+        }
     }
 
     #[test]

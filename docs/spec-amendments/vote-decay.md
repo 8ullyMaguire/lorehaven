@@ -46,11 +46,15 @@ indistinguishable in aggregate from an honest consensus.
 today's trust-and-taste weight and `decay` is a pure function of the vote's
 age.
 
-**Decay shape.** Exponential toward a configurable cutoff:
+**Decay shape.** A power curve toward a configurable cutoff:
 
 ```text
-decay(age_days) = (1 - age/cutoff) ^ 2
+t            = 1 - min(1, max(0, age / cutoff))
+decay(age)   = t ^ exponent
 ```
+
+`exponent` is an **integer**, defaulting to 2. That is not an aesthetic
+choice and §2.1 records why it cannot be anything else.
 
 The square makes the early loss gentle and the late loss fast, which matches
 the stated intent — *daily* voting barely matters, *weekly* matters slightly
@@ -70,7 +74,7 @@ claim is that it stopped.
 | `decay_enabled` | `true` | Master switch. `false` restores permanent votes. |
 | `decay_cutoff_days` | `60` | Age at which weight is exactly 0. |
 | `decay_min_votes` | `20` | Entries with fewer *live* votes never decay. |
-| `decay_exponent` | `2.0` | The curve's shape. 1.0 is linear. |
+| `decay_exponent` | `2` | The curve's shape, an integer. 1 is linear. |
 
 **`decay_min_votes` is the important one.** Without it, a new entry with three
 votes decays toward zero and never ranks, because the ranking signal it needs
@@ -85,46 +89,67 @@ diminishes.
 
 ---
 
-## §2.0 Vote Decay → §2.0 Storage
+## §1.5 Vote Decay → §1.5 The Exponent Is an Integer
 
-**Modification.** `directory_votes` gains a surrogate key and stops being
-keyed on `(entry_id, account_id)`.
+**Why.** The curve is computed in SQL as well as in Rust (§3.3), and
+**sqlx's bundled SQLite has no math functions at all**. `POWER`, `exp`, `ln`
+and `sqrt` all return `no such function: POWER` and friends — `SQLITE_ENABLE_
+MATH_FUNCTIONS` is a compile-time flag the bundled build does not set. Only
+integer powers are expressible in portable SQL, because an integer power *is*
+repeated multiplication.
 
-```text
-id          TEXT PRIMARY KEY
-entry_id    TEXT NOT NULL
-account_id  TEXT NOT NULL
-vote_value  INTEGER NOT NULL CHECK (vote_value IN (-1, 1))
-base_weight REAL NOT NULL      -- trust x taste at cast time
-voted_at    TEXT NOT NULL
-```
+A fractional exponent would therefore be computable in Rust and unreachable in
+the database, and the two would disagree on every score with nothing to report
+it. The Rust side therefore multiplies in a loop rather than calling `powf`, so
+that both dialects perform the same operation on the same numbers, and
+`vote_decay_parity.rs` asserts the two agree to 1e-3 across a table of ages and
+parameter sets on both backends.
 
-The existing `weight` column is renamed to `base_weight` and its meaning is
-pinned: it is the **trust-and-taste weight at the moment of voting**, not the
-weight contributed to the score. This is the change that makes re-voting
-meaningful — a vote cast at TL2 and refreshed at TL4 carries the TL4 weight,
-which is correct, because the reader's current standing is what the vote is
-expressing.
+The 1e-3 tolerance is a bound on the *engines'* arithmetic, not on the curve.
+If it ever needs loosening, the cause is a dialect implementation of a
+primitive, not the design.
 
-**Uniqueness moves to a partial index**, so a voter has at most one *live*
-row per entry while history remains queryable:
-
-```sql
-CREATE UNIQUE INDEX idx_directory_votes_one_live
-  ON directory_votes (entry_id, account_id)
-  WHERE weight > 0;
-```
-
-This is SQLite 3.8+ and PostgreSQL 3.0+, both satisfied. It is the only way to
-express "at most one current vote" once rows are allowed to go stale, and it
-makes the invariant a database guarantee rather than a transaction's
-discipline.
-
-**Migration** (`0048`): add `id`, add `base_weight`, backfill `id` with a
-generated value per existing row, drop the old primary key, add the partial
-index. Dual-dialect, per `migration-dialect-convention`.
+**Corollary.** `1.0 - age/cutoff` must be clamped into `[0, 1]` *before* the
+power. Without the clamp, a vote older than the cutoff gives a **negative**
+base raised to an even power, which is positive on both engines: a 400-day-old
+vote would score `(1 - 400/60)² = 28.4`, i.e. one stale vote outweighing 28
+fresh ones, and both backends would agree, so no dialect test would catch it.
+The clamp is asserted structurally in the parity test for exactly that reason.
 
 ---
+
+## §2.0 Vote Decay → §2.0 Storage
+
+**Modification.** None required. This is the part of the design that turned
+out not to need doing, which is worth recording so nobody "fixes" it later.
+
+The existing `directory_votes` is keyed `(entry_id, account_id)` with
+`weight` and `voted_at`. Under §3.1 a voter has exactly one row per entry at
+any time, so that key is already the right constraint, and re-voting is an
+UPDATE — which resets `weight` to the current trust-and-taste value and
+`voted_at` to now. Refresh comes for free.
+
+**What changes is the meaning of the `weight` column.** It becomes explicitly
+*the trust-and-taste weight at the moment of voting*, never the weight
+contributed to the score. Today the comment says "recomputed on trust/taste
+change", which is a promise the code does not keep and decay would make
+actively misleading: a weight that was recomputed on trust change could not
+also be a function of age, and the distinction is the whole mechanism.
+
+Rename to `base_weight` for the same reason the analytics milestone renamed
+`weight` → `base_weight` elsewhere: a column whose name does not say *which*
+of three meanings it carries is a bug waiting for a reader who assumed the
+other one. This is a rename with no behaviour change, so it is safe.
+
+**No partial index.** An append-only design would need one
+(`WHERE weight > 0`), but with refresh semantics there is never a stale row to
+be confused with a live one — every row is current by definition. The index
+that exists (`idx_directory_votes_entry`) is still what the score query needs.
+
+**Migration** (`0079`): `ALTER TABLE directory_votes RENAME COLUMN weight TO
+base_weight`, in both dialects, with no data movement. SQLite 3.25+ and
+PostgreSQL both support the rename, and it is a schema-only change, so
+`cargo test --test migrate` covers it.
 
 ## §3.0 Vote Decay → §3.0 Behaviour
 
@@ -153,19 +178,38 @@ weight satisfies that only until the next second.
 
 **Consequence, and it is a real cost:** the score can no longer be a
 denormalised column updated in the vote transaction, because decay moves it
-without any vote happening. The score becomes a computed value from a
-correlated subquery over the vote rows:
+without any vote happening. `cast_vote` today recomputes and stores
+`directory_entries.score` in the same transaction as the vote, which §39.4
+requires and which is the right design for permanent votes. With decay it
+would be wrong the moment the transaction committed, so the score becomes a
+computed value from a correlated subquery over the vote rows:
 
 ```sql
 SELECT COALESCE(SUM(vote_value * base_weight * decay(age)), 0) ...
 ```
 
-The `directory_entries.score` column stays for the *undecayed* case (an
-operator with `decay_enabled = false`) and for entries below the threshold,
-and the read path picks the cheap path when it can. Every entry in the Top
-sort is recomputed, which on a directory of a few hundred entries is
-microseconds and on a directory of a few hundred thousand is a sequential
-scan — which is a reason for §4.1's recompute job.
+The `directory_entries.score` column stays and is still maintained — it is
+the cheap path for an instance with `decay_enabled = false` and for entries
+under `decay_min_votes`, and the read path picks the cheap path when it can.
+**`decay(age)` has to be computed in SQL, not in Rust**, which means the
+curve exists in two places, and the SQL cannot be a literal transcription of
+the Rust: three dialect facts force it to be *constructed* per backend rather
+than written once.
+
+1. **No math functions on SQLite** (§1.5) — the power is a product, not a
+   `POWER` call.
+2. **PostgreSQL has no scalar two-argument `min`/`max`.** Those are aggregate
+   functions; `max(double precision, double precision)` does not exist and the
+   query fails at plan time with **42883**. The scalar forms are
+   `LEAST`/`GREATEST`.
+3. **PostgreSQL's bare decimal literals are `NUMERIC`**, so an uncast `0.0`
+   makes `GREATEST` fail to resolve against a `double precision` operand —
+   42883 again, from the same class of mistake.
+
+The age is fractional in both dialects (`julianday` on SQLite,
+`EXTRACT(EPOCH …)` cast to `double precision` on PostgreSQL); an integer day
+count would make the curve a staircase, and "full weight for 24 hours then a
+step down" is not the rule anyone asked for.
 
 ### 3.4 The score still never exposes a weight
 
