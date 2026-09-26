@@ -628,6 +628,14 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // Trust-gated analytics. Every capability is authorised by the
+        // registry rather than by a per-route check, so this door and the
+        // list at `/me/analytics` can never disagree.
+        .merge(classified(
+            routes::analytics::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // Decision service (M30 / spec §34).
         .merge(classified(
             routes::decision_service::router(),

@@ -1161,6 +1161,13 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/search/in-work/{id}",
         audience: Audience::Public,
     },
+    RouteEntry {
+        file: "search.rs",
+        handler: "users_search",
+        method: "GET",
+        path: "/users/search",
+        audience: Audience::Public,
+    },
     // ------------------------------------------------------------------
     // Discovery — public reads, session-scoped writes
     // ------------------------------------------------------------------
@@ -2592,6 +2599,23 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         handler: "creator_dashboard",
         method: "GET",
         path: "/me/dashboard",
+        audience: Audience::Pseudonymous,
+    },
+    // ------------------------------------------------------------------
+    // Analytics — trust-gated. Authorisation is in the registry, not here.
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "analytics.rs",
+        handler: "my_analytics",
+        method: "GET",
+        path: "/me/analytics",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "analytics.rs",
+        handler: "one_capability",
+        method: "GET",
+        path: "/me/analytics/{capability}",
         audience: Audience::Pseudonymous,
     },
     // ------------------------------------------------------------------
