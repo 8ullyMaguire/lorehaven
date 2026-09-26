@@ -258,9 +258,9 @@ pub async fn join_critique(db: &Database, topic_id: &str, pseud: &str) -> Result
             sqlx::query_scalar(
                 "SELECT CAST(MAX(position) AS BIGINT) FROM critique_queue WHERE topic_id = $1",
             )
-                .bind(topic_id)
-                .fetch_one(db.postgres_pool().expect("postgres"))
-                .await?
+            .bind(topic_id)
+            .fetch_one(db.postgres_pool().expect("postgres"))
+            .await?
         }
     };
     let position = max_pos.unwrap_or(-1) + 1;
