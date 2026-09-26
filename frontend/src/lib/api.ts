@@ -3762,3 +3762,64 @@ export function importSettings(data: SettingsExport): Promise<ImportReport> {
     body: JSON.stringify({ data }),
   });
 }
+
+// --- Analytics (docs/spec-amendments/trust-gated-analytics.md) ------------
+//
+// The server decides what a reader may see and sends the list. The client
+// holds no ladder, no floor and no capability list of its own, so there is
+// nothing here that could disagree with the registry.
+
+/** §24.2's method block, as the registry renders it. */
+export interface AnalyticsMeta {
+  name: string;
+  definition: string;
+  freshness: string;
+  approximation: string;
+  minimum_trust_level: number;
+  subject: 'self' | 'other';
+  /** The k-anonymity floor, or null for a single-entity fact. */
+  floor: number | null;
+}
+
+/**
+ * A count, exactly as the server reports it.
+ *
+ * `count` is absent rather than zero when the true number is below the floor,
+ * and that distinction is the whole point: zero says "nobody did this", and
+ * for a new work the true statement is "too few people to tell you". So the
+ * type has no `count: number | undefined` to accidentally `?? 0`.
+ */
+export interface AnalyticsCount {
+  count?: number;
+  fewer_than?: number;
+}
+
+export interface AnalyticsValue extends AnalyticsCount {
+  status?: string;
+  note?: string;
+}
+
+export interface AnalyticsList {
+  viewer: { trust_level: number; role: string; preset: string };
+  capabilities: AnalyticsMeta[];
+}
+
+export interface AnalyticsDetail {
+  capability: string;
+  implemented: boolean;
+  meta: AnalyticsMeta;
+  value: AnalyticsValue;
+}
+
+/** What this reader may see. The client renders this list and nothing else. */
+export async function fetchAnalytics(signal?: AbortSignal): Promise<AnalyticsList> {
+  return apiFetch<AnalyticsList>('/me/analytics', { signal });
+}
+
+/** One capability, already authorised server-side. */
+export async function fetchCapability(
+  name: string,
+  signal?: AbortSignal,
+): Promise<AnalyticsDetail> {
+  return apiFetch<AnalyticsDetail>(`/me/analytics/${encodeURIComponent(name)}`, { signal });
+}
