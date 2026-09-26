@@ -245,15 +245,32 @@ Resource directory settings (spec §39).
 
 ## `[rate_limits]`
 
-Rate-limit quotas (spec §3.8). Each bucket has `burst` and `per_minute`.
+Rate-limit quotas (spec §3.8).
 
-| Key | Burst | Per minute |
-|-----|-------|-----------|
-| `auth` | 5 | 20 |
-| `write` | 10 | 60 |
-| `search` | 20 | 120 |
-| `export` | 3 | 10 |
-| `default` | 30 | 180 |
+The keys are **flat** — `<class>_burst` and `<class>_per_minute`, one line each.
+A nested form (`auth = { burst = 5, per_minute = 20 }`) is not what the parser
+accepts, and neither is a bare `burst` or `per_minute`. An unrecognised key is a
+hard parse error, not a warning, so a config written from the shape this table
+used to imply fails at startup with the field list in the message.
+
+| Key | Default |
+|-----|---------|
+| `auth_burst` | 10 |
+| `auth_per_minute` | 30 |
+| `write_burst` | 20 |
+| `write_per_minute` | 60 |
+| `search_burst` | 30 |
+| `search_per_minute` | 120 |
+| `export_burst` | 30 |
+| `export_per_minute` | 120 |
+| `default_burst` | 120 |
+| `default_per_minute` | 600 |
+| `address_multiplier` | 4 |
+
+`address_multiplier` scales the address-keyed bucket only, so one address behind
+a shared NAT absorbs more before any individual account is affected. Zero is
+rejected at startup: a zero burst would make every request un-rate-limited and
+zero would make every request refused.
 
 ## `[accounts]`
 

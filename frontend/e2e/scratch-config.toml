@@ -1,0 +1,31 @@
+# Rate limits for the Playwright scratch instance.
+#
+# The whole E2E suite runs from one address against one server process, and
+# every test registers its own account. Under the production defaults
+# (`auth_burst` 10, `default_burst` 120) the suite is itself a brute-force run:
+# after a few tests the address bucket is empty, and the next reader to ask a
+# question gets a 429. That is not a bug in the feature under test -- it is the
+# limiter doing its job on traffic shaped nothing like a real reader -- but it
+# makes every later test's result depend on how many tests ran before it.
+#
+# So the harness raises the ceilings rather than weakening the assertions: the
+# tests that are *about* rate limiting do not use this instance. They build
+# their own server with tight limits (see `crates/app/tests/milestone_2.rs`),
+# which is the only way to test a limit honestly.
+#
+# Note the flat keys: `[rate_limits]` takes `auth_burst`, not a nested
+# `auth = { burst = ... }`. Production defaults are unchanged; this file is
+# never loaded outside the Playwright harness.
+
+[rate_limits]
+auth_burst = 500
+auth_per_minute = 5000
+write_burst = 1000
+write_per_minute = 5000
+search_burst = 1000
+search_per_minute = 5000
+export_burst = 500
+export_per_minute = 5000
+default_burst = 2000
+default_per_minute = 10000
+address_multiplier = 1
