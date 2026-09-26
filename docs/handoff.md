@@ -248,14 +248,6 @@ identical values for identical rules.
    not have a slot to explain, and that is achieved upstream by the filter work
    in this commit.
 
-2. **Notifications still do not filter, and the count is the sharp edge.**
-   `notifications::list` returns notification rows, not works, so a blocked tag
-   does not currently appear in one. But a notification whose subject is a work
-   carries that work's title, and `unread_count` counts it regardless — so a
-   reader who blocked a tag can still see an unread badge naming it. The count is
-   the harder half: a badge that is filtered from the list but still counted is the
-   same leak through a smaller door, and filtering the count means the number no
-   longer matches the list, which needs a stated convention.
 2. **No lint for a bare `?` reaching a PG pool.** That is the defect class that
    broke filters. I tried a regex rule and abandoned it: "is this literal the
    PostgreSQL arm" is not decidable from the text (three legal call shapes,
@@ -297,6 +289,14 @@ twenty minutes of chasing a nonexistent regression before I noticed that
 If a build error contradicts something you verified minutes ago, suspect a shared
 target dir before you suspect your own edit. Check with a build in a fresh
 `CARGO_TARGET_DIR`; if that passes, the error was never yours.
+
+**Positional placeholders cannot be numbered when the bind count is dynamic.**
+`notifications::list_filtered` appends the content-filter's binds in a loop, so
+its SQL uses unnumbered `?` and lets `sql_owned` renumber the PostgreSQL form.
+I first wrote `WHERE account_id = ?1 ... LIMIT ?2` — and SQLite answered
+`datatype mismatch`, which points at nothing useful. `?2` is fixed but the
+filter contributes an unknown number of binds, so the two numbering schemes
+collide. The error names a type when the fault is a count.
 
 **A test that pins a schema fact can encode the wrong one.** When I removed the
 bad `work_id::text` cast, three unit tests in `content_filter_sql.rs` went red —

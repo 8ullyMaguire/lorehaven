@@ -26,6 +26,25 @@ pub struct NotificationRow {
     pub created_at: String,
 }
 
+/// The raw row shape both list statements select, in the same order. Kept in
+/// one place so the two SELECTs cannot drift from the decoder.
+type RawRow = (String, String, String, String, Option<String>, i32, String);
+
+impl From<RawRow> for NotificationRow {
+    fn from(r: RawRow) -> Self {
+        let (id, kind, title, body, work_id, unread, created_at) = r;
+        NotificationRow {
+            id,
+            kind,
+            title,
+            body,
+            work_id,
+            unread: unread != 0,
+            created_at,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Writes
 // ---------------------------------------------------------------------------
@@ -101,7 +120,8 @@ pub async fn notify(
 // Reads
 // ---------------------------------------------------------------------------
 
-/// The account's inbox, newest first.
+/// The caller's inbox, newest first. Unfiltered; callers that can see a work
+/// should use [`list_filtered`], which applies the reader's content filters.
 pub async fn list(
     db: &Database,
     account_id: &str,
@@ -119,34 +139,133 @@ pub async fn list(
     );
     let rows = match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, (String, String, String, String, Option<String>, i32, String)>(&sql)
+            sqlx::query_as::<_, RawRow>(&sql)
                 .bind(account_id)
                 .bind(limit)
                 .fetch_all(db.sqlite_pool().expect("sqlite"))
                 .await?
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, (String, String, String, String, Option<String>, i32, String)>(&sql)
+            sqlx::query_as::<_, RawRow>(&sql)
                 .bind(account_id)
                 .bind(limit)
                 .fetch_all(db.postgres_pool().expect("postgres"))
                 .await?
         }
     };
-    Ok(rows
-        .into_iter()
-        .map(
-            |(id, kind, title, body, work_id, unread, created_at)| NotificationRow {
-                id,
-                kind,
-                title,
-                body,
-                work_id,
-                unread: unread != 0,
-                created_at,
-            },
-        )
-        .collect())
+    Ok(rows.into_iter().map(NotificationRow::from).collect())
+}
+
+/// [`list`], minus the works the reader has content-filtered.
+///
+/// A notification *with* a `work_id` carries that work's title in `title`, so
+/// leaving it unfiltered leaks exactly what the filter exists to withhold. One
+/// *without* a work -- `kind = system`, an instance notice -- is not filtered:
+/// §46.7.1 is about works not reaching the reader, not about silencing the
+/// instance at someone who filtered a tag. The predicate is built over
+/// `n.work_id`, so a NULL work_id makes the NOT EXISTS trivially true and the
+/// system notice is kept, which is the behaviour we want without a special case.
+///
+/// The exclusion is in the `WHERE` rather than applied after the `LIMIT`, for
+/// the reason it is everywhere else: filtering after the limit returns a short
+/// page, which the reader cannot distinguish from the end of the inbox.
+pub async fn list_filtered(
+    db: &Database,
+    account_id: &str,
+    limit: i64,
+    rules: &[crate::search::content_filter_sql::FilterRule],
+) -> Result<Vec<NotificationRow>, sqlx::Error> {
+    let excl = crate::search::content_filter_sql::build_for(rules, "n.work_id");
+    // An empty predicate must not leave a stray `AND` behind.
+    let and = if excl.predicate.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {}", excl.predicate)
+    };
+    // `sql_owned` renumbers `?` to `$n` for PostgreSQL, so both arms are
+    // written once here. The filter's binds are appended in a loop, which is
+    // why the placeholders are positional and unnumbered: an explicit `?2`
+    // would be renumbered too and the two numbering schemes would collide.
+    let sql = crate::sql_owned(
+        db,
+        format!(
+            "SELECT id, kind, title, body, work_id,
+                CASE WHEN read_at IS NULL THEN 1 ELSE 0 END AS unread, created_at
+           FROM notifications n WHERE n.account_id = ?{and}
+          ORDER BY n.created_at DESC, n.id DESC LIMIT ?"
+        ),
+        format!(
+            "SELECT id::text, kind, title, body, work_id::text,
+                CASE WHEN read_at IS NULL THEN 1 ELSE 0 END AS unread, created_at
+           FROM notifications n WHERE n.account_id = ?::uuid{and}
+          ORDER BY n.created_at DESC, n.id DESC LIMIT ?"
+        ),
+    );
+    // The query builder is monomorphized per backend, so each arm builds its
+    // own rather than sharing one across the match.
+    let rows = match db.backend() {
+        Backend::Sqlite => {
+            let mut q = sqlx::query_as::<_, RawRow>(&sql).bind(account_id);
+            for b in &excl.binds {
+                q = q.bind(b);
+            }
+            q.bind(limit)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            let mut q = sqlx::query_as::<_, RawRow>(&sql).bind(account_id);
+            for b in &excl.binds {
+                q = q.bind(b);
+            }
+            q.bind(limit)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(rows.into_iter().map(NotificationRow::from).collect())
+}
+
+/// [`unread_count`], counting only entries the reader can actually see.
+///
+/// The count is filtered for the same reason the list is, and it is the sharper
+/// half: a badge that is filtered out of the list but still counted leaks the
+/// existence of the very work the filter hides, through a one-digit door. The
+/// visible consequence is that the badge no longer matches a row count the
+/// reader can see, which is the correct trade -- §46.7.1 is an invariant, and a
+/// mismatch is visible while a leak is not.
+pub async fn unread_count_filtered(
+    db: &Database,
+    account_id: &str,
+    rules: &[crate::search::content_filter_sql::FilterRule],
+) -> Result<i64, sqlx::Error> {
+    let excl = crate::search::content_filter_sql::build_for(rules, "n.work_id");
+    let and = if excl.predicate.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {}", excl.predicate)
+    };
+    let sql = crate::sql_owned(
+        db,
+        format!("SELECT COUNT(*) FROM notifications n WHERE n.account_id = ? AND n.read_at IS NULL{and}"),
+        format!("SELECT COUNT(*) FROM notifications n WHERE n.account_id = ?::uuid AND n.read_at IS NULL{and}"),
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            let mut q = sqlx::query_scalar(&sql).bind(account_id);
+            for b in &excl.binds {
+                q = q.bind(b);
+            }
+            q.fetch_one(db.sqlite_pool().expect("sqlite")).await
+        }
+        Backend::Postgres => {
+            let mut q = sqlx::query_scalar(&sql).bind(account_id);
+            for b in &excl.binds {
+                q = q.bind(b);
+            }
+            q.fetch_one(db.postgres_pool().expect("postgres")).await
+        }
+    }
 }
 
 /// How many entries are still unread.
