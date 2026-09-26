@@ -1,3 +1,125 @@
+# Handoff — the forum search speaks the same language as the works search
+
+## The short version
+
+The unified-search goal is now two surfaces, not one. `..` ranges landed, dates
+became comparable values, and `/api/v1/forum-search` was rebuilt on the shared
+query language: `replies:>50`, `category:meta`, `author:nightowl`,
+`active:>2026-01-15`, `locked:true` and `replies:10..100` all work there, and a
+field from another surface is a 422 naming it rather than an empty page.
+
+The old `crates/db/src/forum_search.rs` is deleted. It had two hand-written
+dialect arms and no callers once the route moved.
+
+**Four bugs surfaced while building this, and three of them were in code the
+previous slice had just written.** They are listed below because each one is a
+*silent* failure — a search that returns the wrong rows, or none, and looks like
+a legitimate empty result.
+
+## What a reader can type today
+
+Works (`/api/v1/search?q=`) and forum (`/api/v1/forum-search?q=`) share one
+parser, one operator set, one 422 behaviour.
+
+    tag:"enemies to lovers" fandom:"Good Omens" words:>10000
+    words:10000..50000          inclusive at both ends
+    words:..50000               an open lower bound, inclusive upper
+    replies:>50 category:meta   forum
+    active:>2026-01-15          a date, not a number
+    locked:true
+    a NOT b                     a AND NOT b
+    "a quoted phrase"           matches exactly, in post bodies only
+
+Every bound is inclusive. `10000..5000` is refused with a reason, not silently
+empty.
+
+## The three bugs worth knowing about
+
+**A numeric bound needs `CAST(? AS BIGINT)`.** The bound is a `String`, and
+SQLite leaves it as text on the right of an integer, so `3 > '1'` is *false*.
+Without the cast every `replies:>N` matched nothing and read as "this category
+is empty". There is a test for it — and a test for the opposite mistake, because
+casting a *date* bound compares `2026-01-15` as the number 2026.
+
+**`bounds_descend` compared lexicographically.** `"10000" < "5000"` as strings,
+so `10000..5000` passed the backwards-range check and then matched nothing.
+Numbers compare numerically; dates compare lexicographically. The caller passes
+the kind, because it is the only layer that knows the column's type.
+
+**A `forum_posts` join multiplies rows.** The result set is topics, so the
+free-text, phrase and `author:` arms each reach `forum_posts` through a
+correlated `EXISTS` instead. A thread with three replies all saying "winter"
+comes back once. A join would have returned it three times with the same title,
+and a reader cannot tell that from three different threads.
+
+## A schema divergence worth knowing about
+
+`pseuds.id` is `UUID` on PostgreSQL and `TEXT` on SQLite, but ten tables carry a
+pseud FK that is `TEXT` in *both* migrations (`comments.author_pseud`,
+`forum_topics.author_pseud`, `forum_posts.author_pseud`, `forum_karma.pseud`,
+`forum_votes.pseud`, `critique_participants.pseud`, `work_reactions.pseud`, and
+three more). Joining one of those to `pseuds.id` without a cast is accepted by
+SQLite and rejected by PostgreSQL with `42883: uuid = text`.
+
+`community.rs` splits its arms for this. The new forum statement uses
+`CAST(pseuds.id AS TEXT) = forum_topics.author_pseud` instead, which is ANSI —
+uuid-to-text on PostgreSQL, text-to-text on SQLite — so the statement is a
+single shared string with no `Dialect` parameter at all.
+
+**The real fix is a migration** retyping those ten columns to `UUID` to match
+`pseuds`. That is worth doing and was deliberately not done here; the
+column-name parity test does not compare types, so it will not catch a
+regression.
+
+Note that *binding* one of those columns is fine on both dialects. Only the
+join to `pseuds.id` breaks. `works.owner_pseud_id` and
+`collaboration_invites.invited_pseud_id` are already `UUID` and correct as
+written.
+
+## What the UI does now
+
+- The category dropdown is populated from `/forums`. It used to be hardcoded to
+  `general`, `fanworks`, `discussion`, `help` — **none of which is a category a
+  fresh instance creates**, so anyone who picked one got an empty page and no
+  way to know the dropdown was the problem. A failed fetch omits the filter
+  entirely; the query box still works.
+- A min-replies box was added, and an empty query can search on filters alone
+  (`category:meta` is a complete query).
+- A 422's reason is shown verbatim instead of "Search failed".
+- One line under the box lists what the language accepts. A reader cannot learn
+  the operators except by being told.
+- The works search box emits `words:10000..50000` as one `..` term, and drops a
+  backwards range before sending it.
+
+## Still open
+
+The bulk of the feature, unchanged in shape:
+
+1. **User, bookmark and directory renderers.** The field registry knows the
+   fields; nothing renders them.
+2. **Shared taste gravity and the meta-ranker across surfaces.** One ranking
+   architecture so signal weighting is not re-implemented per entity.
+3. **The other three specialized filter UIs** (user, bookmark, directory).
+   Works and forum have one each now.
+4. **E2E coverage for the new search behaviour** at the browser level.
+5. **The migration** that retypes the ten TEXT pseud FKs to `UUID`.
+
+## Verified
+
+- 563 domain unit tests, 20 forum-renderer tests
+- 11 forum DB integration tests, 8 forum route tests, 26 works-comparison
+  integration tests — all on SQLite **and** PostgreSQL
+- 326 frontend tests, 0 `svelte-check` errors, 0 clippy warnings workspace-wide
+- Commits `8afa138` (`..`), `b2d235d` (forum renderer), `0e6ecc1` (forum search
+  end to end), all pushed to `master`
+
+## The one trap in this codebase
+
+`cargo fmt` reformats long SQL strings and will reflow them, which silently
+reverts a `::uuid` cast you added to a line above if the line got re-wrapped.
+Twice in this slice a cast "came back" after a `fmt`. If a fix seems to not
+apply, run `git diff` before assuming the test is lying.
+
 # Handoff — the query language grows a comparison, and two of its bugs surface
 
 ## The short version
