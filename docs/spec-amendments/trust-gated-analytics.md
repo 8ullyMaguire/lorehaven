@@ -75,6 +75,39 @@ reader does not "fix" it back.
 
 ---
 
+## Implementation status
+
+The registry's `implemented` flag is **derived**, not declared: a capability
+reports `implemented` when the query backing it exists, so a route cannot sit
+permanently reporting `false` for a query that is right there. Two of the 57
+are built:
+
+| Capability | Trust | Query |
+|---|---|---|
+| `own.reading.basic` | TL0 | `reading_totals` |
+| `own.reading.trend` | TL1 | `reading_trend` |
+
+`crates/app/tests/analytics_reading.rs` holds 20 tests over both: the
+totals and the reading-status write/read path, plus the trend's week
+anchoring, cross-account isolation and trust gate.
+
+`own.reading.trend` reports four weeks ending on the current Monday, oldest
+first, each with the reads recorded and the works finished in that week. It
+answers §9.6's "reads per week over time" over the same evidence
+`own.reading.basic` uses, so a reader is never shown a number derived from a
+kind of event the privacy floor has withheld elsewhere.
+
+Two dialect facts are load-bearing and are recorded at the query, because both
+fail silently rather than loudly:
+
+- SQLite has no `weeks` date modifier. `date(x, '-1 weeks')` is NULL, not an
+  error, so a whole trend of empty weeks looks like a working query over an
+  empty table.
+- A statement must not mix `?1` with bare `?`. libsqlite3 numbers the bare
+  placeholders from the highest explicit index it has already seen, so the
+  account id was compared against the date. Every placeholder is a bare `?`,
+  bound positionally, and `sql_owned` produces the PostgreSQL form.
+
 ## §1.0 Trust-Gated Analytics → §1.0 Analytics Model
 
 **Modification.** Analytics become capability-gated. The gate is a single pure
