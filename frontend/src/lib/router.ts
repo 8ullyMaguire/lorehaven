@@ -50,6 +50,7 @@ export type RouteId =
   | 'vanguard'
   | 'roadmap'
   | 'directory'
+  | 'analytics'
   | 'planned'
   | 'not-found';
 
@@ -107,6 +108,7 @@ const FIXED_ROUTES: Record<string, RouteId> = {
   '/quiz': 'quiz',
   '/vanguard': 'vanguard',
   '/directory': 'directory',
+  '/analytics': 'analytics',
   '/roadmap': 'roadmap',
 };
 

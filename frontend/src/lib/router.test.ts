@@ -165,4 +165,11 @@ describe('docs routes', () => {
     expect(matchRoute('/docs/').id).toBe('docs');
     expect(matchRoute('/docs//').id).toBe('docs');
   });
+  it('resolves the analytics page rather than the not-found view', () => {
+    // The page existed with twenty unit tests and no route to it, so every one
+    // of those tests passed while no reader could reach it. A component that
+    // is not in FIXED_ROUTES is invisible, and nothing else in the suite
+    // notices.
+    expect(matchRoute('/analytics').id).toBe('analytics');
+  });
 });

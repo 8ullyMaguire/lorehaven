@@ -27,6 +27,7 @@
     type AnalyticsMeta,
     type AnalyticsDetail,
     type ReadingTotals,
+    ApiError,
   } from '../lib/api';
 
   let loading = true;
@@ -35,6 +36,17 @@
   let role = 'reader';
   let preset = 'archive';
   let capabilities: AnalyticsMeta[] = [];
+
+  /**
+   * Set when the server refused because nobody is signed in.
+   *
+   * A 401 on this door is not an error to report, it is the answer to "is this
+   * page for me?" — and rendering it as a failure string sends a signed-out
+   * visitor to a message they can do nothing about. The door is
+   * `RequirePseud`, so the page is about *this* reader's own numbers and there
+   * is nothing to show an anonymous caller.
+   */
+  let signedOut = false;
 
   /** The capability whose value is expanded, if any. */
   let open: string | null = null;
@@ -49,7 +61,11 @@
       preset = list.viewer.preset;
       capabilities = list.capabilities;
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Could not load your analytics.';
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+        signedOut = true;
+      } else {
+        error = e instanceof Error ? e.message : 'Could not load your analytics.';
+      }
     } finally {
       loading = false;
     }
@@ -145,6 +161,11 @@
 
   {#if loading}
     <p class="state" role="status">Loading your analytics…</p>
+  {:else if signedOut}
+    <p class="state">
+      These are your own reading numbers, so they need an account. <a href="/sign-in">Sign in</a>, or{' '}
+      <a href="/register">register</a>, and your reading history will be waiting.
+    </p>
   {:else if error}
     <p class="state error" role="alert">{error}</p>
   {:else if capabilities.length === 0}
