@@ -26,11 +26,29 @@
   let selectedValue = $state('');
   let selectedFilters = $state<{ field: FilterField; value: string }[]>([]);
 
+  // Word-count range. Two number inputs rather than a slider: a slider cannot
+  // express "any minimum" and "any maximum" independently, and a reader who
+  // wants "everything over 10k" has to be able to leave the upper bound empty.
+  //
+  // Typed as `string | number | null` because `bind:value` on `type="number"`
+  // hands back a number when it can and `null` when the field is cleared, so
+  // the state is not a string and every read has to go through `bound`.
+  let minWords = $state<string | number | null>('');
+  let maxWords = $state<string | number | null>('');
+
+  /**
+   * Reads one bound as trimmed text. `bind:value` on a number input yields a
+   * number, and `null` once cleared, so this is the single place that knows it.
+   */
+  function bound(value: string | number | null): string {
+    return value === null || value === undefined ? '' : String(value).trim();
+  }
+
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   function onInput() {
     if (debounceTimer) clearTimeout(debounceTimer);
-    if (query.trim().length === 0) {
+    if (query.trim().length === 0 && !hasAnyFilter()) {
       results = null;
       searched = false;
       return;
@@ -52,13 +70,38 @@
     void runSearch();
   }
 
+  function clearWordRange() {
+    minWords = '';
+    maxWords = '';
+    void runSearch();
+  }
+
+  function hasAnyFilter(): boolean {
+    return selectedFilters.length > 0 || bound(minWords) !== '' || bound(maxWords) !== '';
+  }
+
+  /**
+   * A bound is only emitted when it parses as a non-negative integer. Sending
+   * `words:>` with nothing after it is a 422, and the reader would see an
+   * error for a field they had merely focused and left alone.
+   */
+  function wordRangeTerms(): string[] {
+    const terms: string[] = [];
+    const min = bound(minWords);
+    const max = bound(maxWords);
+    if (min !== '' && /^\d+$/.test(min)) terms.push(`words:>=${min}`);
+    if (max !== '' && /^\d+$/.test(max)) terms.push(`words:<=${max}`);
+    return terms;
+  }
+
   function buildQuery(): string {
     const freeText = query.trim();
     const filterParts = selectedFilters.map((f) => `${f.field}:"${f.value}"`);
-    if (freeText && filterParts.length > 0) {
-      return `${freeText} AND ${filterParts.join(' AND ')}`;
+    const all = [...filterParts, ...wordRangeTerms()];
+    if (freeText && all.length > 0) {
+      return `${freeText} AND ${all.join(' AND ')}`;
     }
-    return freeText || filterParts.join(' AND ');
+    return freeText || all.join(' AND ');
   }
 
   async function runSearch() {
@@ -148,6 +191,38 @@
         {/each}
       </ul>
     {/if}
+
+    <div class="word-range">
+      <div class="field">
+        <label for="min-words">Min words</label>
+        <input
+          id="min-words"
+          type="number"
+          min="0"
+          step="1000"
+          inputmode="numeric"
+          placeholder="Any"
+          bind:value={minWords}
+          oninput={onInput}
+        />
+      </div>
+      <div class="field">
+        <label for="max-words">Max words</label>
+        <input
+          id="max-words"
+          type="number"
+          min="0"
+          step="1000"
+          inputmode="numeric"
+          placeholder="Any"
+          bind:value={maxWords}
+          oninput={onInput}
+        />
+      </div>
+      {#if bound(minWords) !== '' || bound(maxWords) !== ''}
+        <button type="button" class="add-filter" onclick={clearWordRange}>Clear</button>
+      {/if}
+    </div>
   </fieldset>
 
   {#if error}
@@ -285,6 +360,34 @@
   .add-filter {
     min-height: 2.75rem;
     padding: var(--space-2) var(--space-3);
+  }
+
+  .word-range {
+    display: flex;
+    gap: var(--space-2);
+    align-items: flex-end;
+    flex-wrap: wrap;
+    margin-top: var(--space-2);
+  }
+
+  .word-range .field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .word-range label {
+    font-size: var(--text-xs);
+    font-weight: 600;
+  }
+
+  .word-range input {
+    padding: var(--space-2);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    min-height: 2.75rem;
+    font: inherit;
+    width: 8rem;
   }
 
   .active-filters {
