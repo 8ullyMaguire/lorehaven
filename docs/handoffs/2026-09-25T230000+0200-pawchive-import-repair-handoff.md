@@ -65,8 +65,8 @@ truncated mid-sentence.
 | Repair | Scope | Method |
 |---|---|---|
 | Author names | 10,071 works | `library_items.author_text` ← profile API |
-| Tags | ~10,071 works, 80,218 links | taxonomy match + source tags |
-| Summaries | ~9,000 works | authored `Summary:` line, else derived excerpt |
+| Tags | 33,167 works, 326,867 links | taxonomy match + source tags |
+| Summaries | most of 33,167 | authored `Summary:` line, else derived excerpt |
 | Un-merge | 40 containers → 23,096 works | re-fetch each post from the API |
 
 Scripts live in `/home/alvaro/code-local/research/pawchive/`:
@@ -81,6 +81,54 @@ Scripts live in `/home/alvaro/code-local/research/pawchive/`:
 All write paths are transactional per author with explicit conflict targets
 (`taxonomy_nodes` → `(kind, norm)`, `work_tags` → `(work_id, node_id)`).
 Every script has a `--dry-run` and was rollback-tested before committing.
+
+### Front matter is not line-based
+
+The single biggest parsing surprise. Pawchive bodies open with all their
+metadata run together on one line, with no separator:
+
+```
+Patron RequestThemes: Consensual, Futa, Slutty, Dom/Sub, Free UseWord Count: 2,623Summary: Nanoha wakes Fate up with a morning bloom.
+```
+
+A `^`-anchored regex matches none of that. Markers must be found wherever a
+lower-case letter or digit runs into the keyword, and each captured value cut
+short at the next marker. Roughly two thirds of the archive is in this shape;
+anchoring missed every one of those posts' summaries.
+
+Two subtleties in that regex, both of which cost a debugging round:
+
+- The boundary **lookbehind must not consume a character**. Written as
+  `(?:^|\n|(?<=[a-z0-9)]))` the `\n` alternative eats one char and the search
+  position moves past the boundary, so a later marker on the same line is
+  never seen. Zero-width everywhere: `(?:^|(?<=[a-z0-9)])|\n)`.
+- `_NEXT_MARKER` needs `re.I` like every other pattern here. Without it
+  `Word Count:` (capitalised) is invisible and the themes field swallows the
+  summary that follows it.
+
+### The importer stores bodies with the newlines removed
+
+The summary repair looked broken for three full runs. `works.summary` holds a
+truncated copy of the post body, and the natural repair — "replace it when the
+stored value is still a prefix of the body" — silently matched nothing.
+
+The stored body and the freshly-fetched one differ at the very first line:
+
+```
+db : 'Poll WinnerThemes: Slutty Sex, Rough Sex, Fucked SillySummary: It turns out…'
+api: 'Poll Winner\nThemes: Slutty Sex, Rough Sex, Fucked Silly\nSummary: It turns out…'
+```
+
+The importer's text extraction strips newlines; `html_to_text` keeps them. Every
+stored body is 56–76 characters shorter than its source, and the very first
+character compared is already wrong, so a prefix test can never pass no matter
+how long the strings are. The guard also has a floor (`length >= 80`) so a
+short agreement between two unrelated texts is not mistaken for a match.
+
+Both sides are now reduced with `regexp_replace(..., '\s', '', 'g')` before
+comparison. Finding this needed a character-level diff of one row against its
+API source — the length gap in a per-post sample pointed at it, not any
+aggregate.
 
 ## The 135M model was tested and rejected
 
@@ -99,7 +147,7 @@ scores better: measured over 300 live posts, the final extractor emits
 | series | 62.7% | from title patterns (`Series! 35`) |
 | source tags | 69.1% | author-supplied, preserved verbatim |
 | relationships | 5.7% | requires the exact `A/B` form; genuinely rare |
-| summary | 98.3% derivable | 2.5% authored, rest first-prose-sentence |
+| any abstract | 96.9% | 4.3% authored, 92.5% derived, 3.1% none |
 
 The character filter is the important one. The taxonomy conflates trope tags
 ("Forced", "Breasts") with character names, and the first version promoted
