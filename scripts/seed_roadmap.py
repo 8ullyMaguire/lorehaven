@@ -348,7 +348,28 @@ def self_test() -> int:
         print("add each to STATUS_TO_STAGE, or correct the spelling in the CSV", file=sys.stderr)
         return 1
 
+    # Evidence that names a file which is not there is worse than no evidence:
+    # it reads as a claim someone checked. Four whole milestones (M39, M40,
+    # M41, M43) cited `crates/app/tests/milestone_mNN.rs`, and no such file has
+    # ever existed -- 28 rows asserting a passing test suite that was never
+    # written. Same class of defect as the status vocabulary, and the same fix:
+    # a failing exit code rather than a note.
+    repo_root = Path(__file__).resolve().parent.parent
+    phantom: dict[str, list[str]] = {}
+    pattern = re.compile(r"(?:crates|frontend|docs|scripts|migrations|tools)/[\w./{}-]*\.rs")
+    for row in read_rows():
+        for match in pattern.findall(row.get("evidence", "")):
+            if not (repo_root / match).exists():
+                phantom.setdefault(match, []).append(row["id"])
+    if phantom:
+        print("error: evidence cites files that do not exist:", file=sys.stderr)
+        for path, ids in sorted(phantom.items()):
+            print(f"  {path} <- {len(ids)} rows: {', '.join(ids[:8])}", file=sys.stderr)
+        print("cite the file that really holds the test, or write the test", file=sys.stderr)
+        return 1
+
     print("status vocabulary ok: " + ", ".join(f"{s} ({n})" for s, n in sorted(statuses.items())))
+    print(f"evidence paths ok: all cited files exist across {sum(statuses.values())} rows")
     return 0
 
 
