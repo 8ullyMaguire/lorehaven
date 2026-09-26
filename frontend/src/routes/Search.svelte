@@ -81,27 +81,41 @@
   }
 
   /**
-   * A bound is only emitted when it parses as a non-negative integer. Sending
-   * `words:>` with nothing after it is a 422, and the reader would see an
-   * error for a field they had merely focused and left alone.
+   * The range as a single `..` term, which is the spelling the query language
+   * documents. A bound the reader left blank is simply absent, so an untouched
+   * form contributes nothing rather than a bare `words:>` the server rejects
+   * with a 422 -- a reader would see an error for a field they only focused.
+   *
+   * Two number inputs rather than a slider: a slider cannot express "any
+   * minimum and no maximum", which is the common case.
    */
-  function wordRangeTerms(): string[] {
-    const terms: string[] = [];
+  function wordRangeTerm(): string | null {
     const min = bound(minWords);
     const max = bound(maxWords);
-    if (min !== '' && /^\d+$/.test(min)) terms.push(`words:>=${min}`);
-    if (max !== '' && /^\d+$/.test(max)) terms.push(`words:<=${max}`);
-    return terms;
+    const ok = (v: string) => /^\d+$/.test(v);
+    if (min && max) {
+      if (!ok(min) || !ok(max)) return null;
+      // Backwards bounds cannot match anything, and the server rejects the
+      // query outright. Dropping the range here is quieter than a 422, but it
+      // is the difference between a reader who typed the numbers in the wrong
+      // order getting their other filters back and getting an error page.
+      if (Number(min) > Number(max)) return null;
+      return `words:${min}..${max}`;
+    }
+    if (min && ok(min)) return `words:>=${min}`;
+    if (max && ok(max)) return `words:<=${max}`;
+    return null;
   }
 
   function buildQuery(): string {
     const freeText = query.trim();
     const filterParts = selectedFilters.map((f) => `${f.field}:"${f.value}"`);
-    const all = [...filterParts, ...wordRangeTerms()];
-    if (freeText && all.length > 0) {
-      return `${freeText} AND ${all.join(' AND ')}`;
+    const range = wordRangeTerm();
+    if (range) filterParts.push(range);
+    if (freeText && filterParts.length > 0) {
+      return `${freeText} AND ${filterParts.join(' AND ')}`;
     }
-    return freeText || all.join(' AND ');
+    return freeText || filterParts.join(' AND ');
   }
 
   async function runSearch() {

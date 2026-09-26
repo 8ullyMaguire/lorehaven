@@ -198,6 +198,27 @@ impl QueryField {
             Self::User | Self::Works | Self::UserFandom | Self::Joined => EntityKind::User,
         }
     }
+
+    /// Whether this field carries an ordering, so `>`, `<` and `..` mean
+    /// something on it.
+    ///
+    /// This lives on the field rather than in a renderer because the parser
+    /// needs it to reject `title:a..b` at the point the mistake is made. When
+    /// the four remaining renderers land, a field that is comparable here but
+    /// unmapped there is a renderer bug, not a query bug -- which is the right
+    /// way round for the failure to be.
+    pub fn is_comparable(self) -> bool {
+        matches!(
+            self,
+            Self::Words
+                | Self::Kudos
+                | Self::Replies
+                | Self::Rank
+                | Self::Works
+                | Self::MinQuality
+                | Self::Quality
+        )
+    }
 }
 
 /// The entity surface a field belongs to.
@@ -364,9 +385,25 @@ impl<'a> Parser<'a> {
             if self.input[self.pos..].starts_with(')') {
                 break;
             }
-            match self.parse_not() {
-                Ok(term) if term != QueryAst::Text(String::new()) => terms.push(term),
-                _ => break,
+            // A failure here is the reader's mistake, not a reason to stop
+            // quietly. `winter words:a lot..5000` used to break out of the loop
+            // and return `Text("winter")`, so the broken term vanished and the
+            // search answered with something the reader never asked for --
+            // the same failure as ignoring a field from another surface, and
+            // worse, because the query looked like it parsed.
+            let term = self.parse_not()?;
+            if term == QueryAst::Text(String::new()) {
+                break;
+            }
+            // A term that expands to an `And` -- which is what a `..` range
+            // does -- is spliced into the enclosing conjunction rather than
+            // nested. Both render identically, but a nested `And` would leave
+            // every consumer of this list needing to know both shapes exist,
+            // and `NOT` over a spliced range needs re-grouping to stay correct.
+            if let QueryAst::And(range_parts) = term {
+                terms.extend(range_parts);
+            } else {
+                terms.push(term);
             }
             self.skip_ws();
         }
@@ -512,11 +549,104 @@ impl<'a> Parser<'a> {
                     }
                     return Err(QueryError::new("expected a field value", self.pos));
                 }
+
+                // A range: `field:low..high`, either bound optional.
+                //
+                // Checked before the equality return so a range never becomes a
+                // `Fielded` carrying the literal text "10000..50000" -- that
+                // would render as `words = '10000..50000'` and match nothing,
+                // which reads to the reader as "no such work" rather than
+                // "you wrote a range where I expected a value".
+                if let Some(node) = self.try_range(f, value, start)? {
+                    return Ok(node);
+                }
+
                 return Ok(QueryAst::Fielded(f, value.to_owned()));
             }
         }
 
         Ok(QueryAst::Text(term.to_owned()))
+    }
+
+    /// Expands `low..high` into the comparison(s) it stands for.
+    ///
+    /// Returns `Ok(None)` when the value contains no `..` and is therefore a
+    /// plain equality. Returns `Err` for a range that cannot be honoured --
+    /// nothing at either end, a non-numeric bound, a backwards range, or a
+    /// field with no ordering. In every one of those cases an error is
+    /// returned rather than a silently looser query, because all four would
+    /// otherwise widen the result set while looking like a filter.
+    fn try_range(
+        &self,
+        field: QueryField,
+        value: &str,
+        offset: usize,
+    ) -> std::result::Result<Option<QueryAst>, QueryError> {
+        let Some(dot) = value.find("..") else {
+            return Ok(None);
+        };
+
+        if !field.is_comparable() {
+            return Err(QueryError::new(
+                format!(
+                    "{} takes a single value, not a range -- it has no ordering",
+                    field.as_str()
+                ),
+                offset,
+            ));
+        }
+
+        let (low, high) = (&value[..dot], &value[dot + 2..]);
+        if low.is_empty() && high.is_empty() {
+            return Err(QueryError::new(
+                format!("{}:.. has no bounds to compare against", field.as_str()),
+                offset,
+            ));
+        }
+
+        for bound in [low, high].into_iter().filter(|b| !b.is_empty()) {
+            if bound.parse::<i64>().is_err() {
+                return Err(QueryError::new(
+                    format!(
+                        "{} range bounds must be whole numbers, got {bound:?}",
+                        field.as_str()
+                    ),
+                    offset,
+                ));
+            }
+        }
+
+        let mut parts = Vec::with_capacity(2);
+        if !low.is_empty() {
+            parts.push(QueryAst::Comparison(field, CompareOp::Gte, low.to_owned()));
+        }
+        if !high.is_empty() {
+            parts.push(QueryAst::Comparison(field, CompareOp::Lte, high.to_owned()));
+        }
+
+        // A backwards range can never match. Saying so is the difference
+        // between a sentence the reader can act on and an empty result page
+        // they have to reverse-engineer.
+        if parts.len() == 2 {
+            let low_n: i64 = low.parse().expect("checked above");
+            let high_n: i64 = high.parse().expect("checked above");
+            if low_n > high_n {
+                return Err(QueryError::new(
+                    format!(
+                        "{} range starts at {low_n} and ends at {high_n}, \
+                         so it can never match",
+                        field.as_str()
+                    ),
+                    offset,
+                ));
+            }
+        }
+
+        Ok(Some(if parts.len() == 1 {
+            parts.pop().expect("just pushed one")
+        } else {
+            QueryAst::And(parts)
+        }))
     }
 
     fn skip_ws(&mut self) {
@@ -925,6 +1055,178 @@ mod tests {
             err.message.contains("numeric") || err.message.contains("integer"),
             "expected a numeric-value error, got: {}",
             err.message
+        );
+    }
+
+    // --- `..` ranges --------------------------------------------------------
+    //
+    // A range is sugar for two comparisons, never a new AST node: a renderer
+    // that understands `>=` and `<=` already understands `10000..50000`, and a
+    // distinct `Range` variant would need its own arm in every renderer --
+    // four of them, once the other surfaces land -- for no expressive gain.
+
+    /// The comparisons a range expands to, as a slice. A one-bound range is a
+    /// single node rather than an `And` of one, so this normalises both shapes
+    /// and the test states the comparison count directly.
+    fn range_parts(q: &str) -> Vec<QueryAst> {
+        match parse_query(q).unwrap() {
+            QueryAst::And(parts) => parts,
+            other => vec![other],
+        }
+    }
+
+    #[test]
+    fn a_closed_range_is_two_inclusive_bounds() {
+        let parts = range_parts("words:10000..50000");
+        assert_eq!(parts.len(), 2, "a range is exactly two bounds");
+        assert_eq!(
+            parts[0],
+            QueryAst::Comparison(QueryField::Words, CompareOp::Gte, "10000".into())
+        );
+        assert_eq!(
+            parts[1],
+            QueryAst::Comparison(QueryField::Words, CompareOp::Lte, "50000".into())
+        );
+    }
+
+    #[test]
+    fn an_open_lower_bound_keeps_only_the_upper() {
+        // `..50000` means "up to 50k". Inclusive, like every other bound here:
+        // Rust's own `..` is exclusive at the top, but a reader typing a word
+        // count almost never means "not including exactly 50,000", and a
+        // language where `..` and `<=` disagree at the boundary is a language
+        // nobody can predict. Exclusive stays reachable as `words:<50000`.
+        let parts = range_parts("words:..50000");
+        assert_eq!(
+            parts.len(),
+            1,
+            "an absent bound is not a wildcard comparison"
+        );
+        assert_eq!(
+            parts[0],
+            QueryAst::Comparison(QueryField::Words, CompareOp::Lte, "50000".into())
+        );
+    }
+
+    #[test]
+    fn an_open_upper_bound_keeps_only_the_lower() {
+        let parts = range_parts("words:10000..");
+        assert_eq!(parts.len(), 1);
+        assert_eq!(
+            parts[0],
+            QueryAst::Comparison(QueryField::Words, CompareOp::Gte, "10000".into())
+        );
+    }
+
+    #[test]
+    fn a_range_with_no_bounds_at_all_is_rejected() {
+        // `words:..` bounds nothing. Accepting it would silently drop the term
+        // and widen the result set, which is the same class of failure as
+        // ignoring a field that belongs to another surface.
+        let err = parse_query("words:..").unwrap_err();
+        assert!(
+            err.message.contains("range") || err.message.contains("bound"),
+            "expected a range/bound error, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn a_backwards_range_is_rejected_rather_than_returning_nothing() {
+        // `10000..5000` can match no row at all. Saying so at parse time turns
+        // a baffling empty result into a sentence the reader can act on.
+        let err = parse_query("words:10000..5000").unwrap_err();
+        assert!(
+            err.message.contains("range") || err.message.contains("bound"),
+            "expected a range/bound error, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn a_non_numeric_range_bound_is_rejected() {
+        // One token, so the range is not split by a space: `a lot` would be two
+        // terms and the parser would be right to treat them as such.
+        let err = parse_query("words:many..5000").unwrap_err();
+        assert!(
+            err.message.contains("whole numbers") || err.message.contains("numeric"),
+            "expected a numeric-value error, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn a_range_with_a_space_in_it_is_two_terms_not_a_bad_range() {
+        // `words:a lot..5000` has a space, so it is `words:a` AND `lot..5000`
+        // -- the free-text `lot..5000`, not a range. Erroring here would
+        // reject a query whose every token is individually valid.
+        let ast = parse_query("words:a lot..5000").unwrap();
+        assert!(
+            matches!(ast, QueryAst::And(ref parts) if parts.len() == 2),
+            "expected two terms, got {ast:?}"
+        );
+    }
+
+    #[test]
+    fn a_range_on_a_text_field_is_rejected() {
+        // `title:abc..def` is a category error: there is no ordering on a
+        // string, so the two bounds have nothing to mean.
+        let err = parse_query("title:abc..def").unwrap_err();
+        assert!(
+            err.message.contains("range") || err.message.contains("comparable"),
+            "expected a range/comparable error, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn a_range_composes_with_other_terms() {
+        // The range expands to an `And` node, so it has to compose with the
+        // terms around it -- a range that silently dropped out of a longer
+        // query would widen the results without saying so.
+        let ast = parse_query("winter words:1000..5000").unwrap();
+        match ast {
+            QueryAst::And(parts) => {
+                assert_eq!(parts.len(), 3, "winter, plus two bounds: {parts:?}");
+                assert_eq!(parts[0], QueryAst::Text("winter".into()));
+                assert_eq!(
+                    parts[1],
+                    QueryAst::Comparison(QueryField::Words, CompareOp::Gte, "1000".into())
+                );
+                assert_eq!(
+                    parts[2],
+                    QueryAst::Comparison(QueryField::Words, CompareOp::Lte, "5000".into())
+                );
+            }
+            other => panic!("expected a three-part And, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_spliced_range_still_negates_as_a_pair() {
+        // Splicing flattens the range into two sibling terms, so `NOT` has to
+        // be applied by the reader grouping them: `NOT (a AND b)`, not
+        // `NOT a` and `NOT b` separately. The parser cannot express that from
+        // `NOT words:1000..5000` alone -- the `NOT` is seen before the range
+        // expands -- so what it must guarantee is that the expansion lands
+        // *inside* the negation rather than beside it.
+        let ast = parse_query("NOT words:1000..5000").unwrap();
+        assert!(
+            matches!(ast, QueryAst::Not(_)),
+            "the range must stay inside the NOT, got {ast:?}"
+        );
+    }
+
+    #[test]
+    fn a_negated_spliced_range_is_a_double_negation_of_each_bound() {
+        // `NOT a AND NOT b` and `NOT (a AND b)` agree on the empty and
+        // full-result cases and disagree on "both bounds hold", so pin the
+        // shape the reader has to write to get what they mean, and document
+        // that the bare form is the looser one.
+        let grouped = parse_query("NOT (words:1000..5000)").unwrap();
+        assert!(
+            matches!(grouped, QueryAst::Not(ref inner) if matches!(**inner, QueryAst::And(_))),
+            "parenthesised NOT negates the pair, got {grouped:?}"
         );
     }
 }
