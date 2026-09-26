@@ -1,3 +1,135 @@
+# Handoff — three surfaces, and a backslash that ate itself
+
+## The short version
+
+Search now speaks one language on three surfaces: works, forum, and users.
+`/api/v1/users/search` is new in this slice; the `ESCAPE` bug it exposed is not.
+
+That bug is the reason this handoff exists. It is silent on both backends in
+different ways, it was in code written in an earlier slice, and it took an hour
+to find because the source reads correctly. It is written up in full at the
+bottom under **The backslash that ate itself** — read that part even if you
+skip the rest.
+
+## What a reader can type today
+
+    works:10000..50000          inclusive at both ends
+    works:..50000               an open lower bound
+    replies:>50 category:meta   forum
+    active:>2026-01-15          a date, not a number
+    user:nightowl               a pseudonym
+    fandoms:"Good Omens"        a pseudonym who has written in a fandom
+    works:>10                   how much a pseudonym has published
+    joined:<2026-01-01          when they arrived
+
+Every bound is inclusive. `10000..5000` is refused with a reason.
+
+An empty query is an empty page on the forum and user surfaces. The works
+search treats it as a browse; putting every pseudonym on an instance into one
+response is a phone book and a denial of service at the same time.
+
+## The four things this slice found
+
+**A date comparison rendered as a number.** `render_comparison` assumed every
+comparison's value was an integer. `published:>=2026-08-01` parsed and then
+failed to render — and because both media doors validate a query by running it
+through `render_query` first, `published:2026-08-01..2026-08-01` went from 200
+to 422 for every reader. The range arm handled dates; the comparison arm did
+not, and the range arm is only reachable *through* the comparison arm.
+
+**`works:10` was a syntax error on the user surface.** A numeric field with no
+operator is equality, and the works renderer already treated it that way. The
+user renderer did not, so `works:0` was a 422 while `words:5000` worked. A
+reader who counted to ten and got an error has no way to guess they should have
+written `works:=10`.
+
+**A fandom spelled as an alias found nobody.** `taxonomy_nodes.canonical` is
+the spelling the instance chose; `taxonomy_aliases` holds what readers type.
+Matching only the canonical form means a variant spelling returns an empty page,
+and a reader concludes nobody writes in that fandom.
+
+**`ESCAPE ''`.** The subject of its own section below.
+
+## The backslash that ate itself
+
+No `LIKE` in any renderer declared an `ESCAPE` character, while all three
+escaped `%`, `_` and `\` in the bound pattern. PostgreSQL treats backslash as
+the default `LIKE` escape. SQLite has no default. So `100%` matched correctly on
+one backend and nothing on the other, with no error on either.
+
+The working form has **two** backslashes in the Rust source:
+
+    "… LIKE LOWER(?) ESCAPE '\\'"
+
+The file on disk had one, which Rust reads as `\'` — an escaped apostrophe — so
+the compiled SQL was:
+
+    ESCAPE ''
+
+and not the one backslash the source appeared to ask for.
+
+    SQLite     → ERROR: ESCAPE expression must be a single character
+    PostgreSQL → accepts '' as an empty escape, which matches every row
+
+One backend errors, the other returns everything, and the source reads
+correctly. It survived `cargo fmt`, survived review, and passed 20 renderer
+tests, because every one of them asserted behaviour on SQLite only.
+
+**What to do when a SQL edit appears to do nothing:** print the *rendered*
+fragment, not the source. A throwaway test that `panic!`s the SQL finds it in
+one run. Text-level `replace` calls write a different number of backslashes than
+the Rust lexer wants, and that is how the doubled form became a single one.
+
+`a_like_pattern_declares_its_escape_character` now asserts the emitted clause
+byte for byte, because `contains("ESCAPE")` also passes against `ESCAPE ''`.
+
+## A schema divergence still worth a migration
+
+`pseuds.id` is `UUID` on PostgreSQL and `TEXT` on SQLite, and ten tables carry a
+pseud FK that is `TEXT` in *both* migrations: `comments.author_pseud`,
+`forum_topics.author_pseud`, `forum_posts.author_pseud`, `forum_karma.pseud`,
+`forum_votes.pseud`, `critique_participants.pseud`, `work_reactions.pseud`,
+`prompt_posts.winner_pseud`, and one more.
+
+Joining one of those to `pseuds.id` without a cast is accepted by SQLite and
+rejected by PostgreSQL with `42883: uuid = text`. The three new statements use
+`CAST(... AS TEXT)`, which is ANSI and needs no dialect split. **The real fix
+is a migration retyping those columns to `UUID`**, deliberately not done here.
+The column-name parity test compares names and not types, so it will not catch
+a regression.
+
+Note that *binding* one of those columns is fine on both dialects. Only the join
+to `pseuds.id` breaks.
+
+## Still open
+
+1. **Bookmark and directory renderers.** Two surfaces left of five.
+2. **Shared taste gravity and the meta-ranker across surfaces.** One ranking
+   architecture, so signal weighting is not re-implemented per entity.
+3. **The bookmark and directory filter UIs**, and a user one. Works and forum
+   have one each; the user surface has none yet.
+4. **E2E coverage for the new search behaviour** at the browser level. This is
+   the largest remaining gap and it is not small.
+5. **The migration** retyping the ten TEXT pseud FKs.
+6. **Nine Rust warnings on the ThinkCentre build**, including
+   `unused variable: user` in `crates/app/src/routes/media_resilience.rs:180`.
+
+## Verified
+
+- 17 user-renderer, 20 forum-renderer, 567 domain unit tests
+- 20 user DB+route, 26 works-comparison, 11 forum DB, 8 forum route,
+  17 media-field tests — each on SQLite **and** PostgreSQL
+- 0 clippy warnings workspace-wide
+- Commits `0e6ecc1` (forum search end to end), `9277b57` (the date fix),
+  `0942094` (user surface + ESCAPE), all pushed
+
+## The one trap in this codebase
+
+`cargo fmt` reformats long SQL strings and will reflow them, which silently
+reverts a cast you added to a line above if the line got re-wrapped. Twice in
+this slice a fix "came back" after a `fmt`. If a change seems not to apply, run
+`git diff` before assuming the test is lying.
+
 # Handoff — the forum search speaks the same language as the works search
 
 ## The short version
