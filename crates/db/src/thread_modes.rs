@@ -3,6 +3,12 @@ use anyhow::Result;
 
 /// Create a forum topic with a thread mode (spec §35.3). The mode is data; an
 /// existing topic keeps working unchanged with the default 'plain' mode.
+///
+/// No `::uuid` casts on the binds, though the columns look like ids: `forum_topics.id`,
+/// `category_id` and `author_pseud` are all TEXT (migration 0013), and
+/// `category_id` holds a *slug* like "general", not a UUID. The casts made every
+/// thread-mode write a 500 on PostgreSQL while SQLite passed, because SQLite
+/// ignores a cast it cannot apply.
 pub async fn create_topic(
     db: &Database,
     id: &str,
@@ -31,7 +37,7 @@ pub async fn create_topic(
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO forum_topics (id, category_id, author_pseud, title, created_at, last_post_at, locked, mode)
-                 VALUES ($1::uuid, $2::uuid, $3, $4, $5, $5, FALSE, $6)",
+                 VALUES ($1, $2, $3, $4, $5, $5, FALSE, $6)",
             )
             .bind(id)
             .bind(category_id)
@@ -74,7 +80,7 @@ pub async fn add_schedule_section(
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO topic_schedules (topic_id, position, title, chapter_start, chapter_end, unlocks_at)
-                 VALUES ($1::uuid, $2, $3, $4, $5, $6)",
+                 VALUES ($1, $2, $3, $4, $5, $6)",
             )
             .bind(topic_id)
             .bind(position)
@@ -150,14 +156,14 @@ pub async fn create_wiki_pin(
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO topic_wiki_pins (topic_id, post_id, body, revision, edited_by, edited_at)
-                 VALUES ($1::uuid, $2::uuid, $3, 0, $4, $5)",
+                 VALUES ($1, $2, $3, 0, $4, $5)",
             )
             .bind(topic_id)
             .bind(post_id)
             .bind(body)
             .bind(edited_by)
             .bind(&now)
-            .execute(db.sqlite_pool().expect("sqlite"))
+            .execute(db.postgres_pool().expect("postgres"))
             .await?;
         }
     }
@@ -194,7 +200,7 @@ pub async fn approve_wiki_pin(
             .bind(&now)
             .bind(topic_id)
             .bind(post_id)
-            .execute(db.sqlite_pool().expect("sqlite"))
+            .execute(db.postgres_pool().expect("postgres"))
             .await?;
         }
     }
@@ -219,7 +225,7 @@ pub async fn get_wiki_pin(db: &Database, topic_id: &str) -> Result<Option<serde_
                  WHERE topic_id = $1 AND approved_by IS NOT NULL",
             )
             .bind(topic_id)
-            .fetch_optional(db.sqlite_pool().expect("sqlite"))
+            .fetch_optional(db.postgres_pool().expect("postgres"))
             .await?,
         };
     Ok(row.map(|(body, rev, by, at)| {
@@ -246,7 +252,7 @@ pub async fn join_critique(db: &Database, topic_id: &str, pseud: &str) -> Result
         Backend::Postgres => {
             sqlx::query_scalar("SELECT MAX(position) FROM critique_queue WHERE topic_id = $1")
                 .bind(topic_id)
-                .fetch_one(db.sqlite_pool().expect("sqlite"))
+                .fetch_one(db.postgres_pool().expect("postgres"))
                 .await?
         }
     };
@@ -266,12 +272,12 @@ pub async fn join_critique(db: &Database, topic_id: &str, pseud: &str) -> Result
         Backend::Postgres => {
             sqlx::query(
                 "INSERT INTO critique_queue (topic_id, pseud, position, posted_at)
-                 VALUES ($1::uuid, $2, $3, NULL)",
+                 VALUES ($1, $2, $3, NULL)",
             )
             .bind(topic_id)
             .bind(pseud)
             .bind(position)
-            .execute(db.sqlite_pool().expect("sqlite"))
+            .execute(db.postgres_pool().expect("postgres"))
             .await?;
         }
     }
@@ -296,7 +302,7 @@ pub async fn get_critique_queue(db: &Database, topic_id: &str) -> Result<Vec<ser
                  WHERE topic_id = $1 ORDER BY position",
             )
             .bind(topic_id)
-            .fetch_all(db.sqlite_pool().expect("sqlite"))
+            .fetch_all(db.postgres_pool().expect("postgres"))
             .await?
         }
     };
