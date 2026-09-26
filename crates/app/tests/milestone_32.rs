@@ -280,17 +280,21 @@ async fn seed_vote_type(
     id: &str,
     label: &str,
     scope: &str,
-    position: &str,
-    cost: &str,
-    negative: &str,
+    position: i64,
+    cost: i64,
+    negative: i64,
 ) {
+    // `exec` binds every value as text, which SQLite stores into a BIGINT column
+    // without complaint and PostgreSQL refuses ("column position is of type
+    // bigint but expression is of type text"). The numeric columns are therefore
+    // cast in the PostgreSQL form rather than passed as strings.
     exec(
         harness,
         "INSERT INTO forum_vote_types (id, label, category_scope, position, weight_bp, cost, is_negative) \
          VALUES (?, ?, ?, ?, 1000, ?, ?)",
         "INSERT INTO forum_vote_types (id, label, category_scope, position, weight_bp, cost, is_negative) \
-         VALUES ($1, $2, $3, $4, 1000, $5, $6)",
-        &[id, label, scope, position, cost, negative],
+         VALUES ($1, $2, $3, $4::bigint, 1000, $5::bigint, $6::bigint)",
+        &[id, label, scope, &position.to_string(), &cost.to_string(), &negative.to_string()],
     )
     .await;
 }
@@ -881,24 +885,15 @@ async fn a_category_taxonomy_override_changes_the_surface_without_code_changes()
     let critique = seed_category(&harness, "Critique").await;
 
     // The Critique category's own set, inserted as rows: no code changed.
-    seed_vote_type(
-        &harness,
-        "constructive",
-        "Constructive",
-        &critique,
-        "0",
-        "1",
-        "0",
-    )
-    .await;
+    seed_vote_type(&harness, "constructive", "Constructive", &critique, 0, 1, 0).await;
     seed_vote_type(
         &harness,
         "harsh_but_fair",
         "Harsh but fair",
         &critique,
-        "1",
-        "1",
-        "0",
+        1,
+        1,
+        0,
     )
     .await;
     seed_vote_type(
@@ -906,9 +901,9 @@ async fn a_category_taxonomy_override_changes_the_surface_without_code_changes()
         "needs_sources",
         "Needs sources",
         &critique,
-        "2",
-        "2",
-        "1",
+        2,
+        2,
+        1,
     )
     .await;
 
