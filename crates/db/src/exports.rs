@@ -387,9 +387,13 @@ pub async fn list_exports(
              ORDER BY created_at DESC, id DESC LIMIT ?"
         ),
         format!(
+            // `export_jobs.created_at` is TIMESTAMPTZ (0035), so the cursor's
+            // text bind needs the cast -- a row comparison against a tuple of
+            // mixed types is "operator does not exist: timestamp with time
+            // zone < text". `id` is UUID, hence `::uuid` on the other half.
             "SELECT {EXPORT_COLUMNS_PG} FROM export_jobs \
              WHERE account_id::text = ? AND (? IS NULL OR state = ?) \
-               AND (?::text IS NULL OR (created_at, id) < (?::text, ?::uuid)) \
+               AND (?::timestamptz IS NULL OR (created_at, id) < (?::timestamptz, ?::uuid)) \
              ORDER BY created_at DESC, id DESC LIMIT ?"
         ),
     );
@@ -644,8 +648,11 @@ pub async fn mint_grant(
     let sql = db.sql(
         "INSERT INTO download_grants (id, export_job_id, token_hash, expires_at, used_at, \
          single_use, created_at) VALUES (?, ?, ?, ?, NULL, 1, ?)",
+        // `expires_at` and `created_at` are TIMESTAMPTZ (0035); the caller
+        // passes an RFC 3339 string, which PostgreSQL will not coerce into a
+        // timestamptz without being told.
         "INSERT INTO download_grants (id, export_job_id, token_hash, expires_at, used_at, \
-         single_use, created_at) VALUES (?::uuid, ?::uuid, ?, ?, NULL, 1, ?)",
+         single_use, created_at) VALUES (?::uuid, ?::uuid, ?, ?::timestamptz, NULL, 1, ?::timestamptz)",
     );
     run!(db, &sql, |query| {
         query
@@ -803,9 +810,12 @@ pub async fn upsert_device(
          ON CONFLICT (id) DO UPDATE SET label = excluded.label, \
          push_subscription_json = excluded.push_subscription_json, \
          last_seen_at = excluded.last_seen_at, updated_at = excluded.updated_at",
+        // `last_seen_at`, `created_at` and `updated_at` are TEXT on this table
+        // (0008), so the timestamps take text binds. `::timestamptz` here is the
+        // fault `fix-timestamptz-binds.py` documents: 42804 on write and
+        // "operator does not exist: timestamp with time zone < text" on read.
         "INSERT INTO user_devices (id, account_id, label, push_subscription_json, last_seen_at, \
-         created_at, updated_at) VALUES (?::uuid, ?::uuid, ?, ?::timestamptz, \
-         ?::timestamptz, ?::timestamptz, ?::timestamptz) \
+         created_at, updated_at) VALUES (?::uuid, ?::uuid, ?, ?, ?, ?, ?) \
          ON CONFLICT (id) DO UPDATE SET label = excluded.label, \
          push_subscription_json = excluded.push_subscription_json, \
          last_seen_at = excluded.last_seen_at, updated_at = excluded.updated_at",
