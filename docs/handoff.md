@@ -121,6 +121,96 @@ six read as passing under a `--test` filter that matched no test at all, which
 is how a baseline check quietly proves nothing. Match the test *name* to its
 file with `grep -rl` first.
 
+## The whole dual-backend claim rested on the forgiving engine
+
+The headline finding of this stretch. The PostgreSQL suite had never been run to
+completion, so the repository's central architectural claim -- that the same code
+serves both engines -- was supported only by tests that had ever run against
+SQLite.
+
+Run for the first time, it was **30 failing tests across 11 suites**. Nearly all
+of them were one thing: SQL that SQLite accepts and PostgreSQL rejects. SQLite is
+dynamically typed, so each of these passes there and fails here:
+
+| written            | SQLite      | PostgreSQL                    |
+|--------------------|-------------|-------------------------------|
+| `WHERE id = ?`     | fine        | syntax error at the next `AND` |
+| `SELECT some_int4` | fine        | "driver reports the column as INTEGER" |
+| `SELECT some_uuid` | fine        | "mismatched types; Rust String" |
+
+The worst one was `vote_tx!` in `directory.rs`: a `macro_rules!` with a single
+`?`-using body, written on the assumption that sqlx renumbers placeholders per
+dialect. sqlx 0.8 does not. Every entry vote on a PostgreSQL instance was a 500,
+and every test was green. Four more arms had the same defect across
+`category_governance.rs` (36 placeholders, 6 arms), `settings.rs` (3), and
+`work_discussion.rs`, where `linked_topic` cast `chapter_id::text` and left the
+`work_id` sitting next to it uncast, so every work-thread read was a 500.
+
+**Thirty fixed, and the two classes are now gated.**
+
+### The gate: bound the arm by brace depth, then look inside it
+
+`scripts/check-pg-backend-arm-placeholders.py` (blocks in CI, self-test 6/6).
+The whole design is one idea: once you have the `Backend::Postgres => {` ... `}`
+span, "is this literal inside it" is *exact* rather than heuristic.
+
+This matters because four earlier positional attempts each reported 100-500
+correct statements as faults -- the repo spells a dialect pair three legal ways
+(`db.sql(a, b)`, `let sqlite = ...` / `let postgres = ...`, and a `format!` built
+statement), a literal may sit on the line after its binding, and SQL fragments get
+interpolated into callers' statements. A gate that cries wolf gets muted, which
+is worse than no gate. Brace-depth bounding has no false positives and found all
+eleven real sites, three of which had been green for a long time.
+
+Two details:
+
+- `?` is ambiguous *even inside a correct arm* -- PostgreSQL's JSONB containment
+  operators are spelled `?`, `?|` and `?&`. Skip whitespace after the `?` and treat
+  a following quote, `|`, or `&` as an operator. Do **not** treat a `?` that ends
+  the line as an operator: `LIMIT ?` is an ordinary bind. I got this backwards
+  first and it silently hid eight real sites.
+- Number `$n` per *arm*, not per literal. An arm usually runs several statements
+  each with its own `.bind(..)` chain; restarting at `$1` collides with the
+  statement before it.
+
+`scripts/fix-pg-arm-placeholders.py` is the migration, and it is worth keeping
+next to the gate: fixing these by hand went wrong twice, because the two arms
+hold adjacent, near-identical literals and `replace(.., 1)` cheerfully edits the
+SQLite one. The gate caught both mistakes within minutes of being written.
+
+### Four gates written, then deleted
+
+While fixing the above I wrote four scanner-shaped gates without first reading
+`scripts/`. Three were duplicates of gates already in CI, and the fourth was
+strictly worse:
+
+    check-backend-pool-mismatch.py     ->  check-pg-arm-uses-sqlite-pool.py
+    check-pg-int4-as-i64.py            ->  check-uncast-pg-placeholders.py
+    check-pg-uuid-placeholder-casts.py ->  check-pg-uuid-casts.py
+    check-pg-arm-divergence.py         ->  neither; 289 advisory findings
+
+`check-uncast-pg-placeholders.py` reads 256 tables out of `migrations/postgres`
+and resolves the column type per statement, which is the thing my name-matching
+approach could not do -- the reason mine produced ~280 false positives where this
+one produces zero. The lesson is not "write fewer gates", it is that reading the
+directory is a precondition for adding to it.
+
+### Running this yourself
+
+    export CARGO_TARGET_DIR=$HOME/.cargo-target/lorehaven-pg6   # isolate, see below
+    export LOREHAVEN_TEST_PG_URL='postgres://lorehaven:***@127.0.0.1:55433/postgres'
+    cargo test --workspace --no-fail-fast
+
+Give every checkout its own `CARGO_TARGET_DIR`. Two checkouts sharing the
+default `lorehaven` target directory produce failures that belong to neither:
+they compile against each other's stale artifacts. This cost a long detour and
+is the single most confusing failure mode in this repo.
+
+Two of the timing-sensitive tests need `-- --test-threads=2` on this machine, and
+`repeated_login_attempts_...` takes 83 s alone. Treat `0 passed; N filtered out`
+as a filter that matched nothing, not a pass -- two "baselines" earlier in this
+document were verified that way and proved nothing.
+
 ## A second gate, and six more PostgreSQL-only 500s
 
 Fixing the four `::uuid`-on-a-`TEXT`-column bugs was not a lucky guess. I built
