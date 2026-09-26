@@ -1236,3 +1236,179 @@ async fn a_self_mention_creates_no_mention_event() {
 
     harness.cleanup().await;
 }
+
+/// A reader's content filters apply to the inbox, and to the unread count.
+///
+/// Two things have to hold, and the second is the one that is easy to forget:
+/// the filtered notification must leave the list *and* stop being counted. A
+/// badge that is filtered out of the list but still counted leaks the existence
+/// of the very work the filter hides, through a one-digit door.
+///
+/// A notification with no `work_id` (an instance notice) must survive: §46.7.1
+/// is about works not reaching the reader, not about silencing the instance at
+/// someone who filtered a tag.
+#[tokio::test]
+async fn content_filters_reach_the_inbox_and_the_unread_count() {
+    let harness = Harness::new("notify-content-filter").await;
+    let mut reader = harness.client();
+    let (_account, _pseud) = register(&mut reader, "inbox-reader@example.com", "InboxReader").await;
+    let db = harness.tdb.db();
+
+    // One published work, tagged `spoilers`; one untagged work.
+    let blocked_work = published_work(
+        &harness,
+        "inbox-blocked@example.com",
+        "InboxBlocked",
+        "Tagged With Spoilers",
+    )
+    .await;
+    let clean_work = published_work(
+        &harness,
+        "inbox-clean@example.com",
+        "InboxClean",
+        "Untagged Work",
+    )
+    .await;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let node_id = uuid::Uuid::new_v4().to_string();
+    let sql_node = db.sql(
+        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) VALUES ($1::uuid, $2, $3, $4, $5::timestamptz)",
+    );
+    let sql_tag = db.sql(
+        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO work_tags (work_id, node_id, weight, added_at) VALUES ($1::uuid, $2, $3, $4::timestamptz)",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(sql_node.as_ref())
+                .bind(&node_id)
+                .bind("tag")
+                .bind("spoilers")
+                .bind("spoilers")
+                .bind(&now)
+                .execute(db.sqlite_pool().unwrap())
+                .await
+                .expect("taxonomy node");
+            sqlx::query(sql_tag.as_ref())
+                .bind(&blocked_work)
+                .bind(&node_id)
+                .bind(1i64)
+                .bind(&now)
+                .execute(db.sqlite_pool().unwrap())
+                .await
+                .expect("work tag");
+        }
+        Backend::Postgres => {
+            sqlx::query(sql_node.as_ref())
+                .bind(&node_id)
+                .bind("tag")
+                .bind("spoilers")
+                .bind("spoilers")
+                .bind(&now)
+                .execute(db.postgres_pool().unwrap())
+                .await
+                .expect("taxonomy node");
+            sqlx::query(sql_tag.as_ref())
+                .bind(&blocked_work)
+                .bind(&node_id)
+                .bind(1i64)
+                .bind(&now)
+                .execute(db.postgres_pool().unwrap())
+                .await
+                .expect("work tag");
+        }
+    }
+
+    // Seed three unread notifications directly, so `work_id` is under the
+    // test's control: the reply writers attach none.
+    let account_id: uuid::Uuid = _account.parse().expect("account id is a uuid");
+    let sql_note = db.sql(
+        "INSERT INTO notifications (id, account_id, kind, title, body, work_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO notifications (id, account_id, kind, title, body, work_id, created_at) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::uuid, $7::timestamptz)",
+    );
+    for (title, work) in [
+        ("Someone replied about your spoilers", Some(&blocked_work)),
+        ("Someone replied about your clean work", Some(&clean_work)),
+        ("The instance has an announcement", None),
+    ] {
+        match db.backend() {
+            Backend::Sqlite => {
+                sqlx::query(sql_note.as_ref())
+                    .bind(uuid::Uuid::new_v4().to_string())
+                    .bind(account_id.to_string())
+                    .bind("reply")
+                    .bind(title)
+                    .bind("body")
+                    .bind(work.map(|w| w.to_string()))
+                    .bind(&now)
+                    .execute(db.sqlite_pool().unwrap())
+                    .await
+                    .expect("seed notification");
+            }
+            Backend::Postgres => {
+                sqlx::query(sql_note.as_ref())
+                    .bind(uuid::Uuid::new_v4().to_string())
+                    .bind(account_id)
+                    .bind("reply")
+                    .bind(title)
+                    .bind("body")
+                    .bind(work.map(|w| w.parse::<uuid::Uuid>().unwrap()))
+                    .bind(&now)
+                    .execute(db.postgres_pool().unwrap())
+                    .await
+                    .expect("seed notification");
+            }
+        }
+    }
+
+    // Before any filter, all three are there and all three count.
+    let (status, body) = reader.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["items"].as_array().map(Vec::len), Some(3), "{body}");
+    assert_eq!(body["unread_count"].as_i64(), Some(3), "{body}");
+
+    // Block the tag.
+    let (status, body) = reader
+        .post(
+            "/api/v1/settings/content-filters",
+            json!({ "filter_type": "tag", "value": "spoilers" }),
+        )
+        .await;
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "add content filter: {status} {body}"
+    );
+
+    // The work notification is gone -- from the list and from the count.
+    let (status, body) = reader.get("/api/v1/notifications").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body["items"].as_array().expect("items");
+    assert_eq!(
+        items.len(),
+        2,
+        "the filtered notification must not be listed: {body}"
+    );
+    let titles: Vec<&str> = items.iter().filter_map(|i| i["title"].as_str()).collect();
+    assert!(
+        !titles.iter().any(|t| t.contains("spoilers")),
+        "the blocked work's title reached the inbox: {titles:?}"
+    );
+    assert_eq!(
+        body["unread_count"].as_i64(),
+        Some(2),
+        "the count must exclude the filtered notification too, or the badge leaks it: {body}"
+    );
+    // The untagged work and the workless announcement both survive.
+    assert!(
+        titles.iter().any(|t| t.contains("clean work")),
+        "the untagged work's notification should survive: {titles:?}"
+    );
+    assert!(
+        titles.iter().any(|t| t.contains("announcement")),
+        "a notification with no work is not about a work and must survive: {titles:?}"
+    );
+
+    harness.cleanup().await;
+}

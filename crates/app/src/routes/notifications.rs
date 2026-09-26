@@ -22,9 +22,24 @@ async fn list_notifications(
     RequireSession(user): RequireSession,
 ) -> ApiResult<Json<serde_json::Value>> {
     let account_id = user.account_id.to_string();
+    // Content filters belong to the pseud the session acts as, and which pseud
+    // that is comes from `sessions.active_pseud_id` -- the same rule, and the
+    // same account-id fallback, as `routes/discovery.rs`. A notification about a
+    // work carries that work's title, so an inbox that ignored the reader's
+    // filters would hand back exactly what the filter withholds everywhere
+    // else. §46.4 lists notifications as one of the surfaces.
+    let viewer_pseud: Option<uuid::Uuid> = Some(
+        user.pseud_id
+            .as_ref()
+            .map(|p| p.as_uuid())
+            .unwrap_or_else(|| user.account_id.as_uuid()),
+    );
+    let rules = darkhold_db::search::content_filter_sql::for_pseud(state.db(), viewer_pseud)
+        .await
+        .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e)))?;
     let (rows, unread) = tokio::try_join!(
-        darkhold_db::notifications::list(state.db(), &account_id, 200),
-        darkhold_db::notifications::unread_count(state.db(), &account_id),
+        darkhold_db::notifications::list_filtered(state.db(), &account_id, 200, &rules),
+        darkhold_db::notifications::unread_count_filtered(state.db(), &account_id, &rules),
     )
     .map_err(|e| ApiError(darkhold_domain::AppError::Internal(e.into())))?;
     let items: Vec<serde_json::Value> = rows
