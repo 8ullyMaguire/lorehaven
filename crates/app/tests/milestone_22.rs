@@ -514,7 +514,10 @@ async fn seed_quality_signal(
     weight: i64,
 ) {
     let db = fx.tdb.db();
-    let id = format!("qs-{n}");
+    // A real UUID, not `qs-{n}`. `quality_signals.id` is UUID on PostgreSQL, so
+    // a fake id is accepted by SQLite and rejected there with 22P02. The suffix
+    // keeps ids distinct within one test.
+    let id = format!("00000000-0000-4000-8000-{n:012x}");
     let now = "2026-01-01T00:00:00Z";
     // `quality_signals.id` and `.work_id` are UUID on PostgreSQL, so the PG arm
     // needs explicit casts: `Database::sql` renumbers the placeholders but does

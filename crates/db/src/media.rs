@@ -337,7 +337,13 @@ pub async fn list_media_filtered(
     let (qual_group_sql, qual_group_pg) = match quality_min {
         Some(_) => (
             " GROUP BY w.id HAVING CASE WHEN SUM(qs.weight) > 0 THEN SUM(qs.value * qs.weight) / SUM(qs.weight) ELSE 0 END >= CAST(? AS INTEGER)".to_string(),
-            " GROUP BY w.id HAVING CASE WHEN SUM(qs.weight) > 0 THEN SUM(qs.value * qs.weight)::float / SUM(qs.weight) ELSE 0 END >= ?".to_string(),
+            // The `::float` makes the left side `double precision`, and the bind
+            // arrives as text, so PG has to be told: "operator does not exist:
+            // double precision >= text". `?::double precision` is the same value
+            // SQLite coerces to, and matches the float8 the expression produces.
+            " GROUP BY w.id, w.title, w.summary, w.format, w.rating, w.visibility, w.lifecycle, \
+                    p.account_id, w.created_at, w.updated_at, w.version \
+          HAVING CASE WHEN SUM(qs.weight) > 0 THEN SUM(qs.value * qs.weight)::float / SUM(qs.weight) ELSE 0 END >= ?::double precision".to_string(),
         ),
         None => (String::new(), String::new()),
     };
@@ -1413,7 +1419,12 @@ fn canon_cursor_clause(cursor: Option<&str>, table: &str, work: &str) -> Result<
           ({work}.created_at = ? AND {work}.id > ?))))"
     );
     let postgres = format!(
-        " AND ({table}.position > ? OR ({table}.position = ? AND ({work}.created_at < ?::text OR \
+        // `position` is INTEGER here and the cursor carries it as a string
+        // (INTEGER in 0026, BIGINT in 0009 -- the cast is correct for both), so
+        // both comparisons need it. Without it: "operator does not exist:
+        // integer > text" on page 2 of any scoped listing.
+        " AND ({table}.position > ?::bigint OR ({table}.position = ?::bigint \
+          AND ({work}.created_at < ?::text OR \
           ({work}.created_at = ?::text AND {work}.id > ?::uuid))))"
     );
     Ok((sqlite, postgres))
