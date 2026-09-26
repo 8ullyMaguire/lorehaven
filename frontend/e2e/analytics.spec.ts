@@ -15,11 +15,13 @@ import { expect, test, type Page } from '@playwright/test';
  * * **A signed-out visitor gets a way in, not an error.** The door is
  *   `RequirePseud`, so an anonymous GET is a 401, and rendered as a failure
  *   string that is a message the reader can do nothing about.
- * * **A refused write leaves no trace.** The last test publishes a work and
- *   then tries to mark it finished, and the honest answer is a 404 followed by
- *   a zero -- because a library item is created only by an import, and the work
- *   this test published is not one. See the requirement row for what that costs
- *   the product.
+ * * **The reader's own action moves their own number.** A work is published
+ *   through the real doors, marked finished through the reading-status door, and
+ *   the dashboard count follows. That assertion could not be written before the
+ *   door existed.
+ * * **The other status door still refuses a work id.** Both routes are named
+ *   `/…/{id}/…` and key on different rows; one of them used to accept the wrong
+ *   one and store an orphan row.
  */
 
 /**
@@ -150,7 +152,7 @@ test('a signed-out visitor is offered a way in, not an error', async ({ page }) 
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
-test('a status written against a work id is refused, and the count stays honest', async ({ page }) => {
+test('a reader marks a locally published work finished, and the count moves', async ({ page }) => {
   test.setTimeout(180_000);
 
   // The author publishes a work the reader can find.
@@ -184,19 +186,16 @@ test('a status written against a work id is refused, and the count stays honest'
     page.locator('#main').getByRole('heading', { name: 'The Analytics Odyssey' }),
   ).toBeVisible();
 
-  // Reading status is tracked against a *library item*, and a library item is
-  // created only by an import -- `upsert_library_item` has exactly one caller,
-  // and it is the import runner. A work published on this instance never gets
-  // one, so the reader who just read it has nothing to mark.
-  //
-  // Asserting that as a fact rather than working around it, because the
-  // workaround is what hid it: an earlier version of this test marked the
-  // *work* id through the status door, got a 200, and then found a zero on the
-  // dashboard with no visible cause. The door was writing a reading status
-  // against a subject that did not exist. The route now refuses that, and the
-  // 404 below is the assertion that the refusal is real on the shipped binary.
+  // Mark it finished through the work's own reading-status door, the way a
+  // reader does. This is the door that did not exist when this test was first
+  // written: reading status hung off a library item, a library item is created
+  // only by the import runner, and a work published on this instance had no
+  // subject to mark. An earlier version of this test marked the *work* id
+  // through the library door, got a 200, and then found a zero on the dashboard
+  // with no visible cause -- the door was writing a status against a subject
+  // that did not exist.
   const marked = await page.evaluate(async ([work, token]) => {
-    const res = await fetch(`/api/v1/library/items/${work}/status`, {
+    const res = await fetch(`/api/v1/works/${work}/reading-status`, {
       method: 'PUT',
       credentials: 'include',
       headers: { 'content-type': 'application/json', 'x-csrf-token': token },
@@ -205,14 +204,62 @@ test('a status written against a work id is refused, and the count stays honest'
     return { status: res.status, body: await res.text() };
   }, [workId, await csrfToken(page)]);
 
+  expect(marked.status, `marking the work finished: ${marked.status} ${marked.body}`).toBe(200);
+
+  // And the count the reader was promised actually moved. This is the assertion
+  // that could not be written before: there was no action to take.
+  await page.goto('/analytics');
+  const totals = await readingTotals(page);
+  expect(totals['Works finished']).toBe('1');
+});
+
+/**
+ * The library status door refuses a work id, and refuses it as a 404.
+ *
+ * The companion to the test above, and the bug that made it necessary: both
+ * routes are named `/…/{id}/…`, but they key on different rows. The library door
+ * used to accept a work id, answer 200, and store a reading status against a
+ * subject that did not exist -- leaving the reader a zero with no visible cause.
+ */
+test('the library status door refuses a work id', async ({ page }) => {
+  test.setTimeout(180_000);
+
+  await register(page, AUTHOR());
+  await page.goto('/write');
+  await page.fill('input[id^=field-]', 'A Work Id Is Not An Item Id');
+  await page.click('button:text-is("Start a draft")');
+  await expect(page).toHaveURL(/\/write\//);
+  await page.click('button:text-is("Add chapter")');
+  await page.locator('.tiptap.ProseMirror').click();
+  await page.keyboard.type('A chapter, so the work can be published.');
+  const saved = page.waitForResponse(
+    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
+  );
+  await page.click('button:text-is("Save now")');
+  await saved;
+  await page.click('button:text-is("Publish")');
+  await expect(page.getByText('Republish')).toBeVisible();
+  const workId = page.url().split('/').pop()!;
+
+  const token = await csrfToken(page);
+  const refused = await page.evaluate(async ([work, csrf]) => {
+    const res = await fetch(`/api/v1/library/items/${work}/status`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json', 'x-csrf-token': csrf },
+      body: JSON.stringify({ status: 'finished' }),
+    });
+    return { status: res.status, body: await res.text() };
+  }, [workId, token]);
+
+  // 404, not 403: a 403 would confirm the id names a real work.
   expect(
-    marked.status,
-    `a work id is not a library item id, so the status door must refuse it: ${marked.status} ${marked.body}`,
+    refused.status,
+    `the library door must refuse a work id: ${refused.status} ${refused.body}`,
   ).toBe(404);
 
-  // And the dashboard still reads zero, because a refused write leaves nothing
-  // behind to count. A zero here is the honest number rather than the symptom
-  // of an orphan row.
+  // A refused write leaves no row, so the reader's own count is still the
+  // honest zero rather than the symptom of an orphan.
   await page.goto('/analytics');
   const totals = await readingTotals(page);
   expect(totals['Works finished']).toBe('0');

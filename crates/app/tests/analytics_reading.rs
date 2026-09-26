@@ -429,3 +429,296 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
+
+// ---------------------------------------------------------------------------
+// The door, not a fixture
+// ---------------------------------------------------------------------------
+//
+// Every test above seeds `reading_status` with raw SQL, because until now there
+// was no way to write one any other way: reading status hung off
+// `library_items`, and a library item is created in exactly one place --
+// `imports::upsert_library_item`, called by the import runner. A work published
+// on this instance had no subject to mark, so a reader of local fiction saw a
+// permanent zero on their own dashboard.
+//
+// The data model already anticipated the fix. `SUBJECT_WORK` exists, the
+// analytics query already filters on `subject_type = 'work'`, and
+// `reading_progress` is keyed on works. Only the door was missing.
+//
+// These tests exist to prove the door writes the same rows the fixtures did, and
+// that it refuses the subjects it should.
+
+/// Publish a work through the real doors, returning its id.
+///
+/// Create, add a chapter, publish -- all through the router, because a fixture
+/// that inserts a work directly would not catch a visibility rule that hides it.
+async fn published_work(client: &mut test_support::TestClient, title: &str) -> String {
+    let (status, body) = client
+        .post("/api/v1/works", json!({ "title": title }))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "create work: {body}");
+    // The create door returns the work view itself, not an envelope.
+    let id = body["id"].as_str().expect("work id").to_owned();
+
+    let (status, body) = client
+        .post(
+            &format!("/api/v1/works/{id}/chapters"),
+            json!({ "title": "One" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "add chapter: {body}");
+    let chapter = body["id"].as_str().expect("chapter id").to_owned();
+    let chapter_version = body["version"].as_i64().expect("chapter version");
+
+    // A chapter needs a document before the work can be published: the publish
+    // door refuses an empty work with "an empty work has nothing to read", which
+    // is the right rule and an easy 422 to hit in a fixture.
+    let doc = json!({ "type": "doc", "content": [
+        { "type": "paragraph", "content": [
+            { "type": "text", "text": "A chapter with enough words to have a middle." }] }] });
+    let (status, body) = client
+        .request(
+            "PATCH",
+            &format!("/api/v1/chapters/{chapter}"),
+            Some(json!({ "expected_version": chapter_version, "document": doc })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "write the chapter: {body}");
+
+    // Publish is optimistic: it names the work version it expects to publish,
+    // and adding a chapter moved that version on, so the value read at create
+    // is stale by now. Read it back rather than guessing.
+    let (status, body) = client.get(format!("/api/v1/works/{id}")).await;
+    assert_eq!(status, StatusCode::OK, "reload work: {body}");
+    let current = body["version"].as_i64().expect("current work version");
+
+    let (status, body) = client
+        .post(
+            &format!("/api/v1/works/{id}/publish"),
+            json!({ "expected_version": current }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "publish: {body}");
+    id
+}
+
+/// A reader can mark a work published on this instance, and the number moves.
+///
+/// The whole point of the door: the reader takes an action through the API, and
+/// the capability they can already see reports it. Before this there was no
+/// action to take.
+#[tokio::test]
+async fn a_reader_can_mark_a_locally_published_work_finished_and_the_count_moves() {
+    let mut r = reader("reading-door").await;
+    let work = published_work(&mut r.client, "A Work Of Local Fiction").await;
+
+    let (status, body) = r
+        .client
+        .put(
+            format!("/api/v1/works/{work}/reading-status"),
+            json!({ "status": "finished" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "mark finished: {body}");
+    assert_eq!(
+        body["status"], "finished",
+        "the door echoes the status: {body}"
+    );
+    // The spec's own rule: a finished work carries the moment it was finished,
+    // so a reader can see when they decided rather than when they last looked.
+    assert!(
+        body["finished_at"].is_string(),
+        "a finished status must record when: {body}"
+    );
+
+    let body = get(&mut r.client, "own.reading.basic").await;
+    let totals = reading(&body);
+    assert_eq!(
+        totals["finished_works"], 1,
+        "the dashboard must count the work the reader just finished: {totals}"
+    );
+
+    r.tdb.cleanup().await;
+}
+
+/// Reading it back is the reader's own record, not a guess.
+///
+/// A door that writes but cannot read leaves a reader unable to see what they
+/// have already recorded, which is the same as not having recorded it.
+#[tokio::test]
+async fn a_reader_can_read_back_the_status_they_recorded() {
+    let mut r = reader("reading-door-read").await;
+    let work = published_work(&mut r.client, "Read Back").await;
+
+    let (status, _) = r
+        .client
+        .put(
+            format!("/api/v1/works/{work}/reading-status"),
+            json!({ "status": "reading" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = r
+        .client
+        .get(format!("/api/v1/works/{work}/reading-status"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "read status: {body}");
+    assert_eq!(body["status"], "reading");
+
+    // Not finished, so it must not be counted as finished. A door that set
+    // `finished_at` on every status would make the count wrong while every
+    // individual response looked right.
+    let body = get(&mut r.client, "own.reading.basic").await;
+    let totals = reading(&body);
+    assert_eq!(
+        totals["finished_works"], 0,
+        "reading is not finished: {totals}"
+    );
+
+    r.tdb.cleanup().await;
+}
+
+/// No status at all is null, not a fabricated `unknown`.
+#[tokio::test]
+async fn a_work_with_no_status_reads_back_as_null() {
+    let mut r = reader("reading-door-null").await;
+    let work = published_work(&mut r.client, "Never Started").await;
+
+    let (status, body) = r
+        .client
+        .get(format!("/api/v1/works/{work}/reading-status"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "read status: {body}");
+    assert!(
+        body.is_null(),
+        "an unrecorded status is absent, not a guess: {body}"
+    );
+
+    r.tdb.cleanup().await;
+}
+
+/// Clearing removes the row, so the count falls back.
+#[tokio::test]
+async fn clearing_a_status_removes_it_from_the_count() {
+    let mut r = reader("reading-door-clear").await;
+    let work = published_work(&mut r.client, "Changed My Mind").await;
+
+    let (status, _) = r
+        .client
+        .put(
+            format!("/api/v1/works/{work}/reading-status"),
+            json!({ "status": "finished" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let body = get(&mut r.client, "own.reading.basic").await;
+    assert_eq!(reading(&body)["finished_works"], 1);
+
+    let (status, body) = r
+        .client
+        .request(
+            "DELETE",
+            &format!("/api/v1/works/{work}/reading-status"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "clear status: {body}");
+    let body = get(&mut r.client, "own.reading.basic").await;
+    assert_eq!(
+        reading(&body)["finished_works"],
+        0,
+        "a cleared status must not still be counted"
+    );
+
+    r.tdb.cleanup().await;
+}
+
+/// A status the build does not know is a validation failure, not a stored row.
+///
+/// The four statuses are the whole vocabulary; accepting an unknown one and
+/// storing it would put a row in the table that no count and no read-back can
+/// interpret.
+#[tokio::test]
+async fn an_unknown_reading_status_is_refused_rather_than_stored() {
+    let mut r = reader("reading-door-unknown").await;
+    let work = published_work(&mut r.client, "Vocab").await;
+
+    let (status, body) = r
+        .client
+        .put(
+            format!("/api/v1/works/{work}/reading-status"),
+            json!({ "status": "skimmed" }),
+        )
+        .await;
+    // 422, matching the other validation refusals in the instance: the value
+    // parsed as a string and failed as a vocabulary, which is a field problem
+    // rather than a malformed request.
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "unknown status: {body}"
+    );
+
+    let (status, body) = r
+        .client
+        .get(format!("/api/v1/works/{work}/reading-status"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "read back: {body}");
+    assert!(
+        body.is_null(),
+        "a refused status must leave nothing behind to read back: {body}"
+    );
+
+    r.tdb.cleanup().await;
+}
+
+/// A work that does not exist is a 404, and writes nothing.
+///
+/// The companion to the library-item guard: the door checks its subject rather
+/// than trusting the path.
+#[tokio::test]
+async fn a_status_against_a_work_that_does_not_exist_is_refused() {
+    let mut r = reader("reading-door-missing").await;
+    let absent = test_support::id("absent-work");
+
+    let (status, body) = r
+        .client
+        .put(
+            format!("/api/v1/works/{absent}/reading-status"),
+            json!({ "status": "finished" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "absent work: {body}");
+
+    let body = get(&mut r.client, "own.reading.basic").await;
+    let totals = reading(&body);
+    assert_eq!(totals["finished_works"], 0, "nothing was written: {totals}");
+
+    r.tdb.cleanup().await;
+}
+
+/// The door needs a session. An anonymous reader gets nothing written.
+#[tokio::test]
+async fn the_status_door_requires_a_session() {
+    let dir = test_support::scratch_dir("reading-door-anon");
+    let tdb = test_support::TestDb::connect_with_dir("reading-door-anon", &dir).await;
+    let mut author = test_support::TestClient::new(router_for(&tdb, &dir));
+    test_support::register(&mut author, "door-anon-author@test.dev", "DoorAnonAuthor").await;
+    let work = published_work(&mut author, "Needs A Reader").await;
+
+    // A client with no cookies at all.
+    let mut anon = test_support::TestClient::new(router_for(&tdb, &dir));
+    let (status, body) = anon
+        .put(
+            format!("/api/v1/works/{work}/reading-status"),
+            json!({ "status": "finished" }),
+        )
+        .await;
+    assert!(
+        matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN),
+        "an anonymous caller must not write a reading status: {status} {body}"
+    );
+
+    tdb.cleanup().await;
+}
