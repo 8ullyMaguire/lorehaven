@@ -294,9 +294,12 @@ async fn search_miss_roundtrip() {
 
     // Read back through whichever pool the fixture is on, so the assertion is
     // the same claim on both backends instead of SQLite-only by construction.
+    // `count::bigint` on the PostgreSQL side: the column is INTEGER there and
+    // sqlx will not decode an INT4 into an i64. The cast belongs in the query
+    // rather than in the Rust type, so the test asserts the same claim on both.
     let sql = harness.tdb.db().sql(
         "SELECT query_text, count FROM forum_search_misses WHERE query_text = ?",
-        "SELECT query_text, count FROM forum_search_misses WHERE query_text = $1",
+        "SELECT query_text, count::bigint AS count FROM forum_search_misses WHERE query_text = $1",
     );
     let row: Option<(String, i64)> = match harness.tdb.db().backend() {
         lorehaven_db::Backend::Sqlite => sqlx::query_as(&sql)
