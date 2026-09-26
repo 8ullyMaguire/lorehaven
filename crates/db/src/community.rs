@@ -1387,6 +1387,61 @@ impl From<MessageRow> for Message {
     }
 }
 
+/// One account's presence row, if it has one.
+pub async fn presence_of(
+    db: &Database,
+    account: &str,
+) -> Result<Option<(String, String, Option<String>, bool)>> {
+    let sql = db.sql(
+        "SELECT account, last_seen_at, typing_until, enabled FROM presence WHERE account = ?",
+        "SELECT account, last_seen_at, typing_until, enabled FROM presence WHERE account = $1",
+    );
+    let row: Option<(String, String, Option<String>, bool)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(account)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(account)
+                .fetch_optional(db.postgres_pool().expect("pg"))
+                .await?
+        }
+    };
+    Ok(row)
+}
+
+/// Turn a viewer's own presence on or off, without touching `last_seen_at`.
+///
+/// Separate from `upsert_presence` because the stream handler upserts on every
+/// poll with `enabled = true`; routing the toggle through that would mean
+/// turning presence off lasted until the next poll, which is not an opt-out.
+pub async fn set_presence_enabled(db: &Database, account: &str, enabled: bool) -> Result<()> {
+    let sql = db.sql(
+        "UPDATE presence SET enabled = ? WHERE account = ?",
+        "UPDATE presence SET enabled = $1 WHERE account = $2",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(i64::from(enabled))
+                .bind(account)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(enabled)
+                .bind(account)
+                .execute(db.postgres_pool().expect("pg"))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
 pub async fn upsert_presence(
     db: &Database,
     account: &str,
@@ -1455,6 +1510,55 @@ pub async fn presence_for(
 /// List all presence records (for the presence stream).
 ///
 /// Returns `(account, last_seen_at, typing_until, enabled)` for every row.
+/// The accounts a viewer has blocked or muted, for filtering a list in one pass.
+///
+/// A set rather than `is_blocked`/`is_muted` per row because the callers filter
+/// whole lists -- a presence stream, a comment page -- and a per-row check turns
+/// one query into N. The two lists are separate queries rather than one UNION
+/// because a pair can be in both and a caller may want to tell "blocked" from
+/// "muted" when it explains why something is missing.
+pub async fn hidden_accounts(db: &Database, viewer: &str) -> Result<(Vec<String>, Vec<String>)> {
+    let blocked = hidden_one(
+        db,
+        viewer,
+        "SELECT blocked FROM blocks WHERE blocker = ?",
+        "SELECT blocked FROM blocks WHERE blocker = $1",
+    )
+    .await?;
+    let muted = hidden_one(
+        db,
+        viewer,
+        "SELECT muted FROM mutes WHERE muter = ?",
+        "SELECT muted FROM mutes WHERE muter = $1",
+    )
+    .await?;
+    Ok((blocked, muted))
+}
+
+async fn hidden_one(
+    db: &Database,
+    viewer: &str,
+    sqlite_sql: &str,
+    pg_sql: &str,
+) -> Result<Vec<String>> {
+    let sql = db.sql(sqlite_sql, pg_sql);
+    let rows: Vec<(String,)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(viewer)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(viewer)
+                .fetch_all(db.postgres_pool().expect("pg"))
+                .await?
+        }
+    };
+    Ok(rows.into_iter().map(|r| r.0).collect())
+}
+
 pub async fn list_presence(db: &Database) -> Result<Vec<(String, String, Option<String>, bool)>> {
     let sql = db.sql(
         "SELECT account, last_seen_at, typing_until, enabled FROM presence ORDER BY account",

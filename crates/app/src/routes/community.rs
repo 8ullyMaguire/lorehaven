@@ -66,6 +66,7 @@ pub fn router() -> Router<AppState> {
         .route("/me/mutes/{id}", delete(delete_mute))
         // presence
         .route("/presence/stream", get(get_presence_stream))
+        .route("/me/presence", put(set_presence_preference))
 }
 
 // ---------------------------------------------------------------------------
@@ -899,26 +900,107 @@ async fn delete_mute(
 // Presence
 // ---------------------------------------------------------------------------
 
+/// Turn your own presence on or off.
+///
+/// Presence being opt-in is only true if a person can decline it, so this is the
+/// route that makes the `enabled` column mean something.
+async fn set_presence_preference(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    axum::extract::Json(body): axum::extract::Json<serde_json::Value>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let enabled = body
+        .get("enabled")
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| {
+            ApiError(lorehaven_domain::AppError::Validation {
+                message: "enabled must be a boolean".to_owned(),
+                field_errors: Default::default(),
+            })
+        })?;
+    let account_id = user.account_id.to_string();
+    // An account that has never polled the stream has no presence row, so
+    // upsert with the requested flag rather than updating a row that may not
+    // exist and silently doing nothing.
+    if lorehaven_db::community::presence_of(state.db(), &account_id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?
+        .is_none()
+    {
+        lorehaven_db::community::upsert_presence(
+            state.db(),
+            &account_id,
+            &format_rfc3339_local(),
+            None::<&str>,
+            enabled,
+        )
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    } else {
+        lorehaven_db::community::set_presence_enabled(state.db(), &account_id, enabled)
+            .await
+            .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    }
+    Ok(Json(serde_json::json!({ "enabled": enabled })))
+}
+
+fn format_rfc3339_local() -> String {
+    lorehaven_db::identity::format_rfc3339(OffsetDateTime::now_utc())
+}
+
 async fn get_presence_stream(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
 ) -> ApiResult<Json<serde_json::Value>> {
     use lorehaven_db::identity::format_rfc3339;
 
-    // Upsert the viewer's presence record so they appear in the stream.
+    // Record that the viewer is here, without re-enabling a presence they turned
+    // off: the flag is read back rather than assumed, because passing `true`
+    // would make the opt-out last exactly one poll.
     let account_id = user.account_id.to_string();
     let now = format_rfc3339(OffsetDateTime::now_utc());
-    lorehaven_db::community::upsert_presence(state.db(), &account_id, &now, None::<&str>, true)
+    // An account with no row yet defaults to visible: presence is opt-in, and
+    // polling the stream is the opt-in.
+    let already_enabled = lorehaven_db::community::presence_of(state.db(), &account_id)
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?
+        .is_none_or(|r| r.3);
+    lorehaven_db::community::upsert_presence(
+        state.db(),
+        &account_id,
+        &now,
+        None::<&str>,
+        already_enabled,
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
 
     // Fetch all presence records and return as JSON items.
     let rows = lorehaven_db::community::list_presence(state.db())
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
 
+    // A blocked or muted account is absent from the stream, not merely greyed
+    // out: "who is online" is a statement about people, and someone you blocked
+    // should not learn they are online just because you are looking at the page.
+    // The viewer's own row survives -- muting someone does not hide you from
+    // yourself.
+    let (blocked, muted) = lorehaven_db::community::hidden_accounts(state.db(), &account_id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+
     let items: Vec<serde_json::Value> = rows
         .into_iter()
+        .filter(|(account, _, _, enabled)| {
+            // The viewer's own row survives: muting someone does not hide you
+            // from yourself.
+            account == &account_id
+                || lorehaven_domain::community::presence_visible_to(
+                    *enabled,
+                    blocked.iter().any(|b| b == account),
+                    muted.iter().any(|m| m == account),
+                )
+        })
         .map(|(account, last_seen_at, typing_until, enabled)| {
             let active_now = is_active_now(&last_seen_at);
             serde_json::json!({

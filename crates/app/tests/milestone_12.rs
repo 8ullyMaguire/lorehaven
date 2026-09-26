@@ -6,8 +6,8 @@
 //! block filtering, forums topics and replies, group visibility, block-aware
 //! messaging, the block and mute lists, and the presence record.
 //!
-//! Known gaps: forum categories need trust gates; `GET /presence/stream` is
-//! a stub returning empty (SSE lands with the real-time milestone); block-aware
+//! Known gaps: forum categories need trust gates; `GET /presence/stream` is a
+//! poll rather than a stream (SSE lands with the real-time milestone); block-aware
 //! filtering on search/mention paths is still TODO.
 
 use std::path::{Path, PathBuf};
@@ -141,6 +141,9 @@ impl Client {
     }
     async fn post(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
         self.request("POST", uri, Some(body)).await
+    }
+    async fn put(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
+        self.request("PUT", uri, Some(body)).await
     }
     async fn delete(&mut self, uri: &str) -> (StatusCode, Value) {
         self.request("DELETE", uri, None).await
@@ -473,6 +476,156 @@ async fn the_mute_list_round_trips_and_deletes() {
     let (status, body) = a.get("/api/v1/me/mutes").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["items"].as_array().expect("items").len(), 0, "{body}");
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_mute_removes_someone_from_the_presence_stream() {
+    // Mute existed as a stored row and a listable row and nothing else: the
+    // route never consulted it, and the domain decision function that should
+    // have consumed it (`presence_visible_to`) was dead code. A mute that
+    // changes nothing is a mute the person who set it believes is working.
+    let harness = Harness::new("presence-mute").await;
+    let mut viewer = harness.client();
+    register(&mut viewer, "viewer@example.com", "Viewer").await;
+    let mut other = harness.client();
+    let (other_account, _) = register(&mut other, "other@example.com", "Other").await;
+
+    // The other account is online and visible before the mute.
+    let (status, body) = other.get("/api/v1/presence/stream").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .any(|i| i["account"] == other_account.as_str()),
+        "the second account is in the stream: {body}"
+    );
+
+    let (status, _) = viewer
+        .post("/api/v1/me/mutes", json!({ "muted": other_account }))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, body) = viewer.get("/api/v1/presence/stream").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let accounts: Vec<&str> = body["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .map(|i| i["account"].as_str().expect("account"))
+        .collect();
+    assert!(
+        !accounts.contains(&other_account.as_str()),
+        "a muted account is absent, not greyed out: {body}"
+    );
+
+    // The viewer's own row is still there: muting someone does not hide you
+    // from yourself.
+    assert!(
+        !accounts.is_empty(),
+        "the viewer still sees themselves: {body}"
+    );
+
+    // And the other account still sees themselves -- the mute is one-directional.
+    let (_, body) = other.get("/api/v1/presence/stream").await;
+    assert!(
+        body["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .any(|i| i["account"] == other_account.as_str()),
+        "the mute does not follow the muted person: {body}"
+    );
+
+    // Unmuting puts them back.
+    let (status, _) = viewer
+        .delete(&format!("/api/v1/me/mutes/{other_account}"))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, body) = viewer.get("/api/v1/presence/stream").await;
+    assert!(
+        body["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .any(|i| i["account"] == other_account.as_str()),
+        "and removing the mute restores them: {body}"
+    );
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_block_also_removes_someone_from_the_presence_stream() {
+    let harness = Harness::new("presence-block").await;
+    let mut viewer = harness.client();
+    register(&mut viewer, "pviewer@example.com", "PViewer").await;
+    let mut other = harness.client();
+    let (other_account, _) = register(&mut other, "pother@example.com", "POther").await;
+
+    // They must be online *before* the block, or the assertion below would pass
+    // on a stream that never contained them -- which is exactly what happened
+    // the first time this test was written.
+    let (status, body) = other.get("/api/v1/presence/stream").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .any(|i| i["account"] == other_account.as_str()),
+        "precondition: the other account is in the stream to begin with: {body}"
+    );
+
+    let (status, _) = viewer
+        .post(
+            "/api/v1/me/blocks",
+            json!({ "blocked": other_account, "scope": "all" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, body) = viewer.get("/api/v1/presence/stream").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        !body["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .any(|i| i["account"] == other_account.as_str()),
+        "a blocked account is absent: {body}"
+    );
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn presence_is_opt_in_so_a_disabled_account_is_not_listed() {
+    // Presence is opt-in per account. A row that says it is off is not shown
+    // even to a viewer who could otherwise see it -- the domain function
+    // `presence_visible_to` exists to decide exactly this and was never called.
+    let harness = Harness::new("presence-optin").await;
+    let mut viewer = harness.client();
+    register(&mut viewer, "optviewer@example.com", "OptViewer").await;
+    let mut quiet = harness.client();
+    let (quiet_account, _) = register(&mut quiet, "optquiet@example.com", "OptQuiet").await;
+
+    // Turn presence off for the quiet account.
+    let (status, body) = quiet
+        .put("/api/v1/me/presence", json!({ "enabled": false }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) = viewer.get("/api/v1/presence/stream").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        !body["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .any(|i| i["account"] == quiet_account.as_str()),
+        "an account with presence off is not listed: {body}"
+    );
     harness.cleanup().await;
 }
 
