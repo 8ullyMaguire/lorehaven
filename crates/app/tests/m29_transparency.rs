@@ -638,7 +638,7 @@ async fn an_operators_taste_profile_change_is_remembered_rather_than_echoed() {
         .await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["status"], "updated");
-    assert_eq!(body["version"], 1, "the first write is version 1");
+    assert_eq!(body["version"], 1, "the first knobs write is version 1");
 
     // A separate request, so this is persistence rather than an echo.
     let (status, read_back) = operator.get(path).await;
@@ -654,26 +654,30 @@ async fn an_operators_taste_profile_change_is_remembered_rather_than_echoed() {
 
 #[tokio::test]
 async fn a_second_taste_profile_change_bumps_the_version_and_keeps_what_was_omitted() {
-    // A partial update is a partial update. An operator who changes one weight
-    // should not have to restate the whole model, and certainly should not
-    // silently lose the other axes by omitting them.
+    // A partial update is a partial update. An operator who changes one knob
+    // should not have to restate the others, and a body that touches only the
+    // dimensions should not reset the knobs -- the two live in separate tables
+    // precisely so that a partial write to one does not clobber the other.
     let harness = Harness::with_operator("taste2", "Taster2").await;
     let mut operator = harness.reader("Taster2").await;
 
     let path = "/api/v1/operator/taste-profile";
-    let first = json!([
+    let dims = json!([
         {"key": "angst", "label": "Angst", "admin_target": 0.4, "weight": 1.0},
         {"key": "pacing", "label": "Pacing", "admin_target": 0.6, "weight": 0.5}
     ]);
-    let (status, body) = operator.put(path, json!({ "dimensions": first })).await;
+    let (status, body) = operator
+        .put(path, json!({ "dimensions": dims, "gravity_strength": 500 }))
+        .await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
-    assert_eq!(body["version"], 1);
+    assert_eq!(body["version"], 1, "the first knobs write is version 1");
 
-    // Now change only the weight.
+    // Change one knob and one dimension weight; omit the rest.
     let (status, body) = operator
         .put(
             path,
             json!({
+                "gravity_strength": 900,
                 "dimensions": [
                     {"key": "angst", "label": "Angst", "admin_target": 0.4, "weight": 0.9},
                     {"key": "pacing", "label": "Pacing", "admin_target": 0.6, "weight": 0.5}
@@ -682,22 +686,58 @@ async fn a_second_taste_profile_change_bumps_the_version_and_keeps_what_was_omit
         )
         .await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
-    assert_eq!(body["version"], 2, "the second write is version 2");
+    assert_eq!(body["version"], 2, "the second knobs write is version 2");
 
     let (_, read_back) = operator.get(path).await;
     assert_eq!(read_back["version"], 2);
     assert_eq!(read_back["dimensions"][0]["weight"], 0.9);
-    // The gravity strength was never restated and is still the config default,
-    // not zero.
+    assert_eq!(read_back["gravity_strength"], 900);
+    // admin_weight was never restated and is still the config default, not zero.
     assert_eq!(
-        read_back["gravity_strength"],
+        read_back["admin_weight"],
         json!(
             lorehaven_app::config::Config::development_defaults()
                 .taste
-                .gravity_strength as i64
+                .admin_weight as i64
         ),
         "an omitted field keeps what was in force"
     );
+}
+
+#[tokio::test]
+async fn a_dimensions_only_change_leaves_the_knobs_alone() {
+    // The failure this guards against: one store's write zeroing the other's.
+    let harness = Harness::with_operator("tastesplit", "Taster6").await;
+    let mut operator = harness.reader("Taster6").await;
+    let path = "/api/v1/operator/taste-profile";
+
+    let (status, body) = operator.put(path, json!({ "gravity_strength": 420 })).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+
+    let (status, body) = operator
+        .put(
+            path,
+            json!({"dimensions": [
+                {"key": "prose", "label": "Prose", "admin_target": 0.7, "weight": 1.0}
+            ]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert!(
+        body.get("version").is_none(),
+        "a dimensions-only write does not bump the knobs version: {body}"
+    );
+
+    let (_, read_back) = operator.get(path).await;
+    assert_eq!(
+        read_back["gravity_strength"], 420,
+        "the knob survived: {read_back}"
+    );
+    assert_eq!(
+        read_back["version"], 1,
+        "the knob's version did not move either"
+    );
+    assert_eq!(read_back["dimensions"][0]["key"], "prose");
 }
 
 #[tokio::test]
@@ -864,9 +904,34 @@ async fn a_served_slot_explains_itself() {
 
     // The taste signal is bucketed, never a raw score.
     assert_eq!(body["taste_signal"], "strong");
+
+    // Asserted on the *fields*, not on a substring. The first version of this
+    // test looked for "0." anywhere in the body and called it a leaked score --
+    // which then failed on PostgreSQL, where the served slot happened to carry
+    // a blend_score of 42 and the slot id contained the digits "0." by chance.
+    // blend_score is deliberately reader-visible (it is the reader's own
+    // ranking position, echoed from the discovery response, and §29.2 shows a
+    // close call above it). What must never appear is a *per-engine* weight or
+    // an operator affinity, and the field-level check says so precisely.
+    for forbidden in [
+        "weight",
+        "weights",
+        "operator_affinity",
+        "affinity",
+        "score_detail",
+    ] {
+        assert!(
+            body.get(forbidden).is_none(),
+            "{forbidden} reached the reader: {body}"
+        );
+    }
+    // blend_score is a 0-100 reader-facing rank, not a per-engine float.
+    let blend = body["blend_score"]
+        .as_i64()
+        .expect("blend_score is an integer");
     assert!(
-        !body.to_string().contains("0."),
-        "a raw score reached the reader: {body}"
+        (0..=100).contains(&blend),
+        "blend_score is a rank, got {blend}"
     );
 }
 
