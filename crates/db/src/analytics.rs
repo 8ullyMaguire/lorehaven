@@ -403,6 +403,164 @@ async fn comment_totals(db: &Database, owner_pseud: &str) -> anyhow::Result<(i64
     }
 }
 
+// -- own.reading.basic (spec §9.6) --------------------------------------------
+
+/// The largest gap between two progress updates that counts as reading.
+///
+/// §9.6 asks for "approximate reading time" and the method for
+/// `own.reading.basic` documents the approximation as "wall-clock between two
+/// progress updates on the same chapter, capped at 30 minutes per gap". The
+/// cap is not a rounding convenience: a reader who left a tab open overnight,
+/// or closed a laptop with the reader still open, has contributed zero reading
+/// and eight hours of wall-clock, and a dashboard that reports the second is
+/// telling a reader something false about themselves.
+pub const READING_GAP_CAP_SECONDS: i64 = 30 * 60;
+
+/// A reader's own reading totals, as §9.6 lists them.
+///
+/// Every field is a fact about the caller. `Subject::Self_` means the floor
+/// does not apply, so these are exact numbers and never bands — a reader who
+/// knows they finished two works must not be told "fewer than 5".
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct ReadingTotals {
+    /// Works the reader marked finished. A decision, not an open (§9.6).
+    pub finished_works: i64,
+    /// Chapters the reader advanced progress through.
+    pub chapters_read: i64,
+    /// Estimated words in those chapters. An estimate: it is the word count
+    /// of the revision as stored now, not as read then.
+    pub words_read: i64,
+    /// Capped wall-clock between progress updates. An estimate, per the cap.
+    pub reading_seconds: i64,
+}
+
+const READING_TOTALS_SQLITE: &str = "SELECT
+     (SELECT COUNT(*) FROM reading_status rs
+        WHERE rs.account_id = ?
+          AND rs.subject_type = 'work'
+          AND rs.status = 'finished') AS finished_works,
+     (SELECT COUNT(*) FROM reading_progress rp
+        WHERE rp.account_id = ?
+          AND rp.subject_type = 'work') AS chapters_read,
+     (SELECT COALESCE(CAST(SUM(word_total) AS BIGINT), 0) FROM (
+        SELECT (SELECT COALESCE(CAST(SUM(cr.word_count) AS BIGINT), 0)
+                  FROM chapters c
+                  JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                 WHERE c.work_id = rp.subject_id) AS word_total
+          FROM reading_progress rp
+         WHERE rp.account_id = ?
+           AND rp.subject_type = 'work')) AS words_read,
+     (SELECT COALESCE(CAST(SUM(MIN(gap, 1800)) AS BIGINT), 0) FROM (
+        SELECT (julianday(nxt.created_at) - julianday(prev.created_at)) * 86400.0 AS gap
+          FROM reading_progress prev
+          JOIN reading_progress nxt
+            ON nxt.account_id = prev.account_id
+           AND nxt.subject_id = prev.subject_id
+           AND nxt.created_at > prev.created_at
+         WHERE prev.account_id = ?
+           AND prev.subject_type = 'work')) AS reading_seconds";
+
+const READING_TOTALS_POSTGRES: &str = "SELECT
+     (SELECT COUNT(*) FROM reading_status rs
+        WHERE rs.account_id = $1::uuid
+          AND rs.subject_type = 'work'
+          AND rs.status = 'finished') AS finished_works,
+     (SELECT COUNT(*) FROM reading_progress rp
+        WHERE rp.account_id = $2::uuid
+          AND rp.subject_type = 'work') AS chapters_read,
+     (SELECT COALESCE(CAST(SUM(word_total) AS BIGINT), 0) FROM (
+        SELECT (SELECT COALESCE(CAST(SUM(cr.word_count) AS BIGINT), 0)
+                  FROM chapters c
+                  JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                 WHERE c.work_id = rp.subject_id) AS word_total
+          FROM reading_progress rp
+         WHERE rp.account_id = $3::uuid
+           AND rp.subject_type = 'work')) AS words_read,
+     (SELECT COALESCE(CAST(SUM(LEAST(gap, 1800)) AS BIGINT), 0) FROM (
+        SELECT EXTRACT(EPOCH FROM (nxt.created_at::timestamptz - prev.created_at::timestamptz)) AS gap
+          FROM reading_progress prev
+          JOIN reading_progress nxt
+            ON nxt.account_id = prev.account_id
+           AND nxt.subject_id = prev.subject_id
+           AND nxt.created_at > prev.created_at
+         WHERE prev.account_id = $4::uuid
+           AND prev.subject_type = 'work')) AS reading_seconds";
+
+/// The caller's own reading totals.
+///
+/// `account_id` is filtered in SQL, never in the route: a post-filter has
+/// already read the rows, and this is the shape of leak the whole registry
+/// exists to prevent.
+///
+/// Four subqueries rather than one pass, because each is a different table and
+/// a reader who has opened nothing must still get zeros rather than a row
+/// that the outer aggregate then has to coalesce. Four binds of the same
+/// account id is the price, and the alternative — a `UNION ALL` of four
+/// aggregates — is one statement that reads worse than four named counts.
+pub async fn reading_totals(db: &Database, account_id: &str) -> anyhow::Result<ReadingTotals> {
+    let sql = sql_owned(
+        db,
+        READING_TOTALS_SQLITE.to_string(),
+        READING_TOTALS_POSTGRES.to_string(),
+    );
+    // Each arm reads its own row and returns the same plain struct. A row
+    // cannot cross the `match`: `QueryResult<Sqlite, _>` and
+    // `QueryResult<Postgres, _>` are different types, and `AnyRow` needs the
+    // `any` feature this workspace does not enable.
+    match db.backend() {
+        Backend::Sqlite => {
+            let row = sqlx::query(&sql)
+                .bind(account_id)
+                .bind(account_id)
+                .bind(account_id)
+                .bind(account_id)
+                .fetch_one(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+            Ok(totals_from(
+                row.get::<i64, _>("finished_works"),
+                row.get::<i64, _>("chapters_read"),
+                row.get::<i64, _>("words_read"),
+                row.get::<i64, _>("reading_seconds"),
+            ))
+        }
+        Backend::Postgres => {
+            let row = sqlx::query(&sql)
+                .bind(account_id)
+                .bind(account_id)
+                .bind(account_id)
+                .bind(account_id)
+                .fetch_one(db.postgres_pool().expect("postgres handle"))
+                .await?;
+            Ok(totals_from(
+                row.get::<i64, _>("finished_works"),
+                row.get::<i64, _>("chapters_read"),
+                row.get::<i64, _>("words_read"),
+                row.get::<i64, _>("reading_seconds"),
+            ))
+        }
+    }
+}
+
+/// The one place the four counts become a struct.
+///
+/// `COUNT` is BIGINT on PostgreSQL and the `MIN`/`LEAST` sum is NUMERIC, so
+/// every field is cast in the statement rather than decoded and converted here:
+/// a decode error names the column, and `i64` in both arms is what lets the
+/// two dialects agree.
+fn totals_from(
+    finished_works: i64,
+    chapters_read: i64,
+    words_read: i64,
+    reading_seconds: i64,
+) -> ReadingTotals {
+    ReadingTotals {
+        finished_works,
+        chapters_read,
+        words_read,
+        reading_seconds,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
