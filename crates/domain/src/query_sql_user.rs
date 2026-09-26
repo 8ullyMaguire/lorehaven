@@ -25,15 +25,15 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
         // that would match on any word in it and return a long tail of
         // strangers.
         QueryAst::Text(text) => {
-            let sql = "(COALESCE(LOWER(pseuds.handle), '') LIKE LOWER(?) \
-                       OR COALESCE(LOWER(pseuds.display_name), '') LIKE LOWER(?))";
+            let sql = "(COALESCE(LOWER(pseuds.handle), '') LIKE LOWER(?) ESCAPE '\\' \
+                       OR COALESCE(LOWER(pseuds.display_name), '') LIKE LOWER(?) ESCAPE '\\')";
             let pattern = format!("%{}%", escape_like(text));
             Ok(SqlFragment::new(sql)
                 .with_bind(pattern.clone())
                 .with_bind(pattern))
         }
         QueryAst::Phrase(phrase) => Ok(SqlFragment::new(
-            "COALESCE(LOWER(pseuds.display_name), '') LIKE LOWER(?)",
+            "COALESCE(LOWER(pseuds.display_name), '') LIKE LOWER(?) ESCAPE '\\'",
         )
         .with_bind(format!("%{}%", escape_like(phrase)))),
         QueryAst::Fielded(field, value) => render_fielded(*field, value),
@@ -123,8 +123,45 @@ fn render_fielded(field: QueryField, value: &str) -> Result<SqlFragment, QueryEr
         )
         .with_bind(value.to_owned())
         .with_bind(value.to_owned())),
+        // `works:10` is equality, not a comparison -- `words:5000` works the
+        // same way on the works surface, and a reader who counted to ten is
+        // not asking for a syntax error. The bound is still cast, for the same
+        // reason the comparison arm casts it.
+        QueryField::Works => {
+            if value.parse::<i64>().is_err() {
+                return Err(QueryError::new(
+                    format!("works takes a whole number, got {value:?}"),
+                    0,
+                ));
+            }
+            Ok(
+                SqlFragment::new(format!("{} = CAST(? AS BIGINT)", live_works_count()))
+                    .with_bind(value.to_owned()),
+            )
+        }
+        // A bare date is a whole day, matching the `..` range arm and the
+        // comparison arm. `joined:2026-01-01` means "joined on that day", not
+        // "joined at the midnight that started it".
+        QueryField::Joined => Ok(SqlFragment::new(
+            "SUBSTR(COALESCE(accounts.created_at, pseuds.created_at), 1, 10) = ?",
+        )
+        .with_bind(value.to_owned())),
         other => Err(wrong_surface(other, "user")),
     }
+}
+
+/// The count of works a reader can actually see, as a SQL expression.
+///
+/// Shared by the equality arm and the comparison arm so the two cannot drift:
+/// a reader who writes `works:10` and `works:>=10` is asking about the same
+/// population, and if the definitions disagree the boundary is wrong in a way
+/// that looks plausible.
+fn live_works_count() -> &'static str {
+    "(SELECT COUNT(*) FROM works uw \
+      WHERE uw.owner_pseud_id = pseuds.id \
+        AND uw.deleted_at IS NULL \
+        AND uw.lifecycle = 'published' \
+        AND uw.visibility = 'public')"
 }
 
 fn render_comparison(
@@ -156,14 +193,7 @@ fn render_comparison(
         // `String` and SQLite leaves it as text on the right of an integer, so
         // `3 > '1'` is *false* and every `works:>N` matches nothing -- which
         // reads exactly like an instance with no authors.
-        QueryField::Works => format!(
-            "(SELECT COUNT(*) FROM works uw \
-              WHERE uw.owner_pseud_id = pseuds.id \
-                AND uw.deleted_at IS NULL \
-                AND uw.lifecycle = 'published' \
-                AND uw.visibility = 'public') {} CAST(? AS BIGINT)",
-            op.as_str()
-        ),
+        QueryField::Works => format!("{} {} CAST(? AS BIGINT)", live_works_count(), op.as_str()),
         // A pseudonym added to an existing account has no account creation date
         // of its own, and NULL compares false against every operator -- so
         // without the fallback every pseudonym on a year-old account vanishes

@@ -17,6 +17,42 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/search", get(search))
         .route("/search/in-work/{id}", get(in_work))
+        .route("/users/search", get(users_search))
+}
+
+/// Search pseudonyms with the shared query language.
+///
+/// The same parser, the same operators and the same 422 as `/search` and
+/// `/forum-search`; only the surface differs. A field from another one is an
+/// error naming where it does belong, because "no results" is
+/// indistinguishable from "nobody matches" and a reader has no other way to
+/// learn they used the wrong box.
+///
+/// An empty query returns an empty page rather than every pseudonym on the
+/// instance, which on a large one is a phone book and a denial of service at
+/// the same time.
+async fn users_search(
+    State(state): State<AppState>,
+    Query(params): Query<UserSearchQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let results =
+        lorehaven_db::search::search_users_ast(state.db(), &params.q, params.limit.clamp(1, 100))
+            .await
+            .map_err(search_failure)?;
+
+    let total = results.len();
+    Ok(Json(serde_json::json!({
+        "total": total,
+        "items": results,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UserSearchQuery {
+    #[serde(default)]
+    q: String,
+    #[serde(default = "default_limit")]
+    limit: i64,
 }
 
 #[derive(Debug, Deserialize)]

@@ -34,7 +34,7 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
     match ast {
         QueryAst::Text(text) => {
             let sql =
-                "(LOWER(works.title) LIKE LOWER(?) OR LOWER(works.summary) LIKE LOWER(?) OR LOWER(works_index.body_text) LIKE LOWER(?))"
+                "(LOWER(works.title) LIKE LOWER(?) ESCAPE '\\' OR LOWER(works.summary) LIKE LOWER(?) ESCAPE '\\' OR LOWER(works_index.body_text) LIKE LOWER(?) ESCAPE '\\')"
                     .to_owned();
             let pattern = format!("%{}%", text);
             Ok(SqlFragment::new(sql)
@@ -43,7 +43,7 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
                 .with_bind(pattern))
         }
         QueryAst::Phrase(phrase) => {
-            let sql = "(LOWER(works_index.body_text) LIKE LOWER(?))";
+            let sql = "(LOWER(works_index.body_text) LIKE LOWER(?) ESCAPE '\\')";
             let pattern = format!("%{}%", phrase);
             Ok(SqlFragment::new(sql).with_bind(pattern))
         }
@@ -370,11 +370,11 @@ fn render_fielded(field: &QueryField, value: &str) -> Result<SqlFragment, QueryE
             .with_bind(end.to_string()))
         }
         QueryField::Title => {
-            let sql = "(LOWER(works.title) LIKE LOWER(?))";
+            let sql = "(LOWER(works.title) LIKE LOWER(?) ESCAPE '\\')";
             Ok(SqlFragment::new(sql).with_bind(format!("%{}%", value)))
         }
         QueryField::Author => {
-            let sql = "(LOWER(pseuds.handle) LIKE LOWER(?))";
+            let sql = "(LOWER(pseuds.handle) LIKE LOWER(?) ESCAPE '\\')";
             Ok(SqlFragment::new(sql).with_bind(format!("%{}%", value)))
         }
         QueryField::Fandom => {
@@ -398,11 +398,11 @@ fn render_fielded(field: &QueryField, value: &str) -> Result<SqlFragment, QueryE
             Ok(SqlFragment::new(sql).with_bind(value.to_lowercase().trim().to_owned()))
         }
         QueryField::Summary => {
-            let sql = "(LOWER(works.summary) LIKE LOWER(?))";
+            let sql = "(LOWER(works.summary) LIKE LOWER(?) ESCAPE '\\')";
             Ok(SqlFragment::new(sql).with_bind(format!("%{}%", value)))
         }
         QueryField::Body => {
-            let sql = "(LOWER(works_index.body_text) LIKE LOWER(?))";
+            let sql = "(LOWER(works_index.body_text) LIKE LOWER(?) ESCAPE '\\')";
             Ok(SqlFragment::new(sql).with_bind(format!("%{}%", value)))
         }
         QueryField::Language => {
