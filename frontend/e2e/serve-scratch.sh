@@ -17,10 +17,14 @@ BIN=${LOREHAVEN_BIN:-$HOME/.cargo-target/lorehaven/release/lorehaven}
 PORT=${LOREHAVEN_E2E_PORT:-8173}
 SCRATCH="$(pwd)/test-results/scratch"
 
+# scratch-config.toml raises the rate limits for this instance only. See the
+# file for why: one address running the whole suite is otherwise a brute-force
+# run, and the rate limiting tests build their own server with tight limits.
 "$BIN" \
   --storage-root "$SCRATCH/storage" \
   --database-url "sqlite://$SCRATCH/lorehaven.db?mode=rwc" \
   --port "$PORT" \
+  --config "$(pwd)/e2e/scratch-config.toml" \
   serve --with-worker &
 SRV=$!
 trap 'kill "$SRV" 2>/dev/null' EXIT

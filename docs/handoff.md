@@ -1506,15 +1506,30 @@ range-checks `blend_score` as the 0–100 rank it is.
 The general rule: an assertion that a *field* is absent must name the field.
 `contains("0.")` is a claim about text, and text is not the thing under test.
 
-### A flake that is not a regression
+### A flake that was a test-isolation bug — and is now fixed
 
-`milestone_2::repeated_login_attempts_are_rate_limited` failed in a parallel
-full-suite run and passes alone, and passes as a whole suite. The limiter is
-process-global and `clear_buckets()` is called by several tests, so under
-`--test-threads=2` another test refills the bucket between the clear and the
-loop. It is a test-isolation problem, not a product one; run that suite on its
-own when it matters. Do not "fix" it by widening the limits — the test exists to
-trip them.
+`milestone_2::repeated_login_attempts_are_rate_limited` used to fail in a
+parallel full-suite run while passing alone. That was recorded here as a known
+flake to be run in isolation. **It is fixed, and this entry is the record of why
+the diagnosis was wrong.**
+
+The limiter's buckets live in a process-global `GLOBAL_BUCKETS` so that clones
+of `AppState` share one budget — right for a server, wrong for a suite. "Clear
+the bucket, then spend 200 requests from it" is not atomic with respect to
+another test in another thread, so under `--test-threads=2` one rate-limit test
+cleared the shared map while the other refilled it. The failure mode was a
+credential-stuffing loop that observed no 429, which is the worst shape a
+security test can fail in: it looks like the protection is absent.
+
+`crates/app/tests/milestone_2.rs` now has `RATE_LIMIT_LOCK` and
+`rate_limit_guard()`, which locks, recovers from poisoning, and clears the
+buckets in one place. `clear_buckets()` appears exactly once in that file, so a
+new test cannot bypass the lock by calling the raw function.
+
+The lesson worth keeping: **a test that fails only under `--test-threads>1` is
+almost never a flake.** It is a shared-state bug, and "passes in isolation" is
+the evidence for that, not against it. The cost of believing the flake story is
+a security test that intermittently does not test anything.
 
 ### The taste knobs are versioned, and a rollback is a write (migration 0078)
 
@@ -1788,13 +1803,18 @@ in ORDER BY when it wraps a subquery.
 - **Frontend builds need to run ON thinkcentre** — the embedded bundle (`frontend/dist/`) is built into the binary with `rust-embed`.
 - Build on thinkcentre: `pkill -9 cargo` first; binary swap needs `pkill -9 -f "lorehaven serve"`.
 - Argon2 params: m_cost=19456, t_cost=2, p_cost=1.
-- Rate limiter buckets are process-global (`GLOBAL_BUCKETS` in `limiter.rs`), keyed by IP.
+- Rate limiter buckets are process-global (`GLOBAL_BUCKETS` in `limiter.rs`), keyed by IP — which
+  is right for a server and a hazard for tests. Any test that calls `limiter::clear_buckets()` must
+  hold `RATE_LIMIT_LOCK` from `milestone_2.rs`; see `rate_limit_guard()`.
 - Lint false positive: the write_file/patch tool's linter runs rustc with Rust 2015 edition and reports `async fn` errors — ignore those; `cargo check` is the real gate.
 
 ## Gotchas (carried forward, still true)
 
 - Spoilers routes passed `pseud_id` where DB FK'd `accounts(id)` — fixed with `RequirePseud { user, .. }` → `user.account_id`.
-- Config `rate_limits` field has no top-level `burst`/`per_minute` — nested in each `Quota`.
+- Config `rate_limits` keys are **flat**: `auth_burst`, `write_per_minute`, etc. — not a nested
+  `auth = { burst = … }`, and there is no bare `burst`/`per_minute`. An unrecognised key is a hard
+  parse error at startup, not a warning. This is what `frontend/e2e/scratch-config.toml` uses to
+  raise the ceilings for the Playwright instance.
 - Comment POST returns **200** with `{id, receipt}`, not 201.
 - `forum_categories` has no repo-level `create_category`; tests seed via raw SQL.
 - **NewTopicForm** input ID must be `#topic-title` (tests expect this).

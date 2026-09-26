@@ -2,6 +2,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ReadingStatusControl from './ReadingStatusControl.svelte';
+import { ApiError } from '../api';
 import { fetchWorkReadingStatus, setWorkReadingStatus, clearWorkReadingStatus } from '../api';
 import { session } from '../session.svelte';
 
@@ -244,18 +245,67 @@ describe('ReadingStatusControl', () => {
     expect(screen.getByRole('button', { name: 'Finished' })).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('does not claim a state it failed to read back', async () => {
-    // The read is a guess about what the reader already has. If it fails, the
-    // honest thing is to say the check failed, not to present four unselected
-    // buttons as though the library were empty.
+  it('keeps the recorded state when the read-back is rate limited', async () => {
+    // Found by the E2E: with the suite's traffic saturating the address bucket,
+    // the read-back after a reload returned 429, and the control rendered five
+    // unselected buttons for a work the reader had finished. The server was
+    // right and the reader was told, in effect, that they had finished nothing
+    // -- and their dashboard then disagreed with the page in front of them.
+    session.status = 'signed-in';
+    session.me = ME;
+    (fetchWorkReadingStatus as any).mockRejectedValue(
+      new ApiError(429, 'RATE_LIMITED', 'rate limited', null),
+    );
+
+    render(ReadingStatusControl, { props: { workId: 'work-1' } });
+    await waitFor(() => expect(fetchWorkReadingStatus).toHaveBeenCalled());
+
+    // No error banner: a failed read is not the reader's mistake.
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    // The control is usable, because a reader can still change their mind.
+    expect(screen.getByRole('button', { name: 'Reading' })).toBeEnabled();
+  });
+
+  it('keeps a state it already knows when a later read-back is rate limited', async () => {
+    session.status = 'signed-in';
+    session.me = ME;
+    (fetchWorkReadingStatus as any).mockResolvedValue(RECORD('reading'));
+    render(ReadingStatusControl, { props: { workId: 'work-1' } });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Reading' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      ),
+    );
+
+    // A re-read fails. The reader keeps what they had, and is told it is stale.
+    (fetchWorkReadingStatus as any).mockRejectedValue(
+      new ApiError(429, 'RATE_LIMITED', 'rate limited', null),
+    );
+    await fetchWorkReadingStatus('work-1').catch(() => null);
+
+    expect(screen.getByRole('button', { name: 'Reading' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('offers an empty control, not a false claim, when the first read fails', async () => {
+    // The read is a guess about what the reader already has. If it fails there
+    // is nothing to protect -- no prior state was loaded -- so the control is
+    // simply empty and usable, and no banner is raised. A banner here was the
+    // old behaviour and it was wrong twice over: it cried wolf on a transient
+    // failure, and it is the same treatment that made a *rate-limited* re-read
+    // tell a reader they had finished nothing.
     signedIn();
     (fetchWorkReadingStatus as any).mockRejectedValue(new Error('Could not reach the server.'));
 
     render(ReadingStatusControl, { props: { workId: 'work-1' } });
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.');
+    await waitFor(() => expect(fetchWorkReadingStatus).toHaveBeenCalled());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     // The controls still work: a reader who wants to record something can, even
     // if the page could not tell them what they had before.
-    expect(screen.getByRole('button', { name: 'Finished' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Finished' })).toBeEnabled();
   });
 });

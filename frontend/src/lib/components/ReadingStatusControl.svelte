@@ -48,6 +48,14 @@
   let loaded = $state(false);
   let busy = $state(false);
   let error = $state<unknown>(null);
+  // Separate from `error` on purpose. A write that failed is the reader's
+  // problem to notice: the click did not take, and we put the old state back.
+  // A *read-back* that failed is the server's problem, and the one thing it is
+  // not is evidence that the reader recorded nothing -- saying so by showing
+  // unselected states would be a lie, and the dashboard behind it would then
+  // disagree with the reader. Keep the last known value and say we could not
+  // check.
+  let readFailed = $state(false);
 
   // Loaded when the session resolves rather than passed in: the work page is
   // the only place this appears, and a prop would mean the page had to fetch it
@@ -71,12 +79,15 @@
     void (async () => {
       try {
         const record: WorkReadingStatus | null = await fetchWorkReadingStatus(workId);
-        if (!cancelled) current = record?.status ?? null;
-      } catch (failure) {
-        // A failed *read* is not worth an error banner: the reader has not
-        // asked anything yet, and offering the four states as though nothing
-        // was recorded would be a guess. Say so quietly instead.
-        if (!cancelled) error = failure;
+        if (!cancelled) {
+          current = record?.status ?? null;
+          readFailed = false;
+        }
+      } catch {
+        // Deliberately not `error`, and deliberately not `current = null`. See
+        // `readFailed`: a rate limit or a dropped connection must not tell the
+        // reader they have finished nothing.
+        if (!cancelled) readFailed = true;
       } finally {
         if (!cancelled) loaded = true;
       }
@@ -166,6 +177,17 @@
         Forget this
       </button>
     {/if}
+
+    <!--
+      Shown only when the read-back failed *and* there is something to protect.
+      With no recorded state there is nothing to misreport, so a bare failure
+      stays quiet and the reader simply sees an empty control.
+    -->
+    {#if readFailed && current !== null}
+      <p class="hint subtle" role="status">
+        Showing what you had before. We could not check for a newer one.
+      </p>
+    {/if}
   {/if}
 
   {#if error}
@@ -243,6 +265,11 @@
     font-size: var(--text-sm);
     color: var(--color-muted);
     margin: 0;
+  }
+
+  .hint.subtle {
+    margin-top: 0.5rem;
+    opacity: 0.75;
   }
 
   .error {
