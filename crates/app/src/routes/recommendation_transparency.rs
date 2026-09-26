@@ -95,7 +95,7 @@ async fn explain_slot(
         Ok(None) => Err(ApiError(lorehaven_domain::AppError::NotFound {
             resource: "recommendation slot",
         })),
-        Err(e) => Err(ApiError(lorehaven_domain::AppError::Internal(e.into()))),
+        Err(e) => Err(ApiError(lorehaven_domain::AppError::Internal(e))),
     }
 }
 
@@ -117,14 +117,14 @@ async fn get_attention_report(
     };
     let enabled = slots::attention_enabled(state.db(), pseud_id.into())
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
 
     if !enabled {
         return Ok(Json(AttentionReport::disabled()));
     }
     let lines = slots::attention_lines(state.db(), pseud_id.into())
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     // `build` returns None when disabled and guarantees a held-back line when
     // enabled, so the §33.3(b) criterion holds here rather than in the handler
     // where a future edit could drop it.
@@ -150,7 +150,7 @@ async fn set_attention_report(
     };
     slots::set_attention_enabled(state.db(), pseud_id.into(), body.enabled)
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     Ok(Json(json!({ "enabled": body.enabled })))
 }
 
@@ -240,7 +240,7 @@ async fn propose_wrangling(
         trust,
     )
     .await
-    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
 
     Ok((
         StatusCode::CREATED,
@@ -272,7 +272,7 @@ async fn list_wrangling_proposals(
     let limit = q.limit.unwrap_or(50).clamp(1, 200);
     let items = slots::list_pending_wrangling(state.db(), limit)
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     Ok(Json(json!({ "items": items })))
 }
 
@@ -324,7 +324,7 @@ async fn public_wrangling_log(
     let limit = q.limit.unwrap_or(50).clamp(1, 200);
     let items = slots::public_wrangling_log(state.db(), limit)
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     Ok(Json(json!({ "items": items.iter().map(|p| json!({
         "id": p.id,
         "kind": p.kind.as_str(),

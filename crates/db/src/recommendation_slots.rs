@@ -21,6 +21,57 @@ use lorehaven_domain::recommendation_transparency::{
 
 use crate::{Backend, Database};
 
+/// One `recommendation_slots` row, in the column order the reads select.
+///
+/// A named type rather than a ten-element tuple: this row is read in four
+/// places and built in two, and a tuple that long is unreadable at the call
+/// site and impossible to change without finding every use. `FromRow` names the
+/// columns so the `SELECT` above it and the struct below it are checked against
+/// each other by the compiler rather than by a reader.
+#[derive(Debug, sqlx::FromRow)]
+pub struct SlotRow {
+    pub id: String,
+    pub work_id: String,
+    pub position: i64,
+    /// JSON on the PostgreSQL side, already cast to text there.
+    pub reasons: String,
+    pub taste_signal: Option<String>,
+    pub seeded_by: Option<String>,
+    pub recipe_stage: Option<String>,
+    pub instance_curation: String,
+    pub blend_score: i64,
+    pub served_at: String,
+}
+
+impl SlotRow {
+    /// The reader-facing explanation this row describes.
+    ///
+    /// A reason outside the vocabulary is dropped rather than passed through, so
+    /// a row written by a newer version explains itself with what this version
+    /// understands instead of rendering a string it cannot vouch for.
+    pub fn into_explanation(self) -> SlotExplanation {
+        let parsed: Vec<SlotReason> = serde_json::from_str::<Vec<String>>(&self.reasons)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|s| SlotReason::parse(s))
+            .collect();
+        SlotExplanation {
+            slot_id: self.id,
+            work_id: self.work_id,
+            position: self.position,
+            reasons: SlotExplanation::normalized(parsed),
+            taste_signal: self.taste_signal.as_deref().and_then(TasteSignal::parse),
+            seeded_by: self.seeded_by,
+            recipe_stage: self.recipe_stage,
+            instance_curation: InstanceCuration::parse(&self.instance_curation)
+                .and_then(|c| c.reader_phrase())
+                .map(str::to_string),
+            blend_score: self.blend_score,
+            served_at: self.served_at,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Recording slots
 // ---------------------------------------------------------------------------
@@ -142,33 +193,22 @@ pub async fn explain_slot(
     pseud_id: Uuid,
     slot_id: &str,
 ) -> Result<Option<SlotExplanation>> {
+    // The column names are the `SlotRow` field names, aliased where the stored
+    // column differs from what the struct calls it. Every uuid is cast on the
+    // placeholder side and `reasons` on the column side, because the row is read
+    // as text on both backends and PostgreSQL has no implicit uuid->text.
     let sql = db.sql(
         "SELECT id, work_id, position, reasons, taste_signal, seeded_by, recipe_stage,
-                instance_curation, blend_score, created_at
+                instance_curation, blend_score, created_at AS served_at
            FROM recommendation_slots
           WHERE id = ? AND pseud_id = ?",
-        // `reasons` is JSONB here and read as a String, so the column carries
-        // the cast. Every uuid column is cast on the placeholder side, and
-        // `position`/`blend_score` are INTEGER/BIGINT so they need nothing --
-        // they are read into i64, which sqlx decodes from either.
         "SELECT id::text, work_id::text, position, reasons::text AS reasons, taste_signal,
                 seeded_by, recipe_stage, instance_curation, blend_score::bigint AS blend_score,
-                created_at::text AS created_at
+                created_at::text AS served_at
            FROM recommendation_slots
           WHERE id = ?::uuid AND pseud_id = ?::uuid",
     );
-    let row: Option<(
-        String,
-        String,
-        i64,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        String,
-        i64,
-        String,
-    )> = match db.backend() {
+    let row: Option<SlotRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
                 .bind(slot_id)
@@ -184,46 +224,7 @@ pub async fn explain_slot(
                 .await?
         }
     };
-
-    let Some((
-        id,
-        work_id,
-        position,
-        reasons_json,
-        taste_signal,
-        seeded_by,
-        recipe_stage,
-        instance_curation,
-        blend_score,
-        created_at,
-    )) = row
-    else {
-        return Ok(None);
-    };
-
-    // A reason outside the vocabulary is dropped rather than passed through, so
-    // a row written by a newer version explains itself with what this version
-    // understands instead of rendering a string it cannot vouch for.
-    let parsed: Vec<SlotReason> = serde_json::from_str::<Vec<String>>(&reasons_json)
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|s| SlotReason::parse(s))
-        .collect();
-
-    Ok(Some(SlotExplanation {
-        slot_id: id,
-        work_id,
-        position,
-        reasons: SlotExplanation::normalized(parsed),
-        taste_signal: taste_signal.as_deref().and_then(TasteSignal::parse),
-        seeded_by,
-        recipe_stage,
-        instance_curation: InstanceCuration::parse(&instance_curation)
-            .and_then(|c| c.reader_phrase())
-            .map(str::to_string),
-        blend_score,
-        served_at: created_at,
-    }))
+    Ok(row.map(SlotRow::into_explanation))
 }
 
 /// Every slot of one response, in position order.
@@ -237,29 +238,18 @@ pub async fn list_response_slots(
 ) -> Result<Vec<SlotExplanation>> {
     let sql = db.sql(
         "SELECT id, work_id, position, reasons, taste_signal, seeded_by, recipe_stage,
-                instance_curation, blend_score, created_at
+                instance_curation, blend_score, created_at AS served_at
            FROM recommendation_slots
           WHERE pseud_id = ? AND request_id = ?
           ORDER BY position ASC",
         "SELECT id::text, work_id::text, position, reasons::text AS reasons, taste_signal,
                 seeded_by, recipe_stage, instance_curation, blend_score::bigint AS blend_score,
-                created_at::text AS created_at
+                created_at::text AS served_at
            FROM recommendation_slots
           WHERE pseud_id = ?::uuid AND request_id = ?::uuid
           ORDER BY position ASC",
     );
-    let rows: Vec<(
-        String,
-        String,
-        i64,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        String,
-        i64,
-        String,
-    )> = match db.backend() {
+    let rows: Vec<SlotRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
                 .bind(pseud_id.to_string())
@@ -275,44 +265,7 @@ pub async fn list_response_slots(
                 .await?
         }
     };
-
-    Ok(rows
-        .into_iter()
-        .map(
-            |(
-                id,
-                work_id,
-                position,
-                reasons_json,
-                taste_signal,
-                seeded_by,
-                recipe_stage,
-                instance_curation,
-                blend_score,
-                served_at,
-            )| {
-                let parsed: Vec<SlotReason> = serde_json::from_str::<Vec<String>>(&reasons_json)
-                    .unwrap_or_default()
-                    .iter()
-                    .filter_map(|s| SlotReason::parse(s))
-                    .collect();
-                SlotExplanation {
-                    slot_id: id,
-                    work_id,
-                    position,
-                    reasons: SlotExplanation::normalized(parsed),
-                    taste_signal: taste_signal.as_deref().and_then(TasteSignal::parse),
-                    seeded_by,
-                    recipe_stage,
-                    instance_curation: InstanceCuration::parse(&instance_curation)
-                        .and_then(|c| c.reader_phrase())
-                        .map(str::to_string),
-                    blend_score,
-                    served_at,
-                }
-            },
-        )
-        .collect())
+    Ok(rows.into_iter().map(SlotRow::into_explanation).collect())
 }
 
 /// Delete slots older than `cutoff`, returning how many went.
@@ -508,6 +461,43 @@ pub async fn attention_lines(db: &Database, pseud_id: Uuid) -> Result<Vec<Attent
 /// proposal needs a conflict, and a caller that asked to approve a proposal
 /// that does not exist needs a 404. Reporting both as an internal error would
 /// tell the client to retry something that can never succeed.
+/// One `tag_wrangling_proposals` row.
+///
+/// Named for the same reason as [`SlotRow`]: three reads and three identical
+/// column lists.
+#[derive(Debug, sqlx::FromRow)]
+struct ProposalRow {
+    id: String,
+    kind: String,
+    from_node_id: String,
+    to_node_id: Option<String>,
+    reason: String,
+    status: String,
+    proposer_trust: i64,
+    approver_trust: Option<i64>,
+    created_at: String,
+}
+
+impl ProposalRow {
+    fn into_proposal(self) -> WranglingProposal {
+        WranglingProposal {
+            id: self.id,
+            // An unrecognised kind is a row written by a newer version. It is
+            // not a lie about the taxonomy and not a reason to refuse the read,
+            // so it degrades to the least destructive kind rather than
+            // pretending to be a merge.
+            kind: WranglingKind::parse(&self.kind).unwrap_or(WranglingKind::Alias),
+            from_node_id: self.from_node_id,
+            to_node_id: self.to_node_id,
+            reason: self.reason,
+            status: self.status,
+            proposer_trust: self.proposer_trust,
+            approver_trust: self.approver_trust,
+            created_at: self.created_at,
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum WrangleError {
     /// No proposal with that id.
@@ -596,17 +586,7 @@ pub async fn get_wrangling_proposal(db: &Database, id: &str) -> Result<Option<Wr
                 created_at::text AS created_at
            FROM tag_wrangling_proposals WHERE id = ?::uuid",
     );
-    let row: Option<(
-        String,
-        String,
-        String,
-        Option<String>,
-        String,
-        String,
-        i64,
-        Option<i64>,
-        String,
-    )> = match db.backend() {
+    let row: Option<ProposalRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
                 .bind(id)
@@ -620,19 +600,7 @@ pub async fn get_wrangling_proposal(db: &Database, id: &str) -> Result<Option<Wr
                 .await?
         }
     };
-    Ok(row.map(
-        |(id, kind, from, to, reason, status, ptrust, atrust, created_at)| WranglingProposal {
-            id,
-            kind: WranglingKind::parse(&kind).unwrap_or(WranglingKind::Alias),
-            from_node_id: from,
-            to_node_id: to,
-            reason,
-            status,
-            proposer_trust: ptrust,
-            approver_trust: atrust,
-            created_at,
-        },
-    ))
+    Ok(row.map(ProposalRow::into_proposal))
 }
 
 /// Pending proposals, oldest first, for the moderation queue.
@@ -650,17 +618,7 @@ pub async fn list_pending_wrangling(db: &Database, limit: i64) -> Result<Vec<Wra
           WHERE status = 'pending'
           ORDER BY created_at ASC, id ASC LIMIT ?",
     );
-    let rows: Vec<(
-        String,
-        String,
-        String,
-        Option<String>,
-        String,
-        String,
-        i64,
-        Option<i64>,
-        String,
-    )> = match db.backend() {
+    let rows: Vec<ProposalRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
                 .bind(limit)
@@ -674,22 +632,7 @@ pub async fn list_pending_wrangling(db: &Database, limit: i64) -> Result<Vec<Wra
                 .await?
         }
     };
-    Ok(rows
-        .into_iter()
-        .map(
-            |(id, kind, from, to, reason, status, ptrust, atrust, created_at)| WranglingProposal {
-                id,
-                kind: WranglingKind::parse(&kind).unwrap_or(WranglingKind::Alias),
-                from_node_id: from,
-                to_node_id: to,
-                reason,
-                status,
-                proposer_trust: ptrust,
-                approver_trust: atrust,
-                created_at,
-            },
-        )
-        .collect())
+    Ok(rows.into_iter().map(ProposalRow::into_proposal).collect())
 }
 
 /// Approve a proposal, applying it and recording what it changed.
@@ -936,7 +879,7 @@ async fn apply_merge(
                                            AND existing.node_id = ?)";
     match db.backend() {
         Backend::Sqlite => {
-            sqlx::query(&alias_sql)
+            sqlx::query(alias_sql)
                 .bind(to_node_id)
                 .bind(from_node_id)
                 .bind(to_node_id)
@@ -944,7 +887,7 @@ async fn apply_merge(
                 .await?;
         }
         Backend::Postgres => {
-            sqlx::query(&alias_sql)
+            sqlx::query(alias_sql)
                 .bind(to_node_id)
                 .bind(from_node_id)
                 .bind(to_node_id)
@@ -1009,11 +952,11 @@ pub async fn revert_wrangling(
         let (Some(subject), Some(previous)) = (subject, previous) else {
             continue;
         };
-        match action.as_str() {
+        if action == "retarget_tags" {
             // The tag went from `previous` to the target. Put it back on
             // `previous` at the weight it had, recreating the row if the
             // dedupe step deleted it instead of moving it.
-            "retarget_tags" => {
+            {
                 let weight = actions
                     .iter()
                     .find(|(a, sub, _)| {
@@ -1084,9 +1027,6 @@ pub async fn revert_wrangling(
                     }
                 }
             }
-            // The merge left the weight alone, so there is nothing to undo. The
-            // row's weight was restored by the `retarget_tags` branch above.
-            _ => {}
         }
     }
 
@@ -1161,17 +1101,7 @@ pub async fn public_wrangling_log(db: &Database, limit: i64) -> Result<Vec<Wrang
           WHERE status IN ('approved', 'reverted')
           ORDER BY created_at DESC, id DESC LIMIT ?",
     );
-    let rows: Vec<(
-        String,
-        String,
-        String,
-        Option<String>,
-        String,
-        String,
-        i64,
-        Option<i64>,
-        String,
-    )> = match db.backend() {
+    let rows: Vec<ProposalRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
                 .bind(limit)
@@ -1185,22 +1115,7 @@ pub async fn public_wrangling_log(db: &Database, limit: i64) -> Result<Vec<Wrang
                 .await?
         }
     };
-    Ok(rows
-        .into_iter()
-        .map(
-            |(id, kind, from, to, reason, status, ptrust, atrust, created_at)| WranglingProposal {
-                id,
-                kind: WranglingKind::parse(&kind).unwrap_or(WranglingKind::Alias),
-                from_node_id: from,
-                to_node_id: to,
-                reason,
-                status,
-                proposer_trust: ptrust,
-                approver_trust: atrust,
-                created_at,
-            },
-        )
-        .collect())
+    Ok(rows.into_iter().map(ProposalRow::into_proposal).collect())
 }
 
 #[cfg(test)]
@@ -1233,7 +1148,7 @@ mod tests {
     #[test]
     fn an_unknown_reason_stored_in_a_row_is_dropped_not_rendered() {
         // This is what `explain_slot` does with a reason it cannot parse.
-        let stored = vec!["taste_tags".to_string(), "operator_boost".to_string()];
+        let stored = ["taste_tags".to_string(), "operator_boost".to_string()];
         let parsed: Vec<SlotReason> = stored.iter().filter_map(|s| SlotReason::parse(s)).collect();
         assert_eq!(parsed, vec![SlotReason::TasteTags]);
     }
