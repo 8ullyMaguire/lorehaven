@@ -3333,6 +3333,7 @@ dependencies = [
  "sqlx",
  "tokio",
  "tower",
+ "tracing-subscriber",
  "uuid",
 ]
 

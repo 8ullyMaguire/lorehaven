@@ -184,7 +184,12 @@ pub async fn lineage_edges_for_work(db: &Database, work_id: &str) -> Result<Vec<
               FROM derivative_lineage \
              WHERE from_work_id = ? OR to_work_id = ? \
           ORDER BY created_at",
-        "SELECT id, from_work_id, to_work_id, kind, provenance, created_at \
+        // `id`, `from_work_id` and `to_work_id` are UUID (0036) and the
+        // LineageEdge fields are String, so the SELECT list needs the casts.
+        // The WHERE clause is the opposite case -- comparing to a text bind needs
+        // `$1::uuid` -- which is why only the list above is cast.
+        "SELECT id::text AS id, from_work_id::text AS from_work_id, \
+               to_work_id::text AS to_work_id, kind, provenance, created_at \
               FROM derivative_lineage \
              WHERE from_work_id = $1::uuid OR to_work_id = $1::uuid \
           ORDER BY created_at",
@@ -310,7 +315,9 @@ pub async fn lineage_depth(db: &Database, work_id: &str) -> Result<u32> {
         }
         let sql = db.sql(
             "SELECT from_work_id FROM derivative_lineage WHERE to_work_id = ? AND kind = 'remix' LIMIT 1",
-            "SELECT from_work_id FROM derivative_lineage WHERE to_work_id = $1::uuid AND kind = 'remix' LIMIT 1",
+            // UUID column into a String scalar -- see lineage_edges_for_work.
+            "SELECT from_work_id::text AS from_work_id FROM derivative_lineage \
+              WHERE to_work_id = $1::uuid AND kind = 'remix' LIMIT 1",
         );
         let parent: Option<String> = match db.backend() {
             Backend::Sqlite => {

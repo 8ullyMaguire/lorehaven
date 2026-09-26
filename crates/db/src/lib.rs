@@ -346,7 +346,17 @@ impl Database {
 pub fn sql_owned(db: &Database, sqlite: String, postgres: String) -> String {
     match db.backend() {
         Backend::Sqlite => sqlite,
-        Backend::Postgres => rewrite_placeholders(&postgres),
+        Backend::Postgres => {
+            let out = rewrite_placeholders(&postgres);
+            // Same trace as `Database::sql`. Without it a fault in a
+            // column-list-built statement is invisible: the response carries
+            // only "Something went wrong on our side", and the statement is the
+            // only thing that names the column or the dialect error.
+            if tracing::enabled!(tracing::Level::DEBUG) && pg_statement_trace() {
+                tracing::debug!(sql = %out, "postgres statement");
+            }
+            out
+        }
     }
 }
 

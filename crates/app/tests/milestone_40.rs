@@ -496,8 +496,14 @@ async fn fork_inherits_parent_tags() {
     let parent_id = create_work(&mut author, "Tagged Work", "yes").await;
 
     // Add tags to parent via DB for test simplicity.
-    let _ = lorehaven_db::taxonomy::tag_work(harness.tdb.db(), &parent_id, "tag-1", 1).await;
-    let _ = lorehaven_db::taxonomy::tag_work(harness.tdb.db(), &parent_id, "tag-2", 1).await;
+    // `.expect`, not `let _ =`: swallowing this is what hid a `$2::uuid` cast on a
+    // TEXT column, which made every tag a silent no-op on PostgreSQL.
+    lorehaven_db::taxonomy::tag_work(harness.tdb.db(), &parent_id, "tag-1", 1)
+        .await
+        .expect("tag parent with tag-1");
+    lorehaven_db::taxonomy::tag_work(harness.tdb.db(), &parent_id, "tag-2", 1)
+        .await
+        .expect("tag parent with tag-2");
 
     // Fork.
     let (status, body) = author

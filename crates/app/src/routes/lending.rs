@@ -246,7 +246,9 @@ async fn check_active_loan_id(
     let now = now_rfc3339();
     let sql = db.sql(
         "SELECT id FROM work_loans WHERE work_id = ? AND borrower_account_id = ? AND revoked_at IS NULL AND expires_at > ? LIMIT 1",
-        "SELECT id FROM work_loans WHERE work_id = ?::uuid AND borrower_account_id = ?::uuid AND revoked_at IS NULL AND expires_at > ? LIMIT 1",
+        // `work_loans.id` is UUID and this reads it as String, so the SELECT list
+        // needs the cast. The two WHERE casts are the opposite direction.
+        "SELECT id::text AS id FROM work_loans WHERE work_id = ?::uuid AND borrower_account_id = ?::uuid AND revoked_at IS NULL AND expires_at > ? LIMIT 1",
     );
     let row = match db.backend() {
         lorehaven_db::Backend::Sqlite => {
@@ -257,7 +259,11 @@ async fn check_active_loan_id(
                 .fetch_optional(db.sqlite_pool()?)
                 .await
                 .ok()?;
-            r.map(|row: sqlx::sqlite::SqliteRow| row.get::<String, _>("id"))
+            // `try_get`, not `get().ok()`. Both arms return `Option<String>`, but
+            // `get` panics the request task on a decode failure -- which is what a
+            // UUID column read as String does -- so a wrong cast on the lending
+            // path surfaced as a panicked handler rather than a reported error.
+            r.and_then(|row| row.try_get::<String, _>("id").ok())
         }
         lorehaven_db::Backend::Postgres => {
             let r = sqlx::query(&sql)
@@ -267,7 +273,7 @@ async fn check_active_loan_id(
                 .fetch_optional(db.postgres_pool()?)
                 .await
                 .ok()?;
-            r.map(|row: sqlx::postgres::PgRow| row.get::<String, _>("id"))
+            r.and_then(|row| row.try_get::<String, _>("id").ok())
         }
     };
     row

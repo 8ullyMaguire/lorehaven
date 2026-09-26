@@ -14,9 +14,38 @@
 //! backend.
 
 use std::path::{Path, PathBuf};
+use std::sync::Once;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use lorehaven_db::{Backend, Database, DatabaseConfig};
+
+/// Install a tracing subscriber, but only when a test asks for one.
+///
+/// Without this every `tracing::error!` in the app is dropped on the floor,
+/// because nothing calls `tracing_subscriber::fmt::init()` in a test binary.
+/// That is why a PostgreSQL-only 500 used to arrive as
+/// `{"code":"INTERNAL","message":"Something went wrong on our side"}` with no
+/// server-side reason anywhere in the log -- the response deliberately hides it,
+/// and the log that would have said why was never wired up.
+///
+/// Opt in with `LOREHAVEN_TEST_TRACE=1` (and `RUST_LOG` to choose the level;
+/// `LOREHAVEN_TRACE_SQL=1` additionally prints every PostgreSQL statement as it
+/// is built, which is the only way to see the SQL a 500 came from).
+fn install_diagnostic_reporter() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        if !std::env::var("LOREHAVEN_TEST_TRACE").is_ok_and(|v| v != "0") {
+            return;
+        }
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+        // A second reporter is not an error worth failing a test over.
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_test_writer()
+            .try_init();
+    });
+}
 
 /// A per-test database. SQLite is a file inside the harness's scratch
 /// directory; PostgreSQL is a scratch database created (and dropped) through
@@ -133,6 +162,7 @@ impl TestDb {
     /// from one `TestDb` and return it alongside the router. `media_resilience::
     /// build_app` is the worked example.
     pub async fn connect_with_dir(tag: &str, dir: &Path) -> Self {
+        install_diagnostic_reporter();
         match std::env::var("LOREHAVEN_TEST_PG_URL") {
             Ok(admin_url) if !admin_url.is_empty() => {
                 let _ = &dir;

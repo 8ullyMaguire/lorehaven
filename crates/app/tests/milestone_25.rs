@@ -652,9 +652,12 @@ async fn enable_lending(tdb: &test_support::TestDb, copies: i64) {
     let _ = lorehaven_db::lending::get_lending_config(tdb.db())
         .await
         .expect("the lending configuration row exists after this");
+    // `enabled` is BOOLEAN on PostgreSQL and INTEGER on SQLite, so the literal
+    // differs. Writing `1` is accepted on one engine and rejected on the other.
+    let truthy = if tdb.is_postgres() { "TRUE" } else { "1" };
     exec(
         tdb,
-        &format!("UPDATE lending_config SET enabled = 1, copies_per_work = {copies}"),
+        &format!("UPDATE lending_config SET enabled = {truthy}, copies_per_work = {copies}"),
         &[],
     )
     .await;
