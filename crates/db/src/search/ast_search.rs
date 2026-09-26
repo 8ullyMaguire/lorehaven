@@ -233,7 +233,7 @@ fn render_statement(
     // filters after paging, so a page could come back short.
     let exclusion = match dialect {
         Dialect::Sqlite => content_filter_sql::predicate(rules),
-        Dialect::Postgres => content_filter_sql::predicate_pg(rules),
+        Dialect::Postgres => content_filter_sql::predicate(rules),
     };
     // An empty predicate must not leave a stray `AND` behind.
     let exclusion = if exclusion.is_empty() {

@@ -298,6 +298,25 @@ If a build error contradicts something you verified minutes ago, suspect a share
 target dir before you suspect your own edit. Check with a build in a fresh
 `CARGO_TARGET_DIR`; if that passes, the error was never yours.
 
+**A test that pins a schema fact can encode the wrong one.** When I removed the
+bad `work_id::text` cast, three unit tests in `content_filter_sql.rs` went red —
+not because the fix was wrong but because they asserted the pre-fix SQL text,
+including the comment "`work_tags.work_id` is TEXT and `works.id` is UUID". That
+comment was my own wrong inference, and I had written a test around it. They
+also asserted on literal aliases `wt`/`tn` when the code uses `cf_wt`/`cf_tn`
+constants, so they were only ever passing by coincidence of an earlier shape.
+
+The rewrite pins what is actually true and cannot drift: the correlation is
+`cf_wt.work_id = <caller's work column>` with no `::text` anywhere, for every
+alias. `render` is dialect-independent, which let the whole `_pg` half of the
+module go -- `predicate_pg`, `build_pg`, `build_for_pg` and the `match
+db.backend()` in `exclusion_for`, whose `db` argument three callers were passing
+purely to select an arm that no longer exists.
+
+Assert on behaviour and on facts read from the migrations, never on the text of
+a comment you wrote. If a test fails the moment you fix the thing it describes,
+the test is the defect.
+
 Use `-- --test-threads=2` on both runs. Fully parallel, the suite starves the
 rate-limit test (83 s on its own) and it fails for timing, not logic.
 

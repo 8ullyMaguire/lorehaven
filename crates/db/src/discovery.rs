@@ -151,7 +151,7 @@ pub async fn public_recommendations(
     limit: i64,
 ) -> Result<Vec<WorkId>> {
     let rules = content_filter_sql::for_pseud(db, viewer_pseud).await?;
-    let filter = content_filter_sql::exclusion_for(db, &rules, "w.id");
+    let filter = content_filter_sql::exclusion_for(&rules, "w.id");
     // The exclusion carries `?` of its own and is renumbered once by
     // `sql_owned`, so it has to be bound in the position it appears in the text:
     // here inside the WHERE, ahead of `LIMIT ?`. Binding order is positional and
@@ -221,7 +221,7 @@ pub async fn personalized_recommendations(
             // rules are the ones that can be read here: this engine is keyed by
             // account, and a pseud-scoped rule is not reachable from it.
             let rules = content_filter_sql::for_pseud(db, viewer_pseud).await?;
-            let filter = content_filter_sql::exclusion_for(db, &rules, "w.id");
+            let filter = content_filter_sql::exclusion_for(&rules, "w.id");
             let sqlite = format!(
                 "SELECT DISTINCT w.id FROM works w
                  JOIN work_tags wt ON wt.work_id = w.id
@@ -314,7 +314,7 @@ pub async fn media_reference_collaborative_recommendations(
     // exclusion correlates on `wmr.work_id` -- the reason the predicate takes an
     // expression rather than a table name.
     let rules = content_filter_sql::for_pseud(db, viewer_pseud).await?;
-    let filter = content_filter_sql::exclusion_for(db, &rules, "wmr.work_id");
+    let filter = content_filter_sql::exclusion_for(&rules, "wmr.work_id");
     // Both arms are written with `?` in bind order and renumbered once. The
     // account appears three times in the original text, so it is bound three
     // times here too rather than relying on `$1` reuse, which keeps the two
