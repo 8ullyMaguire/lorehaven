@@ -32,6 +32,14 @@ pub fn router() -> Router<AppState> {
             get(get_admin_taste_profile).put(update_admin_taste_profile),
         )
         .route(
+            "/operator/taste-profile/history",
+            get(get_admin_taste_profile_history),
+        )
+        .route(
+            "/operator/taste-profile/history/{history_id}/rollback",
+            post(rollback_admin_taste_profile),
+        )
+        .route(
             "/operator/taste-profile/recompute-all",
             post(recompute_all_taste_profiles),
         )
@@ -887,6 +895,83 @@ async fn update_admin_taste_profile(
         response["dimensions"] = serde_json::to_value(&dimensions).unwrap_or_default();
     }
     Ok(Json(response))
+}
+
+/// Page size for the taste history.
+///
+/// Its own struct rather than reusing the moderation queue's, because the two
+/// clamps differ: a history is a short audit trail an operator scrolls, a
+/// moderation queue is a page of work.
+#[derive(serde::Deserialize)]
+pub struct HistoryQuery {
+    pub limit: Option<i64>,
+}
+
+/// The taste-knob history, newest first (operator only).
+///
+/// An operator who changes the instance's lens and regrets it needs the previous
+/// values, and a singleton row overwrites them. The question being asked is
+/// "what did I just change this from", so the newest entry is first and the
+/// first entry says it replaced the config file rather than a version.
+async fn get_admin_taste_profile_history(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Query(q): Query<HistoryQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_operator(&state, &user)?;
+    let limit = q.limit.unwrap_or(20).clamp(1, 100);
+    let items = lorehaven_db::instance_taste_settings::history(state.db(), limit)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+    let current = lorehaven_db::instance_taste_settings::read(state.db())
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+    Ok(Json(serde_json::json!({
+        "items": items,
+        "current_version": current.as_ref().map(|c| c.version),
+    })))
+}
+
+/// Restore the taste knobs to a recorded earlier state (operator only).
+///
+/// A rollback is a write, not an undo: the restored state is appended to the
+/// history with its own author, so the trail records that a rollback happened
+/// and who asked for it, and rolling back twice walks backwards through the
+/// history rather than toggling between two values.
+async fn rollback_admin_taste_profile(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(history_id): Path<uuid::Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_operator(&state, &user)?;
+    let outcome = lorehaven_db::instance_taste_settings::rollback(
+        state.db(),
+        history_id,
+        user.account_id.into(),
+    )
+    .await
+    .map_err(|e| {
+        match e.downcast_ref::<lorehaven_db::instance_taste_settings::TasteRollbackError>() {
+            // A history id that does not exist is a 404 rather than a 500: the
+            // caller named a thing that is not there, which is a client error.
+            Some(lorehaven_db::instance_taste_settings::TasteRollbackError::UnknownEntry) => {
+                ApiError(AppError::NotFound {
+                    resource: "taste history entry",
+                })
+            }
+            None => ApiError(AppError::Internal(e)),
+        }
+    })?;
+    Ok(Json(serde_json::json!({
+        "status": "rolled_back",
+        "version": outcome.version,
+        "restored": {
+            "gravity_strength": outcome.restored.gravity_strength,
+            "signal_weight_mode": outcome.restored.signal_weight_mode,
+            "admin_weight": outcome.restored.admin_weight,
+            "diversity_injection_percent": outcome.restored.diversity_injection_percent,
+        },
+    })))
 }
 
 /// Recompute all taste profiles (operator only).
