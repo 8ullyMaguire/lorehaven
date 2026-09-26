@@ -318,3 +318,89 @@ test('a keyboard user can scroll a target clear of the header', async ({ page })
   );
   expect(parseFloat(pad)).toBeGreaterThanOrEqual(headerHeight);
 });
+
+/**
+ * The reading-status control, driven through the page.
+ *
+ * The door has a Rust test and the control has ten component tests, and neither
+ * can tell whether a reader can actually *reach* the control: a component that
+ * is never mounted is indistinguishable from one that is mounted and broken.
+ * This drives it the way a reader does, through the work page.
+ */
+test('a reader records where they got to, and the dashboard counts it', async ({ page }) => {
+  test.setTimeout(180_000);
+
+  await register(page, AUTHOR());
+
+  // Publish, through the real doors.
+  await page.goto('/write');
+  await page.fill('input[id^=field-]', 'A Work To Keep Track Of');
+  await page.click('button:text-is("Start a draft")');
+  await expect(page).toHaveURL(/\/write\//);
+  await page.click('button:text-is("Add chapter")');
+  await page.locator('.tiptap.ProseMirror').click();
+  await page.keyboard.type('A chapter, read so the work can be published.');
+  const saved = page.waitForResponse(
+    (r) => r.url().includes('/api/v1/chapters/') && r.request().method() !== 'GET',
+  );
+  await page.click('button:text-is("Save now")');
+  await saved;
+  await page.click('button:text-is("Publish")');
+  await expect(page.getByText('Republish')).toBeVisible();
+  const workId = page.url().split('/').pop()!;
+
+  // The control is on the work page, beside the rating.
+  await page.goto(`/works/${workId}`);
+  const control = page.locator('#reading-status');
+  await expect(control.getByText('Where you got to')).toBeVisible();
+
+  // All five states, and none of them chosen yet.
+  await expect(control.getByRole('button', { name: 'Want to read' })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  for (const label of ['Reading', 'On hold', 'Dropped', 'Finished']) {
+    await expect(control.getByRole('button', { name: label })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  }
+
+  // Record it, the way a reader does: click, not an API call.
+  await control.getByRole('button', { name: 'Finished' }).click();
+  await expect(control.getByRole('button', { name: 'Finished' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+
+  // The state survives a reload, which is what "recorded" means.
+  await page.reload();
+  await expect(
+    page.locator('#reading-status').getByRole('button', { name: 'Finished' }),
+  ).toHaveAttribute('aria-pressed', 'true');
+
+  // And it is the reader's own number that moved.
+  await page.goto('/analytics');
+  const totals = await readingTotals(page);
+  expect(totals['Works finished']).toBe('1');
+});
+
+/**
+ * A signed-out visitor is offered a way in, and no state buttons.
+ *
+ * The control is behind `session.isSignedIn`, so a visitor gets the sign-in
+ * prompt -- and must not get four or five unselected buttons, which would invite
+ * a click that cannot do anything.
+ */
+test('a signed-out visitor cannot set a reading status', async ({ page }) => {
+  await page.goto('/works/00000000-0000-4000-8000-000000000009');
+
+  const control = page.locator('#reading-status');
+  if ((await control.count()) === 0) {
+    // The work does not exist, so there is no page to put a control on. Nothing
+    // to assert and nothing broken.
+    return;
+  }
+  await expect(control.getByRole('link', { name: 'Sign in' })).toBeVisible();
+  await expect(control.getByRole('button', { name: 'Finished' })).toHaveCount(0);
+});

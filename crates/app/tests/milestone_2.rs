@@ -72,6 +72,36 @@ fn config_for(dir: &Path) -> Config {
 /// Config with the development-default tight limits, for the two tests that exist
 /// to trip the limiter. Using `config_for` (above) would give them a 4000-token
 /// address bucket and they would never observe a 429.
+///
+/// Held for the duration of a test that needs a clean bucket and tight limits.
+///
+/// The limiter's buckets live in a process-wide static (`limiter::GLOBAL_BUCKETS`)
+/// so that clones of `AppState` share one budget -- correct for a server, and
+/// wrong for a test suite, because "clear the bucket then spend from it" is not
+/// atomic with respect to another test running in another thread. With
+/// `--test-threads=2` the two rate-limit tests in this file ran concurrently:
+/// one cleared the shared map, the other refilled it from its own 200-request
+/// loop, and the first finished 200 attempts without a 429 and failed. The
+/// symptom was a credential-stuffing loop that looked un-rate-limited, which is
+/// the worst shape a security test can fail in.
+///
+/// Serialising the two is the fix; the alternative -- keying buckets per test --
+/// would mean changing the production type this file is testing.
+static RATE_LIMIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Take the lock and return a clean bucket set. The guard lives as long as the
+/// binding, so `let _guard = rate_limit_guard();` scopes the exclusion to the
+/// test that asked for it.
+fn rate_limit_guard() -> std::sync::MutexGuard<'static, ()> {
+    let guard = RATE_LIMIT_LOCK.lock();
+    // A poisoned lock means another test panicked while holding it. Recovering
+    // is correct here: the state this protects is rebuilt by `clear_buckets` on
+    // the next line, so a poison from a neighbour carries no information.
+    let guard = guard.unwrap_or_else(|poisoned| poisoned.into_inner());
+    lorehaven_app::limiter::clear_buckets();
+    guard
+}
+
 fn tight_config_for(dir: &Path) -> Config {
     let mut config = config_for(dir);
     config.rate_limits = lorehaven_app::limiter::Limits::default();
@@ -1305,7 +1335,7 @@ async fn repeated_login_attempts_are_rate_limited() {
     // limits (burst 10 → 40-token address bucket) and a clean bucket. The
     // widened limits used by the rest of the suite would absorb 200 logins
     // without ever returning 429.
-    lorehaven_app::limiter::clear_buckets();
+    let _guard = rate_limit_guard();
     let config = tight_config_for(&harness.dir);
     let app = server::build_router(AppState::new(config, harness.tdb.db().clone()));
     let mut client = Client::new(app);
@@ -1355,7 +1385,7 @@ async fn the_limiter_refuses_a_route_that_declares_no_class() {
     // Tight limits and a clean bucket: this test asserts the limiter *does*
     // refuse, so a pre-filled bucket from a wide-config neighbour would let
     // the 600-request loop run to completion without a 429.
-    lorehaven_app::limiter::clear_buckets();
+    let _guard = rate_limit_guard();
     let config = tight_config_for(&harness.dir);
     let state = AppState::new(config, harness.tdb.db().clone());
 

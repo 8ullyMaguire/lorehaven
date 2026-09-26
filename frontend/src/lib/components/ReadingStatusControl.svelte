@@ -49,13 +49,23 @@
   let busy = $state(false);
   let error = $state<unknown>(null);
 
-  // Loaded on mount rather than passed in: the work page is the only place
-  // this appears, and a prop would mean the page had to fetch it for a visitor
-  // who cannot see it anyway.
+  // Loaded when the session resolves rather than passed in: the work page is
+  // the only place this appears, and a prop would mean the page had to fetch it
+  // for a visitor who cannot see it anyway.
+  //
+  // The `session.isSignedIn` read inside the effect is load-bearing. It starts
+  // as `unknown` and resolves asynchronously, so an effect that ran only on
+  // mount would see a not-yet-signed-in session, give up, and never fetch --
+  // leaving a signed-in reader with a permanently unselected control that looks
+  // like they had recorded nothing. Reading the flag here is what makes the
+  // effect re-run when it changes.
   $effect(() => {
     let cancelled = false;
-    if (!session.isSignedIn) {
-      loaded = true;
+    const signedIn = session.isSignedIn;
+    if (!signedIn) {
+      // Not "loaded": the session may still be resolving, and treating
+      // `unknown` as "no session" is the same bug one level up.
+      loaded = session.status === 'anonymous';
       return;
     }
     void (async () => {
@@ -121,7 +131,14 @@
 <div class="reading-status">
   <h3 class="label" id="reading-status-label">Where you got to</h3>
 
-  {#if !session.isSignedIn}
+  <!--
+    The `session.status === 'anonymous'` test rather than `!session.isSignedIn`:
+    the session starts `unknown`, and branching on the negation shows the
+    sign-in prompt to a reader who is signed in but whose session has not
+    resolved yet -- asking somebody to sign in again while they are signed in.
+    `unknown` gets the loading state, which is the honest one.
+  -->
+  {#if session.status === 'anonymous'}
     <p class="hint">
       <a href="/sign-in">Sign in</a> to keep track of what you have read.
     </p>
