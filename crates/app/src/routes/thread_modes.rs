@@ -11,6 +11,9 @@ use serde::Deserialize;
 use serde_json::json;
 
 use lorehaven_domain::thread_modes::ThreadMode;
+// `ThreadMode::from_str` below is a trait method; without this import in
+// scope it does not resolve.
+use std::str::FromStr;
 use lorehaven_domain::typed_votes::is_moderator;
 
 use crate::auth::{MaybeSession, RequirePseud};
@@ -64,7 +67,7 @@ async fn put_mode(
     Path(id): Path<String>,
     Json(body): Json<PutModeBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let mode = ThreadMode::from_str(&body.mode).ok_or_else(|| {
+    let mode = ThreadMode::from_str(&body.mode).ok().ok_or_else(|| {
         ApiError(lorehaven_domain::AppError::field(
             "mode",
             "unknown thread mode",
