@@ -378,7 +378,7 @@ async fn list_entries_inner(
                 // The threshold is per entry, so the count and the sum are one
                 // CASE over the entry's own votes rather than two passes.
                 let sum = vote_decay_sql::decayed_score_sum_sql(cfg, d, id_expr);
-                let count = vote_decay_sql::vote_count_sql(d, id_expr);
+                let count = vote_decay_sql::vote_count_sql(d, id_expr, true);
                 format!(
                     "CASE WHEN {count} >= {} THEN {sum} ELSE CAST((SELECT COALESCE(SUM(v.vote_value * v.base_weight), 0) FROM directory_votes{alias} WHERE v.entry_id = {id_expr}) AS DOUBLE PRECISION) END",
                     cfg.min_votes,
@@ -469,6 +469,64 @@ pub async fn get_entry(
 }
 
 /// The viewer's live vote on an entry (1/-1), never the weight.
+/// Vote counts for a page of entries, in one query.
+///
+/// The list needs each entry's count to decide whether that entry is over the
+/// `min_votes` threshold. Asking per entry is a query per row, so this groups
+/// by entry id and returns the whole page at once.
+///
+/// Entries with no votes are absent from the map rather than mapped to zero.
+/// A caller that treats "absent" as zero gets the right answer -- an entry
+/// with no votes is below any threshold -- and the map does not carry a
+/// misleading `0` next to a real count.
+pub async fn vote_counts(
+    db: &Database,
+    entry_ids: &[String],
+) -> Result<std::collections::HashMap<String, i64>> {
+    if entry_ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    // `IN (...)` with bound placeholders rather than an interpolated list, so
+    // the ids are values the database parses rather than SQL it trusts. The
+    // placeholders are generated, not user-supplied, and the number of them
+    // is bounded by the page size, which the route already clamps.
+    let n = entry_ids.len();
+    // A `Query` is generic over its database, so the statement and its binds
+    // are built inside each arm rather than shared: one built for the SQLite
+    // pool cannot execute on the PostgreSQL one, and the resulting error names
+    // the pool rather than the cause.
+    let rows: Vec<(String, i64)> = match db.backend() {
+        Backend::Sqlite => {
+            let marks = vec!["?"; n].join(", ");
+            let sql = format!(
+                "SELECT CAST(entry_id AS TEXT) AS entry_id, CAST(COUNT(*) AS BIGINT) AS n FROM directory_votes WHERE entry_id IN ({marks}) GROUP BY entry_id"
+            );
+            let mut query = sqlx::query_as::<_, (String, i64)>(&sql);
+            for id in entry_ids {
+                query = query.bind(id);
+            }
+            query.fetch_all(db.sqlite_pool().expect("sqlite")).await?
+        }
+        Backend::Postgres => {
+            let marks = (1..=n)
+                .map(|i| format!("${i}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT CAST(entry_id AS TEXT) AS entry_id, CAST(COUNT(*) AS BIGINT) AS n FROM directory_votes WHERE entry_id IN ({marks}) GROUP BY entry_id"
+            );
+            let mut query = sqlx::query_as::<_, (String, i64)>(&sql);
+            for id in entry_ids {
+                query = query.bind(id);
+            }
+            query
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(rows.into_iter().collect())
+}
+
 pub async fn my_vote(db: &Database, entry_id: &str, account_id: &str) -> Result<Option<i64>> {
     let sql = db.sql(
         "SELECT vote_value FROM directory_votes WHERE entry_id = ? AND account_id = ?",
@@ -657,8 +715,8 @@ pub async fn vote_count(db: &Database, entry_id: &str) -> Result<i64> {
         Backend::Postgres => Dialect::Postgres,
     };
     let sql = match db.backend() {
-        Backend::Sqlite => vote_decay_sql::vote_count_sql(d, "?"),
-        Backend::Postgres => vote_decay_sql::vote_count_sql(d, "$1"),
+        Backend::Sqlite => vote_decay_sql::vote_count_sql(d, "?", false),
+        Backend::Postgres => vote_decay_sql::vote_count_sql(d, "$1", false),
     };
     let row: (i64,) = match db.backend() {
         Backend::Sqlite => {

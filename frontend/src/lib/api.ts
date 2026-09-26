@@ -2973,6 +2973,13 @@ export interface DirectoryEntry {
   my_vote: number | null;
   submitted_by: string;
   approved_by: string | null;
+  /**
+   * Absent on older responses and on endpoints that do not compute it, so it
+   * is optional rather than nullable: "the server did not say" and "the
+   * server said there is nothing to say" are different, and the UI shows
+   * nothing in both.
+   */
+  decay?: DirectoryVoteDecay;
 }
 
 export interface DirectoryCategory {
@@ -3180,15 +3187,45 @@ export function submitDirectoryEntry(body: {
   });
 }
 
-/** Vote on a directory entry (signed-in users, one vote per account). */
+/**
+ * How votes on a directory entry are ageing, if at all.
+ *
+ * `applies_to_this_entry` is per entry, not per instance: below the
+ * activation threshold a vote is permanent however old it gets, and a voter
+ * is entitled to know which case they are in before deciding whether coming
+ * back is worth anything.
+ */
+export interface DirectoryVoteDecay {
+  enabled: boolean;
+  cutoff_days: number;
+  applies_to_this_entry: boolean;
+}
+
+/** What a directory vote returns. */
+export interface DirectoryVoteResult {
+  score: number;
+  my_vote: number | null;
+  decay: DirectoryVoteDecay;
+}
+
+/**
+ * Vote on a directory entry (signed-in users, one vote per account).
+ *
+ * `value` is `1` or `-1` to vote in a direction, or `0` to withdraw. Voting
+ * the same direction twice *refreshes* the vote — it does not undo it — so
+ * withdrawing is a distinct, explicit act.
+ */
 export function voteDirectoryEntry(
   entryId: string,
-  value: 1 | -1,
-): Promise<{ score: number; my_vote: number | null }> {
-  return apiFetch(`/directory/entries/${encodeURIComponent(entryId)}/vote`, {
-    method: 'POST',
-    body: JSON.stringify({ value }),
-  });
+  value: 1 | 0 | -1,
+): Promise<DirectoryVoteResult> {
+  return apiFetch<DirectoryVoteResult>(
+    `/directory/entries/${encodeURIComponent(entryId)}/vote`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ value }),
+    },
+  );
 }
 
 /** Fetch the operator moderation queue. */

@@ -77,7 +77,7 @@
     }
   }
 
-  async function handleVote(entryId: string, value: 1 | -1) {
+  async function handleVote(entryId: string, value: 1 | 0 | -1) {
     try {
       await voteDirectoryEntry(entryId, value);
       await load();
@@ -203,9 +203,11 @@
             <button
               type="button"
               class="vote-up"
+              class:voted={entry.my_vote === 1}
               onclick={() => handleVote(entry.id, 1)}
               disabled={!session.isSignedIn}
               title="Upvote"
+              aria-label="Upvote"
             >
               ▲
             </button>
@@ -213,14 +215,49 @@
             <button
               type="button"
               class="vote-down"
+              class:voted={entry.my_vote === -1}
               onclick={() => handleVote(entry.id, -1)}
               disabled={!session.isSignedIn}
               title="Downvote"
+              aria-label="Downvote"
             >
               ▼
             </button>
+            <!--
+              Withdrawing is its own control, not "click the arrow again":
+              voting the same direction a second time now refreshes the vote,
+              so the arrow is no longer a toggle and must not look like one.
+            -->
+            {#if entry.my_vote !== null && entry.my_vote !== undefined}
+              <button
+                type="button"
+                class="vote-clear"
+                onclick={() => handleVote(entry.id, 0)}
+                disabled={!session.isSignedIn}
+                title="Remove your vote"
+                aria-label="Remove your vote"
+              >
+                ✕
+              </button>
+            {/if}
           </div>
           <div class="entry-content">
+            <!--
+              Only ever shown to someone who has actually voted, and only when
+              it changes what they would do. A reader who has not voted is not
+              owed an explanation of the ranking formula; a voter is, because
+              the number they are looking at is a moving target and they are
+              the only thing that can stop it moving.
+            -->
+            {#if entry.decay?.enabled && entry.my_vote !== null && entry.my_vote !== undefined}
+              <p class="decay-note">
+                {#if entry.decay.applies_to_this_entry}
+                  Votes here count less over time — vote again to refresh it.
+                {:else}
+                  This entry does not age votes; it has too few to rank fairly.
+                {/if}
+              </p>
+            {/if}
             <h3>
               {#if entry.url}
                 <a href={entry.url} target="_blank" rel="noopener noreferrer">{entry.title}</a>
@@ -371,6 +408,45 @@
 
   .vote-down:hover {
     color: var(--danger);
+  }
+
+  /* A cast vote is marked by colour AND by `aria-pressed`, so the state is
+     not carried by hue alone. */
+  .vote-up.voted,
+  .vote-down.voted {
+    font-weight: 700;
+  }
+
+  .vote-up.voted {
+    color: var(--accent);
+  }
+
+  .vote-down.voted {
+    color: var(--danger);
+  }
+
+  .vote-clear {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: var(--text-xs);
+    padding: 0 var(--space-1);
+  }
+
+  .vote-clear:hover {
+    color: var(--text);
+  }
+
+  .vote-clear:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .decay-note {
+    margin: 0 0 var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
   }
 
   .score {

@@ -457,6 +457,82 @@ async fn visibility_approved_own_pending_operator() {
 }
 
 #[tokio::test]
+async fn the_list_reports_whether_each_entries_votes_are_on_a_clock() {
+    // The list is where a voter decides whether coming back is worth anything,
+    // so it has to say per entry. An entry below `min_votes` is permanent at
+    // any age; one above it counts down to nothing.
+    let harness = Harness::new("decay_list").await;
+    let mut operator = harness.client();
+    let (op_account, _op_pseud) = register(&mut operator, "op@example.com", "operator").await;
+    make_operator(&harness.tdb, &op_account).await;
+    seed_list(&mut operator).await;
+
+    let mut member = harness.client();
+    let (_m, _p) = register(&mut member, "member@example.com", "memberer").await;
+    let quiet = submit_entry(&mut member, "Quiet", "https://quiet.example.org").await;
+    let busy = submit_entry(&mut member, "Busy", "https://busy.example.org").await;
+    for id in [&quiet, &busy] {
+        let (status, _b) = operator
+            .post(
+                &format!("/api/v1/directory/entries/{id}/approve"),
+                json!({}),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    // One vote: below the threshold.
+    let (status, _b) = member
+        .post(
+            &format!("/api/v1/directory/entries/{quiet}/vote"),
+            json!({"value": 1}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Twenty on the other: above it. Same accounts, so the second entry is
+    // over the threshold and the first is not.
+    for i in 0..20 {
+        let mut voter = harness.client();
+        let handle = format!("crowd{i}");
+        register(&mut voter, &format!("{handle}@example.com"), &handle).await;
+        let (status, _b) = voter
+            .post(
+                &format!("/api/v1/directory/entries/{busy}/vote"),
+                json!({"value": 1}),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "vote {i}");
+    }
+
+    let (_status, body) = operator.get("/api/v1/directory/entries").await;
+    let items = body["items"].as_array().expect("items");
+    let by_id: std::collections::HashMap<&str, &Value> = items
+        .iter()
+        .map(|e| (e["id"].as_str().expect("id"), e))
+        .collect();
+
+    let quiet_entry = by_id.get(quiet.as_str()).expect("quiet listed");
+    assert_eq!(
+        quiet_entry["decay"]["applies_to_this_entry"],
+        json!(false),
+        "a one-vote entry is permanent: {quiet_entry}"
+    );
+    let busy_entry = by_id.get(busy.as_str()).expect("busy listed");
+    assert_eq!(
+        busy_entry["decay"]["applies_to_this_entry"],
+        json!(true),
+        "a twenty-vote entry is on a clock: {busy_entry}"
+    );
+    // The instance-level facts ride along, so the UI can explain the rule
+    // without a second request.
+    for entry in [quiet_entry, busy_entry] {
+        assert_eq!(entry["decay"]["enabled"], json!(true), "{entry}");
+        assert_eq!(entry["decay"]["cutoff_days"], json!(60.0), "{entry}");
+    }
+}
+
+#[tokio::test]
 async fn voting_up_down_refresh_flip_and_weighted_score() {
     let harness = Harness::new("voting").await;
     let mut operator = harness.client();

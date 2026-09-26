@@ -219,11 +219,38 @@ async fn list_entries(
         viewer,
         is_operator,
     };
-    let entries =
-        db::list_entries_with_decay(state.db(), &filter, &state.config().directory.decay())
-            .await
-            .map_err(internal)?;
-    Ok(Json(json!({ "items": entries })))
+    let decay = state.config().directory.decay();
+    let entries = db::list_entries_with_decay(state.db(), &filter, &decay)
+        .await
+        .map_err(internal)?;
+
+    // Each entry carries whether *it* is on a clock, so a voter can tell a
+    // permanent vote from a decaying one without a second request. It is the
+    // same three fields the vote response returns, computed by the same
+    // function, so the two can never describe different states.
+    //
+    // The counts come back in one grouped query, not one per row. An entry
+    // with no votes is absent from the map, which reads as 0 and is below any
+    // threshold -- the same answer the per-entry query would have given.
+    let ids: Vec<String> = entries.iter().map(|e| e.id.clone()).collect();
+    let counts = db::vote_counts(state.db(), &ids).await.map_err(internal)?;
+    let items: Vec<Value> = entries
+        .into_iter()
+        .map(|entry| {
+            let mut view = serde_json::to_value(&entry).expect("serialise entry");
+            view["tags"] = json!(entry.tags());
+            view["decay"] = json!({
+                "enabled": decay.enabled,
+                "cutoff_days": decay.cutoff_days,
+                "applies_to_this_entry": lorehaven_domain::vote_decay::should_decay(
+                    counts.get(&entry.id).copied().unwrap_or(0),
+                    &decay,
+                ),
+            });
+            view
+        })
+        .collect();
+    Ok(Json(json!({ "items": items })))
 }
 
 async fn submit_entry(
