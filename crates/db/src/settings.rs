@@ -106,7 +106,7 @@ pub async fn delete_search_setting(db: &Database, pseud_id: Uuid, key: &str) -> 
                 .rows_affected()
         }
         Backend::Postgres => {
-            sqlx::query("DELETE FROM search_settings WHERE pseud_id = ?::uuid AND key = ?")
+            sqlx::query("DELETE FROM search_settings WHERE pseud_id = $1::uuid AND key = $2")
                 .bind(pseud_id.to_string())
                 .bind(key)
                 .execute(db.postgres_pool().expect("postgres handle"))
@@ -316,7 +316,7 @@ pub async fn resolve_notification_channel(
         }
         Backend::Postgres => {
             sqlx::query_as::<_, (String, bool)>(
-                "SELECT channel, enabled FROM notification_routes WHERE account_id::text = ? AND event_type = ?",
+                "SELECT channel, enabled FROM notification_routes WHERE account_id::text = $1 AND event_type = $2",
             )
             .bind(account_id.to_string())
             .bind(event_type)
@@ -388,14 +388,14 @@ pub async fn delete_notification_route(
                 .await?
                 .rows_affected()
         }
-        Backend::Postgres => {
-            sqlx::query("DELETE FROM notification_routes WHERE account_id = ? AND event_type = ?")
-                .bind(account_id.to_string())
-                .bind(event_type)
-                .execute(db.postgres_pool().expect("postgres handle"))
-                .await?
-                .rows_affected()
-        }
+        Backend::Postgres => sqlx::query(
+            "DELETE FROM notification_routes WHERE account_id = $1::uuid AND event_type = $2",
+        )
+        .bind(account_id.to_string())
+        .bind(event_type)
+        .execute(db.postgres_pool().expect("postgres handle"))
+        .await?
+        .rows_affected(),
     };
 
     Ok(affected > 0)
