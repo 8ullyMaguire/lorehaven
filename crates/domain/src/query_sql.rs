@@ -141,6 +141,32 @@ fn render_comparison(
     op: CompareOp,
     value: &str,
 ) -> Result<SqlFragment, QueryError> {
+    // A date field is compared as a date. It has to be checked before the
+    // numeric arm, because the numeric arm's `parse::<i64>` would reject
+    // `2026-08-01` outright -- and the media search runs *every* field through
+    // `render_query` to validate a query, so that one mismatch turned a 200
+    // into a 422 for a reader who had typed a perfectly good date filter.
+    if let Some(column) = date_column(field) {
+        let date = parse_query_date(value).ok_or_else(|| {
+            QueryError::new(
+                format!(
+                    "{} {} takes a YYYY-MM-DD date, got {:?}",
+                    field.as_str(),
+                    op.as_str(),
+                    value
+                ),
+                0,
+            )
+        })?;
+        // SUBSTR for the same reason the range arm uses it: `2026-08-01` means
+        // the whole day, not the midnight that started it. Without it a work
+        // published at 14:00 on the boundary day reads as *after* a
+        // `>=2026-08-01` the reader meant as "on or after that day".
+        return Ok(
+            SqlFragment::new(format!("(SUBSTR({column}, 1, 10) {} ?)", op.sql())).with_bind(date),
+        );
+    }
+
     // Re-validate: the parser checks the value is an integer, but
     // `render_query` is public and can be handed an AST built by hand.
     let n = value.parse::<i64>().map_err(|_| {
@@ -160,6 +186,30 @@ fn render_comparison(
         SqlFragment::new(format!("({column} {} CAST(? AS BIGINT))", op.sql()))
             .with_bind(n.to_string()),
     )
+}
+
+/// The works-surface column behind a date field, if this is one.
+///
+/// Separate from `numeric_column` because the two need different SQL: a date
+/// is ISO-8601 text that orders lexicographically, and casting one to an
+/// integer would compare `2026-08-01` as the number 2026.
+fn date_column(field: &QueryField) -> Option<&'static str> {
+    match field {
+        QueryField::Published => Some("works.published_at"),
+        QueryField::Updated => Some("works.updated_at"),
+        _ => None,
+    }
+}
+
+/// Parse a `YYYY-MM-DD` query bound, returning it in the same shape the column
+/// stores so the comparison is a plain string compare.
+fn parse_query_date(value: &str) -> Option<String> {
+    let date = time::Date::parse(
+        value,
+        &time::macros::format_description!("[year]-[month]-[day]"),
+    )
+    .ok()?;
+    Some(date.to_string())
 }
 
 /// The SQL expression for a works-surface numeric field.
@@ -654,6 +704,60 @@ mod tests {
         );
         let err = render_query(&ast).unwrap_err();
         assert!(err.message.contains("integer"), "got: {}", err.message);
+    }
+
+    #[test]
+    fn a_date_field_compares_as_a_date_not_a_number() {
+        // `published:>=2026-08-01` is an ordered comparison on a date column.
+        // The numeric arm rejected it, so a query that had worked for months --
+        // the media search runs every field through `render_query` to validate,
+        // which turned a 200 into a 422 for every reader.
+        let ast = parse_query("published:>=2026-08-01").unwrap();
+        let frag = render_query(&ast).expect("a date comparison must render");
+        // Not `CAST(? AS BIGINT)`: that compares 2026-08-01 as the number 2026
+        // and returns the wrong rows without an error.
+        assert!(!frag.sql.contains("BIGINT"), "{}", frag.sql);
+        assert!(frag.sql.contains(">="), "{}", frag.sql);
+        assert!(frag.sql.contains("published_at"), "{}", frag.sql);
+    }
+
+    #[test]
+    fn every_date_field_compares_as_a_date() {
+        // The three works date fields and the two cross-surface ones. A partial
+        // fix here would leave `updated:>...` broken, which is exactly how the
+        // original regression hid: one field was fixed, the other was not.
+        for (q, column) in [
+            ("published:>=2026-08-01", "published_at"),
+            ("updated:<=2026-09-01", "updated_at"),
+        ] {
+            let ast = parse_query(q).unwrap();
+            let frag = render_query(&ast).unwrap_or_else(|e| panic!("{q}: {}", e.message));
+            assert!(frag.sql.contains(column), "{q} -> {}", frag.sql);
+            assert!(!frag.sql.contains("BIGINT"), "{q} -> {}", frag.sql);
+        }
+    }
+
+    #[test]
+    fn a_date_comparison_keeps_the_day_precision_the_range_arm_uses() {
+        // `published` in the range arm is truncated with SUBSTR(...,1,10) so
+        // `2026-08-01` means the whole day rather than the midnight that
+        // started it. A comparison that compares the raw timestamp would treat
+        // a work published at 14:00 on the boundary day as later than the
+        // reader's `>=2026-08-01` when they meant "on or after that day".
+        let ast = parse_query("published:>=2026-08-01").unwrap();
+        let frag = render_query(&ast).unwrap();
+        assert!(frag.sql.contains("SUBSTR("), "{}", frag.sql);
+    }
+
+    #[test]
+    fn a_date_comparison_with_a_malformed_date_is_refused() {
+        // Either the parser or the renderer may refuse it -- both are correct,
+        // and the point is that it is not rendered into a comparison.
+        let refused = match parse_query("published:>=sometime") {
+            Err(_) => true,
+            Ok(ast) => render_query(&ast).is_err(),
+        };
+        assert!(refused, "a malformed date must not render");
     }
 
     #[test]

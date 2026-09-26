@@ -42,6 +42,7 @@ pub mod positivity;
 pub mod query;
 pub mod query_sql;
 pub mod query_sql_forum;
+pub mod query_sql_user;
 pub mod reading;
 pub mod recommendation_transparency;
 pub mod settings;

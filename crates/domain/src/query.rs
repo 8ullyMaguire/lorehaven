@@ -144,7 +144,7 @@ impl QueryField {
             "note" => Self::Note,
             "user" => Self::User,
             "works" => Self::Works,
-            "user_fandom" => Self::UserFandom,
+            "user_fandom" | "fandoms" => Self::UserFandom,
             "joined" => Self::Joined,
             "bookmarked" => Self::Bookmarked,
             "active" => Self::Active,
