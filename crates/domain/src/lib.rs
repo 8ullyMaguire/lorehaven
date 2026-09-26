@@ -55,6 +55,7 @@ pub mod taxonomy;
 pub mod thread_modes;
 pub mod translation;
 pub mod typed_votes;
+pub mod vote_decay;
 pub mod webhook;
 pub mod work_discussion;
 
