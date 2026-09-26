@@ -168,6 +168,10 @@ impl Client {
     async fn patch(&mut self, uri: &str, body: Value) -> (StatusCode, Value) {
         self.request("PATCH", uri, Some(body)).await
     }
+
+    async fn delete(&mut self, uri: &str) -> (StatusCode, Value) {
+        self.request("DELETE", uri, None).await
+    }
 }
 
 struct Harness {
@@ -926,5 +930,176 @@ async fn markup_is_escaped_in_the_reading_view() {
     assert!(html.contains("&lt;script&gt;"), "{html}");
     assert!(html.contains("&amp;"), "{html}");
 
+    harness.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// Chapter deletion (spec §8) — soft delete, owner or contributor only
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_deleted_chapter_disappears_from_reads_but_keeps_its_row() {
+    // `delete_chapter` has been implemented and unwired since it was written:
+    // chapters could be created, edited and restored, never removed. It is a
+    // *soft* delete on purpose — a reader's stored position may point at a
+    // chapter, and the revision history is what makes an accident recoverable —
+    // so this asserts both halves: gone from the API, still in the table.
+    let harness = Harness::new("chapter-delete").await;
+    let mut owner = harness.client();
+    register(&mut owner, "owner@example.com", "ChapOwner").await;
+    active_pseud(&mut owner).await;
+    let work = create_work(&mut owner, "Deletable").await;
+    let work_id = work["id"].as_str().expect("work id").to_owned();
+    let (chapter, _version) = add_chapter(&mut owner, &work_id, "Doomed").await;
+
+    // Positive precondition: the chapter is readable before it is deleted.
+    // The read path for one chapter is under its work, not /chapters/{id}.
+    let read_path = format!("/api/v1/works/{work_id}/chapters/{chapter}");
+    let (status, body) = owner.get(&read_path).await;
+    assert_eq!(status, StatusCode::OK, "precondition: {body}");
+
+    let (status, body) = owner.delete(&format!("/api/v1/chapters/{chapter}")).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "delete: {body}");
+
+    let (status, _) = owner.get(&read_path).await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "a deleted chapter is not readable"
+    );
+
+    // Soft, not gone: the row survives with deleted_at set. This is the part a
+    // hard delete would fail.
+    // This file is SQLite-only, so the row can be read directly rather than
+    // through a backend-agnostic helper.
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT deleted_at FROM chapters WHERE id = ?")
+            .bind(&chapter)
+            .fetch_optional(harness.tdb.db().sqlite_pool().expect("sqlite"))
+            .await
+            .expect("query chapters");
+    let deleted_at = row
+        .expect("the row is still there — this is a soft delete, not a hard one")
+        .0
+        .expect("and deleted_at is set");
+    assert!(
+        deleted_at.len() >= 20 && deleted_at.ends_with('Z'),
+        "deleted_at is a timestamp, not a flag: {deleted_at}"
+    );
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn deleting_a_chapter_twice_is_a_404_not_a_second_success() {
+    // The second delete names a chapter that is not there. Reporting 204 would
+    // tell the caller it had just removed something.
+    let harness = Harness::new("chapter-delete-twice").await;
+    let mut owner = harness.client();
+    register(&mut owner, "owner2@example.com", "ChapOwner2").await;
+    active_pseud(&mut owner).await;
+    let work = create_work(&mut owner, "Twice").await;
+    let work_id = work["id"].as_str().expect("work id").to_owned();
+    let (chapter, _) = add_chapter(&mut owner, &work_id, "Doomed Twice").await;
+
+    let (status, _) = owner.delete(&format!("/api/v1/chapters/{chapter}")).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = owner.delete(&format!("/api/v1/chapters/{chapter}")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "second delete: {body}");
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_stranger_cannot_delete_someone_elses_chapter() {
+    // Authorization is by loading the parent work through the acting pseud, so a
+    // stranger's chapter is a 404 rather than a 403: confirming it exists is
+    // itself a disclosure.
+    let harness = Harness::new("chapter-delete-stranger").await;
+    let mut owner = harness.client();
+    register(&mut owner, "chapowner@example.com", "ChapOwner3").await;
+    active_pseud(&mut owner).await;
+    let work = create_work(&mut owner, "Guarded").await;
+    let work_id = work["id"].as_str().expect("work id").to_owned();
+    let (chapter, _) = add_chapter(&mut owner, &work_id, "Protected").await;
+
+    let mut stranger = harness.client();
+    register(&mut stranger, "stranger@example.com", "Stranger").await;
+    active_pseud(&mut stranger).await;
+    let (status, body) = stranger
+        .delete(&format!("/api/v1/chapters/{chapter}"))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "not found, not forbidden: {body}"
+    );
+
+    // And the chapter is still there.
+    let (status, body) = owner
+        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the refused delete changed nothing: {body}"
+    );
+    harness.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_contributor_who_may_not_edit_cannot_delete_a_chapter() {
+    // The stranger test alone does not pin the `can_edit` check: `author_work`
+    // already refuses a non-contributor with a 404, so removing `can_edit` from
+    // the delete route left that test green. The case only `can_edit` decides is
+    // a contributor whose role grants reach but not editing — a beta reader, who
+    // can read the work and would still be refused a delete.
+    let harness = Harness::new("chapter-delete-betareader").await;
+    let mut owner = harness.client();
+    register(&mut owner, "br@example.com", "BetaOwner").await;
+    active_pseud(&mut owner).await;
+    let work = create_work(&mut owner, "Beta Shared").await;
+    let work_id = work["id"].as_str().expect("id").to_owned();
+    let (chapter, _) = add_chapter(&mut owner, &work_id, "Beta's Work").await;
+
+    let mut reader = harness.client();
+    register(&mut reader, "beta@example.com", "Beta").await;
+    active_pseud(&mut reader).await;
+    let (status, body) = owner
+        .post(
+            &format!("/api/v1/works/{work_id}/contributors/invitations"),
+            json!({ "handle": "Beta", "role": "beta_reader" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let invite_id = body["id"].as_str().expect("invite id").to_owned();
+    let (status, body) = reader
+        .post(
+            &format!("/api/v1/invitations/{invite_id}/accept"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // A beta reader is a contributor, so the work is reachable...
+    let (status, body) = reader.get(&format!("/api/v1/works/{work_id}")).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "precondition, a beta reader is reachable: {body}"
+    );
+    assert_eq!(body["role"], "beta_reader");
+
+    // ...but reach is not edit.
+    let (status, body) = reader.delete(&format!("/api/v1/chapters/{chapter}")).await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "a beta reader may read the work but not delete its text: {body}"
+    );
+
+    // And the chapter is intact.
+    let (status, _) = owner
+        .get(&format!("/api/v1/works/{work_id}/chapters/{chapter}"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "the refused delete changed nothing");
     harness.cleanup().await;
 }
