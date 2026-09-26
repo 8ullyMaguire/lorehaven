@@ -909,6 +909,47 @@ pub async fn tags_for(
     Ok(rows)
 }
 
+/// Whether `subject_id` is an item in *this* account's library.
+///
+/// The status and tag doors are keyed on a subject id, and both used to trust
+/// it: a `PUT /library/items/{id}/status` naming any UUID in the instance wrote
+/// a `reading_status` row for a subject that does not exist and answered 200.
+/// The reader's own dashboard then showed a zero that nothing could explain,
+/// because the row it wrote is keyed on a subject the query does not count.
+///
+/// Scoping to `account_id` is the second half of the same check. Without it a
+/// reader who learned another reader's item id could write a reading status
+/// against it, which is a write into somebody else's namespace — the same
+/// subject id, attributed to the wrong owner.
+///
+/// Returns `false` rather than erroring, so the route decides the shape of the
+/// refusal; this is a predicate, not a door.
+pub async fn library_item_exists(db: &Database, account_id: &str, item_id: &str) -> Result<bool> {
+    // Both dialects bind the id as text: a non-UUID path segment is a
+    // miss, not a 500 from a cast.
+    let sql = db.sql(
+        "SELECT 1 FROM library_items WHERE account_id = ? AND id = ? LIMIT 1",
+        "SELECT 1 FROM library_items WHERE account_id::text = ? AND id::text = ? LIMIT 1",
+    );
+    let found: Option<i32> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar(&sql)
+                .bind(account_id)
+                .bind(item_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar(&sql)
+                .bind(account_id)
+                .bind(item_id)
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(found.is_some())
+}
+
 /// The reader's tags with how many subjects each is on.
 ///
 /// Scoped to one account by its own predicate, so it can be rendered as a filter
