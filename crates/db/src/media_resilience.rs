@@ -1871,8 +1871,11 @@ pub async fn list_local_mirrors(
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             let rows = sqlx::query(
-                "SELECT id, media_reference_id, storage_path, original_url, file_size_bytes,
-                        content_type, checksum_sha256, mirrored_by, status, mirrored_at
+                // `mirrored_at` is TIMESTAMPTZ (0063) and the reader below
+                // wants a String; `id` is UUID for the same reason. The ORDER BY
+                // still uses the raw column, so the sort is unaffected.
+                "SELECT id::text AS id, media_reference_id, storage_path, original_url, file_size_bytes,
+                        content_type, checksum_sha256, mirrored_by, status, mirrored_at::text AS mirrored_at
                  FROM local_mirrors WHERE media_reference_id = $1 AND status = 'active'
                  ORDER BY mirrored_at DESC",
             )
@@ -2018,7 +2021,9 @@ pub async fn list_ipfs_pins(
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             let rows = sqlx::query(
-                "SELECT id, media_reference_id, cid, pin_service, status, file_size_bytes, pinned_at
+                // `ipfs_pins.id` is TEXT (0063) so it needs no cast, but
+                // `pinned_at` is TIMESTAMPTZ and the reader wants a String.
+                "SELECT id, media_reference_id, cid, pin_service, status, file_size_bytes, pinned_at::text AS pinned_at
                  FROM ipfs_pins WHERE media_reference_id = $1 AND status = 'pinned'
                  ORDER BY pinned_at DESC",
             )
