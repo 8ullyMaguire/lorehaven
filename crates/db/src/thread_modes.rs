@@ -250,7 +250,14 @@ pub async fn join_critique(db: &Database, topic_id: &str, pseud: &str) -> Result
                 .await?
         }
         Backend::Postgres => {
-            sqlx::query_scalar("SELECT MAX(position) FROM critique_queue WHERE topic_id = $1")
+            // `position` is INTEGER, so `MAX(position)` is INT4 and decoding it
+            // into `Option<i64>` fails on the second member of a queue. The cast
+            // is what makes the arm work at all: the first join reads a NULL over
+            // an empty table and never hits the type, so this only surfaces once
+            // two people are in a critique circle.
+            sqlx::query_scalar(
+                "SELECT CAST(MAX(position) AS BIGINT) FROM critique_queue WHERE topic_id = $1",
+            )
                 .bind(topic_id)
                 .fetch_one(db.postgres_pool().expect("postgres"))
                 .await?
