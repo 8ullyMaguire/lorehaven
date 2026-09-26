@@ -10,9 +10,6 @@ use serde::Deserialize;
 use serde_json::json;
 
 use lorehaven_domain::spoilers::{WarningAction, WarningType};
-// `SanctionLevel::from_str` / `WarningType::from_str` below are trait
-// methods; without this import in scope they do not resolve.
-use std::str::FromStr;
 
 use crate::auth::{MaybeSession, RequirePseud};
 use crate::http::{ApiError, ApiResult};
@@ -149,7 +146,7 @@ async fn post_warning(
     Path(id): Path<String>,
     Json(body): Json<WarningBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let warning_type = WarningType::from_str(&body.warning_type).ok().ok_or_else(|| {
+    let warning_type = WarningType::from_str(&body.warning_type).ok_or_else(|| {
         ApiError(lorehaven_domain::AppError::field(
             "warning_type",
             "unknown type",
@@ -298,13 +295,13 @@ async fn put_warning_pref(
     RequirePseud { user, .. }: RequirePseud,
     Json(body): Json<WarningPrefBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let warning_type = WarningType::from_str(&body.warning_type).ok().ok_or_else(|| {
+    let warning_type = WarningType::from_str(&body.warning_type).ok_or_else(|| {
         ApiError(lorehaven_domain::AppError::field(
             "warning_type",
             "unknown type",
         ))
     })?;
-    let action = WarningAction::from_str(&body.action).ok().ok_or_else(|| {
+    let action = WarningAction::from_str(&body.action).ok_or_else(|| {
         ApiError(lorehaven_domain::AppError::field(
             "action",
             "must be 'blur' or 'show'",

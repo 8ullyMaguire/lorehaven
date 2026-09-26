@@ -10,9 +10,6 @@ use serde::Deserialize;
 use serde_json::json;
 
 use lorehaven_domain::moderation::SanctionLevel;
-// `SanctionLevel::from_str` / `WarningType::from_str` below are trait
-// methods; without this import in scope they do not resolve.
-use std::str::FromStr;
 use lorehaven_domain::typed_votes::is_moderator;
 
 use crate::auth::{MaybeSession, RequirePseud};
@@ -58,7 +55,7 @@ async fn post_sanction(
     if !moderator_check(&state, &pseud_id.to_string()).await? {
         return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
     }
-    let level = SanctionLevel::from_str(&body.level).ok().ok_or_else(|| {
+    let level = SanctionLevel::from_str(&body.level).ok_or_else(|| {
         ApiError(lorehaven_domain::AppError::field(
             "level",
             "unknown sanction level",
@@ -145,7 +142,7 @@ async fn put_federation_scope(
     Json(body): Json<FederationScopeBody>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let scope =
-        lorehaven_domain::moderation::FederationScope::from_str(&body.scope).ok().ok_or_else(|| {
+        lorehaven_domain::moderation::FederationScope::from_str(&body.scope).ok_or_else(|| {
             ApiError(lorehaven_domain::AppError::field(
                 "scope",
                 "must be 'public', 'local', or 'unlisted'",

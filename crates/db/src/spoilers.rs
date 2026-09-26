@@ -1,9 +1,6 @@
 use crate::{Backend, Database};
 use anyhow::Result;
 use lorehaven_domain::spoilers::{WarningAction, WarningType};
-// Needed for `WarningType::from_str` / `WarningAction::from_str` at line 316;
-// without it in scope, those inherent-looking calls do not resolve.
-use std::str::FromStr;
 
 /// Upsert a reader's progress through a work (spec §35.4).
 pub async fn upsert_reader_progress(
@@ -317,13 +314,11 @@ pub async fn list_warning_prefs(
     Ok(rows
         .into_iter()
         .filter_map(|(t, a)| {
-            // A stored preference that no longer parses as a known warning is
-            // skipped rather than failing the whole list: the reader's other
-            // preferences are still worth returning.
-            Some((
-                WarningType::from_str(&t).ok()?,
-                WarningAction::from_str(&a).ok()?,
-            ))
+            // These are inherent `from_str` methods returning Option, not the
+            // std FromStr trait, so no trait import is needed and no `.ok()`.
+            // A stored preference naming a warning type that no longer exists
+            // is skipped rather than failing the reader's whole list.
+            Some((WarningType::from_str(&t)?, WarningAction::from_str(&a)?))
         })
         .collect())
 }
