@@ -188,4 +188,138 @@ describe('AnalyticsDashboard', () => {
     render(AnalyticsDashboard);
     await waitFor(() => expect(screen.getByText(/about other people/i)).toBeTruthy());
   });
+  // -- the first capability with named fields -------------------------------
+  //
+  // `own.reading.basic` is the first capability that answers with named fields
+  // rather than one count. The tests below are about the two ways that goes
+  // wrong: a client that renders the wrong capability's shape, and a client
+  // that shows a raw estimate as though it were exact.
+
+  function mockReading(value: unknown) {
+    mockList([meta()]);
+    vi.spyOn(api, 'fetchCapability').mockResolvedValue({
+      capability: 'own.reading.basic',
+      implemented: true,
+      meta: meta(),
+      value,
+    } as never);
+  }
+
+  it('renders the reading totals as named fields, not one number', async () => {
+    mockReading({
+      status: 'ok',
+      reading: {
+        finished_works: 7,
+        chapters_read: 132,
+        words_read: 480000,
+        reading_seconds: 9000,
+      },
+    });
+
+    render(AnalyticsDashboard);
+    await waitFor(() => expect(screen.getByText('own.reading.basic')).toBeTruthy());
+    await fireEvent.click(screen.getByText('own.reading.basic'));
+
+    await waitFor(() => expect(screen.getByText('Works finished')).toBeTruthy());
+    expect(screen.getByText('7')).toBeTruthy();
+    expect(screen.getByText('132')).toBeTruthy();
+  });
+
+  it('shows reading time as a duration rather than raw seconds', async () => {
+    // 9000 seconds is 2 h 30 min. A bare "9000" tells a reader nothing and
+    // invites them to do the division themselves.
+    mockReading({
+      status: 'ok',
+      reading: {
+        finished_works: 1,
+        chapters_read: 4,
+        words_read: 9000,
+        reading_seconds: 9000,
+      },
+    });
+
+    render(AnalyticsDashboard);
+    await waitFor(() => expect(screen.getByText('own.reading.basic')).toBeTruthy());
+    await fireEvent.click(screen.getByText('own.reading.basic'));
+
+    await waitFor(() => expect(screen.getByText('2 h 30 min')).toBeTruthy());
+    expect(screen.queryByText('9000')).toBeNull();
+  });
+
+  it('gives words a magnitude instead of six raw digits', async () => {
+    mockReading({
+      status: 'ok',
+      reading: {
+        finished_works: 1,
+        chapters_read: 4,
+        words_read: 480000,
+        reading_seconds: 600,
+      },
+    });
+
+    render(AnalyticsDashboard);
+    await waitFor(() => expect(screen.getByText('own.reading.basic')).toBeTruthy());
+    await fireEvent.click(screen.getByText('own.reading.basic'));
+
+    await waitFor(() => expect(screen.getByText('480.0 thousand')).toBeTruthy());
+  });
+
+  it('shows a zero reading history as zeros, not as an empty panel', async () => {
+    // These count the viewer's own behaviour, so a zero is a true zero. A
+    // client that renders nothing for a zero has turned "you have read
+    // nothing" into "we are not telling you", which is a different claim.
+    mockReading({
+      status: 'ok',
+      reading: {
+        finished_works: 0,
+        chapters_read: 0,
+        words_read: 0,
+        reading_seconds: 0,
+      },
+    });
+
+    render(AnalyticsDashboard);
+    await waitFor(() => expect(screen.getByText('own.reading.basic')).toBeTruthy());
+    await fireEvent.click(screen.getByText('own.reading.basic'));
+
+    await waitFor(() => expect(screen.getByText('Works finished')).toBeTruthy());
+    expect(screen.getByText('0 min')).toBeTruthy();
+  });
+
+  it('does not render reading fields for a different capability', async () => {
+    // The shape is keyed on the capability name, not on "the value has these
+    // fields" -- otherwise the next capability with a `reading` key would be
+    // rendered with this one's labels.
+    mockList([meta({ name: 'own.reading.trend' })]);
+    vi.spyOn(api, 'fetchCapability').mockResolvedValue({
+      capability: 'own.reading.trend',
+      implemented: true,
+      meta: meta({ name: 'own.reading.trend' }),
+      value: {
+        status: 'ok',
+        reading: {
+          finished_works: 3,
+          chapters_read: 9,
+          words_read: 1000,
+          reading_seconds: 300,
+        },
+      },
+    } as never);
+
+    render(AnalyticsDashboard);
+    await waitFor(() => expect(screen.getByText('own.reading.trend')).toBeTruthy());
+    await fireEvent.click(screen.getByText('own.reading.trend'));
+
+    // The point is the labels, not a particular message: `own.reading.trend`
+    // carries a `reading` key that this client does not own, and rendering it
+    // with the basic shape would tell the reader these are works finished when
+    // they are something else entirely. The value block is empty here because
+    // the server sent no band and no count -- which is a separate gap (a
+    // capability with a shape this client cannot render should say so, not
+    // render nothing), and is not what this test is about.
+    await waitFor(() => expect(screen.getByText('Session length and pace are estimates.')).toBeTruthy());
+    expect(screen.queryByText('Works finished')).toBeNull();
+    expect(screen.queryByText('Chapters read')).toBeNull();
+    expect(screen.queryByText('Time reading')).toBeNull();
+  });
 });

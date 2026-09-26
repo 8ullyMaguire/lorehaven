@@ -84,6 +84,14 @@ fn value(body: &serde_json::Value) -> &serde_json::Value {
     &body["value"]
 }
 
+/// The §9.6 reading totals inside `value`.
+///
+/// Nested under the capability's own key rather than flat, because a second
+/// capability with different fields would otherwise collide by name.
+fn reading(body: &serde_json::Value) -> &serde_json::Value {
+    &value(body)["reading"]
+}
+
 // -- the metric answers at all ------------------------------------------------
 
 /// The capability the registry has always listed now answers with numbers.
@@ -126,10 +134,10 @@ async fn a_reader_who_has_read_nothing_gets_zeros_rather_than_a_null() {
 
     let body = get(&mut client, "own.reading.basic").await;
 
-    assert_eq!(value(&body)["finished_works"], json!(0), "{body}");
-    assert_eq!(value(&body)["chapters_read"], json!(0), "{body}");
-    assert_eq!(value(&body)["words_read"], json!(0), "{body}");
-    assert_eq!(value(&body)["reading_seconds"], json!(0), "{body}");
+    assert_eq!(reading(&body)["finished_works"], json!(0), "{body}");
+    assert_eq!(reading(&body)["chapters_read"], json!(0), "{body}");
+    assert_eq!(reading(&body)["words_read"], json!(0), "{body}");
+    assert_eq!(reading(&body)["reading_seconds"], json!(0), "{body}");
     tdb.cleanup().await;
 }
 
@@ -156,7 +164,7 @@ async fn a_finished_work_counts_and_a_work_left_open_does_not() {
     let body = get(&mut client, "own.reading.basic").await;
 
     assert_eq!(
-        value(&body)["finished_works"],
+        reading(&body)["finished_works"],
         json!(1),
         "one of the three statuses is a finish; the other two are not: {body}"
     );
@@ -183,7 +191,7 @@ async fn a_readers_own_counts_are_exact_and_carry_no_floor() {
 
     let body = get(&mut client, "own.reading.basic").await;
 
-    assert_eq!(value(&body)["finished_works"], json!(2), "{body}");
+    assert_eq!(reading(&body)["finished_works"], json!(2), "{body}");
     assert!(
         value(&body).get("fewer_than").is_none(),
         "own counts are not banded: {body}"
@@ -215,8 +223,8 @@ async fn one_readers_reading_is_not_another_readers() {
     let a = get(&mut mine, "own.reading.basic").await;
     let b = get(&mut theirs, "own.reading.basic").await;
 
-    assert_eq!(value(&a)["finished_works"], json!(7), "reader A: {a}");
-    assert_eq!(value(&b)["finished_works"], json!(1), "reader B: {b}");
+    assert_eq!(reading(&a)["finished_works"], json!(7), "reader A: {a}");
+    assert_eq!(reading(&b)["finished_works"], json!(1), "reader B: {b}");
     tdb.cleanup().await;
 }
 
@@ -241,7 +249,7 @@ async fn a_long_gap_between_progress_updates_is_capped_and_disclosed() {
     let body = get(&mut client, "own.reading.basic").await;
 
     assert_eq!(
-        value(&body)["reading_seconds"],
+        reading(&body)["reading_seconds"],
         json!(1800),
         "a 20-hour gap is capped at 30 minutes: {body}"
     );
@@ -272,7 +280,7 @@ async fn a_short_gap_is_reported_uncapped() {
     let body = get(&mut client, "own.reading.basic").await;
 
     assert_eq!(
-        value(&body)["reading_seconds"],
+        reading(&body)["reading_seconds"],
         json!(600),
         "a 10-minute gap is under the cap, so it is reported whole: {body}"
     );

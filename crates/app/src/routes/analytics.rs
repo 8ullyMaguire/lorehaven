@@ -180,12 +180,19 @@ async fn reading_value(state: &AppState, account_id: &str) -> ApiResult<Value> {
     // that discarded `e` would throw away the only clue the reader's server has
     // about which statement failed.
     let totals = lorehaven_db::analytics::reading_totals(state.db(), account_id).await?;
+    // The named fields are nested under the capability's own key rather than
+    // laid out flat. Two capabilities with different value shapes share one
+    // `value` object, and flat fields would collide by name -- the second
+    // metric to land would have to be called `chapters_read_weekly` or the
+    // client would have to know which shape it is looking at.
     Ok(json!({
         "status": "ok",
-        "finished_works": totals.finished_works,
-        "chapters_read": totals.chapters_read,
-        "words_read": totals.words_read,
-        "reading_seconds": totals.reading_seconds,
+        "reading": {
+            "finished_works": totals.finished_works,
+            "chapters_read": totals.chapters_read,
+            "words_read": totals.words_read,
+            "reading_seconds": totals.reading_seconds,
+        },
     }))
 }
 
