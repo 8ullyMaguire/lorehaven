@@ -651,7 +651,11 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         handler: "explain_slot",
         method: "GET",
         path: "/discovery/slots/{slot_id}/explanation",
-        audience: Audience::Public,
+        // Was tabled as Public when the handler was a stub. It is a reader's
+        // own explanation of a slot they were served, so it needs a session --
+        // and the handler is scoped to the reader's pseud, so an anonymous
+        // caller has no row to be told about.
+        audience: Audience::Authenticated,
     },
     RouteEntry {
         file: "recommendation_transparency.rs",
@@ -3571,6 +3575,75 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         handler: "recompute_all_taste_profiles",
         method: "POST",
         path: "/operator/taste-profile/recompute-all",
+        audience: Audience::Authenticated,
+    },
+    // M29 recommendation transparency. The explanations and the attention report
+    // are about the reader, so a session is required and the reader's own pseud
+    // scopes them -- there is no "someone else's explanation" to ask for.
+    RouteEntry {
+        file: "recommendation_transparency.rs",
+        handler: "get_attention_report",
+        method: "GET",
+        path: "/me/attention-report",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "recommendation_transparency.rs",
+        handler: "set_attention_report",
+        method: "PUT",
+        path: "/me/attention-report",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "recommendation_transparency.rs",
+        handler: "propose_wrangling",
+        method: "POST",
+        path: "/admin/tag-wrangling/proposals",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "recommendation_transparency.rs",
+        handler: "list_wrangling_proposals",
+        method: "GET",
+        path: "/admin/tag-wrangling/proposals",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "recommendation_transparency.rs",
+        handler: "approve_wrangling",
+        method: "POST",
+        path: "/admin/tag-wrangling/proposals/{id}/approve",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "recommendation_transparency.rs",
+        handler: "reject_wrangling",
+        method: "POST",
+        path: "/admin/tag-wrangling/proposals/{id}/reject",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "recommendation_transparency.rs",
+        handler: "revert_wrangling",
+        method: "POST",
+        path: "/admin/tag-wrangling/proposals/{id}/revert",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "recommendation_transparency.rs",
+        handler: "public_wrangling_log",
+        method: "GET",
+        path: "/tag-wrangling/log",
+        // No session extractor on the handler at all, which is what a public
+        // door looks like in this codebase. The inventory infers `MaybeSession`
+        // from the absence, so that is what the table says.
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "update_admin_taste_profile",
+        method: "PUT",
+        path: "/operator/taste-profile",
         audience: Audience::Authenticated,
     },
     RouteEntry {
