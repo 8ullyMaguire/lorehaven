@@ -1,3 +1,102 @@
+# Handoff
+
+## `own.reading.trend`, and two SQL bugs that fail silently
+
+At `2947926`. SQLite and PostgreSQL are both green: **101 suites, 2167 tests,
+0 failed**, exit 0 on each, `--workspace --no-fail-fast --test-threads=2`.
+Frontend: 62 files, 382 tests.
+
+### What I got wrong first
+
+I spent a long time convinced `seed_progress_on` was the problem, then that
+`uuid_for('r', …)` was, and I changed working code twice to test theories that
+the evidence already contradicted. The actual bugs were three, none of them in
+the fixture.
+
+### SQLite has no `weeks` date modifier
+
+`date('2026-09-21', '-1 weeks')` returns **NULL** — no error, no warning. The
+symptom was four week labels with no rows and a trend of all zeroes, which is
+indistinguishable from a working query against an empty database. Found by
+running the statement alone against a bare `sqlite3`.
+
+### A statement must not mix `?1` with bare `?`
+
+libsqlite3 does not number the bare placeholders the way a reader expects once an
+explicit index has been seen, and sqlx binds positionally. With the week anchor
+as `?1` in the CTE and two bare `?` in the SELECT arms, the account id was
+compared against the *date*. Every week matched nothing.
+
+This one resisted diagnosis unusually well, and the reason is worth keeping: the
+data was right, the account was right, the storage types were right, the SQL text
+was right, and the same statement run by hand against the real database file
+returned 2. Only sqlx returned 0. Python's `sqlite3` and libsqlite3 agree with
+each other and disagree with sqlx's binding, so "works in isolation" proved
+nothing. Every placeholder is now a bare `?`.
+
+### PostgreSQL: every timestamp column is TEXT
+
+`operator does not exist: text >= date` — a hard 500, not an empty trend. The
+schema stores RFC 3339 in TEXT columns on both backends, so the cast has to be
+spelled out. `::timestamptz`, the same cast `reading_totals` already uses on that
+file for the same column.
+
+### The rate-limit test was passing for the wrong reason
+
+`repeated_login_attempts_are_rate_limited` failed intermittently in the full file
+and passed alone. The handoff had recorded it as "passes in isolation, run it
+alone when it matters" — that was wrong, and the cause was not the one I first
+assumed (a shared bucket under `--test-threads>1`, which is what the old
+`rate_limit_guard` was built for and is *not* what was happening).
+
+An in-process router driven by `oneshot` has no `ConnectInfo`, so
+`client_address` falls back to the literal string `unknown`. Every request in the
+whole test binary landed on one bucket. Buckets are created on first sighting
+with whatever burst their first caller declared and are **never resized** — so a
+neighbour running the suite's wide `auth: burst 1000` created a 4000-token
+address bucket that a test trying to drain 40 tokens could never empty. Which
+neighbour won decided whether the test passed.
+
+Fixing that required two rounds, and the second is the interesting one:
+
+1. Per-test forwarded address, plus burst-only limits (`per_minute: 0`, because
+   the default refunds half a token per second and a loop paying a SQLite
+   password hash per attempt outruns the refill).
+2. Then it still failed. `Harness::new` — the fixture every test calls — began
+   with `set_trust_proxy(false)`. That flag is process-wide, so a neighbour's
+   harness built part-way through a 200-request loop revoked this test's
+   forwarded address, and requests 5..200 fell back to `unknown`.
+
+The second round is the generalisable part: **a fixture that resets a
+process-wide flag in its constructor revokes a concurrent test's setup
+mid-test.** `clear_buckets` from a fixture has the same defect and needs the same
+lock. `private_rate_limit_budget()` now takes buckets + lock + flag together and
+holds all three for the whole test; `Harness::new` no longer touches the flag.
+
+What actually localised it was an `eprintln!` of key and quota inside the
+limiter's own `check()`: `262 requests on ip:auth:unknown vs 3 on my address`.
+The bucket was correct the whole time; it was not being used for most of the
+run. When a fix works alone and fails in the suite, the residual is a *second
+writer to the same global* — grep every call to the setter, not just the one
+under test.
+
+The file now runs in 35s against 90s before, because it was paying every request
+against a 4000-token neighbour. That wall-clock gap was the first real clue.
+
+### Also
+
+`server::current_trust_proxy()` added — a caller that restores a process-wide
+flag has to be able to read what it was rather than hardcode `false` and clobber
+a neighbour's legitimate setting.
+
+### Still open
+
+57 of 284 requirements are `planned` (M45 block plus M52/M53/M54/M11-17):
+ActivityPub federation, the Discord bot, GDPR erasure cascades, cross-language
+supply. 184 sit at `implemented-locally-tested`. Neither number is padded.
+
+---
+
 # Handoff — three surfaces, and a backslash that ate itself
 
 ## The short version
