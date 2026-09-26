@@ -59,7 +59,9 @@ pub async fn get_metrics(db: &Database, work_id: &WorkId) -> Result<WorkMetrics>
         "SELECT work_id, views, complete_reads, reactions, kudos, bookmarks,
                 collection_adds, reviews
            FROM work_metric_aggregates WHERE work_id = ?",
-        "SELECT work_id, CAST(views AS BIGINT), CAST(complete_reads AS BIGINT), CAST(reactions AS BIGINT), CAST(kudos AS BIGINT), CAST(bookmarks AS BIGINT),
+        // `work_id` is UUID and WorkMetrics.work_id is a String, so the SELECT
+        // list needs the cast -- the opposite direction from the WHERE below.
+        "SELECT work_id::text AS work_id, CAST(views AS BIGINT), CAST(complete_reads AS BIGINT), CAST(reactions AS BIGINT), CAST(kudos AS BIGINT), CAST(bookmarks AS BIGINT),
                 CAST(collection_adds AS BIGINT), CAST(reviews AS BIGINT)
            FROM work_metric_aggregates WHERE work_id::text = $1",
     );
@@ -364,9 +366,12 @@ pub async fn toggle_kudos(db: &Database, work_id: &str, account_id: &str) -> Res
 async fn kudo_state(db: &Database, work_id: &str, account_id: &str) -> Result<bool> {
     let sql = db.sql(
         "SELECT 1 FROM work_kudos WHERE work_id = ? AND account_id = ?",
-        "SELECT 1 FROM work_kudos WHERE work_id::text = $1 AND account_id::text = $2",
+        // A bare `1` is INTEGER on PostgreSQL, and the driver refuses to decode
+        // INT4 as i64 -- so the existence probe is a `bool`, which is what it
+        // actually is. `found.is_some()` below is the answer either way.
+        "SELECT EXISTS(SELECT 1 FROM work_kudos WHERE work_id::text = $1 AND account_id::text = $2) AS present",
     );
-    let found: Option<i64> = match db.backend() {
+    let found: Option<bool> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_scalar(&sql)
                 .bind(work_id)
@@ -382,7 +387,10 @@ async fn kudo_state(db: &Database, work_id: &str, account_id: &str) -> Result<bo
                 .await?
         }
     };
-    Ok(found.is_some())
+    // `fetch_optional` on EXISTS always yields one row, so the value itself is
+    // the answer, not its presence. Both dialects are consistent: SQLite also
+    // returns 1/0 here, and `bool` from an INTEGER is what `query_scalar` wants.
+    Ok(found.unwrap_or(false))
 }
 
 async fn add_kudos(db: &Database, work_id: &str, account_id: &str) -> Result<()> {
@@ -467,11 +475,15 @@ async fn upsert_counter(db: &Database, work_id: &str, column: &str, delta: i64) 
                updated_at = datetime('now')",
         ),
         Backend::Postgres => format!(
+            // `work_metric_aggregates.work_id` is UUID and the bind is text, so
+            // the insert needs `$1::uuid` -- "column is of type uuid but
+            // expression is of type text". The column name is a validated
+            // literal, so interpolating it into the SET clause stays safe.
             "INSERT INTO work_metric_aggregates
                (work_id, {column}, updated_at)
-             VALUES ($1, $2, {now_text})
+             VALUES ($1::uuid, $2, {now_text})
              ON CONFLICT(work_id) DO UPDATE SET
-               {column} = work_metric_aggregates.{column} + $3,
+               {column} = work_metric_aggregates.{column} + $2,
                updated_at = {now_text}",
             now_text = NOW_TEXT,
         ),
@@ -486,9 +498,11 @@ async fn upsert_counter(db: &Database, work_id: &str, column: &str, delta: i64) 
                 .await?;
         }
         Backend::Postgres => {
+            // Two binds, not three: the PostgreSQL statement references $2 twice
+            // (VALUES and the DO UPDATE increment) where SQLite needs a third
+            // because it numbers each `?` positionally.
             sqlx::query(&sql)
                 .bind(work_id)
-                .bind(delta)
                 .bind(delta)
                 .execute(db.postgres_pool().expect("postgres handle"))
                 .await?;
