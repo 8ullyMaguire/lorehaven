@@ -1639,6 +1639,97 @@ report `implemented: false`, which is honest but means the dashboard is
 mostly a list of definitions. Next is a real metric per capability, starting
 with the reading ones the §9.6 dashboard already promises.
 
+## M58 — Vote decay in the directory (done)
+
+Spec: `docs/spec-amendments/vote-decay.md`. Four commits: `5ac9d1b` the curve,
+`dfb8c69` the integer exponent, `971bb1e` the computed score, `3db5aa0` refresh
+and withdraw, `707f060` the list, `543ca2c` the UI.
+
+**The shape.** A vote is a *current statement*, not a ballot. One row per
+`(entry_id, account_id)`; re-voting rewrites `base_weight` and `voted_at` on
+that row. A vote of age `d` is worth `base × (1 - clamp(0, d/cutoff))^exponent`,
+and the score is `SUM` of those, computed on read. Below `min_votes` rows the
+entry is exempt entirely.
+
+**Defaults:** enabled, 60-day cutoff, `min_votes` 20, integer exponent 2.
+A fresh vote is 1.0; day 7 about 0.78; day 30 exactly 0.25; day 60 exactly 0.
+
+### The traps in here
+
+- **sqlx's bundled SQLite has no `POWER`, `EXP`, `LN` or `SQRT`.** Probed, not
+  assumed. A fractional exponent is computable in Rust and unreachable in SQL,
+  so the two would disagree on the score with nothing to report it. The
+  exponent is `u32` and the SQL is a product of repeated factors.
+- **Counting *live* votes for the threshold is a cliff.** With 20 votes at 59
+  days the live count is 20, so the entry decays and scores ~0.0006; a day
+  later every vote is dead, the count is 0, the entry is exempt, and it jumps
+  to full weight. It counts *rows* now. See `vote_decay::should_decay`.
+- **`voted_at` is TEXT in both schemas** and the decay expression read it
+  unqualified inside a subquery that aliases the table. SQLite resolved that
+  against the outer query; PostgreSQL could not resolve it and reported it by
+  returning the *undecayed* sum. A silent wrong answer on one engine.
+- **The two fixture arms disagreed about the sign of an age.** SQLite's
+  `datetime` modifier takes the signed offset; PostgreSQL's
+  `NOW() - (N * INTERVAL)` subtracts it. A shared negative number wrote votes
+  dated 200 days in the *future*, which clamps to 1.0 — so the suite reported
+  "decay does nothing" while passing most of the time.
+- **A correlated subquery given `'e.id'` compares every row to the literal
+  string "e.id".** Both engines accept it silently and the threshold sees the
+  same count for the whole list.
+- **`vote_count_sql` has two shapes.** Parenthesised for `CASE WHEN <here> >= n`
+  (a bare SELECT is a syntax error there) and bare as a statement in its own
+  right (a leading `(` is a syntax error on SQLite). The `wrapped` flag exists
+  so the caller states which, rather than stripping a character afterwards.
+- **A `sqlx::Query` is generic over its database.** One built for the SQLite
+  pool cannot execute on the PostgreSQL one, and the error names the pool
+  rather than the cause. Statement and binds are built inside each arm.
+- **`TestDb::connect_with_dir` names the PostgreSQL database from the tag and
+  ignores the directory, but the SQLite branch opens a fixed
+  `lorehaven.sqlite` with `mode=rwc`** — which reuses whatever is there. A fixed
+  scratch directory means a failed run's rows survive into the next, and the
+  next run fails on a UNIQUE constraint against data it thinks it created.
+  Put the pid in the path.
+- **`match` arms returning `QueryResult<Sqlite, _>` and
+  `QueryResult<Postgres, _>` are different types.** `.map(|_| ())` before the
+  `?` makes both arms `anyhow::Result<()>`.
+- **`bad_request` in the directory routes is `AppError::Validation`, which is
+  422**, not 400.
+
+### Testing it
+
+```bash
+cargo test -p lorehaven-domain --test vote_decay
+cargo test -p lorehaven-app --test vote_decay_score --test vote_decay_parity \
+                           --test vote_refresh --test vote_unvote \
+                           --test vote_list_ranking --test milestone_39
+# then again with LOREHAVEN_TEST_PG_URL set for the dual-backend path
+cd frontend && npx vitest run src/routes/Directory.test.ts
+```
+
+**The two tests that catch the most:** a decay test that forgets to clear
+`min_votes` is measuring the exemption and reporting it as "decay is broken";
+and the list test that asserts the *same* expression ranks and displays, since
+those are written out twice because PostgreSQL will not accept a SELECT alias
+in ORDER BY when it wraps a subquery.
+
+**Left open deliberately, not forgotten:**
+
+- **The denormalised `directory_entries.score` is still written** by the vote
+  transaction, undecayed. Nothing reads it any more and the list computes its
+  own, so the next step is a migration that drops the column rather than
+  another reader to keep in sync. `list_entries` (the undecayed variant) is
+  kept only because `vote_list_ranking` compares the two.
+- **No browser E2E.** The component tests cover the withdraw control and the
+  three decay notes, but nothing drives the real page. The Playwright
+  directory suite is the next thing to add.
+- **No production deployment or smoke test** for any of this. Nothing since
+  `3d4ba0f` has been restarted on thinkcentre.
+- **The `Top` sort is the only one affected.** `New` is `created_at` and never
+  looked at the score, so it is untouched.
+- **No per-entry decay in the single-entry `GET`.** `get_entry` returns
+  `my_vote` but not `decay`, so the entry page has the same information gap
+  the list had.
+
 ## Environment quirks (unchanged)
 
 - **Work in local clone** `~/code-local/rust/lorehaven`. `~/code/rust/lorehaven` is SSHFS — never run git/cargo/npm through it.

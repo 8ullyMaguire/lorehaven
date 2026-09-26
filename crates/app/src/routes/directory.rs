@@ -331,7 +331,25 @@ async fn get_entry(
         .await
         .map_err(internal)?
         .ok_or_else(|| ApiError(lorehaven_domain::AppError::NotFound { resource: "entry" }))?;
-    Ok(Json(json!({ "entry": entry })))
+
+    // The same two corrections the list makes: the score is the decayed one,
+    // not the stored snapshot, and the entry carries whether it is on a clock.
+    // A detail page that showed a different number from the list it was reached
+    // from would be the more confusing of the two.
+    let decay = state.config().directory.decay();
+    let mut view = serde_json::to_value(&entry).expect("serialise entry");
+    view["tags"] = json!(entry.tags());
+    view["score"] = json!(db::decayed_score(state.db(), &id, &decay)
+        .await
+        .map_err(internal)?);
+    let count = db::vote_count(state.db(), &id).await.map_err(internal)?;
+    view["decay"] = json!({
+        "enabled": decay.enabled,
+        "cutoff_days": decay.cutoff_days,
+        "applies_to_this_entry":
+            lorehaven_domain::vote_decay::should_decay(count, &decay),
+    });
+    Ok(Json(json!({ "entry": view })))
 }
 
 async fn remove_entry(

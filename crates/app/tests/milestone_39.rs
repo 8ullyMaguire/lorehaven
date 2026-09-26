@@ -457,6 +457,82 @@ async fn visibility_approved_own_pending_operator() {
 }
 
 #[tokio::test]
+async fn the_entry_page_shows_the_same_score_and_the_same_decay_state_as_the_list() {
+    // A detail page reached from the list must not disagree with it. Both
+    // read the same two functions, and this pins that they do.
+    let harness = Harness::new("decay_detail").await;
+    let mut operator = harness.client();
+    let (op_account, _op_pseud) = register(&mut operator, "op@example.com", "operator").await;
+    make_operator(&harness.tdb, &op_account).await;
+    seed_list(&mut operator).await;
+
+    let mut member = harness.client();
+    let (_m, _p) = register(&mut member, "member@example.com", "memberer").await;
+    let id = submit_entry(&mut member, "Detailed", "https://detailed.example.org").await;
+    let (status, _b) = operator
+        .post(
+            &format!("/api/v1/directory/entries/{id}/approve"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    for i in 0..20 {
+        let mut voter = harness.client();
+        let handle = format!("det{i}");
+        register(&mut voter, &format!("{handle}@example.com"), &handle).await;
+        let (status, _b) = voter
+            .post(
+                &format!("/api/v1/directory/entries/{id}/vote"),
+                json!({"value": 1}),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "vote {i}");
+    }
+
+    let (status, list) = operator.get("/api/v1/directory/entries").await;
+    assert_eq!(status, StatusCode::OK);
+    let listed = list["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .find(|e| e["id"] == json!(id))
+        .cloned()
+        .expect("entry listed");
+
+    let (status, detail) = operator
+        .get(&format!("/api/v1/directory/entries/{id}"))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let shown = &detail["entry"];
+
+    // Within a hair, not equal. Both read the same function, but each request
+    // calls `NOW()` separately and the score moves with the clock, so two
+    // requests a few milliseconds apart cannot return bit-identical floats.
+    // 1e-4 on a score of ~7.5 is a difference of 0.00001% -- far below anything
+    // a reader could see, and far above the float noise of the comparison
+    // itself. Exact equality here would be asserting that time stood still.
+    let list_score = listed["score"].as_f64().expect("numeric score");
+    let shown_score = shown["score"].as_f64().expect("numeric score");
+    assert!(
+        (list_score - shown_score).abs() < 1e-4,
+        "the detail page shows {shown_score} and the list shows {list_score}"
+    );
+    // The decay block is booleans and a configured cutoff, so it *is* exactly
+    // equal -- there is no clock in it.
+    assert_eq!(
+        shown["decay"], listed["decay"],
+        "the detail page and the list disagree about the decay state"
+    );
+    // And the state is the interesting one: twenty votes, so it is on a clock.
+    assert_eq!(
+        shown["decay"]["applies_to_this_entry"],
+        json!(true),
+        "{shown}"
+    );
+}
+
+#[tokio::test]
 async fn the_list_reports_whether_each_entries_votes_are_on_a_clock() {
     // The list is where a voter decides whether coming back is worth anything,
     // so it has to say per entry. An entry below `min_votes` is permanent at
