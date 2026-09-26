@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use lorehaven_app::config::Config;
-use lorehaven_app::server::{self, set_trust_proxy};
+use lorehaven_app::server::{self, current_trust_proxy, set_trust_proxy};
 use lorehaven_app::state::AppState;
 use lorehaven_db::{sessions, DatabaseConfig};
 use serde_json::{json, Value};
@@ -89,36 +89,62 @@ fn config_for(dir: &Path) -> Config {
 /// would mean changing the production type this file is testing.
 static RATE_LIMIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Take the lock and return a clean bucket set. The guard lives as long as the
-/// binding, so `let _guard = rate_limit_guard();` scopes the exclusion to the
-/// test that asked for it.
-/// Believe forwarded headers for the lifetime of the returned guard.
+/// Exclusive access to the limiter's process-wide state, for as long as the
+/// binding lives.
 ///
-/// `server::set_trust_proxy` writes a process-wide `AtomicBool`, not per-router
-/// state, so a test that turns it on without turning it off changes the rate
-/// limiting of every test that runs after it in the same binary. Restoring on
-/// drop makes the scope explicit and leak-proof.
-struct TrustProxyGuard;
-
-impl Drop for TrustProxyGuard {
-    fn drop(&mut self) {
-        set_trust_proxy(false);
-    }
-}
-
-fn trust_proxy() -> TrustProxyGuard {
-    set_trust_proxy(true);
-    TrustProxyGuard
-}
-
-fn rate_limit_guard() -> std::sync::MutexGuard<'static, ()> {
+/// Three things are global and have to be taken together, because a test that
+/// gets only some of them silently tests the wrong thing:
+///
+/// 1. **`GLOBAL_BUCKETS`** -- every test in this binary shares one map, and a
+///    bucket is created on first sighting with whatever burst its first caller
+///    declared, then never resized. Clearing it is not optional.
+/// 2. **`RATE_LIMIT_LOCK`** -- "clear, then spend" is not atomic against a
+///    sibling test. Under `--test-threads=2` one test cleared the map while
+///    another refilled it, and the security test finished 200 credential-stuffing
+///    attempts with no 429: the worst shape this file can fail in.
+/// 3. **`TRUST_PROXY`** -- a process-wide `AtomicBool`, not per-router state.
+///    Without it the limiter has no `ConnectInfo` to key on (an in-process
+///    router driven by `oneshot` never has one) and every request in the binary
+///    falls back to the literal key `unknown`. Worse, a sibling test can flip
+///    this flag to `false` *part-way through* a loop, after which the forwarded
+///    address stops being read and the remaining requests land in a
+///    4000-token neighbour's bucket instead of this test's own. That was the
+///    residual flake after the per-test address was added.
+///
+/// Returns the mutex guard, so the exclusion is scoped to the binding and no
+/// call site can take the buckets without it.
+fn private_rate_limit_budget() -> PrivateRateLimitBudget {
     let guard = RATE_LIMIT_LOCK.lock();
     // A poisoned lock means another test panicked while holding it. Recovering
     // is correct here: the state this protects is rebuilt by `clear_buckets` on
     // the next line, so a poison from a neighbour carries no information.
     let guard = guard.unwrap_or_else(|poisoned| poisoned.into_inner());
+    // Captured before the flip so the previous value is restored on drop, and
+    // only ever to what it was -- a neighbour may legitimately have it set.
+    let previous = current_trust_proxy();
+    set_trust_proxy(true);
     lorehaven_app::limiter::clear_buckets();
-    guard
+    PrivateRateLimitBudget {
+        _lock: guard,
+        previous,
+    }
+}
+
+/// Holds the limiter's process-wide state for one test, and puts it back.
+///
+/// Deliberately not `Send`: it is bound to a single test's thread, which is what
+/// makes the `TRUST_PROXY` flip safe to reason about — no other thread in this
+/// process can be inside a limiter test at the same time, because they all wait
+/// on the same mutex.
+struct PrivateRateLimitBudget {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    previous: bool,
+}
+
+impl Drop for PrivateRateLimitBudget {
+    fn drop(&mut self) {
+        set_trust_proxy(self.previous);
+    }
 }
 
 fn tight_config_for(dir: &Path) -> Config {
@@ -308,9 +334,22 @@ struct Harness {
 
 impl Harness {
     async fn new(tag: &str) -> Self {
-        // The trust-proxy flag is process-wide and set at startup; the default
-        // is what the tests want, but reset it so a previous test cannot leak.
-        set_trust_proxy(false);
+        // The trust-proxy flag is process-wide and set at startup. The default is
+        // what every test here wants, and each test that needs it otherwise takes
+        // `private_rate_limit_budget`, which holds the limiter lock and restores
+        // the flag on the way out.
+        //
+        // This line used to reset it unconditionally on *every* harness, which
+        // silently revoked a concurrent limiter test's private bucket: the flag
+        // went false part-way through its request loop, the forwarded address
+        // stopped being read, and the remaining requests fell back to the shared
+        // `unknown` key. Resetting a process-wide flag from a constructor that
+        // every test calls is the same bug as clearing shared state from a
+        // fixture -- it needs the same lock, and the lock has to be held for the
+        // whole test, not just the setup.
+        //
+        // So it is not reset here. The flag starts false, every test restores
+        // what it found, and a test that wants it true says so under the lock.
 
         // Route faults through the same logging the server uses, so a failing
         // test prints the cause rather than only the masked 500.
@@ -1417,12 +1456,14 @@ async fn requesting_a_second_reset_invalidates_the_first_link() {
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn repeated_login_attempts_are_rate_limited() {
+    // Taken *before* the harness, and kept for the whole test: see
+    // `private_rate_limit_budget`.
+    let _budget = private_rate_limit_budget();
     let harness = Harness::new("ratelimit").await;
     // This test exists to trip the limiter, so it needs the tight development
     // limits (burst 10 → 40-token address bucket) and a clean bucket. The
     // widened limits used by the rest of the suite would absorb 200 logins
     // without ever returning 429.
-    let _guard = rate_limit_guard();
     let config = tight_config_for(&harness.dir);
     // Give this test an address of its own, so its bucket cannot be spent or
     // refilled by anything else in the process.
@@ -1442,7 +1483,6 @@ async fn repeated_login_attempts_are_rate_limited() {
     // process-wide `AtomicBool` published by `set_trust_proxy` during startup,
     // **not** from the config passed to `build_router` -- so setting
     // `config.security.trust_proxy` here would look right and do nothing.
-    let _proxy = trust_proxy();
     let app = server::build_router(AppState::new(config, harness.tdb.db().clone()));
     let mut client = Client::new(app).with_address("203.0.113.7");
 
@@ -1492,18 +1532,19 @@ async fn the_limiter_refuses_a_route_that_declares_no_class() {
     use axum::middleware;
     use lorehaven_app::limiter::{Classified, RouteClass};
 
+    // Taken before the harness, and kept for the whole test: see
+    // `private_rate_limit_budget`.
+    let _budget = private_rate_limit_budget();
     let harness = Harness::new("unclassified").await;
     // Tight limits and a clean bucket: this test asserts the limiter *does*
     // refuse, so a pre-filled bucket from a wide-config neighbour would let
     // the 600-request loop run to completion without a 429.
-    let _guard = rate_limit_guard();
     let config = tight_config_for(&harness.dir);
     // Its own address, for the reason spelled out in
     // `repeated_login_attempts_are_rate_limited`: an in-process router has no
     // `ConnectInfo`, so all 27 tests in this file would otherwise share the one
     // bucket keyed `unknown`, and this 600-request loop would hand tokens back
     // to the sibling test trying to drain them.
-    let _proxy = trust_proxy();
     let state = AppState::new(config, harness.tdb.db().clone());
 
     let unclassified: axum::Router<AppState> =
