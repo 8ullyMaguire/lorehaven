@@ -200,18 +200,36 @@ fn the_threshold_is_configurable() {
 }
 
 #[test]
-fn the_threshold_counts_live_votes_so_a_stale_entry_recovers() {
-    // `min_votes` is checked against *live* votes, not rows ever inserted. An
-    // entry whose 30 votes have all decayed is back under the threshold, stops
-    // decaying, and can be revived by being voted on again. Otherwise decay is
-    // a one-way ratchet and a once-popular entry can never come back.
+fn the_threshold_counts_vote_rows_not_currently_live_votes() {
+    // The regression this pins. With 20 votes at 59 days the live count is 20,
+    // so the entry decays and scores ~0.0006. One day later every vote is dead:
+    // the live count is 0, the entry is *under* the threshold, therefore exempt,
+    // therefore scored at full base weight again. A twenty-point spike caused
+    // by a vote ageing past the cutoff -- the wrong direction, on exactly the
+    // entries the rule exists for.
     let d = Decay::default();
-    // 30 rows inserted, but only 4 still above zero.
-    let live = 4;
     assert!(
-        !should_decay(live, &d),
-        "a fully decayed entry kept decaying and could never recover"
+        should_decay(20, &d),
+        "an entry with 20 vote rows must keep decaying after they expire"
     );
+    // A new entry with three opinions still never decays, so the threshold
+    // still protects new submissions.
+    assert!(!should_decay(3, &d));
+}
+
+#[test]
+fn an_entry_that_ever_reached_the_threshold_keeps_it() {
+    // Rows, not live rows: a once-popular entry is permanently in the decaying
+    // set. This is what removes the cliff -- the threshold stops depending on
+    // the clock, so ageing cannot cross it.
+    let d = Decay::default();
+    for count in [0, 1, 19, 20, 21, 500] {
+        assert_eq!(
+            should_decay(count, &d),
+            count >= 20,
+            "count {count} got the wrong verdict"
+        );
+    }
 }
 
 #[test]
