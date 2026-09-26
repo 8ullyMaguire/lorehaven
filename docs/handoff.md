@@ -290,6 +290,14 @@ If a build error contradicts something you verified minutes ago, suspect a share
 target dir before you suspect your own edit. Check with a build in a fresh
 `CARGO_TARGET_DIR`; if that passes, the error was never yours.
 
+**The unread count is filtered, and that is a deliberate mismatch.** A reader
+who blocks a tag sees `unread_count` drop below the number of entries in the
+list. That looks like a bug and is not: the alternative is a badge that counts
+a notification the reader cannot open, which leaks the existence of the hidden
+work through one digit. If someone "fixes" this by counting unfiltered rows, the
+test `content_filters_reach_the_inbox_and_the_unread_count` fails on the count
+assertion — which is what it is for.
+
 **Positional placeholders cannot be numbered when the bind count is dynamic.**
 `notifications::list_filtered` appends the content-filter's binds in a loop, so
 its SQL uses unnumbered `?` and lets `sql_owned` renumber the PostgreSQL form.
