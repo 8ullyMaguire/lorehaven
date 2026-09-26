@@ -1057,6 +1057,37 @@ loop. It is a test-isolation problem, not a product one; run that suite on its
 own when it matters. Do not "fix" it by widening the limits — the test exists to
 trip them.
 
+### The taste knobs are versioned, and a rollback is a write (migration 0078)
+
+Gaps review F1 ("taste as a versioned, blendable object") and F2 ("config
+history and rollback") were both unsatisfiable while `instance_taste_settings`
+was a singleton that overwrote: the value an operator just replaced was gone
+before anyone could read it. 0078 appends every write to
+`instance_taste_settings_history`, and
+`POST /operator/taste-profile/history/{id}/rollback` restores one.
+
+Three decisions worth carrying forward:
+
+- **The history insert and the settings upsert are one transaction, in that
+  order.** Two statements leave a window where a crash records a change with no
+  record of what it replaced — and the history row is the only copy of the old
+  values, so that window loses data permanently.
+- **A rollback is a write, not an undo.** It goes through the same path as an
+  ordinary save, so the trail records that a rollback happened and who asked for
+  it. Two rollbacks therefore walk *backwards* through the history rather than
+  toggling between two values. A test asserts the fourth entry exists and names
+  its author.
+- **Each row is the state a write _replaced_, with `replaced_version` null for
+  the first write** — it replaced the config file, which is not version 0.
+
+**The ordering is by `replaced_version`, not `changed_at`, and this bit me.**
+`now_rfc3339()` has second precision, so two writes inside one test share a
+timestamp, and a timestamp ordering returns the rows in whatever order the
+storage engine put them. I wrote the obvious ordering first, the rollback test
+failed with the config baseline instead of the expected value, and switching to
+the version — unique and strictly increasing — fixed it. Verified by mutating the
+order back and watching the test go red.
+
 ## Environment quirks (unchanged)
 
 - **Work in local clone** `~/code-local/rust/lorehaven`. `~/code/rust/lorehaven` is SSHFS — never run git/cargo/npm through it.
