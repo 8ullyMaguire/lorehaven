@@ -41,6 +41,7 @@
   import Rating from '../lib/components/Rating.svelte';
   import ReactionBar from '../lib/components/ReactionBar.svelte';
   import KudosButton from '../lib/components/KudosButton.svelte';
+  import ReadingStatusControl from '../lib/components/ReadingStatusControl.svelte';
   import ResumePrompt from '../lib/components/ResumePrompt.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
@@ -363,6 +364,18 @@
 
   <div id="rate">
     <Rating workId={workId} signedIn={session.isSignedIn} />
+  </div>
+
+  <!--
+    Reading status (§9.6), deliberately outside the `discussionMode` block above.
+    Kudos and the discussion link are public statements about the work, gated by
+    whatever the work's owner allowed. A reading status is a note the reader
+    keeps for themselves: gating it would mean a reader who set
+    `thread_enabled: false` silently loses the ability to record what they have
+    read, and with it the reading statistics on their own dashboard.
+  -->
+  <div id="reading-status">
+    <ReadingStatusControl workId={workId} />
   </div>
 
   <section class="reviews">
