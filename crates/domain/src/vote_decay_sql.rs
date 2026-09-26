@@ -180,7 +180,12 @@ pub fn vote_count_sql(d: Dialect, entry_param: &str) -> String {
         Dialect::Sqlite => " v",
         Dialect::Postgres => " AS v",
     };
+    // The wrapping parentheses are load-bearing: the caller uses this as the
+    // left operand of a `CASE WHEN <here> >= n`, and a bare `SELECT` there is a
+    // syntax error on both engines. A parameter placeholder needs no
+    // parentheses but a correlated column reference in an ORDER BY does, and
+    // one form for both is one thing to keep correct.
     format!(
-        "SELECT CAST(COUNT(*) AS BIGINT) FROM directory_votes{alias} WHERE v.entry_id = {entry_param}"
+        "(SELECT CAST(COUNT(*) AS BIGINT) FROM directory_votes{alias} WHERE v.entry_id = {entry_param})"
     )
 }
