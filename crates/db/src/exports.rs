@@ -986,12 +986,37 @@ pub async fn bulk_items_for_export(
 // ---------------------------------------------------------------------------
 
 /// One curator's mark on a work.
-#[derive(Debug, Clone, Serialize, FromRow)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CtaMark {
     pub work_id: String,
     pub curator: String,
     pub has_own_cta: bool,
     pub marked_at: String,
+}
+
+/// The row shape `cta_marks` actually has: `has_own_cta` is INTEGER on both
+/// engines, so it is read as an integer and converted rather than decoded
+/// straight into the `bool` the API speaks.
+#[derive(FromRow)]
+struct CtaMarkRow {
+    work_id: String,
+    curator: String,
+    // `i32`, not `i64`: the column is INTEGER (INT4) on PostgreSQL and a driver
+    // that reports INT4 will refuse to decode it as i64. SQLite is happy with
+    // either, which is why the wrong one was invisible.
+    has_own_cta: i32,
+    marked_at: String,
+}
+
+impl From<CtaMarkRow> for CtaMark {
+    fn from(r: CtaMarkRow) -> Self {
+        Self {
+            work_id: r.work_id,
+            curator: r.curator,
+            has_own_cta: r.has_own_cta != 0,
+            marked_at: r.marked_at,
+        }
+    }
 }
 
 /// Record or replace a curator's mark. Idempotent: marking again replaces
@@ -1003,6 +1028,11 @@ pub async fn mark_cta(
     has_own_cta: bool,
 ) -> Result<()> {
     let now = now_rfc3339();
+    // `has_own_cta` is INTEGER with a CHECK (IN (0,1)) on *both* engines, so
+    // the write is an integer and the read converts. Binding a Rust `bool` is
+    // the 42804 "column is of type integer but expression is of type boolean",
+    // and the read is the mirror-image decode failure.
+    let flag: i64 = i64::from(has_own_cta);
     let sql = db.sql(
         "INSERT INTO cta_marks (work_id, curator, has_own_cta, marked_at) VALUES (?, ?, ?, ?) \
          ON CONFLICT(work_id, curator) DO UPDATE SET has_own_cta=excluded.has_own_cta, marked_at=excluded.marked_at",
@@ -1014,7 +1044,7 @@ pub async fn mark_cta(
             sqlx::query(&sql)
                 .bind(work_id)
                 .bind(curator)
-                .bind(has_own_cta)
+                .bind(flag)
                 .bind(&now)
                 .execute(db.sqlite_pool().expect("sqlite handle"))
                 .await?;
@@ -1023,7 +1053,7 @@ pub async fn mark_cta(
             sqlx::query(&sql)
                 .bind(work_id)
                 .bind(curator)
-                .bind(has_own_cta)
+                .bind(flag)
                 .bind(&now)
                 .execute(db.postgres_pool().expect("postgres handle"))
                 .await?;
@@ -1061,7 +1091,7 @@ pub async fn cta_marks_for(db: &Database, work_id: &str) -> Result<Vec<CtaMark>>
         "SELECT work_id, curator, has_own_cta, marked_at FROM cta_marks WHERE work_id = ? ORDER BY marked_at DESC",
         "SELECT work_id, curator, has_own_cta, marked_at FROM cta_marks WHERE work_id = ? ORDER BY marked_at DESC",
     );
-    let rows: Vec<CtaMark> = match db.backend() {
+    let rows: Vec<CtaMarkRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
                 .bind(work_id)
@@ -1075,7 +1105,7 @@ pub async fn cta_marks_for(db: &Database, work_id: &str) -> Result<Vec<CtaMark>>
                 .await?
         }
     };
-    Ok(rows)
+    Ok(rows.into_iter().map(CtaMark::from).collect())
 }
 
 /// Whether the work is exempt from the instance CTA (spec §42.2):

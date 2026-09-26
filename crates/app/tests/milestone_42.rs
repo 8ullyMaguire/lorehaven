@@ -281,9 +281,11 @@ async fn quorum_exempts_cta() {
     let (status, body) = curator1
         .get(format!("/api/v1/works/{work_id}/cta_marks").as_str())
         .await;
-    assert_eq!(status, StatusCode::OK);
+    // The body belongs in the message: this assertion used to print only
+    // `left: 400 / right: 200`, which says nothing about *why*.
+    assert_eq!(status, StatusCode::OK, "list marks: {body}");
     let marks = body.as_array().expect("marks array");
-    assert_eq!(marks.len(), 2, "two marks recorded");
+    assert_eq!(marks.len(), 2, "two marks recorded: {body}");
 }
 
 #[tokio::test]
