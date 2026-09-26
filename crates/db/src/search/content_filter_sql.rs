@@ -117,11 +117,6 @@ pub fn predicate(rules: &[FilterRule]) -> String {
     predicate_for(rules, "works.id")
 }
 
-/// The PostgreSQL form of [`predicate`].
-pub fn predicate_pg(rules: &[FilterRule]) -> String {
-    predicate_for_pg(rules, "works.id")
-}
-
 /// [`predicate`] against a statement that names the work id some other way.
 ///
 /// The site search selects `FROM works`, but the recommendation engines do not
@@ -141,12 +136,6 @@ pub fn predicate_pg(rules: &[FilterRule]) -> String {
 pub fn predicate_for(rules: &[FilterRule], work_id_expr: &str) -> String {
     render(rules, work_id_expr)
 }
-
-/// [`predicate_pg`] against a statement that names the work id some other way.
-pub fn predicate_for_pg(rules: &[FilterRule], work_id_expr: &str) -> String {
-    render(rules, work_id_expr)
-}
-
 /// Renders the exclusion. One form, not two.
 ///
 /// There was a `pg` flag here that added `::text` to the work correlation. It
@@ -205,26 +194,10 @@ pub fn build(rules: &[FilterRule]) -> Exclusion {
     }
 }
 
-/// The whole exclusion in its PostgreSQL form, ready to splice.
-pub fn build_pg(rules: &[FilterRule]) -> Exclusion {
-    Exclusion {
-        predicate: predicate_pg(rules),
-        binds: binds(rules),
-    }
-}
-
 /// The exclusion for a statement naming the work id as `work_id_expr`, spliced.
 pub fn build_for(rules: &[FilterRule], work_id_expr: &str) -> Exclusion {
     Exclusion {
         predicate: predicate_for(rules, work_id_expr),
-        binds: binds(rules),
-    }
-}
-
-/// The exclusion for a non-default work id, in its PostgreSQL form.
-pub fn build_for_pg(rules: &[FilterRule], work_id_expr: &str) -> Exclusion {
-    Exclusion {
-        predicate: predicate_for_pg(rules, work_id_expr),
         binds: binds(rules),
     }
 }
@@ -263,15 +236,12 @@ pub async fn for_pseud(
     Ok(rows.into_iter().map(FilterRule::from).collect())
 }
 
-/// Splice helper: the aliased exclusion for the live backend, ready to bind.
+/// Splice helper: the aliased exclusion, ready to bind.
 ///
-/// `#[macro]`-free on purpose -- a caller that gets this wrong should get a
-/// compile error, not a runtime SQL error.
-pub fn exclusion_for(db: &Database, rules: &[FilterRule], work_id_expr: &str) -> Exclusion {
-    match db.backend() {
-        crate::Backend::Postgres => build_for_pg(rules, work_id_expr),
-        crate::Backend::Sqlite => build_for(rules, work_id_expr),
-    }
+/// The predicate is dialect-independent -- both sides of both joins are the same
+/// type in both backends -- so there is no per-backend arm to keep in step.
+pub fn exclusion_for(rules: &[FilterRule], work_id_expr: &str) -> Exclusion {
+    build_for(rules, work_id_expr)
 }
 
 /// [`for_pseud`] as a ready-to-splice exclusion, correlated on `works.id`.
@@ -280,10 +250,7 @@ pub async fn exclusion_for_viewer(
     pseud_id: Option<uuid::Uuid>,
 ) -> crate::Result<Exclusion> {
     let rules = for_pseud(db, pseud_id).await?;
-    Ok(match db.backend() {
-        crate::Backend::Postgres => build_pg(&rules),
-        crate::Backend::Sqlite => build(&rules),
-    })
+    Ok(build(&rules))
 }
 
 /// Groups rules by type, for a surface reporting what is filtered -- a settings
@@ -312,7 +279,6 @@ mod tests {
     #[test]
     fn no_rules_means_no_predicate_and_no_binds() {
         assert!(predicate(&[]).is_empty());
-        assert!(predicate_pg(&[]).is_empty());
         assert!(build(&[]).is_empty());
         assert!(build_for(&[], "w").is_empty());
         assert!(binds(&[]).is_empty());
@@ -321,20 +287,28 @@ mod tests {
     #[test]
     fn the_predicate_correlates_on_the_alias_it_was_given() {
         let rules = vec![rule("tag", "slow burn")];
-        // Unaliased, as the site search writes it.
-        assert!(predicate(&rules).contains("wt.work_id = works.id"));
-        // Aliased, as every recommendation engine writes it.
-        let aliased = predicate_for(&rules, "w");
-        assert!(aliased.contains("wt.work_id = w.id"));
+        // The caller supplies the work column itself, so the correlation reads
+        // `cf_wt.work_id = <caller's expression>`.
+        assert!(predicate(&rules).contains(&format!("{WORK_TAG_ALIAS}.work_id = works.id")));
+        let aliased = predicate_for(&rules, "w.id");
+        assert!(aliased.contains(&format!("{WORK_TAG_ALIAS}.work_id = w.id")));
         assert!(!aliased.contains("works.id"));
     }
 
     #[test]
-    fn the_pg_form_casts_both_sides_of_the_correlation() {
-        let aliased = predicate_for_pg(&[rule("tag", "x")], "w");
-        // `work_tags.work_id` is TEXT and `works.id` is UUID on PostgreSQL;
-        // without both casts this is a type error, not a filter.
-        assert!(aliased.contains("wt.work_id::text = w.id::text"));
+    fn the_correlation_carries_no_cast_either_dialect() {
+        // Both columns are UUID on PostgreSQL (`work_tags.work_id` and
+        // `works.id`); `work_tags.node_id` is the TEXT one. Casting the work
+        // id to text made the comparison `text = uuid`, which is a type error
+        // rather than a filter -- the mistake this test now guards against.
+        for alias in ["w.id", "works.id"] {
+            let p = predicate_for(&[rule("tag", "x")], alias);
+            assert!(
+                p.contains(&format!("{WORK_TAG_ALIAS}.work_id = {alias}")),
+                "missing uncast correlation in {p}"
+            );
+            assert!(!p.contains("::text"), "unexpected text cast in {p}");
+        }
     }
 
     #[test]
@@ -342,7 +316,8 @@ mod tests {
         // Blocking a tag must not block the fandom of the same name, so the
         // pair is compared inside one parenthesised conjunction.
         let p = predicate(&[rule("tag", "a"), rule("fandom", "b")]);
-        assert_eq!(p.matches("(tn.kind = ? AND tn.canonical = ?)").count(), 2);
+        let pair = format!("({TAXONOMY_ALIAS}.kind = ? AND {TAXONOMY_ALIAS}.canonical = ?)");
+        assert_eq!(p.matches(&pair).count(), 2);
         assert!(p.contains(" OR "));
     }
 
@@ -358,10 +333,8 @@ mod tests {
         // caller appends must be identical across dialects. A divergence here is
         // the silent failure mode: the filter applies, but to the wrong column.
         let rules = vec![rule("tag", "a"), rule("warning", "b")];
-        let sqlite = build_for(&rules, "w");
-        let pg = build_for_pg(&rules, "w");
-        assert_eq!(sqlite.binds, pg.binds);
-        assert_eq!(sqlite.binds, vec!["tag", "a", "warning", "b"]);
+        let built = build_for(&rules, "w");
+        assert_eq!(built.binds, vec!["tag", "a", "warning", "b"]);
     }
 
     #[test]
