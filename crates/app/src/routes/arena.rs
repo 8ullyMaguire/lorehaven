@@ -73,6 +73,48 @@ pub struct DimensionWeightSummary {
     pub influence: String,
 }
 
+/// Build the arena's card pool from the DB rows, with each work's real taste
+/// vector attached.
+///
+/// The vector is what the arena varies on, so it has to come from the same
+/// scoring the rest of the recommender uses. `get_arena_pool` returns the
+/// stored taste vector alongside each work; when one is missing the card falls
+/// back to the neutral vector rather than a fabricated score.
+fn build_cards(
+    rows: Vec<lorehaven_db::taste_vectors::ArenaPoolRow>,
+    dimensions: &[TasteDimension],
+) -> Vec<ArenaCard> {
+    let dimension_tuples: Vec<(String, String, f64, f64)> = dimensions
+        .iter()
+        .map(|d| (d.key.clone(), d.label.clone(), d.admin_target, d.weight))
+        .collect();
+
+    // The round varies on the reader's least-confident dimension: a dimension
+    // the model has no opinion about is the one worth learning.
+    let target_dimension = dimensions
+        .first()
+        .map(|d| d.key.clone())
+        .unwrap_or_default();
+
+    rows.into_iter()
+        .map(|row| {
+            ArenaCard {
+                work_id: row.id,
+                title: row.title,
+                fandom: row.fandom,
+                tags: row.tags,
+                word_count: row.word_count,
+                excerpt: row.summary,
+                target_dimension: target_dimension.clone(),
+                vector: lorehaven_domain::taste_vector::work_vector_from_tags(
+                    &dimension_tuples,
+                    &row.tag_weights,
+                ),
+            }
+        })
+        .collect()
+}
+
 /// GET /arena/next — the next arena round for the signed-in user.
 async fn get_arena_next(
     State(state): State<AppState>,
@@ -89,30 +131,16 @@ async fn get_arena_next(
         .await
         .map_err(|e| ApiError(AppError::Internal(anyhow::anyhow!("arena pool: {e}"))))?;
 
-    // Build ArenaCards from the pool.
-    let cards: Vec<ArenaCard> = pool_rows
-        .into_iter()
-        .map(|(id, title, summary, fandom, tags, wc)| ArenaCard {
-            work_id: id,
-            title,
-            fandom,
-            tags,
-            word_count: wc,
-            excerpt: summary,
-            target_dimension: dimensions
-                .first()
-                .map(|d| d.key.clone())
-                .unwrap_or_else(|| "prose".to_string()),
-        })
-        .collect();
+    let cards = build_cards(pool_rows, &dimensions);
 
-    // Generate the arena round.
-    let round =
-        generate_arena_round(&cards, &dimensions, &["prose".to_string()]).ok_or_else(|| {
-            ApiError(AppError::Internal(anyhow::anyhow!(
-                "not enough works for arena round"
-            )))
-        })?;
+    // Vary on every configured dimension: the round should offer the reader a
+    // real tradeoff across their whole profile, not one arbitrary axis.
+    let targets: Vec<String> = dimensions.iter().map(|d| d.key.clone()).collect();
+    let round = generate_arena_round(&cards, &dimensions, &targets).ok_or_else(|| {
+        ApiError(AppError::Internal(anyhow::anyhow!(
+            "not enough works for arena round"
+        )))
+    })?;
 
     // Get existing Elo ratings for dimensions.
     let elos = get_dimension_elos(db, &account_id, &dimensions).await?;
@@ -165,8 +193,22 @@ async fn post_arena_vote(
     let dimensions = get_account_dimensions(db, &account_id).await?;
     let elos = get_dimension_elos(db, &account_id, &dimensions).await?;
 
-    // Build a synthetic round with best/worst for the ballot.
-    let synthetic_round = ArenaRound { cards: vec![] };
+    // The ballot has to be scored against the works it was cast for, so rebuild
+    // the round the reader actually saw. Passing an empty round — which is what
+    // this used to do — left the Elo loop with no cards to compare and every
+    // dimension frozen at 1500 forever.
+    let ballots = lorehaven_db::taste_vectors::get_arena_pool(db, &account_id, 200)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(anyhow::anyhow!("arena pool: {e}"))))?;
+    let cards = build_cards(ballots, &dimensions);
+    let round = ArenaRound {
+        cards: cards
+            .into_iter()
+            .filter(|card| {
+                card.work_id == req.best_work_id || card.work_id == req.worst_work_id
+            })
+            .collect(),
+    };
 
     let ballot = ArenaBallot {
         best_work_id: req.best_work_id.clone(),
@@ -174,7 +216,7 @@ async fn post_arena_vote(
         reason_tags: req.reason_tags.clone(),
     };
 
-    let updated_elos = apply_arena_ballot(&elos, &synthetic_round, &ballot);
+    let updated_elos = apply_arena_ballot(&elos, &round, &ballot, &dimensions);
 
     // Store updated Elo ratings.
     let weight_pairs = weights_from_elos(&updated_elos);
@@ -195,23 +237,14 @@ async fn post_arena_vote(
         .map_err(|e| ApiError(AppError::Internal(anyhow::anyhow!("update weights: {e}"))))?;
     }
 
-    // Generate next round.
+    // Generate next round. The pool now excludes the works just voted on, so
+    // the reader is never asked the same question twice.
     let pool_rows = lorehaven_db::taste_vectors::get_arena_pool(db, &account_id, 50)
         .await
         .map_err(|e| ApiError(AppError::Internal(anyhow::anyhow!("arena pool: {e}"))))?;
-    let cards: Vec<ArenaCard> = pool_rows
-        .into_iter()
-        .map(|(id, title, summary, fandom, tags, wc)| ArenaCard {
-            work_id: id,
-            title,
-            fandom,
-            tags,
-            word_count: wc,
-            excerpt: summary,
-            target_dimension: "prose".to_string(),
-        })
-        .collect();
-    let next_round = generate_arena_round(&cards, &dimensions, &["prose".to_string()]);
+    let cards = build_cards(pool_rows, &dimensions);
+    let targets: Vec<String> = dimensions.iter().map(|d| d.key.clone()).collect();
+    let next_round = generate_arena_round(&cards, &dimensions, &targets);
 
     Ok(Json(ArenaVoteResponse {
         success: true,
