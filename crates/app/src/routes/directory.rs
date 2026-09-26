@@ -356,8 +356,11 @@ async fn vote(
     Path(id): Path<String>,
     Json(body): Json<VoteBody>,
 ) -> ApiResult<Json<Value>> {
-    if body.value != 1 && body.value != -1 {
-        return Err(bad_request("vote value must be 1 or -1"));
+    // 1 and -1 are the two directions; 0 withdraws. Voting the same direction
+    // twice refreshes rather than withdraws, so "I still think this is good"
+    // is one click and a mistaken vote is corrected by an explicit 0.
+    if !(-1..=1).contains(&body.value) {
+        return Err(bad_request("vote value must be 1, 0 or -1"));
     }
     // Only approved entries are votable (spec §39.4: votes rank the list).
     let entry = db::get_entry(
@@ -395,6 +398,7 @@ async fn vote(
     );
 
     let now = lorehaven_db::sessions::now();
+    let decay = cfg.decay();
     let (score, live) = db::set_vote(
         state.db(),
         &id,
@@ -402,14 +406,32 @@ async fn vote(
         body.value,
         weight,
         &now,
+        &decay,
     )
     .await
     .map_err(internal)?;
 
-    // Response: score and the viewer's direction. Never the weight.
+    // Response: the score and the viewer's direction. Never the weight -- not
+    // the base weight and not the decay multiplier, either of which would let a
+    // voter read off how much their own trust and taste are worth.
+    //
+    // `my_vote` is always the direction just voted. Voting the same way again
+    // refreshes rather than clears, so there is no longer a state where
+    // voting leaves you with no vote.
     Ok(Json(json!({
         "score": score,
         "my_vote": if live { Value::from(body.value) } else { Value::Null },
+        "decay": {
+            "enabled": decay.enabled,
+            "cutoff_days": decay.cutoff_days,
+            // Whether *this* entry is currently decaying. An entry below the
+            // threshold keeps full weight forever, and a voter on such an entry
+            // should be able to see that their vote is not on a clock.
+            "applies_to_this_entry": db::vote_count(state.db(), &id)
+                .await
+                .map(|n| lorehaven_domain::vote_decay::should_decay(n, &decay))
+                .unwrap_or(false),
+        },
     })))
 }
 

@@ -452,8 +452,14 @@ macro_rules! vote_tx {
         .fetch_optional(&mut *$tx)
         .await?;
         let live: bool = match existing {
-            Some((current,)) if current == $value => {
-                // Same value again: toggle off.
+            // `value: 0` withdraws. It is a distinct case rather than the
+            // `current == value` branch below because the column is CHECK'd to
+            // IN (-1, 1): a zero can never be stored, only deleted.
+            //
+            // Withdrawing a vote that is not there is not an error. A client
+            // that renders an un-vote control and double-clicks it would
+            // otherwise get a failure from a state that is already correct.
+            _ if $value == 0 => {
                 sqlx::query(&$db.sql(
                     "DELETE FROM directory_votes WHERE entry_id = ? AND account_id = ?",
                     "DELETE FROM directory_votes WHERE entry_id = $1 AND account_id = $2",
@@ -463,6 +469,31 @@ macro_rules! vote_tx {
                 .execute(&mut *$tx)
                 .await?;
                 false
+            }
+            Some((current,)) if current == $value => {
+                // Same value again: refresh, do not toggle off.
+                //
+                // This was a DELETE, which was right for a permanent vote --
+                // clicking up twice should undo the vote -- and it is wrong for
+                // a decaying one. "I still think this is good" has to be
+                // expressible, and the only way to say it under a toggle was to
+                // vote down and back up, which records a down-vote that never
+                // happened and, on a list where the direction matters, briefly
+                // sinks the entry. The rule being implemented is "voting each
+                // day weights slightly more than each week"; a re-vote that
+                // deletes the vote makes that sentence unimplementable.
+                //
+                // `base_weight` is rewritten too, not just the timestamp: it is
+                // derived from the voter's trust and taste at the moment they
+                // voted, and a re-vote is a fresh act of voting.
+                sqlx::query(&$db.sql(
+                    "UPDATE directory_votes SET base_weight = ?, voted_at = ? WHERE entry_id = ? AND account_id = ?",
+                    "UPDATE directory_votes SET base_weight = $1, voted_at = $2 WHERE entry_id = $3 AND account_id = $4",
+                ))
+                .bind($weight).bind($now).bind($entry_id).bind($account_id)
+                .execute(&mut *$tx)
+                .await?;
+                true
             }
             Some(_) => {
                 // Other value: flip in place.
@@ -502,6 +533,18 @@ macro_rules! vote_tx {
     }};
 }
 
+/// Record a vote, or refresh the one already there, and return the entry's
+/// current decayed score.
+///
+/// Voting the same value again **refreshes** the vote: it rewrites
+/// `base_weight` and `voted_at` on the existing row rather than deleting it.
+/// See the `vote_tx!` macro for why that is a change from the old
+/// toggle-off behaviour.
+///
+/// Returns `(score, live)`. `live` is always true — a vote either exists or
+/// it does not, and there is no longer an off state reachable by voting the
+/// same way twice. It is kept because the route's response type carries it and
+/// an unvote path belongs to the product, not to this function's signature.
 pub async fn set_vote(
     db: &Database,
     entry_id: &str,
@@ -509,6 +552,7 @@ pub async fn set_vote(
     value: i64,
     weight: f64,
     now: &str,
+    decay: &Decay,
 ) -> Result<(f64, bool)> {
     // The vote change and the score recompute share one transaction
     // (spec §39.4), so the list can never show a stale score.
@@ -518,7 +562,11 @@ pub async fn set_vote(
             let mut tx = pool.begin().await?;
             let live = vote_tx!(db, tx, entry_id, account_id, value, weight, now)?;
             tx.commit().await?;
-            let score = entry_score(db, entry_id).await?;
+            // The decayed score, not `entry_score`. The denormalised column is
+            // the undecayed sum and is no longer what the list ranks by, so
+            // returning it would hand the client a number the directory
+            // immediately contradicts.
+            let score = decayed_score(db, entry_id, decay).await?;
             Ok((score, live))
         }
         Backend::Postgres => {
@@ -526,7 +574,7 @@ pub async fn set_vote(
             let mut tx = pool.begin().await?;
             let live = vote_tx!(db, tx, entry_id, account_id, value, weight, now)?;
             tx.commit().await?;
-            let score = entry_score(db, entry_id).await?;
+            let score = decayed_score(db, entry_id, decay).await?;
             Ok((score, live))
         }
     }
@@ -537,7 +585,7 @@ pub async fn set_vote(
 /// Every row, not the ones still above zero — see
 /// [`vote_decay_sql::vote_count_sql`] for why that distinction is the whole
 /// difference between a smooth curve and a cliff.
-async fn vote_count(db: &Database, entry_id: &str) -> Result<i64> {
+pub async fn vote_count(db: &Database, entry_id: &str) -> Result<i64> {
     let d = match db.backend() {
         Backend::Sqlite => Dialect::Sqlite,
         Backend::Postgres => Dialect::Postgres,

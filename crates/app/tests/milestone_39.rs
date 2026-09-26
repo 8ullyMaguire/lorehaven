@@ -457,7 +457,7 @@ async fn visibility_approved_own_pending_operator() {
 }
 
 #[tokio::test]
-async fn voting_up_down_toggle_flip_and_weighted_score() {
+async fn voting_up_down_refresh_flip_and_weighted_score() {
     let harness = Harness::new("voting").await;
     let mut operator = harness.client();
     let (op_account, _op_pseud) = register(&mut operator, "op@example.com", "operator").await;
@@ -492,7 +492,12 @@ async fn voting_up_down_toggle_flip_and_weighted_score() {
     assert_eq!(body["score"], json!(0.375), "{body}");
     assert_eq!(body["my_vote"], json!(1), "{body}");
 
-    // Toggle off by repeating.
+    // Repeating the same vote refreshes it rather than undoing it. This
+    // changed from a toggle-off when votes began to decay: "I still think this
+    // is good" has to be expressible, and under a toggle the only way to say
+    // it was to vote down and back up. The score is unchanged because the entry
+    // is below `min_votes` and therefore exempt -- a fresh vote on a
+    // low-count entry is worth its full base weight at any age.
     let (status, body) = voter
         .post(
             &format!("/api/v1/directory/entries/{entry_id}/vote"),
@@ -500,8 +505,19 @@ async fn voting_up_down_toggle_flip_and_weighted_score() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["score"], json!(0.0), "{body}");
-    assert_eq!(body["my_vote"], Value::Null, "{body}");
+    assert_eq!(
+        body["score"],
+        json!(0.375),
+        "a refresh must not change the score: {body}"
+    );
+    assert_eq!(body["my_vote"], json!(1), "{body}");
+    // The response says whether this entry is on a clock at all, so a voter
+    // can tell a permanent vote from a decaying one.
+    assert_eq!(
+        body["decay"]["applies_to_this_entry"],
+        json!(false),
+        "{body}"
+    );
 
     // Downvote instead.
     let (status, body) = voter
@@ -513,6 +529,40 @@ async fn voting_up_down_toggle_flip_and_weighted_score() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["score"], json!(-0.375), "{body}");
     assert_eq!(body["my_vote"], json!(-1), "{body}");
+
+    // Withdraw with an explicit 0. Voting the same way twice now refreshes,
+    // so this is the only way to retract a vote -- and it has to be one
+    // deliberate step, because a double-click no longer means "oops".
+    let (status, body) = voter
+        .post(
+            &format!("/api/v1/directory/entries/{entry_id}/vote"),
+            json!({"value": 0}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["score"], json!(0.0), "{body}");
+    assert_eq!(body["my_vote"], Value::Null, "{body}");
+
+    // Withdrawing again is not an error: a double-clicked un-vote button sends
+    // it twice, and the state it describes is already correct.
+    let (status, body) = voter
+        .post(
+            &format!("/api/v1/directory/entries/{entry_id}/vote"),
+            json!({"value": 0}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Values outside the three legal ones are still rejected. 422, not 400:
+    // `bad_request` here is `AppError::Validation`, which is the route's
+    // established shape for a body that parsed but is not a legal value.
+    let (status, _b) = voter
+        .post(
+            &format!("/api/v1/directory/entries/{entry_id}/vote"),
+            json!({"value": 2}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
     // Anonymous cannot vote.
     let mut anon = harness.client();
