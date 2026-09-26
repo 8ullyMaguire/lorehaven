@@ -13,23 +13,34 @@
     fetchDiscoveryFeed,
     recomputeTasteProfile,
     type DiscoveryItem,
+    type SortValue,
   } from '../lib/api';
   import { handleLinkClick } from '../lib/router';
   import { session } from '../lib/session.svelte.ts';
   import Button from '../lib/components/Button.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
+  import SortControl from '../lib/components/SortControl.svelte';
 
   let items = $state<DiscoveryItem[]>([]);
   let error = $state<unknown>(null);
   let loading = $state(true);
   let recomputing = $state(false);
+  /**
+   * The reader's chosen order, or undefined when they have not chosen.
+   *
+   * Undefined is meaningful and must not be collapsed to a default: the server
+   * resolves `query param > stored preference > surface default`, so passing
+   * anything before the reader has picked would override their own stored
+   * preference with the surface default on every anonymous-first paint.
+   */
+  let chosenSort = $state<SortValue | undefined>(undefined);
 
   async function load() {
     loading = true;
     error = null;
     try {
-      const feed = await fetchDiscoveryFeed();
+      const feed = await fetchDiscoveryFeed(chosenSort);
       items = feed.items ?? [];
     } catch (failure) {
       error = failure;
@@ -77,6 +88,10 @@
     <ErrorSummary {error} onretry={load} />
   {/if}
 
+  <div class="sort-row">
+    <SortControl surface="discover" onchange={(sort) => { chosenSort = sort; void load(); }} />
+  </div>
+
   {#if session.isSignedIn}
     <div class="taste-controls">
       <Button variant="secondary" onclick={recompute} disabled={recomputing}>
@@ -115,6 +130,9 @@
     max-width: 72rem;
     margin-inline: auto;
     padding: 2rem 1rem;
+  }
+  .sort-row {
+    margin-block: 1rem;
   }
   .discovery-header h1 {
     margin-bottom: 0.25rem;
