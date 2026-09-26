@@ -31,9 +31,9 @@ pub struct CategoryProposal {
     pub action: String,
     pub payload: String,
     pub status: String,
-    pub yes_votes: i64,
-    pub no_votes: i64,
-    pub quorum_needed: i64,
+    pub yes_votes: i32,
+    pub no_votes: i32,
+    pub quorum_needed: i32,
     pub closes_at: String,
     pub created_by: String,
     pub decided_by: Option<String>,
@@ -61,9 +61,9 @@ pub struct EntryModProposal {
     pub action: String,
     pub target_category: Option<String>,
     pub status: String,
-    pub yes_votes: i64,
-    pub no_votes: i64,
-    pub quorum_needed: i64,
+    pub yes_votes: i32,
+    pub no_votes: i32,
+    pub quorum_needed: i32,
     pub closes_at: String,
     pub created_by: String,
     pub decided_by: Option<String>,
@@ -232,16 +232,34 @@ pub async fn rename_category(db: &Database, slug: &str, new_label: &str) -> Resu
 /// Apply a category merge: mark source merged, re-home entries (§45.1).
 /// Entry scores and vote rows are untouched — no cascade.
 pub async fn merge_categories(db: &Database, source_slug: &str, target_slug: &str) -> Result<bool> {
+    // Both sides have to exist, and the source has to be a real category rather
+    // than a redirect. Without these checks the subselect below resolves to NULL
+    // and the source is left in state 'merged' pointing at nothing: a redirect
+    // no reader can follow, with its entries still labelled under the dead slug.
+    let Some(source) = get_category(db, source_slug).await? else {
+        return Ok(false);
+    };
+    if source.state != "active" {
+        return Ok(false);
+    }
+    let Some(target) = get_category(db, target_slug).await? else {
+        return Ok(false);
+    };
+    if target.state != "active" || source_slug == target_slug {
+        return Ok(false);
+    }
+
+    // The target is resolved now, so bind its id instead of re-selecting it.
+    let merged_into = target.id;
     match db.backend() {
         Backend::Sqlite => {
             let pool = db.sqlite_pool().expect("sqlite");
             let mut tx = pool.begin().await?;
             sqlx::query(
-                "UPDATE categories SET state = 'merged',
-                 merged_into = (SELECT id FROM categories WHERE slug = ?)
-                 WHERE slug = ?",
+                "UPDATE categories SET state = 'merged', merged_into = ?
+                 WHERE slug = ? AND state = 'active'",
             )
-            .bind(target_slug)
+            .bind(&merged_into)
             .bind(source_slug)
             .execute(&mut *tx)
             .await?;
@@ -255,16 +273,21 @@ pub async fn merge_categories(db: &Database, source_slug: &str, target_slug: &st
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             let mut tx = pool.begin().await?;
+            // Each statement numbers its own placeholders from $1: this one
+            // binds two values, so it starts at $1. Continuing the previous
+            // statement's numbering is not a thing sqlx does, and PostgreSQL
+            // rejects $3 in a statement with two binds as "there is no parameter
+            // $3" -- so a category merge failed on PostgreSQL and worked on
+            // SQLite, which does not check.
             sqlx::query(
-                "UPDATE categories SET state = 'merged',
-                 merged_into = (SELECT id FROM categories WHERE slug = $1)
-                 WHERE slug = $2",
+                "UPDATE categories SET state = 'merged', merged_into = $1
+                 WHERE slug = $2 AND state = 'active'",
             )
-            .bind(target_slug)
+            .bind(&merged_into)
             .bind(source_slug)
             .execute(&mut *tx)
             .await?;
-            sqlx::query("UPDATE directory_entries SET category = $3 WHERE category = $4")
+            sqlx::query("UPDATE directory_entries SET category = $1 WHERE category = $2")
                 .bind(target_slug)
                 .bind(source_slug)
                 .execute(&mut *tx)
@@ -275,7 +298,6 @@ pub async fn merge_categories(db: &Database, source_slug: &str, target_slug: &st
     Ok(true)
 }
 
-/// Apply a category deprecation (§45.1).
 pub async fn deprecate_category(db: &Database, slug: &str) -> Result<bool> {
     let sql = db.sql(
         "UPDATE categories SET state = 'deprecated' WHERE slug = ?",
@@ -338,7 +360,7 @@ pub async fn hard_delete_category(db: &Database, slug: &str) -> Result<bool> {
                 return Ok(false);
             }
             let result =
-                sqlx::query("DELETE FROM categories WHERE slug = $2 AND source = 'community'")
+                sqlx::query("DELETE FROM categories WHERE slug = $1 AND source = 'community'")
                     .bind(slug)
                     .execute(&mut *tx)
                     .await?;
@@ -589,9 +611,9 @@ pub async fn vote_on_proposal(
             .await?;
             sqlx::query(
                 "UPDATE category_proposals
-                 SET yes_votes = (SELECT COUNT(*) FROM category_votes WHERE proposal_id = $6 AND value = 'yes'),
-                     no_votes = (SELECT COUNT(*) FROM category_votes WHERE proposal_id = $7 AND value = 'no')
-                 WHERE id = $8",
+                 SET yes_votes = (SELECT COUNT(*) FROM category_votes WHERE proposal_id = $1 AND value = 'yes'),
+                     no_votes = (SELECT COUNT(*) FROM category_votes WHERE proposal_id = $2 AND value = 'no')
+                 WHERE id = $3",
             )
             .bind(proposal_id)
             .bind(proposal_id)
@@ -599,7 +621,7 @@ pub async fn vote_on_proposal(
             .execute(&mut *tx)
             .await?;
             let proposal: CategoryProposal =
-                sqlx::query_as("SELECT * FROM category_proposals WHERE id = $9")
+                sqlx::query_as("SELECT * FROM category_proposals WHERE id = $1")
                     .bind(proposal_id)
                     .fetch_one(&mut *tx)
                     .await?;
@@ -611,7 +633,7 @@ pub async fn vote_on_proposal(
             if let Some(passed) = decided {
                 let new_status = if passed { "passed" } else { "failed" };
                 sqlx::query(
-                    "UPDATE category_proposals SET status = $10, decided_by = $11, decided_at = $12 WHERE id = $13",
+                    "UPDATE category_proposals SET status = $1, decided_by = $2, decided_at = $3 WHERE id = $4",
                 )
                 .bind(new_status)
                 .bind(account_id)
@@ -944,9 +966,9 @@ pub async fn vote_on_entry_mod(
             .await?;
             sqlx::query(
                 "UPDATE entry_moderation_proposals
-                 SET yes_votes = (SELECT COUNT(*) FROM entry_moderation_votes WHERE proposal_id = $6 AND value = 'yes'),
-                     no_votes = (SELECT COUNT(*) FROM entry_moderation_votes WHERE proposal_id = $7 AND value = 'no')
-                 WHERE id = $8",
+                 SET yes_votes = (SELECT COUNT(*) FROM entry_moderation_votes WHERE proposal_id = $1 AND value = 'yes'),
+                     no_votes = (SELECT COUNT(*) FROM entry_moderation_votes WHERE proposal_id = $2 AND value = 'no')
+                 WHERE id = $3",
             )
             .bind(proposal_id)
             .bind(proposal_id)
@@ -954,7 +976,7 @@ pub async fn vote_on_entry_mod(
             .execute(&mut *tx)
             .await?;
             let proposal: EntryModProposal =
-                sqlx::query_as("SELECT * FROM entry_moderation_proposals WHERE id = $9")
+                sqlx::query_as("SELECT * FROM entry_moderation_proposals WHERE id = $1")
                     .bind(proposal_id)
                     .fetch_one(&mut *tx)
                     .await?;
@@ -966,7 +988,7 @@ pub async fn vote_on_entry_mod(
             if let Some(passed) = decided {
                 let new_status = if passed { "passed" } else { "failed" };
                 sqlx::query(
-                    "UPDATE entry_moderation_proposals SET status = $10, decided_by = $11, decided_at = $12 WHERE id = $13",
+                    "UPDATE entry_moderation_proposals SET status = $1, decided_by = $2, decided_at = $3 WHERE id = $4",
                 )
                 .bind(new_status)
                 .bind(account_id)
@@ -1023,8 +1045,8 @@ pub async fn apply_entry_mod_action(db: &Database, proposal_id: &str, now: &str)
         }
         "remove" => {
             let sql = db.sql(
-                "UPDATE directory_entries SET removed_at = $1 WHERE id = $2 AND removed_at IS NULL",
-                "UPDATE directory_entries SET removed_at = $3 WHERE id = $4 AND removed_at IS NULL",
+                "UPDATE directory_entries SET removed_at = ? WHERE id = ? AND removed_at IS NULL",
+                "UPDATE directory_entries SET removed_at = ? WHERE id = ? AND removed_at IS NULL",
             );
             match db.backend() {
                 Backend::Sqlite => {
