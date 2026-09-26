@@ -10,6 +10,8 @@
 
 use crate::{Backend, Database};
 use anyhow::Result;
+use lorehaven_domain::vote_decay::{self, Decay};
+use lorehaven_domain::vote_decay_sql::{self, Dialect};
 use serde::Serialize;
 use sqlx::FromRow;
 
@@ -465,8 +467,8 @@ macro_rules! vote_tx {
             Some(_) => {
                 // Other value: flip in place.
                 sqlx::query(&$db.sql(
-                    "UPDATE directory_votes SET vote_value = ?, weight = ?, voted_at = ? WHERE entry_id = ? AND account_id = ?",
-                    "UPDATE directory_votes SET vote_value = $1, weight = $2, voted_at = $3 WHERE entry_id = $4 AND account_id = $5",
+                    "UPDATE directory_votes SET vote_value = ?, base_weight = ?, voted_at = ? WHERE entry_id = ? AND account_id = ?",
+                    "UPDATE directory_votes SET vote_value = $1, base_weight = $2, voted_at = $3 WHERE entry_id = $4 AND account_id = $5",
                 ))
                 .bind($value).bind($weight).bind($now).bind($entry_id).bind($account_id)
                 .execute(&mut *$tx)
@@ -475,8 +477,8 @@ macro_rules! vote_tx {
             }
             None => {
                 sqlx::query(&$db.sql(
-                    "INSERT INTO directory_votes (entry_id, account_id, vote_value, weight, voted_at) VALUES (?, ?, ?, ?, ?)",
-                    "INSERT INTO directory_votes (entry_id, account_id, vote_value, weight, voted_at) VALUES ($1, $2, $3, $4, $5)",
+                    "INSERT INTO directory_votes (entry_id, account_id, vote_value, base_weight, voted_at) VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO directory_votes (entry_id, account_id, vote_value, base_weight, voted_at) VALUES ($1, $2, $3, $4, $5)",
                 ))
                 .bind($entry_id).bind($account_id).bind($value).bind($weight).bind($now)
                 .execute(&mut *$tx)
@@ -488,8 +490,8 @@ macro_rules! vote_tx {
         // but REAL on SQLite, so the assignment is cast to the column's own type
         // rather than the expression's.
         sqlx::query(&$db.sql(
-            "UPDATE directory_entries SET score = CAST((SELECT COALESCE(SUM(vote_value * weight), 0) FROM directory_votes WHERE entry_id = ?) AS REAL), updated_at = ? WHERE id = ?",
-            "UPDATE directory_entries SET score = CAST((SELECT COALESCE(SUM(vote_value * weight), 0) FROM directory_votes WHERE entry_id = $1) AS REAL), updated_at = $2 WHERE id = $3",
+            "UPDATE directory_entries SET score = CAST((SELECT COALESCE(SUM(vote_value * base_weight), 0) FROM directory_votes WHERE entry_id = ?) AS REAL), updated_at = ? WHERE id = ?",
+            "UPDATE directory_entries SET score = CAST((SELECT COALESCE(SUM(vote_value * base_weight), 0) FROM directory_votes WHERE entry_id = $1) AS REAL), updated_at = $2 WHERE id = $3",
         ))
         .bind($entry_id)
         .bind($now)
@@ -528,6 +530,103 @@ pub async fn set_vote(
             Ok((score, live))
         }
     }
+}
+
+/// How many votes an entry has, for the `min_votes` threshold.
+///
+/// Every row, not the ones still above zero — see
+/// [`vote_decay_sql::vote_count_sql`] for why that distinction is the whole
+/// difference between a smooth curve and a cliff.
+async fn vote_count(db: &Database, entry_id: &str) -> Result<i64> {
+    let d = match db.backend() {
+        Backend::Sqlite => Dialect::Sqlite,
+        Backend::Postgres => Dialect::Postgres,
+    };
+    let sql = match db.backend() {
+        Backend::Sqlite => vote_decay_sql::vote_count_sql(d, "?"),
+        Backend::Postgres => vote_decay_sql::vote_count_sql(d, "$1"),
+    };
+    let row: (i64,) = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(entry_id)
+                .fetch_one(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(entry_id)
+                .fetch_one(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(row.0)
+}
+
+/// An entry's score, recomputed from its votes with decay applied.
+///
+/// The stored `directory_entries.score` column is a denormalised cache that a
+/// permanent vote could keep correct inside the vote transaction. A decaying
+/// vote cannot: the score moves every second without any vote happening, so
+/// the column is wrong the moment the transaction commits. This is the read
+/// path §39.4's "the list never shows a stale score" actually requires once
+/// decay is on.
+///
+/// Below `min_votes` votes the entry is exempt and every vote counts at its base
+/// weight, which is what keeps a new submission viable — its three votes are
+/// the only ranking signal it has, and decaying them would be erasure rather
+/// than moderation.
+///
+/// The threshold is on vote *rows*, not on votes still above zero, so an entry
+/// does not fall out of the decaying set as its votes expire. See
+/// [`vote_decay::should_decay`] for what the other version did.
+pub async fn decayed_score(db: &Database, entry_id: &str, decay: &Decay) -> Result<f64> {
+    if !vote_decay::should_decay(vote_count(db, entry_id).await?, decay) {
+        return entry_score_sum(db, entry_id, None).await;
+    }
+    entry_score_sum(db, entry_id, Some(decay)).await
+}
+
+/// `SUM(vote_value × base_weight)` for one entry, decayed if `decay` is given.
+///
+/// `SUM()` over a float column is `double precision` on PostgreSQL and REAL on
+/// SQLite, and the cast is what makes the result decodable into an `f64` on
+/// both — without it this is a 500 on PostgreSQL and fine on SQLite.
+async fn entry_score_sum(db: &Database, entry_id: &str, decay: Option<&Decay>) -> Result<f64> {
+    let d = match db.backend() {
+        Backend::Sqlite => Dialect::Sqlite,
+        Backend::Postgres => Dialect::Postgres,
+    };
+    let param = if db.backend() == Backend::Postgres {
+        "$1"
+    } else {
+        "?"
+    };
+    let expr = match decay {
+        Some(cfg) => vote_decay_sql::decayed_score_sum_sql(cfg, d, param),
+        // Decay off, or an exempt entry: the plain permanent sum, spelled out
+        // rather than as a "1.0 multiplier" so the undecayed path stays the
+        // query it was before this feature existed.
+        None => format!(
+            "COALESCE((SELECT SUM(v.vote_value * v.base_weight) FROM directory_votes v WHERE v.entry_id = {param}), 0)"
+        ),
+    };
+    let sql = format!("SELECT CAST({expr} AS DOUBLE PRECISION)");
+    let row: (f64,) = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(entry_id)
+                .fetch_one(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(entry_id)
+                .fetch_one(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(row.0)
 }
 
 /// The denormalised score of an entry.

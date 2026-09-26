@@ -31,10 +31,8 @@
 //! submission, so an entry below `min_votes` **live** votes does not decay at
 //! all, at any age.
 //!
-//! "Live" matters as much as the threshold. An entry whose thirty votes have
-//! all decayed is back under the threshold, stops decaying, and can be revived
-//! by being voted on again. Without that, decay is a one-way ratchet and a
-//! once-popular entry can never return.
+//! The threshold counts vote *rows*, not currently-contributing votes. See
+//! [`should_decay`] for why the live-vote version had a cliff in it.
 //!
 //! # Why a vote at the cutoff is exactly zero
 //!
@@ -126,12 +124,24 @@ pub fn decay(age_days: f64, cfg: &Decay) -> f64 {
     w
 }
 
-/// Whether an entry with `live_votes` currently-voting accounts decays at all.
+/// Whether an entry with `vote_count` votes decays at all.
 ///
-/// The count is of votes still above zero, not of rows ever inserted.
+/// The count is of **vote rows**, not of votes still above zero.
+///
+/// This was live-vote-counting first, and it was wrong in a way that only
+/// showed up once an entry aged past the cutoff. With 20 votes at 59 days the
+/// count of live votes is 20, so the entry decays and scores ~0.0006. One day
+/// later every vote is dead, the live count is 0, the entry is *under* the
+/// threshold — and therefore exempt, and therefore scored at full base weight
+/// again. A twenty-point spike caused by a vote ageing past the cutoff, in the
+/// wrong direction, on exactly the entries the rule was written for.
+///
+/// Counting rows makes the threshold a property of the entry rather than of the
+/// clock. An entry that has ever attracted `min_votes` opinions keeps decaying;
+/// a new one never starts. Both are stable, and the cliff is gone.
 #[must_use]
-pub fn should_decay(live_votes: i64, cfg: &Decay) -> bool {
-    cfg.enabled && live_votes >= cfg.min_votes
+pub fn should_decay(vote_count: i64, cfg: &Decay) -> bool {
+    cfg.enabled && vote_count >= cfg.min_votes
 }
 
 /// A vote's contribution to the score: base weight, decayed by its age.
@@ -185,9 +195,9 @@ mod tests {
     fn a_malformed_cutoff_falls_back_to_the_default() {
         // A zero cutoff would make every vote worthless, and an operator would
         // only find out by noticing a list that stopped ranking.
-        let d = Decay::from_config(true, 0.0, 20, 2.0);
+        let d = Decay::from_config(true, 0.0, 20, 2);
         assert_eq!(d.cutoff_days, 60.0);
-        let d = Decay::from_config(true, -5.0, 20, 2.0);
+        let d = Decay::from_config(true, -5.0, 20, 2);
         assert_eq!(d.cutoff_days, 60.0);
     }
 
@@ -213,7 +223,7 @@ mod tests {
     fn a_negative_threshold_clamps_to_zero() {
         // Zero means every entry decays, which is a legitimate (if unwise)
         // choice, so it is permitted rather than rejected.
-        assert_eq!(Decay::from_config(true, 60.0, -3, 2.0).min_votes, 0);
+        assert_eq!(Decay::from_config(true, 60.0, -3, 2).min_votes, 0);
     }
 
     #[test]

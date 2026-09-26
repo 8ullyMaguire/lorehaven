@@ -758,6 +758,22 @@ pub struct DirectoryConfig {
     pub taste_ceiling: f64,
     /// Category governance settings (§45).
     pub governance: CategoryGovernanceConfig,
+    /// Vote decay (spec §39, amendment `docs/spec-amendments/vote-decay.md`).
+    ///
+    /// A vote counts fully when cast and decays toward nothing, so a directory
+    /// ranks current consensus rather than who noticed an entry first. Entries
+    /// with few votes never decay — see `Decay::should_decay`.
+    pub decay_enabled: bool,
+    /// Age in days at which a vote is worth exactly nothing. Default 60.
+    pub decay_cutoff_days: f64,
+    /// Entries with fewer live votes than this never decay. Default 20.
+    pub decay_min_votes: i64,
+    /// The curve's shape, an integer. 1 is linear, 2 the default.
+    ///
+    /// An integer because the score query computes this curve in SQL and
+    /// sqlx's bundled SQLite has no math functions at all — only integer powers
+    /// are expressible in both dialects.
+    pub decay_exponent: u32,
 }
 
 /// Category governance settings (spec §45).
@@ -799,6 +815,21 @@ impl DirectoryConfig {
         lorehaven_domain::directory::VoteWeighting::parse(&self.weighting)
             .unwrap_or(lorehaven_domain::directory::VoteWeighting::TrustAndTaste)
     }
+
+    /// The vote-decay policy for this instance.
+    ///
+    /// Built here rather than stored, so a malformed config value is
+    /// normalised in exactly one place: `Decay::from_config` falls back to the
+    /// documented default for a zero or negative cutoff rather than producing
+    /// a directory where every vote is worth nothing.
+    pub fn decay(&self) -> lorehaven_domain::vote_decay::Decay {
+        lorehaven_domain::vote_decay::Decay::from_config(
+            self.decay_enabled,
+            self.decay_cutoff_days,
+            self.decay_min_votes,
+            self.decay_exponent,
+        )
+    }
 }
 
 impl Default for DirectoryConfig {
@@ -810,6 +841,13 @@ impl Default for DirectoryConfig {
             taste_floor: lorehaven_domain::directory::DEFAULT_TASTE_FLOOR,
             taste_ceiling: lorehaven_domain::directory::DEFAULT_TASTE_CEILING,
             governance: CategoryGovernanceConfig::default(),
+            // The documented defaults, not zeros: decay is on by default
+            // because a permanent vote measures when someone first noticed an
+            // entry rather than what anyone believes now.
+            decay_enabled: true,
+            decay_cutoff_days: 60.0,
+            decay_min_votes: 20,
+            decay_exponent: 2,
         }
     }
 }
@@ -1556,6 +1594,10 @@ impl Config {
                     taste_floor: d.taste_floor.unwrap_or(defaults.taste_floor),
                     taste_ceiling: d.taste_ceiling.unwrap_or(defaults.taste_ceiling),
                     governance: governance.unwrap_or(defaults.governance),
+                    decay_enabled: d.decay_enabled.unwrap_or(defaults.decay_enabled),
+                    decay_cutoff_days: d.decay_cutoff_days.unwrap_or(defaults.decay_cutoff_days),
+                    decay_min_votes: d.decay_min_votes.unwrap_or(defaults.decay_min_votes),
+                    decay_exponent: d.decay_exponent.unwrap_or(defaults.decay_exponent),
                 }
             }
             None => DirectoryConfig::default(),
@@ -2355,6 +2397,14 @@ struct DirectorySection {
     taste_ceiling: Option<f64>,
     /// Category governance settings (spec §45).
     governance: Option<CategoryGovernanceSection>,
+    /// Vote decay (spec §39, amendment `vote-decay.md`). Default on.
+    decay_enabled: Option<bool>,
+    /// Age in days at which a vote is worth exactly nothing. Default 60.
+    decay_cutoff_days: Option<f64>,
+    /// Entries with fewer live votes than this never decay. Default 20.
+    decay_min_votes: Option<i64>,
+    /// The curve's shape, an integer: 1 is linear, 2 the default.
+    decay_exponent: Option<u32>,
 }
 
 /// `[directory.governance]` — category governance switches (spec §45.3).
