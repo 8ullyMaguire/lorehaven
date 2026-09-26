@@ -75,7 +75,8 @@ pub async fn create_collection(
     Ok(id)
 }
 
-/// Fetch a collection by id, with its items.
+/// Fetch a collection by id. Its items come from `list_collection_items`; this
+/// returns the collection row alone.
 pub async fn get_collection(db: &Database, collection_id: &str) -> Result<Option<Collection>> {
     let sql = db.sql(
         "SELECT id, name, description, owner, item_policy, is_public, created_at FROM collections WHERE id = ?",
@@ -494,11 +495,17 @@ pub async fn fulfil_claim(
     work_id: &str,
 ) -> Result<bool> {
     let now = crate::identity::now_rfc3339();
-    // Anti-gaming: a claimant cannot fulfil the same request twice. But one
-    // work can fulfil multiple different claims from the same claimant — the
-    // constraint is (work, claimant) uniqueness at the application level is
-    // *not* what the spec demands; the spec says "the same work cannot fulfil
-    // two claims from one claimant". We enforce that here.
+    // Anti-gaming: one work may fulfil at most one claim per claimant. The
+    // check below is on `(fulfilled_by_work, claimant)`, which is what the
+    // comment used to claim the opposite of: the same work can fulfil a second
+    // *request* from the same claimant only if a different claimant claimed it
+    // too, so the rule is per (work, claimant) and not per work.
+    //
+    // A duplicate is an error, not a `false`. The signature is `Result<bool>`,
+    // where `false` means "no unfulfilled claim matched" -- a different case
+    // entirely. `join_event` reports its equivalent duplicate as a soft `false`,
+    // so the two functions differ here; a caller has to treat them differently
+    // until one of them is changed.
     let dup_sql = db.sql(
         "SELECT 1 FROM claims WHERE fulfilled_by_work = ? AND claimant = ? AND fulfilled_by_work IS NOT NULL",
         "SELECT 1 FROM claims WHERE fulfilled_by_work = $1 AND claimant = $2 AND fulfilled_by_work IS NOT NULL",
