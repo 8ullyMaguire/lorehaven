@@ -970,18 +970,11 @@ async fn a_deleted_chapter_disappears_from_reads_but_keeps_its_row() {
 
     // Soft, not gone: the row survives with deleted_at set. This is the part a
     // hard delete would fail.
-    // This file is SQLite-only, so the row can be read directly rather than
-    // through a backend-agnostic helper.
-    let row: Option<(Option<String>,)> =
-        sqlx::query_as("SELECT deleted_at FROM chapters WHERE id = ?")
-            .bind(&chapter)
-            .fetch_optional(harness.tdb.db().sqlite_pool().expect("sqlite"))
-            .await
-            .expect("query chapters");
-    let deleted_at = row
-        .expect("the row is still there — this is a soft delete, not a hard one")
-        .0
-        .expect("and deleted_at is set");
+    let deleted_at = harness
+        .tdb
+        .fetch_text("SELECT deleted_at FROM chapters WHERE id = ?", &chapter)
+        .await
+        .expect("the row is still there — this is a soft delete, not a hard one");
     assert!(
         deleted_at.len() >= 20 && deleted_at.ends_with('Z'),
         "deleted_at is a timestamp, not a flag: {deleted_at}"

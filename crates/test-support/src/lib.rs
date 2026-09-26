@@ -195,6 +195,70 @@ impl TestDb {
         &self.db
     }
 
+    /// Fetch one nullable text column, whichever backend is active.
+    ///
+    /// For asserting a stored value a route does not echo back — a soft-delete
+    /// timestamp, a column the API deliberately omits. Tests that reach for a
+    /// pool directly get PostgreSQL wrong (wrong placeholders, `::uuid` casts),
+    /// and the failure only shows on the PG run.
+    pub async fn fetch_text(&self, query: &str, value: &str) -> Option<String> {
+        let sql = self.id_where(query);
+        let row: Option<(Option<String>,)> = match self.db.backend() {
+            Backend::Sqlite => {
+                sqlx::query_as(&sql)
+                    .bind(value)
+                    .fetch_optional(self.db.sqlite_pool().expect("sqlite"))
+                    .await
+            }
+            Backend::Postgres => {
+                sqlx::query_as(&sql)
+                    .bind(value)
+                    .fetch_optional(self.db.postgres_pool().expect("postgres"))
+                    .await
+            }
+        }
+        .expect("scalar query");
+        row.and_then(|r| r.0)
+    }
+
+    /// Whether a row matching the query exists.
+    pub async fn exists(&self, query: &str, value: &str) -> bool {
+        let sql = self.id_where(query);
+        let row: Option<(i32,)> = match self.db.backend() {
+            Backend::Sqlite => {
+                sqlx::query_as(&sql)
+                    .bind(value)
+                    .fetch_optional(self.db.sqlite_pool().expect("sqlite"))
+                    .await
+            }
+            Backend::Postgres => {
+                sqlx::query_as(&sql)
+                    .bind(value)
+                    .fetch_optional(self.db.postgres_pool().expect("postgres"))
+                    .await
+            }
+        }
+        .expect("exists query");
+        row.is_some()
+    }
+
+    /// A scalar query matching a row by a UUID id, cast per backend.
+    ///
+    /// `chapters.id` is TEXT on SQLite and UUID on PostgreSQL, so the
+    /// SQLite-shaped `WHERE id = ?` the rest of the suite writes is a type error
+    /// on PG (`operator does not exist: uuid = text`). Callers pass the SQLite
+    /// form and this rewrites the comparison, so a test asserting a stored value
+    /// does not have to know the dialect — the failure mode otherwise only shows
+    /// on the PG run.
+    fn id_where(&self, query: &str) -> String {
+        match self.db.backend() {
+            Backend::Postgres => {
+                lorehaven_db::rewrite_placeholders(&query.replace("id = ?", "id::text = ?"))
+            }
+            Backend::Sqlite => query.to_string(),
+        }
+    }
+
     /// A query string for the active backend: SQLite takes `?` placeholders
     /// as written; PostgreSQL needs `$n`, which this rewrites.
     pub fn sql(&self, query: &str) -> String {
