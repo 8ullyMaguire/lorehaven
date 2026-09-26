@@ -73,7 +73,7 @@ claim is that it stopped.
 |---|---|---|
 | `decay_enabled` | `true` | Master switch. `false` restores permanent votes. |
 | `decay_cutoff_days` | `60` | Age at which weight is exactly 0. |
-| `decay_min_votes` | `20` | Entries with fewer *live* votes never decay. |
+| `decay_min_votes` | `20` | Entries with fewer *votes* never decay. |
 | `decay_exponent` | `2` | The curve's shape, an integer. 1 is linear. |
 
 **`decay_min_votes` is the important one.** Without it, a new entry with three
@@ -244,7 +244,7 @@ which is a small dishonesty a reader can detect by refreshing.
   more than at 59, which contributes exactly nothing.
 - At and beyond `cutoff_days` the contribution is exactly 0, not a small
   number.
-- An entry with fewer than `decay_min_votes` live votes does not decay at
+- An entry with fewer than `decay_min_votes` votes does not decay at
   all, at any age.
 - Re-voting restores full weight and does not stack.
 - Flipping direction replaces the previous row.
