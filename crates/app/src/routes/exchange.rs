@@ -285,6 +285,61 @@ pub async fn submit_signals(
                     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
             }
         }
+        // §19.15: "Latent demand: a signal through the exchange for a work the
+        // instance does not hold." Conditional on *not held* — a signal about a
+        // work already in the library is not demand, and a demand item would ask
+        // the instance to acquire something it already has.
+        //
+        // The check is *one* verdict, not a per-identity one. A work cross-posted
+        // to three sites is one work with three identities, so "the instance does
+        // not hold it" is a property of the work: recording demand for `ao3:aaa`
+        // while the instance holds the same work under `ffnet:crossover-9` would
+        // put phantom demand in the queue for a work it already has. The test is
+        // therefore *any* identity held ⇒ not demand.
+        //
+        // A signal with no recognisable `site_ids` creates no demand: there is
+        // nothing to deduplicate on, and a title is not an identity (two works
+        // share a title; one work has a translated one).
+        let site_ids = exch::signal_site_ids(signal);
+        if !site_ids.is_empty() {
+            let mut held = false;
+            for (site, source_id) in &site_ids {
+                if lorehaven_db::exchange::find_held_work(state.db(), site, source_id)
+                    .await
+                    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?
+                    .is_some()
+                {
+                    held = true;
+                    break;
+                }
+            }
+            // §19.15 attributes demand to "the submitting instance", and
+            // `source_instance` is NOT NULL because a demand row with no
+            // submitter could not be deduplicated at all — every such row would
+            // collapse onto the same key. An instance that has not set its own id
+            // records the signal (its provenance is real) but records no demand.
+            // A placeholder here would merge every unconfigured instance's demand
+            // into one anonymous bucket, which is the spoofing the composite
+            // primary key exists to prevent.
+            if !held {
+                if let Some(source) = source_instance.as_deref() {
+                    let (site, source_id) = site_ids[0];
+                    // A work this instance does not have has no local id, so the
+                    // `site:id` pair *is* its identity and goes in the work_id
+                    // slot — which is what makes the composite primary key do its
+                    // job: one row per (work, submitting instance), so a client
+                    // retrying the same batch cannot inflate the weight while a
+                    // *different* sibling naming the same work still does.
+                    lorehaven_db::exchange::reinforce_latent_demand(
+                        state.db(),
+                        &format!("{site}:{source_id}"),
+                        source,
+                    )
+                    .await
+                    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+                }
+            }
+        }
         results.push(exch::SignalOutcome {
             content_hash: hash,
             entities: entities

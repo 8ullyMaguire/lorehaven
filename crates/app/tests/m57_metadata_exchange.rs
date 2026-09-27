@@ -88,6 +88,23 @@ mod router {
                 .expect("enable the exchange");
         }
 
+        /// Enable the exchange *and* give this instance an exchange identity.
+        ///
+        /// The two are separate settings and the demand tests need both: without
+        /// an `instance_id` there is no deduplication key for latent demand, and
+        /// the route correctly declines to record any.
+        pub async fn enable_as(&self, instance_id: &str) {
+            // The id first: `set_instance_id` creates the settings row with
+            // `enabled = 0`, so enabling afterwards is what makes it stick. In the
+            // other order the id is set and then the switch is flipped, which also
+            // works — but only because `set_enabled`'s update arm leaves
+            // `instance_id` alone. Setting it first does not depend on that.
+            lorehaven_db::exchange::set_instance_id(&self.db, instance_id)
+                .await
+                .expect("set the exchange instance id");
+            self.enable().await;
+        }
+
         fn cookie_header(&self) -> String {
             self.cookies
                 .iter()
@@ -169,7 +186,7 @@ mod router {
         /// Read from the database rather than an API response on purpose: §7
         /// forbids an endpoint that hands a client its own account id, so there
         /// is deliberately no such door to reach for.
-        async fn sole_account_id(&self) -> String {
+        pub(crate) async fn sole_account_id(&self) -> String {
             sqlx::query_scalar("SELECT id FROM accounts ORDER BY created_at LIMIT 1")
                 .fetch_one(self.db.sqlite_pool().expect("this harness is sqlite"))
                 .await
@@ -1147,4 +1164,315 @@ async fn curating_an_unknown_entity_is_a_404_rather_than_a_silent_creation() {
         )
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+}
+
+// ---------------------------------------------------------------------------
+// M11-17c — §19.15's latent demand
+//
+// "a signal through the exchange for a work the instance does not hold" — and
+// "the demand item is created or reinforced once per work per submitting
+// instance, and re-signalling the same work adds no weight."
+//
+// Both halves are load-bearing. The first stops the instance asking for works
+// it already has; the second stops a chatty sibling (or a retrying client)
+// from buying the same demand several times over.
+// ---------------------------------------------------------------------------
+
+/// A batch whose single signal names an external work the instance does not hold.
+fn signal_for(site: &str, id: &str) -> serde_json::Value {
+    json!({
+        "version": 1,
+        "signals": [{
+            "site_ids": [{ "site": site, "id": id }],
+            "title": "A Stranger's Work",
+            "author_names": ["An Author"],
+            "fandom": "Some Fandom",
+            "tags": ["Slow Burn"],
+            "characters": [],
+            "relationships": [],
+            "content_rating": "general",
+            "language": "en",
+        }],
+    })
+}
+
+/// Seed a `library_items` row, optionally materialised into a local work.
+///
+/// `work_id = None` is the *private-library* case the migration itself calls
+/// out: the reader has it in their own shelves and the instance has no work.
+async fn seed_library_item(h: &Harness, site: &str, source_work_key: &str, work_id: Option<&str>) {
+    let now = lorehaven_db::identity::now_rfc3339();
+    let id = uuid::Uuid::new_v4().to_string();
+    // `account_id` is NOT NULL: a library item is *somebody's* shelf, not the
+    // instance's. So the row is owned by the signed-in reader, which is also the
+    // only actor in §19.15's story who would hold a copy.
+    let account_id = h.sole_account_id().await;
+    match h.db().backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query(
+                "INSERT INTO library_items (id, account_id, work_id, source_key, source_work_key, \
+                 title, author_text, status, source_url, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'Held', '', 'complete', 'https://example.test/held', ?6, ?6)",
+            )
+            .bind(&id)
+            .bind(&account_id)
+            .bind(work_id)
+            .bind(site)
+            .bind(source_work_key)
+            .bind(&now)
+            .execute(h.db().sqlite_pool().expect("sqlite"))
+            .await
+            .expect("seed a library item");
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query(
+                "INSERT INTO library_items (id, account_id, work_id, source_key, source_work_key, \
+                 title, author_text, status, source_url, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, $5, 'Held', '', 'complete', 'https://example.test/held', $6, $6)",
+            )
+            .bind(&id)
+            .bind(&account_id)
+            .bind(work_id)
+            .bind(site)
+            .bind(source_work_key)
+            .bind(&now)
+            .execute(h.db().postgres_pool().expect("postgres"))
+            .await
+            .expect("seed a library item");
+        }
+    }
+}
+
+/// Create a real `works` row and return its id.
+///
+/// A real row rather than a bare uuid because `library_items.work_id` is a
+/// foreign key and enforcement is on. `owner_pseud_id` is NOT NULL (it is what
+/// makes a work attributable), so the fixture inserts a pseud to own it — an
+/// inserted pseud rather than a signed-in one keeps this independent of which
+/// account the test happens to use.
+async fn real_work_id(h: &Harness) -> String {
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = lorehaven_db::identity::now_rfc3339();
+    // The signed-in account's own pseud: `works.owner_pseud_id` is NOT NULL, and
+    // using the account the harness already created avoids a second fixture that
+    // could fail for unrelated reasons.
+    let account_id = h.sole_account_id().await;
+    let pseud_sql = h.db().sql(
+        "SELECT id FROM pseuds WHERE account_id = ?1 LIMIT 1",
+        "SELECT id FROM pseuds WHERE account_id = ?1::uuid LIMIT 1",
+    );
+    let pseud_id: String = match h.db().backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query_as::<_, (String,)>(&pseud_sql)
+                .bind(&account_id)
+                .fetch_one(h.db().sqlite_pool().expect("sqlite"))
+                .await
+                .expect("the harness account has a pseud")
+                .0
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query_as::<_, (String,)>(&pseud_sql)
+                .bind(&account_id)
+                .fetch_one(h.db().postgres_pool().expect("postgres"))
+                .await
+                .expect("the harness account has a pseud")
+                .0
+        }
+    };
+    let sql = h.db().sql(
+        "INSERT INTO works (id, owner_pseud_id, title, summary, language, rating, visibility, \
+         lifecycle, completion, show_public_ratings, created_at, updated_at, version) \
+         VALUES (?1, ?2, 'Held Work', '', 'en', 'general', 'public', 'published', 'complete', 1, ?3, ?3, 1)",
+        "INSERT INTO works (id, owner_pseud_id, title, summary, language, rating, visibility, \
+         lifecycle, completion, show_public_ratings, created_at, updated_at, version) \
+         VALUES (?1::uuid, ?2::uuid, 'Held Work', '', 'en', 'general', 'public', 'published', 'complete', 1, $3, $3, 1)",
+    );
+    match h.db().backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind(&pseud_id)
+                .bind(&now)
+                .execute(h.db().sqlite_pool().expect("sqlite"))
+                .await
+                .expect("insert a work");
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(&id)
+                .bind(&pseud_id)
+                .bind(&now)
+                .execute(h.db().postgres_pool().expect("postgres"))
+                .await
+                .expect("insert a work");
+        }
+    }
+    id
+}
+
+#[tokio::test]
+async fn a_signal_for_a_work_the_instance_does_not_hold_creates_a_demand_item() {
+    let mut h = Harness::new("m1717c-demand").await;
+    h.signed_in_at("reader@example.test", "reader", 1).await;
+    h.enable_as("instance-a").await;
+    h.request(
+        "POST",
+        "/api/v1/exchange/signals",
+        Some(signal_for("ao3", "12345")),
+    )
+    .await;
+    let demand = lorehaven_db::exchange::list_latent_demand(h.db(), 10)
+        .await
+        .expect("list demand");
+    assert_eq!(
+        demand.len(),
+        1,
+        "a work we do not have is demand: {demand:?}"
+    );
+    assert_eq!(
+        demand[0].work_id, "ao3:12345",
+        "keyed by the external identity"
+    );
+}
+
+#[tokio::test]
+async fn a_signal_for_a_work_the_instance_already_holds_is_not_demand() {
+    // §19.15's condition, and the reason the check exists: a demand item here
+    // would ask the instance to acquire a work it has.
+    let mut h = Harness::new("m1717c-held").await;
+    h.signed_in_at("reader@example.test", "reader", 1).await;
+    h.enable_as("instance-a").await;
+    seed_library_item(&h, "ao3", "12345", Some(&real_work_id(&h).await)).await;
+    h.request(
+        "POST",
+        "/api/v1/exchange/signals",
+        Some(signal_for("ao3", "12345")),
+    )
+    .await;
+    let demand = lorehaven_db::exchange::list_latent_demand(h.db(), 10)
+        .await
+        .expect("list demand");
+    assert!(
+        demand.is_empty(),
+        "we hold it, so it is not demand: {demand:?}"
+    );
+}
+
+#[tokio::test]
+async fn the_same_work_signalled_twice_by_one_instance_is_one_demand() {
+    // §16.16.1: "re-signalling the same work adds no weight." The primary key
+    // makes the row unique; this asserts the *weight* does not move, which a
+    // key alone would not guarantee.
+    let mut h = Harness::new("m1717c-repeat").await;
+    h.signed_in_at("reader@example.test", "reader", 1).await;
+    h.enable_as("instance-a").await;
+    h.request(
+        "POST",
+        "/api/v1/exchange/signals",
+        Some(signal_for("ao3", "777")),
+    )
+    .await;
+    // A second, differently-spelled signal for the same work: the demand key is
+    // the site+id, not the content hash, so this must not add weight.
+    let mut second = signal_for("ao3", "777");
+    second["signals"][0]["title"] = json!("A Stranger's Work (2nd ed)");
+    h.request("POST", "/api/v1/exchange/signals", Some(second))
+        .await;
+    let demand = lorehaven_db::exchange::list_latent_demand(h.db(), 10)
+        .await
+        .expect("list demand");
+    assert_eq!(demand.len(), 1, "one work, one demand item: {demand:?}");
+    assert_eq!(
+        demand[0].signal_count, 1,
+        "§16.16.1: re-signalling the same work adds no weight"
+    );
+}
+
+#[tokio::test]
+async fn a_cross_posted_work_held_under_any_identity_is_not_demand() {
+    // A work cross-posted to three sites is one work and three identities. If the
+    // instance holds it under the third, a signal naming the first is not
+    // demand — which is why the route tests *every* site id rather than the
+    // first.
+    let mut h = Harness::new("m1717c-cross").await;
+    h.signed_in_at("reader@example.test", "reader", 1).await;
+    h.enable_as("instance-a").await;
+    seed_library_item(&h, "ffnet", "crossover-9", Some(&real_work_id(&h).await)).await;
+    h.request(
+        "POST",
+        "/api/v1/exchange/signals",
+        Some(json!({
+            "version": 1,
+            "signals": [{
+                "site_ids": [
+                    { "site": "ao3", "id": "aaa" },
+                    { "site": "ffnet", "id": "crossover-9" },
+                    { "site": "wattpad", "id": "bbb" },
+                ],
+                "title": "A Stranger's Work",
+                "author_names": ["An Author"],
+                "fandom": "Some Fandom",
+                "tags": ["Slow Burn"],
+                "characters": [],
+                "relationships": [],
+                "content_rating": "general",
+                "language": "en",
+            }],
+        })),
+    )
+    .await;
+    let demand = lorehaven_db::exchange::list_latent_demand(h.db(), 10)
+        .await
+        .expect("list demand");
+    assert!(
+        demand.is_empty(),
+        "held under one of its three identities: {demand:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_signal_carrying_no_external_identifier_creates_no_demand() {
+    // There is no identity to deduplicate on, and a title is not an identity:
+    // two different works share a title, and one work has a translated one.
+    // Guessing would put phantom demand in the queue under a key we cannot
+    // later prove wrong.
+    let mut h = Harness::new("m1717c-noidentity").await;
+    h.signed_in_at("reader@example.test", "reader", 1).await;
+    h.enable().await;
+    h.request(
+        "POST",
+        "/api/v1/exchange/signals",
+        Some(Harness::batch("A Work", &["Slow Burn"])),
+    )
+    .await;
+    let demand = lorehaven_db::exchange::list_latent_demand(h.db(), 10)
+        .await
+        .expect("list demand");
+    assert!(demand.is_empty(), "no identity, no demand: {demand:?}");
+}
+
+#[tokio::test]
+async fn a_private_library_copy_does_not_count_as_the_instance_holding_the_work() {
+    // A `library_items` row with a NULL `work_id` is a reader's private copy: the
+    // instance has no work for it and cannot acquire one on the instance's
+    // behalf. Asserted because the row is present and the check must still miss
+    // it — the naive query omits the `work_id IS NOT NULL` guard.
+    let mut h = Harness::new("m1717c-private").await;
+    h.signed_in_at("reader@example.test", "reader", 1).await;
+    h.enable_as("instance-a").await;
+    seed_library_item(&h, "ao3", "9999", None).await;
+    h.request(
+        "POST",
+        "/api/v1/exchange/signals",
+        Some(signal_for("ao3", "9999")),
+    )
+    .await;
+    let demand = lorehaven_db::exchange::list_latent_demand(h.db(), 10)
+        .await
+        .expect("list demand");
+    assert_eq!(
+        demand.len(),
+        1,
+        "a private copy is not the instance holding it: {demand:?}"
+    );
 }

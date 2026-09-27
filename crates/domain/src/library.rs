@@ -507,6 +507,7 @@ pub fn normalise_tag(raw: &str) -> Option<String> {
     }
     Some(collapsed)
 }
+#[cfg(test)]
 mod tests {
     #[allow(unused_imports)]
     use super::*;

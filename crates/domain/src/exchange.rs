@@ -284,10 +284,27 @@ pub fn initial_review_status() -> ReviewStatus {
     ReviewStatus::Unverified
 }
 
+/// The distinct (site, id) pairs a signal names.
+///
+/// A signal may carry several — a work cross-posted to three sites is one work
+/// and three identities — and the "not held" test is *any* match, so returning
+/// all of them and testing each is what makes a cross-posted work count as held
+/// when the instance has it under any of its identities.
+pub fn signal_site_ids(signal: &WorkSignal) -> Vec<(&str, &str)> {
+    signal
+        .site_ids
+        .iter()
+        .map(|s| (s.site.as_str(), s.id.as_str()))
+        .collect()
+}
+
+#[cfg(test)]
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lorehaven_lore_metadata::{Completion, ExchangeVersion, SignalBatch, WorkSignal};
+    use lorehaven_lore_metadata::{
+        Completion, ExchangeVersion, SignalBatch, SiteIdentifier, WorkSignal,
+    };
 
     fn signal() -> WorkSignal {
         WorkSignal {
@@ -507,5 +524,40 @@ mod tests {
             assert_eq!(EntityKind::parse(kind.as_str()), Some(kind));
         }
         assert_eq!(EntityKind::parse("mood"), None, "unknown kinds are refused");
+    }
+
+    // `signal_site_ids` is the only thing standing between a cross-posted work and
+    // phantom demand, so the pure behaviour is pinned here rather than only
+    // through the route: every identity, in order, and the empty case that §19.15
+    // says creates no demand at all.
+    #[test]
+    fn a_signal_exposes_every_external_identity_it_carries() {
+        let mut s = signal();
+        s.site_ids = vec![
+            SiteIdentifier {
+                site: "ao3".into(),
+                id: "aaa".into(),
+            },
+            SiteIdentifier {
+                site: "ffnet".into(),
+                id: "bbb".into(),
+            },
+        ];
+        let ids = signal_site_ids(&s);
+        assert_eq!(
+            ids,
+            vec![("ao3", "aaa"), ("ffnet", "bbb")],
+            "a work cross-posted to two sites is one work with two identities, \
+             and the caller must test all of them rather than the first"
+        );
+    }
+
+    #[test]
+    fn a_signal_with_no_external_identity_exposes_none() {
+        assert!(
+            signal_site_ids(&signal()).is_empty(),
+            "no identity means no demand: there is nothing to deduplicate on, and \
+             a title is not an identity"
+        );
     }
 }
