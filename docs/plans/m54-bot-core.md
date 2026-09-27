@@ -493,6 +493,50 @@ There is currently **no** UI for tokens at all — `grep me/tokens frontend/src`
 returns nothing — which is why D1 shipped. A security control with no surface
 is not one.
 
+#### What A7 actually built
+
+`frontend/src/lib/api.ts` gains `ApiToken`, `KNOWN_TOKEN_SCOPES`,
+`parseTokenScopes`, `isKnownTokenScope`, `fetchTokens`, `createToken` and
+`revokeToken`. `Settings.svelte` gains a fifth tab, **Linked applications**:
+the real list, a create form with a scope picker, a revoke button, and the
+one-time raw-value notice. Eight tests in `Settings.test.ts`; 401 pass across
+63 files.
+
+Three decisions worth recording, none of which the plan predicted:
+
+**`createToken` takes no `acting_pseud_id`.** §23.1's tokens act as an explicit
+pseud, and this surface is for tokens a *reader* made for their own use. A
+parameter here would let a reader post as any face on the instance, which is
+the whole thing the acting-pseud column exists to prevent. Bot tokens come
+through the link handshake, which is a different door. A reader looking at a
+token with a null `acting_pseud_id` is told inline that the API will refuse it,
+rather than finding out by wiring it up.
+
+**`parseTokenScopes` shows unrecognised scopes rather than dropping them.** The
+issue route validates every scope against the known set, so an unrecognised one
+cannot arrive from there — but it can arrive from a row written before a scope
+was renamed, or by hand. A scope the reader cannot see is a scope they cannot
+reason about, and a token list that quietly hides one is worse than one showing
+something odd. Unknown scopes are marked with a dotted underline.
+
+**The tab's failure is scoped to itself.** A token list that fails to load sets
+`tokensError` and nothing else; it does not set the page-level `error`, because
+blanking four working tabs makes a token-list problem look like a login
+problem. There is a test for exactly this.
+
+#### The suite bug the A7 tests exposed
+
+Eight new tests, eight failures, none in the code under test. `vi.clearAllMocks()`
+in `afterEach` wipes the *implementation* of a factory-defined mock, not just its
+call count — so `handles loading error gracefully`, which rejects
+`fetchSearchSettings`, left every subsequent test mounting a page in the error
+state. Those tests were passing by asserting on an error panel.
+
+That test predates this work and was green; it was poisoning the ones after it
+without any of them noticing. Fixed in `beforeEach`, on the grounds that "each
+test starts from a working API" is a property of the suite and not of the single
+test that happens to trip over it.
+
 ## Part B — the bot core (M54-01)
 
 New repo: `~/code-local/rust/lorebot`. Separate workspace, no path dependency
