@@ -384,11 +384,19 @@ async fn a_lease_that_expires_is_requeued() {
 #[tokio::test]
 async fn a_cancelled_job_stops_at_the_next_checkpoint() {
     let harness = Harness::new("cancel-checkpoint").await;
-    // Twelve steps of 40ms: long enough that the cancel lands in the middle.
+    // Long enough that the cancel lands in the middle even when the suite is
+    // running every test at once. It was 12 steps of 40ms, and under load the
+    // first 120ms sleep could elapse before step 1 — the job was then cancelled
+    // having done nothing, `checkpoint` was `None`, and the assertion below
+    // failed while the behaviour under test was never exercised. The 8s of work
+    // is not about making the test slow; it is about making the premise hold on
+    // a loaded machine.
+    const STEPS: i64 = 200;
+    const STEP_MS: i64 = 40;
     let job = jobs::enqueue(
         harness.tdb.db(),
         JobKind::Maintenance,
-        r#"{"task":"probe","steps":12,"delay_ms":40}"#,
+        &format!(r#"{{"task":"probe","steps":{STEPS},"delay_ms":{STEP_MS}}}"#),
         None,
         None,
         0,
@@ -400,12 +408,30 @@ async fn a_cancelled_job_stops_at_the_next_checkpoint() {
     let state = harness.state.clone();
     let running = tokio::spawn(async move { worker().run_once(&state).await });
 
-    // Let a couple of steps happen, then cancel it.
-    tokio::time::sleep(Duration::from_millis(120)).await;
+    // Wait for the job to reach a checkpoint before cancelling, rather than
+    // sleeping a fixed interval and hoping. A sleep is a race with a generous
+    // margin; a poll is an assertion that the premise held. If the worker never
+    // checkpoints, this fails with a clear reason instead of a confusing
+    // `checkpoint: None` ten lines below.
+    let tdb = harness.tdb.db().clone();
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let row = jobs::find(&tdb, job).await.expect("find the job");
+        if row.is_some_and(|r| r.checkpoint.is_some()) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the job never reached a checkpoint, so there is nothing to cancel \
+             mid-flight and the assertions below would be checking nothing"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     assert!(
-        jobs::cancel(harness.tdb.db(), job).await.expect("cancel"),
+        jobs::cancel(&tdb, job).await.expect("cancel"),
         "a queued or running job is cancellable"
     );
+
     let report = running.await.expect("join").expect("pass");
 
     let (finished, job_state) = report.job.expect("the worker ran the job");
