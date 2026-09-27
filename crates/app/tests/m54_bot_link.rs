@@ -741,3 +741,68 @@ async fn a_browser_route_still_gets_the_shell() {
         "a client-side route is served by the fallback, not rejected: {status}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// D7 — KNOWN DEFECT: the feed handlers answer for a handle that does not exist
+//
+// `get_rss_feed` and `get_atom_feed` return `{"feed": "rss"}` and
+// `{"feed": "atom"}` for *any* handle, including a pseud that was never
+// created. Every parameter is bound to `_`, so nothing in the signature is
+// even read. Spec §23.5 wants a public feed and a scoped, revocable private
+// one; what ships is a constant.
+//
+// Recorded rather than fixed here: it is §23.5, not §23.2, so it is not an M54
+// row, and building a real feed means choosing what a feed contains — which is
+// a product decision, not a stub removal. `docs/goal.md` is explicit that
+// "every branch returns a real value or refuses", so leaving this unremarked
+// while calling the build complete is the failure mode this project has been
+// bitten by. It is also on the surface the bot's "return a link to continue on
+// Lorehaven" path wants, so it will not stay quiet for long.
+//
+// These tests pin the *current* behaviour deliberately. A fix turns them red,
+// which is the point: the fix is a decision that deserves to be noticed rather
+// than something that happens in passing.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_feed_for_a_handle_that_does_not_exist_still_answers() {
+    let mut h = Harness::new("d7-feed-unknown").await;
+    // A handle that is certainly not on this instance: no account, no pseud.
+    let (status, body) = h.client.get("/api/v1/feeds/no-such-handle").await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "KNOWN DEFECT: an unknown handle gets 200 and a body, not a 404"
+    );
+    assert_eq!(body["feed"], "rss", "and the body is a constant");
+}
+
+#[tokio::test]
+async fn every_handle_gets_the_same_feed() {
+    // The stronger statement, and the one that matters: the response does not
+    // depend on the handle at all, so this is not "a feed that is wrong for one
+    // pseud" but "a handler that ignores its input".
+    let mut h = Harness::new("d7-feed-constant").await;
+    let mut seen = Vec::new();
+    // No empty handle: `/feeds/` does not match a `{handle}` path segment, so
+    // it 404s at the router and says nothing about the handler.
+    for handle in ["alice", "bob", "no-such-handle"] {
+        let (status, body) = h.client.get(&format!("/api/v1/feeds/{handle}")).await;
+        assert_eq!(status, StatusCode::OK, "{handle}");
+        seen.push(body);
+    }
+    for body in &seen[1..] {
+        assert_eq!(
+            body, &seen[0],
+            "KNOWN DEFECT: the feed is the same for every handle"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_atom_feed_is_also_a_constant() {
+    let mut h = Harness::new("d7-atom-constant").await;
+    let (status, body) = h.client.get("/api/v1/feeds/anyone/atom").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["feed"], "atom");
+}

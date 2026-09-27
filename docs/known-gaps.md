@@ -613,6 +613,35 @@ reading and different under the other, so which is intended is a moderation
 policy question. Pinned by the `meta_verdicts` and `caster_weight_bp` tests in
 `milestone_32_data.rs`, whose names say which reading they assert.
 
+## Open — stubs that return a constant
+
+### M54-D07 · `/feeds/{handle}` and `/feeds/{handle}/atom` ignore their input
+
+`get_rss_feed` and `get_atom_feed` return `{"feed": "rss"}` and
+`{"feed": "atom"}` for **any** handle, including one that was never created.
+Every parameter is bound to `_`, so nothing in the signature is read — this is
+not a feed that is wrong for one pseud, it is a handler that does not look at
+its input.
+
+Spec §23.5 wants a public feed and a scoped, revocable private one. §23.5 is
+not M54, so this is not an M54 row, but it sits on the surface the bot's
+"return a link to continue on Lorehaven" path wants, and `docs/goal.md` is
+explicit that "every branch returns a real value or refuses". Leaving it
+unremarked while calling the build complete is the failure mode this project
+has been bitten by before, so it is recorded here.
+
+Not fixed in M54 because the fix is a product decision, not a stub removal: it
+needs an answer to what a feed contains, whether a private feed is revocable by
+token or only by session, and what a feed for a pseud with no public works
+returns. Each of those is a choice that should be made deliberately.
+
+Pinned by three tests in `crates/app/tests/m54_bot_link.rs`
+(`a_feed_for_a_handle_that_does_not_exist_still_answers`,
+`every_handle_gets_the_same_feed`, `the_atom_feed_is_also_a_constant`), all
+marked `KNOWN DEFECT`. They assert the **current** behaviour on purpose: a fix
+turns them red, which is the point. The fix deserves to be noticed rather than
+to happen in passing.
+
 ## Fixed
 
 Listed because the pattern recurs and the fix is the reference for it.
