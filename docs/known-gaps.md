@@ -100,6 +100,46 @@ rather than a silent hole. Deciding whether the statement *should* bump it is a
 one-word change plus a comment, but it belongs with whoever first adds a
 `version`-based writer, not with a test suite.
 
+### M09-D01 · Rating integrity is called by nothing
+
+`crates/db/src/rating_integrity.rs` has all seven `pub async fn` behind **zero
+production callers** — the anti-brigading surface §9.4 describes is not wired
+into any route. `rating_anomaly_events` is therefore never written, and
+`works.contested` / `contested_at` / `contested_reason` are never set, so
+nothing reads a contested mark either.
+
+Consequences worth deciding on:
+
+- No code path marks a work contested when its ratings look like a brigade.
+  The detection functions (burst, cohort outlier, profile outlier) are not
+  written at all — the module stores events but nothing raises them.
+- The columns exist and are indexed, so the data model is committed to; only
+  the behaviour is missing.
+- The suite in `crates/app/tests/milestone_09_rating_integrity.rs` exercises
+  every function against both backends, so the gap is "not called" rather
+  than "not known to work".
+
+Related: `M09-D02` below records the moderation-audit defect found in the
+`clear_rating_anomaly_event` path while covering this module.
+
+### M09-D02 · A second clear overwrites the first triage
+
+`clear_rating_anomaly_event` runs an unconditional
+`UPDATE ... SET cleared_at = ?, cleared_by = ? WHERE id = ?` with no
+`AND cleared_at IS NULL`, so clearing an already-cleared event replaces the
+first triager and time with the second.
+
+For a moderation audit trail that is the wrong shape: the first triage is the
+interesting one — who saw the signal and when — and it is the one that gets
+erased. If re-clearing is ever meant to happen (a signal re-opened, a bulk
+re-triage), the history belongs in an append-only table rather than in two
+mutable columns on the event.
+
+Not fixed here: it changes what a moderation record means, and no caller
+exists yet to be migrated. Pinned by
+`clearing_twice_overwrites_the_first_clear` so the current behaviour is
+recorded rather than assumed.
+
 ### M19-D02 · The history `ORDER BY` breaks ties differently on each backend
 
 `instance_taste_settings::history` ends its ordering with a third key:
