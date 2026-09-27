@@ -37,9 +37,11 @@ Port the FicNexus rec-platform design onto `discovery`.
   Embeddings/MF feature-gated on AI provider presence.
 - Recipes (§16.3) compose over strategies; taste gravity / diversity /
   ordering contract apply after the blend, in both modes.
-- Rows: M52-01…M52-08. Depends on: nothing open. ~1 week.
-  M52-01…07 are built (8 strategies, RRF blend, recipe composition, both
-  modes wired). M52-08 (shadow-mode evaluation) is open.
+- Rows: M52-01…M52-08. Depends on: nothing open.
+  M52-01…08 are built. M52-08 (shadow-mode evaluation) landed: a third
+  `rec.mode` value that serves `legacy` and records the comparison against
+  `pluggable`, with an operator report at `GET /api/v1/operator/rec/shadow`.
+  M52 is closed.
 
 ### M52-09 — Per-user recommendation engine preference (spec §16.1b, new)
 

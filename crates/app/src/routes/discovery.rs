@@ -47,6 +47,7 @@ pub fn router() -> Router<AppState> {
         .route("/media/reverse-search", post(reverse_search))
         .route("/curator/bounty-queue", get(curator_bounty_queue))
         .route("/operator/affinities", post(set_operator_affinity))
+        .route("/operator/rec/shadow", get(get_shadow_evaluation))
         .nest("/recipes", recipe_routes())
         .nest("/dashboard", dashboard_routes())
 }
@@ -211,57 +212,107 @@ async fn get_discovery(
     // Merge candidates. Branch on rec_mode (spec §16.1a, M52-07):
     // - legacy: blend multi-engine candidates (current behavior)
     // - pluggable: use strategy registry with RRF blend
-    let mut blended: Vec<lorehaven_domain::discovery::Candidate> =
-        if state.config().discovery.rec_mode == "pluggable" {
-            if let Some(ref account_id) = account_id {
-                // M52-09: the reader's stored engine preference narrows the
-                // blend (spec §16.1b). The resolver is the only thing that
-                // reads the preference, so a reader's choice applies here the
-                // same as it applies on every other surface — and when the
-                // operator has since disabled the reader's choice, the
-                // instance blend is used and `choice` says so, rather than a
-                // different engine being substituted without notice.
-                let choice = crate::rec_preference::load_for_pseud(
-                    state.db(),
-                    &state.config().discovery,
-                    session
-                        .as_ref()
-                        .and_then(|s| s.pseud_id.as_ref().map(|p| p.as_uuid())),
-                )
-                .await;
-                let registry = crate::rec_engine::build_registry(&state.config().discovery);
-                let registry = choice.effective_registry(&registry).unwrap_or_else(|| {
-                    crate::rec_engine::build_registry(&state.config().discovery)
-                });
-                let ids = crate::rec_engine::generate_with_registry(
-                    state.db(),
-                    &registry,
-                    account_id,
-                    limit as usize,
-                )
-                .await
-                .map_err(|e| ApiError(AppError::Internal(e)))?;
-                ids.into_iter()
-                    .map(|id| lorehaven_domain::ids::WorkId::from_str(&id))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| ApiError(AppError::Internal(e.into())))?
-                    .into_iter()
-                    .enumerate()
-                    .map(|(idx, work_id)| lorehaven_domain::discovery::Candidate {
-                        work_id,
-                        score: (limit - idx as i64),
-                        reason: "strategy".into(),
-                        taste_signal: 0.0,
-                        diversity_class: 0.5,
-                    })
-                    .collect()
-            } else {
-                vec![]
-            }
+    // - shadow (M52-08): serve `legacy`, and additionally run the pluggable
+    //   registry to record how the two rankings would differ.
+    //
+    // Shadow is the third value rather than a flag on either of the other two,
+    // because the spec's guarantee is about what a reader receives: in shadow
+    // mode the reader receives the legacy ranking, always, and the comparison is
+    // an observation made alongside it. Making it a boolean on `pluggable`
+    // would mean the flag decided which ranking was served, which is the one
+    // thing it must not.
+    let mode = state.config().discovery.rec_mode.as_str();
+
+    let mut blended: Vec<lorehaven_domain::discovery::Candidate> = if mode == "pluggable" {
+        if let Some(ref account_id) = account_id {
+            // M52-09: the reader's stored engine preference narrows the
+            // blend (spec §16.1b). The resolver is the only thing that
+            // reads the preference, so a reader's choice applies here the
+            // same as it applies on every other surface — and when the
+            // operator has since disabled the reader's choice, the
+            // instance blend is used and `choice` says so, rather than a
+            // different engine being substituted without notice.
+            let choice = crate::rec_preference::load_for_pseud(
+                state.db(),
+                &state.config().discovery,
+                session
+                    .as_ref()
+                    .and_then(|s| s.pseud_id.as_ref().map(|p| p.as_uuid())),
+            )
+            .await;
+            let registry = crate::rec_engine::build_registry(&state.config().discovery);
+            let registry = choice
+                .effective_registry(&registry)
+                .unwrap_or_else(|| crate::rec_engine::build_registry(&state.config().discovery));
+            let ids = crate::rec_engine::generate_with_registry(
+                state.db(),
+                &registry,
+                account_id,
+                limit as usize,
+            )
+            .await
+            .map_err(|e| ApiError(AppError::Internal(e)))?;
+            ids.into_iter()
+                .map(|id| lorehaven_domain::ids::WorkId::from_str(&id))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| ApiError(AppError::Internal(e.into())))?
+                .into_iter()
+                .enumerate()
+                .map(|(idx, work_id)| lorehaven_domain::discovery::Candidate {
+                    work_id,
+                    score: (limit - idx as i64),
+                    reason: "strategy".into(),
+                    taste_signal: 0.0,
+                    diversity_class: 0.5,
+                })
+                .collect()
         } else {
-            let blended = lorehaven_domain::discovery::blend(&engines);
-            blended.into_iter().take(limit as usize).collect()
-        };
+            vec![]
+        }
+    } else {
+        // `legacy` and `shadow` serve the same ranking. The difference is that
+        // `shadow` also runs the pluggable registry and records the
+        // comparison, below.
+        let blended = lorehaven_domain::discovery::blend(&engines);
+        blended.into_iter().take(limit as usize).collect()
+    };
+
+    // Shadow evaluation (spec §16.1a, M52-08). Runs on the same candidate set
+    // the reader was served, which is what makes the comparison meaningful, and
+    // runs *after* the served ranking is fixed so nothing here can influence it.
+    //
+    // A failure to evaluate is logged and swallowed, deliberately: a shadow
+    // evaluation that broke discovery would be worse than no evaluation, since
+    // the reader is owed a feed either way. The mode's contract is "the reader
+    // sees legacy", and that holds even when the comparison cannot be made.
+    if mode == "shadow" {
+        if let Some(ref account_id) = account_id {
+            let served: Vec<String> = blended.iter().map(|c| c.work_id.to_string()).collect();
+            let registry = crate::rec_engine::build_registry(&state.config().discovery);
+            match crate::rec_shadow::evaluate(
+                state.db(),
+                &registry,
+                account_id,
+                &served,
+                limit as usize,
+                crate::rec_shadow::next_sample(),
+            )
+            .await
+            {
+                Ok(report) => {
+                    tracing::info!(target: "rec_shadow", "{}", report.summary());
+                    crate::rec_shadow::record(report);
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        target: "rec_shadow",
+                        %error,
+                        "shadow evaluation failed; the reader still receives the legacy ranking"
+                    );
+                }
+            }
+        }
+    }
 
     // Apply half-life ranking (silent reordering, spec §41.1).
     if state.config().discovery.enable_half_life {
@@ -929,6 +980,35 @@ async fn get_admin_taste_profile_history(
     Ok(Json(serde_json::json!({
         "items": items,
         "current_version": current.as_ref().map(|c| c.version),
+    })))
+}
+
+/// `GET /operator/rec/shadow` — the latest shadow evaluation (spec §16.1a, M52-08).
+///
+/// Operator-only, and deliberately not folded into the discovery response: the
+/// feed is served to signed-out readers, and a field saying "the ranker you
+/// would have got differs on 40% of positions" is instance-tuning information
+/// that does not belong in an anonymous payload. §0.4's rule is that an
+/// instance's curation is not the reader's business, and that holds for the
+/// diagnostics about it too.
+///
+/// Answers 200 with `evaluated: false` when shadow mode has not run, which is
+/// the honest answer for a fresh process — as distinct from running and having
+/// found nothing.
+async fn get_shadow_evaluation(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_operator(&state, &user)?;
+    let mode = state.config().discovery.rec_mode.as_str();
+    let evaluations = crate::rec_shadow::EVALUATIONS.load(std::sync::atomic::Ordering::Relaxed);
+    let latest = crate::rec_shadow::latest();
+    Ok(Json(serde_json::json!({
+        "mode": mode,
+        "shadow_active": mode == "shadow",
+        "evaluations_this_process": evaluations,
+        "evaluated": latest.is_some(),
+        "latest": latest,
     })))
 }
 
