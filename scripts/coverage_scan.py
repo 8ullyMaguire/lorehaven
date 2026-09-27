@@ -17,6 +17,20 @@ A grouped import brings *bare* function names into scope, so those names count
 as references too. Omitting that case made this report 348/831 when the true
 figure was 358 -- the module it missed had just been finished.
 
+A third shape is a call from *within* crates/db/src, reaching a module through
+another module's public surface:
+
+    crates/db/src/lib.rs:  migrate::apply(self).await
+
+A function reached only that way reads as uncovered here, which is wrong rather
+than merely pessimistic: `migrate` is the one module that is never worth testing
+directly, because every `TestDb::connect` in every suite runs it. Crediting
+intra-crate calls keeps the number honest in the other direction too -- a module
+that is genuinely dead is still genuinely dead, because nothing in the crate
+calls it either.
+
+    python3 scripts/coverage_scan.py
+
     python3 scripts/coverage_scan.py
 """
 
@@ -65,6 +79,13 @@ def references(aliases):
                 item = item.strip().split(" as ")[-1].strip()
                 if item and re.fullmatch(r"\w+", item):
                     refs.add((item, item))
+    # Calls from inside the crate itself. `migrate` is reached through
+    # `Database::migrate` in lib.rs rather than from a test, and is run by every
+    # harness that connects.
+    for path in glob.glob(DB_SRC) + glob.glob(os.path.join(BASE, "crates/db/src/**/*.rs")):
+        src = open(path).read()
+        for m in re.finditer(r"\b(\w+)::(\w+)\s*\(", src):
+            refs.add((m.group(1), m.group(2)))
     del aliases
     return refs
 
