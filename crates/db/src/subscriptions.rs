@@ -414,11 +414,19 @@ pub async fn ai_training_opt_in(
             .execute(db.sqlite_pool().expect("sqlite")).await?;
         }
         Backend::Postgres => {
+            // `opt_in` is a `BIGINT` column holding 0 or 1 (house rule: every
+            // bind is String or i64), and sqlx will not coerce a Rust `bool`
+            // into one. SQLite stores the bool as 0/1 without complaint, so
+            // only the PostgreSQL run catches this: with a plain `.bind(opt_in)`
+            // every AI-training consent write on a PostgreSQL instance was a
+            // 500 (42804, "column opt_in is of type bigint but expression is of
+            // type boolean"). `i64::from` is the same conversion the `events`
+            // module uses for its own boolean column.
             sqlx::query(
                 "INSERT INTO author_ai_training (pseud_id, opt_in, updated_at) VALUES ($1, $2, $3)
                  ON CONFLICT(pseud_id) DO UPDATE SET opt_in = excluded.opt_in, updated_at = excluded.updated_at"
             )
-            .bind(pseud_id).bind(opt_in).bind(&now)
+            .bind(pseud_id).bind(i64::from(opt_in)).bind(&now)
             .execute(db.postgres_pool().expect("postgres")).await?;
         }
     }
@@ -463,12 +471,15 @@ pub async fn ai_training_status(db: &Database, pseud_id: &str) -> Result<bool, s
             Ok(r.unwrap_or(0) != 0)
         }
         Backend::Postgres => {
-            let r: Option<bool> =
+            // `opt_in` is BIGINT (0/1), so it is read as an i64 and compared
+            // against 0 exactly as the SQLite arm does. sqlx cannot decode a
+            // BIGINT column into a `bool`.
+            let r: Option<i64> =
                 sqlx::query_scalar("SELECT opt_in FROM author_ai_training WHERE pseud_id = $1")
                     .bind(pseud_id)
                     .fetch_optional(db.postgres_pool().expect("postgres"))
                     .await?;
-            Ok(r.unwrap_or(false))
+            Ok(r.unwrap_or(0) != 0)
         }
     }
 }
@@ -506,7 +517,12 @@ pub async fn ai_training_opt_out_delayed(
                 .execute(db.sqlite_pool().expect("sqlite")).await?;
         }
         Backend::Postgres => {
-            sqlx::query("UPDATE author_ai_training SET opt_in = 0, updated_at = $1 + ($2 || ' seconds')::interval WHERE pseud_id = $3")
+            // `updated_at` is a TEXT column (the whole schema stores
+            // timestamps as RFC 3339 text), so PostgreSQL has no `text +
+            // interval` operator and the arithmetic has to happen in SQL
+            // before the value is cast back to text. Doing the addition on the
+            // bound parameter -- the obvious form -- is a 42883 on every call.
+            sqlx::query("UPDATE author_ai_training SET opt_in = 0, updated_at = to_char(($1::timestamptz + ($2 || ' seconds')::interval), 'YYYY-MM-DD\"T\"HH24:MI:SSOF') WHERE pseud_id = $3")
                 .bind(&now).bind(delay_seconds).bind(pseud_id)
                 .execute(db.postgres_pool().expect("postgres")).await?;
         }
@@ -531,7 +547,12 @@ pub async fn ai_training_opt_out_delayed_tx(
         }
         Backend::Postgres => {
             let mut tx = db.postgres_pool().expect("postgres").begin().await?;
-            sqlx::query("UPDATE author_ai_training SET opt_in = 0, updated_at = $1 + ($2 || ' seconds')::interval WHERE pseud_id = $3")
+            // `updated_at` is a TEXT column (the whole schema stores
+            // timestamps as RFC 3339 text), so PostgreSQL has no `text +
+            // interval` operator and the arithmetic has to happen in SQL
+            // before the value is cast back to text. Doing the addition on the
+            // bound parameter -- the obvious form -- is a 42883 on every call.
+            sqlx::query("UPDATE author_ai_training SET opt_in = 0, updated_at = to_char(($1::timestamptz + ($2 || ' seconds')::interval), 'YYYY-MM-DD\"T\"HH24:MI:SSOF') WHERE pseud_id = $3")
                 .bind(&now).bind(delay_seconds).bind(pseud_id)
                 .execute(&mut *tx).await?;
             tx.commit().await?;
@@ -561,9 +582,17 @@ pub async fn list_ai_training_statuses(db: &Database) -> Result<Vec<(String, boo
             let rows = sqlx::query("SELECT pseud_id, opt_in FROM author_ai_training")
                 .fetch_all(db.postgres_pool().expect("postgres"))
                 .await?;
+            // Same reason as the write: `opt_in` is BIGINT, so it decodes as
+            // an i64 and is compared against 0. Asking sqlx for a `bool` here
+            // fails on the read path even once the write is fixed.
             Ok(rows
                 .into_iter()
-                .map(|r| (r.get::<String, _>("pseud_id"), r.get::<bool, _>("opt_in")))
+                .map(|r| {
+                    (
+                        r.get::<String, _>("pseud_id"),
+                        r.get::<i64, _>("opt_in") != 0,
+                    )
+                })
                 .collect())
         }
     }
