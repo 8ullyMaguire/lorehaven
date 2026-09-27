@@ -62,6 +62,43 @@ return but errors rather than returning `false`. Both are typed
 `Result<...>` with a boolean in the signature, so callers have to handle the
 same condition two ways.
 
+### M31-D03 · `migrate_comments_to_topic` is not transactional
+
+The tool links a topic, then loops over the work's comments: for each one it
+creates a forum post and soft-deletes the original. Those two writes and the
+per-comment loop run outside any transaction, so a failure part-way leaves some
+comments moved and some not, with a topic already created. It is also
+destructive to the comment bodies (replaced with a tombstone), so a mid-way
+failure loses text that was never successfully copied.
+
+Re-running is safe -- already-migrated comments are soft-deleted and skipped --
+so recovery is possible, but it is manual. Wrapping the loop in one transaction
+is the obvious fix and the module's own design points at it (`link_topic` and
+`create_post_with_timestamp` both take `&Database`, not a `&mut Transaction`, so
+they would need transaction-aware variants first).
+
+Idempotency and ordering are pinned by `migrating_twice_moves_nothing_the_second_time`,
+`each_comment_becomes_a_post_with_its_text` and
+`a_post_keeps_the_comment_s_author_and_timestamp`.
+
+### M31-D02 · an unreadable `discussion_mode` is indistinguishable from a deleted work
+
+`work_discussion_mode` returns `Option<WorkDiscussionMode>` and builds it with
+`value.and_then(|v| WorkDiscussionMode::parse(&v))`, so a stored mode that
+`parse` does not recognise collapses into the same `None` as "no row" -- which
+is also what a soft-deleted work returns. A caller cannot tell a corrupt value
+from an absent one, and falls back to the default (`CommentsOnly`).
+
+Failing that way is the safe direction: an unreadable mode does not silently
+become `thread_only`, which would move a work's discussion out from under its
+readers. So this is logged rather than fixed -- the fix is a second return
+shape (`Result<Option<Mode>>` with a distinct "unreadable" arm) and that changes
+every call site. Note the column is `NOT NULL DEFAULT 'comments_only'`
+(0038), so "unset" is only reachable via a deleted work.
+
+Pinned by `an_unreadable_stored_mode_reads_as_absent` and
+`a_soft_deleted_work_is_not_readable_and_not_writable`.
+
 ### M68-D21 · `increment_counter` interpolates a caller-supplied column name
 
 `work_metrics::increment_counter(db, work_id, column, delta)` is `pub`, takes
