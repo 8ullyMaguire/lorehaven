@@ -2129,7 +2129,29 @@ Writing the tests turned up a suite-wide bug: `vi.clearAllMocks()` wipes the
 later test mounting a page in the error state — passing by asserting on an
 error panel. Fixed in `beforeEach`.
 
+### Two more, found by the full-suite gate
+
+Neither was M54's, and both would have been re-run as flakes rather than read.
+
+**`vote_decay_parity` shared one SQLite file between its six tests.** Its
+`scratch()` was the only one in the suite keyed on a bare nanosecond timestamp —
+no process id, no thread id. Two tests starting in the same tick got the same
+name and therefore the same `lorehaven.sqlite`; the second connection then failed
+at *connect* with `database is locked`, and the message pointed at a scratch
+directory rather than at anything the file does. It now uses an atomic counter
+through `test_support::scratch_dir`, which is also the house convention. 5/5
+where it had been intermittent.
+
+**`milestone_5`'s cancel-mid-flight test never exercised its own claim.** It slept
+120ms and cancelled, against a 12-step 40ms-per-step job. In isolation that is
+generous; under the full suite the worker's first sleep could elapse before step
+1, so the job was cancelled having done nothing and `checkpoint` was `None`. It
+now polls for the checkpoint before cancelling, so the premise is an assertion
+rather than a hope — and a worker that never checkpoints fails with a clear
+reason instead of a confusing `None` ten lines later.
+
 ### Where it stands
+
 
 * Part A is complete. `cargo fmt --all --check`, `cargo clippy --workspace
   --all-targets` and `cargo test --workspace --no-fail-fast` on **both** backends
