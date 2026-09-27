@@ -29,6 +29,37 @@ pub type RecStrategyFn = Arc<
 /// A factory that creates a strategy by name.
 pub type StrategyFactory = Arc<dyn Fn() -> RecStrategyFn + Send + Sync>;
 
+/// What one strategy contributed to a blend, in its own ranking order.
+///
+/// Produced by `RecRegistry::generate_traced` and consumed by shadow mode
+/// (spec §16.1a, M52-08). `produced` is separate from `ranked.len()` only in
+/// intent: it is recorded before the ranking list is built, so a strategy whose
+/// results were all dropped by the cap is still visible as having produced
+/// them. A strategy that silently contributes nothing is the finding an operator
+/// most needs before switching modes, and it is invisible in the blended output.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StrategyContribution {
+    /// The registered strategy name.
+    pub name: String,
+    /// How many work ids the strategy returned.
+    pub produced: usize,
+    /// Its ranking as `(work_id, RRF contribution)`, best first.
+    pub ranked: Vec<(String, f64)>,
+}
+
+/// One registry run: the blend, plus every strategy's own contribution.
+///
+/// The two halves are the point. `blended` is what a reader would be shown;
+/// `per_strategy` is what an operator needs in order to decide whether the
+/// blend is worth switching on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecRunReport {
+    /// The RRF-blended, capped ranking — identical to `RecRegistry::generate`.
+    pub blended: Vec<String>,
+    /// Each registered strategy's own contribution, in registration order.
+    pub per_strategy: Vec<StrategyContribution>,
+}
+
 /// Registry of recommendation strategies with RRF blending.
 ///
 /// `Clone` because a reader's stored preference (spec §16.1b) narrows the
@@ -132,15 +163,53 @@ impl RecRegistry {
     }
 
     pub async fn generate(&self, db: &Database, ctx: RecContext) -> Result<Vec<String>> {
+        Ok(self.generate_traced(db, ctx).await?.blended)
+    }
+
+    /// Run every strategy and report what each one contributed, alongside the
+    /// blend they produce.
+    ///
+    /// Shadow mode (spec §16.1a, M52-08) is the consumer: an operator deciding
+    /// whether to switch from `legacy` to `pluggable` needs to know not just
+    /// *whether* the two orders differ but *why*. A per-strategy breakdown
+    /// answers that — a strategy returning nothing, a strategy returning the
+    /// same list as every other one, and a strategy that is outscored are three
+    /// different findings, and the blended list alone collapses them into one.
+    ///
+    /// The blend itself is byte-for-byte what `generate` returns: both call
+    /// this method, so shadow mode cannot measure a different computation than
+    /// the one it would switch to. That is the whole point of evaluating "on the
+    /// same candidate sets".
+    ///
+    /// A failing strategy still propagates its error, as in `generate` — a
+    /// shadow evaluation that silently swallowed a broken strategy would be
+    /// reporting a green comparison of two things where one never ran.
+    pub async fn generate_traced(&self, db: &Database, ctx: RecContext) -> Result<RecRunReport> {
         let mut scores: HashMap<String, f64> = HashMap::new();
         let mut _seen_set: HashSet<String> = ctx.seen.iter().cloned().collect();
+        let mut per_strategy: Vec<StrategyContribution> = Vec::new();
 
-        for (_name, strategy) in &self.strategies {
+        for (name, strategy) in &self.strategies {
             let ranked = strategy(db, ctx.clone()).await?;
             for (rank, work_id) in ranked.iter().enumerate() {
                 let entry = scores.entry(work_id.clone()).or_insert(0.0);
                 *entry += 1.0 / (self.k + (rank + 1) as f64);
             }
+            // Recorded before the `for work_id in ranked` loop below consumes it,
+            // so the count is the strategy's real contribution rather than a
+            // length of an already-moved value.
+            let produced = ranked.len();
+            let mut scored: Vec<(String, f64)> = ranked
+                .iter()
+                .enumerate()
+                .map(|(rank, id)| (id.clone(), 1.0 / (self.k + (rank + 1) as f64)))
+                .collect();
+            scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            per_strategy.push(StrategyContribution {
+                name: name.clone(),
+                produced,
+                ranked: scored,
+            });
             for work_id in ranked {
                 _seen_set.insert(work_id);
             }
@@ -148,7 +217,10 @@ impl RecRegistry {
 
         let mut ranked: Vec<(String, f64)> = scores.into_iter().collect();
         ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        Ok(ranked.into_iter().map(|(id, _)| id).take(ctx.cap).collect())
+        Ok(RecRunReport {
+            blended: ranked.into_iter().map(|(id, _)| id).take(ctx.cap).collect(),
+            per_strategy,
+        })
     }
 }
 

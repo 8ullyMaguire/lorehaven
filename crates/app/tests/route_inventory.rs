@@ -1206,6 +1206,15 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/operator/affinities",
         audience: Audience::Authenticated,
     },
+    // M52-08: the shadow evaluation is instance-tuning diagnostics about the
+    // ranker, so it is an operator door like the settings it reports on.
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "get_shadow_evaluation",
+        method: "GET",
+        path: "/operator/rec/shadow",
+        audience: Audience::Authenticated,
+    },
     // ------------------------------------------------------------------
     // Browse — sort vocabulary surfaces (spec §43.1)
     // ------------------------------------------------------------------

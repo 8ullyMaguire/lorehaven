@@ -394,8 +394,17 @@ pub struct DiscoveryConfig {
     pub half_life_min_age_days: i64,
     /// Window size in days for both recent and first-window reader counts.
     pub half_life_window_days: i64,
-    /// Recommendation mode: `legacy` (current `discovery::blend`) or `pluggable`
-    /// (strategy registry with RRF blend). Default: legacy (spec §16.1a).
+    /// Recommendation mode (spec §16.1a). One of:
+    ///
+    /// - `legacy` — `discovery::blend` over the multi-engine candidates. Default.
+    /// - `pluggable` — the strategy registry with RRF blend.
+    /// - `shadow` — serves `legacy` *and* runs the pluggable registry, recording
+    ///   how the two rankings would differ. What a reader receives is unchanged;
+    ///   the comparison is the product. The spec requires evaluation to precede
+    ///   a switch, and this is how that is done without switching.
+    ///
+    /// Validated in `Config::validate`, so a misspelling is refused at startup
+    /// rather than silently meaning `legacy`.
     pub rec_mode: String,
     /// RRF k constant for the strategy blend (spec §16.1a). Default: 60.
     pub rec_rrf_k: f64,
@@ -1982,6 +1991,22 @@ impl Config {
         }
         if self.site.name.trim().is_empty() {
             anyhow::bail!("site.name must not be empty");
+        }
+        // `rec.mode` is a three-valued enum spelled as a String, and a typo here
+        // would otherwise be silent and load-bearing: the route dispatches on
+        // `== "pluggable"`, so `Pluggable`, `pluggable ` or `shadow-mode` would
+        // all fall through to the legacy branch. An operator who wrote
+        // `plugggable` in the config and saw legacy behaviour would have no way
+        // to tell a typo from a bug. Named values in the error, for the same
+        // reason §0.4.7's engine validation refuses rather than falling back.
+        if !matches!(
+            self.discovery.rec_mode.as_str(),
+            "legacy" | "pluggable" | "shadow"
+        ) {
+            anyhow::bail!(
+                "discovery.rec_mode must be one of legacy, pluggable, shadow, got {:?}",
+                self.discovery.rec_mode
+            );
         }
         // Perceptual dedup settings (spec §32.7.2). A threshold outside the
         // 1..=32 domain would either match nothing or match everything, and both
