@@ -338,7 +338,25 @@ mod tests {
     // milestone_15 invented three account uuids and PostgreSQL
     // answered 23503 where SQLite answered nothing.
     //
-    // `topic_work_links` was here and is not any more: migration 0038 created
+    // `works_index`, `works_index_terms` and `topic_work_links` were all here
+    // and are not any more. Each is a table the PostgreSQL migrations gave a
+    // foreign key and the SQLite twin silently omitted, and each was found by
+    // writing the suite for a module that had none:
+    //
+    //   works_index, works_index_terms -- migration 0011; a deleted work left
+    //     its index rows behind on SQLite, and the terms of a removed work
+    //     stayed searchable. See `deleting_a_work_cascades_its_index` in
+    //     crates/app/tests/milestone_15_search.rs.
+    //   topic_work_links -- migration 0038; an orphan link was insertable on
+    //     SQLite and impossible on PostgreSQL. See
+    //     `a_link_to_a_missing_work_is_refused` in
+    //     crates/app/tests/milestone_38_work_backlink.rs.
+    //
+    // All three are fixed in the original migration rather than a forward one,
+    // since each predates every release tag. This list is the check that finds
+    // them: an entry naming a divergence that no longer exists fails on purpose.
+    //
+    // `topic_work_links` in particular: migration 0038 created
     // it on SQLite without the two foreign keys it declares on PostgreSQL, so
     // an orphan link was insertable on one engine and impossible on the other.
     // 0038 is fixed in place -- it predates every release tag, so no deployed
@@ -357,8 +375,6 @@ mod tests {
         "fk:work_media_references",
         "fk:work_reactions",
         "fk:work_tags",
-        "fk:works_index",
-        "fk:works_index_terms",
     ];
 
     fn declared_schema(sql: &str) -> Schema {
