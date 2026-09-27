@@ -329,5 +329,3 @@ impl ReportSlot {
         });
     }
 }
-
-    
