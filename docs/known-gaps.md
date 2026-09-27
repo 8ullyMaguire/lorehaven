@@ -100,6 +100,45 @@ rather than a silent hole. Deciding whether the statement *should* bump it is a
 one-word change plus a comment, but it belongs with whoever first adds a
 `version`-based writer, not with a test suite.
 
+### M41-D01 · `half_life_of` reported an unscored work as a hard zero
+
+`half_life_of` read the `half_life_bp` column with an untyped
+`query_scalar::<i64>`. On SQLite that decodes a NULL row as `Some(0)`, so
+every work that had never been scored came back as a real score of zero —
+indistinguishable from "scored, and the score is zero". `half_life_map` used
+`query_as` and was always correct, so the two functions disagreed about the
+same work.
+
+The fix binds the scalar as `Option<i64>` and flattens, so NULL survives the
+decode. Both backends also needed a `CAST(half_life_bp AS BIGINT)`: the column
+is `INTEGER` (INT4 on PostgreSQL) and sqlx will not decode INT4 into an `i64`.
+
+### M41-D02 · Every timestamp comparison in the longevity module compared text to a timestamp
+
+All timestamp columns in this schema are RFC 3339 `TEXT` (ADR 0004), rendered
+by `identity::format_rfc3339` as `2026-09-27T05:11:23.652819138Z`. The module
+compared those strings against SQL date functions, and the two backends failed
+differently:
+
+- **SQLite** — `w.created_at < datetime('now', '-30 days')` compares a
+  `T`-separated, `Z`-suffixed string against a **space**-separated one. `T`
+  (0x54) sorts after ` ` (0x20), so a same-day work fails the test even though
+  it is genuinely older. The filter silently dropped recent works rather than
+  erroring. Fixed with `datetime(w.created_at)`, which parses the text.
+- **PostgreSQL** — `w.created_at < NOW() - INTERVAL ...` has no implicit
+  text-to-timestamp cast, so it is a type error, not a comparison. The
+  scheduled job would have failed on every run in production while passing
+  locally. Fixed with an explicit `::timestamptz` cast.
+
+Four separate comparisons were affected: work eligibility, the trailing-window
+reader count, and both bounds of the opening-window count. This is the second
+time in this codebase that a TEXT timestamp has been compared directly to a SQL
+date function, and the failure mode is always silent on SQLite.
+
+`recompute_half_life` runs on a schedule from `worker.rs` and `half_life_map`
+feeds discovery ranking, so the eligibility filter was deciding which works
+could be scored at all in production.
+
 ### M43-D01 · `compute_theme_from_bookmarks` has never worked, and has no caller
 
 The function that derives an instance's theme vector from what its members have
