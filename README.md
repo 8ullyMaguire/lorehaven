@@ -10,15 +10,18 @@ all live in this repository.
 
 ## Status
 
-**2026-09-25 (ADR 0024):** this repository is the base for the consolidated
-from-scratch specification. The honest one-line status, re-derived from
-`docs/requirements.csv`: **196 of 257 requirement rows implemented**
-(176 locally-tested, 20 fully-tested), **57 planned**, **4 deliberately
-unsupported**, tags through `v0.51.0`. What remains is planned in
-`docs/plans/remaining-work.md`: the recommendation strategy registry (M52),
-adapter porting batches (M53+), the companion bot (M54), OpenAPI publication
-(M55), the metadata exchange (M57, new — see below), and the M45/M47 planned
-rows (M56).
+**`docs/goal.md` is the standing brief** — build to completion, no stubs, and
+the gates every change passes before it is committed.
+
+This repository is the base for the consolidated from-scratch specification. The
+honest one-line status, re-derived from `docs/requirements.csv` (640 rows):
+**583 implemented** (285 fully-tested, 115 verified E2E, 183 built but not
+verified end to end), **53 planned**, **4 deliberately unsupported**, tags
+through `v0.51.0`. What remains is planned in `docs/plans/remaining-work.md`:
+the metadata exchange endpoint (M57), the companion bot (M54), the gated adapters
+(M53), and the M45 block — 45 of the 53 rows, and the dominant term in any
+estimate. `docs/plans/bots-extension.md` covers the bot core, the separate
+Lorebook desktop app, and a Chromium extension that does not exist yet.
 
 **The metadata exchange** (spec §11.17, §15.17, §19.14, §2.3.1) was adopted
 2026-09-25 after triaging an external proposal. Readers may offer metadata
@@ -107,6 +110,7 @@ migrations/
   sqlite/     one set per dialect, kept identical by a test
   postgres/
 docs/
+  goal.md               the standing goal: build to completion, no stubs, and the gates
   adr/                  architecture decision records
   design/THEME.md       "The Reading Room" — the visual specification
   spec.md               the 18-milestone implementation plan every decision is measured against
@@ -116,6 +120,7 @@ docs/
   verification.md       what has actually been run, and what has not
   plans/
     remaining-work.md           the forward plan: what is left, in what order
+    bots-extension.md           the bot core, the local desktop app, and the Chromium extension
     metadata-exchange-triage.md an external proposal reviewed, corrected and partly adopted
     junior-implementation-plan.md  the historical milestone map
 ```
