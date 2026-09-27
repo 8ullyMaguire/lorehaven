@@ -291,11 +291,150 @@ impl TestDb {
 
     /// A query string for the active backend: SQLite takes `?` placeholders
     /// as written; PostgreSQL needs `$n`, which this rewrites.
+    ///
+    /// This is the raw escape hatch, and it handles placeholders only. A uuid
+    /// column additionally needs a `::text` cast on PostgreSQL — for the
+    /// comparison *and* for the projection — and that cast is a **syntax error**
+    /// on SQLite, so no single query string can satisfy both engines. A test
+    /// that reads a uuid column should use [`Self::fetch_text_column`], which
+    /// builds the query per backend and is the reason that function exists.
     pub fn sql(&self, query: &str) -> String {
         match self.db.backend() {
             Backend::Postgres => lorehaven_db::rewrite_placeholders(query),
             Backend::Sqlite => query.to_string(),
         }
+    }
+
+    /// Fetch one text column from one row, matched by one column.
+    ///
+    /// The dialect handling lives here rather than in the caller's SQL, because
+    /// the two engines disagree in *opposite* directions and a caller cannot
+    /// write one query that satisfies both:
+    ///
+    /// - a uuid column (`account_id`, `pseud.id`) is `TEXT` on SQLite and
+    ///   `UUID` on PostgreSQL, so the same `SELECT` decodes on one arm and fails
+    ///   on the other with `mismatched types; Rust type String (as SQL type
+    ///   TEXT) is not compatible with SQL type UUID`;
+    /// - `col::text` is the fix on PostgreSQL and a **syntax error** on SQLite,
+    ///   so the cast cannot simply be written into the query.
+    ///
+    /// Writing `SELECT col::text` in the test fixed PostgreSQL and broke
+    /// SQLite; writing `SELECT col` fixed SQLite and broke PostgreSQL. Hence
+    /// this takes the column as a name and builds the query per backend.
+    /// Table and column names are interpolated rather than bound because
+    /// PostgreSQL cannot bind an identifier — callers pass literals, and these
+    /// are test queries, not a user-facing surface.
+    pub async fn fetch_text_column(
+        &self,
+        table: &str,
+        column: &str,
+        match_column: &str,
+        value: &str,
+    ) -> Option<String> {
+        // A uuid projection must become text on PostgreSQL. `token_hash`,
+        // `state` and timestamps are genuinely TEXT on both, and casting them
+        // would be harmless but is not needed.
+        let projection = if self.is_postgres() && is_uuid_column(column) {
+            format!("{column}::text")
+        } else {
+            column.to_owned()
+        };
+        // The comparison needs the same treatment: `uuid = text` has no
+        // operator.
+        let predicate = if self.is_postgres() && is_uuid_column(match_column) {
+            format!("{match_column}::text = ?")
+        } else {
+            format!("{match_column} = ?")
+        };
+        let sql = self.sql(&format!(
+            "SELECT {projection} FROM {table} WHERE {predicate}"
+        ));
+        let row: Option<(Option<String>,)> = match self.db.backend() {
+            Backend::Sqlite => {
+                sqlx::query_as(&sql)
+                    .bind(value)
+                    .fetch_optional(self.db.sqlite_pool().expect("sqlite"))
+                    .await
+            }
+            Backend::Postgres => {
+                sqlx::query_as(&sql)
+                    .bind(value)
+                    .fetch_optional(self.db.postgres_pool().expect("postgres"))
+                    .await
+            }
+        }
+        .expect("scalar query");
+        row.and_then(|r| r.0)
+    }
+
+    /// Fetch one nullable text column by any column value, whichever backend.
+    ///
+    /// [`Self::fetch_text`] is keyed to `id`; this one binds wherever the caller
+    /// says, for the columns `fetch_text` cannot address —
+    /// `api_tokens.token_hash`, a `state` column, a `last_used_at` timestamp.
+    ///
+    /// On PostgreSQL the query is rewritten twice, and the second rewrite is
+    /// the one that bites:
+    ///
+    /// - `?` becomes `$n`.
+    /// - a uuid column compared to a text bind becomes `col::text = ?`.
+    ///   `WHERE account_id = $1` with a text bind is `operator does not exist:
+    ///   uuid = text`.
+    ///
+    /// The caller must still cast any uuid column it **selects** into text
+    /// (`SELECT account_id::text`). This cannot be done here: whether a
+    /// projection decodes as text is the caller's decision, and guessing would
+    /// mean silently rewriting the columns a test is asserting on. That
+    /// asymmetry is the whole trap — casting the *bind* is the codebase's habit
+    /// and does nothing for a *projection*.
+    ///
+    /// The reason this exists at all: a test reaching for `sqlite_pool()`
+    /// directly passes locally and fails on the PG run, which is the worst way
+    /// for it to fail, because the signal arrives after the work is done.
+    pub async fn fetch_text_by(&self, query: &str, value: &str) -> Option<String> {
+        let sql = self.sql(query);
+        let row: Option<(Option<String>,)> = match self.db.backend() {
+            Backend::Sqlite => {
+                sqlx::query_as(&sql)
+                    .bind(value)
+                    .fetch_optional(self.db.sqlite_pool().expect("sqlite"))
+                    .await
+            }
+            Backend::Postgres => {
+                sqlx::query_as(&sql)
+                    .bind(value)
+                    .fetch_optional(self.db.postgres_pool().expect("postgres"))
+                    .await
+            }
+        }
+        .expect("scalar query");
+        row.and_then(|r| r.0)
+    }
+
+    /// Count rows matching one bound value, whichever backend.
+    ///
+    /// `fetch_text_by` answers "what is in this column"; this answers "is
+    /// there such a row at all", which is the question several expiry and
+    /// single-use tests actually need and which `exists` cannot express
+    /// without knowing the id.
+    pub async fn count_by(&self, query: &str, value: &str) -> i64 {
+        let sql = self.sql(query);
+        let row: (i64,) = match self.db.backend() {
+            Backend::Sqlite => {
+                sqlx::query_as(&sql)
+                    .bind(value)
+                    .fetch_one(self.db.sqlite_pool().expect("sqlite"))
+                    .await
+            }
+            Backend::Postgres => {
+                sqlx::query_as(&sql)
+                    .bind(value)
+                    .fetch_one(self.db.postgres_pool().expect("postgres"))
+                    .await
+            }
+        }
+        .expect("count query");
+        row.0
     }
 
     /// Close the database and drop the scratch PostgreSQL database if one
@@ -376,6 +515,36 @@ use axum::Router;
 use serde_json::Value;
 use tower::ServiceExt;
 
+/// Whether this project's schema declares `column` as a uuid.
+///
+/// A uuid column is `TEXT` on SQLite and `UUID` on PostgreSQL, which is the
+/// single fact behind nearly every two-engine test failure in this repo: the
+/// same query decodes on one arm and not the other, or compares with an
+/// operator that exists on only one. The list is deliberately explicit rather
+/// than a heuristic on the name — `id` is a uuid in some tables and TEXT in
+/// others (`link_challenges.code`, `api_tokens.token_hash`), so a name-based
+/// guess would be wrong in both directions.
+fn is_uuid_column(column: &str) -> bool {
+    matches!(
+        column,
+        "id" | "account_id"
+            | "pseud_id"
+            | "pseud"
+            | "token_id"
+            | "bot_id"
+            | "registration_id"
+            | "author_id"
+            | "owner_id"
+            | "user_id"
+            | "post_id"
+            | "work_id"
+            | "item_id"
+            | "parent_id"
+            | "created_by"
+            | "approved_by"
+    )
+}
+
 /// A router plus the cookies it has handed out.
 ///
 /// The cookie jar is the whole point: the app authenticates with a session
@@ -421,7 +590,27 @@ impl TestClient {
         uri: &str,
         body: Option<Value>,
     ) -> (StatusCode, Value) {
+        self.request_with(method, uri, body, None).await
+    }
+
+    /// Issue a request that also carries a bearer token.
+    ///
+    /// The bearer path is separate from the cookie path on purpose: a test that
+    /// wants to prove "a *token* can do this" must not be holding a session
+    /// cookie, or the request succeeds through the session and the token is
+    /// never exercised. `MaybeToken` prefers whichever is present, so a test
+    /// holding both proves nothing about either.
+    pub async fn request_with(
+        &mut self,
+        method: &str,
+        uri: &str,
+        body: Option<Value>,
+        bearer: Option<&str>,
+    ) -> (StatusCode, Value) {
         let mut builder = Request::builder().method(method).uri(uri);
+        if let Some(token) = bearer {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        }
         if !self.cookies.is_empty() {
             let jar = self
                 .cookies
@@ -458,7 +647,25 @@ impl TestClient {
         let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap_or_default();
-        let value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+        // A body that will not parse is surfaced as text, not swallowed.
+        //
+        // `unwrap_or(Value::Null)` made every failing assertion in the M54 suite
+        // print "null" for a response that had a real body: axum's JSON extractor
+        // rejects a malformed payload with a *plain-text* explanation, and this
+        // quietly turned that into `null`. A suite that renders its failures as
+        // `null` is a suite you debug with print statements. The real culprit
+        // this exposed was a test sending a body missing a required field, which
+        // read as "the route does not exist" until the text was visible.
+        let value = if bytes.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+                Value::String(format!(
+                    "<non-JSON body: {e}; raw: {}>",
+                    String::from_utf8_lossy(&bytes[..bytes.len().min(200)])
+                ))
+            })
+        };
         (status, value)
     }
 
@@ -480,20 +687,39 @@ impl TestClient {
             .find(|(k, _)| k == name)
             .map(|(_, v)| v.as_str())
     }
+
+    /// Forget every cookie, so the next request is anonymous.
+    ///
+    /// For a test that has to become a *different* account. A cross-account
+    /// test that keeps the first identity's session and only registers the
+    /// second one is not a cross-account test at all — the caller is still the
+    /// first account, the request succeeds through that session, and the test
+    /// measures nothing. This is not hypothetical: it is how the M54 revoke
+    /// test was first written, and it failed on a sanity assertion only because
+    /// the assertion existed.
+    pub fn clear_cookies(&mut self) {
+        self.cookies.clear();
+    }
 }
+
+/// The password [`register`] and [`sign_in_as`] use.
+///
+/// Public because a test that has to log in again — after becoming a different
+/// account, say — must use the same one `register` used. A test that declares a
+/// second constant with the same value is a value that can drift.
+pub const TEST_PASSWORD: &str = "a-long-enough-passphrase";
 
 /// Register an account through the API and return its id.
 ///
 /// Goes through the real registration route rather than inserting a row, so the
 /// session cookie and the CSRF token are the ones the app itself issued.
 pub async fn register(client: &mut TestClient, email: &str, handle: &str) -> String {
-    const PASSWORD: &str = "a-long-enough-passphrase";
     let (status, body) = client
         .post(
             "/api/v1/auth/register",
             serde_json::json!({
                 "email": email,
-                "password": PASSWORD,
+                "password": TEST_PASSWORD,
                 "handle": handle,
                 "display_name": handle,
                 "age_band": "adult"
@@ -501,6 +727,40 @@ pub async fn register(client: &mut TestClient, email: &str, handle: &str) -> Str
         )
         .await;
     assert_eq!(status, StatusCode::CREATED, "register {handle}: {body}");
+    let (status, me) = client.get("/api/v1/auth/me").await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    me["account"]["id"]
+        .as_str()
+        .expect("account id in /auth/me")
+        .to_owned()
+}
+
+/// Become `email`, registering the account if it does not exist yet.
+///
+/// The registration check asks the database rather than parsing a status code.
+/// A duplicate email comes back `422 VALIDATION_FAILED` with a *field* error —
+/// not `409 CONFLICT` — so a helper that tolerates "created or conflict" is
+/// built on a guess, and in practice it was: asserting `409` meant this could
+/// only ever be called once per account, and it is called at least twice in the
+/// cross-account revoke test (as the intruder, then back as the owner).
+pub async fn sign_in_as(client: &mut TestClient, db: &TestDb, email: &str, handle: &str) -> String {
+    let exists = db
+        .count_by("SELECT COUNT(*) FROM accounts WHERE email = ?", email)
+        .await;
+    if exists == 0 {
+        register(client, email, handle).await;
+    }
+    // Drop the previous identity's cookies: a stale CSRF token left behind
+    // fails the login *after* it succeeded, or worse passes it against the
+    // wrong session.
+    client.clear_cookies();
+    let (status, body) = client
+        .post(
+            "/api/v1/auth/login",
+            serde_json::json!({ "email": email, "password": TEST_PASSWORD }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "login as {email}: {body}");
     let (status, me) = client.get("/api/v1/auth/me").await;
     assert_eq!(status, StatusCode::OK, "{me}");
     me["account"]["id"]

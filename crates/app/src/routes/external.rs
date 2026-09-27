@@ -13,7 +13,7 @@ use lorehaven_db::collaboration;
 use lorehaven_db::content;
 use lorehaven_domain::WorkId;
 
-use crate::auth::MaybeSession;
+use crate::auth::{MaybeSession, MaybeToken};
 use crate::http::{ApiError, ApiResult};
 use crate::routes::works::{actor_for, reading_decision, Reading};
 use crate::state::AppState;
@@ -117,7 +117,27 @@ pub struct IssueTokenBody {
     pub name: String,
     pub kind: String,
     pub scopes: Vec<String>,
+    /// How long the token lives, in seconds (D2).
+    ///
+    /// Optional, and absent means "no expiry" — which is still permitted for a
+    /// token the reader revokes by hand, because that is the pre-existing
+    /// behaviour and a self-managed personal token is not the hazard a bot token
+    /// is. What changed is that the *bot* path (§23.2, A4) must pass an expiry,
+    /// and `register_bot` below refuses to issue one without it.
+    #[serde(default)]
+    pub expires_in_seconds: Option<i64>,
+    /// The pseud this token acts as (§23.1's "explicit acting pseud").
+    #[serde(default)]
+    pub acting_pseud_id: Option<String>,
 }
+
+/// The longest lifetime a caller may request for a token, in seconds.
+///
+/// A year. Long enough for a bot token on a quiet instance that nobody thinks
+/// about, short enough that a token nobody remembers issuing has lapsed before
+/// anyone decides it might matter. A caller wanting longer gets an error naming
+/// the ceiling rather than a token that outlives the instance's memory of it.
+const MAX_TOKEN_TTL_SECONDS: i64 = 31_536_000;
 
 pub async fn issue_token(
     State(state): State<AppState>,
@@ -139,35 +159,149 @@ pub async fn issue_token(
         .collect::<Result<_, _>>()
         .map_err(|e| ApiError(lorehaven_domain::AppError::field("scopes", &e)))?;
 
+    // D2. The refusal names the accepted range rather than clamping, for the
+    // same reason M52-09 refuses an unavailable engine "with the accepted
+    // values named, never a silent fallback" — a clamped expiry is a token
+    // whose lifetime nobody chose and nobody can see.
+    let expires_at = match body.expires_in_seconds {
+        None => None,
+        Some(seconds) if seconds <= 0 => {
+            return Err(ApiError(lorehaven_domain::AppError::field(
+                "expires_in_seconds",
+                "must be greater than zero; omit it for a token that does not expire",
+            )))
+        }
+        Some(seconds) if seconds > MAX_TOKEN_TTL_SECONDS => {
+            return Err(ApiError(lorehaven_domain::AppError::field(
+                "expires_in_seconds",
+                format!("must be at most {MAX_TOKEN_TTL_SECONDS} (one year)"),
+            )))
+        }
+        Some(seconds) => Some(lorehaven_db::identity::in_seconds(seconds)),
+    };
+
     let token = Uuid::new_v4().to_string();
     let token_hash = format!(
         "{:x}",
         Sha256::new().chain_update(token.as_bytes()).finalize()
     );
 
-    let id = lorehaven_db::external::issue_token(
+    // The acting pseud is verified against the caller's own account before it is
+    // stored, rather than trusted. A token that could name any pseud would let
+    // its holder post as someone else's face, which is the conflation §23.1's
+    // "explicit acting pseud" exists to prevent — and a *checked* one is worth
+    // having precisely because the untrusted version is only one missing
+    // predicate away.
+    if let Some(pseud) = body.acting_pseud_id.as_deref() {
+        if !pseud_belongs_to_account(state.db(), pseud, &account)
+            .await
+            .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?
+        {
+            return Err(ApiError(lorehaven_domain::AppError::field(
+                "acting_pseud_id",
+                "that pseud does not belong to your account",
+            )));
+        }
+    }
+
+    let id = lorehaven_db::external::issue_token_acting(
         state.db(),
         &account,
         &body.kind,
         &body.name,
         &token_hash,
         &scopes,
+        expires_at.as_deref(),
+        body.acting_pseud_id.as_deref(),
     )
     .await
     .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
 
-    Ok(Json(json!({ "id": id, "token": token })))
+    // The secret is returned exactly once. The acting pseud and the expiry are
+    // echoed so the caller can see what the token will act as and how long it
+    // will live — §23.1 requires the acting pseud to be explicit, and an issuer
+    // that accepted one without reporting it back has not made it explicit to
+    // anybody.
+    Ok(Json(json!({
+        "id": id,
+        "token": token,
+        "acting_pseud_id": body.acting_pseud_id,
+        "expires_at": expires_at,
+    })))
 }
 
-/// Revoke a token.
+/// Whether `pseud` is one of `account`'s own pseuds, and not deleted.
+async fn pseud_belongs_to_account(
+    db: &lorehaven_db::Database,
+    pseud: &str,
+    account: &str,
+) -> Result<bool, sqlx::Error> {
+    let sql = db.sql(
+        "SELECT id FROM pseuds WHERE id = ? AND account_id = ? AND deleted_at IS NULL",
+        "SELECT id::text FROM pseuds WHERE id = ?::uuid AND account_id = ?::uuid AND deleted_at IS NULL",
+    );
+    let row = match db.backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query_as::<_, (String,)>(&sql)
+                .bind(pseud)
+                .bind(account)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query_as::<_, (String,)>(&sql)
+                .bind(pseud)
+                .bind(account)
+                .fetch_optional(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(row.is_some())
+}
+
+/// Revoke one of the caller's own tokens.
+///
+/// **This handler was an unauthenticated, cross-account denial of service.** It
+/// took `MaybeSession(_user)`, discarded it, and called a query with no account
+/// predicate — so anyone, signed in or not, could revoke anyone's token by id.
+/// Since `expires_at` was also never written, nothing ever stopped them doing
+/// it again. §23.2 leans on this endpoint for "revocation and unlinking", so
+/// the bot's headline security property depended on it working.
+///
+/// The account predicate now lives in SQL (`revoke_token_for_account`) rather
+/// than in a check this handler might forget, and the rows-affected flag is what
+/// lets it answer 404 for a token that is not the caller's without a second
+/// existence query — which would itself disclose that the token exists.
+///
+/// Either a session or a bearer token is accepted, because a reader revoking a
+/// bot's token from a chat client and a client revoking its own token are the
+/// same act on the same row.
 pub async fn revoke_token(
     State(state): State<AppState>,
     Path(token_id): Path<String>,
-    MaybeSession(_user): MaybeSession,
+    MaybeSession(session): MaybeSession,
+    MaybeToken(token): MaybeToken,
 ) -> ApiResult<Json<Value>> {
-    lorehaven_db::external::revoke_token(state.db(), &token_id)
+    // The caller's account from either identity. A session without an
+    // `account_id` is not a caller we can scope a revoke to, so it is a refusal
+    // rather than an empty string that would match no token and report success.
+    let account = session
+        .as_ref()
+        .map(|u| u.account_id.to_string())
+        .or_else(|| token.as_ref().map(|t| t.account_id.to_string()))
+        .unwrap_or_default();
+    if account.is_empty() {
+        return Err(ApiError(lorehaven_domain::AppError::AuthRequired));
+    }
+    let revoked = lorehaven_db::external::revoke_token_for_account(state.db(), &token_id, &account)
         .await
         .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    if !revoked {
+        // 404, not 403: a 403 confirms the token exists.
+        return Err(ApiError(lorehaven_domain::AppError::NotFound {
+            resource: "token",
+        }));
+    }
     Ok(Json(json!({ "revoked": true })))
 }
 

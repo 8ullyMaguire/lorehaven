@@ -229,15 +229,25 @@ async fn api_scope_vocabulary_works() {
         .await
         .expect("resolve token");
     assert!(result.is_some());
-    let (resolved_account_id, resolved_scopes) = result.unwrap();
-    assert_eq!(resolved_account_id, account_id);
-    assert_eq!(resolved_scopes.len(), 2);
-    assert!(resolved_scopes.contains(&"content.read".to_string()));
+    let identity = result.unwrap();
+    assert_eq!(identity.account_id, account_id);
+    assert_eq!(identity.scopes.len(), 2);
+    assert!(identity.scopes.contains(&"content.read".to_string()));
+    // The token's own row id comes back with the resolution, so a caller can
+    // record the use without a second query by hash.
+    assert_eq!(identity.token_id, id);
+    // Issued without an acting pseud, so there is none. Not a fallback to the
+    // account's default: `RequireActor` refuses rather than guessing.
+    assert_eq!(identity.acting_pseud_id, None);
 
-    // Revoke token
-    lorehaven_db::external::revoke_token(harness.tdb.db(), &id)
-        .await
-        .expect("revoke token");
+    // Revoke token — scoped to the owning account (D1). The predicate lives in
+    // the query, so this is the only shape the function has.
+    assert!(
+        lorehaven_db::external::revoke_token_for_account(harness.tdb.db(), &id, &account_id)
+            .await
+            .expect("revoke token"),
+        "the owning account's revoke succeeds"
+    );
     let result = lorehaven_db::external::resolve_token(harness.tdb.db(), "hash123")
         .await
         .expect("resolve after revoke");

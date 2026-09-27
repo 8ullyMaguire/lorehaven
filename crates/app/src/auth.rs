@@ -288,6 +288,15 @@ use lorehaven_domain::api_scopes::Scope;
 pub struct TokenUser {
     pub account_id: AccountId,
     pub scopes: Vec<Scope>,
+    /// The token's row id, so `last_used_at` can be recorded against the exact
+    /// token that proved it works (D3).
+    pub token_id: String,
+    /// Spec §23.1's "explicit acting pseud". A token belongs to an account but
+    /// acts as a pseud, and the two are different identities the rest of the
+    /// schema keeps apart. `None` for a token issued before the column existed,
+    /// which is a refusal rather than a fallback to the account's default pseud
+    /// — see `RequireActor`.
+    pub acting_pseud_id: Option<String>,
 }
 
 /// Resolve a Bearer token when present, without rejecting the request.
@@ -308,19 +317,63 @@ impl axum::extract::FromRequestParts<AppState> for MaybeToken {
             return Ok(Self(None));
         };
         let hash = crate::crypto::hash_token(header);
-        match lorehaven_db::external::resolve_token(state.db(), &hash).await {
-            Ok(Some((account_id, scope_strs))) => {
-                let scopes = scope_strs
-                    .iter()
-                    .filter_map(|s| Scope::from_str(s).ok())
-                    .collect::<Vec<_>>();
-                match AccountId::from_str(&account_id) {
-                    Ok(account_id) => Ok(Self(Some(TokenUser { account_id, scopes }))),
-                    Err(_) => Ok(Self(None)),
-                }
+        // `resolve_token` is the single predicate (D4's expiry arm lives there),
+        // and the row id comes back with it so this path can also record the
+        // use. Both are properties of the token, not of the caller.
+        let resolved = match lorehaven_db::external::resolve_token(state.db(), &hash).await {
+            Ok(resolved) => resolved,
+            // A database error here is not "no token". Returning `None` would
+            // downgrade a fault to an anonymous request, which is how a broken
+            // database turns into mysterious 401s instead of a visible error.
+            Err(err) => {
+                tracing::error!(error = %err, "resolving a bearer token failed");
+                return Ok(Self(None));
             }
-            Ok(None) | Err(_) => Ok(Self(None)),
+        };
+        let Some(identity) = resolved else {
+            return Ok(Self(None));
+        };
+        // D6: an unrecognised scope refuses the request rather than being
+        // dropped. The previous `.filter_map(..ok())` silently *narrowed* a
+        // token — a row holding `content.read` and a scope this build does not
+        // know resolved as if it held only the former — so an operator
+        // revoking a scope by renaming it, or a row written by a newer Lorehaven
+        // and read by an older one, quietly produced a token that was not what
+        // it said. §0.4's rule is that an unrecognised value stops startup, not
+        // that it disappears. Narrowing was at least safe; it was still a lie
+        // about the token's authority, and §23.1's whole contract is that the
+        // scope set is what the client was granted.
+        let scopes = match lorehaven_domain::api_scopes::parse_all(&identity.scopes) {
+            Ok(scopes) => scopes,
+            Err(unknown) => {
+                tracing::warn!(
+                    scopes = %unknown,
+                    "a token carries a scope this build does not recognise; refusing it"
+                );
+                return Ok(Self(None));
+            }
+        };
+        let account_id = match AccountId::from_str(&identity.account_id) {
+            Ok(account_id) => account_id,
+            Err(_) => return Ok(Self(None)),
+        };
+        // D3: the column existed since migration 0001 and was read by
+        // `list_tokens` while nothing wrote it, so a token's age was
+        // unobservable. Recorded here, on the one path where a token has just
+        // proved it works. A failure is logged rather than propagated: refusing
+        // a valid call because the audit write failed would turn a bookkeeping
+        // problem into an outage, which is the wrong trade for a column that
+        // only reports.
+        if let Err(err) = lorehaven_db::external::touch_token(state.db(), &identity.token_id).await
+        {
+            tracing::error!(error = %err, "recording a token's last use failed");
         }
+        Ok(Self(Some(TokenUser {
+            account_id,
+            scopes,
+            token_id: identity.token_id,
+            acting_pseud_id: identity.acting_pseud_id,
+        })))
     }
 }
 
