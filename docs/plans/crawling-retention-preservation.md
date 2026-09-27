@@ -320,7 +320,7 @@ POST /api/v1/works/:id/body-request
 
 Config: `[retention]` with `proposal_mode`, `proposal_min_trust`,
 `body_request_min_trust`, `widen_quorum`, `cooling_days`. Note this is a
-**new** config section — the existing `docs/spec.md` §43 table has no
+**new** config section — the existing `docs/spec.md` §38 table has no
 `[retention]` block, so the amendment's table is the first statement of it.
 
 ### C.4 `works_past_saving`
@@ -480,13 +480,29 @@ pub enum PreservationEligibility {
 }
 ```
 
-### D.6 The imported-work refusal
+### D.6 The permission gate, and the imported-work refusal
 
-`PreservationEligibility` is computed, but the **permission** gate is separate
-and comes first: if the work is imported (has a `source_key` that is not this
-instance) the crosspost is refused with an error naming the missing §23.7
-transfer manifest. This is a refusal *by design*, and its test is the one that
-keeps it from being "fixed" later by someone who reads it as a bug:
+**§33.1 is spec-only** — §33 opens with "Nothing in this section is
+implemented" — so the `redistribution` assertion is a **dependency of this
+phase, not an existing column**. Migration 0085 (or a small 0085a alongside
+it) adds `works.redistribution TEXT NOT NULL DEFAULT 'unstated'`, checked against
+`yes | ask | no | unstated`, editable only by the owning pseud. Check whether a
+`works` column of that name already exists before assuming it does not:
+
+```bash
+rg -n 'redistribution' migrations/ crates/db/src/content.rs
+```
+
+`yes` pays full, `ask` pays less, `no` refuses by name. An `unstated` work is
+treated as `ask` — the default must be the cautious one, because the reward
+structure is what makes an unstated work worth asserting on, and an assertion
+nobody has to make is an assertion nobody makes.
+
+The **imported-work refusal** is separate and comes first: if the work is
+imported (has a `source_key` that is not this instance) the crosspost is
+refused with an error naming the missing §23.7 transfer manifest. This is a
+refusal *by design*, and its test is the one that keeps it from being "fixed"
+later by someone who reads it as a bug:
 
 ```text
 a_preservation_target_for_an_imported_work_is_refused_naming_the_transfer_manifest

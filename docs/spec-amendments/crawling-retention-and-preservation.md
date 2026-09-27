@@ -3,7 +3,7 @@
 **Status:** Final plan
 **Date:** 2026-09-27
 **Source:** Owner brainstorm (robots flexibility, preservation rewards, trust-gated body visibility, community-voted retention)
-**Amends:** §11.5, §11.11, §11.12, §11.15, §9.7.1, §9.7.2, §9.7.5, §9.7.6, §19.1, §28.2, §43
+**Amends:** §11.5, §11.11, §11.12, §11.15, §9.7.1, §9.7.2, §9.7.5, §9.7.6, §19.1, §28.2, §38
 **Adds:** §19.15, §11.12a, §11.15a, §11.15b
 **Milestone:** M59
 **Plan:** `docs/plans/crawling-retention-preservation.md`
@@ -262,8 +262,11 @@ cap                 = 8      # destinations that count at all
 - Past `cap`, a destination records the preservation and displays it, but pays
   nothing and does not count toward the threshold. A reader who finds an
   eleventh archive has still done a good thing; they are not paid more for it.
-- All of it sits inside the existing §9.7.2 daily action cap, so preservation
-  cannot be farmed by volume even if every limit above were wrong.
+- All of it sits inside the existing daily action cap — §9.7.2's 50/75/100
+  credits and §20.3's per-action caps — so preservation cannot be farmed by
+  volume even if every limit above were wrong. The credit row belongs in both
+  tables; they are two renderings of one economy and a row in only one of them
+  is a row that does not count everywhere.
 
 ### 2.3 Clawback
 
@@ -318,6 +321,11 @@ looks like the reader's.
   reward, `ask` pays a reduced amount, `no` pays nothing and the crosspost is
   refused by name. The incentive then points at the corpus that genuinely
   should be preserved, which is the point of having a permission model at all.
+  **Note that §33.1 is itself spec-only** — §33 opens with "Nothing in this
+  section is implemented" — so this phase's permission gate is a **dependency**,
+  not an existing capability. Build the `redistribution` column and its
+  yes/ask/no reads with Phase D, and do not treat the §33.1 milestone as
+  something this amendment gets for free.
 - An **imported** work's assertion is inherited from the origin, and if the
   origin says `no` or `ask` the crosspost is refused. Pushing site A's fic to
   site B is A→B redistribution, and it is the hardest case in the set. §2.7
@@ -687,7 +695,7 @@ section states why a retention proposal's bar is a different kind of number.
 
 ---
 
-## §28 / §43 Checklist and configuration
+## §28 / §38 Checklist and configuration
 
 New rows for §28.2 (available fiction) and §28.9 (foundational protections):
 
@@ -704,7 +712,8 @@ New rows for §28.2 (available fiction) and §28.9 (foundational protections):
 - [ ] A crosspost of an imported work is refused by name rather than performed without a permission basis.
 - [ ] `works_past_saving` is visible to the operator on an aggregating instance.
 
-Configuration keys (§43, all with the §43 defaults table updated):
+Configuration keys (§38 — the instance-configuration contract and its defaults
+table, which is where every key in this amendment belongs):
 
 ```text
 [imports]   robots_posture              "strict"     strict | metadata_only | permissive
