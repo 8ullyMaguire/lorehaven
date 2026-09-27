@@ -1687,6 +1687,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "darkhold-metadata"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "darkhold-scrapers"
 version = "0.1.0"
 dependencies = [
