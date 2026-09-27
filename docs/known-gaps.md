@@ -100,6 +100,49 @@ rather than a silent hole. Deciding whether the statement *should* bump it is a
 one-word change plus a comment, but it belongs with whoever first adds a
 `version`-based writer, not with a test suite.
 
+### M43-D01 · `compute_theme_from_bookmarks` has never worked, and has no caller
+
+The function that derives an instance's theme vector from what its members have
+bookmarked has two defects, and the second hid the first.
+
+**The query referenced two things that do not exist.** Both arms joined
+
+    work_tags wt ON wt.work_id = ...
+    JOIN tags t ON t.id = wt.tag_id
+
+There is no `tags` table in any migration. `work_tags` is
+`(work_id UUID, node_id TEXT, weight BIGINT, added_at TEXT)`, keyed on
+`taxonomy_nodes(id)` — the taxonomy tree, not a tag table. So the statement
+failed on **both** backends.
+
+**The failure was swallowed.** `.unwrap_or_default()` turned the error into an
+empty `Vec`, and an empty `Vec` produces `{}`. The function therefore returned
+an empty theme vector on every call, on every backend, since it was written.
+The `.unwrap_or_default()` is now a `tracing::warn!`, because a broken statement
+that looks like a legitimate empty result is the failure mode worth designing
+against.
+
+**The PostgreSQL arm was also missing its privacy filter.** The SQLite query
+carried `WHERE b.is_public = FALSE`; the PostgreSQL one had no predicate at all.
+`is_public` is `BOOLEAN` on PostgreSQL and `INTEGER` on SQLite, so even the
+SQLite spelling needed checking rather than copying. A theme is a statement
+about what an instance's members read, derived from *private* bookmarks — a
+public bookmark is a reader's own signal. The two arms had it exactly inverted.
+
+**Why it was never noticed: nothing calls it.** `routes/federation.rs` takes
+`theme_vector` from the operator's POST body and calls `upsert_theme` directly.
+The compute path is unreachable, which is the only reason a function that has
+always returned `{}` shipped.
+
+Open question, not decided here: the compute path being dead means an operator
+must hand-write a theme vector. Either wire it up — recompute on a schedule
+after the tag is right — or delete it. Shipping a second, broken way to set the
+same value is the worst of the three, and that is the current state.
+
+Fixed in `49aad9a`'s successor; pinned by `compute_reads_the_real_taxonomy`,
+`compute_ignores_public_bookmarks` and `compute_ignores_tags_on_unbookmarked_works`,
+all of which fail before the fix.
+
 ### M32-D01 · A malformed edition id is an `Err` on PostgreSQL, `false` on SQLite
 
 `approve_narration_edition` binds `WHERE id = ?::uuid` on PostgreSQL and
