@@ -473,7 +473,12 @@ pub async fn list_similar_peers(
         }
         Backend::Postgres => {
             sqlx::query_as::<_, (String, String, f64, String, Option<String>, bool, Option<String>, Option<String>)>(
-                "SELECT id, peer_host, similarity, state, last_checked, auto_federate, set_by, set_at FROM federation_peers_v2 WHERE similarity >= $1 ORDER BY similarity DESC LIMIT $2"
+                // `similarity` is REAL (FLOAT4) and the struct field is f64 (FLOAT8). sqlx will not
+                // decode one into the other -- it is a strict type match, not a widening
+                // conversion -- so the column is cast in SQL. SQLite stores REAL as a
+                // double already, which is why this only breaks on PostgreSQL: every
+                // peer query was an error there.
+                "SELECT id, peer_host, similarity::double precision, state, last_checked, auto_federate, set_by, set_at FROM federation_peers_v2 WHERE similarity >= $1 ORDER BY similarity DESC LIMIT $2"
             ).bind(threshold).bind(limit).fetch_all(db.postgres_pool().expect("postgres")).await?
         }
     };
@@ -506,7 +511,11 @@ pub async fn list_all_peers(db: &Database) -> Result<Vec<FederationPeer>> {
         }
         Backend::Postgres => {
             sqlx::query_as::<_, (String, String, f64, String, Option<String>, bool, Option<String>, Option<String>)>(
-                "SELECT id, peer_host, similarity, state, last_checked, auto_federate, set_by, set_at FROM federation_peers_v2 ORDER BY similarity DESC"
+                // `similarity` is REAL (FLOAT4) and the struct field is f64 (FLOAT8). sqlx
+                // matches types strictly rather than widening, so the column is cast in
+                // SQL. SQLite stores REAL as a double already, which is why this only
+                // breaks on PostgreSQL -- every peer query was an error there.
+                "SELECT id, peer_host, similarity::double precision, state, last_checked, auto_federate, set_by, set_at FROM federation_peers_v2 ORDER BY similarity DESC"
             ).fetch_all(db.postgres_pool().expect("postgres")).await?
         }
     };
