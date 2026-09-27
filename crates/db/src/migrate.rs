@@ -337,13 +337,23 @@ mod tests {
     // fails the test. payment_events is how this list was found:
     // milestone_15 invented three account uuids and PostgreSQL
     // answered 23503 where SQLite answered nothing.
+    //
+    // `topic_work_links` was here and is not any more: migration 0038 created
+    // it on SQLite without the two foreign keys it declares on PostgreSQL, so
+    // an orphan link was insertable on one engine and impossible on the other.
+    // 0038 is fixed in place -- it predates every release tag, so no deployed
+    // instance has a recorded checksum to contradict. Found by the backlink
+    // suite, which had no tests until then: see
+    // `a_link_to_a_missing_work_is_refused` in
+    // crates/app/tests/milestone_38_work_backlink.rs.
+    //
+
     pub(crate) const KNOWN_FK_DIVERGENCES: &[&str] = &[
         "fk:availability_links",
         "fk:curator_rewards",
         "fk:link_health_checks",
         "fk:payment_events",
         "fk:rating_anomaly_events",
-        "fk:topic_work_links",
         "fk:work_media_references",
         "fk:work_reactions",
         "fk:work_tags",

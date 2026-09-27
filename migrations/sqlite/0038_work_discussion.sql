@@ -6,8 +6,17 @@ ALTER TABLE works ADD COLUMN discussion_mode TEXT NOT NULL DEFAULT 'comments_onl
 
 CREATE TABLE topic_work_links (
     id TEXT PRIMARY KEY,
-    topic_id TEXT NOT NULL UNIQUE,
-    work_id TEXT NOT NULL,
+    -- The two foreign keys the PostgreSQL arm of this same migration declares.
+    -- They were missing here, which made an orphan link insertable on SQLite and
+    -- impossible on PostgreSQL, and left dangling links behind when a work was
+    -- hard-deleted. The SQLite pool runs with `PRAGMA foreign_keys = ON`, so the
+    -- constraints were always enforceable. Found by the backlink suite, which
+    -- had no tests until then.
+    --
+    -- Note `work_id` is TEXT here and UUID in the PostgreSQL arm: that is the
+    -- standing ADR 0004 id-type divergence, not an oversight here.
+    topic_id TEXT NOT NULL UNIQUE REFERENCES forum_topics(id) ON DELETE CASCADE,
+    work_id TEXT NOT NULL REFERENCES works(id) ON DELETE CASCADE,
     chapter_id TEXT,
     created_at TEXT NOT NULL
 );
