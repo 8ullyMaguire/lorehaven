@@ -1992,3 +1992,153 @@ Two decisions worth keeping:
 Every test in `analytics_reading.rs` seeds `reading_status` with raw SQL. The
 seven new ones go through the door instead, which is the whole point: a fixture
 that inserts the row cannot catch a door that refuses to write it.
+
+
+---
+
+## M54, Part A — the token foundation and the bot link flow (Lorehaven side)
+
+`docs/requirements.csv` moves **M54-02** to `implemented-verified-e2e`. M54-01
+(the bot itself) is unchanged: it is a separate repo and has not been started.
+
+Everything below is what was found and what was decided. The short version is
+that the token feature existed and was not connected to anything: a reader
+could not see a token, a token could be revoked by anyone, no token ever
+expired, and **a bot token could perform none of the eight actions the spec
+promises it**. D8 — that last one — is the finding that changed the shape of the
+work.
+
+### D1–D7: the token was a row, not a credential
+
+| | defect | fix |
+|---|---|---|
+| D1 | `DELETE /me/tokens/{id}` revoked **any** token, for **any** account | account predicate on the row; bearer tokens accepted so a bot can revoke its own |
+| D2 | `api_tokens.expires_at` never written — nothing could expire | `issue_token_acting` takes an optional expiry; the issue door accepts `expires_in_seconds` |
+| D3 | `last_used_at` never written — an unused token was indistinguishable from a dormant one | `touch_token` after each use |
+| D4 | `resolve_token` did not check `expires_at`, so D2 alone would have bought nothing | checked at resolve |
+| D5 | `bot_registrations.token_id` had no foreign key; `owner` was unconstrained | FK, plus a `kind` on `api_tokens` so a bot token and a user token are distinguishable |
+| D6 | `MaybeToken` **silently dropped** an unparseable scope | `api_scopes::parse_all` rejects, and a new `MissingScope` error names the scope wanted |
+| D7 | `/feeds/{handle}` returned a constant | left as-is: out of scope for M54, and recorded rather than half-fixed |
+
+### D8: a bot could do nothing
+
+`MaybeToken` appeared in exactly **one** handler in the whole tree. Every §23.2
+action took `RequireSession`, so the actions were documented, the API existed,
+and a bot could perform none of them.
+
+Eight doors are now `RequireActorScoped` — session pseud *or* bearer token,
+resolved into one actor:
+
+| door | scope |
+|---|---|
+| `POST /bookmarks` | `library.read` |
+| `POST /works/{id}/kudos` | `content.read` |
+| `POST /imports`, `POST /imports/{id}/cancel` | `content.write` |
+| `GET /jobs` | `content.write` |
+| `POST /exports`, `GET /exports/{id}`, `DELETE /exports/{id}` | `library.read` |
+
+There is no `GET /jobs/{id}` — this plan assumed one and the route table has
+only `/jobs` and `/jobs/{id}/cancel`. The export read-back doors were not in
+the plan either: starting an export a bot cannot poll is half a feature, and
+§23.2's action is the whole round trip.
+
+Three decisions in here that are worth keeping:
+
+* **A scope says what an account may do, never whose rows are its own.** Every
+  ownership test asserts **404, not 403** on another account's row — a 403
+  would confirm the row exists. The scope matrix and the ownership matrix catch
+  different defects and have separate tests, because conflating them lets a
+  missing account predicate hide behind a passing scope test.
+* **A token with no acting pseud is refused, not defaulted.** Falling back to
+  the account's default pseud would post the bot's words under a face the
+  reader never chose.
+* **`route_inventory.rs` gained `Audience::Scoped` as a fifth kind**, not a
+  flavour of `Authenticated`, and `find_audience_extractor` checks it *first* —
+  a signature carrying both extractors must report the one the handler actually
+  authenticates with.
+
+### The test bug worth remembering
+
+`RequireActor` resolves a **session first when one is present**. The first run
+of `m54_bot_actions.rs` failed 5 of 12, and not for the reason predicted: a
+test that registers, keeps the cookies, *and* sends a bearer token never
+consults the token, so the scope check was not failing — it was not running.
+The assertions read as though authorization were broken while the harness was at
+fault. `Harness::as_token` clears the jar first; the doc comment says why,
+because the next person will otherwise write `request_with` and get a green run
+that proves nothing.
+
+### D9 fallout: the SPA fallback was hiding four dead tests
+
+The static-asset fallback answered **any** extensionless path with a 200 and
+the app shell. That is a 200 for `/api/v1/anything-that-is-not-a-route`, and it
+meant a test asserting an invented URL passed without ever reaching a handler.
+It now 404s under `/api/`. Four tests surfaced, all asserting URLs that have
+never existed:
+
+| test | asserted | real |
+|---|---|---|
+| `milestone_14.rs` | `/api/v1/my/trust` | `/api/v1/me/trust` |
+| `milestone_14.rs` | `/api/v1/my/appeals` | `/api/v1/appeals` |
+| `instance_access_mode.rs` | `/api/v1/health/ready` | `/health/ready` (root, for a LB probe) |
+| `milestone_41.rs` | `POST /works/{id}/chapters/1/read` | `PUT /reading/progress` |
+| `milestone_26.rs` | `POST /settings/content-preferences` | `PATCH /settings/content` |
+
+`milestone_41`'s is the one worth dwelling on: it recorded **no reading event
+at all**, then asserted the audience counts were present. It was green because
+the counts were zero and the assertions only checked for the keys.
+
+### The one change that looked right and was not
+
+`exports.rs`'s `is_known_subject` lists `query`; `load_subject` cannot load one.
+So `POST /exports` with a `query` subject is accepted, queued, and then refused
+at render time with the same words as a validation failure. Narrowing the list
+to what the loader handles **broke the bulk export door**, which validates
+`query` against the same function. Reverted and documented at the definition;
+the honest fix is for `load_subject` to handle `query`, and that is a separate
+change.
+
+### A pre-existing flake that was not a flake
+
+`m52_08_rec_shadow`'s `a_non_shadow_instance_reports_that_it_has_not_evaluated`
+read a **process global** that a sibling test in the same file writes. It passed
+serially and failed in the default parallel run, which is why it read as a flake
+and kept getting re-run.
+
+Resetting the global before each test is not a fix, only a narrower race —
+another test can still record between the reset and the assertion, and that is
+precisely what happened on the first attempt. The slot now lives in `AppState`
+behind its `Arc`, so it is per instance, which is what the global was modelling
+(one process, one instance) except that the test binary builds many. Three
+consecutive parallel runs are green.
+
+### Frontend: there was no surface at all
+
+`grep me/tokens frontend/src` returned nothing, which is why D1 shipped. A
+security control with no surface is not one. `Settings.svelte` now has a
+**Linked applications** tab: the real list, create with a scope picker, revoke,
+and the one-time raw-value notice.
+
+`createToken` deliberately takes **no** `acting_pseud_id` — this surface is for
+tokens a reader made for their own use, and a parameter here would let a reader
+post as any face on the instance. Bot tokens come through the link handshake.
+
+Writing the tests turned up a suite-wide bug: `vi.clearAllMocks()` wipes the
+*implementation* of a factory-defined mock, not just its call count, so
+`handles loading error gracefully` rejecting `fetchSearchSettings` left every
+later test mounting a page in the error state — passing by asserting on an
+error panel. Fixed in `beforeEach`.
+
+### Where it stands
+
+* Part A is complete. `cargo fmt --all --check`, `cargo clippy --workspace
+  --all-targets` and `cargo test --workspace --no-fail-fast` on **both** backends
+  are the gate; `cargo test --workspace --doc` too.
+* `crates/app/tests/m54_bot_link.rs` — 17 tests, the link flow end to end.
+* `crates/app/tests/m54_bot_actions.rs` — 12 tests, both engines, the scope and
+  ownership matrices.
+* **Not started: Part B.** The bot core is a new repo at
+  `~/code-local/rust/lorebot`, and that is the user's call to make before it
+  begins — see "What M54 is, and what it is not" in
+  `docs/plans/m54-bot-core.md`. Every door its client needs is now open, so it
+  would not be blocked on Lorehaven.
