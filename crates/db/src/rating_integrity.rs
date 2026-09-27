@@ -155,7 +155,15 @@ pub async fn get_work_anomaly_events(
            FROM rating_anomaly_events \
           WHERE work_id = ? AND cleared_at IS NULL \
           ORDER BY detected_at DESC",
-        "SELECT id, work_id, cohort_id, kind, CAST(severity AS BIGINT), detail, detected_at, cleared_at, cleared_by \
+        // Every column is cast back to text here so the row mapper below reads
+        // the same Rust types as the SQLite arm. The columns are UUID, JSONB
+        // and TIMESTAMPTZ natively, and `id TEXT` / `detail TEXT` /
+        // `detected_at TEXT` do not decode from those.
+        "SELECT id::text, work_id::text, cohort_id::text, kind, CAST(severity AS BIGINT), \
+                detail::text, \
+                to_char(detected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), \
+                to_char(cleared_at    AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), \
+                cleared_by::text \
            FROM rating_anomaly_events \
           WHERE work_id = $1::uuid AND cleared_at IS NULL \
           ORDER BY detected_at DESC",
@@ -191,10 +199,10 @@ pub async fn get_work_anomaly_events(
             for r in rows {
                 events.push(RatingAnomalyEvent {
                     id: r.get::<String, _>(0),
-                    work_id: r.get::<Uuid, _>(1).to_string(),
-                    cohort_id: r.get::<Option<Uuid>, _>(2).map(|u| u.to_string()),
+                    work_id: r.get::<Option<String>, _>(1).unwrap_or_default(),
+                    cohort_id: r.get::<Option<String>, _>(2),
                     kind: r.get::<String, _>(3),
-                    severity: r.get::<i32, _>(4) as i64,
+                    severity: r.get::<i64, _>(4),
                     detail: r.get::<String, _>(5),
                     detected_at: r.get::<String, _>(6),
                     cleared_at: r.get::<Option<String>, _>(7),
@@ -263,7 +271,7 @@ pub async fn clear_work_contested(db: &Database, work_id: &WorkId) -> Result<()>
 pub async fn is_work_contested(db: &Database, work_id: &WorkId) -> Result<bool> {
     let sql = db.sql(
         "SELECT contested FROM works WHERE id = ?",
-        "SELECT contested FROM works WHERE id = $1::uuid",
+        "SELECT CAST(contested AS BIGINT) FROM works WHERE id = $1::uuid",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -278,7 +286,11 @@ pub async fn is_work_contested(db: &Database, work_id: &WorkId) -> Result<bool> 
                 .bind(work_id.to_string())
                 .fetch_optional(db.postgres_pool().expect("postgres"))
                 .await?;
-            Ok(row.map(|r| r.get::<bool, _>(0)).unwrap_or(false))
+            // `works.contested` is `INTEGER NOT NULL DEFAULT 0` in the
+            // PostgreSQL migration, not `BOOLEAN` — so this reads `i64` and
+            // compares, exactly as the SQLite arm does. Reading it as `bool`
+            // fails to decode on every call.
+            Ok(row.map(|r| r.get::<i64, _>(0) != 0).unwrap_or(false))
         }
     }
 }
