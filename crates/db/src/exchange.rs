@@ -563,6 +563,20 @@ pub async fn curate_entity(
 /// the difference between "a reader on a sister instance cannot find this" —
 /// genuine, additive demand — and "forty submitters", which §16.16.1 forbids
 /// reading as a headcount.
+/// Record (or re-record) a sister instance's demand for a work.
+///
+/// The conflict arm updates `reinforced_at` and **nothing else**. §16.16.1:
+/// "re-signalling the same work adds no weight", and §19.15 requires the item be
+/// "created or reinforced once per work per submitting instance" — the primary
+/// key is what makes that structural, but only if the update arm does not
+/// increment. An earlier version incremented `signal_count` here, which turned
+/// one sibling instance's client retrying into an unbounded weight multiplier:
+/// the demand item is the same demand, and the count is how many *instances*
+/// asked, not how often one of them asked. `signal_count` is therefore pinned at
+/// 1 by construction, and the row's existence is the signal.
+///
+/// `reinforced_at` still moves, because it is a recency field and §19.15's
+/// half-life decays on it.
 pub async fn reinforce_latent_demand(
     db: &Database,
     work_id: &str,
@@ -573,13 +587,11 @@ pub async fn reinforce_latent_demand(
         "INSERT INTO exchange_latent_demand (work_id, source_instance, reinforced_at, signal_count, created_at)
          VALUES (?, ?, ?, 1, ?)
          ON CONFLICT (work_id, source_instance) DO UPDATE SET
-             reinforced_at = excluded.reinforced_at,
-             signal_count = exchange_latent_demand.signal_count + 1",
+             reinforced_at = excluded.reinforced_at",
         "INSERT INTO exchange_latent_demand (work_id, source_instance, reinforced_at, signal_count, created_at)
          VALUES ($1, $2, $3, 1, $4)
          ON CONFLICT (work_id, source_instance) DO UPDATE SET
-             reinforced_at = EXCLUDED.reinforced_at,
-             signal_count = exchange_latent_demand.signal_count + 1",
+             reinforced_at = EXCLUDED.reinforced_at",
     );
     match db.backend() {
         Backend::Sqlite => {
@@ -676,4 +688,64 @@ pub async fn count_provenance_signals(db: &Database, work_id: &str) -> Result<i6
         }
     };
     Ok(n)
+}
+
+/// Does this instance already hold the work the signal names?
+///
+/// §19.15 makes latent demand conditional on it: "a signal through the exchange
+/// for a work the instance does not hold". A signal about a work already in the
+/// library is not demand — the work is here, and a demand item would ask the
+/// instance to acquire something it already has.
+///
+/// The identity is `library_items(source_key, source_work_key)`, because that is
+/// the only external identity the instance actually stores against a work: a
+/// signal's `site_ids` are `site` + `id` pairs, and `library_items` is where an
+/// import of that same site id lands. Matching on anything else — a title, an
+/// author name — would be a guess: two works share a title, and one work has a
+/// translated one. `title` is not an identity in this schema and must not be
+/// treated as one.
+///
+/// An item whose `work_id` is NULL is a *private-library* copy: the reader has it
+/// in their own shelves and the instance has no work for it. That is not the
+/// instance holding the work, so it does not satisfy the check — but a signal for
+/// it is not demand either, because a private copy is not something the instance
+/// can acquire. Both are "not held" here, and the distinction belongs to the
+/// curation decision, not to this predicate.
+///
+/// A signal carrying no recognisable `site_ids` is treated as not held. That is
+/// the correct default: an unidentifiable work is a stranger's work until this
+/// instance proves otherwise, and the cost of being wrong is a duplicate demand
+/// item, not a lost one.
+///
+/// Returns the local work id when held.
+pub async fn find_held_work(
+    db: &Database,
+    site: &str,
+    source_work_key: &str,
+) -> Result<Option<String>> {
+    let sql = db.sql(
+        "SELECT work_id FROM library_items
+          WHERE source_key = ? AND source_work_key = ? AND work_id IS NOT NULL
+          LIMIT 1",
+        "SELECT work_id FROM library_items
+          WHERE source_key = $1 AND source_work_key = $2 AND work_id IS NOT NULL
+          LIMIT 1",
+    );
+    let row: Option<(String,)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(site)
+                .bind(source_work_key)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(site)
+                .bind(source_work_key)
+                .fetch_optional(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(row.map(|r| r.0))
 }
