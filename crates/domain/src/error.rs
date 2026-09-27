@@ -109,6 +109,22 @@ pub enum AppError {
     #[error("access denied")]
     AccessDenied,
 
+    /// The caller is authenticated, and permitted in general, but the token
+    /// they presented does not carry the scope this door requires.
+    ///
+    /// Separate from [`AppError::AccessDenied`] purely so the message can name
+    /// the scope. A bot that gets 403 "access denied" cannot tell whether it
+    /// asked for the wrong door, was granted too little at link time, or is
+    /// being refused for some reason this build does not describe — and the
+    /// fix is different in each case. §23.1's contract is that the scope set
+    /// is the whole of what the client was granted, so saying which one is
+    /// missing discloses nothing the token holder does not already know.
+    #[error("this token lacks the {scope} scope")]
+    MissingScope {
+        /// The scope the door requires, e.g. `content.write`.
+        scope: &'static str,
+    },
+
     /// The resource is absent, or present but not disclosable.
     ///
     /// Spec §3.3: prefer `404` over revealing that a private object exists.
@@ -220,7 +236,7 @@ impl AppError {
         match self {
             Self::AuthRequired => ErrorCode::AuthRequired,
             Self::InvalidCredentials => ErrorCode::AuthRequired,
-            Self::AccessDenied => ErrorCode::AccessDenied,
+            Self::AccessDenied | Self::MissingScope { .. } => ErrorCode::AccessDenied,
             Self::NotFound { .. } => ErrorCode::NotFound,
             Self::Validation { .. } => ErrorCode::ValidationFailed,
             Self::RevisionConflict { .. } => ErrorCode::RevisionConflict,
@@ -247,6 +263,7 @@ impl AppError {
         match self {
             Self::AuthRequired | Self::InvalidCredentials => 401,
             Self::AccessDenied
+            | Self::MissingScope { .. }
             | Self::ContentRestricted
             | Self::ExtensionPermissionDenied { .. } => 403,
             Self::NotFound { .. } => 404,

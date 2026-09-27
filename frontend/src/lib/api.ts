@@ -4009,3 +4009,101 @@ export async function fetchCapability(
 ): Promise<AnalyticsDetail> {
   return apiFetch<AnalyticsDetail>(`/me/analytics/${encodeURIComponent(name)}`, { signal });
 }
+
+// ---------------------------------------------------------------------------
+// API tokens (spec §23.1, §46.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * One API token, as `GET /me/tokens` describes it.
+ *
+ * Note there is no `token` field: the raw value is returned exactly once, by
+ * the issue call, and never again. Everything here is metadata about a
+ * credential the server will not repeat. `scopes` arrives as the raw stored
+ * string rather than an array — see {@link parseTokenScopes} — and
+ * `acting_pseud_id` is null for a token that was issued without one, which
+ * this build refuses to act with.
+ */
+export interface ApiToken {
+  id: string;
+  account_id: string;
+  name: string;
+  /** `user` for one a person made, `bot` for one bound to a bot. */
+  kind: string;
+  /** A space-separated list, as stored. */
+  scopes: string;
+  acting_pseud_id: string | null;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+}
+
+/** The scopes this build knows, in the order the settings surface shows them. */
+export const KNOWN_TOKEN_SCOPES = [
+  'content.read',
+  'content.write',
+  'library.read',
+  'moderation.write',
+  'identity.read',
+] as const;
+
+export type KnownTokenScope = (typeof KNOWN_TOKEN_SCOPES)[number];
+
+/**
+ * Split a stored `scopes` string into a list.
+ *
+ * The server stores scopes space-separated and validates every one against the
+ * known set at issue time, so an unrecognised entry cannot reach here from the
+ * issue route — but it can reach here from a row written before a scope was
+ * removed, or by hand. It is shown verbatim rather than dropped: a scope the
+ * reader cannot see is a scope they cannot reason about, and a token list that
+ * quietly hides one is worse than one that shows something odd.
+ */
+export function parseTokenScopes(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(/\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Whether a scope is one this build recognises.
+ *
+ * Used by the create form to warn, not to refuse — see the note on
+ * {@link parseTokenScopes}.
+ */
+export function isKnownTokenScope(scope: string): scope is KnownTokenScope {
+  return (KNOWN_TOKEN_SCOPES as readonly string[]).includes(scope);
+}
+
+/** List the caller's live tokens. Revoked ones are filtered server-side. */
+export async function fetchTokens(signal?: AbortSignal): Promise<ApiToken[]> {
+  const body = await apiFetch<{ tokens: ApiToken[] }>('/me/tokens', { signal });
+  return body.tokens;
+}
+
+/**
+ * Issue a token. The raw value is in the response and nowhere else, ever.
+ *
+ * `acting_pseud_id` is deliberately not a parameter. §23.1's tokens act as an
+ * explicit pseud, and this surface is for tokens a *person* made for their own
+ * use; the bot flow mints its tokens with an acting pseud through the link
+ * handshake, which is a different door. A reader who could pick an arbitrary
+ * pseud here could post as any face on the instance.
+ */
+export async function createToken(
+  name: string,
+  scopes: string[],
+): Promise<{ token: string; id: string }> {
+  return apiFetch<{ token: string; id: string }>('/me/tokens', {
+    method: 'POST',
+    body: JSON.stringify({ name, scopes: scopes.join(' ') }),
+  });
+}
+
+/** Revoke a token. After this the raw value stops working immediately. */
+export async function revokeToken(id: string): Promise<void> {
+  await apiFetch(`/me/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
