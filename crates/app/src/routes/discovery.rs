@@ -295,13 +295,13 @@ async fn get_discovery(
                 account_id,
                 &served,
                 limit as usize,
-                crate::rec_shadow::next_sample(),
+                state.shadow_report().next_sample(),
             )
             .await
             {
                 Ok(report) => {
                     tracing::info!(target: "rec_shadow", "{}", report.summary());
-                    crate::rec_shadow::record(report);
+                    state.shadow_report().record(report);
                 }
                 Err(error) => {
                     tracing::warn!(
@@ -1001,8 +1001,11 @@ async fn get_shadow_evaluation(
 ) -> ApiResult<Json<serde_json::Value>> {
     require_operator(&state, &user)?;
     let mode = state.config().discovery.rec_mode.as_str();
-    let evaluations = crate::rec_shadow::EVALUATIONS.load(std::sync::atomic::Ordering::Relaxed);
-    let latest = crate::rec_shadow::latest();
+    // This instance's slot, not a process global: `state` is the instance the
+    // operator is asking about, and a report recorded against a *different*
+    // instance must not be reported as this one's history.
+    let evaluations = state.shadow_report().evaluations();
+    let latest = state.shadow_report().latest();
     Ok(Json(serde_json::json!({
         "mode": mode,
         "shadow_active": mode == "shadow",

@@ -851,16 +851,21 @@ async fn opted_out_readers_never_see_explicit() {
 
     let mut reader = Client::new(app.clone());
     register(&mut reader, "reader@example.com", "reader").await;
+    // `/settings/content`, and a PATCH — not `POST /settings/content-preferences`,
+    // which was never a route. Two errors, and the first one hid the second:
+    // the SPA fallback answers any extensionless path under `/api/` with a 200
+    // and the settings shell, so this used to "succeed" without ever reaching a
+    // handler. D9 removed that and the invented URL surfaced.
+    //
+    // `expected_version` is required and the fresh account's is 1, so a stale
+    // expectation here is a 409 that looks like a routing failure.
     let (status, body) = reader
-        .post(
-            "/api/v1/settings/content-preferences",
-            json!({ "max_rating": "teen" }),
+        .patch(
+            "/api/v1/settings/content",
+            json!({ "max_rating": "teen", "expected_version": 1 }),
         )
         .await;
-    assert!(
-        status == StatusCode::OK || status == StatusCode::CREATED,
-        "set prefs: {body}"
-    );
+    assert_eq!(status, StatusCode::OK, "set prefs: {body}");
 
     let (status, body) = reader.get("/api/v1/media").await;
     assert_eq!(status, StatusCode::OK, "media list: {body}");

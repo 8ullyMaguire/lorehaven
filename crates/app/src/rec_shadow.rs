@@ -253,53 +253,81 @@ pub async fn evaluate(
 /// what exists; aggregation into a metrics sink is a deployment decision, not
 /// something to invent a schema for here.
 ///
-/// The evaluation count is deliberately *not* stored here — it is a process
-/// global, and a value that resets on restart must not be presented as a
-/// lifetime total.
-static LATEST: std::sync::Mutex<Option<ShadowReport>> = std::sync::Mutex::new(None);
-
-/// Evaluations run since this process started.
-pub static EVALUATIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// The next evaluation number.
-pub fn next_sample() -> u64 {
-    EVALUATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+/// One instance's shadow report and evaluation count.
+///
+/// Held per `AppState` (behind its `Arc`) rather than in process statics. A
+/// production process serves one instance, so a global was an accurate model of
+/// it — but the test binary builds many instances in one process, and a global
+/// made them share one another's reports and counters. The result was a test
+/// that passed or failed depending on which test the scheduler ran first.
+#[derive(Debug, Default)]
+pub struct ReportSlot {
+    latest: std::sync::Mutex<Option<ShadowReport>>,
+    evaluations: std::sync::atomic::AtomicU64,
 }
 
-/// Record the most recent report for the operator surface.
-///
-/// A poisoned lock is recovered rather than propagated: the stored value is a
-/// diagnostic, and a panic in one request's logging path must not turn every
-/// later evaluation into a 500.
-pub fn record(report: ShadowReport) {
-    match LATEST.lock() {
-        Ok(mut slot) => *slot = Some(report),
-        Err(poisoned) => *poisoned.into_inner() = Some(report),
+impl ReportSlot {
+    /// The next evaluation number.
+    pub fn next_sample(&self) -> u64 {
+        self.evaluations
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1
+    }
+
+    /// Record the most recent report for the operator surface.
+    ///
+    /// A poisoned lock is recovered rather than propagated: the stored value is
+    /// a diagnostic, and a panic in one request's logging path must not turn
+    /// every later evaluation into a 500.
+    pub fn record(&self, report: ShadowReport) {
+        match self.latest.lock() {
+            Ok(mut slot) => *slot = Some(report),
+            Err(poisoned) => *poisoned.into_inner() = Some(report),
+        }
+    }
+
+    /// The most recent report, if any.
+    pub fn latest(&self) -> Option<ShadowReport> {
+        match self.latest.lock() {
+            Ok(slot) => slot.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    /// Evaluations recorded on this instance since it was built.
+    pub fn evaluations(&self) -> u64 {
+        self.evaluations.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Clear both the report and the count.
+    pub fn clear(&self) {
+        match self.latest.lock() {
+            Ok(mut slot) => *slot = None,
+            Err(poisoned) => *poisoned.into_inner() = None,
+        }
+        self.evaluations
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Poison the report slot, so the recovery path in `record` is exercised.
+    ///
+    /// Exists because the recovery is otherwise unreachable from a test: the
+    /// only way to poison a mutex is to panic while holding it, and `record` is
+    /// the only holder. Without this, the recovery arms are never pulled in a
+    /// green run, and the claim "a panic in the logging path does not 500 later
+    /// requests" is untested — which is the kind of claim that turns out to be
+    /// false.
+    #[doc(hidden)]
+    pub fn poison_for_tests(&self) {
+        // A `Mutex` is poisoned when a panic unwinds through a scope holding its
+        // guard. The guard is dropped during that unwind, which both sets the
+        // flag and releases the lock — so a poisoned mutex is recoverable, and
+        // the test can go on to prove it.
+        let _ = std::panic::catch_unwind(|| {
+            let _guard = self.latest.lock().expect("a fresh slot is not poisoned");
+            panic!("simulated panic while holding the report lock");
+        });
     }
 }
 
-/// The most recent report, if any.
-pub fn latest() -> Option<ShadowReport> {
-    match LATEST.lock() {
-        Ok(slot) => slot.clone(),
-        Err(poisoned) => poisoned.into_inner().clone(),
-    }
-}
-
-/// Poison the report slot, so the recovery path in `record` is exercised.
-///
-/// Exists because the recovery is otherwise unreachable from a test: the only
-/// way to poison a mutex is to panic while holding it, and `record` is the only
-/// holder. Without this, the recovery arms are never pulled in a green run, and
-/// the claim "a panic in the logging path does not 500 later requests" is
-/// untested — which is the kind of claim that turns out to be false.
-#[doc(hidden)]
-pub fn poison_the_report_slot_for_tests() {
-    // A `Mutex` is poisoned when a panic unwinds through a scope holding its
-    // guard. The guard is dropped during that unwind, which both sets the flag
-    // and releases the lock — so a poisoned mutex is recoverable, while a
-    // *forgotten* guard would leave it locked and deadlock every later caller.
-    // So: take the guard, do nothing, and panic with it still in scope.
-    let _guard = LATEST.lock();
-    panic!("simulated panic while holding the report lock");
-}
+    

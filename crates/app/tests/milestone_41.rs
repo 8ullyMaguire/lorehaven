@@ -180,7 +180,7 @@ async fn register(client: &mut Client, email: &str, handle: &str) -> (String, St
 }
 
 /// Create a work with the given title.
-async fn create_work(client: &mut Client, title: &str) -> String {
+async fn create_work(client: &mut Client, title: &str) -> (String, String) {
     let (status, body) = client
         .post("/api/v1/works", json!({ "title": title }))
         .await;
@@ -206,7 +206,7 @@ async fn create_work(client: &mut Client, title: &str) -> String {
         .await;
     assert_eq!(status, StatusCode::OK, "update chapter: {body}");
 
-    work_id
+    (work_id, chapter_id)
 }
 
 /// Publish a work so it's visible.
@@ -291,20 +291,31 @@ async fn warmth_accumulates_and_promotes_tier() {
         register(&mut reader_client, "reader@example.com", "reader").await;
 
     // Create a work by the author
-    let work_id = create_work(&mut author_client, "Author's Work").await;
+    let (work_id, chapter_id) = create_work(&mut author_client, "Author's Work").await;
     publish_work(&mut author_client, &work_id).await;
 
-    // Reader reads the work (creates a reading event)
+    // Reader records progress (creates a reading event).
+    //
+    // `PUT /reading/progress`, not `POST /works/{id}/chapters/1/read` — the
+    // latter was never a route. The GET at `/works/{id}/chapters/{chapter}`
+    // exists; there is no POST under it. A second invented URL hidden behind
+    // the SPA fallback, which answered 200 for the empty `json!({})` body and
+    // the test passed having recorded nothing at all.
     let (status, body) = reader_client
-        .post(
-            &format!("/api/v1/works/{work_id}/chapters/1/read"),
-            json!({}),
+        .request(
+            "PUT",
+            "/api/v1/reading/progress",
+            Some(json!({
+                "subject_type": "work",
+                "subject_id": work_id,
+                "chapter_id": chapter_id,
+                "position_permille": 500,
+            })),
         )
         .await;
-    // Either OK or CREATED is fine — just verify it didn't error hard
     assert!(
-        status == StatusCode::OK || status == StatusCode::CREATED,
-        "read chapter: {status} {body}"
+        status == StatusCode::OK || status == StatusCode::NO_CONTENT,
+        "record progress: {status} {body}"
     );
 
     // Author checks audience panel
