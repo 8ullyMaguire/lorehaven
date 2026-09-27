@@ -30,6 +30,7 @@ pub mod dnf;
 pub mod economy;
 pub mod engagement;
 pub mod events;
+pub mod exchange;
 pub mod exports;
 pub mod external;
 pub mod federation;

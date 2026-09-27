@@ -80,6 +80,43 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Public,
     },
     // ------------------------------------------------------------------
+    // Metadata exchange (M57, spec §11.17)
+    //
+    // All three are `MaybeSession` deliberately, and the reason is the check
+    // order rather than anonymity. §11.17 requires a server that did not enable
+    // the exchange to be indistinguishable from one without the door, and the
+    // opt-in has to be tested *before* the session — otherwise an anonymous
+    // caller learns the exchange exists from a 401 where a 404 would have said
+    // nothing. So the extractor is the permissive one and the handler does the
+    // gating itself, in this order: opt-in (404) → version → session (401) →
+    // trust bar (403).
+    //
+    // Declaring them `Authenticated` would be a lie the test could not detect
+    // and a future reader would believe: the extractor would then be
+    // `RequireSession`, and the 401 would arrive *before* the 404.
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "exchange.rs",
+        handler: "get_version",
+        method: "GET",
+        path: "/exchange/version",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "exchange.rs",
+        handler: "submit_signals",
+        method: "POST",
+        path: "/exchange/signals",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "exchange.rs",
+        handler: "get_canonical",
+        method: "GET",
+        path: "/exchange/canonical",
+        audience: Audience::Public,
+    },
+    // ------------------------------------------------------------------
     // Health — public read
     // ------------------------------------------------------------------
     RouteEntry {

@@ -46,6 +46,7 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 
 lorehaven-db = { path = "../db" }
+lorehaven-lore-metadata = { path = "../lore-metadata" }
 lorehaven-domain = { path = "../domain" }
 # `cloudflare-impersonation` is a feature of the scraper crate rather than a
 # default of it, so that a library consumer is not made to carry a second HTTP/TLS

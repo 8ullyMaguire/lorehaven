@@ -400,6 +400,19 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // M57: the metadata exchange (spec §11.17). Classed as a writer because
+        // `POST /exchange/signals` is a write and the limiter's class is per
+        // router, not per route — the two GETs ride along under the stricter
+        // class rather than being split out, which is the conservative
+        // direction. The opt-in is enforced in the handlers, not here: a
+        // disabled exchange must answer 404, and a route that is not mounted
+        // would answer 404 for a different reason (no such path), which would
+        // make the two indistinguishable to a test.
+        .merge(classified(
+            routes::exchange::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // The reader's library: shelves, bookmarks, private tags, reading
         // statuses, saved views, storage and the update check. Every route
         // needs a session and most of them write, so the whole tree sits under
