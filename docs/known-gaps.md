@@ -100,6 +100,33 @@ rather than a silent hole. Deciding whether the statement *should* bump it is a
 one-word change plus a comment, but it belongs with whoever first adds a
 `version`-based writer, not with a test suite.
 
+### M10-D01 · A second `retire_encryption_key` overwrites the first
+
+`retire_encryption_key` runs an unconditional
+`UPDATE encryption_keys SET retired_at = ? WHERE key_id = ?` with no
+`AND retired_at IS NULL`, so retiring an already-retired key replaces the
+recorded time with the later one.
+
+Lower stakes than `M09-D02` — a key has exactly one retirement, and the second
+call is most likely the same operator repeating themselves — but two things
+follow:
+
+- The stored time is the *last attempt*, not the moment the key actually stopped
+  being used. For a key-retention audit, that is the number you would want.
+- Nothing reports that the key was already retired, so a caller cannot tell a
+  fresh retirement from a repeat. A `Result<bool>` (or an error) would let
+  `seal_secret` skip work it has already done.
+
+Not fixed here: `retire_encryption_key` has one caller, in
+`crates/app/src/secrets.rs`, and changing the signature means changing it.
+Pinned by `retiring_twice_re_stamps_the_key`.
+
+Note this is the third unconditional-`UPDATE`-of-a-timestamp pattern found in
+two modules (`M09-D02`, `M10-D01`, and the `contested` flag is a fourth case
+where the same shape is *intended*). Worth a deliberate convention: every
+"set this field once" write in the data layer should either guard with
+`AND <field> IS NULL` or say in its docstring that the last write wins.
+
 ### M09-D01 · Rating integrity is called by nothing
 
 `crates/db/src/rating_integrity.rs` has all seven `pub async fn` behind **zero
