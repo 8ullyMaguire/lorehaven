@@ -100,6 +100,58 @@ rather than a silent hole. Deciding whether the statement *should* bump it is a
 one-word change plus a comment, but it belongs with whoever first adds a
 `version`-based writer, not with a test suite.
 
+### M45-D01 · `upsert_card` freezes a shipped card's whole row, not just its stage
+
+§44.6 requires that a `shipped` or `rejected` card's *stage* is never
+downgraded. The guard is written as a `WHERE` on the `ON CONFLICT ... DO UPDATE`
+clause:
+
+```sql
+ON CONFLICT(id) DO UPDATE SET
+  title=excluded.title, category=excluded.category, stage=excluded.stage, updated_at=excluded.updated_at
+WHERE roadmap_cards.stage NOT IN ('shipped','rejected')
+```
+
+A `WHERE` on `DO UPDATE` gates the **whole** update, not one assignment, so once
+a card reaches `shipped` or `rejected` its title, category and `updated_at` are
+frozen too. A re-seed cannot correct a typo in a shipped feature's name, and an
+operator renaming a card through the seeder sees no error and no change.
+
+Guarding only the assignment would look like
+`stage=CASE WHEN roadmap_cards.stage IN ('shipped','rejected') THEN roadmap_cards.stage ELSE excluded.stage END`
+with the `WHERE` removed.
+
+**Not fixed here deliberately.** This changes what a user sees on a public
+board, so it is a product call: either the freeze is intended (a shipped card is
+immutable and renames must go through the operator's `update_card_stage` path)
+or it is a bug. Pinned by
+`a_protected_cards_whole_row_is_frozen` in
+`crates/app/tests/milestone_45_roadmap.rs` so the current behaviour cannot
+change silently either way.
+
+### M45-D02 · `normalize_title` strips hyphens instead of separating words
+
+`find_card_by_title_normalized` deduplicates cards by normalizing both titles
+with `normalize_title`, which keeps alphanumerics and whitespace and **drops**
+everything else. A hyphen is therefore removed rather than turned into a space:
+
+| title | normalizes to |
+| --- | --- |
+| `Dark Mode` | `dark mode` |
+| `Dark-Mode` | `darkmode` |
+| `DarkMode` | `darkmode` |
+
+So `Dark-Mode` is treated as a duplicate of `DarkMode`, and neither is a
+duplicate of `Dark Mode`. For a feature board whose titles are ordinary prose
+this silently fails to catch the most common re-punctuation, and the false
+merges are only visible if you happen to try them.
+
+Fixing it means replacing punctuation with a space instead of deleting it,
+which is a one-line change to the `filter` step. Not done here because it
+changes which cards a re-seed merges, so it is a data-migration decision as
+much as a code one. Pinned by
+`a_title_is_found_despite_case_punctuation_and_spacing`.
+
 ### M12-D01 · `notifications.work_id` has no foreign key
 
 Migration `0023_notifications.sql` declares `work_id UUID` with no
