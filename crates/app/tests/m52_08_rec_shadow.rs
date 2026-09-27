@@ -280,7 +280,8 @@ mod router {
             burst: 1000,
             per_minute: 6000,
         };
-        config.discovery.rec_mode = mode.to_owned();
+        config.discovery.rec_mode =
+            lorehaven_app::config::RecMode::parse(mode).expect("a known rec mode");
         config
     }
 

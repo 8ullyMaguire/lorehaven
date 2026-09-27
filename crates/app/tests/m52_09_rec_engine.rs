@@ -57,7 +57,7 @@ fn config_for(dir: &Path) -> Config {
     };
     // Pluggable mode, so the resolver is on the path that produces
     // recommendations rather than on the legacy branch.
-    config.discovery.rec_mode = "pluggable".to_owned();
+    config.discovery.rec_mode = lorehaven_app::config::RecMode::Pluggable;
     config
 }
 

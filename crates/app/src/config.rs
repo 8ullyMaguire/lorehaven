@@ -20,7 +20,7 @@ use anyhow::{Context, Result};
 use lorehaven_db::DatabaseConfig;
 use lorehaven_domain::media_resilience::{AudioFingerprint, PerceptualHashAlgorithm};
 use lorehaven_domain::AccountId;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::cli::GlobalArgs;
 
@@ -394,18 +394,9 @@ pub struct DiscoveryConfig {
     pub half_life_min_age_days: i64,
     /// Window size in days for both recent and first-window reader counts.
     pub half_life_window_days: i64,
-    /// Recommendation mode (spec §16.1a). One of:
-    ///
-    /// - `legacy` — `discovery::blend` over the multi-engine candidates. Default.
-    /// - `pluggable` — the strategy registry with RRF blend.
-    /// - `shadow` — serves `legacy` *and* runs the pluggable registry, recording
-    ///   how the two rankings would differ. What a reader receives is unchanged;
-    ///   the comparison is the product. The spec requires evaluation to precede
-    ///   a switch, and this is how that is done without switching.
-    ///
-    /// Validated in `Config::validate`, so a misspelling is refused at startup
-    /// rather than silently meaning `legacy`.
-    pub rec_mode: String,
+    /// Which recommender to serve: `legacy`, `pluggable` or `shadow`
+    /// (spec §16.1a). See [`RecMode`].
+    pub rec_mode: RecMode,
     /// RRF k constant for the strategy blend (spec §16.1a). Default: 60.
     pub rec_rrf_k: f64,
     /// Per-strategy resource ceiling: max results each strategy may contribute.
@@ -426,7 +417,7 @@ impl Default for DiscoveryConfig {
             enable_half_life: true,
             half_life_min_age_days: 14,
             half_life_window_days: 30,
-            rec_mode: "legacy".to_string(),
+            rec_mode: RecMode::Legacy,
             rec_rrf_k: 60.0,
             rec_per_strategy_cap: 100,
             rec_enabled_strategies: Vec::new(),
@@ -606,6 +597,60 @@ pub enum InstanceMode {
     WalledGarden,
     /// The instance is closed to everyone but the operator.
     Private,
+}
+
+/// Which recommender the instance serves (spec §16.1a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecMode {
+    /// `discovery::blend` over the multi-engine candidates. Default.
+    #[default]
+    Legacy,
+    /// The strategy registry with an RRF blend.
+    Pluggable,
+    /// Serves `legacy` *and* runs the pluggable registry alongside, recording
+    /// how the two rankings would differ.
+    ///
+    /// What a reader receives is unchanged — that is the entire safety
+    /// property, and the reason this is a mode rather than a flag on
+    /// `Pluggable`: a flag would let it decide which ranking was served, which
+    /// is the one thing it must not. The spec requires evaluation to precede a
+    /// switch, and this is how that happens without switching.
+    Shadow,
+}
+
+impl RecMode {
+    /// Canonical configuration spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Legacy => "legacy",
+            Self::Pluggable => "pluggable",
+            Self::Shadow => "shadow",
+        }
+    }
+
+    /// Parse a configuration value, refusing anything unrecognised.
+    ///
+    /// The route dispatches on this value, so a typo that fell back to
+    /// `legacy` would be indistinguishable from a working instance: the
+    /// operator would have no way to tell a misspelling from a bug.
+    pub fn parse(raw: &str) -> Result<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "legacy" => Ok(Self::Legacy),
+            "pluggable" => Ok(Self::Pluggable),
+            "shadow" => Ok(Self::Shadow),
+            other => anyhow::bail!(
+                "discovery.rec_mode must be one of legacy, pluggable, shadow, got {other:?}"
+            ),
+        }
+    }
+}
+
+impl std::fmt::Display for RecMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 impl InstanceMode {
@@ -1675,7 +1720,29 @@ impl Config {
                     tag_gravity_bp: t.tag_gravity_bp.unwrap_or_default(),
                 }
             },
-            discovery: DiscoveryConfig::default(),
+            // §16.1a names `rec.mode` an operator control, and until this was
+            // wired the value was only reachable from Rust: the section existed
+            // on `Config` and nowhere in `FileConfig`, so a deployment could
+            // not set it and no test failed, because a value nobody can set
+            // cannot be wrong. A default is taken first so a partial
+            // `[discovery]` table keeps every other knob, and `mode` is parsed
+            // rather than defaulted — an unrecognised value must be refused
+            // here, where the operator can see it, rather than reaching the
+            // route and silently meaning `legacy`.
+            discovery: {
+                let d = file.discovery.unwrap_or_default();
+                let mut cfg = DiscoveryConfig::default();
+                if let Some(mode) = d.mode {
+                    cfg.rec_mode = RecMode::parse(&mode)?;
+                }
+                if let Some(k) = d.rrf_k {
+                    cfg.rec_rrf_k = k;
+                }
+                if let Some(strategies) = d.enabled_strategies {
+                    cfg.rec_enabled_strategies = strategies;
+                }
+                cfg
+            },
             tts,
             // --- bulk_export (spec §38) -----------------------------------------
             bulk_export: BulkExportConfig {
@@ -1992,22 +2059,9 @@ impl Config {
         if self.site.name.trim().is_empty() {
             anyhow::bail!("site.name must not be empty");
         }
-        // `rec.mode` is a three-valued enum spelled as a String, and a typo here
-        // would otherwise be silent and load-bearing: the route dispatches on
-        // `== "pluggable"`, so `Pluggable`, `pluggable ` or `shadow-mode` would
-        // all fall through to the legacy branch. An operator who wrote
-        // `plugggable` in the config and saw legacy behaviour would have no way
-        // to tell a typo from a bug. Named values in the error, for the same
-        // reason §0.4.7's engine validation refuses rather than falling back.
-        if !matches!(
-            self.discovery.rec_mode.as_str(),
-            "legacy" | "pluggable" | "shadow"
-        ) {
-            anyhow::bail!(
-                "discovery.rec_mode must be one of legacy, pluggable, shadow, got {:?}",
-                self.discovery.rec_mode
-            );
-        }
+        // `rec.mode` needs no check here: it is a `RecMode`, so an unrecognised
+        // value is refused by `RecMode::parse` at load time rather than
+        // surviving as a string that silently means `legacy`.
         // Perceptual dedup settings (spec §32.7.2). A threshold outside the
         // 1..=32 domain would either match nothing or match everything, and both
         // are silent: the instance would claim to deduplicate and quietly not.
@@ -2176,6 +2230,8 @@ struct FileConfig {
     library: Option<LibrarySection>,
     /// Media resilience settings (spec §32.7).
     media_resilience: Option<MediaResilienceSection>,
+    /// Recommendation mode (spec §16.1a).
+    discovery: Option<DiscoverySection>,
     theme: Option<ThemeSection>,
     /// Taste gravity settings (spec §0.4, §16.17).
     taste: Option<TasteSection>,
@@ -2189,6 +2245,27 @@ struct FileConfig {
     instance: Option<InstanceSection>,
     /// Meta-ranker settings (spec §9.10).
     meta_ranker: Option<MetaRankerSection>,
+}
+
+/// The `[discovery]` table (spec §16.1a): which recommender the instance
+/// serves, and which strategies it may use.
+///
+/// This section existed as a Rust field only until now, which meant `rec.mode`
+/// — a documented operator control — could not be set from a config file at
+/// all. The type was loadable in a test and unreachable in a deployment, and
+/// nothing failed, because a value that is never read cannot be wrong.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DiscoverySection {
+    /// `legacy`, `pluggable` or `shadow`. An unrecognised value is refused at
+    /// load rather than falling back: the route dispatches on this, so a typo
+    /// that fell back to `legacy` would be indistinguishable from a working
+    /// instance.
+    mode: Option<String>,
+    /// The RRF k constant for the strategy blend.
+    rrf_k: Option<f64>,
+    /// Restrict the enabled strategy set. Empty means all enabled.
+    enabled_strategies: Option<Vec<String>>,
 }
 
 /// The `[theme]` table (spec §0.4.6): theme mode and gravity settings.
@@ -3172,6 +3249,56 @@ mode = "quantum"
         )
         .expect("loads");
         assert_eq!(config.theme.mode, "quantum");
+    }
+
+    #[test]
+    fn rec_mode_loads_each_named_value() {
+        // §16.1a: three named values, and a config file is how an operator sets
+        // one. Round-tripped through the real file loader rather than assigned in
+        // Rust, so this covers the path an operator actually takes.
+        for (spelling, expected) in [
+            ("legacy", RecMode::Legacy),
+            ("pluggable", RecMode::Pluggable),
+            ("shadow", RecMode::Shadow),
+        ] {
+            let config = load_from(
+                "rec-mode-valid",
+                &format!("[discovery]\nmode = \"{spelling}\"\n"),
+            )
+            .expect("a named rec mode loads");
+            assert_eq!(config.discovery.rec_mode, expected);
+        }
+    }
+
+    #[test]
+    fn a_misspelled_rec_mode_is_refused_at_load() {
+        // The reason `rec_mode` is a typed enum rather than a String. The route
+        // dispatches on the value, so `Pluggable`, a trailing space or
+        // `shadow-mode` would all reach the legacy branch — and an operator who
+        // typed `plugggable` would have no way to tell a typo from a bug. A
+        // refusal at load names the problem instead.
+        let error = load_from("rec-mode-bad", "[discovery]\nrec_mode = \"plugggable\"\n")
+            .expect_err("a misspelling is refused");
+        let text = format!("{error:#}");
+        assert!(
+            text.contains("plugggable"),
+            "the error names what was read: {text}"
+        );
+    }
+
+    #[test]
+    fn rec_mode_is_case_and_space_insensitive() {
+        // An operator's TOML should not fail on a capital letter. The
+        // normalisation lives in `parse` so both the file loader and any other
+        // caller get it.
+        assert_eq!(
+            RecMode::parse("  Shadow  ").expect("normalised"),
+            RecMode::Shadow
+        );
+        assert_eq!(
+            RecMode::parse("PLUGGABLE").expect("normalised"),
+            RecMode::Pluggable
+        );
     }
 
     #[test]
