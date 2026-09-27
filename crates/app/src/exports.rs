@@ -626,10 +626,25 @@ pub async fn run(state: &AppState, payload: &Value) -> Result<(), HandlerError> 
         })?;
 
     let db = state.db();
-    let row = repo::find_export(db, export_job_id)
+    // The export row is committed immediately after the queue row it rides on,
+    // because `export_jobs.job_id` is a foreign key and the insert fails the
+    // other way round. That leaves a window in which a worker can claim the job
+    // before the export row exists. Treating that as fatal burned the job: it
+    // exhausted its retries against a row that appeared microseconds later, the
+    // export stayed `queued` forever, and the reader saw "Waiting" with nothing
+    // coming. A missing row here is therefore transient — the right answer is to
+    // let the retry policy try again, not to give up on the export.
+    let row = match repo::find_export(db, export_job_id)
         .await
         .map_err(transient)?
-        .ok_or_else(|| fatal(format!("export {export_job_id} no longer exists")))?;
+    {
+        Some(row) => row,
+        None => {
+            return Err(transient(format!(
+                "export {export_job_id} is not committed yet"
+            )))
+        }
+    };
 
     // Idempotent: a redelivered job for an export that is finished does nothing.
     // The queue is at-least-once, so this is the difference between a retry and
