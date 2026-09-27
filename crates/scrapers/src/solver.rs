@@ -245,6 +245,25 @@ impl SolverClient {
         if body.is_empty() {
             return Err(SourceError::Parse("the solver returned no page".to_owned()));
         }
+        // A service that reports success while returning the challenge page is
+        // the failure mode this check exists for, and it is not hypothetical:
+        // obscura-solverr answers `{"status":"ok","message":"Challenge not
+        // detected!"}` with the 10KB Cloudflare interstitial and no
+        // `cf_clearance`, having solved nothing. Believing that reply hands a
+        // challenge page to the adapter, which reports it as a source that
+        // "sent a page this build cannot read" -- an error that blames the
+        // source for the service's failure and sends the operator looking in the
+        // wrong place. The status code is useless here because the challenge is
+        // served as 200, so the body itself has to be the evidence.
+        if let Some(marker) = challenge_marker(&body) {
+            tracing::warn!(
+                solver = %self.request_url,
+                url,
+                marker,
+                "the solver reported success but returned a challenge page"
+            );
+            return Err(SourceError::Blocked);
+        }
         let status = solution.status.unwrap_or(200);
         if !(200..400).contains(&status) {
             // The service got through the wall and the source said no. That is
@@ -449,6 +468,36 @@ impl SolverClient {
 fn names_a_missing_session(message: &str) -> bool {
     let text = message.to_ascii_lowercase();
     text.contains("session") && (text.contains("not exist") || text.contains("expired"))
+}
+
+/// The marker that says this body is a challenge page rather than content, if
+/// it is one.
+///
+/// Only markers that appear in Cloudflare's own interstitial shell are listed,
+/// because the cost of a false positive is a page we refuse to read and the
+/// cost of a false negative is a challenge page handed to a parser as if it
+/// were a work. A bare `525` is deliberately **not** here, and that is the whole
+/// trap: a real work page contains that string as often as not (a kudos count,
+/// a date, a tag), so matching it refuses the content the tier exists to fetch.
+///
+/// The returned `&'static str` names the marker for the log line, so an
+/// operator reading a refused import can tell a challenge page from a source
+/// that genuinely sent something unreadable.
+fn challenge_marker(body: &str) -> Option<&'static str> {
+    // The shell of Cloudflare's managed challenge. `cf_chl_opt` is the option
+    // container the challenge script renders into and is the most stable of
+    // these, since it is required for the challenge to function at all.
+    const MARKERS: &[(&str, &str)] = &[
+        ("cf_chl_opt", "cf_chl_opt"),
+        ("challenge-platform", "challenge-platform"),
+        ("cf-browser-verification", "cf-browser-verification"),
+        ("cf-turnstile", "cf-turnstile"),
+        ("Just a moment...", "Just a moment..."),
+    ];
+    MARKERS
+        .iter()
+        .find(|(needle, _)| body.contains(needle))
+        .map(|(_, label)| *label)
 }
 
 /// What one `request.get` produced.
@@ -832,6 +881,53 @@ mod tests {
             .await
             .expect_err("must fail");
         assert!(matches!(error, SourceError::Parse(_)), "got {error:?}");
+    }
+
+    #[tokio::test]
+    async fn a_service_reporting_success_with_a_challenge_page_is_a_wall() {
+        // Measured against obscura-solverr 2026-09-27, asked for an AO3 work page
+        // that a plain `curl` reads one time in eight. It answered
+        // `{"status":"ok","message":"Challenge not detected!"}` with the 10,050-byte
+        // Cloudflare interstitial as the page body, status 200, and no
+        // `cf_clearance` cookie — having solved nothing. The client believed the
+        // `ok` and would have handed that page to the adapter, which reports such
+        // a page as a source that "sent a page this build cannot read" — an error
+        // that blames AO3 for the solver's failure. It is a wall, and `Blocked` is
+        // the category that already means one.
+        const INTERSTITIAL: &str = "<html><head><title>Just a moment...</title></head>\
+            <body><div id=\"cf-please-wait\"></div>\
+            <script>window._cf_chl_opt={cType:'managed'};</script>\
+            <div class=\"cf-turnstile\" data-sitekey=\"x\"></div>\
+            <noscript>Enable JavaScript and cookies to continue</noscript></body></html>";
+        let (endpoint, _seen) = stub(vec![ok_solution(INTERSTITIAL)]).await;
+        let client = SolverClient::new(SolverConfig::new(&endpoint), vec!["fimfiction.net".into()])
+            .expect("client");
+        let error = client
+            .get("https://www.fimfiction.net/story/1/")
+            .await
+            .expect_err("must fail");
+        assert!(matches!(error, SourceError::Blocked), "got {error:?}");
+    }
+
+    #[tokio::test]
+    async fn a_page_that_merely_mentions_525_is_still_read() {
+        // The trap this check walks around, kept as a test because it is so easy to
+        // reintroduce. A real work page contains "525" constantly — a kudos count, a
+        // date, a tag — and the 8,706-byte Cloudflare 525 page is what the wall
+        // actually looks like from this project. A guard written as "reject any
+        // 525" refuses the content the solver tier exists to fetch, so the marker
+        // has to come from the challenge shell and never from a bare code.
+        let (endpoint, _seen) = stub(vec![ok_solution(
+            "<html><body><div class=\"story\">He was 525 kudos proud, tagged 1953-07-19</div></body></html>",
+        )])
+        .await;
+        let client = SolverClient::new(SolverConfig::new(&endpoint), vec!["fimfiction.net".into()])
+            .expect("client");
+        let fetched = client
+            .get("https://www.fimfiction.net/story/1/")
+            .await
+            .expect("a real page");
+        assert!(fetched.body.contains("525 kudos"));
     }
 
     #[test]

@@ -135,6 +135,29 @@ impl ArchiveSoftware {
         if is_not_found(&document) {
             return Err(SourceError::NotFound);
         }
+        // AO3's own error page, and the one that matters here. Measured
+        // 2026-09-27: this host answers a work page with Cloudflare's 8,706-byte
+        // `525: SSL handshake failed` roughly seven times in eight, and serves
+        // the real 82KB work the rest. It is reported as `Blocked` rather than
+        // left to fail as a parse error, because the two are handled differently
+        // on purpose: `Blocked` is the category that escalates to the next
+        // transport tier and is retried, whereas a `Parse` is the adapter
+        // reporting that the source sent something it cannot read, which
+        // escalates nowhere. Read as a parse error this page produced
+        // "no title on the work page for work …" on 474 of 500 seeded imports and
+        // silently spent the archive tier on a page that is not a copy of
+        // anything.
+        //
+        // It cannot be taught to `is_bot_challenge` instead: that function
+        // matches on `Just a moment` / `__cf_chl` / `Attention Required!`, and
+        // deliberately omits `challenge-platform` because real royalroad and
+        // fanfiction pages carry it. This 525 page contains none of the three
+        // markers it does use, and it is a TLS failure at the origin rather than
+        // a challenge, so no marker common to served pages can separate it.
+        // Recognising it is a fact about *this* site, and belongs here.
+        if is_cloudflare_origin_error(&document) {
+            return Err(SourceError::Blocked);
+        }
         let adult_gated = is_adult_gate(&document);
 
         let work_id = Self::work_id(url).ok_or_else(|| {
@@ -571,6 +594,35 @@ fn is_not_found(document: &Html) -> bool {
         .map(|text| {
             let text = text.to_lowercase();
             text.contains("error") || text.contains("not found")
+        })
+        .unwrap_or(false)
+}
+
+/// Whether a page is Cloudflare's origin-error page rather than anything the
+/// site served.
+///
+/// AO3 sits behind Cloudflare, and when the handshake between Cloudflare and
+/// AO3's origin fails, Cloudflare answers with its own error page instead of
+/// the work. It is not a bot challenge and not a copy of the work, so nothing
+/// downstream can make anything of it — the only correct answers are "a wall,
+/// try another transport" and "stop".
+///
+/// Recognised on the prose Cloudflare puts in the page's own explanation, and
+/// only when the code and the explanation appear together. The bare code is
+/// never enough: an AO3 work page contains "525" as a kudos count as often as
+/// not, which is the same trap that made an earlier probe here report real
+/// works as walls, so a guard written on the code alone would refuse exactly the
+/// content this adapter exists to read.
+fn is_cloudflare_origin_error(document: &Html) -> bool {
+    text_of(document, "#main")
+        .or_else(|| text_of(document, "body"))
+        .map(|text| {
+            let text = text.to_ascii_lowercase();
+            // "Error code 525" plus Cloudflare's own account of what happened.
+            // Both are required: the code alone is not distinctive, and the
+            // explanation alone could appear in a work's own summary.
+            (text.contains("error code 525") || text.contains("525: ssl handshake failed"))
+                && (text.contains("cloudflare") || text.contains("handshake"))
         })
         .unwrap_or(false)
 }

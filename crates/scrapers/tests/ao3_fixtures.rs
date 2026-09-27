@@ -14,6 +14,7 @@
 //! | `ao3/work-full.html` | `archiveofourown.org/works/92356871?view_full_work=true` |
 //! | `ao3/work-ongoing.html` | `archiveofourown.org/works/91806026` |
 //! | `ao3/not-found.html` | `archiveofourown.org/works/99999999999999` (404) |
+//! | `ao3/cloudflare-525.html` | `archiveofourown.org/works/36333757` (2026-09-27, Cloudflare origin error) |
 //!
 //! The fixture is the contract. When the site changes its markup these tests
 //! fail, which is the entire point: the failure is a signal that the parser
@@ -275,6 +276,48 @@ fn a_page_that_is_not_a_work_page_fails_loudly() {
         matches!(error, SourceError::Parse(_)),
         "expected a parse error, got {error:?}"
     );
+}
+
+#[test]
+fn a_cloudflare_origin_error_is_a_wall_and_not_a_parse_failure() {
+    // Recorded 2026-09-27 from `archiveofourown.org/works/36333757`, which
+    // answered seven times in eight with this page. It matters which error this
+    // is: `Blocked` escalates to the next transport tier and is retried, while
+    // `Parse` escalates nowhere and is reported to the operator as the source
+    // having sent something unreadable. Read as a parse error it produced
+    // "no title on the work page for work 36333757" and, on a 500-work seed,
+    // 474 identical failures.
+    let error = adapter()
+        .preview_from_html(
+            &fixture("ao3/cloudflare-525.html"),
+            &url("https://archiveofourown.org/works/36333757"),
+        )
+        .expect_err("an origin error is not a work");
+    assert_eq!(error, SourceError::Blocked);
+}
+
+#[test]
+fn a_work_page_that_merely_mentions_525_is_still_a_work() {
+    // The trap in the guard above, pinned from the other side. A real AO3 work
+    // page contains "525" freely — a kudos count, a date inside a tag — so a
+    // detector written on the code alone would refuse the very pages this
+    // adapter is for. The code has to arrive with Cloudflare's explanation.
+    let work = adapter()
+        .preview_from_html(
+            &fixture("ao3/work.html"),
+            &url("https://archiveofourown.org/works/92356871"),
+        )
+        .expect("a real work page still parses");
+    assert!(!work.title.is_empty());
+
+    let error = adapter()
+        .preview_from_html(
+            "<html><body><div id=\"main\"><h2 class=\"title heading\">A Work</h2>\
+             <p>525 kudos, 1953-07-19, and a summary mentioning a handshake.</p></div></body></html>",
+            &url("https://archiveofourown.org/works/1"),
+        )
+        .expect("a work whose summary says 525 is still a work");
+    assert_eq!(error.title, "A Work");
 }
 
 #[test]
