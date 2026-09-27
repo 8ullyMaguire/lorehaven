@@ -166,9 +166,20 @@ pub async fn contribute_to_bounty(
         }
     }
 
-    // Record the contribution itself for audit (best-effort; the table may
-    // not exist on older deployments).
-    let _ = record_contribution(db, bounty_id, contributor, amount).await;
+    // Record the contribution itself for audit. The table is added by a later
+    // migration than `bounties` itself, so a deployment that has not run it
+    // will not have it and the contribution must still be accepted -- the
+    // funding arithmetic above is the source of truth. The failure is
+    // therefore swallowed, but it is logged: silently losing the audit trail
+    // is what hid a missing-`id` insert here for so long.
+    if let Err(err) = record_contribution(db, bounty_id, contributor, amount).await {
+        tracing::warn!(
+            bounty_id,
+            contributor,
+            %err,
+            "recorded a bounty contribution but could not write the audit row"
+        );
+    }
 
     Ok((new_funded, activated))
 }
@@ -181,12 +192,16 @@ async fn record_contribution(
     amount: i64,
 ) -> Result<(), sqlx::Error> {
     let now = crate::identity::now_rfc3339();
+    // `bounty_contributions.id` is `TEXT PRIMARY KEY` and so NOT NULL on both
+    // backends; it has no default, so it has to be supplied here.
+    let id = uuid::Uuid::new_v4().to_string();
     match db.backend() {
         crate::Backend::Sqlite => {
             let pool = db.sqlite_pool().expect("sqlite handle");
             sqlx::query(
-                "INSERT INTO bounty_contributions (bounty_id, contributor, amount, contributed_at) VALUES (?, ?, ?, ?)",
+                "INSERT INTO bounty_contributions (id, bounty_id, contributor, amount, contributed_at) VALUES (?, ?, ?, ?, ?)",
             )
+            .bind(&id)
             .bind(bounty_id)
             .bind(contributor)
             .bind(amount)
@@ -197,8 +212,9 @@ async fn record_contribution(
         crate::Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres handle");
             sqlx::query(
-                "INSERT INTO bounty_contributions (bounty_id, contributor, amount, contributed_at) VALUES ($1, $2, $3, $4)",
+                "INSERT INTO bounty_contributions (id, bounty_id, contributor, amount, contributed_at) VALUES ($1, $2, $3, $4, $5)",
             )
+            .bind(&id)
             .bind(bounty_id)
             .bind(contributor)
             .bind(amount)

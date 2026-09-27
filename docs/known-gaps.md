@@ -100,6 +100,25 @@ rather than a silent hole. Deciding whether the statement *should* bump it is a
 one-word change plus a comment, but it belongs with whoever first adds a
 `version`-based writer, not with a test suite.
 
+### M18P59-D01 · `contribute_to_bounty` is not atomic across the funding update and the ledger
+
+`contribute_to_bounty` reads the bounty, computes `funded_amount` in Rust, then
+writes the new total, then writes the contribution row — three separate
+statements with no transaction and no row lock. Two concurrent contributions
+read the same `funded_amount`, both add their own amount, and the second write
+wins, so one contribution's credits vanish from the total while its ledger row
+remains. The ledger and the total then disagree, which is the one invariant the
+table exists to make checkable.
+
+The same window means activation is not safe: two contributions that each cross
+the threshold both report `activated = true`.
+
+Fixing it means wrapping the read-modify-write in a transaction and taking
+`SELECT ... FOR UPDATE` on the bounty row (a no-op clause to skip on SQLite),
+which is a real change to a money path. Recorded, not fixed, pending a decision
+on whether crowdfunded bounties can plausibly receive concurrent contributions
+in practice.
+
 ### M45-D01 · `upsert_card` freezes a shipped card's whole row, not just its stage
 
 §44.6 requires that a `shipped` or `rejected` card's *stage* is never
