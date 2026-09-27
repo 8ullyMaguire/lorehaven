@@ -20,6 +20,7 @@ pub mod discovery;
 pub mod dnf;
 pub mod economy;
 pub mod events;
+pub mod exchange;
 pub mod exports;
 pub mod external;
 pub mod federation;
