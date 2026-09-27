@@ -62,6 +62,26 @@ return but errors rather than returning `false`. Both are typed
 `Result<...>` with a boolean in the signature, so callers have to handle the
 same condition two ways.
 
+### M68-D21 · `increment_counter` interpolates a caller-supplied column name
+
+`work_metrics::increment_counter(db, work_id, column, delta)` is `pub`, takes
+`column: &str` and interpolates it into three places in the statement: the INSERT
+column list, the VALUES clause, and the `ON CONFLICT DO UPDATE SET` clause. Its
+comment says "the column name is validated by the caller (always a literal in
+this module)" — but it has no callers outside the module, and `pub` makes it
+reachable from anywhere in the crate, so the validation the comment relies on
+does not exist anywhere. A caller that passed a request-supplied name would be a
+SQL injection.
+
+Not changed, because closing it is a design decision with two reasonable
+answers: make the function private and add seven thin wrappers (safest, no escape
+hatch), or validate the name against the known counter set and return an error
+for anything else (keeps the seed script working). An unknown column name does
+fail loudly today, so nothing is corrupting a row — the risk is the shape, not a
+live exploit.
+
+Pinned by `increment_counter_will_interpolate_any_column_name_it_is_given`.
+
 ### M43-D10 · `regenerate_fingerprint` cannot regenerate
 
 `instance_fingerprints.instance_host` is `UNIQUE` and the INSERT has no
