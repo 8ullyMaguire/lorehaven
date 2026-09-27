@@ -68,6 +68,22 @@ impl From<DerivativeRow> for Derivative {
     }
 }
 
+/// The column list every `SELECT` in this module reads, in the order
+/// `DerivativeRow` expects.
+///
+/// The two forms differ only in the two `UUID` columns, which PostgreSQL needs
+/// cast to text and SQLite stores as text already. Kept as one constant per
+/// dialect because the list appears in four statements and a hand-copied
+/// variant that dropped or reordered a column would decode as a plausible row
+/// rather than an error -- a checksum landing in a timestamp field.
+const SELECT_COLUMNS_SQLITE: &str = "SELECT id, work_id, edition_kind, derivative_kind, \
+     parent_checksum, output_checksum, output_bytes, output_mime_type, state, job_id, \
+     error_message, built_at, verified_at";
+
+const SELECT_COLUMNS_POSTGRES: &str = "SELECT id::text AS id, work_id::text AS work_id, \
+     edition_kind, derivative_kind, parent_checksum, output_checksum, output_bytes, \
+     output_mime_type, state, job_id::text AS job_id, error_message, built_at, verified_at";
+
 /// Insert a new derivative row.
 pub async fn create_derivative(db: &Database, new: NewDerivative<'_>) -> Result<String> {
     let id = uuid::Uuid::new_v4().to_string();
@@ -76,9 +92,16 @@ pub async fn create_derivative(db: &Database, new: NewDerivative<'_>) -> Result<
         "INSERT INTO derivatives (id, work_id, edition_kind, derivative_kind, parent_checksum, state, created_at, updated_at, version) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, 1)",
         "INSERT INTO derivatives (id, work_id, edition_kind, derivative_kind, parent_checksum, state, created_at, updated_at, version) VALUES (?::uuid, ?::uuid, ?, ?, ?, 'queued', ?, ?, 1)",
     );
+    // The result is propagated, not discarded. A derivative row can fail to
+    // insert -- `work_id` is a foreign key, so a work that was deleted between
+    // the route's check and this call, or a checksum column that outgrew its
+    // type -- and swallowing that with `let _ =` returned the freshly minted
+    // id for a row that does not exist. The caller enqueues a build job for
+    // that id, so the failure surfaced later as a job that could never find
+    // its subject, with the real cause already discarded.
     match db.backend() {
         Backend::Sqlite => {
-            let _ = sqlx::query(&sql)
+            sqlx::query(&sql)
                 .bind(&id)
                 .bind(new.work_id)
                 .bind(new.edition_kind)
@@ -90,7 +113,7 @@ pub async fn create_derivative(db: &Database, new: NewDerivative<'_>) -> Result<
                 .await?;
         }
         Backend::Postgres => {
-            let _ = sqlx::query(&sql)
+            sqlx::query(&sql)
                 .bind(&id)
                 .bind(new.work_id)
                 .bind(new.edition_kind)
@@ -101,7 +124,7 @@ pub async fn create_derivative(db: &Database, new: NewDerivative<'_>) -> Result<
                 .execute(db.postgres_pool().expect("postgres handle"))
                 .await?;
         }
-    };
+    }
     Ok(id)
 }
 
@@ -109,8 +132,8 @@ pub async fn create_derivative(db: &Database, new: NewDerivative<'_>) -> Result<
 pub async fn list_derivatives(db: &Database, work_id: &str) -> Result<Vec<Derivative>> {
     let sql = sql_owned(
         db,
-        "SELECT id, work_id, edition_kind, derivative_kind, parent_checksum, output_checksum, output_bytes, output_mime_type, state, job_id, error_message, built_at, verified_at FROM derivatives WHERE work_id = ? ORDER BY created_at".to_string(),
-        "SELECT id::text AS id, work_id::text AS work_id, edition_kind, derivative_kind, parent_checksum, output_checksum, output_bytes, output_mime_type, state, job_id::text AS job_id, error_message, built_at, verified_at FROM derivatives WHERE work_id = ?::uuid ORDER BY created_at".to_string(),
+        format!("{SELECT_COLUMNS_SQLITE} FROM derivatives WHERE work_id = ? ORDER BY created_at"),
+        format!("{SELECT_COLUMNS_POSTGRES} FROM derivatives WHERE work_id = ?::uuid ORDER BY created_at"),
     );
     let rows = match db.backend() {
         Backend::Sqlite => {
@@ -254,27 +277,46 @@ pub async fn find_stale_for_verification(
     older_than_rfc3339: &str,
     limit: i64,
 ) -> Result<Vec<Derivative>> {
-    let sqlite_sql = "SELECT id, work_id, edition_kind, derivative_kind, parent_checksum, output_checksum, output_bytes, output_mime_type, state, job_id, error_message, built_at, verified_at FROM derivatives WHERE state = 'ready' AND (verified_at IS NULL OR verified_at < ?) ORDER BY verified_at IS NULL DESC, verified_at LIMIT ?".to_string();
-    let postgres_sql = "SELECT id::text AS id, work_id::text AS work_id, edition_kind, derivative_kind, parent_checksum, output_checksum, output_bytes, output_mime_type, state, job_id::text AS job_id, error_message, built_at, verified_at FROM derivatives WHERE state = 'ready' AND (verified_at IS NULL OR verified_at < ?) ORDER BY verified_at NULLS LAST LIMIT ?".to_string();
-    let rows = match db.backend() {
+    // The ORDER BY is one expression on both backends. It used to be two
+    // spellings of the same intent:
+    //
+    // - SQLite:    `ORDER BY verified_at IS NULL DESC, verified_at`
+    // - PostgreSQL:`ORDER BY verified_at NULLS LAST`
+    //
+    // Both are wrong as a pair, in two independent ways. `NULLS LAST` is a
+    // syntax error in PostgreSQL unless a sort direction precedes it -- the
+    // statement failed with "syntax error at or near )", so the sweep has never
+    // run on PostgreSQL at all. And the two spellings are *opposites* rather
+    // than restatements: `verified_at IS NULL` is `1` for a never-verified row
+    // and `DESC` sorts `1` first, so SQLite returns the never-verified rows
+    // first, while `NULLS LAST` would return them last.
+    //
+    // The intent is the SQLite one: a rendition nobody has verified is the one
+    // most in need of it, then the least recently verified. `verified_at IS
+    // NULL DESC` is valid PostgreSQL, so both arms now carry it and the rows
+    // come back in the same order everywhere.
+    let sql = sql_owned(
+        db,
+        format!("{SELECT_COLUMNS_SQLITE} FROM derivatives WHERE state = 'ready' AND (verified_at IS NULL OR verified_at < ?) ORDER BY verified_at IS NULL DESC, verified_at ASC LIMIT ?"),
+        format!("{SELECT_COLUMNS_POSTGRES} FROM derivatives WHERE state = 'ready' AND (verified_at IS NULL OR verified_at < ?) ORDER BY verified_at IS NULL DESC, verified_at ASC LIMIT ?"),
+    );
+    let rows: Vec<DerivativeRow> = match db.backend() {
         Backend::Sqlite => {
-            let rows: Vec<DerivativeRow> = sqlx::query_as(&sqlite_sql)
+            sqlx::query_as(&sql)
                 .bind(older_than_rfc3339)
                 .bind(limit)
                 .fetch_all(db.sqlite_pool().expect("sqlite handle"))
-                .await?;
-            rows.into_iter().map(|r| r.into()).collect()
+                .await?
         }
         Backend::Postgres => {
-            let rows: Vec<DerivativeRow> = sqlx::query_as(&postgres_sql)
+            sqlx::query_as(&sql)
                 .bind(older_than_rfc3339)
                 .bind(limit)
                 .fetch_all(db.postgres_pool().expect("postgres handle"))
-                .await?;
-            rows.into_iter().map(|r| r.into()).collect()
+                .await?
         }
     };
-    Ok(rows)
+    Ok(rows.into_iter().map(|r| r.into()).collect())
 }
 
 /// Update verified_at timestamp after successful re-verification.
@@ -307,8 +349,8 @@ pub async fn touch_derivative_verified(db: &Database, id: &str) -> Result<bool> 
 pub async fn find_derivative(db: &Database, id: &str) -> Result<Option<Derivative>> {
     let sql = sql_owned(
         db,
-        "SELECT id, work_id, edition_kind, derivative_kind, parent_checksum, output_checksum, output_bytes, output_mime_type, state, job_id, error_message, built_at, verified_at FROM derivatives WHERE id = ?".to_string(),
-        "SELECT id::text AS id, work_id::text AS work_id, edition_kind, derivative_kind, parent_checksum, output_checksum, output_bytes, output_mime_type, state, job_id::text AS job_id, error_message, built_at, verified_at FROM derivatives WHERE id = ?::uuid".to_string(),
+        format!("{SELECT_COLUMNS_SQLITE} FROM derivatives WHERE id = ?"),
+        format!("{SELECT_COLUMNS_POSTGRES} FROM derivatives WHERE id = ?::uuid"),
     );
     let row: Option<DerivativeRow> = match db.backend() {
         Backend::Sqlite => {
