@@ -270,7 +270,32 @@ pub async fn set_reaction(
             };
             Ok(ReactionOutcome::Retracted)
         }
-        (Some(prev), Some(vt)) if prev == vt => Ok(ReactionOutcome::Retracted),
+        // Re-clicking the same reaction retracts it. This arm used to
+        // `return Ok(Retracted)` without touching the row, so the caller was
+        // told the reaction was gone while the work page kept showing it.
+        (Some(prev), Some(vt)) if prev == vt => {
+            let sql = db.sql(
+                "DELETE FROM work_reactions WHERE work_id = ? AND pseud = ?",
+                "DELETE FROM work_reactions WHERE work_id::text = $1 AND pseud::text = $2",
+            );
+            match db.backend() {
+                Backend::Sqlite => {
+                    sqlx::query(&sql)
+                        .bind(work_id)
+                        .bind(pseud)
+                        .execute(db.sqlite_pool().expect("sqlite handle"))
+                        .await?;
+                }
+                Backend::Postgres => {
+                    sqlx::query(&sql)
+                        .bind(work_id)
+                        .bind(pseud)
+                        .execute(db.postgres_pool().expect("postgres handle"))
+                        .await?;
+                }
+            }
+            Ok(ReactionOutcome::Retracted)
+        }
         (Some(_), Some(vt)) => {
             let sql = db.sql(
                 "UPDATE work_reactions SET vote_type = ?, updated_at = ? WHERE work_id = ? AND pseud = ?",
