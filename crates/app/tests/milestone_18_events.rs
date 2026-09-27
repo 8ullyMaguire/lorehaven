@@ -23,6 +23,11 @@
 //!     from one claimant; the same work may not fulfil two claims for the same
 //!     request. Those are different rules and a test that conflates them passes
 //!     under either implementation.
+//!   * **A duplicate is a soft `false`, not an error (M18-06).** `fulfil_claim`
+//!     and `join_event` used to disagree: one bailed, the other let the unique
+//!     key raise. Both are `Result<bool>`, so a caller following both signatures
+//!     correctly was still wrong on one of them. A test that asserts a duplicate
+//!     *errors* pins that asymmetry back in, so these say `false` deliberately.
 
 use std::path::PathBuf;
 
@@ -248,15 +253,15 @@ async fn one_work_cannot_fulfil_the_same_request_twice() {
             .expect("first fulfil"),
         "the first fulfilment of a request goes through"
     );
-    // The second call is an *error*, not a `false`: the anti-gaming check bails
-    // rather than reporting a refusal, so a caller has to distinguish the two by
-    // matching on the message. `join_event` returns false for the equivalent
-    // case, so the module is not consistent about it.
+    // The second call is a soft `false`, matching `join_event` (M18-06). The
+    // anti-gaming rule is unchanged in force -- the duplicate is still refused --
+    // but refusal is reported the same way as every other "no" from this
+    // function, so a caller does not have to know that this particular refusal
+    // used to arrive as an error.
     let second = ev::fulfil_claim(h.db(), &r, &claimant, &work).await;
     assert!(
-        second.is_err(),
-        "the same work cannot fulfil the same request a second time -- it is \
-         rejected, and rejected loudly: {second:?}"
+        !second.expect("a duplicate is refused, not raised"),
+        "the same work cannot fulfil the same request a second time"
     );
 }
 
@@ -305,9 +310,9 @@ async fn the_anti_gaming_rule_is_per_work_and_claimant() {
         "one work fulfils the first of a claimant's two claims"
     );
     assert!(
-        ev::fulfil_claim(h.db(), &second, &claimant, &work)
+        !ev::fulfil_claim(h.db(), &second, &claimant, &work)
             .await
-            .is_err(),
+            .expect("refused, not raised"),
         "and it cannot fulfil the second claim from the same claimant"
     );
 
@@ -367,27 +372,114 @@ async fn claims_expire_once_past_the_grace_period() {
         "with the clock two hours ahead even a zero grace period reaches it, and \
          exactly one claim expired"
     );
-    // The second call matches the same row again. The statement *sets*
-    // `fulfilled_at = NULL` rather than marking the claim expired, and its guard
-    // is `fulfilled_at IS NULL` -- so expiring a claim leaves it looking exactly
-    // like a claim that was never fulfilled, and the row is re-expired on every
-    // subsequent run. The `rows_affected` count is therefore not "claims that
-    // expired this run" but "claims past the cutoff", and it never falls to zero
-    // for a request nobody ever fulfils.
+    // The second call must expire nothing (M18-05).
     //
-    // That is a real defect: the job that calls this runs on a schedule, so the
-    // count is a growing tally of every stale claim rather than the work done by
-    // the run. Pinned here so the behaviour is visible rather than assumed. The
-    // fix belongs in `expire_claims`: it needs a state that distinguishes an
-    // expired claim from an unfulfilled one.
+    // The statement used to filter on `fulfilled_at IS NULL` and then *set*
+    // `fulfilled_at = NULL`, so the row came out of the statement in exactly the
+    // state the statement matched on. A scheduled job therefore reported the
+    // same stale claim as expired on every pass, and the count never fell to
+    // zero for a request nobody ever fulfilled. `claims.status` is the fix: an
+    // expired claim leaves the `status = 'outstanding'` set, so the statement
+    // does not match it again.
     assert_eq!(
         ev::expire_claims(h.db(), &add_seconds(&now, 7200), 0)
             .await
             .expect("expire again"),
+        0,
+        "a claim is expired exactly once: the second pass finds nothing to do"
+    );
+    // And a third pass, to rule out a count that is merely lagging.
+    assert_eq!(
+        ev::expire_claims(h.db(), &add_seconds(&now, 14400), 0)
+            .await
+            .expect("expire a third time"),
+        0,
+        "still nothing: the claim is expired, not outstanding"
+    );
+}
+
+#[tokio::test]
+async fn an_expired_claim_can_be_claimed_again() {
+    // The other half of M18-05, and the one a fix for the counting bug can
+    // easily break. "At most one active claim" has to mean one *outstanding*
+    // claim; if the guard still filtered on `fulfilled_at IS NULL`, then an
+    // expired claim would keep satisfying it and the request could never be
+    // picked up again. The expiry would have released the work for nobody,
+    // which is a worse defect than the one it fixed.
+    let h = Db::new("reclaim").await;
+    let requester = account("rq");
+    let r = ev::create_request(h.db(), &requester, "a very specific request", None)
+        .await
+        .expect("create");
+
+    let first = account("c1");
+    assert!(
+        ev::claim_request(h.db(), &r, &first).await.expect("claim"),
+        "the first claim succeeds"
+    );
+
+    // Past the grace period, the first claim expires.
+    let now = now_rfc3339();
+    assert_eq!(
+        ev::expire_claims(h.db(), &add_seconds(&now, 7200), 0)
+            .await
+            .expect("expire"),
+        1
+    );
+
+    // The original claimant may re-claim it. Checked *first*, and on its own
+    // database state: once another reader claims, the row is outstanding again
+    // and this same call is correctly refused. Testing it after a second reader
+    // takes it would assert a bug and read as a fix.
+    assert!(
+        ev::claim_request(h.db(), &r, &first)
+            .await
+            .expect("re-claim"),
+        "the original claimant may pick their claim back up after the expiry"
+    );
+
+    // And a different reader cannot take it while it is outstanding again.
+    assert!(
+        !ev::claim_request(h.db(), &r, &account("c2"))
+            .await
+            .expect("second"),
+        "and the re-claim is live, so a second reader is still refused"
+    );
+}
+
+#[tokio::test]
+async fn joining_an_event_twice_is_false_not_an_error() {
+    // M18-06. `join_event`'s signature and doc comment both promised "false if
+    // already joined" while the statement was a bare INSERT against a composite
+    // primary key, so the unique violation escaped through `?` and a caller
+    // following the documentation got an error where they expected a bool.
+    let h = Db::new("join-twice").await;
+    let event = ev::create_event(h.db(), "a reading event", "", &account("host"))
+        .await
+        .expect("create event");
+    let account = account("joiner");
+
+    assert!(
+        ev::join_event(h.db(), &event, &account)
+            .await
+            .expect("first join"),
+        "the first join is a change"
+    );
+    assert!(
+        !ev::join_event(h.db(), &event, &account)
+            .await
+            .expect("second join"),
+        "the second join is reported as a no-op, not raised as a constraint \
+         violation -- a duplicate is a normal outcome for this function"
+    );
+    // And the row is still there exactly once.
+    let participants = ev::list_event_participants(h.db(), &event)
+        .await
+        .expect("list");
+    assert_eq!(
+        participants.len(),
         1,
-        "KNOWN DEFECT: the same claim is reported expired again -- expiring it \
-         sets fulfilled_at back to NULL, which is the very predicate the \
-         statement filters on"
+        "re-joining must not duplicate the participation row: {participants:?}"
     );
 }
 
@@ -578,15 +670,17 @@ async fn joining_an_event_records_the_participant_and_refuses_a_rejoin() {
             .expect("join"),
         "joining an event reports true"
     );
-    // A rejoin is an *error*, not a `false`. `event_participation` has a unique
-    // key on (event_id, account) and the statement is a plain INSERT, so the
-    // second attempt violates it. The signature is `Result<bool>`, so a caller
-    // that treats a duplicate join as a soft no-op still has to handle this.
+    // A rejoin is a soft `false`, not an error (M18-06). `event_participation`
+    // has a composite primary key on (event_id, account); the statement is now
+    // `ON CONFLICT DO NOTHING`, so the duplicate is answered in the statement
+    // rather than raised through `?`. `fulfil_claim` reports its duplicate the
+    // same way, so a caller needs no per-function knowledge of which duplicates
+    // are errors.
     let rejoin = ev::join_event(h.db(), &e, &participant).await;
     assert!(
-        rejoin.is_err(),
-        "joining an event twice is rejected by the unique key rather than \
-         reported as a soft failure: {rejoin:?}"
+        !rejoin.expect("a duplicate join is not an error"),
+        "joining an event twice is a no-op reported as false, not a raised \
+         constraint violation"
     );
     ev::join_event(h.db(), &e, &account("p2"))
         .await
