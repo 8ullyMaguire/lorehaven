@@ -345,14 +345,20 @@ pub async fn select_by_contribution_volume(
     match db.backend() {
         Backend::Sqlite => {
             let pool = db.sqlite_pool().ok_or(pool_err())?;
+            // `bookmarks` is keyed by `account_id` with a `(subject_type,
+            // subject_id)` pair -- it has no `pseud_id` or `work_id` column --
+            // and the review table is named `review`, not `reviews`. The
+            // original query named columns that exist in neither, so it failed
+            // on both backends. `analytics::reader_totals` reads the same two
+            // tables and is the reference for this shape.
             let rows = sqlx::query(
-                "SELECT pseud_id as account_id, COUNT(*) as cnt FROM (
-                    SELECT pseud_id, work_id FROM bookmarks
-                    WHERE created_at > ?
+                "SELECT account_id, COUNT(*) as cnt FROM (
+                    SELECT b.account_id, b.subject_id AS work_id FROM bookmarks b
+                    WHERE b.subject_type = 'work' AND b.created_at > ?
                     UNION ALL
-                    SELECT pseud_id, work_id FROM reviews
-                    WHERE created_at > ?
-                 ) GROUP BY pseud_id ORDER BY cnt DESC LIMIT ?",
+                    SELECT r.account_id, r.work_id FROM review r
+                    WHERE r.created_at > ?
+                 ) q GROUP BY account_id ORDER BY cnt DESC LIMIT ?",
             )
             .bind(&since)
             .bind(&since)
@@ -367,13 +373,13 @@ pub async fn select_by_contribution_volume(
         Backend::Postgres => {
             let pool = db.postgres_pool().ok_or(pool_err())?;
             let rows = sqlx::query(
-                "SELECT pseud_id as account_id, COUNT(*) as cnt FROM (
-                    SELECT pseud_id, work_id FROM bookmarks
-                    WHERE created_at > $1
+                "SELECT account_id::text AS account_id, COUNT(*) as cnt FROM (
+                    SELECT b.account_id, b.subject_id AS work_id FROM bookmarks b
+                    WHERE b.subject_type = 'work' AND b.created_at > $1
                     UNION ALL
-                    SELECT pseud_id, work_id FROM reviews
-                    WHERE created_at > $1
-                 ) q GROUP BY pseud_id ORDER BY cnt DESC LIMIT $2",
+                    SELECT r.account_id, r.work_id FROM review r
+                    WHERE r.created_at > $1
+                 ) q GROUP BY account_id ORDER BY cnt DESC LIMIT $2",
             )
             .bind(&since)
             .bind(limit)

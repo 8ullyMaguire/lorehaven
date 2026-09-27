@@ -81,6 +81,27 @@ Idempotency and ordering are pinned by `migrating_twice_moves_nothing_the_second
 `each_comment_becomes_a_post_with_its_text` and
 `a_post_keeps_the_comment_s_author_and_timestamp`.
 
+### M18-P42-D03 · re-pinning returns an id that was never stored
+
+`roles::pin_work` mints a fresh `uuid` on every call and returns it, but its
+`ON CONFLICT(account_id, work_id) DO UPDATE` clause updates `pinned_at`,
+`pin_reason` and `message` only — never `id`. So pinning a work a second time
+returns a *second* id for a row that only ever had the first, and
+`routes::vanguard::pin_work` puts that id straight into its 201 response body.
+A client that stored the id from its re-pin holds an identifier that resolves
+to nothing.
+
+Not changed, because the fix is a product decision: either the statement
+adopts the new id on conflict (`DO UPDATE SET id = excluded.id`, which changes
+the row's identity and invalidates any id a client already holds) or the
+function returns the *stored* id, which means `RETURNING id::text` and a
+signature that can report "the existing pin" rather than always "a new one".
+The second is the honest fix; the first is the smaller diff. Worth noting the
+route returns 201 either way, which is arguably wrong for a re-pin regardless
+of which id it reports — that would be 200.
+
+Pinned by `re_pinning_returns_an_id_that_was_never_stored`.
+
 ### M31-D02 · an unreadable `discussion_mode` is indistinguishable from a deleted work
 
 `work_discussion_mode` returns `Option<WorkDiscussionMode>` and builds it with
