@@ -56,9 +56,10 @@ use lorehaven_domain::library::ReadingStatus;
 use lorehaven_domain::{AppError, PseudId};
 use lorehaven_scrapers::{SafeFetcher, SourceAdapter, SourceKey};
 
-use crate::auth::{MaybeSession, RequirePseud, RequireSession};
+use crate::auth::{MaybeSession, RequireActorScoped, RequirePseud, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
+use lorehaven_domain::api_scopes::Scope;
 
 /// The catalogue and the preview.
 pub fn router() -> Router<AppState> {
@@ -806,12 +807,29 @@ fn default_destination() -> String {
 
 async fn start_import(
     State(state): State<AppState>,
-    RequirePseud { user, pseud_id }: RequirePseud,
+    RequireActorScoped { actor }: RequireActorScoped,
     Json(request): Json<StartImportRequest>,
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    // `content.write`: an import writes the work into the library, which is a
+    // change to the instance's content, not a note on the caller's shelf.
+    let actor = actor.require(Scope::ContentWrite)?;
+    let account_id = actor.account_id;
+    // A body-supplied pseud is honoured only when it is one of *this* account's
+    // own. `RequirePseud` resolved the session's selected pseud and a token
+    // resolved its acting pseud; either way the caller may choose which of
+    // their several faces the import lands under, and may choose no other. The
+    // check is here rather than at the parse because `parse_pseud` only knows
+    // the id is well formed.
     let pseud = match &request.pseud_id {
-        Some(raw) => parse_pseud(raw)?,
-        None => pseud_id,
+        Some(raw) => {
+            let requested = parse_pseud(raw)?;
+            let owned = lorehaven_db::identity::find_pseud(state.db(), requested)
+                .await?
+                .filter(|p| p.account_id == account_id)
+                .ok_or_else(|| ApiError(AppError::NotFound { resource: "pseud" }))?;
+            owned.id
+        }
+        None => actor.pseud_id,
     };
     if request.destination != "library" {
         return Err(ApiError(AppError::Validation {
@@ -864,7 +882,7 @@ async fn start_import(
             .await
             .map_err(preview_error)?;
 
-        let held = held_work(&state, &user.account_id.to_string(), &source_key, &work).await?;
+        let held = held_work(&state, &account_id.to_string(), &source_key, &work).await?;
         let plan = plan_import(
             held.as_ref(),
             &ImportedWork {
@@ -904,7 +922,7 @@ async fn start_import(
         // token, stays in the import row rather than here.
         &serde_json::json!({ "import_job_id": id }).to_string(),
         None,
-        Some(user.account_id),
+        Some(account_id),
         0,
         &lorehaven_domain::jobs::RetryPolicy::default(),
     )
@@ -914,7 +932,7 @@ async fn start_import(
         state.db(),
         &id,
         &job_id.to_string(),
-        &user.account_id.to_string(),
+        &account_id.to_string(),
         &pseud.to_string(),
         &source_key,
         url.as_str(),
@@ -1282,12 +1300,17 @@ async fn get_import(
 
 async fn cancel_import(
     State(state): State<AppState>,
-    RequireSession(user): RequireSession,
+    RequireActorScoped { actor }: RequireActorScoped,
     Path(id): Path<String>,
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    let actor = actor.require(Scope::ContentWrite)?;
+    // The scope says this account may cancel imports; the predicate says *this*
+    // one. Both are needed: a scope is a statement about what an account may
+    // do, never about which rows it owns, and 404 rather than 403 so the
+    // response does not confirm that another account's import exists.
     let row = imports::get_import_job(state.db(), &id)
         .await?
-        .filter(|row| row.account_id == user.account_id.to_string())
+        .filter(|row| row.account_id == actor.account_id.to_string())
         .ok_or_else(|| ApiError(AppError::NotFound { resource: "import" }))?;
 
     // Cancelling something that already finished is not an error: the caller

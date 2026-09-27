@@ -369,6 +369,7 @@ unredeemed; a used one returns a refusal, not the token again.
 `crates/app/tests/milestone_18.rs` gains the D1 regression at the DB layer too,
 so the predicate is pinned where it lives.
 
+
 ### A6 — token-aware identity for the six write doors (D8)
 
 This is the step that makes §23.2's eight actions real, and it is the one the
@@ -394,9 +395,10 @@ the scope §23.2's own security note implies:
 | `POST /bookmarks` | `library.read` | a bookmark is a reader-side fact about the caller's own shelf; writing one changes nothing the author sees |
 | `POST /works/{id}/kudos` | `content.read` | §0.3-class: kudos are "a statement about themselves" per the handler's own comment, and carry no content authorship |
 | `POST /imports` | `content.write` | a private import is a write |
-| `GET /jobs`, `GET /jobs/{id}` | `content.write` | job status is about the caller's own import/export |
+| `GET /jobs` | `content.write` | job status is about the caller's own import/export. **There is no `GET /jobs/{id}`** — this plan assumed one, and the route table has only `/jobs` and `/jobs/{id}/cancel` |
 | `POST /exports` | `library.read` | an export of the caller's own library; §23.2 says "a permitted export", and the permission check is already in the handler |
 | `POST /imports/{id}/cancel` | `content.write` | with `POST /imports` |
+| `GET /exports/{id}`, `DELETE /exports/{id}` | `library.read` | **added while building this.** Starting an export a bot cannot poll is half a feature; §23.2's action is the whole round trip, not the request |
 
 Every one of those handlers must also confirm the row it is about belongs to the
 actor, not merely that the actor holds the scope — a scope says what you may do,
@@ -414,6 +416,71 @@ Covering, per action: a bearer token with the right scope succeeds; with the
 wrong scope, 403 naming it; with no token, 401; a session still works on every
 one of them (the browser must not regress); and account B cannot act on account
 A's import/export/job by id.
+
+#### What the acceptance test found, and why one fixture mattered
+
+`crates/app/tests/m54_bot_actions.rs` builds 12 tests, all on both engines.
+
+The first run failed **five of them**, and not for the reason the plan
+predicted. Every failure was a *session* answering where a *token* was supposed
+to be refused:
+
+```
+a_token_with_no_acting_pseud_is_refused_rather_than_defaulted   left: 401  right: 200
+a_job_list_is_reachable_by_a_content_write_token               (items, not jobs)
+a_job_list_never_shows_another_accounts_jobs                    (same)
+```
+
+`RequireActor` resolves a **session first when one is present**. So a test that
+registers an account, keeps the cookies, and *also* sends a bearer token never
+consults the token at all — the scope check is not failing, it is not running.
+The tests read as though authorization were broken when the harness was the
+thing at fault.
+
+The fix is `Harness::as_token`, which calls `clear_cookies()` before every
+token-only request. The alternative — a separate cookie-less client per token —
+was rejected because the two credentials then could not be compared in the same
+test, and "a token works where a session also works" is not an interesting
+claim. The helper's doc comment records the trap, because the next person to add
+a token test will otherwise write `request_with` and get a green run that proves
+nothing.
+
+A note on the ownership tests: they assert `404`, not `403`, for another
+account's row. A scope says what an account may do; it never says whose rows
+those are, and a `403` on a foreign export would confirm the export exists. The
+scope matrix (`content.write` refused where `library.read` is wanted, and the
+refusal *naming the scope*) is the part that catches a mis-mapped door; the
+ownership matrix catches a missing account predicate. They are separate defects
+and need separate tests.
+
+#### Casts: the same problem in three directions, and none of them interchangeable
+
+The PostgreSQL arm of the export-ownership fixture needed three dialect casts on
+one INSERT, and each was wrong before it was right:
+
+| position | correct | why the other fails |
+|---|---|---|
+| read, `WHERE` | `column::text` | casting the *value* leaves `uuid = text`, which is not a comparison PostgreSQL will do |
+| insert, `VALUES` | `?::uuid` | `column is of type uuid but expression is of type text` — it is an assignment, so the column is what must be coerced |
+| insert, timestamps | `?::timestamptz` | `now_rfc3339()` returns text; SQLite stores those columns as TEXT throughout, so the cast is the only difference between the two arms |
+
+A `?::text` cast written into the shared query is a **syntax error on SQLite**, so
+the statement is built twice, once per backend. And `sqlx::Query` is monomorphic:
+one query value cannot serve two pools, so the arms are separate `match` blocks
+rather than a loop over `(statement, args)`.
+
+#### The one code change that was *not* a fix
+
+`is_known_subject` lists `query`, and `load_subject` cannot load one — so
+`POST /exports` with `subject_type: query` is accepted, queued, and then refused
+at render time with the same words as a validation failure. Narrowing the list to
+`work | library_item` **broke the bulk export door**, which validates `query`
+against this same function. Reverted, with the gap documented at the definition:
+the honest fix is for `load_subject` to handle `query`, and that is a separate
+change from this one.
+
+This is recorded because the narrowing looked obviously correct, passed the test
+that prompted it, and was wrong for a reason no test in the file could see.
 
 ### A7 — frontend
 
@@ -488,7 +555,8 @@ the property under test is a server behaviour the bot merely observes.
   **both** backends, `cargo test -p <crate> --doc` as its own command — all
   exit 0.
 - The three adapters pass one conformance suite, and the DB-reachability
-  assertion is a test rather than a review comment.
+  assertion is a test rather than a review comment
+.
 - `docs/handoff.md` records where the build stands, in the style of the
   existing entries, including the defects D1–D7 and what was decided.
 

@@ -249,6 +249,20 @@ impl ExportFailure {
 /// The subject kinds an export may be asked for.
 #[must_use]
 /// The subject types this instance exports.
+///
+/// `query` is here because migration 0035 widened the `export_jobs` CHECK
+/// constraint to allow it, for the bulk path. `load_subject` cannot load one —
+/// it handles `work` and `library_item` only — so a single-work `POST
+/// /exports` naming `query` clears this check and is then refused by
+/// `load_work`. That is a real gap in the single-export door, and closing it is
+/// a separate change from this one: the honest fix is for `load_subject` to
+/// treat `query` as what it is here (a bulk export), not for this list to stop
+/// admitting a value the schema and the bulk door both rely on.
+///
+/// I narrowed this to `work | library_item` first, on the reading that a
+/// validation list should only name what the loader can load. That broke the
+/// bulk export's own subject type, which is the wrong trade: the list is also
+/// what `POST /exports/bulk` validates against.
 pub fn is_known_subject(subject_type: &str) -> bool {
     matches!(subject_type, "work" | "library_item" | "query")
 }

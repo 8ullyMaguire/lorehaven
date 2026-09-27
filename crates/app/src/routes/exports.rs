@@ -43,9 +43,10 @@ use lorehaven_db::exports as repo;
 use lorehaven_db::storage::BlobStore;
 use lorehaven_domain::exports::{ExportFormat, ExportOptions};
 
-use crate::auth::{MaybeSession, RequireSession};
+use crate::auth::{MaybeSession, RequireActorScoped, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
+use lorehaven_domain::api_scopes::Scope;
 
 /// The privacy notice a reader has to have seen (spec §13.6).
 ///
@@ -178,9 +179,15 @@ struct StartExportRequest {
 /// Ask for an export.
 async fn start_export(
     State(state): State<AppState>,
-    RequireSession(user): RequireSession,
+    RequireActorScoped { actor }: RequireActorScoped,
     Json(request): Json<StartExportRequest>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
+    // `library.read`, because that is what the handler's own permission check
+    // already requires and §23.2's "a permitted export" means that permission.
+    // Demanding `content.write` would be asking a bot for more authority than
+    // the action uses: an export reads the caller's library and writes nothing
+    // back.
+    let actor = actor.require(Scope::LibraryRead)?;
     let Some(format) = ExportFormat::parse(&request.format) else {
         return Err(ApiError(lorehaven_domain::AppError::Validation {
             message: format!("{:?} is not an export format", request.format),
@@ -208,7 +215,7 @@ async fn start_export(
 
     let row = crate::exports::request(
         &state,
-        &user.account_id.to_string(),
+        &actor.account_id.to_string(),
         &request.subject_type,
         &request.subject_id,
         format,
@@ -272,20 +279,26 @@ async fn start_bulk_export(
 /// One export, for its owner.
 async fn get_export(
     State(state): State<AppState>,
-    RequireSession(user): RequireSession,
+    RequireActorScoped { actor }: RequireActorScoped,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    let row = owned(&state, &user.account_id.to_string(), &id).await?;
+    // Reading an export back is the other half of "a permitted export" (§23.2):
+    // a bot that can *start* an export and cannot poll it is half a feature.
+    // `library.read` again, and `owned` is the predicate that matters — the
+    // scope says what an account may do, not whose rows are its own.
+    let actor = actor.require(Scope::LibraryRead)?;
+    let row = owned(&state, &actor.account_id.to_string(), &id).await?;
     Ok(Json(json!(ExportView::from(row))))
 }
 
 /// Forget an export and its file.
 async fn forget_export(
     State(state): State<AppState>,
-    RequireSession(user): RequireSession,
+    RequireActorScoped { actor }: RequireActorScoped,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    let row = owned(&state, &user.account_id.to_string(), &id).await?;
+    let actor = actor.require(Scope::LibraryRead)?;
+    let row = owned(&state, &actor.account_id.to_string(), &id).await?;
 
     // The file goes first. An export row deleted while its blob is still
     // referenced would leave bytes nothing can reach, since the reference names

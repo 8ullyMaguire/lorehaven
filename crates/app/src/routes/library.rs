@@ -52,9 +52,10 @@ use lorehaven_domain::library::{
 };
 use lorehaven_domain::AppError;
 
-use crate::auth::RequireSession;
+use crate::auth::{RequireActorScoped, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
+use lorehaven_domain::api_scopes::Scope;
 
 /// The per-account routes.
 pub fn router() -> Router<AppState> {
@@ -472,9 +473,13 @@ async fn list_bookmarks(
 /// Add a bookmark.
 async fn create_bookmark(
     State(state): State<AppState>,
-    RequireSession(user): RequireSession,
+    RequireActorScoped { actor }: RequireActorScoped,
     Json(body): Json<BookmarkBody>,
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    // `library.read`, not a write scope: a bookmark is a fact about the
+    // caller's own shelf, and writing one changes nothing the author of the
+    // work can observe. It is a read of the library with a local side effect.
+    let actor = actor.require(Scope::LibraryRead)?;
     if !lorehaven_domain::library::is_known_subject(&body.subject_type) {
         return Err(ApiError(AppError::Validation {
             message: "a bookmark must be attached to a work or a library item".to_owned(),
@@ -492,7 +497,7 @@ async fn create_bookmark(
     }
     let row = library::create_bookmark(
         state.db(),
-        &user.account_id.to_string(),
+        &actor.account_id.to_string(),
         &library::NewBookmark {
             subject_type: &body.subject_type,
             subject_id: &body.subject_id,

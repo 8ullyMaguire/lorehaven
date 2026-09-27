@@ -335,7 +335,11 @@ async fn my_trust_returns_a_trust_level() {
     let mut user = harness.client();
     let (_account, _) = register(&mut user, "trust@example.com", "TrustTest").await;
 
-    let (status, body) = user.get("/api/v1/my/trust").await;
+    // `/me/trust`, not `/api/v1/my/trust`. There is no `my/` segment in this
+    // API; the test asked for a path that has never existed and got a 200 with
+    // the SPA shell, because the static-asset fallback answers *any*
+    // extensionless path. D9 removed that, and the wrong URL became visible.
+    let (status, body) = user.get("/api/v1/me/trust").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let trust = body["level"].as_i64().unwrap_or(0);
     assert_eq!(trust, 0, "new account should be TL_NEW");
@@ -420,7 +424,8 @@ async fn a_user_can_open_and_list_their_own_appeals() {
         "open appeal: {status} {body}"
     );
 
-    let (status, body) = user.get("/api/v1/my/appeals").await;
+    // `/appeals`, not `/api/v1/my/appeals` — same story as `my_trust` above.
+    let (status, body) = user.get("/api/v1/appeals").await;
     assert_eq!(status, StatusCode::OK, "list appeals: {body}");
 
     harness.cleanup().await;

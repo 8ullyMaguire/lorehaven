@@ -32,6 +32,19 @@ enum Audience {
     Pseudonymous,
     /// Operator door — `RequireSession` + `require_operator`.
     Operator,
+    /// Token-or-session door — `RequireActorScoped`.
+    ///
+    /// A distinct kind, not a flavour of `Authenticated`, because the two are
+    /// not interchangeable: a session's authority was settled at login and
+    /// spans whatever that account may do, while a token carries an explicit
+    /// scope set and an acting pseud. Collapsing them would let a token-scope
+    /// regression hide behind a session test, or the reverse.
+    ///
+    /// M54-A5 added this for the §23.2 bot actions. It is the *audience* that
+    /// is new; which scope a given door wants is checked by
+    /// `m54_bot_actions.rs`, the only place that can tell one scope from
+    /// another.
+    Scoped,
 }
 
 impl Audience {
@@ -41,6 +54,7 @@ impl Audience {
             Audience::Authenticated => "RequireSession",
             Audience::Pseudonymous => "RequirePseud",
             Audience::Operator => "RequireSession",
+            Audience::Scoped => "RequireActorScoped",
         }
     }
 }
@@ -481,7 +495,7 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         handler: "toggle_kudos",
         method: "POST",
         path: "/works/{id}/kudos",
-        audience: Audience::Authenticated,
+        audience: Audience::Scoped,
     },
     // ------------------------------------------------------------------
     // Reading progress, ratings, reviews, history, notes — session-scoped
@@ -799,7 +813,7 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         handler: "create_bookmark",
         method: "POST",
         path: "/bookmarks",
-        audience: Audience::Authenticated,
+        audience: Audience::Scoped,
     },
     RouteEntry {
         file: "library.rs",
@@ -935,7 +949,7 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         handler: "list_jobs",
         method: "GET",
         path: "/jobs",
-        audience: Audience::Authenticated,
+        audience: Audience::Scoped,
     },
     RouteEntry {
         file: "jobs.rs",
@@ -994,7 +1008,7 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         handler: "start_import",
         method: "POST",
         path: "/imports",
-        audience: Audience::Pseudonymous,
+        audience: Audience::Scoped,
     },
     RouteEntry {
         file: "imports.rs",
@@ -1008,7 +1022,7 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         handler: "cancel_import",
         method: "POST",
         path: "/imports/{id}/cancel",
-        audience: Audience::Authenticated,
+        audience: Audience::Scoped,
     },
     RouteEntry {
         file: "imports.rs",
@@ -1112,14 +1126,14 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         handler: "start_export",
         method: "POST",
         path: "/exports",
-        audience: Audience::Authenticated,
+        audience: Audience::Scoped,
     },
     RouteEntry {
         file: "exports.rs",
         handler: "get_export",
         method: "GET",
         path: "/exports/{id}",
-        audience: Audience::Authenticated,
+        audience: Audience::Scoped,
     },
     RouteEntry {
         file: "exports.rs",
@@ -1147,7 +1161,7 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         handler: "forget_export",
         method: "DELETE",
         path: "/exports/{id}",
-        audience: Audience::Authenticated,
+        audience: Audience::Scoped,
     },
     // ------------------------------------------------------------------
     // Feedback — session-scoped
@@ -3829,7 +3843,18 @@ fn find_audience_extractor(sig: &str) -> Option<&'static str> {
         }
     }
     let args = &sig[args_start..args_end];
-    if args.contains("RequirePseud") {
+    // `RequireActorScoped` is checked **first**, and it has to be. The
+    // substring "RequireActorScoped" does not contain "RequireSession" and
+    // "MaybeSession" does not either, so a later check would not have found it
+    // by accident — but the reverse is true and it matters: a door written as
+    // `RequireActorScoped` with a `RequireSession` in the same signature would
+    // report as a session door, and this is precisely the extractor whose whole
+    // point is that it is *not* a session door. Ordering it ahead of the
+    // session checks keeps the reported audience the one the handler actually
+    // authenticates with.
+    if args.contains("RequireActorScoped") {
+        Some("RequireActorScoped")
+    } else if args.contains("RequirePseud") {
         Some("RequirePseud")
     } else if args.contains("RequireSession") {
         Some("RequireSession")

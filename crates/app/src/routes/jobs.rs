@@ -39,9 +39,10 @@ use lorehaven_db::jobs::{self, Job};
 use lorehaven_domain::jobs::{can_cancel, JobKind, JobState, RetryPolicy};
 use lorehaven_domain::{AppError, JobId};
 
-use crate::auth::{RequirePseud, RequireSession};
+use crate::auth::{RequireActorScoped, RequirePseud, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
+use lorehaven_domain::api_scopes::Scope;
 
 /// The caller's own queue, and the cancel action.
 pub fn router() -> Router<AppState> {
@@ -249,13 +250,22 @@ fn page(mut rows: Vec<Job>, limit: i64) -> JobListView {
 
 async fn list_jobs(
     State(state): State<AppState>,
-    RequireSession(user): RequireSession,
+    RequireActorScoped { actor }: RequireActorScoped,
     Query(query): Query<JobsQuery>,
 ) -> ApiResult<Json<JobListView>> {
+    // `content.write`, not a read scope: the jobs listed here are the caller's
+    // own imports and exports — the machinery that *changes* their content —
+    // and §23.2's bot actions include polling them. The scope is about whose
+    // machinery you may see, so a token that may not start a job has no business
+    // enumerating them.
+    let actor = actor.require(Scope::ContentWrite)?;
     let after = query.cursor.as_deref().map(decode_cursor).transpose()?;
+    // `jobs_for` is already account-scoped: the predicate is in the query, not
+    // in a filter here. A job list that showed every instance's jobs would be a
+    // disclosure bug, and the scope check above does not prevent it.
     let rows = jobs::jobs_for(
         state.db(),
-        user.account_id,
+        actor.account_id,
         PAGE,
         after.as_ref().map(|(at, id)| (at.as_str(), id.as_str())),
     )

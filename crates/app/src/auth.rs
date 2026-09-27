@@ -283,6 +283,192 @@ impl axum::extract::FromRequestParts<AppState> for RequirePseud {
 }
 use lorehaven_domain::api_scopes::Scope;
 
+/// Who is acting on this request, whichever credential proved it.
+///
+/// A session and a bearer token are two different *credentials* and one
+/// *actor*. Before this type existed, every handler took `RequireSession` and
+/// so was unreachable by a token — which meant all eight of §23.2's bot actions
+/// had real API doors that no bot could walk through, and `MaybeToken` was used
+/// in exactly one handler in the tree.
+#[derive(Debug, Clone)]
+pub struct Actor {
+    /// The account the action belongs to. A scope says what this account may
+    /// do; the handlers still have to check that the row in question is
+    /// *this account's* row.
+    pub account_id: AccountId,
+    /// The pseud the action is taken as.
+    ///
+    /// Always resolved, never optional. A token's acting pseud is looked up and
+    /// confirmed to belong to the account; a session's is its selected pseud.
+    pub pseud_id: PseudId,
+    /// Which credential proved it, for handlers that treat the two differently.
+    pub via: Credential,
+    /// The scopes this credential carries. Empty for a session: a session's
+    /// authority was settled at login, so there is no scope set to check
+    /// against, and pretending otherwise would mean inventing one.
+    pub scopes: Vec<Scope>,
+}
+
+impl Actor {
+    /// Refuse unless this credential carries `required`.
+    ///
+    /// A session carries no scope set, so it passes: its authority was settled
+    /// at login, and re-checking it against a scope set it never had would lock
+    /// every contributor out of their own library. Only a token is limited.
+    ///
+    /// Named on `Actor` rather than on `RequireActorScoped` so a handler that
+    /// destructures the extractor — which is how axum wants it written — can
+    /// reach the check without keeping the wrapper alive for it.
+    pub fn require(self, required: Scope) -> Result<Self, ApiError> {
+        if self.via == Credential::Token
+            && !lorehaven_domain::api_scopes::has_scope(&self.scopes, &required)
+        {
+            return Err(missing_scope(required));
+        }
+        Ok(self)
+    }
+}
+
+/// The credential behind an [`Actor`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Credential {
+    /// A signed-in session. Authorization was settled at login, so scopes do
+    /// not apply — this is what `media.rs` already did, and what the browser
+    /// relies on.
+    Session,
+    /// A bearer token, which carries its own scope set.
+    Token,
+}
+
+/// An extractor for doors that a *bot* must be able to reach.
+///
+/// It accepts either credential and resolves both to one [`Actor`], so a
+/// handler stops caring which arrived. Extracting this *is* the authentication
+/// check: a handler naming it cannot be reached anonymously.
+///
+/// **A token with no acting pseud is refused, not defaulted.** A token belongs
+/// to an account but acts as a pseud, and those are different identities the
+/// schema keeps strictly apart — a reader may wear several faces, and a bot
+/// posting under a face the reader never chose is exactly the confusion
+/// §23.1's "explicit acting pseud" exists to prevent. Falling back to the
+/// account's default pseud would be the convenient answer and the wrong one: it
+/// is a silent substitution of identity, and a token minted before this column
+/// existed would get it too.
+pub struct RequireActor(pub Actor);
+
+impl axum::extract::FromRequestParts<AppState> for RequireActor {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        // A session, when there is one, wins. The browser never sends a bearer
+        // token, so this ordering only matters for a client that sends both —
+        // and there the session is the more specific, already-authorized
+        // credential.
+        if let Some(session) = parts.extensions.get::<SessionUser>().cloned() {
+            let pseud_id = session
+                .pseud_id
+                .ok_or_else(|| ApiError(AppError::AccessDenied))?;
+            return Ok(Self(Actor {
+                account_id: session.account_id,
+                pseud_id,
+                via: Credential::Session,
+                scopes: Vec::new(),
+            }));
+        }
+
+        let token = resolve_bearer(parts, state).await?;
+        let token = token.ok_or_else(|| ApiError(AppError::AuthRequired))?;
+
+        let acting = token
+            .acting_pseud_id
+            .as_deref()
+            .ok_or_else(|| ApiError(AppError::AccessDenied))?;
+        let pseud_id = PseudId::from_str(acting).map_err(|_| ApiError(AppError::AccessDenied))?;
+
+        // Confirm the pseud belongs to the account. The token row already ties
+        // them together, so this is not paranoia about the token — it is about
+        // the pseud having since been deleted or moved, in which case acting as
+        // it would attach the request to an identity that no longer exists.
+        let pseud = lorehaven_db::identity::find_pseud(state.db(), pseud_id)
+            .await
+            .map_err(|e| ApiError(AppError::internal("looking up a token's acting pseud", e)))?
+            .ok_or_else(|| ApiError(AppError::AccessDenied))?;
+        if pseud.account_id != token.account_id {
+            // A token whose acting pseud belongs to somebody else. The link
+            // flow cannot produce this — it validates at issue time — so it means
+            // the column was written directly. Refuse rather than act.
+            return Err(ApiError(AppError::AccessDenied));
+        }
+
+        Ok(Self(Actor {
+            account_id: token.account_id,
+            pseud_id,
+            via: Credential::Token,
+            scopes: token.scopes,
+        }))
+    }
+}
+
+/// As [`RequireActor`], and the token must additionally carry `required`.
+///
+/// The scope check lives here rather than in each handler, so a door cannot
+/// forget it — the same argument that made `RequireSession` an extractor in the
+/// first place. A session caller bypasses it, exactly as `media.rs` already
+/// does: a session's authority was settled at login, and re-checking it against
+/// a scope set the session never had would lock every contributor out of their
+/// own library.
+pub struct RequireActorScoped {
+    /// The resolved actor.
+    pub actor: Actor,
+}
+
+impl axum::extract::FromRequestParts<AppState> for RequireActorScoped {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let RequireActor(actor) = RequireActor::from_request_parts(parts, state).await?;
+        Ok(Self { actor })
+    }
+}
+
+/// The 403 for a token that lacks `required`.
+///
+/// Names the scope on purpose: §23.1's contract is that a token's scope set is
+/// the whole of its authority, so the bot already knows the set — and "access
+/// denied" would send an operator looking for a permission bug rather than a
+/// token that was granted too little at link time.
+fn missing_scope(required: Scope) -> ApiError {
+    ApiError(AppError::MissingScope {
+        scope: required.as_str(),
+    })
+}
+
+/// The bearer token on this request, if one resolves.
+///
+/// Shared by [`RequireActor`] and `MaybeToken` so there is one answer to "what
+/// does this token say" — two implementations would drift, and the drift would
+/// be invisible until one of them accepted something the other refused.
+pub(crate) async fn resolve_bearer(
+    parts: &mut axum::http::request::Parts,
+    state: &AppState,
+) -> Result<Option<TokenUser>, ApiError> {
+    use axum::extract::FromRequestParts as _;
+    // `MaybeToken`'s rejection is `Infallible` by construction — it never
+    // refuses, it only resolves or declines to — so the match here is total and
+    // the `unreachable!` arm is genuinely unreachable.
+    let MaybeToken(token) = match MaybeToken::from_request_parts(parts, state).await {
+        Ok(maybe) => maybe,
+        Err(never) => match never {},
+    };
+    Ok(token)
+}
+
 /// Identity resolved from a Bearer API token.
 #[derive(Debug, Clone)]
 pub struct TokenUser {

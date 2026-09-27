@@ -122,6 +122,9 @@ async fn a_walled_garden_refuses_an_anonymous_reader_at_a_work_door() {
 #[tokio::test]
 async fn a_public_instance_still_serves_the_landing_page() {
     let h = Harness::new("landing-public", InstanceMode::Public).await;
-    let (status, _) = h.get("/api/v1/health/ready").await;
+    // Health is mounted at the *root*, not under `/api/v1`: it is what a load
+    // balancer and an operator probe before the API is reachable at all.
+    // `/api/v1/health/ready` never existed and was answered with the SPA shell.
+    let (status, _) = h.get("/health/ready").await;
     assert_eq!(status, StatusCode::OK);
 }

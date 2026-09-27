@@ -59,9 +59,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
-use crate::auth::{MaybeSession, RequireSession, SessionUser};
+use crate::auth::{MaybeSession, RequireActorScoped, RequireSession, SessionUser};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
+use lorehaven_domain::api_scopes::Scope;
 
 /// Work, chapter and revision routes.
 ///
@@ -1347,14 +1348,20 @@ async fn record_view_for_work(
 /// Toggle kudos for the signed-in account on a work. Returns the new state.
 async fn toggle_kudos(
     State(state): State<AppState>,
-    RequireSession(user): RequireSession,
+    RequireActorScoped { actor }: RequireActorScoped,
     Path(id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    // `content.read`, not `content.write`, and the handler's own comment says
+    // why: kudos are "a statement about themselves" — a reader saying they
+    // liked something. It carries no authorship and no edit to the work, so
+    // granting a bot `content.write` in order to let it thank a story would be
+    // asking for far more authority than the action needs.
+    let actor = actor.require(Scope::ContentRead)?;
     let work_id = parse_work_id(&id)?;
     let kudoed = work_metrics::toggle_kudos(
         state.db(),
         &work_id.to_string(),
-        &user.account_id.to_string(),
+        &actor.account_id.to_string(),
     )
     .await
     .map_err(|e| ApiError(AppError::Internal(e)))?;

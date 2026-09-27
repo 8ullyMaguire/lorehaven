@@ -19,6 +19,13 @@
     importSettings,
     fetchRecEngine,
     patchRecEngine,
+    fetchTokens,
+    createToken,
+    revokeToken,
+    isKnownTokenScope,
+    parseTokenScopes,
+    KNOWN_TOKEN_SCOPES,
+    type ApiToken,
     type RecEngineView,
     type ResolvedSetting,
     type ContentFilterView,
@@ -36,6 +43,7 @@
     { id: 'content', label: 'Content Filters' },
     { id: 'notifications', label: 'Notifications' },
     { id: 'recommendations', label: 'Recommendations' },
+    { id: 'applications', label: 'Linked applications' },
   ];
 
   let tab = $state('search');
@@ -60,6 +68,18 @@
   // from `recEngine.engine` so an in-progress choice is not overwritten by a
   // re-render, and so the submit button can tell "unchanged" from "changed".
   let newRecEngine = $state('');
+
+  // Linked applications (spec §23.1, §46.5).
+  let tokens = $state<ApiToken[] | null>(null);
+  let tokensError = $state<string | null>(null);
+  let newTokenName = $state('');
+  let chosenScopes = $state<string[]>([]);
+  let creatingToken = $state(false);
+  let revokingId = $state<string | null>(null);
+  /** The raw value, held only while the reader has not yet dismissed the
+   *  one-time notice. Cleared by `dismissNewToken` and by no other code path,
+   *  because there is no second chance to read it. */
+  let freshToken = $state<{ token: string; id: string } | null>(null);
 
   // Notification routes
   let routes = $state<NotificationRouteView[]>([]);
@@ -109,12 +129,23 @@
       routes = notif.routes;
       recEngine = rec;
       newRecEngine = rec?.engine ?? '';
+      // Tokens are fetched on entering the tab rather than here: they are the
+      // one part of this surface a reader may not be signed in to see, and a
+      // failure must not take the other four tabs down with it.
+      loadTokens();
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to load settings';
     } finally {
       loading = false;
     }
   }
+
+  // Fetch the token list when the tab is first opened, not on every render.
+  $effect(() => {
+    if (tab === 'applications' && tokens === null && !tokensError) {
+      loadTokens();
+    }
+  });
 
   // Load on mount
   $effect(() => {
@@ -297,6 +328,66 @@
    * engines this instance accepts. Replacing it with "could not save" would
    * hide the one piece of information that lets the reader fix it.
    */
+  // -------------------------------------------------------------------------
+  // Linked applications
+  // -------------------------------------------------------------------------
+
+  async function loadTokens() {
+    tokensError = null;
+    try {
+      tokens = await fetchTokens();
+    } catch (e) {
+      // Kept separate from the page-level `error`: a token list that fails to
+      // load is one broken panel, not a broken settings page, and blanking the
+      // four working tabs would make the failure look like a login problem.
+      tokensError = e instanceof Error ? e.message : 'Failed to load tokens';
+      tokens = [];
+    }
+  }
+
+  function toggleScope(scope: string) {
+    chosenScopes = chosenScopes.includes(scope)
+      ? chosenScopes.filter((s) => s !== scope)
+      : [...chosenScopes, scope];
+  }
+
+  async function submitToken(event: SubmitEvent) {
+    event.preventDefault();
+    if (!newTokenName.trim() || chosenScopes.length === 0) return;
+    creatingToken = true;
+    tokensError = null;
+    try {
+      freshToken = await createToken(newTokenName.trim(), chosenScopes);
+      newTokenName = '';
+      chosenScopes = [];
+      await loadTokens();
+    } catch (e) {
+      tokensError = e instanceof Error ? e.message : 'Failed to create the token';
+    } finally {
+      creatingToken = false;
+    }
+  }
+
+  async function revoke(id: string) {
+    revokingId = id;
+    tokensError = null;
+    try {
+      await revokeToken(id);
+      // Drop it locally rather than refetching: the list is the only thing
+      // that changed, and a refetch would make the row vanish for reasons
+      // unrelated to the revoke if the network is slow.
+      tokens = (tokens ?? []).filter((t) => t.id !== id);
+    } catch (e) {
+      tokensError = e instanceof Error ? e.message : 'Failed to revoke the token';
+    } finally {
+      revokingId = null;
+    }
+  }
+
+  function dismissNewToken() {
+    freshToken = null;
+  }
+
   async function chooseRecEngine(engine: string) {
     savingRecEngine = true;
     notice = null;
@@ -593,6 +684,128 @@
         </p>
       {/if}
     </div>
+  {:else if tab === 'applications'}
+    <div class="tab-content">
+      <div class="section-header">
+        <h2>Linked applications</h2>
+        <p>
+          A token lets a script act as you, with only the permissions you pick.
+          Revoking one takes effect immediately.
+        </p>
+      </div>
+
+      {#if tokensError}
+        <div class="notice notice-error" role="alert">{tokensError}</div>
+      {/if}
+
+      <!-- The one-time notice. This value is not retrievable after this
+           moment, so the panel says so in as many words and the reader has to
+           dismiss it deliberately. -->
+      {#if freshToken}
+        <div class="notice notice-info" role="status">
+          <p>
+            <strong>Copy this token now.</strong> It is shown once and cannot be
+            shown again — there is no way to recover it, and closing this
+            without copying it means creating a new one.
+          </p>
+          <code class="token-value">{freshToken.token}</code>
+          <Button type="button" onclick={dismissNewToken}>
+            I have copied it
+          </Button>
+        </div>
+      {/if}
+
+      <form class="add-form" onsubmit={submitToken}>
+        <input
+          type="text"
+          placeholder="What is this for?"
+          aria-label="Token name"
+          bind:value={newTokenName}
+          disabled={creatingToken}
+        />
+        <Button
+          type="submit"
+          disabled={creatingToken || !newTokenName.trim() || chosenScopes.length === 0}
+        >
+          {creatingToken ? 'Creating…' : 'Create token'}
+        </Button>
+      </form>
+
+      <!-- At least one scope, or a token that can do nothing. The button is
+           disabled rather than the form refusing, so the reason is visible
+           where the choice is made. -->
+      <fieldset class="scope-picker">
+        <legend>Permissions</legend>
+        {#each KNOWN_TOKEN_SCOPES as scope (scope)}
+          <label class="scope-option">
+            <input
+              type="checkbox"
+              checked={chosenScopes.includes(scope)}
+              onchange={() => toggleScope(scope)}
+              disabled={creatingToken}
+            />
+            <code>{scope}</code>
+          </label>
+        {/each}
+      </fieldset>
+      {#if chosenScopes.length === 0}
+        <p class="hint">Pick at least one permission.</p>
+      {/if}
+
+      {#if tokens === null}
+        <Skeleton lines={3} label="Loading linked applications" />
+      {:else if tokens.length === 0}
+        <EmptyState
+          title="No linked applications"
+          description="Tokens you create appear here, with their permissions and when they were last used."
+        />
+      {:else}
+        <ul class="token-list">
+          {#each tokens as token (token.id)}
+            <li class="token-row">
+              <div class="token-main">
+                <span class="token-name">{token.name}</span>
+                {#if token.kind === 'bot'}
+                  <!-- A bot token is not one this panel made, and revoking it
+                       unlinks a bot somebody else runs. Say which it is. -->
+                  <span class="token-kind">bot</span>
+                {/if}
+                <span class="token-meta">
+                  created {token.created_at.slice(0, 10)}
+                  {#if token.last_used_at}
+                    · last used {token.last_used_at.slice(0, 10)}
+                  {:else}
+                    · never used
+                  {/if}
+                  {#if token.expires_at}
+                    · expires {token.expires_at.slice(0, 10)}
+                  {/if}
+                </span>
+                <span class="token-scopes">
+                  {#each parseTokenScopes(token.scopes) as scope (scope)}
+                    <code class:unknown-scope={!isKnownTokenScope(scope)}>{scope}</code>
+                  {/each}
+                </span>
+                {#if !token.acting_pseud_id}
+                  <!-- A token with no acting pseud is refused by the API. A
+                       reader looking at one should know before wiring it up. -->
+                  <span class="token-warning">
+                    this token has no acting pseud and will be refused
+                  </span>
+                {/if}
+              </div>
+              <Button
+                type="button"
+                disabled={revokingId === token.id}
+                onclick={() => revoke(token.id)}
+              >
+                {revokingId === token.id ? 'Revoking…' : 'Revoke'}
+              </Button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
   {/if}
 </section>
 
@@ -835,5 +1048,111 @@
   .filter-list {
     display: flex;
     flex-wrap: wrap;
+  }
+
+  .scope-picker {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    margin: 0.75rem 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.25rem;
+  }
+
+  .scope-picker legend {
+    font-size: 0.875rem;
+    font-weight: 600;
+    padding: 0 0.35rem;
+  }
+
+  .scope-option {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+  }
+
+  .token-list {
+    list-style: none;
+    padding: 0;
+    margin: 1rem 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .token-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+
+  .token-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+  }
+
+  .token-name {
+    font-weight: 600;
+  }
+
+  /* A scope this build does not recognise, shown rather than hidden. It is
+     usually a token issued before the scope was renamed, and a reader who
+     cannot see it cannot work out why the token does less than it should. */
+  .unknown-scope {
+    text-decoration: underline dotted;
+  }
+
+  .token-kind {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.1rem 0.35rem;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text-muted);
+    margin-left: 0.4rem;
+  }
+
+  .token-meta {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+
+  .token-scopes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+
+  .token-scopes code,
+  .token-value {
+    font-size: 0.75rem;
+    background: var(--code-bg);
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+  }
+
+  /* The raw value. Wraps rather than overflowing, because a token that runs
+     off the edge of a panel is a token a reader cannot reliably select. */
+  .token-value {
+    display: block;
+    margin: 0.5rem 0;
+    word-break: break-all;
+    white-space: pre-wrap;
+    user-select: all;
+  }
+
+  .token-warning {
+    font-size: 0.8rem;
+    color: var(--warning-fg, var(--text-muted));
   }
 </style>
