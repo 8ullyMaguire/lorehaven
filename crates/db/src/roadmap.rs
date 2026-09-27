@@ -122,8 +122,8 @@ pub async fn list_cards(db: &Database, stage: Option<&str>) -> Result<Vec<Card>,
         None => "SELECT id, title, category, stage, elo_rating, CAST(matches_played AS BIGINT), CAST(times_best AS BIGINT), CAST(times_worst AS BIGINT), created_at, updated_at FROM roadmap_cards ORDER BY elo_rating DESC, matches_played DESC, id ASC",
     };
     let sql_pg = match stage {
-        Some(_) => "SELECT id, title, category, stage, elo_rating, CAST(matches_played AS BIGINT), CAST(times_best AS BIGINT), CAST(times_worst AS BIGINT), created_at, updated_at FROM roadmap_cards WHERE stage = $1 ORDER BY elo_rating DESC, matches_played DESC, id ASC",
-        None => "SELECT id, title, category, stage, elo_rating, CAST(matches_played AS BIGINT), CAST(times_best AS BIGINT), CAST(times_worst AS BIGINT), created_at, updated_at FROM roadmap_cards ORDER BY elo_rating DESC, matches_played DESC, id ASC",
+        Some(_) => "SELECT id, title, category, stage, elo_rating, CAST(matches_played AS BIGINT), CAST(times_best AS BIGINT), CAST(times_worst AS BIGINT), created_at::text, updated_at::text FROM roadmap_cards WHERE stage = $1 ORDER BY elo_rating DESC, matches_played DESC, id ASC",
+        None => "SELECT id, title, category, stage, elo_rating, CAST(matches_played AS BIGINT), CAST(times_best AS BIGINT), CAST(times_worst AS BIGINT), created_at::text, updated_at::text FROM roadmap_cards ORDER BY elo_rating DESC, matches_played DESC, id ASC",
     };
     match db.backend() {
         Backend::Sqlite => {
@@ -152,7 +152,7 @@ pub async fn list_cards(db: &Database, stage: Option<&str>) -> Result<Vec<Card>,
 /// Pick N random `idea`-stage cards for an arena ballot.
 pub async fn arena_candidates(db: &Database, limit: i64) -> Result<Vec<Card>, sqlx::Error> {
     let sql = "SELECT id, title, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at FROM roadmap_cards WHERE stage = 'idea' ORDER BY RANDOM() LIMIT ?";
-    let sql_pg = "SELECT id, title, category, stage, elo_rating, CAST(matches_played AS BIGINT), CAST(times_best AS BIGINT), CAST(times_worst AS BIGINT), created_at, updated_at FROM roadmap_cards WHERE stage = 'idea' ORDER BY RANDOM() LIMIT $1";
+    let sql_pg = "SELECT id, title, category, stage, elo_rating, CAST(matches_played AS BIGINT), CAST(times_best AS BIGINT), CAST(times_worst AS BIGINT), created_at::text, updated_at::text FROM roadmap_cards WHERE stage = 'idea' ORDER BY RANDOM() LIMIT $1";
     match db.backend() {
         Backend::Sqlite => {
             let rows = sqlx::query(sql)
@@ -219,7 +219,7 @@ pub async fn fetch_ballot(
     ballot_id: &str,
 ) -> Result<Option<(Vec<String>, Vec<(String, f64)>, Option<String>)>, sqlx::Error> {
     let sql = "SELECT card_ids, served_elo, voted_at FROM roadmap_ballots WHERE id = ?";
-    let sql_pg = "SELECT card_ids, served_elo, voted_at FROM roadmap_ballots WHERE id = $1";
+    let sql_pg = "SELECT card_ids::text, served_elo::text, voted_at::text FROM roadmap_ballots WHERE id = $1";
     match db.backend() {
         Backend::Sqlite => {
             let row = sqlx::query(sql)
@@ -242,6 +242,10 @@ pub async fn fetch_ballot(
                 .fetch_optional(db.postgres_pool().expect("postgres"))
                 .await?;
             Ok(row.map(|r| {
+                // `card_ids` and `served_elo` are `JSONB`, and sqlx will not
+                // decode a JSONB column into a `String` -- it demands
+                // `serde_json::Value`. Render it back to text in the query so
+                // both backends hand this function the same thing.
                 let card_ids_json: String = r.get(0);
                 let served_elo_json: String = r.get(1);
                 let voted_at: Option<String> = r.get(2);
@@ -377,7 +381,7 @@ pub async fn list_moves(
     offset: i64,
 ) -> Result<Vec<(String, String, String, String, String, String)>, sqlx::Error> {
     let sql = "SELECT card_id, from_stage, to_stage, reason, moved_by, created_at FROM roadmap_moves ORDER BY created_at DESC LIMIT ? OFFSET ?";
-    let sql_pg = "SELECT card_id, from_stage, to_stage, reason, moved_by, created_at FROM roadmap_moves ORDER BY created_at DESC LIMIT $1 OFFSET $2";
+    let sql_pg = "SELECT card_id, from_stage, to_stage, reason, moved_by::text, created_at::text FROM roadmap_moves ORDER BY created_at DESC LIMIT $1 OFFSET $2";
     match db.backend() {
         Backend::Sqlite => {
             let rows = sqlx::query(sql)
@@ -516,9 +520,12 @@ fn row_to_card_postgres(row: &sqlx::postgres::PgRow) -> Card {
         category: row.get::<String, _>(2),
         stage: row.get::<String, _>(3),
         elo_rating: row.get::<f64, _>(4),
-        matches_played: row.get::<i32, _>(5) as i64,
-        times_best: row.get::<i32, _>(6) as i64,
-        times_worst: row.get::<i32, _>(7) as i64,
+        // Every PostgreSQL branch of `list_cards` selects these three as
+        // `CAST(... AS BIGINT)`, so they arrive as `INT8`. Reading them as
+        // `i32` failed to decode on every card.
+        matches_played: row.get::<i64, _>(5),
+        times_best: row.get::<i64, _>(6),
+        times_worst: row.get::<i64, _>(7),
         created_at: row.get::<String, _>(8),
         updated_at: row.get::<String, _>(9),
     }
