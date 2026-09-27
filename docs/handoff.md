@@ -2152,15 +2152,27 @@ reason instead of a confusing `None` ten lines later.
 
 ### Where it stands
 
+Part A is complete and verified. Every gate below was run serially, with
+nothing else competing for the database — two full suites at once produce
+`database is locked` and pool timeouts that look exactly like real failures and
+are not.
 
-* Part A is complete. `cargo fmt --all --check`, `cargo clippy --workspace
-  --all-targets` and `cargo test --workspace --no-fail-fast` on **both** backends
-  are the gate; `cargo test --workspace --doc` too.
-* `crates/app/tests/m54_bot_link.rs` — 17 tests, the link flow end to end.
+| gate | result |
+|---|---|
+| `cargo fmt --all --check` | clean |
+| `cargo clippy --workspace --all-targets` | exit 0, 0 warnings |
+| `cargo test --workspace --no-fail-fast` (SQLite) | **exit 0 — 3020 passing** |
+| `cargo test --workspace --no-fail-fast` (PostgreSQL 15) | **exit 0 — 3020 passing** |
+| `cargo test --workspace --doc` | exit 0 |
+| `npx vitest run` (frontend) | 401 passing, 63 files |
+| `npx svelte-check --threshold error` | 0 errors, 0 warnings |
+
+* `crates/app/tests/m54_bot_link.rs` — 20 tests, the link flow end to end, plus
+  the three that pin the D7 feed stub.
 * `crates/app/tests/m54_bot_actions.rs` — 12 tests, both engines, the scope and
   ownership matrices.
 * **Not started: Part B.** The bot core is a new repo at
-  `~/code-local/rust/lorebot`, and that is the user's call to make before it
+  `~/code-local/rust/lorebot`, and that is the owner's call to make before it
   begins — see "What M54 is, and what it is not" in
   `docs/plans/m54-bot-core.md`. Every door its client needs is now open, so it
   would not be blocked on Lorehaven.
