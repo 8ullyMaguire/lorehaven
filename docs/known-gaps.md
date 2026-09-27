@@ -100,6 +100,31 @@ rather than a silent hole. Deciding whether the statement *should* bump it is a
 one-word change plus a comment, but it belongs with whoever first adds a
 `version`-based writer, not with a test suite.
 
+### M38-D01 · `topic_work_links` had no foreign keys on SQLite
+
+Migration 0038 created `topic_work_links` with `topic_id` and `work_id` as bare
+`NOT NULL` columns on SQLite while declaring both as `REFERENCES ... ON DELETE
+CASCADE` in the same migration's PostgreSQL arm. The SQLite pool runs with
+`PRAGMA foreign_keys = ON`, so the constraints were always enforceable — they
+were simply never declared.
+
+Two consequences, both silent:
+
+- An orphan link was insertable on SQLite and impossible on PostgreSQL, so the
+  same route code passed locally and failed in production with `23503`.
+- Deleting a work left its links behind on SQLite. The read path
+  (`work_backlink::work_for_topic`) filters `deleted_at IS NULL`, so a
+  *soft*-deleted work was already handled; a hard delete left a dangling link
+  that PostgreSQL would have cascaded away.
+
+It shipped green because the table had no tests at all. Fixed in migration 0038
+in place rather than in a new numbered migration: 0038 predates every release
+tag, so no deployed instance has a recorded checksum to contradict, and a
+rebuild would have needed a same-named `CREATE` on both dialects purely to
+satisfy the migration-parity test. The entry also came off
+`KNOWN_FK_DIVERGENCES` in `crates/db/src/migrate.rs`, which is the check that
+found it — an entry that names a divergence no longer present fails on purpose.
+
 ### M41-D01 · `half_life_of` reported an unscored work as a hard zero
 
 `half_life_of` read the `half_life_bp` column with an untyped
