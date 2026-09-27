@@ -827,3 +827,324 @@ async fn latent_demand_is_once_per_work_per_instance_and_never_a_headcount() {
         .expect("list");
     assert_eq!(items.len(), 2, "two instances, two rows: {items:?}");
 }
+
+// ---------------------------------------------------------------------------
+// M11-17a — §15.17's usable-while-unverified claim
+//
+// The claim is not "the exchange records the name". It is that the name is
+// usable *in the instance's own taxonomy* — searchable, browsable, attachable —
+// while visibly not curated. A name that lives only in the exchange's own table
+// satisfies GET /canonical and is invisible everywhere else, which is the stall
+// §15.17 says the split exists to prevent.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_name_from_a_signal_is_searchable_in_the_instance_taxonomy() {
+    let mut h = Harness::new("m1717a-search").await;
+    h.signed_in_at("reader@example.test", "reader", 1).await;
+    h.enable().await;
+    h.request(
+        "POST",
+        "/api/v1/exchange/signals",
+        Some(Harness::batch("A Work", &["Slow Burn"])),
+    )
+    .await;
+    // `search_nodes` is the instance's own taxonomy search. If the entity is not
+    // findable here, it is not usable, whatever GET /canonical says.
+    let found = lorehaven_db::taxonomy::search_nodes(h.db(), Some("tag"), "slow burn", 10)
+        .await
+        .expect("search nodes");
+    assert_eq!(
+        found.len(),
+        1,
+        "the signal's tag is in the taxonomy: {found:?}"
+    );
+    assert_eq!(found[0].canonical, "Slow Burn");
+    assert_eq!(
+        found[0].review_status, "unverified",
+        "§15.17: usable, and visibly not curated"
+    );
+    assert_eq!(found[0].signal_count, 1, "one signal, one count");
+}
+
+#[tokio::test]
+async fn an_unverified_node_is_listed_by_the_instance_tag_browser() {
+    // §15.17: it "may be attached to a work, appear in the tag browser, and be
+    // searched". A separate assertion from the search one, because the tag
+    // browser is a different query and a name can be findable by prefix search
+    // while missing from a listing.
+    let mut h = Harness::new("m1717a-browser").await;
+    h.signed_in_at("reader@example.test", "reader", 1).await;
+    h.enable().await;
+    h.request(
+        "POST",
+        "/api/v1/exchange/signals",
+        Some(Harness::batch("A Work", &["Cozy Fantasy"])),
+    )
+    .await;
+    // `list_tags` returns `(id, canonical, kind, count)` tuples.
+    let listed = lorehaven_db::taxonomy::list_tags(h.db(), 50, 0)
+        .await
+        .expect("list tags");
+    assert!(
+        listed
+            .iter()
+            .any(|(_, canonical, _, _)| canonical == "Cozy Fantasy"),
+        "the tag browser shows it: {listed:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_node_made_by_a_person_starts_curated_and_a_signal_does_not_demote_it() {
+    // Two claims in one test, because they are the same column and a build that
+    // satisfied only the second would still be wrong.
+    let h = Harness::new("m1717a-curated").await;
+    let made = lorehaven_db::taxonomy::create_node(h.db(), "tag", "Handmade")
+        .await
+        .expect("a person creates a tag");
+    assert_eq!(
+        made.review_status, "curated",
+        "§19.4 quorum is what makes a node curated, and create_node is the person path"
+    );
+    let after = lorehaven_db::taxonomy::ensure_node_from_signal(h.db(), "tag", "Handmade")
+        .await
+        .expect("a signal names the same tag");
+    assert_eq!(
+        after.review_status, "curated",
+        "agreement is not curation: a signal must not demote a curated node"
+    );
+    assert_eq!(after.id, made.id, "and must not create a second node");
+    assert_eq!(after.signal_count, 1, "but the count still rises");
+}
+
+#[tokio::test]
+async fn distinct_signals_reinforce_one_taxonomy_node() {
+    let h = Harness::new("m1717a-reinforce").await;
+    let first = lorehaven_db::taxonomy::ensure_node_from_signal(h.db(), "tag", "Slow Burn")
+        .await
+        .expect("first signal");
+    let second = lorehaven_db::taxonomy::ensure_node_from_signal(h.db(), "tag", "slow burn")
+        .await
+        .expect("second signal");
+    assert_eq!(first.id, second.id, "one node");
+    assert_eq!(second.signal_count, 2, "two distinct signals reinforced it");
+    assert_eq!(
+        second.canonical, "Slow Burn",
+        "a curator's display form is not rewritten by a later spelling"
+    );
+}
+
+#[tokio::test]
+async fn a_differing_spelling_is_recorded_as_an_alias_not_a_duplicate() {
+    // §15.17: "A signal naming a known tag adds an alias rather than creating a
+    // duplicate."
+    let mut h = Harness::new("m1717a-alias").await;
+    h.signed_in_at("reader@example.test", "reader", 1).await;
+    h.enable().await;
+    h.request(
+        "POST",
+        "/api/v1/exchange/signals",
+        Some(Harness::batch("A Work", &["SLOW   BURN"])),
+    )
+    .await;
+    let nodes = lorehaven_db::taxonomy::search_nodes(h.db(), Some("tag"), "slow burn", 10)
+        .await
+        .expect("search");
+    assert_eq!(
+        nodes.len(),
+        1,
+        "one node despite the messy spelling: {nodes:?}"
+    );
+    assert_eq!(
+        nodes[0].canonical, "SLOW   BURN",
+        "the submitter's spelling is kept"
+    );
+}
+
+#[tokio::test]
+async fn the_review_queue_is_ordered_by_signal_count() {
+    // §15.17: "the name with forty distinct signals is examined before the name
+    // with one." The ordering is the function's whole point, so it is asserted
+    // rather than left to the index.
+    let h = Harness::new("m1717a-queue").await;
+    for _ in 0..3 {
+        lorehaven_db::taxonomy::ensure_node_from_signal(h.db(), "tag", "Busy")
+            .await
+            .expect("busy");
+    }
+    lorehaven_db::taxonomy::ensure_node_from_signal(h.db(), "tag", "Quiet")
+        .await
+        .expect("quiet");
+    let queue = lorehaven_db::taxonomy::list_unverified_nodes(h.db(), 10)
+        .await
+        .expect("queue");
+    assert_eq!(
+        queue.len(),
+        2,
+        "only unverified nodes are queued: {queue:?}"
+    );
+    assert_eq!(
+        queue[0].canonical, "Busy",
+        "the reinforced name comes first"
+    );
+    assert_eq!(queue[0].signal_count, 3);
+}
+
+// ---------------------------------------------------------------------------
+// M11-17b — §19.14's asymmetric trust bars, over the real routes
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_tl1_account_may_not_curate() {
+    // §19.14: the asymmetry. If this passed for TL1, the whole design collapses
+    // into "cheap to be believed", and the canonical layer stops being worth
+    // reading.
+    let mut h = Harness::new("m1717b-curate").await;
+    h.signed_in_at("reader@example.test", "reader", 1).await;
+    h.enable().await;
+    h.request(
+        "POST",
+        "/api/v1/exchange/signals",
+        Some(Harness::batch("A Work", &["Slow Burn"])),
+    )
+    .await;
+    let (status, body) = h
+        .request(
+            "GET",
+            "/api/v1/exchange/review-queue",
+            None::<serde_json::Value>,
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "TL1 may not read the queue: {body}"
+    );
+    let (status, body) = h
+        .request(
+            "POST",
+            "/api/v1/exchange/entities/curate",
+            Some(json!({ "kind": "tag", "norm": "slow burn", "canonical": "Slow Burn" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "TL1 may not curate: {body}");
+}
+
+#[tokio::test]
+async fn a_tl3_account_may_curate_and_the_provenance_survives() {
+    // §15.17: "Curating an entity retains the originating signals."
+    let mut h = Harness::new("m1717b-tl3").await;
+    h.signed_in_at("curator@example.test", "curator", 3).await;
+    h.enable().await;
+    h.request(
+        "POST",
+        "/api/v1/exchange/signals",
+        Some(Harness::batch("A Work", &["Slow Burn"])),
+    )
+    .await;
+    let (status, body) = h
+        .request(
+            "POST",
+            "/api/v1/exchange/entities/curate",
+            Some(json!({ "kind": "tag", "norm": "slow burn", "canonical": "Slowburn" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "TL3 may curate: {body}");
+    let nodes = lorehaven_db::taxonomy::search_nodes(h.db(), Some("tag"), "slow burn", 10)
+        .await
+        .expect("search");
+    assert_eq!(nodes[0].review_status, "curated");
+    assert_eq!(nodes[0].canonical, "Slowburn", "the curator's form wins");
+    assert_eq!(
+        nodes[0].signal_count, 1,
+        "curation does not erase the count that justified it"
+    );
+}
+
+#[tokio::test]
+async fn a_tl2_account_may_neither_submit_nor_curate() {
+    // The gap between the bars is the design: §19.14's "cheap to participate,
+    // expensive to be believed".
+    let mut h = Harness::new("m1717b-tl2").await;
+    h.signed_in_at("mid@example.test", "mid", 2).await;
+    h.enable().await;
+    let (status, body) = h
+        .request(
+            "POST",
+            "/api/v1/exchange/signals",
+            Some(Harness::batch("A Work", &["x"])),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "TL2 is above the submit bar: {body}"
+    );
+    let (status, body) = h
+        .request(
+            "POST",
+            "/api/v1/exchange/entities/curate",
+            Some(json!({ "kind": "tag", "norm": "x", "canonical": "X" })),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "and below the curate bar: {body}"
+    );
+}
+
+#[tokio::test]
+async fn curation_does_not_rewrite_the_originating_signals() {
+    // §15.17: signals are "retained as provenance, never rewritten". Asserted
+    // by content, not by row count, because a rewrite that kept the count would
+    // pass a weaker version of this test.
+    let mut h = Harness::new("m1717b-provenance").await;
+    h.signed_in_at("curator@example.test", "curator", 3).await;
+    h.enable().await;
+    let batch = Harness::batch("Original Title", &["Slow Burn"]);
+    h.request("POST", "/api/v1/exchange/signals", Some(batch.clone()))
+        .await;
+    let before = lorehaven_db::exchange::count_provenance_signals(h.db(), "unused")
+        .await
+        .expect("count");
+    h.request(
+        "POST",
+        "/api/v1/exchange/entities/curate",
+        Some(json!({ "kind": "tag", "norm": "slow burn", "canonical": "Slowburn" })),
+    )
+    .await;
+    let after = lorehaven_db::exchange::count_provenance_signals(h.db(), "unused")
+        .await
+        .expect("count");
+    assert_eq!(
+        before, after,
+        "curating neither deletes nor rewrites a signal"
+    );
+    // And the original spelling is still the one the signal carried.
+    let nodes = lorehaven_db::taxonomy::search_nodes(h.db(), Some("tag"), "slow burn", 10)
+        .await
+        .expect("search");
+    assert_eq!(
+        nodes[0].signal_count, 1,
+        "the count that justified curation is intact"
+    );
+}
+
+#[tokio::test]
+async fn curating_an_unknown_entity_is_a_404_rather_than_a_silent_creation() {
+    // A curation act on a name nobody has ever signalled would be an operator
+    // inventing canonical metadata, which is a different thing with a different
+    // authority. It must not quietly succeed.
+    let mut h = Harness::new("m1717b-unknown").await;
+    h.signed_in_at("curator@example.test", "curator", 3).await;
+    h.enable().await;
+    let (status, body) = h
+        .request(
+            "POST",
+            "/api/v1/exchange/entities/curate",
+            Some(json!({ "kind": "tag", "norm": "nothing here", "canonical": "Nothing" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+}

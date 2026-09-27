@@ -98,6 +98,11 @@ CREATE TABLE canonical_entities (
     -- unverified. Always populated: §15.17 requires an unverified entity to be
     -- usable, and an entity with no canonical form has nothing to display.
     canonical TEXT NOT NULL,
+    -- 'unverified' / 'curated' — the same two values as
+    -- `taxonomy_nodes.review_status` (migration 0082), deliberately. Two tables
+    -- describing one state must not spell it two ways, or a query joining them
+    -- silently drops every curated row.
+    --
     -- §15.17: 'unverified' is a usable state, not a pending one. A new name from
     -- a signal may be attached to a work, searched and browsed immediately; it
     -- is simply never presented as curated.

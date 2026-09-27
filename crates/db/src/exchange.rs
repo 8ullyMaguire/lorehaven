@@ -55,7 +55,9 @@ pub struct CanonicalEntity {
     /// The display form — a curator's canonical spelling, or the first spelling
     /// seen while unverified. Always populated.
     pub canonical: String,
-    /// `unverified` or `verified` (§15.17).
+    /// `unverified` or `curated` (§15.17). One vocabulary with
+    /// `taxonomy_nodes.review_status`; the wire type's `ReviewStatus::Verified`
+    /// is the same state under the name the exchange protocol uses.
     pub review_status: String,
     /// Review priority only. Never a demand weight, never a count of readers.
     pub signal_count: i64,
@@ -522,10 +524,10 @@ pub async fn curate_entity(
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
         "UPDATE canonical_entities
-         SET canonical = ?, review_status = 'verified', curated_by = ?, curated_at = ?, updated_at = ?
+         SET canonical = ?, review_status = 'curated', curated_by = ?, curated_at = ?, updated_at = ?
          WHERE kind = ? AND norm = ?",
         "UPDATE canonical_entities
-         SET canonical = $1, review_status = 'verified', curated_by = $2, curated_at = $3, updated_at = $4
+         SET canonical = $1, review_status = 'curated', curated_by = $2, curated_at = $3, updated_at = $4
          WHERE kind = $5 AND norm = $6",
     );
     let affected = match db.backend() {

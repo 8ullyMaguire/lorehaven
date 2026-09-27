@@ -47,6 +47,11 @@ pub fn router() -> axum::Router<AppState> {
         .route("/exchange/version", get(get_version))
         .route("/exchange/signals", post(submit_signals))
         .route("/exchange/canonical", get(get_canonical))
+        // §15.17/§19.14: the review queue and the curation act. Both are
+        // governance surfaces, gated on trust in the handler rather than on a
+        // flag here — see `get_review_queue` and `curate_entity`.
+        .route("/exchange/review-queue", get(get_review_queue))
+        .route("/exchange/entities/curate", post(curate_entity))
 }
 
 /// The settings row, or 404 if the operator never enabled the exchange.
@@ -254,6 +259,32 @@ pub async fn submit_signals(
         lorehaven_db::exchange::reinforce_entities(state.db(), &hash, &entities)
             .await
             .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+        // §15.17: "A new name is usable immediately, and visibly so." Usable
+        // means the *instance's own taxonomy* — a node `search_nodes` finds, a
+        // tag browser lists, and `tag_work` can attach. Recording the name only
+        // in the exchange's own table would satisfy `GET /canonical` while
+        // leaving the tag invisible everywhere else, which is exactly the stall
+        // §15.17 says the unverified/curated split exists to avoid.
+        //
+        // So each entity is also ensured as a taxonomy node, unverified. The
+        // node is the usable artefact; `canonical_entities` stays the exchange's
+        // own provenance record of which signal named what.
+        for (kind, value, norm) in &entities {
+            let node = lorehaven_db::taxonomy::ensure_node_from_signal(state.db(), kind, value)
+                .await
+                .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+            // §15.17: "A signal naming a known tag adds an alias rather than
+            // creating a duplicate." When the submitted spelling differs from
+            // the normalised form — mixed case, doubled spacing — that spelling
+            // is the variant a curator needs before deciding on a merge, so it
+            // is recorded against the node. Only when it differs: re-recording
+            // the canonical spelling as its own alias is noise.
+            if value.to_lowercase() != *norm {
+                lorehaven_db::taxonomy::create_alias(state.db(), value, &node.id, "exchange")
+                    .await
+                    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+            }
+        }
         results.push(exch::SignalOutcome {
             content_hash: hash,
             entities: entities
@@ -363,7 +394,11 @@ pub async fn get_canonical(
             // total rather than a clamp-and-hope.
             signal_count: r.signal_count.max(0) as u64,
             curated_at: r.curated_at,
-            review_status: if r.review_status == "verified" {
+            // Stored as `curated`, matching `taxonomy_nodes`; the wire type
+            // calls the same state `Verified`. One vocabulary in storage, the
+            // protocol's own on the wire — and a third spelling here would be a
+            // third way for the two tables to disagree.
+            review_status: if r.review_status == "curated" {
                 ReviewStatus::Verified
             } else {
                 ReviewStatus::Unverified
@@ -376,6 +411,112 @@ pub async fn get_canonical(
             "the canonical batch did not serialise: {e}"
         )))
     })?))
+}
+
+/// The entities awaiting curation, most-reinforced first (§15.17's queue).
+///
+/// Operator-only in effect: the queue names what the instance has been told and
+/// has not yet reviewed, which is a moderation workload rather than public
+/// metadata. Gated on trust in the handler, not on a route flag, because §19.14
+/// makes the bar a trust threshold and §0.3 makes trust non-purchasable.
+pub async fn get_review_queue(
+    State(state): State<AppState>,
+    MaybeSession(session): MaybeSession,
+) -> ApiResult<Json<Value>> {
+    let _ = require_enabled(&state).await?;
+    let session = session.ok_or(ApiError(lorehaven_domain::AppError::AuthRequired))?;
+    let trust = lorehaven_db::governance::trust_for(state.db(), &session.account_id.to_string())
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    if !exch::may_curate(trust) {
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
+    }
+    let nodes = lorehaven_db::taxonomy::list_unverified_nodes(state.db(), 100)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    Ok(Json(json!({
+        "entities": nodes
+            .iter()
+            .map(|n| json!({
+                "kind": n.kind,
+                "canonical": n.canonical,
+                "norm": n.norm,
+                "review_status": n.review_status,
+                // Review priority. Not a demand weight, not a reader count.
+                "signal_count": n.signal_count,
+            }))
+            .collect::<Vec<_>>(),
+    })))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct CurateBody {
+    pub kind: String,
+    /// The normalised name, as the queue reports it.
+    pub norm: String,
+    /// The canonical form the curator is setting.
+    pub canonical: String,
+}
+
+/// Curate an entity: set its canonical form and mark it verified (§19.4 quorum
+/// work, gated to TL3).
+///
+/// §15.17 requires the originating signals to be **retained as provenance,
+/// never rewritten**, so this updates the node and the exchange's entity record
+/// and touches nothing in `exchange_signals` or `exchange_signal_entities`. That
+/// is why a curator cannot "tidy" a signal by editing it: the function has no
+/// path that writes those tables.
+pub async fn curate_entity(
+    State(state): State<AppState>,
+    MaybeSession(session): MaybeSession,
+    axum::Json(body): axum::Json<CurateBody>,
+) -> ApiResult<Json<Value>> {
+    let _ = require_enabled(&state).await?;
+    let session = session.ok_or(ApiError(lorehaven_domain::AppError::AuthRequired))?;
+    let account_id = session.account_id.to_string();
+    let trust = lorehaven_db::governance::trust_for(state.db(), &account_id)
+        .await
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+    // §19.14: TL3. A change to a canonical value other readers will receive is a
+    // governance act, held to the governance bar.
+    if !exch::may_curate(trust) {
+        return Err(ApiError(lorehaven_domain::AppError::AccessDenied));
+    }
+    if exch::EntityKind::parse(&body.kind).is_none() {
+        return Err(ApiError(lorehaven_domain::AppError::field(
+            "kind",
+            format!("`{}` is not a known entity kind", body.kind),
+        )));
+    }
+    let norm = exch::normalise(&body.norm);
+    let canonical = body.canonical.trim();
+    if canonical.is_empty() {
+        return Err(ApiError(lorehaven_domain::AppError::field(
+            "canonical",
+            "a curated entity needs a canonical form to display",
+        )));
+    }
+    let node_curated =
+        lorehaven_db::taxonomy::curate_node(state.db(), &body.kind, &norm, canonical)
+            .await
+            .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    let entity_curated = lorehaven_db::exchange::curate_entity(
+        state.db(),
+        &body.kind,
+        &norm,
+        canonical,
+        &account_id,
+    )
+    .await
+    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    if !node_curated && !entity_curated {
+        return Err(ApiError(lorehaven_domain::AppError::NotFound {
+            resource: "entity",
+        }));
+    }
+    Ok(Json(
+        json!({ "curated": true, "kind": body.kind, "norm": norm, "canonical": canonical }),
+    ))
 }
 
 /// An RFC 3339 timestamp one hour ago, for the rate-limit window.

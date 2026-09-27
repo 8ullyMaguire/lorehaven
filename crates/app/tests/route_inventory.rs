@@ -116,6 +116,26 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/exchange/canonical",
         audience: Audience::Public,
     },
+    // The two governance doors. `MaybeSession` for the same reason as the three
+    // above — the opt-in is checked first so a disabled instance answers 404
+    // before either the session or the trust bar is consulted. What differs is
+    // the check *after*: these refuse below TL3, and that refusal is a governance
+    // decision rather than an authentication one, so it is not the extractor's
+    // job.
+    RouteEntry {
+        file: "exchange.rs",
+        handler: "get_review_queue",
+        method: "GET",
+        path: "/exchange/review-queue",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "exchange.rs",
+        handler: "curate_entity",
+        method: "POST",
+        path: "/exchange/entities/curate",
+        audience: Audience::Public,
+    },
     // ------------------------------------------------------------------
     // Health — public read
     // ------------------------------------------------------------------
