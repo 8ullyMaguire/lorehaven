@@ -62,6 +62,30 @@ return but errors rather than returning `false`. Both are typed
 `Result<...>` with a boolean in the signature, so callers have to handle the
 same condition two ways.
 
+### M43-D10 · `regenerate_fingerprint` cannot regenerate
+
+`instance_fingerprints.instance_host` is `UNIQUE` and the INSERT has no
+`ON CONFLICT` clause, so the second call for a host is a unique violation. The
+function is the only way to refresh a fingerprint, and `get_fingerprint` filters
+on `valid_until > now` — so a fingerprint becomes invisible after 30 days and can
+never be replaced. Nothing in the workspace calls it yet, which is why it has
+gone unnoticed. The fix is a `DO UPDATE` on the host, or dropping the UNIQUE and
+selecting the newest row.
+
+Pinned by `regenerating_a_fingerprint_fails_instead_of_refreshing_it`.
+
+### M43-D19 · A failed federation delivery is never retried
+
+`mark_queue_failed` sets `status = 'failed'` and increments `attempts`, but
+`get_pending_queue` selects only `status = 'pending'` and the schema has exactly
+three states (`pending | sent | failed`). So a delivery that fails once leaves
+the queue for good, and the `attempts` counter that exists to drive a backoff is
+written and never read. The index is already `(status, created_at)` — the shape
+a retry sweep wants — so the missing piece is a retryable state or a query that
+also takes `failed` rows below an attempt ceiling.
+
+Pinned by `a_failed_delivery_leaves_the_queue_for_good`.
+
 ### M32 · `meta_verdicts` counts the opposite of what its name and doc say
 
 Documented as "a caster's meta-moderation record", the query joins
@@ -90,6 +114,11 @@ Listed because the pattern recurs and the fix is the reference for it.
   Three separate sites — the `INSERT` bound a Rust `bool` into a `BIGINT`
   column, and two reads asked sqlx to decode `BIGINT` as `bool`. Invisible on
   SQLite, which stores the bool as 0/1 without complaint.
+* **`federation`: every peer query was an error on PostgreSQL.** `similarity` is
+  `REAL` (FLOAT4) and the struct field is `f64` (FLOAT8); sqlx matches types
+  strictly rather than widening, so both the thresholded list and the full list
+  failed to decode. SQLite stores REAL as a double, so only the PostgreSQL run
+  caught it. Fixed with `similarity::double precision` in the PG arms only.
 * **`subscriptions`: the delayed opt-out had no `text + interval` operator on
   PostgreSQL** (`updated_at` is RFC 3339 TEXT). The arithmetic now happens in
   SQL and is cast back to text, so the two dialects agree.
