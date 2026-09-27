@@ -35,13 +35,13 @@ pub async fn recompute_half_life(
                 "SELECT w.id FROM works w
                  WHERE w.deleted_at IS NULL
                    AND w.lifecycle = 'published'
-                   AND w.created_at < datetime('now', '-{min_age_days} days')"
+                   AND datetime(w.created_at) < datetime('now', '-{min_age_days} days')"
             ),
             format!(
                 "SELECT w.id::text FROM works w
                  WHERE w.deleted_at IS NULL
                    AND w.lifecycle = 'published'
-                   AND w.created_at < NOW() - INTERVAL '{min_age_days} days'"
+                   AND w.created_at::timestamptz < NOW() - INTERVAL '{min_age_days} days'"
             ),
         );
         match db.backend() {
@@ -94,12 +94,12 @@ async fn count_recent_starts(db: &Database, work_id: &str, window_days: i64) -> 
         format!(
             "SELECT COUNT(DISTINCT pseud_id) FROM reading_history_entry
              WHERE subject_type = 'work' AND subject_id = ?
-               AND last_read_at >= datetime('now', '-{window_days} days')"
+               AND datetime(last_read_at) >= datetime('now', '-{window_days} days')"
         ),
         format!(
             "SELECT COUNT(DISTINCT pseud_id) FROM reading_history_entry
              WHERE subject_type = 'work' AND subject_id::text = $1
-               AND last_read_at >= NOW() - INTERVAL '{window_days} days'"
+               AND last_read_at::timestamptz >= NOW() - INTERVAL '{window_days} days'"
         ),
     );
     let count: i64 = match db.backend() {
@@ -127,15 +127,16 @@ async fn count_first_window_starts(db: &Database, work_id: &str, window_days: i6
             "SELECT COUNT(DISTINCT h.pseud_id) FROM reading_history_entry h
              JOIN works w ON w.id = h.subject_id
              WHERE h.subject_type = 'work' AND h.subject_id = ?
-               AND h.last_read_at >= w.created_at
-               AND h.last_read_at < datetime(w.created_at, '+{window_days} days')"
+               AND datetime(h.last_read_at) >= datetime(w.created_at)
+               AND datetime(h.last_read_at) < datetime(w.created_at, '+{window_days} days')"
         ),
         format!(
             "SELECT COUNT(DISTINCT h.pseud_id) FROM reading_history_entry h
              JOIN works w ON w.id::text = h.subject_id::text
              WHERE h.subject_type = 'work' AND h.subject_id::text = $1
-               AND h.last_read_at >= w.created_at
-               AND h.last_read_at < w.created_at + INTERVAL '{window_days} days'"
+               AND h.last_read_at::timestamptz >= w.created_at::timestamptz
+               AND h.last_read_at::timestamptz
+                   < w.created_at::timestamptz + INTERVAL '{window_days} days'"
         ),
     );
     let count: i64 = match db.backend() {
@@ -159,21 +160,26 @@ async fn count_first_window_starts(db: &Database, work_id: &str, window_days: i6
 pub async fn half_life_of(db: &Database, work_id: &WorkId) -> Result<Option<i64>> {
     let sql = db.sql(
         "SELECT half_life_bp FROM works WHERE id = ?",
-        "SELECT half_life_bp FROM works WHERE id::text = $1",
+        // `half_life_bp` is INTEGER, i.e. INT4, which sqlx will not decode into
+        // an i64. Cast to BIGINT in SQL rather than decode narrow and widen, so
+        // the two arms have the same Rust type.
+        "SELECT CAST(half_life_bp AS BIGINT) FROM works WHERE id::text = $1",
     );
+    // `query_scalar::<i64>` over a NULLable column yields `Some(0)` for a NULL
+    // row on SQLite rather than `None`, which would report every unscored work
+    // as a hard zero -- the exact distinction the caller needs. Bind the scalar as
+    // `Option<i64>` so NULL survives the decode.
     let bp: Option<i64> = match db.backend() {
-        Backend::Sqlite => {
-            sqlx::query_scalar(&sql)
-                .bind(work_id.to_string())
-                .fetch_optional(db.sqlite_pool().expect("sqlite"))
-                .await?
-        }
-        Backend::Postgres => {
-            sqlx::query_scalar(&sql)
-                .bind(work_id.to_string())
-                .fetch_optional(db.postgres_pool().expect("postgres"))
-                .await?
-        }
+        Backend::Sqlite => sqlx::query_scalar::<_, Option<i64>>(&sql)
+            .bind(work_id.to_string())
+            .fetch_optional(db.sqlite_pool().expect("sqlite"))
+            .await?
+            .flatten(),
+        Backend::Postgres => sqlx::query_scalar::<_, Option<i64>>(&sql)
+            .bind(work_id.to_string())
+            .fetch_optional(db.postgres_pool().expect("postgres"))
+            .await?
+            .flatten(),
     };
     Ok(bp)
 }
@@ -204,7 +210,8 @@ pub async fn half_life_map(
         Backend::Postgres => {
             let pg_placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("${i}")).collect();
             let pg_sql = format!(
-                "SELECT id::text, half_life_bp FROM works WHERE id::text IN ({})",
+                "SELECT id::text, CAST(half_life_bp AS BIGINT) AS half_life_bp \
+                 FROM works WHERE id::text IN ({})",
                 pg_placeholders.join(",")
             );
             let mut query = sqlx::query_as(&pg_sql);
