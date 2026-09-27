@@ -100,6 +100,42 @@ rather than a silent hole. Deciding whether the statement *should* bump it is a
 one-word change plus a comment, but it belongs with whoever first adds a
 `version`-based writer, not with a test suite.
 
+### M7-D01 · An export claimed before its row was committed was killed for good
+
+`export_jobs.job_id` is a foreign key onto `jobs`, so the queue row is written
+first — the call site says so, and picks the export id up front so the payload
+can name it from the moment the job is visible. But "written first" is not
+"written in the same transaction": the two are separate commits, and a worker
+polling on a short interval can claim the job in the gap.
+
+The handler looked up the export row and treated its absence as fatal:
+
+```text
+export 6e10aced-… no longer exists
+```
+
+`fatal` means "a retry cannot change this", so the job failed on its first
+attempt, the export row stayed `queued`, and the retries could not have helped —
+the row the handler was waiting for was committed microseconds after the lookup.
+A reader who asked for an EPUB saw **"Waiting" indefinitely**, on an instance
+whose worker was healthy and whose export had in fact already finished.
+
+Found by the Playwright export journey, which failed twice in a row with the
+export stuck at "Waiting" while a later export from another test completed in
+520ms. The scratch database said it plainly: one job in state `failed` with
+`last_error` naming a row that existed, and its export still `queued`.
+
+The absence of the export row is now transient, so the queue's own retry policy
+decides, and the message says "is not committed yet" rather than "no longer
+exists" — for an operator reading a stuck job, one is a race that resolves
+itself and the other looks like data loss. A payload with no export id stays
+fatal: that is a programming error, not a race, and retrying it would burn every
+attempt on a job that can never succeed.
+
+Pinned by `crates/app/tests/export_worker_commit_window.rs` (4 tests; 3 of them
+fail against the old code, and the fourth is the malformed-payload case that was
+and remains fatal).
+
 ### M15-D01 · `search_works` never filtered soft-deleted works
 
 `search_works` backs `GET /api/v1/public/search`, the **anonymous** door. Its
