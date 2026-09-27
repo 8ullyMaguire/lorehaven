@@ -31,12 +31,18 @@ CREATE TABLE work_tags (
 CREATE INDEX work_tags_node ON work_tags (node_id);
 
 CREATE TABLE works_index (
-    work_id TEXT PRIMARY KEY,
+    -- The PostgreSQL arm of this same migration declares
+    -- `work_id ... REFERENCES works (id) ON DELETE CASCADE` on both index
+    -- tables. These were missing here, so a deleted work left its index rows
+    -- behind on SQLite and hard-deleting a work cascaded on PostgreSQL only.
+    -- The pool runs with `PRAGMA foreign_keys = ON`, so the constraints were
+    -- always enforceable. Found by the search-index suite, which had no tests.
+    work_id TEXT PRIMARY KEY REFERENCES works (id) ON DELETE CASCADE,
     body_text TEXT NOT NULL
 );
 
 CREATE TABLE works_index_terms (
-    work_id TEXT NOT NULL,
+    work_id TEXT NOT NULL REFERENCES works (id) ON DELETE CASCADE,
     term TEXT NOT NULL,
     pos INTEGER NOT NULL
 );

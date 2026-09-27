@@ -1,6 +1,15 @@
 //! Search repository: rebuild index, search works, search in-work.
 //!
 //! Spec §15.9–15.10. Both dialects.
+//!
+//! `search_works` backs the **anonymous** door (`GET /api/v1/public/search`), so
+//! its predicate is the strictest one in the crate: published, public, and not
+//! soft-deleted. The `deleted_at` guard was missing for as long as this module
+//! existed — the term index keeps a deleted work's terms until a deindex event
+//! lands, and a withdrawal or a takedown request is a soft delete, so a removed
+//! work stayed findable by anyone who knew a word in it. The same guard the
+//! `word_count` subquery already applied to `chapters` is now applied to
+//! `works` in the outer predicate too.
 
 use crate::{Backend, Database};
 use anyhow::{Context, Result};
@@ -212,6 +221,7 @@ pub async fn search_works(db: &Database, needle: &str, limit: i64) -> Result<Vec
                  JOIN works w ON w.id = t.work_id \
                  JOIN pseuds a ON a.id = w.owner_pseud_id \
                  WHERE ({}) AND w.lifecycle = 'published' AND w.visibility = 'public' \
+                   AND w.deleted_at IS NULL \
                  GROUP BY w.id \
                  ORDER BY score DESC \
                  LIMIT ?",
@@ -257,6 +267,7 @@ pub async fn search_works(db: &Database, needle: &str, limit: i64) -> Result<Vec
                  JOIN works w ON w.id = t.work_id \
                  JOIN pseuds a ON a.id = w.owner_pseud_id::uuid \
                  WHERE ({}) AND w.lifecycle = 'published' AND w.visibility = 'public' \
+                   AND w.deleted_at IS NULL \
                  GROUP BY w.id, w.title, a.handle \
                  ORDER BY score DESC \
                  LIMIT ${}",

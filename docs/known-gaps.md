@@ -100,6 +100,44 @@ rather than a silent hole. Deciding whether the statement *should* bump it is a
 one-word change plus a comment, but it belongs with whoever first adds a
 `version`-based writer, not with a test suite.
 
+### M15-D01 · `search_works` never filtered soft-deleted works
+
+`search_works` backs `GET /api/v1/public/search`, the **anonymous** door. Its
+predicate checked `lifecycle = 'published'` and `visibility = 'public'` but not
+`deleted_at IS NULL` — a gap that had existed for the life of the module, which
+had no tests.
+
+The index is why this mattered rather than being cosmetic. A withdrawal, a
+takedown request and a DMCA removal are all soft deletes, and the deindex event
+is asynchronous: the term rows stay in `works_index_terms` until it lands. So a
+work removed for cause stayed findable by anyone who typed a word from it, on
+every page of results, with its title and author handle. The same `deleted_at`
+guard the `word_count` subquery already applied to `chapters` now applies to
+`works` in the outer predicate.
+
+Found by `a_deleted_work_is_not_searchable` in
+`crates/app/tests/milestone_15_search.rs`.
+
+### M15-D02 · `works_index` and `works_index_terms` had no foreign keys on SQLite
+
+Migration 0011 gave both index tables `work_id ... REFERENCES works (id) ON
+DELETE CASCADE` in its PostgreSQL arm and declared no key at all in its SQLite
+arm. The pool runs with `PRAGMA foreign_keys = ON`, so the constraints were
+always enforceable and were simply absent.
+
+Consequence: hard-deleting a work on SQLite left its index rows behind —
+orphaned term rows that no query would ever return but that a `rebuild_work_index`
+on a recycled id would collide with, and that kept the deleted work's body text
+and every token in it in the database file after the work was gone.
+
+Both tables are on the divergence allowlist in `crates/db/src/migrate.rs`; the
+two entries are removed now that the schemas agree, alongside the one removed for
+`topic_work_links` in M38-D01. The allowlist is the thing that found this, and
+it will find the next one.
+
+Found by `deleting_a_work_cascades_its_index` in
+`crates/app/tests/milestone_15_search.rs`.
+
 ### M38-D01 · `topic_work_links` had no foreign keys on SQLite
 
 Migration 0038 created `topic_work_links` with `topic_id` and `work_id` as bare
