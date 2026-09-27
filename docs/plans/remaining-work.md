@@ -11,10 +11,11 @@ canonical feature inventory and the roadmap-board seed).
 
 ## Where the build actually stands (re-derived 2026-09-25)
 
-Verified from `docs/requirements.csv`: **196 rows implemented**
-(176 locally-tested, 20 fully-tested), **57 planned**, **4 deliberately
-unsupported**, 257 rows total. 51 milestone test files through M45, migrations to
-0071, 37 frontend routes, tags through `v0.51.0`. The
+Verified from `docs/requirements.csv`: **588 rows implemented**
+(289 fully-tested, 183 locally-tested, 116 verified-e2e), **68 planned**,
+**4 deliberately unsupported**, 660 rows total. 51 milestone test files through
+M45 plus the M54–M58 suites, migrations to
+0083, 80 frontend routes, tags through `v0.51.0`. The
 platform core (M0–M15), the forum series (M31–M35), media resilience
 (M48–M51), roadmap consensus (M45), browse ordering (M43), export CTAs
 (M42), user settings (M47 complete, 9/9 requirements implemented-fully-tested) are built. What remains to the
@@ -253,6 +254,31 @@ The dead handlers were removed rather than left to rot. Restoring this means:
 
 ~1 day. Small, but §45 is not usable without it.
 
+### M59 — Crawling posture, retention governance, and preservation (spec §11.5, §11.15, §11.12a, §11.15a, §11.15b, §19.15, amended)
+
+Spec: `docs/spec-amendments/crawling-retention-and-preservation.md`.
+Plan: `docs/plans/crawling-retention-preservation.md`. Rows: M59-01…M59-20,
+all `planned`.
+
+`imports.honour_robots` becomes `imports.robots_posture`
+(`strict | metadata_only | permissive`) with every fetch declaring a class, and
+§11.15's unbuilt `cache | aggregate` retention (**M6-15**, recorded
+`unsupported` since 2026-09-11) is built as specified. Preservation targets
+crosspost a work to a configured archive and earn credits and a badge for
+**verified live** preservation, with a ledger reversal when a destination
+dies. Retention may be decided by a trust-gated community vote in `advisory`
+(default) or opt-in `binding` mode, with asymmetric quorum, a cooling period
+and a recorded operator override.
+
+Two things this deliberately does not build: §11.11 preservation *batches*
+(M6-10) stay unbuilt, and crossposting an **imported** work is refused by name
+because inherited `redistribution` permission needs the §23.7 transfer
+manifest, which is deferred. Local works are the shippable slice.
+
+Order: A posture+class → B UA token → C retention → D preservation → E
+proposals. A and C can run in parallel; D and E share the retention routes and
+serialise.
+
 ### Then — hardening and release
 
 E2E green (73/73 as of `9cd3c71`, the commit that fixed the export-delete
@@ -317,19 +343,20 @@ can run in the background.
 
 ## Verification debt, stated plainly
 
-**172 of 253 rows are `implemented-locally-tested`, not
-`implemented-fully-tested`.** That is the largest soft spot in a green board, and
+**299 rows are not `implemented-fully-tested`** (183 locally-tested, 116
+verified-e2e, of 660). That is the largest soft spot in a green board, and
 it is why M57 is not simply next in line. A public write path built on
 machinery that has never been exercised through the full stack is a different
 risk from the one the external proposal named when it argued about sequencing —
 its argument was that M10 taxonomy and M14 trust were unbuilt, and both are
 built. The real constraint is verification depth, not milestone order.
 
-The number is not a claim that 172 rows are broken. It is a claim that 172 rows
+The number is not a claim that 299 rows are broken. It is a claim that 299 rows
 have not been held to the full-stack bar, and the honest way to find out which
 those are is a sweep that promotes or downgrades each row on evidence — not a
 re-read of this file. That sweep is unowned and unestimated; it is listed here so
-it is not mistaken for finished.
+it is not mistaken for finished. (Re-derived 2026-09-27; the previous figure of
+172 of 253 predated the M54–M58 rows.)
 
 One more thing worth stating plainly: a public write path is the first thing in
 this spec that lets data leave the instance. Everything else here is either

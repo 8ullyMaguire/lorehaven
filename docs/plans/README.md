@@ -206,6 +206,7 @@ was racing. **Never** `SELECT` then `UPDATE` without the version predicate.
 | File | Covers |
 |---|---|
 | `junior-implementation-plan.md` | **Start here.** The whole website, start to finish: prerequisites, the workflow loop, every milestone from 5 to 18 with its migration, domain types, routes, pages, tests and pitfalls, then the frontend rules and the cross-cutting work. Written so someone who has never seen this repository can implement a milestone without guessing. |
+| `crawling-retention-preservation.md` | **M59.** `robots_posture` and the fetch class, §11.15 retention built as specified, preservation targets with credits/badge/clawback, and trust-gated retention proposals. Implements `docs/spec-amendments/crawling-retention-and-preservation.md`. |
 | `milestone-04-reader.md` | Milestone 4 in full: built, with its verification in `docs/verification.md` |
 | `milestone-05-jobs.md` | Milestone 5 in full: built, with its verification in `docs/verification.md` |
 | `milestones-05-18.md` | The remaining milestones, in summary form |
