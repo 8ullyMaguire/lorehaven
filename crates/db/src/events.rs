@@ -453,17 +453,68 @@ pub async fn create_request(
 /// claim succeeded, 0 means there was already an active claim.
 pub async fn claim_request(db: &Database, request_id: &str, claimant: &str) -> Result<bool> {
     let now = crate::identity::now_rfc3339();
+    // The "at most one active claim" guard keys on `status`, not on
+    // `fulfilled_at IS NULL` (M18-05). Under the old predicate an *expired*
+    // claim still satisfied "there is already an active claim", so a request
+    // whose claim had aged out could never be re-claimed — the expiry would
+    // have released the work for nobody.
+    // The guard blocks on a claim that is still live, which is exactly what the
+    // old `fulfilled_at IS NULL` meant, restated as a state (M18-05).
+    //
+    // Two things that guard must *not* block on, and the reason each is easy to
+    // get wrong:
+    //
+    // - A **fulfilled** claim. The request was answered; a new claimant may
+    //   reasonably pick it up. The pre-existing test
+    //   `a_fulfilled_request_can_be_claimed_again` pins this, and reading it as
+    //   a bug rather than a decision is the mistake this comment exists to stop.
+    //   An earlier draft of this fix guarded on `status <> 'expired'` instead,
+    //   which reads as the conservative choice and quietly forbids a
+    //   re-claim the spec permits.
+    //
+    // - An **expired** claim. Before the state existed, an expired claim was
+    //   indistinguishable from an outstanding one, so the old predicate blocked
+    //   it — a request whose claim aged out could never be picked up again, and
+    //   the expiry released the work for nobody. `status = 'outstanding'` is the
+    //   predicate that fixes that without forbidding the re-claim above.
+    // `ON CONFLICT ... DO UPDATE` is load-bearing, not defensive. The key is
+    // `(request_id, claimant)`, so a *new* claimant inserting is fine, but the
+    // original claimant re-claiming their own expired claim collides with their
+    // own earlier row. Under the pre-fix schema that could not arise — the guard
+    // refused the re-claim, so the row was never duplicated — and once expiry
+    // became a real state the collision is reachable. Refusing it would mean the
+    // claimant who held the claim first is the one who can never take it back,
+    // which is a worse rule than either of the two it replaces.
+    //
+    // The conflict arm re-arms the row rather than inserting a second one: a new
+    // `claimed_at`, a fresh outstanding status, and the fulfilment columns
+    // cleared, which is what "claiming again" means. The `WHERE` on the arm keeps
+    // a *fulfilled* row from being reset — `a_fulfilled_request_can_be_claimed_
+    // again` is true because a *different* claimant gets a *different* row, and
+    // this must not let a fulfilled claim be reopened in place.
     let sql = db.sql(
-        "INSERT INTO claims (request_id, claimant, claimed_at, fulfilled_by_work, fulfilled_at)
-         SELECT ?, ?, ?, NULL, NULL
+        "INSERT INTO claims (request_id, claimant, claimed_at, fulfilled_by_work, fulfilled_at, status)
+         SELECT ?, ?, ?, NULL, NULL, 'outstanding'
          WHERE NOT EXISTS (
-             SELECT 1 FROM claims WHERE request_id = ? AND fulfilled_at IS NULL
-         )",
-        "INSERT INTO claims (request_id, claimant, claimed_at, fulfilled_by_work, fulfilled_at)
-         SELECT $1, $2, $3, NULL, NULL
+             SELECT 1 FROM claims WHERE request_id = ? AND status = 'outstanding'
+         )
+         ON CONFLICT (request_id, claimant) DO UPDATE SET
+             claimed_at = excluded.claimed_at,
+             fulfilled_by_work = NULL,
+             fulfilled_at = NULL,
+             status = 'outstanding'
+         WHERE claims.status = 'expired'",
+        "INSERT INTO claims (request_id, claimant, claimed_at, fulfilled_by_work, fulfilled_at, status)
+         SELECT $1, $2, $3, NULL, NULL, 'outstanding'
          WHERE NOT EXISTS (
-             SELECT 1 FROM claims WHERE request_id = $4 AND fulfilled_at IS NULL
-         )",
+             SELECT 1 FROM claims WHERE request_id = $4 AND status = 'outstanding'
+         )
+         ON CONFLICT (request_id, claimant) DO UPDATE SET
+             claimed_at = excluded.claimed_at,
+             fulfilled_by_work = NULL,
+             fulfilled_at = NULL,
+             status = 'outstanding'
+         WHERE claims.status = 'expired'",
     );
     let rows = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
@@ -501,14 +552,19 @@ pub async fn fulfil_claim(
     // *request* from the same claimant only if a different claimant claimed it
     // too, so the rule is per (work, claimant) and not per work.
     //
-    // A duplicate is an error, not a `false`. The signature is `Result<bool>`,
-    // where `false` means "no unfulfilled claim matched" -- a different case
-    // entirely. `join_event` reports its equivalent duplicate as a soft `false`,
-    // so the two functions differ here; a caller has to treat them differently
-    // until one of them is changed.
+    // `false` is the single "no" answer here, for all three of: no claim
+    // matched, the claim was already fulfilled, or this work already fulfilled
+    // another claim from this claimant. Collapsing them is what M18-06 asks
+    // for, and it is safe because none of the three is actionable for the
+    // caller differently: the claim did not take, and `false` says so.
+    // `CAST(1 AS BIGINT)` rather than a bare `1`. `SELECT 1` is INT4 on
+    // PostgreSQL and an integer on SQLite, and this row is read into an `i64`,
+    // so the PostgreSQL arm fails to decode — invisibly on SQLite, where the
+    // value happens to fit. `CAST` is ANSI, so one shared string covers both
+    // dialects and `excluded` (below) is the only PostgreSQL-specific token.
     let dup_sql = db.sql(
-        "SELECT 1 FROM claims WHERE fulfilled_by_work = ? AND claimant = ? AND fulfilled_by_work IS NOT NULL",
-        "SELECT 1 FROM claims WHERE fulfilled_by_work = $1 AND claimant = $2 AND fulfilled_by_work IS NOT NULL",
+        "SELECT CAST(1 AS BIGINT) FROM claims WHERE fulfilled_by_work = ? AND claimant = ? AND fulfilled_by_work IS NOT NULL",
+        "SELECT CAST(1 AS BIGINT) FROM claims WHERE fulfilled_by_work = $1 AND claimant = $2 AND fulfilled_by_work IS NOT NULL",
     );
     let dup: Option<(i64,)> = match db.backend() {
         Backend::Sqlite => {
@@ -526,12 +582,22 @@ pub async fn fulfil_claim(
                 .await?
         }
     };
+    // A duplicate is a soft `false`, matching `join_event` (M18-06). Both
+    // functions are `Result<bool>` and both now answer `Ok(true)` for a change
+    // and `Ok(false)` for "already there", so a caller needs no per-function
+    // knowledge of which duplicates are errors. The alternative — a distinct
+    // error per function — is what made this a trap: a caller could follow both
+    // signatures correctly and still be wrong on one of them.
+    //
+    // The anti-gaming rule is unchanged in force; only its reporting moved. A
+    // second claim from the same claimant on the same work is still refused, and
+    // `false` is the refusal.
     if dup.is_some() {
-        anyhow::bail!("the same work cannot fulfil two claims from one claimant");
+        return Ok(false);
     }
     let update_sql = db.sql(
-        "UPDATE claims SET fulfilled_by_work = ?, fulfilled_at = ? WHERE request_id = ? AND claimant = ? AND fulfilled_at IS NULL",
-        "UPDATE claims SET fulfilled_by_work = $1, fulfilled_at = $2 WHERE request_id = $3 AND claimant = $4 AND fulfilled_at IS NULL",
+        "UPDATE claims SET fulfilled_by_work = ?, fulfilled_at = ?, status = 'fulfilled' WHERE request_id = ? AND claimant = ? AND status = 'outstanding'",
+        "UPDATE claims SET fulfilled_by_work = $1, fulfilled_at = $2, status = 'fulfilled' WHERE request_id = $3 AND claimant = $4 AND status = 'outstanding'",
     );
     let rows = match db.backend() {
         Backend::Sqlite => sqlx::query(&update_sql)
@@ -568,11 +634,26 @@ pub async fn expire_claims(db: &Database, now: &str, grace_seconds: i64) -> Resu
             .checked_sub(time::Duration::seconds(grace_seconds.max(0)))
             .unwrap_or(time::OffsetDateTime::UNIX_EPOCH),
     );
+    // The predicate keys on `status = 'outstanding'`, not on `fulfilled_at IS
+    // NULL` (M18-05). That single change is the whole fix: expiring a claim now
+    // sets `status = 'expired'`, which the same statement does not match, so a
+    // claim is expired exactly once no matter how often the scheduled job runs.
+    //
+    // The old statement wrote `fulfilled_at = NULL` — the very expression it
+    // filtered on — so the row came out of the statement looking exactly like it
+    // had going in. The count it returned was every claim past the cutoff rather
+    // than the work this run did, and for a request nobody ever fulfilled it grew
+    // on every pass instead of falling to zero.
+    //
+    // `fulfilled_by_work`/`fulfilled_at` are cleared too. They are already NULL
+    // on any row with `status = 'outstanding'` (the status is the discriminator,
+    // and nothing writes a work without setting the status), so this is
+    // belt-and-braces against a half-written row rather than the mechanism.
     let sql = db.sql(
-        "UPDATE claims SET fulfilled_by_work = NULL, fulfilled_at = NULL
-         WHERE fulfilled_at IS NULL AND claimed_at < ?",
-        "UPDATE claims SET fulfilled_by_work = NULL, fulfilled_at = NULL
-         WHERE fulfilled_at IS NULL AND claimed_at < $1",
+        "UPDATE claims SET status = 'expired', fulfilled_by_work = NULL, fulfilled_at = NULL
+         WHERE status = 'outstanding' AND claimed_at < ?",
+        "UPDATE claims SET status = 'expired', fulfilled_by_work = NULL, fulfilled_at = NULL
+         WHERE status = 'outstanding' AND claimed_at < $1",
     );
     let expired: i64 = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)
@@ -868,11 +949,32 @@ impl From<EventRow> for Event {
 }
 
 /// Join an event (insert a participation row). Returns false if already joined.
+///
+/// A duplicate is reported as `false`, not raised (M18-06). `fulfil_claim` and
+/// this function are the two places where "you already did this" is a normal
+/// outcome rather than a fault, and they now say so the same way: `Ok(true)` for
+/// the change, `Ok(false)` for "already there".
+///
+/// Previously the duplicate reached the caller as a database error. The
+/// signature promised otherwise — `Result<bool>`, with a doc comment saying
+/// "returns false if already joined" — and the comment was simply wrong, because
+/// the statement was a bare `INSERT` against a composite primary key and the
+/// unique violation propagated out of `?`. A caller following the signature
+/// would have had to wrap every call in a constraint-violation matcher to get
+/// the documented behaviour.
+///
+/// `ON CONFLICT DO NOTHING` is used rather than catching the error because the
+/// duplicate is a *known* case with a *known* answer, and handling it in the
+/// statement keeps it out of the error path entirely. It is also the only form
+/// that behaves identically on both dialects without inspecting a driver error
+/// code — SQLite and PostgreSQL number their unique violations differently.
 pub async fn join_event(db: &Database, event_id: &str, account: &str) -> Result<bool> {
     let now = crate::identity::now_rfc3339();
     let sql = db.sql(
-        "INSERT INTO event_participation (event_id, account, joined_at) VALUES (?, ?, ?)",
-        "INSERT INTO event_participation (event_id, account, joined_at) VALUES ($1, $2, $3)",
+        "INSERT INTO event_participation (event_id, account, joined_at) VALUES (?, ?, ?)
+         ON CONFLICT (event_id, account) DO NOTHING",
+        "INSERT INTO event_participation (event_id, account, joined_at) VALUES ($1, $2, $3)
+         ON CONFLICT (event_id, account) DO NOTHING",
     );
     let rows = match db.backend() {
         Backend::Sqlite => sqlx::query(&sql)

@@ -376,6 +376,13 @@ async fn post_fulfil_claim(
             .await
             .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
     if !fulfils {
+        // Every refusal arrives here as a 4xx, not a 500 (M18-06). The
+        // anti-gaming duplicate used to bail inside `fulfil_claim` and surface
+        // as `Internal`, so a reader who fulfilled the same claim twice got a
+        // server fault for a client mistake. The message stays general on
+        // purpose: naming the anti-gaming rule would tell a caller which
+        // constraint they hit, which is the kind of detail that makes the rule
+        // discoverable by probing.
         return Err(ApiError(lorehaven_domain::AppError::field(
             "claim",
             "no active claim found for this claimant",
