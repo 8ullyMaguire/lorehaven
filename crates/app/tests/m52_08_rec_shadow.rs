@@ -205,28 +205,32 @@ fn summary_names_the_things_an_operator_acts_on() {
 fn the_latest_report_is_readable_and_survives_a_poisoned_lock() {
     // A panic in one request's logging path must not turn every later
     // evaluation into a 500, and must not lose the report either.
-    rec_shadow::record(rec_shadow::compare(
+    //
+    // Reset first, then record. The reset has to precede the record or it
+    // erases the very report this test is about, and it has to happen at all
+    // because `LATEST` is process-global: a shadow run in another test would
+    // otherwise leave state behind that this one reads and cannot account for.
+    let slot = rec_shadow::ReportSlot::default();
+    slot.record(rec_shadow::compare(
         &ids(&["a"]),
         &ids(&["a"]),
         &run_with("s", 1, &["a"]),
-        1,
+        slot.next_sample(),
     ));
-    assert!(rec_shadow::latest().is_some());
+    assert!(slot.latest().is_some());
 
     // Poison the mutex the way a panic would: a panic must escape the closure
     // while the lock is held, which is exactly what poisons it.
-    let _ = std::panic::catch_unwind(|| {
-        rec_shadow::poison_the_report_slot_for_tests();
-    });
+    slot.poison_for_tests();
 
     // A later evaluation must still be storable and readable.
-    rec_shadow::record(rec_shadow::compare(
+    slot.record(rec_shadow::compare(
         &ids(&["x"]),
         &ids(&["x"]),
         &run_with("s", 1, &["x"]),
-        2,
+        slot.next_sample(),
     ));
-    let latest = rec_shadow::latest().expect("report readable after poisoning");
+    let latest = slot.latest().expect("report readable after poisoning");
     assert_eq!(latest.served, ids(&["x"]));
     assert_eq!(latest.sample, 2);
 }
@@ -588,6 +592,13 @@ mod router {
     async fn a_non_shadow_instance_reports_that_it_has_not_evaluated() {
         // "Not running" and "ran and found nothing" are different answers, and
         // an operator switching modes needs the difference.
+        //
+        // No reset needed, and that is the point. This used to read a process
+        // global that `shadow_mode_evaluates_for_a_signed_in_reader` in this
+        // same file wrote, so it passed or failed on thread scheduling. The
+        // report slot is per `AppState` now, and the harness gives each test
+        // its own — so this asserts about *this* instance and nothing else can
+        // reach in.
         let (_dir, _db, _config, mut client) = harness_with_operator("not-run", "legacy").await;
 
         let (status, report) = client

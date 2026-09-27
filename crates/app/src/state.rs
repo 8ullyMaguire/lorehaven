@@ -48,6 +48,22 @@ struct Inner {
     reqwest_client: reqwest::Client,
     /// Webhook sender configuration.
     webhook_config: WebhookSenderConfig,
+    /// The most recent shadow-mode evaluation, for the operator surface.
+    ///
+    /// Per instance, inside the `Arc`, rather than the process-global static
+    /// this replaced. One process serving one instance is the production shape
+    /// and the global modelled it correctly — but the test binary builds
+    /// *many* instances in one process, so the global was every test's report
+    /// to write and every other test's to read. `a_non_shadow_instance_reports_
+    /// that_it_has_not_evaluated` failed whenever a shadow run finished first,
+    /// and passed whenever it finished second: a test whose result depended on
+    /// thread scheduling, and which read as a flake for weeks.
+    ///
+    /// Resetting a global before each test is not a fix, only a narrower race —
+    /// another test can still record after the reset and before the assertion.
+    /// Scoping the slot to the instance makes the two tests independent, which
+    /// is the property was actually missing.
+    shadow_report: crate::rec_shadow::ReportSlot,
 }
 
 impl AppState {
@@ -85,6 +101,7 @@ impl AppState {
                 tts,
                 reqwest_client,
                 webhook_config,
+                shadow_report: crate::rec_shadow::ReportSlot::default(),
             }),
         }
     }
@@ -99,6 +116,12 @@ impl AppState {
     #[must_use]
     pub fn registry(&self) -> &Registry {
         &self.inner.registry
+    }
+
+    /// This instance's shadow-mode report slot.
+    #[must_use]
+    pub fn shadow_report(&self) -> &crate::rec_shadow::ReportSlot {
+        &self.inner.shadow_report
     }
 
     /// The external converters this instance found at startup.
