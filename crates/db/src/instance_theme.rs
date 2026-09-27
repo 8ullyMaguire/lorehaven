@@ -22,32 +22,48 @@ pub struct InstanceTheme {
 /// Compute theme vector from user bookmarks and tags.
 /// Reads works a user has bookmarked/liked and aggregates their tags.
 pub async fn compute_theme_from_bookmarks(db: &Database, _instance_id: &str) -> Result<JsonValue> {
+    // The tag taxonomy is `taxonomy_nodes` joined through `work_tags.node_id` --
+    // there is no `tags` table and no `work_tags.tag_id`, so the previous
+    // statement referenced two things that do not exist and failed on both
+    // engines. `.unwrap_or_default()` then turned that failure into an empty
+    // vector, which is why this function has always returned `{}`.
+    //
+    // `is_public` is BOOLEAN on PostgreSQL and INTEGER on SQLite, hence one
+    // predicate per dialect. Only *private* bookmarks feed the instance's own
+    // theme; a public bookmark is a reader's signal, not the instance's.
     let rows: Vec<(String,)> = match db.backend() {
         Backend::Sqlite => sqlx::query_as(
-            "SELECT t.name
+            "SELECT tn.canonical
              FROM bookmarks b
-             JOIN work_tags wt ON wt.work_id = CAST(b.subject_id AS INTEGER)
-             JOIN tags t ON t.id = wt.tag_id
+             JOIN work_tags wt ON wt.work_id = b.subject_id
+             JOIN taxonomy_nodes tn ON tn.id = wt.node_id
              WHERE b.is_public = FALSE
-             GROUP BY t.name
+             GROUP BY tn.canonical
              ORDER BY COUNT(*) DESC
              LIMIT 100",
         )
         .fetch_all(db.sqlite_pool().expect("sqlite"))
         .await
-        .unwrap_or_default(),
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "theme: bookmark tag query failed; theme will be empty");
+            Vec::new()
+        }),
         Backend::Postgres => sqlx::query_as(
-            "SELECT t.name
+            "SELECT tn.canonical
              FROM bookmarks b
              JOIN work_tags wt ON wt.work_id = b.subject_id
-             JOIN tags t ON t.id = wt.tag_id
-             GROUP BY t.name
+             JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+             WHERE b.is_public = FALSE
+             GROUP BY tn.canonical
              ORDER BY COUNT(*) DESC
              LIMIT 100",
         )
         .fetch_all(db.postgres_pool().expect("postgres"))
         .await
-        .unwrap_or_default(),
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "theme: bookmark tag query failed; theme will be empty");
+            Vec::new()
+        }),
     };
 
     let mut map = serde_json::Map::new();
