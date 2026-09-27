@@ -1,0 +1,22 @@
+[package]
+name = "lorehaven-lore-metadata"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Shared lore-metadata exchange contract: wire types only, no IO and no database"
+
+# Deliberately dependency-light (spec §2.3.1). `serde` is the only runtime
+# dependency, and there is no `sqlx`, no `axum`, no `reqwest` and no `tokio`:
+# this crate defines the shape both sides compile against, and anything that can
+# perform IO can also start depending on a database, which is the coupling the
+# crate exists to avoid. A third-party implementation of the exchange must be
+# able to adopt these types without adopting Lorehaven's database.
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/lore-metadata",
     "crates/domain",
     "crates/db",
     "crates/app",

@@ -1687,6 +1687,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lorehaven-lore-metadata"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lorehaven-scrapers"
 version = "0.1.0"
 dependencies = [
