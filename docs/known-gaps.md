@@ -100,6 +100,39 @@ rather than a silent hole. Deciding whether the statement *should* bump it is a
 one-word change plus a comment, but it belongs with whoever first adds a
 `version`-based writer, not with a test suite.
 
+### M32-D01 · A malformed edition id is an `Err` on PostgreSQL, `false` on SQLite
+
+`approve_narration_edition` binds `WHERE id = ?::uuid` on PostgreSQL and
+`WHERE id = ?` on SQLite. A non-UUID string therefore fails two different ways:
+
+- **PostgreSQL** — the cast rejects it before the statement runs, so the call
+  returns `Err("invalid input syntax for type uuid")`.
+- **SQLite** — the column is TEXT, the comparison matches no row, and the call
+  returns `Ok(false)`.
+
+`create_narration_edition` is the same shape, except there both backends end in
+an error (PostgreSQL at the cast, SQLite at the foreign key to `works(id)`), so
+only the *approval* path is asymmetric.
+
+Why it matters: `Ok(false)` reads as "there was nothing to approve" and `Err`
+reads as a fault. If a route ever accepts an edition id from a client and maps
+any `Err` to a 500, the same bad request is a clean 404 on SQLite and a 500 on
+PostgreSQL — a difference that only appears in production, where PostgreSQL is
+the default backend.
+
+Options, none taken here because each is a product decision:
+
+- Parse the id in Rust before binding (as `rating_integrity` does) and return
+  one typed error for both backends. Costs a parse on a hot path; gains a
+  single, meaningful error.
+- Have the route validate the id shape at the edge, and leave the repository
+  assuming well-formed input. Cheapest, and makes the SQLite/PG difference
+  unreachable rather than removed.
+- Accept the asymmetry and document it at every call site. Not recommended: it
+  has now appeared in two modules and will appear again.
+
+Pinned by `a_malformed_edition_id_differs_between_backends`.
+
 ### M10-D01 · A second `retire_encryption_key` overwrites the first
 
 `retire_encryption_key` runs an unconditional
