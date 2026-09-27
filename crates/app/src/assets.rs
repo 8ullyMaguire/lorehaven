@@ -50,6 +50,23 @@ pub async fn serve(State(state): State<AppState>, uri: Uri) -> Response {
 
     // Client-side routing: an extensionless path is a route, not a file, so
     // hand back the shell and let the router resolve it.
+    //
+    // **Except under /api/.** The shell fallback answers *anything*
+    // extensionless with a 200 and an HTML body, so a client that mistypes an
+    // API path — or that calls a door this build does not have — gets 200
+    // instead of 404. That is the same failure the M57 exchange refused to ship
+    // ("a 403 confirms the door exists", and worse: a 200 confirms everything
+    // exists). It bit this test suite: `POST /api/v1/link/challenge` returned
+    // 200 with `null` while the door did not exist, and the only reason the test
+    // caught it is that it asserted on the *status* rather than the body.
+    //
+    // An API client sending a mistyped path is a bug in the client, and a body
+    // of HTML cannot be a useful answer to one. The SPA shell is for the
+    // browser's own routes, and the browser never asks for /api/.
+    if uri.path().starts_with("/api/") {
+        return not_found(requested);
+    }
+
     if !requested.contains('.') && requested != "index.html" {
         if let Some((bytes, _)) = load(assets_dir.as_deref(), "index.html").await {
             return file_response("index.html", bytes, "text/html; charset=utf-8".to_owned());

@@ -811,7 +811,7 @@ async fn media_tokens_enforce_scopes_and_revocation() {
     );
 
     // Revoked token loses access to the draft.
-    darkhold_db::external::revoke_token(fx.tdb.db(), &read_token_id)
+    darkhold_db::external::revoke_token_for_account(fx.tdb.db(), &read_token_id, &account)
         .await
         .unwrap();
     let status = owner

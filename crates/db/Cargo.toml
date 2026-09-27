@@ -14,6 +14,10 @@ path = "src/lib.rs"
 [dependencies]
 anyhow.workspace = true
 hex.workspace = true
+# For the link challenge's nonce only (spec §23.2). Already in the tree
+# transitively via `uuid` and `sqlx`, so this costs no new dependency tree, and
+# the house pattern in crates/app/src/secrets.rs uses the same calls.
+rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
