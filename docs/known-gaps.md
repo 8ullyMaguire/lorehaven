@@ -81,6 +81,25 @@ Idempotency and ordering are pinned by `migrating_twice_moves_nothing_the_second
 `each_comment_becomes_a_post_with_its_text` and
 `a_post_keeps_the_comment_s_author_and_timestamp`.
 
+### M25-D02 · `attach_derivative_job` is the one statement that skips `version`
+
+Every other state-changing statement in `derivative.rs` increments `version`:
+`mark_derivative_built`, `mark_derivative_failed`, `mark_derivative_stale`,
+`touch_derivative_verified`. `attach_derivative_job` does not.
+
+The omission looks deliberate -- its own doc comment frames the job link as
+bookkeeping ("the link an operator follows", "the link the verification sweep
+uses to skip a rebuild that is already running") rather than a state change,
+and it does leave `state` alone. But `version` is otherwise the module's
+optimistic-concurrency counter, and a writer that read-modify-writes a
+derivative would miss this one.
+
+Pinned as current behaviour by `attaching_a_job_does_not_bump_the_version` so
+that a future writer using `version` for concurrency has a test to update
+rather than a silent hole. Deciding whether the statement *should* bump it is a
+one-word change plus a comment, but it belongs with whoever first adds a
+`version`-based writer, not with a test suite.
+
 ### M12-D01 · `notifications.work_id` has no foreign key
 
 Migration `0023_notifications.sql` declares `work_id UUID` with no
