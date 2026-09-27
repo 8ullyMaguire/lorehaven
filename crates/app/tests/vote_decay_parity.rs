@@ -16,13 +16,27 @@ use lorehaven_db::{Backend, Database};
 use lorehaven_domain::vote_decay::{decay, Decay};
 use test_support::TestDb;
 
-/// A unique scratch directory, so the two tests do not share one SQLite file.
+/// A unique scratch directory, so no two tests share one SQLite file.
+///
+/// The uniqueness is a process id plus a nanosecond stamp rather than the
+/// stamp alone. `SystemTime::now()` is read from the vDSO and has coarse
+/// granularity on some kernels, so two threads starting a test in the same
+/// tick got the same number — and then the same `lorehaven.sqlite`. The second
+/// connection found the file locked by the first test's `journal_mode(WAL)`
+/// write and failed at *connect*, with `database is locked` pointing at the
+/// scratch directory rather than at anything this file does.
+///
+/// `std::env::temp_dir()` was the other half: the profile's scratch directory
+/// is where test artefacts belong, and `TMPDIR` already points there. The
+/// directories also are not removed on the way out, so each run leaked one.
 fn scratch() -> std::path::PathBuf {
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    std::env::temp_dir().join(format!("lh-vote-decay-{n}"))
+    // A counter, not a clock. `scratch_dir` *removes* the directory it is
+    // handed, so two callers that computed the same name would delete each
+    // other's database — a worse failure than the collision this replaces, and
+    // the reason a timestamp is not good enough here.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    test_support::scratch_dir(&format!("vote-decay-{}-{n}", std::process::id()))
 }
 
 /// The age-in-days expression, per dialect.
