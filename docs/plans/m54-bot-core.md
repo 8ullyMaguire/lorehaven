@@ -214,6 +214,12 @@ failed on it.
 -- captured from a chat log cannot be replayed tomorrow. used_at is set exactly
 -- once: the redemption is a single UPDATE ... WHERE used_at IS NULL, so two
 -- browsers racing on the same challenge produce one token, not two.
+--
+-- `state` is a value, not an inference from `used_at`/`expires_at`, for the same
+-- reason migration 0080 gave `claims` one: an expiry that nobody ever evaluated
+-- is the rec.mode defect from docs/goal.md, and a column that can say
+-- 'expired' while the predicate that would make it expired is never run is a
+-- state no query can rely on.
 CREATE TABLE link_challenges (
     code         TEXT PRIMARY KEY,     -- public nonce, high entropy
     state        TEXT NOT NULL,        -- pending|used|expired
@@ -227,32 +233,66 @@ CREATE TABLE link_challenges (
 );
 CREATE INDEX link_challenges_pending ON link_challenges (state, expires_at);
 
--- api_tokens gains the columns it has always been read as having.
---
--- expires_at is what makes a bot token "limited" in §23.2's sense. Without it
--- a token is a permanent bearer credential, and `list_tokens` reporting a NULL
--- expiry is reporting the truth about a defect.
+-- api_tokens gains only what is genuinely absent.
 --
 -- acting_pseud_id is §23.1's "explicit acting pseud": a token belongs to an
 -- ACCOUNT but acts as a PSEUD, and without this column every token call acts as
 -- the account's default pseud, silently conflating two identities.
-ALTER TABLE api_tokens ADD COLUMN expires_at TEXT;
-ALTER TABLE api_tokens ADD COLUMN last_used_at TEXT;
+--
+-- kind is read by issue_token's `_kind` parameter and then thrown away today,
+-- so every token in the database is indistinguishable from a personal one
+-- however it was issued.
+--
+-- expires_at and last_used_at are NOT added here. They already exist (0001,
+-- both dialects) and are already read by list_tokens; they are simply never
+-- written. Re-adding them here would have been the same defect a second time.
 ALTER TABLE api_tokens ADD COLUMN acting_pseud_id TEXT;
 ALTER TABLE api_tokens ADD COLUMN kind TEXT NOT NULL DEFAULT 'personal';
 ```
+
+**Correction, made by reading both files before writing either:**
+`expires_at` and `last_used_at` **already exist** on `api_tokens` in
+`migrations/postgres/0001_identity.sql:162-163` and in the SQLite twin. So D2
+and D3 are not a missing column — they are a column that is *read by
+`list_tokens` and written by nothing*. The migration is correspondingly smaller
+than the first draft said, and the fix for D2/D3 is in A2, not here.
+
+Two things the parity test cannot see, verified against `declared_schema` in
+`crates/db/src/migrate.rs:380`:
+
+- it reads **`CREATE TABLE` only**, so `ALTER TABLE ... ADD COLUMN` is invisible
+  to it. The new `api_tokens` columns therefore get no cross-dialect check from
+  that test — the gate is the PG runtime pass instead, since a column declared
+  in one dialect and not the other fails the first query that names it.
+- it *does* read `CREATE TABLE` and index names, so `link_challenges` and its
+  index must be declared identically in both files, with the index on one line
+  and no `IF NOT EXISTS`.
 
 `kind` is read by `issue_token`'s `_kind` parameter and then thrown away — the
 parameter exists and is ignored. Moving it to a column is a one-line change to
 the INSERT plus one to the signature.
 
+On PostgreSQL, `acting_pseud_id` is a `TEXT` column holding what is a `UUID` in
+`pseuds` — the same deliberate choice this schema already makes where a
+TEXT-typed column references a uuid id. The gate is `RequireActor`'s lookup on
+the PG pass, per the INT4-into-i64 blind spot in `docs/goal.md`.
+
 D5 in the same migration: `bot_registrations` gets a real foreign key. On
 PostgreSQL that means `ALTER TABLE bot_registrations ADD CONSTRAINT
 bot_registrations_token_fk FOREIGN KEY (token_id) REFERENCES api_tokens (id)
-ON DELETE CASCADE`. On SQLite a bare `ALTER TABLE ADD CONSTRAINT` is not
-supported, so the SQLite file **recreates** the table (create-new, copy, drop,
-rename) — the standard SQLite shape, and there is precedent for a recreate in
-this repo's migration set. **Verify one exists before writing it.**
+ON DELETE CASCADE` — which the parity parser *does* read, via its
+`FOREIGN KEY` / `ALTER TABLE` branch, so both files must declare it in that
+form. On SQLite a bare `ALTER TABLE ADD CONSTRAINT` is not supported, so the
+SQLite file **recreates** the table: `PRAGMA foreign_keys=OFF`, rename, `CREATE`
+under the real name, copy, `DROP`, `PRAGMA foreign_keys=ON` — the shape of
+`migrations/sqlite/0075_fix_device_deliveries_export_job_fk.sql`, and the
+recreated table's columns must match PostgreSQL's exactly or the parity test
+fails.
+
+So the SQL that survives correction is: `link_challenges` plus its one-line
+index, two `ALTER TABLE api_tokens ADD COLUMN` statements, and the
+`bot_registrations` foreign key. The `expires_at` / `last_used_at` `ALTER`s the
+first draft proposed are dropped, because those columns are already there.
 
 ### A2 — `crates/db/src/external.rs`
 
