@@ -65,12 +65,40 @@ fn sanitize(tag: &str) -> String {
     cleaned.trim_matches('_').to_string()
 }
 
+/// A suffix that is unique among the threads of one process.
+///
+/// A clock is not enough. This was `subsec_nanos() ^ as_secs() ^ pid << 17`,
+/// and `milestone_32_data` produced
+/// `duplicate key value violates unique constraint pg_database_datname_index`
+/// on `lh_test_fx_248991333688` — two threads read the same clock value, so two
+/// tests asked for the same database name. `SystemTime::now()` comes from the
+/// vDSO and its resolution is not guaranteed finer than a microsecond on every
+/// kernel, so two tests starting together genuinely can read the same value.
+///
+/// The process id alone is not enough either: `as_secs() << 20` makes the name
+/// unique across processes, and the counter makes it unique within one, and
+/// both are needed. A test binary that ran a second time while the first was
+/// still going would otherwise collide on the name alone.
+///
+/// Deliberately monotonic and atomic rather than random, so a failure
+/// reproduces: the same test in the same order gets the same suffix, and a
+/// collision is visible as a repeated number rather than as entropy.
 fn unique_suffix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.subsec_nanos() as u64 ^ d.as_secs())
-        .unwrap_or(0)
-        ^ (std::process::id() as u64) << 17
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::OnceLock;
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    static BASE: OnceLock<u64> = OnceLock::new();
+    // Computed once, on first use, so every thread in this process shares it.
+    let base = *BASE.get_or_init(|| {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs())
+    });
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    // 20 bits of counter, 44 bits of seconds: a counter large enough that no
+    // suite reaches it, and seconds that fit the 63 bits PostgreSQL's
+    // `bigint` gives us.
+    (base << 20) | (n & 0xF_FFFF)
 }
 
 /// Unique scratch directory per tag (also used for export/storage files).
