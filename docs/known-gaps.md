@@ -81,6 +81,46 @@ Idempotency and ordering are pinned by `migrating_twice_moves_nothing_the_second
 `each_comment_becomes_a_post_with_its_text` and
 `a_post_keeps_the_comment_s_author_and_timestamp`.
 
+### M12-D01 · `notifications.work_id` has no foreign key
+
+Migration `0023_notifications.sql` declares `work_id UUID` with no
+`REFERENCES` clause; only `account_id` cascades. Two consequences, both live:
+
+1. A notification can reference a work that never existed, or one that has
+   since been deleted. The row survives, the inbox renders, and the link
+   404s.
+2. Deleting a work does not clean up its notifications, so an author deleting
+   a work leaves the reader's inbox pointing at nothing.
+
+Not fixed here, because the fix is a migration plus a decision about existing
+rows: a bare `ADD CONSTRAINT ... REFERENCES works(id) ON DELETE CASCADE`
+would fail outright if any row already points at a missing work, and the
+scratch databases in this suite create exactly such rows. The order that works
+is: find and resolve or delete the dangling rows, then add the constraint.
+Which of "delete the notification" and "leave the work tombstoned and the link
+dead" is right for a reader's inbox is a product call.
+
+Pinned as current behaviour by
+`a_notification_for_a_missing_work_is_stored_not_rejected`, so the day the
+constraint lands the test flips rather than silently passing.
+
+### M12-D02 · the resolver default and the column default disagree
+
+`settings::resolve_notification_channel` returns `Some("email")` for an account
+with no route row, while migration `0071` gives `delivery_channel` a column
+default of `'in_app'`. Only the function's value is reachable in normal use --
+`notify` always supplies it -- so the column default is a fallback for direct
+INSERTs, and an account with no configured routes has its notifications
+labelled `email` while the schema's own default says `in_app`.
+
+Neither is wrong in isolation, but a reader inspecting the column directly would
+read `in_app` and a reader going through `notify` would read `email`, and
+nothing in the code says which is authoritative. Worth picking one and making
+the other derive from it.
+
+Pinned by `the_column_default_and_the_resolver_default_differ` and
+`an_unset_channel_resolves_to_email`.
+
 ### M18-P42-D03 · re-pinning returns an id that was never stored
 
 `roles::pin_work` mints a fresh `uuid` on every call and returns it, but its
