@@ -100,6 +100,30 @@ rather than a silent hole. Deciding whether the statement *should* bump it is a
 one-word change plus a comment, but it belongs with whoever first adds a
 `version`-based writer, not with a test suite.
 
+### M19-D02 · The history `ORDER BY` breaks ties differently on each backend
+
+`instance_taste_settings::history` ends its ordering with a third key:
+
+| backend | third key |
+| --- | --- |
+| SQLite | `rowid DESC` |
+| PostgreSQL | `history_id DESC` |
+
+`replaced_version` is unique and strictly increasing for every row this module
+writes, so the third key is unreachable in normal operation — it only matters
+for a hand-edited or corrupt table. It is recorded because the two arms are not
+equivalent and `rowid` in particular is an implementation detail: `VACUUM` can
+renumber it, and `WITHOUT ROWID` tables do not have it at all. If the table ever
+gains a legitimate version collision, the two backends would order those rows
+differently with no way to tell which is right.
+
+Not fixed here because there is nothing to fix for any state the code can
+produce. The ordering that does matter is pinned by `the_history_is_newest_first`
+and `two_writes_in_the_same_second_still_order_correctly` in
+`crates/app/tests/milestone_19_instance_taste.rs`. If the tie-break is ever
+needed, order both arms on `history_id DESC` — it is a real column, it is
+stable, and it is already what PostgreSQL uses.
+
 ### M18P59-D01 · `contribute_to_bounty` is not atomic across the funding update and the ledger
 
 `contribute_to_bounty` reads the bounty, computes `funded_amount` in Rust, then
