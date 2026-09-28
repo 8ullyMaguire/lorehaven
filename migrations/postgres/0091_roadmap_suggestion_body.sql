@@ -1,0 +1,21 @@
+-- Roadmap suggestion descriptions (spec §44.1, amendment
+-- docs/spec-amendments/roadmap-card-bodies.md, ADR 0025).
+--
+-- Dialect: PostgreSQL.
+--
+-- The counterpart of migrations/sqlite/0091_roadmap_suggestion_body.sql. Read
+-- that file first: it carries the reasoning, including why this column is
+-- NULLABLE while 0090's `roadmap_cards.body` is `NOT NULL DEFAULT ''`.
+--
+-- NUMBERING. 0091, following 0090 in the same change. 0084 is reserved (gap
+-- D5) and 0086-0088 belong to the in-flight M59 retention work.
+--
+-- PARITY. As 0090: `the_two_dialects_declare_the_same_columns_and_indexes`
+-- parses CREATE TABLE bodies and inline REFERENCES, not ALTER TABLE ADD
+-- COLUMN, so this migration is invisible to it in both files.
+--
+-- TYPE. TEXT and nullable, no default. A default of '' would erase the
+-- absent/empty distinction the SQLite header explains, and would be applied to
+-- every future row that legitimately carries no description.
+
+ALTER TABLE roadmap_suggestions ADD COLUMN IF NOT EXISTS body TEXT;

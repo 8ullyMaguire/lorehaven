@@ -182,7 +182,18 @@
             <div class="column-cards">
               {#if board.board[stage] && board.board[stage].length > 0}
                 {#each board.board[stage] as card (card.id)}
-                  <article class="card">
+                  <!--
+                    A link, so the card is readable. §44.1: the board LISTS
+                    titles only — the prose behind a card lives on its detail
+                    view, because 667 pages of prose is not a board. The board
+                    payload still carries the body so the click costs no second
+                    request.
+                  -->
+                  <a
+                    class="card"
+                    href={`/roadmap/${encodeURIComponent(card.id)}`}
+                    onclick={(e) => handleLinkClick(e, `/roadmap/${encodeURIComponent(card.id)}`)}
+                  >
                     <h3 class="card-title">{card.title}</h3>
                     <div class="card-meta">
                       <span class="card-elo" title="Elo rating">
@@ -192,7 +203,7 @@
                         <span class="card-category">{card.category}</span>
                       {/if}
                     </div>
-                  </article>
+                  </a>
                 {/each}
               {:else}
                 <p class="empty">Nothing here yet.</p>
@@ -271,6 +282,24 @@
               }}
             >
               <h3>{card.title}</h3>
+              <!--
+                §44.1: the ballot carries the body too. This is the surface
+                where the ranking is actually decided, and a MaxDiff choice is a
+                judgement about the feature — a title-only ballot makes it a
+                judgement about the phrasing. Clamped to a few lines so four
+                cards still fit on screen; the full text is one click away.
+              -->
+              <!--
+                `(card.body ?? '')` rather than `card.body`: an older payload,
+                a cached response or a hand-built fixture can carry a card with
+                no `body` key, and `.trim()` on undefined throws inside the
+                {#if} — which takes the whole board down, not just this card.
+                The server always sends the field; the client does not have to
+                bet on it.
+              -->
+              {#if (card.body ?? '').trim()}
+                <p class="ballot-body">{card.body}</p>
+              {/if}
               {#if bestId === card.id}
                 <span class="badge best">Most Valuable</span>
               {:else if worstId === card.id}
@@ -389,11 +418,30 @@
     gap: 0.75rem;
   }
 
+  /*
+    An <a>, so it needs `display: block` to fill the column and the default
+    link colour and underline removed, or the whole board reads as a wall of
+    underlined blue text. The focus ring is kept: this is the primary way to
+    reach a card's body, and a keyboard user has to be able to see where they
+    are.
+  */
   .card {
+    display: block;
     padding: 0.75rem;
     border-radius: 6px;
     background: var(--bg);
     border: 1px solid var(--border);
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .card:hover {
+    border-color: var(--accent);
+  }
+
+  .card:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   .card-title {
@@ -490,6 +538,21 @@
   .ballot-card h3 {
     margin: 0 0 0.5rem 0;
     font-size: 1rem;
+  }
+
+  .ballot-body {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--muted);
+    /* Clamp rather than scroll: the ballot is four cards side by side, and a
+       full page of prose in each one turns a two-second decision into a
+       reading task before the vote. The detail view has the whole thing. */
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   .badge {

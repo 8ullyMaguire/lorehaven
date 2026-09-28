@@ -1,0 +1,49 @@
+-- Roadmap card bodies (spec §44.1, amendment
+-- docs/spec-amendments/roadmap-card-bodies.md, ADR 0025).
+--
+-- Dialect: SQLite.
+--
+-- The counterpart of migrations/postgres/0090_roadmap_card_body.sql.
+--
+-- WHAT THIS IS. One column on `roadmap_cards`. §44.1 defined a card as "one
+-- idea, stated in one sentence", and the board rendered the title alone. That
+-- was true while every card was a one-sentence row of `docs/requirements.csv`
+-- (median `requirement` cell: 47 characters). It stopped being true when the
+-- preservation brainstorm arrived: 162 ideas, each a title PLUS a paragraph of
+-- rationale. Seeded into the old shape, the argument has nowhere to go, and an
+-- arena that asks people to rank bare titles is asking them to rank phrasing.
+--
+-- A MaxDiff ballot (§44.3) presupposes a comparable judgement is possible per
+-- ballot. That judgement is about the feature, not the phrase, so the feature
+-- has to be readable at the moment the judgement is made.
+--
+-- NOT NULL DEFAULT '' is the whole compatibility story. 667 cards exist, none
+-- has a body, and none may break. A NULL body would force every reader to
+-- branch on Option<String> and every writer to supply a value, in exchange for
+-- an absent-versus-empty distinction that no surface renders differently.
+-- Empty is a real, supported state: it renders a placeholder, and a card
+-- created by the suggest endpoint is legitimately title-only.
+--
+-- NOT A SEPARATE TABLE. A card's body is edited with the card, travels with it
+-- through a stage move, and is read on every detail view. A side table makes
+-- every read a join and leaves "a card with a body row and no card row, or the
+-- reverse" permanently on the table — cheap to forbid, easy to introduce.
+--
+-- RETENTION (spec §4.1). No cascade; nothing references this column; nothing
+-- is deleted by it. Cards are never deleted (§44.1), so a body dies exactly
+-- when its card does. This migration owns nothing but the column.
+--
+-- RE-RUN SAFETY. Deliberately a PLAIN `ADD COLUMN`, with no
+-- `IF NOT EXISTS`. SQLite does not support that form on ALTER TABLE — it is a
+-- parse error, `near "EXISTS": syntax error` — and the support is exactly this
+-- migration's first draft, which failed here rather than in review. Postgres
+-- does accept it, so the two files differ deliberately and the difference is
+-- recorded in both.
+--
+-- Nothing needs re-run safety anyway. The runner records a checksum per
+-- applied migration and refuses to re-apply or to run a changed file
+-- (crates/db/src/migrate.rs), so a migration is executed at most once per
+-- database. No other migration in migrations/sqlite/ uses `IF NOT EXISTS` on
+-- an ADD COLUMN; this one is no different.
+
+ALTER TABLE roadmap_cards ADD COLUMN body TEXT NOT NULL DEFAULT '';
