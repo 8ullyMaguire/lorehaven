@@ -134,10 +134,16 @@ pub async fn identity_for_work(db: &Database, work_id: &str) -> Result<Option<St
           WHERE work_id = ?
           ORDER BY created_at
           LIMIT 1",
-        "SELECT id, work_id, canonical_title::text, status,
+        // `?::uuid` on the bind: `story_identities.work_id` is `UUID` (0085),
+        // and sqlx binds a `&str` as text, which PostgreSQL will not compare
+        // against a UUID column -- `42804: column "work_id" is of type uuid
+        // but expression is of type text`. The read side is already cast
+        // (`work_id` is read as String, so it is selected as-is and decoded
+        // from a UUID column, which sqlx handles).
+        "SELECT id, work_id::text, canonical_title::text, status,
                 created_at::text, updated_at::text, version::bigint AS version
            FROM story_identities
-          WHERE work_id = ?
+          WHERE work_id = ?::uuid
           ORDER BY created_at
           LIMIT 1",
     );
@@ -195,17 +201,25 @@ pub async fn ensure_identity_for_work(db: &Database, work_id: &str, title: &str)
         "INSERT INTO story_identities
            (id, work_id, canonical_title, status, created_at, updated_at, version)
          VALUES (?, ?, ?, 'active', ?, ?, 1)",
+        // `?::uuid` because `work_id` is a UUID column, and the two timestamps
+        // are bound BARE because they are `TEXT` in this schema (0085 spells
+        // them TEXT to match `works` and every other table). The
+        // `::timestamptz` that was here is the class of cast the handoff
+        // records as a defect: it produced
+        // `operator does not exist: text <= timestamp with time zone`, and
+        // `fix-timestamptz-binds.py` was disabled for adding exactly these.
         "INSERT INTO story_identities
            (id, work_id, canonical_title, status, created_at, updated_at, version)
-         VALUES (?, ?, ?, 'active', ?::timestamptz, ?::timestamptz, 1)",
+         VALUES (?, ?::uuid, ?, 'active', ?, ?, 1)",
     );
     let insert_member = db.sql(
         "INSERT INTO story_identity_members
            (id, identity_id, work_id, external_record_id, edition_relation, created_at)
          VALUES (?, ?, ?, NULL, 'cross_posted', ?)",
+        // Same two corrections as the statement above.
         "INSERT INTO story_identity_members
            (id, identity_id, work_id, external_record_id, edition_relation, created_at)
-         VALUES (?, ?, ?, NULL, 'cross_posted', ?::timestamptz)",
+         VALUES (?, ?, ?::uuid, NULL, 'cross_posted', ?)",
     );
 
     match db.backend() {
@@ -280,10 +294,15 @@ pub async fn record_crossposted_location(
            (id, identity_id, work_id, external_record_id, edition_relation,
             external_source_key, external_url, created_at)
          VALUES (?, ?, NULL, ?, 'cross_posted', ?, ?, ?)",
+        // `created_at` is a TEXT column (0085) and the bind is an RFC 3339
+        // string, so the timestamp is bound bare. `?::timestamptz` here was a
+        // defect of the class the handoff records: PostgreSQL rejects it with
+        // `operator does not exist: text = timestamp with time zone`. The
+        // `work_id` slot is NULL in this statement, so it needs no cast.
         "INSERT INTO story_identity_members
            (id, identity_id, work_id, external_record_id, edition_relation,
             external_source_key, external_url, created_at)
-         VALUES (?, ?, NULL, ?, 'cross_posted', ?, ?, ?::timestamptz)",
+         VALUES (?, ?, NULL, ?, 'cross_posted', ?, ?, ?)",
     );
     match db.backend() {
         Backend::Sqlite => {
