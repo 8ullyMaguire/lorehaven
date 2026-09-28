@@ -30,6 +30,7 @@ use lorehaven_app::state::AppState;
 use lorehaven_db::recommendation_slots as slots;
 use lorehaven_db::{Database, DatabaseConfig};
 use serde_json::{json, Value};
+use test_support::TestDb;
 use tower::ServiceExt;
 
 const GOOD_PASSWORD: &str = "a-long-enough-passphrase";
@@ -48,10 +49,23 @@ fn scratch_dir(tag: &str) -> std::path::PathBuf {
 fn config_for(dir: &Path) -> Config {
     let mut config = Config::development_defaults();
     config.storage.root = dir.to_path_buf();
-    config.database = DatabaseConfig::new(format!(
-        "sqlite://{}/lorehaven.sqlite?mode=rwc",
-        dir.display()
-    ));
+    // Honour the backend selector, as the file's own header claims it does.
+    //
+    // This was hardcoded to a SQLite URL, so every test here ran on SQLite
+    // while the header said "on whichever backend LOREHAVEN_TEST_PG_URL
+    // selects". That is how `apply_merge` shipped with a single SQLite literal
+    // in both arms -- `move_sql` sent a bare `?` to PostgreSQL, which is a
+    // syntax error, and the merge could not work on the engine the production
+    // instance runs. Green on SQLite, green in CI, broken in fact. The header
+    // was not a claim to be checked later; it was the only statement of the
+    // intent, and the code did not match it.
+    config.database = match std::env::var("LOREHAVEN_TEST_PG_URL") {
+        Ok(url) => DatabaseConfig::new(url),
+        Err(_) => DatabaseConfig::new(format!(
+            "sqlite://{}/lorehaven.sqlite?mode=rwc",
+            dir.display()
+        )),
+    };
     // These tests share the process-global rate-limit buckets at 127.0.0.1, so
     // the development-default auth burst is exhausted by neighbours long before
     // this file's own requests are done.
@@ -71,6 +85,9 @@ fn config_for(dir: &Path) -> Config {
 }
 
 struct Harness {
+    /// Held so the scratch PostgreSQL database lives as long as the harness and
+    /// is dropped when it goes. Without it the database outlives the test.
+    _tdb: TestDb,
     _dir: std::path::PathBuf,
     config: Config,
     db: Database,
@@ -88,10 +105,11 @@ impl Harness {
     async fn with_operator(tag: &str, handle: &str) -> Self {
         let dir = scratch_dir(tag);
         let mut config = config_for(&dir);
-        let db = Database::connect(&config.database)
-            .await
-            .expect("db connect");
-        db.migrate().await.expect("migrations");
+        // Same per-test database as `new` -- see the note there. This
+        // constructor had the same shared-database shape, so it would have
+        // collided in exactly the same way.
+        let tdb = TestDb::connect_with_dir(tag, &dir).await;
+        let db = tdb.db().clone();
         // Register the account so its id exists, using a throwaway client: the
         // config is built after this, and the tests sign in again afterwards.
         let mut bootstrap = Client {
@@ -119,6 +137,7 @@ impl Harness {
         let account = account_of(&db, handle).await;
         config.administration.operator_account_id = Some(account.into());
         Self {
+            _tdb: tdb,
             _dir: dir,
             config,
             db,
@@ -127,12 +146,20 @@ impl Harness {
 
     async fn new(tag: &str) -> Self {
         let dir = scratch_dir(tag);
-        let config = config_for(&dir);
-        let db = Database::connect(&config.database)
-            .await
-            .expect("db connect");
-        db.migrate().await.expect("migrations");
+        let mut config = config_for(&dir);
+        // `TestDb` rather than a bare `Database::connect`, so the PostgreSQL arm
+        // gets its OWN database per test.
+        //
+        // Connecting straight to the admin URL put every test in this file into
+        // one shared database, where `taxonomy_nodes` has a UNIQUE(kind, norm):
+        // the first test to create "star trek" won, and the next one failed on a
+        // duplicate key that had nothing to do with what it was testing. On
+        // SQLite every test had its own file, so this never showed. Test
+        // isolation that only exists on one backend is not isolation.
+        let tdb = TestDb::connect_with_dir(tag, &dir).await;
+        let db = tdb.db().clone();
         Self {
+            _tdb: tdb,
             _dir: dir,
             config,
             db,
@@ -1362,12 +1389,18 @@ async fn a_slot_older_than_the_retention_window_is_pruned_and_a_fresh_one_is_kep
                 .expect("backdated slot");
         }
         lorehaven_db::Backend::Postgres => {
+            // Five binds, same as the SQLite arm, and the reasons are real JSON.
+            // This arm had a sixth bind and passed `["popular"]` with escaped
+            // quotes, which PostgreSQL's jsonb parser rejects
+            // (`22P02 invalid input syntax for type json`) while SQLite stores
+            // the same string happily. The bind count differing between two
+            // arms of one statement is the tell: one of them is wrong.
             sqlx::query(&insert)
                 .bind(&old)
                 .bind(pseud.to_string())
                 .bind(&work)
                 .bind(uuid::Uuid::new_v4().to_string())
-                .bind(r#"[\"popular\"]"#)
+                .bind(r#"["popular"]"#)
                 .bind(backdated)
                 .execute(harness.db.postgres_pool().expect("postgres"))
                 .await

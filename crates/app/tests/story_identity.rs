@@ -90,8 +90,13 @@ async fn seed_work(tdb: &TestDb, title: &str) -> (String, String, String) {
         Backend::Postgres => {
             let pool = tdb.db().postgres_pool().expect("postgres");
             sqlx::query(
+                // NOTE: native $n placeholders, NOT `?::uuid`.
+                // sqlx does not rewrite a `?` that is immediately followed by
+                // `::`, so PG receives a literal `?` and reports
+                // `syntax error at or near "::"` (code 42601). This arm is
+                // already PostgreSQL-only, so $n is both correct and clearer.
                 "INSERT INTO accounts (id, email, created_at, updated_at)
-                 VALUES (?::uuid, ?, now(), now())",
+                 VALUES ($1::uuid, $2, now(), now())",
             )
             .bind(&account_id)
             .bind(format!("{account_id}@test.dev"))
@@ -100,7 +105,7 @@ async fn seed_work(tdb: &TestDb, title: &str) -> (String, String, String) {
             .unwrap();
             sqlx::query(
                 "INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at)
-                 VALUES (?::uuid, ?::uuid, ?, ?, now(), now())",
+                 VALUES ($1::uuid, $2::uuid, $3, $4, now(), now())",
             )
             .bind(&pseud_id)
             .bind(&account_id)
@@ -111,7 +116,7 @@ async fn seed_work(tdb: &TestDb, title: &str) -> (String, String, String) {
             .unwrap();
             sqlx::query(
                 "INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at)
-                 VALUES (?::uuid, ?, ?::uuid, 'published', 'public', now(), now())",
+                 VALUES ($1::uuid, $2, $3::uuid, 'published', 'public', now(), now())",
             )
             .bind(&work_id)
             .bind(title)
@@ -406,10 +411,12 @@ async fn a_member_is_not_deleted_when_its_external_site_is_unavailable() {
 /// The absence that matters, asserted by looking for a delete path rather than
 /// by trusting that one was not written.
 async fn members_of_has_no_delete(tdb: &TestDb, identity_id: &str) -> bool {
-    let sql = "SELECT COUNT(*) FROM story_identity_members WHERE identity_id = ?";
+    // `tdb.sql`, not the bare string: this query runs on BOTH engines, and a
+    // `?` handed straight to the PostgreSQL pool is a literal `?` there.
+    let sql = tdb.sql("SELECT COUNT(*) FROM story_identity_members WHERE identity_id = ?");
     let n: i64 = match tdb.db().backend() {
         Backend::Sqlite => {
-            sqlx::query_as::<_, (i64,)>(sql)
+            sqlx::query_as::<_, (i64,)>(&sql)
                 .bind(identity_id)
                 .fetch_one(tdb.db().sqlite_pool().expect("sqlite"))
                 .await
@@ -417,7 +424,7 @@ async fn members_of_has_no_delete(tdb: &TestDb, identity_id: &str) -> bool {
                 .0
         }
         Backend::Postgres => {
-            sqlx::query_as::<_, (i64,)>(sql)
+            sqlx::query_as::<_, (i64,)>(&sql)
                 .bind(identity_id)
                 .fetch_one(tdb.db().postgres_pool().expect("postgres"))
                 .await
@@ -485,11 +492,17 @@ async fn an_identity_member_cannot_be_created_by_similarity_of_title_author_or_u
     let work_two = id("work");
     // A second work with the SAME title and the SAME owner. The only thing
     // separating the two is that no crosspost of the second was ever performed.
-    const WORK: &str = "INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at)
-         VALUES (?1, ?2, ?3, 'published', 'public', now(), now())";
+    // Two placeholder dialects, one per engine: `?1`/`?2`/`?3` is the SQLite
+    // numbered form and PostgreSQL has never accepted it (`operator does not
+    // exist: ?1 integer`). `work_sql` builds the right one rather than shipping
+    // a string that is only valid on one arm.
+    const WORK_SQLITE: &str = "INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 'published', 'public', datetime('now'), datetime('now'))";
+    const WORK_PG: &str = "INSERT INTO works (id, title, owner_pseud_id, lifecycle, visibility, created_at, updated_at)
+         VALUES ($1::uuid, $2, $3::uuid, 'published', 'public', now(), now())";
     match tdb.db().backend() {
         Backend::Sqlite => {
-            sqlx::query(WORK.replace("now()", "datetime('now')").as_str())
+            sqlx::query(WORK_SQLITE)
                 .bind(&work_two)
                 .bind("Ashfall")
                 .bind(&pseud_id)
@@ -498,7 +511,7 @@ async fn an_identity_member_cannot_be_created_by_similarity_of_title_author_or_u
                 .unwrap();
         }
         Backend::Postgres => {
-            sqlx::query(WORK)
+            sqlx::query(WORK_PG)
                 .bind(&work_two)
                 .bind("Ashfall")
                 .bind(&pseud_id)
@@ -607,15 +620,19 @@ async fn every_member_row_names_a_crosspost_this_instance_performed() {
     // `EditionRelation`, because `parse` refusing an unknown value would hide
     // it: a row the build cannot name is a row the build should not have
     // written, and this is where that gets said.
-    let sql = "SELECT edition_relation, COUNT(*) FROM story_identity_members
-                WHERE identity_id = ? GROUP BY edition_relation";
+    // `tdb.sql` again: one query string, two engines, and a bare `?` is a
+    // literal `?` on the PostgreSQL arm.
+    let sql = tdb.sql(
+        "SELECT edition_relation, COUNT(*) FROM story_identity_members
+                WHERE identity_id = ? GROUP BY edition_relation",
+    );
     let rows: Vec<(String, i64)> = match tdb.db().backend() {
-        Backend::Sqlite => sqlx::query_as(sql)
+        Backend::Sqlite => sqlx::query_as(&sql)
             .bind(&identity_id)
             .fetch_all(tdb.db().sqlite_pool().expect("sqlite"))
             .await
             .unwrap(),
-        Backend::Postgres => sqlx::query_as(sql)
+        Backend::Postgres => sqlx::query_as(&sql)
             .bind(&identity_id)
             .fetch_all(tdb.db().postgres_pool().expect("postgres"))
             .await
