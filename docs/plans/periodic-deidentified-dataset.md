@@ -160,6 +160,47 @@ $$;
 would defeat the planner's ability to fold it), and `PARALLEL SAFE` because the
 dump may use parallel workers.
 
+**There are TWO such functions, and the second is the one a first draft forgets.**
+`account_id` appears in 26 tables and is a foreign key to `accounts.id`
+(spec §11.16.3b). A snapshot that re-keys `pseud_id` and keeps `account_id` has
+obscured the handle while leaving the identifier that still joins to the table
+holding the email — and it *looks* de-identified, because every behavioural
+column is pseudonymous. So:
+
+```sql
+-- DIFFERENT salt from snapshot_pseud, so the two derivations cannot collide and
+-- an observer cannot learn that a pseud_id and an account_id belong together.
+CREATE OR REPLACE FUNCTION snapshot_account(raw uuid) RETURNS uuid
+LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+  SELECT (
+    substr(hex, 1, 8) || '-' || substr(hex, 9, 4) || '-4' ||
+    substr(hex, 14, 3) || '-a' || substr(hex, 18, 3) || '-' || substr(hex, 21, 12)
+  )::uuid
+  FROM (SELECT encode(digest(raw::text || 'lorehaven-snapshot-v1-account', 'sha256'), 'hex') AS hex) s;
+$$;
+```
+
+**Verification, and it is three assertions because the two failures differ:**
+
+```bash
+# 1. accounts.id re-keyed the same way its foreign keys are.
+psql "$LOREHAVEN_TEST_PG_URL" -tAc "
+  SELECT count(*) FROM works w
+   JOIN accounts a ON a.id = snapshot_account(w.owner_account_id)
+   WHERE snapshot_account(w.owner_account_id) = a.id;"
+# expected: a non-zero count. Zero means the join does not survive, which is
+# the *other* failure and is also a broken snapshot.
+
+# 2. the two derivations never collide across namespaces.
+psql "$LOREHAVEN_TEST_PG_URL" -tAc "
+  SELECT snapshot_pseud('11111111-1111-1111-1111-111111111111'::uuid)
+      <> snapshot_account('11111111-1111-1111-1111-111111111111'::uuid) AS distinct;"
+# expected: t
+
+# 3. no original account id survives anywhere in the dump. Asserted on the
+#    BYTES, per the same reasoning as the canary test.
+```
+
 **Verification:**
 
 ```bash

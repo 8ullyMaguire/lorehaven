@@ -60,6 +60,8 @@ identifying columns" is not implementable and not reviewable; this list is.
 | `accounts` | `password_hash` | **drop column** | A hash is a credential-adjacent secret. Anonymizing it is meaningless; it has no research value. |
 | `accounts` | `handle`, `display_name` | **replace** | Chosen by a person, and reused across instances. |
 | `pseuds` | `id` | **consistent replace** | The join key for the entire social graph. See below. |
+| every table with `account_id` (26 of them) | `account_id` | **consistent replace** | **A second join key, and the one a first draft misses.** See below. |
+| `webhook_endpoints` | `secret` | **drop column** | A bearer credential. Not PII — a live secret. |
 | `sessions` | `token` and any session secret | **drop column** | A live session token in a published file is an account takeover, not a disclosure. |
 | `device_*`, `*_deliveries` | any push/token/endpoint | **drop column** | A device token is a bearer credential for someone else's inbox. |
 | `*_attempts`, `*_throttles`, limiter tables | any address material | **drop table** | See §11.16.5 — these hold no research value. |
@@ -93,6 +95,33 @@ re-key destroys the dataset.** `uuid_generate_v5(namespace, pseud_id)` over a
 because anyone holding the real `pseud_id` list could reverse it — and the
 namespace must be published in the dump so a third party can verify the
 construction rather than take it on trust.
+
+### 11.16.3b `account_id` is a second join key, and it is the one that gets missed
+
+`pseud_id` is the graph's join key and everyone remembers it. `account_id`
+appears in **26 tables** and is a foreign key to `accounts.id` — so a snapshot
+that re-keys `pseud_id` and keeps `account_id` has replaced a person's public
+handle while leaving the row that identifies their **account** untouched, and
+`accounts.id` is exactly the value every other `account_id` points at.
+
+Two ways this fails, both of them real:
+
+* **A dump with re-keyed `pseud_id`s and live `account_id`s is not
+  de-identified.** It is a snapshot with one column obscured, and the obscured
+  column is the one that still joins to the table holding the email.
+* **Worse, it looks de-identified.** Every table reads as pseudonymous because
+  the behavioural columns are, which is the failure mode this section exists to
+  prevent — a *claim* of privacy with the identifying key still in the file.
+
+**`account_id` gets the same treatment as `pseud_id`**: a deterministic,
+published, stable derivation. Different namespace salt from `pseud_id` so the
+two cannot collide, and the same "same input → same output" property, because
+several tables join on `account_id` too.
+
+**`accounts.id` itself is replaced by the same derivation**, so the foreign keys
+still resolve. The two derivations use different salts, which means an observer
+cannot learn that two accounts share a `pseud_id` and an `account_id` — which is
+the association §11.16.3's determinism was otherwise making trivial to compute.
 
 ### 11.16.4 What is NOT in the dump, and why the answer is not "everything risky"
 
