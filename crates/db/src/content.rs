@@ -353,6 +353,14 @@ pub struct WorkPatch {
     pub completion: Option<String>,
     /// Whether the public rating aggregate is displayed.
     pub show_public_ratings: Option<bool>,
+    /// New body audience (spec §7.7).
+    ///
+    /// Nested `Option` because the field is nullable and "inherit the instance
+    /// default" is a state an author must be able to return to. `COALESCE`
+    /// cannot express it: binding a SQL `NULL` is indistinguishable from not
+    /// patching the column at all, so an author could set an audience but never
+    /// clear one. `Some(None)` clears, `None` leaves alone, `Some(Some(v))` sets.
+    pub body_audience: Option<Option<String>>,
 }
 
 /// What a publication or withdrawal did.
@@ -633,6 +641,10 @@ pub async fn update_work(
                 visibility = COALESCE(?, visibility),
                 completion = COALESCE(?, completion),
                 show_public_ratings = COALESCE(?, show_public_ratings),
+                -- NOT `COALESCE`: see `WorkPatch::body_audience`. `None` must
+                -- leave the column alone and `Some(None)` must clear it, and
+                -- `COALESCE` collapses the two.
+                body_audience = CASE WHEN ? THEN ? ELSE body_audience END,
                 updated_at = ?, version = version + 1
           WHERE id = ? AND version = ? AND deleted_at IS NULL",
         "UPDATE works
@@ -643,6 +655,7 @@ pub async fn update_work(
                 visibility = COALESCE(?, visibility),
                 completion = COALESCE(?, completion),
                 show_public_ratings = COALESCE(?, show_public_ratings),
+                body_audience = CASE WHEN ? THEN ? ELSE body_audience END,
                 updated_at = ?, version = version + 1
           WHERE id::text = ? AND version = ? AND deleted_at IS NULL",
     );
@@ -656,6 +669,11 @@ pub async fn update_work(
             .bind(patch.visibility.as_deref())
             .bind(patch.completion.as_deref())
             .bind(flags)
+            // The `CASE WHEN ?` flag, then the value. A single bound `NULL`
+            // could not distinguish "clear it" from "leave it alone", which is
+            // why this is a flag-plus-value rather than one parameter.
+            .bind(patch.body_audience.is_some())
+            .bind(patch.body_audience.as_ref().and_then(|v| v.as_deref()))
             .bind(&now)
             .bind(id.to_string())
             .bind(expected_version)
@@ -670,6 +688,11 @@ pub async fn update_work(
             .bind(patch.visibility.as_deref())
             .bind(patch.completion.as_deref())
             .bind(flags)
+            // The `CASE WHEN ?` flag, then the value. A single bound `NULL`
+            // could not distinguish "clear it" from "leave it alone", which is
+            // why this is a flag-plus-value rather than one parameter.
+            .bind(patch.body_audience.is_some())
+            .bind(patch.body_audience.as_ref().and_then(|v| v.as_deref()))
             .bind(&now)
             .bind(id.to_string())
             .bind(expected_version)

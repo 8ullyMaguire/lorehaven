@@ -323,6 +323,45 @@ struct UpdateWorkRequest {
     completion: Option<String>,
     #[serde(default)]
     show_public_ratings: Option<bool>,
+    /// The work's body audience (spec §7.7).
+    ///
+    /// A tri-state, because "not mentioned" and "set to nothing" are different
+    /// requests. `Option<Option<String>>` cannot carry them: serde maps a JSON
+    /// `null` to the **outer** `None`, so `{"body_audience": null}` and `{}` are
+    /// indistinguishable and an author can gate a work but never ungate it.
+    /// `Unchanged` is a silent failure of the request, not of the gate, which is
+    /// why it gets its own type rather than a `serde_with` dependency.
+    #[serde(default)]
+    body_audience: AudienceField,
+}
+
+/// A patch field that can be set to a value, cleared to nothing, or left alone.
+///
+/// Serde's own doc calls the `null`-versus-absent problem out for exactly this
+/// case. `Unchanged` is the default, `Set` carries a value, and a bare JSON
+/// `null` deserialises to `Clear` — which is the state that means "inherit the
+/// instance default".
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+enum AudienceField {
+    #[default]
+    Unchanged,
+    Set(String),
+    Clear,
+}
+
+impl<'de> serde::Deserialize<'de> for AudienceField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // `Option<String>` is the honest shape here: serde gives `Some(v)` for a
+        // string and `None` for `null`, which is precisely the two states this
+        // needs and no more.
+        match Option::<String>::deserialize(deserializer)? {
+            Some(value) => Ok(Self::Set(value)),
+            None => Ok(Self::Clear),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1646,6 +1685,44 @@ fn validate_rating(raw: &str) -> ApiResult<String> {
     }
 }
 
+/// Validate a body audience, returning the stored spelling (spec §7.7).
+///
+/// Uses `BodyAudience::parse_stored`, the same parser the column, the config
+/// file and `reading_decision` use, so there is exactly one vocabulary: what an
+/// author types here is what the column holds and what the gate reads.
+///
+/// The stored form is returned rather than the raw input, which normalises the
+/// two spellings that mean the same thing (`trust_at_least` and
+/// `trust_at_least:0` are both level 0). An unrecognised value is a **400**
+/// naming the field — refused rather than inherited, because here the caller
+/// clearly meant to set something and a silent fallback would leave a work
+/// public that its author believed was gated. The opposite of the config-file
+/// rule, and deliberately: there a typo should not take an instance down, here a
+/// typo must not publish a body.
+fn validate_body_audience(raw: &str) -> ApiResult<String> {
+    match lorehaven_domain::retention::BodyAudience::parse_stored(Some(raw)) {
+        // The **input**, not `audience.as_str()`.
+        //
+        // `as_str` is a `const fn` returning `&'static str`, so it cannot carry
+        // `TrustAtLeast(n)`'s level — it returns the bare `"trust_at_least"` for
+        // every level, and its own doc comment says it is "documentation rather
+        // than a parser". Storing that turns `trust_at_least:4` into
+        // `TrustAtLeast(0)` on the next read: a work the author gated to trust 4
+        // becomes readable by every account, and the write returned 200 the
+        // whole time.
+        //
+        // The input is validated and returned, so `trust_at_least` and
+        // `trust_at_least:0` stay the two spellings they are, and the level
+        // survives the round trip through the column.
+        Some(_audience) => Ok(raw.trim().to_owned()),
+        None => Err(ApiError(AppError::field(
+            "body_audience",
+            "A body audience is anyone, accounts_only, role_operator, role_vanguard, \
+             role_curator, or trust_at_least with a level (trust_at_least:3).",
+        ))),
+    }
+}
+
 fn validate_visibility(raw: &str) -> ApiResult<String> {
     match raw {
         "public" | "unlisted" | "restricted" => Ok(raw.to_owned()),
@@ -1698,6 +1775,16 @@ fn work_patch(request: &UpdateWorkRequest) -> ApiResult<WorkPatch> {
         .as_deref()
         .map(validate_completion)
         .transpose()?;
+    // The audience is validated here rather than by letting the database refuse
+    // it, because the failure should read as a bad request about a field the
+    // caller sent, not as a constraint violation. `parse_stored` is the same
+    // parser the column and the config file use, so there is one vocabulary:
+    // an unrecognised value is a 400, not a 500.
+    let body_audience = match &request.body_audience {
+        AudienceField::Unchanged => None,
+        AudienceField::Clear => Some(None),
+        AudienceField::Set(raw) => Some(Some(validate_body_audience(raw)?)),
+    };
 
     Ok(WorkPatch {
         title,
@@ -1707,6 +1794,7 @@ fn work_patch(request: &UpdateWorkRequest) -> ApiResult<WorkPatch> {
         visibility,
         completion,
         show_public_ratings: request.show_public_ratings,
+        body_audience,
     })
 }
 
