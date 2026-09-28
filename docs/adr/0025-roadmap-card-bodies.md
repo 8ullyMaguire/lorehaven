@@ -105,9 +105,15 @@ goes through the move endpoint and not the importer.
 
 ## Consequences
 
-- Migration `0086_roadmap_card_body.sql` in both dialects. 0084 is **not**
+- Migration `0090_roadmap_card_body.sql` in both dialects. 0084 is **not**
   free: 0083 reserves it for `bot_registrations.token_id` (gap D5), and
-  `the_two_dialects_define_the_same_migration_ids` fails on a mismatch.
+  `the_two_dialects_define_the_same_migration_ids` fails on a mismatch. 0086 is
+  also taken — by the in-flight M59 `body_audience` work — and 0087/0088 are
+  claimed by the M59 plan, so the number is 0090.
+- `the_two_dialects_define_the_same_migration_ids` compares the dialects to
+  *each other*. It cannot see that two different changes both claim 0086; that
+  surfaces later as a checksum collision in the migration ledger. Check the
+  free number at the moment you start, not from a document.
 - `the_two_dialects_declare_the_same_columns_and_indexes` does not parse
   `ALTER TABLE ... ADD COLUMN`. This migration is invisible to it. Recorded
   because a check that cannot see a class of change is a check whose silence

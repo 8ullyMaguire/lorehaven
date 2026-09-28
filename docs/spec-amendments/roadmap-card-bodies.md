@@ -134,7 +134,7 @@ A 4-card ballot is 4 pages, which is not a payload problem.
 
 ## Consequences
 
-- Two migrations (SQLite + PostgreSQL), both `0086_roadmap_card_body.sql`. Both
+- Two migrations (SQLite + PostgreSQL), both `0090_roadmap_card_body.sql`. Both
   dialects must carry identical ids: `the_two_dialects_define_the_same_migration_ids`
   fails otherwise.
 - The `Card` struct, every `SELECT` of `roadmap_cards`, and `upsert_card` all
