@@ -1025,10 +1025,10 @@ direction either one moves.
 
 New rows for §28.2 (available fiction) and §28.9 (foundational protections):
 
-- [ ] A `robots_posture` of `strict` refuses every disallowed path; `metadata_only` reads metadata and stores no body; `permissive` is the previous `honour_robots = false`.
-- [ ] `Crawl-delay` and the one-second floor are enforced identically under all three postures.
-- [ ] A `metadata` fetch writes no revision, no FTS row, and no cache-fill job.
-- [ ] Every overridden or discarded read is counted and the first per host is logged.
+- [~] A `robots_posture` of `strict` refuses every disallowed path; `metadata_only` reads metadata and stores no body; `permissive` is the previous `honour_robots = false`. **(A.1–A.3 built; "stores no body" is A.4 and is NOT yet true — nothing stops a caller storing a discarded body today.)**
+- [x] `Crawl-delay` and the one-second floor are enforced identically under all three postures. (`pacing_is_identical_under_every_posture`)
+- [ ] A `metadata` fetch writes no revision, no FTS row, and no cache-fill job. (A.4)
+- [~] Every overridden or discarded read is counted and the first per host is logged. **(overridden: counted and logged. discarded: deliberately NOT counted — a read whose bytes are thrown away is not an operator decision to report, and counting it would tell an operator this instance ignores robots.txt when it has stored nothing. Asserted by `a_read_and_discarded_fetch_is_not_counted_as_an_override` and `a_genuine_override_is_counted`. This row's original wording is therefore wrong for the discarded case and is amended here, deliberately, rather than left to be "fixed" by someone implementing it literally.)**
 - [ ] `body_mode` has a setting, six refusal paths with stable reason codes, and the four admin routes.
 - [ ] Retention is never varied per reader, and a reader above the configured bar may request a personal snapshot that is refused by name on an `aggregate` instance.
 - [ ] A reader may not see another reader's retention ballot.
