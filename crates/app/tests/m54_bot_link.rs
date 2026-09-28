@@ -53,6 +53,19 @@ struct Harness {
 
 impl Harness {
     async fn new(tag: &str) -> Self {
+        // The rate limiter's bucket map is a **process-global static** (see
+        // `crate::limiter::clear_buckets`), so every test in this binary shares
+        // one auth quota — ten sign-ins in a burst. This file alone makes 28
+        // `signed_in`/`switch_to` calls, so the quota is spent long before the
+        // last test runs, and the failure lands on whichever test the scheduler
+        // reaches next. That is how adding six tests turned an unrelated
+        // `one_account_cannot_revoke_another_accounts_token` red.
+        //
+        // Clearing per harness is what `milestone_2.rs` already does. The
+        // alternative — raising the quota under test — would mean the suite
+        // never exercises the limit it is supposed to have.
+        lorehaven_app::limiter::clear_buckets();
+
         let dir = scratch_dir(tag);
         let tdb = TestDb::connect_with_dir(tag, &dir).await;
         let mut config = Config::development_defaults();
@@ -152,12 +165,7 @@ impl Harness {
     /// exercise a bearer-authenticated route needs this one, and the difference
     /// is the reason `/me/credential` returned 403 rather than 200 on a first
     /// run against a token issued the other way.
-    async fn issue_acting(
-        &self,
-        account: &str,
-        pseud: &str,
-        scopes: &[&str],
-    ) -> (String, String) {
+    async fn issue_acting(&self, account: &str, pseud: &str, scopes: &[&str]) -> (String, String) {
         let raw = uuid::Uuid::new_v4().to_string();
         let hash = lorehaven_app::crypto::hash_token(&raw);
         let parsed: Vec<lorehaven_domain::api_scopes::Scope> = scopes
@@ -180,6 +188,21 @@ impl Harness {
         .await
         .expect("issue a token with an acting pseud");
         (id, raw)
+    }
+
+    /// Drop the session cookie, so the next request can only authenticate with
+    /// a bearer token.
+    ///
+    /// [`TestClient::request_with`] sends the cookie jar *and* the Authorization
+    /// header when both are present, and `RequireActor` prefers the session. So a
+    /// test that proves "this token can do this" while holding a session cookie
+    /// proves nothing about the token at all — the request succeeds through the
+    /// session and the bearer token is never resolved. The first version of
+    /// `a_bearer_token_can_describe_its_own_credential` did exactly that and
+    /// reported `via: "session"` with the scopes the *test* had asked for, which
+    /// reads like a server bug and is not one.
+    fn drop_session(&mut self) {
+        self.client.clear_cookies();
     }
 
     /// Register a bot through the API. Returns `(bot_id, raw_secret)`.
@@ -845,7 +868,6 @@ async fn the_atom_feed_is_also_a_constant() {
     assert_eq!(body["feed"], "atom");
 }
 
-
 // ---------------------------------------------------------------------------
 // `GET /me/credential` — the endpoint the §23.2 bot side needs
 //
@@ -874,11 +896,18 @@ async fn a_bearer_token_can_describe_its_own_credential() {
         .issue_acting(&account, &pseud, &["content.read", "library.read"])
         .await;
 
+    // No session cookie: the bearer token must be what authenticates this, or
+    // the assertion below is about the session and not the token.
+    h.drop_session();
     let (status, body) = h
         .client
         .request_with("GET", "/api/v1/me/credential", None, Some(&raw))
         .await;
-    assert_eq!(status, StatusCode::OK, "a live token describes itself: {body}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a live token describes itself: {body}"
+    );
 
     // The scopes are the *server's*, which is the entire point. A reader can
     // re-link with different scopes from Lorehaven's own UI; reporting the
@@ -892,7 +921,10 @@ async fn a_bearer_token_can_describe_its_own_credential() {
         .collect();
     assert!(scopes.contains(&"content.read"), "{scopes:?}");
     assert!(scopes.contains(&"library.read"), "{scopes:?}");
-    assert!(!scopes.contains(&"content.write"), "not granted: {scopes:?}");
+    assert!(
+        !scopes.contains(&"content.write"),
+        "not granted: {scopes:?}"
+    );
 
     assert_eq!(body["via"], "token", "it says which credential it was");
     assert_eq!(body["account_id"], json!(account), "{body}");
@@ -916,6 +948,12 @@ async fn a_revoked_token_cannot_describe_a_credential() {
         .await;
     assert_eq!(status, StatusCode::OK, "revoke");
 
+    // The cookie is dropped only now, and that ordering is the test. The revoke
+    // needs a session — a token must not be able to revoke itself through this
+    // door — and the describe afterwards must not fall back to the session the
+    // revoke used. Without the drop this asserts nothing: the response is
+    // `200 OK, via: "session"`, and the revoked token is never consulted.
+    h.drop_session();
     let (status, body) = h
         .client
         .request_with("GET", "/api/v1/me/credential", None, Some(&raw))
@@ -936,10 +974,10 @@ async fn a_revoked_token_cannot_describe_a_credential() {
 #[tokio::test]
 async fn it_describes_the_caller_and_nobody_else() {
     let mut h = Harness::new("cred-self").await;
-    h.signed_in("me@example.test", "me").await;
+    h.signed_in("me@example.test", "mine").await;
     let my_account = h.current_account_id().await;
 
-    h.switch_to("them@example.test", "them").await;
+    h.switch_to("them@example.test", "theirs").await;
     let their_account = h.current_account_id().await;
     let their_pseud = h.current_pseud_id().await;
     assert_ne!(my_account, their_account, "two real accounts");
@@ -947,13 +985,15 @@ async fn it_describes_the_caller_and_nobody_else() {
     let (_id, their_token) = h
         .issue_acting(&their_account, &their_pseud, &["content.read"])
         .await;
+    h.drop_session();
     let (status, body) = h
         .client
         .request_with("GET", "/api/v1/me/credential", None, Some(&their_token))
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
-        body["account_id"], json!(their_account),
+        body["account_id"],
+        json!(their_account),
         "the token's own account, not the session's"
     );
 }
@@ -971,6 +1011,7 @@ async fn it_never_reports_where_anything_was_sent() {
     let pseud = h.current_pseud_id().await;
     let (_id, raw) = h.issue_acting(&account, &pseud, &["content.read"]).await;
 
+    h.drop_session();
     let (status, body) = h
         .client
         .request_with("GET", "/api/v1/me/credential", None, Some(&raw))

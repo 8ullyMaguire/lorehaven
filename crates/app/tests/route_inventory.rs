@@ -3887,6 +3887,16 @@ fn find_audience_extractor(sig: &str) -> Option<&'static str> {
     // authenticates with.
     if args.contains("RequireActorScoped") {
         Some("RequireActorScoped")
+    } else if args.contains("RequireActor") {
+        // Checked after `RequireActorScoped` and never before it. `RequireActor`
+        // is a PREFIX of `RequireActorScoped`, so a naive `contains` in the
+        // other order reports every scoped door as unscoped — and the two differ
+        // in exactly what they disclose: `RequireActor` answers "who are you",
+        // `RequireActorScoped` answers that and refuses when the scope is
+        // missing, so only the second reveals nothing at all. Collapsing them
+        // would make the inventory unable to tell a door that reports a token's
+        // scopes from one that hides the token's existence.
+        Some("RequireActor")
     } else if args.contains("RequirePseud") {
         Some("RequirePseud")
     } else if args.contains("RequireSession") {

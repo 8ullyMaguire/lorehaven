@@ -24,8 +24,8 @@ use std::path::{Path, PathBuf};
 
 // `Backend` lives in the crate root, not in `migrate`, and `Migration`'s fields
 // are `&'static str` — the catalogue is generated data, so nothing allocates.
-use lorehaven_db::Backend;
 use lorehaven_db::migrate::catalogue;
+use lorehaven_db::Backend;
 
 /// The migrations directory, from this crate's manifest.
 fn migrations_root() -> PathBuf {
@@ -131,10 +131,7 @@ fn every_embedded_migration_has_a_distinct_version() {
     // A duplicate version means one silently shadows the other, and which one
     // wins depends on sort order — a schema that differs between machines.
     for backend in [Backend::Sqlite, Backend::Postgres] {
-        let mut versions: Vec<&str> = catalogue(backend)
-            .iter()
-            .map(|m| m.version)
-            .collect();
+        let mut versions: Vec<&str> = catalogue(backend).iter().map(|m| m.version).collect();
         let before = versions.len();
         versions.sort_unstable();
         versions.dedup();
