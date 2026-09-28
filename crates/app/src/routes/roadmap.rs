@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 pub fn read_router() -> Router<AppState> {
     Router::new()
         .route("/roadmap", get(get_board))
-        .route("/roadmap/cards/:id", get(get_card))
+        .route("/roadmap/cards/{id}", get(get_card))
         .route("/roadmap/changelog", get(get_changelog))
 }
 
