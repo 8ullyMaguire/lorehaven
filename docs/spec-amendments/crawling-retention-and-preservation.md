@@ -4,7 +4,7 @@
 **Date:** 2026-09-27
 **Source:** Owner brainstorm (robots flexibility, preservation rewards, trust-gated body visibility, community-voted retention)
 **Amends:** §11.5, §11.11, §11.12, §11.15, §9.7.1, §9.7.2, §9.7.5, §9.7.6, §19.1, §28.2, §38
-**Adds:** §19.15, §11.12a, §11.15a, §11.15b
+**Adds:** §19.15, §11.10b, §11.12a, §11.15a, §11.15b
 **Milestone:** M59
 **Plan:** `docs/plans/crawling-retention-preservation.md`
 
@@ -39,6 +39,7 @@ behaviour the platform's own premise depends on.
 | 4 | A trust-level-gated **view** of a body on a caching instance is refused; a trust-level-gated **request** for a personal snapshot is provided | The trusted reader gets the bytes, so little is lost. The refused version is recorded here with its reason so a later draft does not re-propose it. |
 | 5 | Retention may be decided by a community vote, in `advisory` (default) or `binding` mode | In `binding` mode a vote can move an operator's storage bill and an instance's preservation debt. It is opt-in, it is asymmetric in cost, and the operator retains a recorded override. |
 | 6 | Cross-posting an **imported** work to a preservation target is refused as unimplemented | The permission chain that would make it safe does not exist. §23.7 defers the transfer manifest; this amendment does not quietly un-defer it. Local works are not blocked, and they are the shippable slice. |
+| 7 | §11.10's cross-source identity model is a **prerequisite** of preservation targets, and none of its four tables exists | A bigger milestone, and the classifier is genuinely hard. Stating the dependency is cheaper than reconciling two notions of "this work exists on site X" after preservation is green. |
 
 ### What already exists, so nothing here is invented
 
@@ -521,14 +522,41 @@ one-line survey question. The distinction is the closing date. A poll answers
 reader who arrives late can still see what happened to it, which is the
 difference §29.5 already draws between a roadmap and a suggestion box.
 
-### 5.2 The tally is a quality-weighted count, not a headcount
+### 5.2 The tally is flat, and this is a correction
 
-Per §29.6, **which reader voted is not a surface anywhere in the product**.
-Individual ballots are never shown; the tally is an aggregate weighted by
-§16.16's demand weight, so a week-old account counts for less (§19.2's safety
-ramp). An unweighted headcount is not used: it is the shape of a popularity
-contest, and §0.3's "no purchased ranking" is the reason the weight is there
-rather than left off.
+Per §29.6, **which reader voted is not a surface anywhere in the product**:
+individual ballots are never shown, and the tally is an aggregate.
+
+**The tally is a flat count — every ballot weighs exactly one.** §45.2 states
+the general rule for governance in this spec without qualification:
+
+> **Flat weights** — every vote weighs 1. Taste affinity, trust level, and
+> private preference are never part of governance (§0.3)
+
+A retention proposal is governance, so §45.2 governs it, and §45.2 wins over
+anything this amendment might prefer. Two things follow that are worth stating
+because the reasoning is not obvious:
+
+- **Demand weight is a reader-preference signal, so it must not set policy.**
+  §16.16's weight expresses what a reader's engagement is worth to *discovery*.
+  Using it to weigh a vote about instance policy lets a reading habit become a
+  governance input — which is the direction §19.2 explicitly refuses ("no trust
+  level is derived from a demand weight, and no demand weight grants trust").
+  The arrow runs one way only.
+- **Asymmetry belongs in the quorum, not in the weight.** §5.3 achieves the
+  same protection — one reader is one ballot — by requiring more *ballots* to
+  move a setting that costs the operator more. A reader's influence never
+  exceeds one, but the number of readers required varies with the cost
+  direction. That is the correct place for the concern §5.3 is answering, and
+  it is why no `weight_bp` column exists on the ballot table.
+
+An earlier draft of this section weighted the tally by demand weight on the
+reasoning that a week-old account should count for less. That was wrong: it
+inverted the arrow above, it contradicted §45.2, and it would have made the
+tally weight an authority input even in advisory mode, which §19.15's "a vote
+never grants the proposer anything personal" is written to prevent. The rule is
+now flat, and the correction is left visible here rather than quietly
+overwritten.
 
 ### 5.3 `binding` mode is bounded, asymmetric, and always overridable
 
@@ -695,6 +723,94 @@ section states why a retention proposal's bar is a different kind of number.
 
 ---
 
+## §11.10b The identity model is a prerequisite, and it does not exist
+
+**Addition.** §11.10 specifies cross-source identity and §3's data-model table
+names four tables for it: `story_identities`, `story_identity_members`,
+`identity_merge_proposals`, `identity_merge_history`. **None of the four has
+ever been created.** A repository-wide search for `story_identit` across
+`crates/` and `migrations/` returns nothing, and `docs/requirements.csv` has no
+row for any of them — so the roadmap seeder has never seen this section either.
+
+What exists instead is `library_items` (migration 0006) with
+`UNIQUE (account_id, source_key, source_work_key)` and a nullable
+`work_id` whose own comment says it is "NULL for a private-library copy, which
+is what this milestone produces". `works` (migration 0003) carries no source
+column at all.
+
+**So the honest state is: one work for a locally published story, and one
+unrelated `library_items` row per source for an imported one, with nothing in
+the database relating them.** Importing the same fic from two sites produces two
+copies and no link, and §11.10's six-way distinction — "duplicate imports from
+the same source, confirmed cross-posting, different editions, translations,
+adaptations, similar but unrelated works" — is not implemented in any part.
+
+### 7.1 Why this section is here rather than a separate plan
+
+Because §3 makes a preservation target a row about a *destination*, and a
+destination is exactly what §11.10 calls an **edition member**. Building
+A preservation-target table first and an identity layer later means two notions of
+"this work exists on site X" that must later be reconciled, and the
+reconciliation is the expensive part. Stating the dependency now is cheaper
+than discovering it after a preservation milestone is green.
+
+The dependency is real and it is narrow: **Phase D needs a
+`story_identity_members` row to hang a destination on.** It does not need
+merges, proposals or history. §11.10b.2 says what the minimum is.
+
+### 7.2 The minimum Phase D needs, and what it does not
+
+**Needed:** the ability to record, for a work, "this same work also exists at
+this external location, with this edition relation and this verification
+state". That is `story_identities` + `story_identity_members` with
+`work_id` and `external_record_id` populated on different rows — the shape §3
+already specifies, and a preservation target becomes the *state* half of an
+identity member rather than a parallel concept.
+
+**Not needed, and not built here:** `identity_merge_proposals`,
+`identity_merge_history`, the six-way classifier, evidence and quorum review,
+and private grouping. Those are §11.10's full scope and belong to their own
+milestone. Building merges before the basic member row exists would be building
+the governance of a thing that has no data.
+
+**The classifier is the part that is genuinely hard, and the honest scope is
+one relation first.** `edition_relation` starts with a single value —
+`cross_posted` — and the rest (`same_source_reprint`, `translation`, `adaptation`,
+`unrelated_lookalike`) arrive with the full milestone. A wrong guess is not
+free: a `translation` recorded as `cross_posted` tells a reader two texts are
+one, and a `unrelated_lookalike` recorded as `cross_posted` is the failure the
+whole section exists to prevent. So the Phase D path is the **narrow** one —
+only crossposts this instance itself made, where the instance already knows the
+answer because it performed the act.
+
+### 7.3 Media uses the same shape and is no further along
+
+`media_editions` (§30.11) is "publication history" at the same level, and a fan
+film crossposted to three places is one `media` record with three editions. The
+same absence applies: no identity/edition relationship has been built for
+media either, so §11.10b.1's dependency is not text-specific.
+
+### 7.4 Acceptance
+
+- `story_identities` and `story_identity_members` exist in both dialects, and
+  a test asserts the migration ids match.
+- A work on this instance can hold a member row naming an external location
+  with `edition_relation = 'cross_posted'`, and the preservation target is that
+  member's state rather than a second concept.
+- The member row records a local `work_id` and an `external_record_id` on
+  different rows of the same identity, and the identity resolves to one work
+  page listing both.
+- **The classifier does not exist yet and no route guesses.** A member row
+  cannot be created by inference from title, author or URL similarity; only a
+  crosspost this instance performed creates one in this milestone. A test
+  asserts no inference path exists.
+- A merge, a proposal, and a private grouping all still return "not available",
+  named as such rather than silently absent.
+- `docs/requirements.csv` has a row for every one of the four §3 tables, so the
+  roadmap board seeds them.
+
+---
+
 ## §28 / §38 Checklist and configuration
 
 New rows for §28.2 (available fiction) and §28.9 (foundational protections):
@@ -733,15 +849,27 @@ table, which is where every key in this amendment belongs):
 Data model additions:
 
 ```text
+story_identities             one canonical story: work_id, canonical_title,
+                              status (§11.10b — specified in §3, never built)
+story_identity_members        one edition: identity_id, exactly one of work_id /
+                              external_record_id (CHECK-enforced), edition_relation,
+                              external_source_key, external_url (§11.10b)
+identity_merge_proposals      created empty; nothing writes to it in this amendment
+identity_merge_history        created empty; nothing writes to it in this amendment
+
 preservation_destinations     instance config: archive name, base URL, match rule,
                               accepts_automated, enabled
-preservation_targets          work_id, destination_id, state, verified_at, dead_at,
-                              evidence_hash, created_by, created_at
-preservation_credit_events    linked ledger entries per target; clawback is a
-                              reversal with an idempotency_key naming the target
+story_identity_members +=     the preservation STATE, as columns on the member row
+                              rather than a parallel table (§11.10b.1): destination_id
+                              (1:1, partial unique index), state, verified_at,
+                              dead_at, evidence_hash, credits_paid, created_by,
+                              updated_at, version
+preservation_credit_events    linked ledger entries per member; clawback is a
+                              reversal with an idempotency_key naming the member
 retention_proposals           proposed body_mode, source family, rationale,
                               opened_by, closes_at, tally, state, outcome
-retention_proposal_votes      one ballot per account; never readable by another reader
+retention_proposal_votes      one flat ballot per account; no weight column (§5.2);
+                              never readable by another reader
 retention_policy_changes      from, to, actor, reason, decided_at — the override record
 ```
 
@@ -760,3 +888,6 @@ retention_policy_changes      from, to, actor, reason, decided_at — the overri
 | Choosing a `User-Agent` token to land in a more permissive group | Evasion by identity, not a posture. Refused in §1.5. |
 | An override that outlives its import run | The §11.5 objection is to persistence, not granularity; the run-scoped form keeps the objection answered. §1.4. |
 | A composite preservation score on the work page | §32.6. A dated fact is fine; a 0–100 score is a ranking. §2.4. |
+| A demand-weighted retention tally | §45.2: governance votes are flat, and a reader's engagement must not set instance policy. §5.2. |
+| A `preservation_targets` table alongside the identity model | Two tables, one fact, and the reconciliation lands on whoever builds identity next. §11.10b.1. |
+| Inferring an identity member from title, author or URL similarity | A `translation` recorded as a crosspost tells a reader two texts are one, and no later fix removes a linkage a reader already believed. §11.10b.2. |
