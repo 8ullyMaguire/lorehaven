@@ -178,11 +178,22 @@ Per the house rule that a gate must be shown to catch a real defect:
 
 - `cargo test -p lorehaven-domain --lib` — 620 pass
 - `cargo test -p lorehaven-db --lib` — 76 pass
-- `cargo test -p lorehaven-app --test body_audience` — 8 pass
+- `cargo test -p lorehaven-app --test body_audience` — 10 pass
+- `cargo test -p lorehaven-app --test body_audience_indistinguishability` — 2
 - SQLite trigger vs PostgreSQL CHECK — 18/18 identical verdicts, INSERT and UPDATE
 - `check-sqlite-migration-syntax.py --self-test` — 14 pass; the gate is red on a
   reinstated `ADD CONSTRAINT` and clean after restore
-- `cargo build --workspace --tests` — clean, 0 warnings
+- `check-uncast-pg-placeholders.py` — clean (was 10, then 5 false positives);
+  25 self-test cases, and red on both a reintroduced `i32`->`i64` and a dropped
+  `CAST(... AS BIGINT)`
+- `check-pg-uuid-casts.py` — clean
+- `cargo clippy --workspace --all-targets` — 0 warnings
+- `cargo fmt --all --check` — clean
+- frontend `vitest run` — 408 pass, 64 files; `svelte-check` 0/0
+
+Every count above was observed, and each one is from a run whose **exit code**
+was checked, not only its tail. A test run that prints "0 failed" and exits
+non-zero has failed.
 
 ### A test-isolation bug the full-suite gate found, in a file I had not touched
 
