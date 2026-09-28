@@ -21,7 +21,7 @@ that bite here:
 ## 1. The order, and why
 
 ```text
-1  migration (both dialects)      0086_roadmap_card_body.sql
+1  migration (both dialects)      0090_roadmap_card_body.sql
 2  domain + repository            Card.body, six queries, find_card_by_id [NEW]
 3  routes                         board body, detail route, suggest accepts body
 4  frontend                       RoadmapCard.svelte + the board link
@@ -40,7 +40,7 @@ depends on an answer nobody has given yet (§5).
 
 ## 2. Step 1 — the migration, both dialects
 
-### 2.1 `migrations/sqlite/0086_roadmap_card_body.sql`
+### 2.1 `migrations/sqlite/0090_roadmap_card_body.sql`
 
 ```sql
 -- Roadmap card bodies (spec §44.1, amendment
@@ -72,7 +72,7 @@ depends on an answer nobody has given yet (§5).
 ALTER TABLE roadmap_cards ADD COLUMN body TEXT NOT NULL DEFAULT '';
 ```
 
-### 2.2 `migrations/postgres/0086_roadmap_card_body.sql`
+### 2.2 `migrations/postgres/0090_roadmap_card_body.sql`
 
 ```sql
 -- Roadmap card bodies (spec §44.1, amendment
@@ -80,7 +80,7 @@ ALTER TABLE roadmap_cards ADD COLUMN body TEXT NOT NULL DEFAULT '';
 --
 -- Dialect: PostgreSQL.
 --
--- The counterpart of migrations/sqlite/0086_roadmap_card_body.sql. Read that
+-- The counterpart of migrations/sqlite/0090_roadmap_card_body.sql. Read that
 -- file first: it carries the reasoning.
 --
 -- PARITY. `the_two_dialects_declare_the_same_columns_and_indexes` in
@@ -112,7 +112,7 @@ Expected: all `migrate::` tests pass, including
 appears in the catalogue:
 
 ```bash
-cargo run -q -- migrate --status 2>&1 | grep -c 0086
+cargo run -q -- migrate --status 2>&1 | grep -c 0090
 ```
 
 Expected: `0` (not yet applied to a fresh dev DB — `--status` lists *pending*;
@@ -120,12 +120,29 @@ if it prints `1`, the migration was already applied and the dev DB is stale,
 which is fine, note it and move on).
 
 ```bash
-ls migrations/sqlite/0086_roadmap_card_body.sql migrations/postgres/0086_roadmap_card_body.sql
+ls migrations/sqlite/0090_roadmap_card_body.sql migrations/postgres/0090_roadmap_card_body.sql
 ```
 
-Expected: both paths printed. **Do not use 0084.** 0083 reserves it for
-`bot_registrations.token_id` (gap D5) — see the NUMBERING note in
-`migrations/sqlite/0085_story_identity.sql`.
+Expected: both paths printed.
+
+**The number is 0090, and not a smaller one.** Verified 2026-09-28 against
+the tree:
+
+- **0084** — reserved by 0083 for `bot_registrations.token_id` (gap D5); see
+  the NUMBERING note in `migrations/sqlite/0085_story_identity.sql`.
+- **0086** — **already taken.** `migrations/{sqlite,postgres}/0086_body_audience.sql`
+  exist untracked: the in-flight M59 §7.7 work. This was found by running
+  `git status` while committing, which is the only reason it was found at all.
+  `the_two_dialects_define_the_same_migration_ids` would NOT have caught a
+  same-number collision in a *new* file — it compares the two dialects against
+  each other, so two 0086 files pass it happily and the failure arrives later,
+  as a checksum collision in the migration ledger.
+- **0087, 0088** — claimed by the M59 plan's later phases
+  (`docs/plans/crawling-retention-preservation.md`, the numbering note at its
+  line 14).
+
+So: check `ls migrations/*/` for the next free number *at the moment you
+start*, and do not trust this document's 0090 if time has passed.
 
 ## 3. Step 2 — domain and repository
 
@@ -650,4 +667,6 @@ wrong-runner-output incidents, and this is the fifth candidate.
 - Whether `GET /api/v1/roadmap` should paginate. The amendment accepts a
   ~600 KB board payload; at 3,000 cards it stops being acceptable and
   pagination becomes the answer. Not this milestone.
-- The 0084 migration gap. Out of scope; 0086 avoids it.
+- Migration numbers below 0090. Out of scope: 0084 is reserved (D5), 0086 is
+  the in-flight M59 `body_audience` work, and 0087/0088 are claimed by the M59
+  plan's later phases. Check for the next free number when you start.
