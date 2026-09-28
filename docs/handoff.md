@@ -344,28 +344,77 @@ suites it broke.
 
 ## Still open in this phase — and one of them is the larger half
 
-1. **§7.7.3's indistinguishability is NOT built.** The paired-response test the
-   amendment asks for — a gated reader's response byte-identical to a
-   non-existent work, across chapter read, work page, search, library,
-   notification, feed, export and the API — does not exist. This is the larger
-   half of Phase C1 and the reason the feature is not safe to offer yet. The
-   work page currently renders its chapter list and summary regardless of the
-   audience, which §7.7.3 names explicitly: no chapter list, no download or
-   export button, no "cached" badge, and **a disabled button with a tooltip is
-   an advertisement**.
-2. **The notification oracle.** "new chapter available" is an existence oracle
-   for a body; on a gated work it must say the work changed.
-3. **No admin door for `body_audience`.** The tests set it with raw SQL, and
-   `config.retention.default_body_audience` has no TOML surface wired to
-   `Config::from_file` yet — the field defaults and no test reads a config that
-   names it.
-4. **Media is not a §7.7 surface.** `crates/app/src/routes/media.rs` passes
+1. **The source level of the three-level resolution has no column.**
+   `resolve_audience` is implemented and tested for all three levels, and
+   `reading_decision` calls `narrowest(instance, work)` directly because
+   nothing feeds it a source. The missing piece is a `body_audience` column on
+   the *source* table, which is a new migration and a per-source table of
+   editorial policy — a decision about who sets it, not a code detail. This is
+   the one remaining item on the list and it is a **design question for the
+   owner, not an unfinished implementation.**
+2. **Media is not a §7.7 surface.** `crates/app/src/routes/media.rs` passes
    `BodyAudience::Anyone` with a comment saying so, which is honest and is the
    right thing to do rather than inventing a nullable column nobody asked for.
-5. **The source level of the three-level resolution does not exist yet.**
-   `resolve_audience` takes `source: Option<BodyAudience>` and every caller
-   passes `None`; `reading_decision` uses `narrowest` directly because the
-   source table has no column.
+
+### The three that are now closed, and what closing them cost
+
+**§7.7.3 indistinguishability — BUILT, and it found a third defect.**
+`crates/app/tests/body_audience_indistinguishability.rs`. A gated body answered
+**403** where an absent one answered 404: `DenyReason::BodyNotInAudience` was
+falling through the `DenyReason` catch-all into the `ContentRestricted` arm.
+One status, and it is the status a client branches on. It now maps to
+`NotFound { resource: "work" }` with `NotPublished` and `BlockedByAuthor` — the
+three reasons that all mean *you cannot tell that this exists*.
+
+The test compares **status, headers and body** across the work page, the chapter
+list, the library, notifications and the feed, plus the chapter door addressed
+directly by chapter id.
+
+Two things about building it that are worth more than the fix:
+
+* `TestClient::get` **discarded headers**, so a header-only leak was not merely
+  uncaught — it was undetectable. `get_with_headers` exists now. The
+  normalisation is by NAME (`date`, `x-request-id`), not by value, so a leak
+  arriving as an unexpected *name* is untouched.
+* **My first header-leak mutation survived, and the mutation was wrong, not the
+  test.** It added the header to *both* 404s — and a leak has to differ, or it
+  is not a leak. Injected properly (a `Retry-After` on the audience path, a
+  mechanism this codebase really has) the test goes red naming `retry-after: 30`
+  on one side only. **"The mutation survived" had a third explanation, and it
+  was the only one I had not tried.**
+
+**The admin door — BUILT, and it returned 200 twice while being wrong.**
+
+* `validate_body_audience` first returned `audience.as_str()`. `as_str` is a
+  `const fn -> &'static str`, so it **cannot carry `TrustAtLeast(n)`'s level** —
+  bare `"trust_at_least"` for every level, and its own doc says it is
+  "documentation rather than a parser". Storing that turned `trust_at_least:4`
+  into `TrustAtLeast(0)` on the next read: a work gated to trust 4 readable by
+  every account. Found by reading the column back with a diagnostic panic.
+* The request field was `Option<Option<String>>`, on the theory that it carries
+  "not mentioned" and "set to nothing" separately. **It does not** — serde maps
+  a JSON `null` to the *outer* `None`, so `{}` and `{"body_audience": null}` are
+  the same request, and an author could gate a work but never ungate it. Now
+  `AudienceField`, a three-state enum with a hand-written `Deserialize`.
+
+Both mutations are caught by the one test, which asserts **both** directions.
+
+**The config surface — BUILT.** `[retention] default_body_audience` did not
+exist; `retention: RetentionConfig::default()` was hardcoded at the file-load
+site, so the field was loadable in a Rust test and unreachable in a deployment.
+
+**The notification oracle — NOT APPLICABLE, and checked rather than assumed.**
+The plan warned that "new chapter available" is an existence oracle. It is also
+a notification this project **does not have**: `grep -rniE 'new.chapter|
+chapter.available' crates/ --include=*.rs` returns one hit, a test name in
+`imports.rs`. There is no oracle to close, and §7.7.3's paired test covers
+`/api/v1/notifications` anyway. **Had I not run that grep, this would have sat
+in the handoff as an open defect forever** — the handoff is not evidence.
+
+**`library.rs` is not a leak surface either.** It renders `word_count` and
+`chapter_count`, which looks exactly like the §7.7.3 problem — but those are
+`imports::LibraryItem` rows, a *personal import list* with an optional `work_id`,
+not the `works` table the audience applies to.
 
 ## `own.reading.trend`, and two SQL bugs that fail silently
 
