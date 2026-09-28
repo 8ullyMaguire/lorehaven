@@ -67,6 +67,7 @@ pub mod sessions;
 pub mod settings;
 pub mod spoilers;
 pub mod storage;
+pub mod story_identity;
 pub mod subscriptions;
 pub mod taste_health;
 pub mod taste_vectors;
