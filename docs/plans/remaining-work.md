@@ -12,8 +12,8 @@ canonical feature inventory and the roadmap-board seed).
 ## Where the build actually stands (re-derived 2026-09-25)
 
 Verified from `docs/requirements.csv`: **588 rows implemented**
-(289 fully-tested, 183 locally-tested, 116 verified-e2e), **71 planned**,
-**4 deliberately unsupported**, 663 rows total. 51 milestone test files through
+(289 fully-tested, 183 locally-tested, 116 verified-e2e), **75 planned**,
+**4 deliberately unsupported**, 667 rows total. 51 milestone test files through
 M45 plus the M54–M58 suites, migrations to
 0083, 80 frontend routes, tags through `v0.51.0`. The
 platform core (M0–M15), the forum series (M31–M35), media resilience
@@ -257,7 +257,7 @@ The dead handlers were removed rather than left to rot. Restoring this means:
 ### M59 — Crawling posture, retention governance, and preservation (spec §11.5, §11.15, §11.12a, §11.15a, §11.15b, §19.15, amended)
 
 Spec: `docs/spec-amendments/crawling-retention-and-preservation.md`.
-Plan: `docs/plans/crawling-retention-preservation.md`. Rows: M59-01…M59-23,
+Plan: `docs/plans/crawling-retention-preservation.md`. Rows: M59-01…M59-27,
 all `planned`.
 
 `imports.honour_robots` becomes `imports.robots_posture`

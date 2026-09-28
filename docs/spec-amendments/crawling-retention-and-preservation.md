@@ -3,8 +3,8 @@
 **Status:** Final plan
 **Date:** 2026-09-27
 **Source:** Owner brainstorm (robots flexibility, preservation rewards, trust-gated body visibility, community-voted retention)
-**Amends:** §11.5, §11.11, §11.12, §11.15, §9.7.1, §9.7.2, §9.7.5, §9.7.6, §19.1, §28.2, §38
-**Adds:** §19.15, §11.10b, §11.12a, §11.15a, §11.15b
+**Amends:** §7.6, §11.5, §11.11, §11.12, §11.15, §9.7.1, §9.7.2, §9.7.5, §9.7.6, §19.1, §25.2, §28.2, §38
+**Adds:** §7.7, §19.15, §11.10b, §11.12a, §11.15a, §11.15b
 **Milestone:** M59
 **Plan:** `docs/plans/crawling-retention-preservation.md`
 
@@ -36,7 +36,7 @@ behaviour the platform's own premise depends on.
 | 1 | `imports.honour_robots: bool` becomes `imports.robots_posture: strict \| metadata_only \| permissive`, and every fetch carries a declared class | A third posture is a third thing to get wrong, and a metadata fetch that returns a body is the new failure mode. §1.3 is the whole defence. |
 | 2 | The reward for preserving a work is **credits plus a badge**, not points | §28.10 refuses points and levels by name. Credits are spent and a badge records one occurrence, so both halves of the request survive and the refused half is refused for the reason already written down. |
 | 3 | The reward attaches to **verified live preservation**, not to the act of posting a link, and a destination that dies **claws the credit back** | More machinery than a click would need. It is also the only mechanism that makes the reward un-farmable, and §11.13's vanished-source treatment gains a second job. |
-| 4 | A trust-level-gated **view** of a body on a caching instance is refused; a trust-level-gated **request** for a personal snapshot is provided | The trusted reader gets the bytes, so little is lost. The refused version is recorded here with its reason so a later draft does not re-propose it. |
+| 4 | A trust-level-gated **view** is refused as a *default*; the operator may narrow who reads a cached body via §7.7 `body_audience`, and a trust-gated **request** for a personal snapshot is provided | Per-request variation is refused because §11.15 forbids it. An operator narrowing in advance is a different decision, and it is only safe because a refused reader cannot learn a body exists at all. §6.1, §7.7. |
 | 5 | Retention may be decided by a community vote, in `advisory` (default) or `binding` mode | In `binding` mode a vote can move an operator's storage bill and an instance's preservation debt. It is opt-in, it is asymmetric in cost, and the operator retains a recorded override. |
 | 6 | Cross-posting an **imported** work to a preservation target is refused as unimplemented | The permission chain that would make it safe does not exist. §23.7 defers the transfer manifest; this amendment does not quietly un-defer it. Local works are not blocked, and they are the shippable slice. |
 | 7 | §11.10's cross-source identity model is a **prerequisite** of preservation targets, and none of its four tables exists | A bigger milestone, and the classifier is genuinely hard. Stating the dependency is cheaper than reconciling two notions of "this work exists on site X" after preservation is green. |
@@ -632,7 +632,7 @@ body of a cached external work while lower-trust readers get metadata only, on
 the same instance. The second half of that is refused, and the first half is
 delivered in the form that holds.
 
-### 6.1 The view is refused, with the spec's own precedent
+### 6.1 The *default* is not narrowed, and this section is where the operator may
 
 §11.15 states the setting "applies to the instance, never to a request, a work,
 an importer, an extension or a federated peer". A view that varies by the
@@ -644,11 +644,26 @@ in the instance's storage.
 The spec has already faced this exact shape and written down why the tempting
 answer is wrong. §11.11, on preservation batches: "a batch that ran anyway as
 metadata-only would be the same request answered two ways depending on who
-asked." A trust-tiered body view is that fault, in the reading direction.
+asked."
 
-**The refusal, recorded so it is not re-proposed:** the instance's
-`body_mode` does not vary by reader trust level, and no body is ever withheld
-from a reader who is eligible to read it by being shown to a reader who is not.
+**The refusal that stands: the instance's `body_mode` never varies by reader
+trust level.** `cache` is `cache` for everyone, and a TL0 reader is never told
+a body exists while a TL3 reader is given it.
+
+**The addition, made on the owner's instruction 2026-09-27: the operator may
+narrow who reads a body the instance already holds** — §7.7's `body_audience`.
+The distinction that makes this compatible rather than a contradiction is
+*who decides*: the audience is an operator setting, applied uniformly, with
+every reader in it reading and every reader out of it refused. §11.15's
+sentence forbids an input-varying override; it does not forbid an operator
+narrowing access to a body by a rule the operator stated in advance.
+
+Two rules keep it from becoming the fault §11.11 names, and both are in §7.7:
+a reader out of the audience gets the **same response as a reader asking about
+a work that does not exist** (indistinguishability, not concealment), and the
+setting only ever narrows. What a reader is refused, they learn nothing about —
+which is the strongest form of "the same request answered the same way to
+everyone" available.
 
 ### 6.2 The request is provided, and it gives the trusted reader the bytes
 
@@ -809,6 +824,201 @@ media either, so §11.10b.1's dependency is not text-specific.
 - `docs/requirements.csv` has a row for every one of the four §3 tables, so the
   roadmap board seeds them.
 
+## §7.7 Body audience — who may read a body this instance holds
+
+**Addition.** §7.6's `can_access_content(actor, content_rating, visibility, policy)`
+decides who may read a work. A **caching** instance (§11.15) holds bodies, and
+until this section existed nothing said who may read *those* — every reader who
+passed the ordinary eligibility check could. An operator may narrow that.
+
+```text
+body_audience = anyone              # default; today's behaviour, unchanged
+              | accounts_only
+              | trust_at_least_N    # N is a trust level, 0..6
+              | role:operator
+              | role:vanguard
+              | role:curator
+```
+
+The audience is an **input to eligibility**, not a policy that overrides it. It
+is a new field on `ContentFacts`, consulted by the one function every surface
+already goes through, so a new surface cannot forget it.
+
+### 7.7.1 It narrows. It never widens.
+
+The audience is set by the operator, per instance, and may also be narrowed per
+source family and per work. It may be narrowed only. No request, uploader,
+importer, extension or federated peer may raise it — the same rule §11.15
+states for retention overrides, and the same reason: a permission that any
+input can widen is not a permission.
+
+`anyone` is the default, so an instance that never touches this setting behaves
+exactly as it does today. Widening an audience back to `anyone` is an operator
+action, recorded in the modlog like every other §11.15 change.
+
+### 7.7.2 The age and rating ceiling runs first, and always
+
+**The audience check never grants anything the age policy would refuse.** The
+rating ceiling is evaluated before the audience, and an actor refused by their
+age state is refused whatever their standing:
+
+```text
+rating ceiling (age-dependent)   →  refuse: RATING_EXCEEDS_POLICY
+body_audience                    →  refuse: BODY_NOT_IN_AUDIENCE
+```
+
+This is the opposite of `can_access_content`'s existing `trusted_reviewer`
+branch, which returns `Decision::Allow` unconditionally and so bypasses both
+the rating ceiling and the lifecycle check. That branch is a deliberate
+exception written for a review context, and **it is not extended to the
+audience**. A `role:operator` audience means "the operator may read this body
+that their age state allows", not "the operator may read anything" — an
+operator on a `declared_minor` age state is still under the minor ceiling.
+§0.3's child-safety protection is not the one thing an audience can trade away.
+
+### 7.7.3 A refused reader learns nothing about whether a body exists
+
+**This is the property that makes the feature safe to offer, and it is a
+stronger promise than §3.3's.** A reader outside the audience must not be able
+to learn, from any surface or by any sequence of requests:
+
+- that this instance holds a body for this work at all,
+- that some other reader can read one,
+- that an audience exists, or that anyone holds a role in it,
+- or that the instance is a caching instance rather than an aggregating one.
+
+So the rule is **indistinguishability, not concealment**. A reader without
+access receives the *same response they would receive for a work that does not
+exist here* — identical status, identical body, identical timing shape — and
+every surface that could imply a body says nothing at all.
+
+Concretely, and each of these is a place the current spec would leak:
+
+- **A chapter request** answers `404` with the coarse noun, exactly like a
+  non-existent work. Never `403`, which confirms existence (§3.3).
+- **A work page** renders identically whether or not a body is present. It does
+  not show a "cached" badge, a body-size figure, an offline-download button, an
+  export button, or a chapter list. §11.15 already requires that an aggregated
+  work offer "no offline download and no export, and says why" — **for a
+  gated audience, the button is not disabled and the reason is not given.** A
+  disabled button with a tooltip is an advertisement.
+- **Search and body search** return the same result set to a gated reader as
+  to a reader who has no access, and a gated work is never *counted* in a
+  result total they can see. A count difference is an oracle.
+- **The library page** does not distinguish "no body" from "no access". A
+  library item is the reader's own, so this needs stating: a reader whose
+  library holds a work they may not read sees the work's metadata and no
+  chapter affordance, with no error and no explanation.
+- **Notifications, feeds, and exports** carry no body-derived signal. A
+  notification that says "new chapter available" is an existence oracle for a
+  body; on a gated work the notification says the work changed, not that a
+  chapter arrived.
+- **`/api/v1/meta`** reports the instance's `body_mode` — that is an operator
+  and public configuration fact, unchanged. It does **not** report the
+  audience, and no route reports a work's audience. The audience is an access
+  rule, and an access rule that is readable is not one.
+
+The test that pins all of this is a **paired-response** test, not a set of
+individual assertions: for a work with a gated body, the responses to a
+gated reader and to a reader asking about a non-existent work must be
+**byte-identical after normalising the id**. Anything that differs — a header, a
+timing branch, an error code, a field — fails the build.
+
+### 7.7.4 What this cannot do, stated so it is not oversold
+
+**A read gate limits who gets the text here. It does not undo a copy someone
+already took.** A body downloaded before the audience was narrowed, exported
+under an earlier setting, or read while the reader was inside the audience
+remains with that reader. A gate is a forward-looking access rule, not a
+recall, and no surface may describe it as one.
+
+It is also not a DRM boundary and does not pretend to be. The threat model is
+a reader who would not otherwise be entitled to the text, on an instance whose
+operator has decided that instance's bandwidth is not open to them.
+
+### 7.7.5 Role values: what each one actually means
+
+Three of the six values name a role, and in this specification a role is a
+**grant, never a score**. The distinction decides the table:
+
+- **`role:operator`** — the instance's operator(s). An operator grant, from the
+  same source as `operator_role`, and subject to §7.7.2's ceiling.
+- **`role:vanguard`** — §16.18's Taste Vanguard: users selected for having
+  *resonance* with the operator's taste profile, existing so the instance does
+  not rely on the operator's signals alone. It is a **configurable gate, not a
+  hand-picked list**, because the selection method itself is configuration
+  (`vanguard.method`, default `resonance_threshold` on a taste profile,
+  `contribution_volume` or `admin_appointment` without one). Where the operator
+  selects by `admin_appointment`, the grant is a row and the gate is that row.
+  Either way the audience consults **"is this account currently a vanguard"**,
+  never "is this account's resonance high enough" — resonance is the operator's
+  taste signal and §0.3 forbids it being visible, inferable, or reachable as a
+  gate. **A reader may not learn their own resonance from a refusal**, so a
+  resonance-derived audience never exposes the score, only a yes/no the reader
+  already knows from their badge.
+- **`role:curator`** — §32's media curator role: a separate opt-in with its own
+  `media_curator.min_trust_level` and `requires_opt_in`. Distinct from Vanguard
+  (§32 states they curate different things), and the two gates are separately
+  expressible, so an instance may open media to curators and fiction to
+  vanguards.
+
+### 7.7.6 Where the audience is set, and its interaction with §11.15
+
+Three scopes, narrowest wins, and **all three may only narrow**:
+
+```text
+instance default          [retention] body_audience
+per source family         instance_retention_source_overrides
+per work                  works.body_audience   (NULL = inherit)
+```
+
+§11.15's `aggregate` interacts in exactly one way, and it is a no-op rather
+than a special case: **on an aggregating instance there is no body, so an
+audience has nothing to gate and the setting is inert.** It is not refused and
+not an error — an operator may set it before switching the instance to
+`aggregate`, and the setting survives. What an aggregating instance must never
+do is *pretend* to gate, which is why §7.7.3's indistinguishability rule is
+absolute there: on `aggregate`, every reader is refused every body identically,
+and no surface distinguishes "this instance does not hold bodies" from "you may
+not read this one".
+
+**§11.15's sentence is not in tension with this section**, and the distinction
+matters: §11.15 says the *retention mode* applies to the instance, never to a
+request or a peer. This section decides *who may read a body the instance
+holds* — a different question, on the input side of §7.6 rather than the
+storage side of §11.15. The two are compatible because narrowing is the only
+direction either one moves.
+
+### 7.7.7 Acceptance
+
+- `anyone` is the default and an instance that sets nothing behaves exactly as
+  before: every reader who passes §7.6 reads the body.
+- A gated reader is refused a chapter with `404` and the coarse noun, never
+  `403`.
+- The rating ceiling is evaluated before the audience, and a `role:operator`
+  audience on a `declared_minor` age state is still refused by the minor
+  ceiling.
+- **A gated reader's responses are byte-identical to a non-existent work's**,
+  after id normalisation, across chapter read, work page, search, library,
+  notification, feed, export, and the API.
+- No surface renders a disabled body affordance with an explanatory tooltip; the
+  affordance is absent.
+- No route returns a work's `body_audience`, a reader's resonance, or a
+  membership list for any role.
+- A `role:vanguard` gate follows `vanguard.method` and never consults the
+  resonance score directly.
+- §25.2's security-test list gains: **body-audience existence leakage** — a
+  reader outside the audience must be unable to distinguish a gated body from
+  a non-existent work through status codes, headers, body affordances, result
+  counts, notification text, or any sequence of requests.
+- A source-family or per-work audience may narrow the instance default and may
+  not raise it; a widening attempt is refused with a named error.
+- On an `aggregate` instance the audience is inert, every reader is refused
+  identically, and no surface says the instance does not hold bodies.
+- A work already downloaded or exported before the audience narrowed is not
+  recalled, and no surface claims otherwise.
+- `docs/requirements.csv` has a row for each of the six audience values.
+
 ---
 
 ## §28 / §38 Checklist and configuration
@@ -827,6 +1037,9 @@ New rows for §28.2 (available fiction) and §28.9 (foundational protections):
 - [ ] No cumulative preservation score, XP, level or lifetime point total exists anywhere (§28.10).
 - [ ] A crosspost of an imported work is refused by name rather than performed without a permission basis.
 - [ ] `works_past_saving` is visible to the operator on an aggregating instance.
+- [ ] A body audience may only narrow, and a reader outside it is refused with the same response a non-existent work gets.
+- [ ] The rating ceiling is evaluated before the body audience, and no role value bypasses an age-state refusal.
+- [ ] A `role:vanguard` audience consults vanguard membership, never a resonance score, and no reader learns a resonance from a refusal.
 
 Configuration keys (§38 — the instance-configuration contract and its defaults
 table, which is where every key in this amendment belongs):
@@ -838,6 +1051,9 @@ table, which is where every key in this amendment belongs):
 [retention] proposal_mode               "advisory"  off | advisory | binding
 [retention] proposal_min_trust          2           configurable (§19.15)
 [retention] body_request_min_trust      2           configurable (§6.3)
+[retention] body_audience                "anyone"    anyone | accounts_only | trust_at_least_N
+                                                       | role:operator | role:vanguard
+                                                       | role:curator  (§7.7)
 [retention] widen_quorum                3           quorum for a storage-widening change
 [retention] cooling_days                14          delay before a binding change commits
 [preservation] threshold                3           distinct verified destinations
@@ -871,6 +1087,13 @@ retention_proposals           proposed body_mode, source family, rationale,
 retention_proposal_votes      one flat ballot per account; no weight column (§5.2);
                               never readable by another reader
 retention_policy_changes      from, to, actor, reason, decided_at — the override record
+
+body_audience                 [retention] body_audience, the instance default (§7.7)
+works.body_audience           per-work narrowing; NULL = inherit. NULL, never 'anyone',
+                              is the absent value — an explicit 'anyone' would
+                              override a narrower instance default on widening
+ContentFacts.body_audience     the resolved audience, computed by the same
+                              narrowest-wins resolution as retention (§7.7)
 ```
 
 ---
@@ -881,7 +1104,12 @@ retention_policy_changes      from, to, actor, reason, decided_at — the overri
 |---|---|
 | Points, XP, or a cumulative preservation score | §28.10 refuses them by name; §9.7.1 refuses anything that compounds. Credits + badge carry the whole request. |
 | Rewarding the crosspost *action* | Pays for link farms. Verification is checkable; a click is not. §2.1. |
-| A trust-tiered *view* of cached bodies | §11.15's "never to a request"; §19.1's core reading at TL0; and §11.11's own precedent on answering one request two ways. §6.1. |
+| A **per-request** trust-tiered view of cached bodies | §11.15's "never to a request"; §19.1's core reading at TL0; §11.11's precedent on answering one request two ways. An operator narrowing in advance is permitted and is §7.7. §6.1. |
+| An audience that grants a role unconditional access | `can_access_content`'s `trusted_reviewer` branch already does this and is not extended: the rating ceiling runs first, always. §7.7.2. |
+| Telling a refused reader that a body exists but is gated | An existence oracle. A refused reader gets a non-existent work's response, byte-identical. §7.7.3. |
+| A disabled download button with a tooltip for a gated body | The tooltip is the advertisement. The affordance is absent. §7.7.3. |
+| A resonance score consulted directly as a body gate | §0.3 forbids the operator's taste being reachable as a rule. The gate asks "is this a vanguard", never how aligned they are. §7.7.5. |
+| Recalling bodies already downloaded or exported before a gate narrowed | A gate is forward-looking, not a recall, and no surface may claim otherwise. §7.7.4. |
 | A binary cache/aggregate poll presented as a fair choice | The costs are asymmetric and deferred; the cheap-today option wins by default. §5.4. |
 | Storage-budget allocation by demand weight | Recorded as considered. Making a demand weight a storage instruction is a larger commitment, and §4.1 is unbuilt. §5.4. |
 | Crossposting imported works to archives | Needs the §23.7 transfer manifest, which is deferred. Refused by name rather than performed without a permission basis. §2.7. |
