@@ -98,7 +98,7 @@ pub async fn get_settings(db: &Database) -> Result<Option<ExchangeSettings>> {
     }
     let sql = db.sql(
         "SELECT enabled, rate_limit_per_hour, instance_id FROM exchange_settings WHERE id = ?",
-        "SELECT enabled, rate_limit_per_hour, instance_id FROM exchange_settings WHERE id = $1",
+        "SELECT enabled, rate_limit_per_hour::bigint, instance_id::text FROM exchange_settings WHERE id = $1",
     );
     let row: Option<Row> = match db.backend() {
         Backend::Sqlite => {
@@ -430,7 +430,7 @@ pub async fn get_entities(
         Backend::Postgres => {
             let pool = db.postgres_pool().expect("postgres");
             for (kind, norm) in wanted {
-                let sql = "SELECT kind, norm, canonical, review_status, signal_count, curated_by, curated_at FROM canonical_entities WHERE kind = $1 AND norm = $2";
+                let sql = "SELECT kind, norm, canonical, review_status, signal_count::bigint, curated_by::text, curated_at::text FROM canonical_entities WHERE kind = $1 AND norm = $2";
                 if let Some(r) = sqlx::query_as::<_, Row>(sql)
                     .bind(kind)
                     .bind(norm)
@@ -475,7 +475,8 @@ pub async fn list_review_queue(db: &Database, limit: i64) -> Result<Vec<Canonica
          FROM canonical_entities WHERE review_status = 'unverified'
          ORDER BY signal_count DESC, norm ASC
          LIMIT ?",
-        "SELECT kind, norm, canonical, review_status, signal_count, curated_by, curated_at
+        "SELECT kind, norm, canonical, review_status, signal_count::bigint,
+                curated_by::text, curated_at::text
          FROM canonical_entities WHERE review_status = 'unverified'
          ORDER BY signal_count DESC, norm ASC
          LIMIT $1",
@@ -628,7 +629,7 @@ pub async fn list_latent_demand(db: &Database, limit: i64) -> Result<Vec<LatentD
     let sql = db.sql(
         "SELECT work_id, source_instance, signal_count, reinforced_at
          FROM exchange_latent_demand ORDER BY reinforced_at DESC LIMIT ?",
-        "SELECT work_id, source_instance, signal_count, reinforced_at
+        "SELECT work_id::text, source_instance::text, signal_count::bigint, reinforced_at::text
          FROM exchange_latent_demand ORDER BY reinforced_at DESC LIMIT $1",
     );
     let rows: Vec<Row> = match db.backend() {
