@@ -136,6 +136,26 @@ async fn set_audience(tdb: &test_support::TestDb, work: &str, audience: &str) {
     }
 }
 
+/// Register a reader at a given trust level.
+///
+/// The same shape as `low_reader` with the level as an argument, so a test that
+/// needs both a reader inside the audience and one outside does not re-implement
+/// registration and drift from it.
+async fn client_at_trust(
+    tdb: &test_support::TestDb,
+    dir: &std::path::Path,
+    tag: &str,
+    trust: i64,
+) -> test_support::TestClient {
+    let mut client = test_support::TestClient::new(router_for(tdb, dir));
+    let handle = tag.replace(['.', '-'], "_");
+    let account = test_support::register(&mut client, &format!("{tag}@test.dev"), &handle).await;
+    lorehaven_db::governance::set_trust(tdb.db(), &account, trust, "{}")
+        .await
+        .expect("set the trust level");
+    client
+}
+
 /// Register a reader at a trust level that will NOT satisfy the gate.
 async fn low_reader(
     tdb: &test_support::TestDb,
@@ -309,6 +329,71 @@ async fn a_gated_readers_responses_are_indistinguishable_from_a_non_existent_wor
 /// ask for its chapter directly. This is the oracle §7.7.3 is most worried
 /// about: the work page might be correctly blank while `GET /chapters/{id}`
 /// still serves the text.
+/// No route reports a work's audience, and `/api/v1/meta` does not either.
+///
+/// §7.7.3's last bullet, and it is the one that cannot be caught by a paired
+/// comparison — there is nothing to pair it against, because the leak is a field
+/// that should not be in *any* response.
+///
+/// The audience is an access rule, and **an access rule that is readable is not
+/// one**: a reader who learns that a work is held for trust 4 learns that the
+/// work exists and that a threshold exists, which is two of the four things
+/// §7.7.3 promises a refused reader cannot learn. `body_mode` IS reported by
+/// `/api/v1/meta` and must stay — it is an operator and public configuration
+/// fact, and §7.7.3 says so explicitly.
+#[tokio::test]
+async fn no_surface_reports_a_gated_works_audience() {
+    let dir = test_support::scratch_dir("ba_audience_leak");
+    let tdb = test_support::TestDb::connect_with_dir("ba-audience-leak", &dir).await;
+
+    let mut author = test_support::TestClient::new(router_for(&tdb, &dir));
+    test_support::register(&mut author, "author@test.dev", "ba_al_author").await;
+    let (work, _chapter) = published_work(&mut author, "Held For Someone Else").await;
+    set_audience(&tdb, &work, "trust_at_least:4").await;
+
+    let mut reader = low_reader(&tdb, &dir, "ba_al_low").await;
+
+    // A reader who is refused, and a reader who could read it, must both fail to
+    // learn the audience. The refused one is the case that matters; the other
+    // is checked because a work's own author arguably could be told, and the
+    // answer the spec gives is no route at all.
+    let (_, admitted_body) = {
+        let mut qualified = client_at_trust(&tdb, &dir, "ba_al_high", 4).await;
+        qualified.get(format!("/api/v1/works/{work}")).await
+    };
+    let (_, refused_body) = reader.get(format!("/api/v1/works/{work}")).await;
+
+    for (who, body) in [("admitted", &admitted_body), ("refused", &refused_body)] {
+        assert!(
+            !body.to_string().contains("trust_at_least"),
+            "{who} reader can read the audience out of the work door: {body}"
+        );
+        assert!(
+            body.get("body_audience").is_none(),
+            "{who} reader sees a body_audience field: {body}"
+        );
+    }
+
+    // The author's own view, which is a different projection and the most
+    // likely place for the field to have been added.
+    let (_, author_body) = author.get(format!("/api/v1/works/{work}")).await;
+    assert!(
+        !author_body.to_string().contains("trust_at_least"),
+        "even the author is not told the audience, because no route reports it: {author_body}"
+    );
+
+    // And `/api/v1/meta` keeps `body_mode` while saying nothing about audiences.
+    let (status, meta) = reader.get("/api/v1/meta").await;
+    assert_eq!(status, StatusCode::OK, "meta is public: {meta}");
+    let rendered = meta.to_string();
+    assert!(
+        !rendered.contains("audience"),
+        "the instance meta endpoint must not mention an audience at all: {meta}"
+    );
+
+    tdb.cleanup().await;
+}
+
 #[tokio::test]
 async fn the_chapter_door_does_not_leak_a_gated_body_to_a_reader_of_the_chapter_id() {
     let dir = test_support::scratch_dir("ba_chapter_leak");
