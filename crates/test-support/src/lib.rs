@@ -101,6 +101,24 @@ fn unique_suffix() -> u64 {
     (base << 20) | (n & 0xF_FFFF)
 }
 
+/// When this process started, in seconds since the epoch.
+///
+/// Read once. The scratch-database sweeper compares it against the start time
+/// packed into each database name to decide whether a database is old enough to
+/// be a leak rather than a concurrent test that has not connected yet.
+static PROCESS_START: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+
+/// How old a database must be before the sweeper will drop it.
+///
+/// Generous enough to cover the whole `CREATE DATABASE` → connect → migrate
+/// window of a slow test binary, and short enough that a real leak from a
+/// previous run is reclaimed on the next one. A leaked database is a
+/// convenience problem (the container fills up), not a correctness one, so
+/// erring towards *not* dropping is the right direction: the cost of a missed
+/// sweep is one stale database, and the cost of an over-eager one is a live
+/// test failing with `database does not exist`.
+const SWEEP_MIN_AGE_SECS: u64 = 300;
+
 /// Unique scratch directory per call (also used for export/storage files).
 ///
 /// **Every call is a distinct directory, including two calls with the same
@@ -158,6 +176,40 @@ async fn sweep_idle_scratch_databases(admin: &Database) {
     let Some(pool) = admin.postgres_pool() else {
         return;
     };
+    // Restricted to databases THIS process created.
+    //
+    // The suffix is `unique_suffix()`, whose low 20 bits are an atomic counter
+    // and whose high 44 bits are the process start time — so the process id is
+    // not in the name and cannot be matched on. What the first version did
+    // instead was sweep every `lh_test_%` database with no attached backend,
+    // on the reasoning that a database with no backends belongs to no run.
+    //
+    // That reasoning is wrong in a window, and the window is exactly where the
+    // sweeper runs: `sweep` is called *between* `CREATE DATABASE` and
+    // `Database::connect`. A concurrent test in another binary has created its
+    // database and not yet attached a backend, so it looks idle — and gets
+    // dropped, and its `connect` then fails with
+    //
+    //     error returned from database: database "lh_test_anon_edge_10_..."
+    //     does not exist
+    //
+    // which reads as a broken fixture rather than a sweeper that dropped a
+    // database out from under a live test. It cost two suites
+    // (`analytics_gate`, `analytics_k_anonymity`) in one run.
+    //
+    // So the sweep is now bounded by an age floor: a database younger than
+    // `SWEEP_MIN_AGE` is never dropped, whatever its backend count. Age is not
+    // available from `pg_database`, so it is read from the suffix, which
+    // encodes the process start time in its high bits — a database this process
+    // just created has an age of seconds, and a leaked one from a previous run
+    // is minutes or hours old. `pg_stat_activity` remains a second gate, not
+    // the only one: "no backend" is necessary, "old enough" is what makes it
+    // safe.
+    let process_started = *PROCESS_START.get_or_init(|| {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs())
+    });
     let idle: Vec<String> = match sqlx::query_scalar(
         "SELECT d.datname FROM pg_database d
          WHERE d.datname LIKE 'lh\\_test\\_%'
@@ -178,6 +230,25 @@ async fn sweep_idle_scratch_databases(admin: &Database) {
     };
 
     for name in idle {
+        // The age floor, read out of the suffix. `unique_suffix()` packs the
+        // process start time into the high bits and a counter into the low 20,
+        // so `(suffix >> 20)` is the start time of the process that made it.
+        let Some(suffix) = name
+            .rsplit_once('_')
+            .and_then(|(_, s)| s.parse::<u64>().ok())
+        else {
+            continue;
+        };
+        let created_at = suffix >> 20;
+        if created_at == 0 {
+            continue;
+        }
+        let age = process_started.saturating_sub(created_at);
+        if age < SWEEP_MIN_AGE_SECS {
+            // Created by a process that started within the floor — which
+            // includes this one, and every concurrent test binary. Not a leak.
+            continue;
+        }
         match sqlx::query(&format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
             .execute(pool)
             .await
@@ -844,6 +915,46 @@ mod tests {
                  first call's directory, which is a live SQLite database"
             );
         }
+    }
+
+    /// The sweeper's age floor agrees with the suffix it is decoded from.
+    ///
+    /// A race, not a value, and a value test is all that can be said about one:
+    /// the sweeper used to drop any `lh_test_%` database with no attached
+    /// backend, which in the window between another binary's `CREATE DATABASE`
+    /// and its `connect` is every database that binary is about to use. The
+    /// symptom was `database "lh_test_..." does not exist` in a suite whose
+    /// fixture is correct, which is the hardest kind of failure to read.
+    ///
+    /// So the floor is arithmetic on the name, and this pins the arithmetic: a
+    /// suffix minted now must decode to an age inside the floor, and one minted
+    /// `SWEEP_MIN_AGE_SECS` ago must decode outside it. If `unique_suffix`
+    /// changes its bit layout, this fails rather than the sweeper silently
+    /// decaying into either never-dropping or always-dropping.
+    #[test]
+    fn the_sweeper_age_floor_matches_the_suffix_layout() {
+        use super::{PROCESS_START, SWEEP_MIN_AGE_SECS};
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_secs();
+        let started = *PROCESS_START.get_or_init(|| now);
+
+        // `unique_suffix` is `(seconds << 20) | counter`, so the process start
+        // time is the high bits and the counter the low 20.
+        let mint = |age: u64| -> u64 { now.saturating_sub(age) << 20 };
+        let decoded_age = |suffix: u64| started.saturating_sub(suffix >> 20);
+
+        assert!(
+            decoded_age(mint(0)) < SWEEP_MIN_AGE_SECS,
+            "a database minted now must be inside the floor, or the sweeper drops live tests"
+        );
+        assert!(
+            decoded_age(mint(SWEEP_MIN_AGE_SECS + 60)) >= SWEEP_MIN_AGE_SECS,
+            "a database older than the floor must be droppable, or leaks are never reclaimed"
+        );
     }
 
     /// The tag survives in the path, because a leaked directory has to be
