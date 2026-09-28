@@ -384,6 +384,53 @@ change to `unique_suffix`'s layout fails a test instead of silently decaying the
 sweeper into never-dropping or always-dropping. 13/13 and 10/10 on the two
 suites it broke.
 
+## M60 — periodic de-identified dataset sharing (spec + plan written, not built)
+
+The owner asked to share a de-identified dump monthly or so without leaking the
+instance's IP. Written up as `docs/spec-amendments/periodic-deidentified-dataset.md`
+(§11.16, §11.17), `docs/plans/periodic-deidentified-dataset.md`, and ten
+`M60-01`..`M60-10` rows. **Nothing is implemented** — D1 is the first phase and
+it is the whole safety property.
+
+Three findings shaped the spec, and two of them contradict what a first draft
+would have said:
+
+**The instance holds no client IPs, so a dump cannot leak one.** No migration
+declares an `inet`/`ip_address`/`client_ip`/`remote_addr` column, and
+`limiter.rs` builds a rate-limit key in memory and discards it with the request.
+The owner's IP fear is therefore **entirely a property of the transfer**, which
+is why §11.16 (the file) and §11.17 (the channel) are separate sections with
+separate requirements. It is also the reason no amount of masking work addresses
+it. Checked rather than assumed, because the request named IP specifically and
+the natural assumption was the opposite.
+
+**`postgresql_anonymizer` is not usable here, and not only because it is
+absent.** It is not in the stock image (`pg_available_extensions` returns
+`pgcrypto` only), but the substantive problems are worse: as of 3.2 it carries
+three critical CVEs, it now **refuses to mask as a superuser**, and its own docs
+say `anon.random_id()` **cannot** be used in backup masking because `pg_dump`
+connects read-only. That last one is fatal for this feature specifically — the
+dataset depends on consistent re-keying, and the extension's primary-key advice
+is a *secret* shift, which §11.16.3 requires to be **published** so a third
+party can verify the construction. The plan uses `pgcrypto` instead and records
+that the rules port to `anon` almost unchanged if the operator later moves to a
+managed instance. The owner's recommended tool is the right *idea*; the plan
+says so rather than silently substituting.
+
+**The deterministic re-key was verified against this engine before it was
+written into the plan**, including the version-4 nibble: same input → same UUID,
+different input → different, and character 15 is `4`. A derivation that renders
+a digest into UUID shape but leaves the version nibble alone produces a
+well-formed value whose version field lies, and that is a requirement row
+(`M60-04`) rather than a detail.
+
+**The open question, which does not block D1:** is the snapshot for other
+Lorehaven instances, for research, or both? The answer decides how far the
+`pseud_id` graph must survive — for other instances it must be internally
+consistent, which §11.17.4's per-snapshot timestamp offset is the price of; for
+research you need `works`/`chapters` and timestamps but probably not the social
+graph at all, and D1.2 gets much simpler. **Ask before D2, not before D1.**
+
 ## Still open in this phase — and one of them is the larger half
 
 1. **The source level of the three-level resolution has no column.**
