@@ -539,7 +539,12 @@ async fn a_failed_delivery_leaves_the_queue_for_good() {
         .fetch_one(h.db().sqlite_pool().expect("sqlite"))
         .await
         .unwrap(),
-        lorehaven_db::Backend::Postgres => sqlx::query_scalar(&h.tdb.sql(&format!(
+        // `i32`, named, because `federation_queue.attempts` is INTEGER and
+        // sqlx will not widen an INT4 into an `i64` on PostgreSQL. The type was
+        // previously inferred from the `assert_eq!(..., 2)` below, which
+        // happened to be `i32` -- correct, and invisible to a reader or to
+        // `check-uncast-pg-placeholders.py`, which reported this as a fault.
+        lorehaven_db::Backend::Postgres => sqlx::query_scalar::<_, i32>(&h.tdb.sql(&format!(
             "SELECT attempts FROM federation_queue WHERE id = '{id}'"
         )))
         .fetch_one(h.db().postgres_pool().expect("pg"))

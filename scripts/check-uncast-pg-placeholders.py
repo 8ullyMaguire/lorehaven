@@ -170,7 +170,12 @@ def insert_column_order(sql: str) -> list[str]:
     return [m.group(1).lower() for m in INSERT_COLUMN.finditer(inner)]
 
 
-def offending_lines(sql: str, schema: dict[str, dict[str, str]]) -> bool:
+def offending_lines(
+    sql: str,
+    schema: dict[str, dict[str, str]],
+    text: str = "",
+    pos: int = 0,
+) -> bool:
     """True when this statement hands text to a column the dialect types.
 
     Note there is no `if "::" in sql: return False` guard here any more. It read
@@ -185,7 +190,7 @@ def offending_lines(sql: str, schema: dict[str, dict[str, str]]) -> bool:
     # checked before the placeholder test rather than after it.
     if sum_sites(sql, schema):
         return True
-    if int4_sites(sql, schema):
+    if int4_sites(sql, schema, text, pos):
         return True
     if bool_literal_sites(sql, schema):
         return True
@@ -788,15 +793,22 @@ def scan(root: pathlib.Path, schema: dict[str, dict[str, str]]) -> list[tuple[pa
                 continue
             if not re.search(r"\b(?:SELECT|INSERT|UPDATE|DELETE)\b", sql, re.IGNORECASE):
                 continue
+            # A `format!` template with substitution holes is not a statement.
+            # It is how a caller *builds* one -- and the built result is what
+            # runs, so judging the template judges something that was never
+            # executed. The cast a template installs is the code that matters
+            # and it is outside the literal, so there is nothing here to check.
+            if TEMPLATE_LITERAL.search(sql) and not re.search(r"\bFROM\b", sql, re.I):
+                continue
             tables = tables_in(sql)
             known = {t: schema[t] for t in tables if t in schema}
             reasons: list[str] = []
-            if offending_lines(sql, known):
+            if offending_lines(sql, known, text, match.start()):
                 reasons.append("uncast placeholder")
             summed = sum_sites(sql, known) if known else []
             if summed:
                 reasons.append("SUM(" + ", SUM(".join(summed) + ") is NUMERIC")
-            narrow = int4_sites(sql, known) if known else []
+            narrow = int4_sites(sql, known, text, match.start()) if known else []
             if narrow:
                 reasons.append("INT4 column into i64: " + ", ".join(narrow))
             # Only production SQL. A test asserting on placeholder rewriting
@@ -969,7 +981,72 @@ SELECT_ITEM = re.compile(
 )
 
 
-def int4_sites(sql: str, known: dict[str, dict[str, str]]) -> list[str]:
+def decoded_as_i64(text: str, pos: int) -> bool | None:
+    """Does the Rust around this SQL literal decode an integer column into `i64`?
+
+    `None` when the script cannot tell, which the caller must treat as "report
+    it" -- an undecidable site is a hypothesis, and a hypothesis that is
+    silently dropped is how a real fault survives.
+
+    The rule exists because sqlx will not decode an INT4 into an `i64` on
+    PostgreSQL, and will happily do it on SQLite. The fault is therefore a
+    *pair*: an INT4 column AND a wide Rust type. Reading the column as `i32`,
+    or casting it to `BIGINT` elsewhere in the statement, makes it correct, and
+    the five sites this currently reports are all of that shape:
+
+        let (status, attempts): (String, i32) = ...          // i32, correct
+        .query_scalar(...)                                  // inferred, not i64
+        "SELECT ... CAST(amount AS BIGINT)"                 // already cast
+        "SELECT {}::text{}"                                 // a fragment
+
+    The first version of this rule could not see any of that and reported all
+    five, and the five suites they live in pass on PostgreSQL --
+    `milestone_43_federation` 41/41, `milestone_18p42_vanguard_roles` 31/31,
+    `milestone_18p59_bounties` 21/21, `analytics_gate` 13/13, `query_sql`'s
+    round trip. **A gate that cries wolf is a gate that gets disabled**, and this
+    one was already on its way there.
+    """
+    # The decode type can sit on either side of the literal. `query_scalar` and
+    # its turbofish are usually *before* the SQL (`query_scalar::<_, i32>(&db.sql("
+    # ... "))`) and the binding annotation usually *after* it
+    # (`let x: (String, i32) = ...`). Looking only forward misses the first,
+    # which is how the `milestone_43_federation` site survived one round of this
+    # fix -- the explicit `::<_, i32>` was 40 characters to the left of the
+    # string.
+    before = text[max(0, pos - 200) : pos]
+    window = before + "\n" + text[pos : pos + 600]
+    # An explicit tuple or scalar annotation naming `i32` settles it.
+    if re.search(r":\s*\(?[^)\n]*\bi32\b", window):
+        return False
+    # `CAST(x AS BIGINT)` anywhere in the statement itself, or a
+    # `.replace()` that installs one, is the other correct form.
+    if re.search(r"AS\s+BIGINT|::bigint", window, re.IGNORECASE):
+        return False
+    # `query_scalar` decodes into whatever the turbofish or the binding says.
+    # `query_scalar::<_, i32>` is explicit and correct; the absence of a
+    # turbofish is not a fault, it is an inference the compiler checks at the
+    # `assert_eq!`. Only an explicit `i64` is the fault this rule is about.
+    if "query_scalar" in window:
+        if re.search(r"query_scalar::<\s*_,\s*(?:Option<\s*)?i(16|32)\b", window):
+            return False
+        if not re.search(r"::<\s*_,\s*i64\s*>|as i64|:\s*i64\b", window):
+            return False
+    return None
+
+
+# A string literal that is a *template* for building a statement, rather than a
+# statement. `format!("SELECT {}::text{}", head, tail)` is a `SELECT` with no
+# FROM and braces where identifiers go; running it is not possible and it is not
+# meant to be.
+TEMPLATE_LITERAL = re.compile(r"\{\}|\{[a-z_]\w*\}")
+
+
+def int4_sites(
+    sql: str,
+    known: dict[str, dict[str, str]],
+    text: str = "",
+    pos: int = 0,
+) -> list[str]:
     """INT4/INT2 columns in the SELECT list with no widening cast.
 
     Only for a statement that is actually the PostgreSQL arm. An INT4 column in
@@ -977,6 +1054,11 @@ def int4_sites(sql: str, known: dict[str, dict[str, str]]) -> list[str]:
     guard the rule reports both halves of every `db.sql(a, b)` pair and roughly
     doubles the output for no new information.
     """
+    # The fault needs a wide decode. When the file text is available and shows
+    # an `i32` (or a cast, or an inferred scalar), this column is not a fault at
+    # all and reporting it is noise. When it cannot tell, it still reports.
+    if text and decoded_as_i64(text, pos) is False:
+        return []
     if not re.search(r"\$\d+", sql) and "?" in sql:
         # `?` is the SQLite spelling. A statement with neither `$n` nor `?` binds
         # nothing, and the PostgreSQL arm of such a pair is still a PostgreSQL arm
