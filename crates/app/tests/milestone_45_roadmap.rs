@@ -103,8 +103,12 @@ impl Harness {
                 .expect("read suggestion bodies")
             }
             lorehaven_db::Backend::Postgres => {
+                // `account_id` is a UUID column on PostgreSQL and the bind is a
+                // `&str`, so the placeholder needs the cast: without it this is a
+                // 42804 on every suggestion-body read, and
+                // `check-uncast-pg-placeholders.py` reports it.
                 sqlx::query_as::<_, (String, Option<String>)>(
-                    "SELECT raw_text, body FROM roadmap_suggestions WHERE account_id = $1 ORDER BY raw_text",
+                    "SELECT raw_text, body FROM roadmap_suggestions WHERE account_id = $1::uuid ORDER BY raw_text",
                 )
                 .bind(account_id)
                 .fetch_all(self.db().postgres_pool().expect("pg"))
