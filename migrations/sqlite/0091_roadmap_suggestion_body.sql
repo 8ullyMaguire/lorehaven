@@ -1,0 +1,36 @@
+-- Roadmap suggestion descriptions (spec §44.1, amendment
+-- docs/spec-amendments/roadmap-card-bodies.md, ADR 0025).
+--
+-- Dialect: SQLite.
+--
+-- The counterpart of migrations/postgres/0091_roadmap_suggestion_body.sql.
+--
+-- WHAT THIS IS. One nullable column on `roadmap_suggestions`, so a member
+-- describing what they are suggesting has somewhere to put the description.
+--
+-- NULLABLE HERE, `NOT NULL DEFAULT ''` ON `roadmap_cards.body`. The two are
+-- not inconsistent, they answer different questions. A card's body is
+-- documentation that is expected to exist — empty means "nobody has written
+-- this yet", and the arena renders a placeholder. A suggestion's body is
+-- optional input: NULL means "no description was offered" and '' means "an
+-- empty description was offered", and those are genuinely different
+-- submissions by a person. Collapsing them would lose that, and the column
+-- costs nothing to keep honest.
+--
+-- `roadmap_suggestions` is a TRIAGE QUEUE, not a card store (§44.1). This
+-- column does not make it one: nothing reads it as a card, and the operator
+-- still decides whether a suggestion becomes a card at all. Adding this
+-- column is what lets the suggest endpoint accept a body WITHOUT creating a
+-- card, which is the whole point — see the `SuggestBody` doc in
+-- crates/app/src/routes/roadmap.rs, which explains why creating a card here
+-- would put a spam vector on the arena's most public surface.
+--
+-- RETENTION (spec §4.1). A suggestion row cascades from its account
+-- (ON DELETE CASCADE, declared in 0067); this column is deleted with its row
+-- and nothing else references it.
+--
+-- RE-RUN SAFETY. Plain `ADD COLUMN` — SQLite has no `IF NOT EXISTS` on ALTER
+-- TABLE, as the 0090 header records. The runner executes each migration at
+-- most once per database anyway.
+
+ALTER TABLE roadmap_suggestions ADD COLUMN body TEXT;

@@ -3271,6 +3271,20 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/roadmap",
         audience: Audience::Public,
     },
+    // Public, like the board it belongs to. §44.5 makes prioritization public
+    // and a card's body is part of what is public about a card: the arena asks
+    // the community to rank features, so the reasoning behind each feature has
+    // to be readable by the same people the arena is for. Gating the body
+    // behind a session would hide it from exactly the audience that needs it
+    // most, the anonymous reader deciding whether this is a project they want
+    // to be on.
+    RouteEntry {
+        file: "roadmap.rs",
+        handler: "get_card",
+        method: "GET",
+        path: "/roadmap/cards/:id",
+        audience: Audience::Public,
+    },
     RouteEntry {
         file: "roadmap.rs",
         handler: "get_changelog",

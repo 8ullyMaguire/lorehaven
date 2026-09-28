@@ -11,6 +11,14 @@ use crate::{Backend, Database};
 pub struct Card {
     pub id: String,
     pub title: String,
+    /// §44.1: what the feature is and why it exists, on the order of a page.
+    ///
+    /// The board lists the title alone; the detail view shows this. Never NULL
+    /// (the column is `NOT NULL DEFAULT ''`), so no reader branches on an
+    /// Option and no writer has to supply a value. Empty is a real state: a card
+    /// created through the suggest endpoint is title-only, and it renders a
+    /// placeholder rather than an error.
+    pub body: String,
     pub category: String,
     pub stage: String,
     pub elo_rating: f64,
@@ -28,19 +36,26 @@ pub async fn upsert_card(db: &Database, card: &Card) -> Result<(), sqlx::Error> 
     let now = crate::identity::now_rfc3339();
     match db.backend() {
         Backend::Sqlite => {
-            // Protect shipped/rejected from stage downgrade.
+            // §44.6 freezes a shipped/rejected card's STAGE, not its prose. The
+            // guard is a CASE on the `stage` assignment alone; see the
+            // PostgreSQL branch below for the full reasoning, because this is a
+            // behaviour change and not a mechanical port, and the two branches
+            // must agree or a card behaves differently depending on backend.
             sqlx::query(
-                "INSERT INTO roadmap_cards (id, title, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "INSERT INTO roadmap_cards (id, title, body, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT(id) DO UPDATE SET
                    title=excluded.title,
+                   body=excluded.body,
                    category=excluded.category,
-                   stage=excluded.stage,
-                   updated_at=excluded.updated_at
-                 WHERE stage NOT IN ('shipped','rejected')",
+                   stage=CASE WHEN roadmap_cards.stage IN ('shipped','rejected')
+                              THEN roadmap_cards.stage
+                              ELSE excluded.stage END,
+                   updated_at=excluded.updated_at",
             )
             .bind(&card.id)
             .bind(&card.title)
+            .bind(&card.body)
             .bind(&card.category)
             .bind(&card.stage)
             .bind(card.elo_rating)
@@ -53,18 +68,51 @@ pub async fn upsert_card(db: &Database, card: &Card) -> Result<(), sqlx::Error> 
             .await?;
         }
         Backend::Postgres => {
+            // The guard changed with the body column, and that is a behaviour
+            // change rather than a mechanical one — `a_protected_cards_whole_
+            // row_is_frozen` in crates/app/tests/milestone_45_roadmap.rs pinned
+            // the OLD shape and is amended in the same commit.
+            //
+            // It was: `... DO UPDATE SET title, category, stage, updated_at
+            // WHERE roadmap_cards.stage NOT IN ('shipped','rejected')`. The
+            // WHERE tests the EXISTING row's stage, so once a card reached
+            // `shipped` the DO UPDATE never ran again and the whole row froze —
+            // title, category, everything. Defensible for a title. Indefensible
+            // for a body: 596 of the 667 seeded cards are `shipped`, so 90% of
+            // the board would have been permanently unable to carry the very
+            // column this amendment adds, and the arena would have shipped 90%
+            // title-only cards while looking finished.
+            //
+            // The stage guard is now a CASE, not a WHERE. The statement always
+            // runs, and only the `stage` assignment is conditional:
+            //
+            //   stage = CASE WHEN roadmap_cards.stage IN ('shipped','rejected')
+            //               THEN roadmap_cards.stage ELSE excluded.stage END
+            //
+            // so a frozen card keeps its stage and has its title, category and
+            // body refreshed. §44.6's promise is about stage, and is kept
+            // exactly — this is the narrowest change that lets a shipped
+            // feature's documentation be corrected, which is what a body is.
+            //
+            // The WHERE became a CASE deliberately rather than staying a WHERE
+            // with a wider body: keeping the WHERE and just adding `body` to
+            // the SET list would have left a shipped card's body frozen too,
+            // which is the 90% problem this paragraph exists to fix.
             sqlx::query(
-                "INSERT INTO roadmap_cards (id, title, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz, $10::timestamptz)
+                "INSERT INTO roadmap_cards (id, title, body, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::timestamptz, $11::timestamptz)
                  ON CONFLICT(id) DO UPDATE SET
                    title=excluded.title,
+                   body=excluded.body,
                    category=excluded.category,
-                   stage=excluded.stage,
-                   updated_at=excluded.updated_at
-                 WHERE roadmap_cards.stage NOT IN ('shipped','rejected')",
+                   stage=CASE WHEN roadmap_cards.stage IN ('shipped','rejected')
+                              THEN roadmap_cards.stage
+                              ELSE excluded.stage END,
+                   updated_at=excluded.updated_at",
             )
             .bind(&card.id)
             .bind(&card.title)
+            .bind(&card.body)
             .bind(&card.category)
             .bind(&card.stage)
             .bind(card.elo_rating)
@@ -78,6 +126,39 @@ pub async fn upsert_card(db: &Database, card: &Card) -> Result<(), sqlx::Error> 
         }
     }
     Ok(())
+}
+
+/// Find a card by id. Returns None if no match.
+///
+/// The detail route (§44.5) needs this. The alternative — reusing
+/// `find_card_by_title_normalized`'s load-everything-and-filter approach — turns
+/// a one-card read on a 667-card board into a ~600 KB table scan, and that
+/// function's own docstring already calls its cost out. One indexed read.
+///
+/// Uses the same `CARD_COLUMNS` constants as `list_cards`, so the positional
+/// mapper is the only place the column order is written down.
+pub async fn find_card_by_id(
+    db: &Database,
+    card_id: &str,
+) -> Result<Option<Card>, sqlx::Error> {
+    match db.backend() {
+        Backend::Sqlite => {
+            let sql = format!("SELECT {CARD_COLUMNS} FROM roadmap_cards WHERE id = ?");
+            let row = sqlx::query(&sql)
+                .bind(card_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite"))
+                .await?;
+            Ok(row.as_ref().map(row_to_card_sqlite))
+        }
+        Backend::Postgres => {
+            let sql = format!("SELECT {CARD_COLUMNS_PG} FROM roadmap_cards WHERE id = $1");
+            let row = sqlx::query(&sql)
+                .bind(card_id)
+                .fetch_optional(db.postgres_pool().expect("postgres"))
+                .await?;
+            Ok(row.as_ref().map(row_to_card_postgres))
+        }
+    }
 }
 
 /// Normalize a title for deduplication: lowercase, punctuation stripped, ws collapsed.
@@ -118,16 +199,24 @@ pub async fn find_card_by_title_normalized(
 /// List cards, optionally filtered by stage. Elo DESC, tie-break matches_played DESC, card_id ASC.
 pub async fn list_cards(db: &Database, stage: Option<&str>) -> Result<Vec<Card>, sqlx::Error> {
     let sql = match stage {
-        Some(_) => "SELECT id, title, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at FROM roadmap_cards WHERE stage = ? ORDER BY elo_rating DESC, matches_played DESC, id ASC",
-        None => "SELECT id, title, category, stage, elo_rating, CAST(matches_played AS BIGINT), CAST(times_best AS BIGINT), CAST(times_worst AS BIGINT), created_at, updated_at FROM roadmap_cards ORDER BY elo_rating DESC, matches_played DESC, id ASC",
+        Some(_) => format!(
+            "SELECT {CARD_COLUMNS} FROM roadmap_cards WHERE stage = ? ORDER BY elo_rating DESC, matches_played DESC, id ASC"
+        ),
+        None => format!(
+            "SELECT {CARD_COLUMNS} FROM roadmap_cards ORDER BY elo_rating DESC, matches_played DESC, id ASC"
+        ),
     };
     let sql_pg = match stage {
-        Some(_) => "SELECT id, title, category, stage, elo_rating, CAST(matches_played AS BIGINT), CAST(times_best AS BIGINT), CAST(times_worst AS BIGINT), created_at::text, updated_at::text FROM roadmap_cards WHERE stage = $1 ORDER BY elo_rating DESC, matches_played DESC, id ASC",
-        None => "SELECT id, title, category, stage, elo_rating, CAST(matches_played AS BIGINT), CAST(times_best AS BIGINT), CAST(times_worst AS BIGINT), created_at::text, updated_at::text FROM roadmap_cards ORDER BY elo_rating DESC, matches_played DESC, id ASC",
+        Some(_) => format!(
+            "SELECT {CARD_COLUMNS_PG} FROM roadmap_cards WHERE stage = $1 ORDER BY elo_rating DESC, matches_played DESC, id ASC"
+        ),
+        None => format!(
+            "SELECT {CARD_COLUMNS_PG} FROM roadmap_cards ORDER BY elo_rating DESC, matches_played DESC, id ASC"
+        ),
     };
     match db.backend() {
         Backend::Sqlite => {
-            let query = sqlx::query(sql);
+            let query = sqlx::query(&sql);
             let query = match stage {
                 Some(s) => query.bind(s),
                 None => query,
@@ -136,7 +225,7 @@ pub async fn list_cards(db: &Database, stage: Option<&str>) -> Result<Vec<Card>,
             Ok(rows.iter().map(row_to_card_sqlite).collect())
         }
         Backend::Postgres => {
-            let query = sqlx::query(sql_pg);
+            let query = sqlx::query(&sql_pg);
             let query = match stage {
                 Some(s) => query.bind(s),
                 None => query,
@@ -151,18 +240,22 @@ pub async fn list_cards(db: &Database, stage: Option<&str>) -> Result<Vec<Card>,
 
 /// Pick N random `idea`-stage cards for an arena ballot.
 pub async fn arena_candidates(db: &Database, limit: i64) -> Result<Vec<Card>, sqlx::Error> {
-    let sql = "SELECT id, title, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at FROM roadmap_cards WHERE stage = 'idea' ORDER BY RANDOM() LIMIT ?";
-    let sql_pg = "SELECT id, title, category, stage, elo_rating, CAST(matches_played AS BIGINT), CAST(times_best AS BIGINT), CAST(times_worst AS BIGINT), created_at::text, updated_at::text FROM roadmap_cards WHERE stage = 'idea' ORDER BY RANDOM() LIMIT $1";
+    let sql = format!(
+        "SELECT {CARD_COLUMNS} FROM roadmap_cards WHERE stage = 'idea' ORDER BY RANDOM() LIMIT ?"
+    );
+    let sql_pg = format!(
+        "SELECT {CARD_COLUMNS_PG} FROM roadmap_cards WHERE stage = 'idea' ORDER BY RANDOM() LIMIT $1"
+    );
     match db.backend() {
         Backend::Sqlite => {
-            let rows = sqlx::query(sql)
+            let rows = sqlx::query(&sql)
                 .bind(limit)
                 .fetch_all(db.sqlite_pool().expect("sqlite"))
                 .await?;
             Ok(rows.iter().map(row_to_card_sqlite).collect())
         }
         Backend::Postgres => {
-            let rows = sqlx::query(sql_pg)
+            let rows = sqlx::query(&sql_pg)
                 .bind(limit)
                 .fetch_all(db.postgres_pool().expect("postgres"))
                 .await?;
@@ -427,10 +520,15 @@ pub async fn list_moves(
 }
 
 /// Insert a suggestion. If `card_id` is provided, attach to that card.
+///
+/// `body` is the description the member offered with the suggestion. It is
+/// `Option<&str>` because "no description offered" and "an empty description"
+/// are different submissions, and the table distinguishes them by NULL.
 pub async fn insert_suggestion(
     db: &Database,
     account_id: &str,
     raw_text: &str,
+    body: Option<&str>,
     card_id: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     let now = crate::identity::now_rfc3339();
@@ -438,12 +536,13 @@ pub async fn insert_suggestion(
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query(
-                "INSERT INTO roadmap_suggestions (id, account_id, raw_text, card_id, created_at)
-                 VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO roadmap_suggestions (id, account_id, raw_text, body, card_id, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?)",
             )
             .bind(&id)
             .bind(account_id)
             .bind(raw_text)
+            .bind(body)
             .bind(card_id)
             .bind(&now)
             .execute(db.sqlite_pool().expect("sqlite"))
@@ -451,12 +550,13 @@ pub async fn insert_suggestion(
         }
         Backend::Postgres => {
             sqlx::query(
-                "INSERT INTO roadmap_suggestions (id, account_id, raw_text, card_id, created_at)
-                 VALUES ($1, $2::uuid, $3, $4, $5::timestamptz)",
+                "INSERT INTO roadmap_suggestions (id, account_id, raw_text, body, card_id, created_at)
+                 VALUES ($1, $2::uuid, $3, $4, $5, $6::timestamptz)",
             )
             .bind(&id)
             .bind(account_id)
             .bind(raw_text)
+            .bind(body)
             .bind(card_id)
             .bind(&now)
             .execute(db.postgres_pool().expect("postgres"))
@@ -498,18 +598,35 @@ pub async fn update_card_stage(
 
 // --- Row mappers ---
 
+/// The column list every card query must use, in this exact order.
+///
+/// `body` sits at index 2, between `title` and `category`. Both are `String`,
+/// so a mapper left on the old positions still compiles, still type-checks, and
+/// silently serves one column's value under the other's name. That is the
+/// whole reason these two functions exist and the reason they are the only
+/// place a positional index is written down.
+const CARD_COLUMNS: &str =
+    "id, title, body, category, stage, elo_rating, matches_played, times_best, times_worst, created_at, updated_at";
+
+/// The PostgreSQL form: the three counters are `INTEGER` (INT4) on this
+/// dialect, so they are cast to `BIGINT` to arrive as `INT8` and decode as
+/// `i64`, and the timestamps are cast to text. SQLite hands both over
+/// natively.
+const CARD_COLUMNS_PG: &str = "id, title, body, category, stage, elo_rating, CAST(matches_played AS BIGINT), CAST(times_best AS BIGINT), CAST(times_worst AS BIGINT), created_at::text, updated_at::text";
+
 fn row_to_card_sqlite(row: &sqlx::sqlite::SqliteRow) -> Card {
     Card {
         id: row.get::<String, _>(0),
         title: row.get::<String, _>(1),
-        category: row.get::<String, _>(2),
-        stage: row.get::<String, _>(3),
-        elo_rating: row.get::<f64, _>(4),
-        matches_played: row.get::<i64, _>(5),
-        times_best: row.get::<i64, _>(6),
-        times_worst: row.get::<i64, _>(7),
-        created_at: row.get::<String, _>(8),
-        updated_at: row.get::<String, _>(9),
+        body: row.get::<String, _>(2),
+        category: row.get::<String, _>(3),
+        stage: row.get::<String, _>(4),
+        elo_rating: row.get::<f64, _>(5),
+        matches_played: row.get::<i64, _>(6),
+        times_best: row.get::<i64, _>(7),
+        times_worst: row.get::<i64, _>(8),
+        created_at: row.get::<String, _>(9),
+        updated_at: row.get::<String, _>(10),
     }
 }
 
@@ -517,16 +634,17 @@ fn row_to_card_postgres(row: &sqlx::postgres::PgRow) -> Card {
     Card {
         id: row.get::<String, _>(0),
         title: row.get::<String, _>(1),
-        category: row.get::<String, _>(2),
-        stage: row.get::<String, _>(3),
-        elo_rating: row.get::<f64, _>(4),
-        // Every PostgreSQL branch of `list_cards` selects these three as
+        body: row.get::<String, _>(2),
+        category: row.get::<String, _>(3),
+        stage: row.get::<String, _>(4),
+        elo_rating: row.get::<f64, _>(5),
+        // Every PostgreSQL branch selects these three as
         // `CAST(... AS BIGINT)`, so they arrive as `INT8`. Reading them as
         // `i32` failed to decode on every card.
-        matches_played: row.get::<i64, _>(5),
-        times_best: row.get::<i64, _>(6),
-        times_worst: row.get::<i64, _>(7),
-        created_at: row.get::<String, _>(8),
-        updated_at: row.get::<String, _>(9),
+        matches_played: row.get::<i64, _>(6),
+        times_best: row.get::<i64, _>(7),
+        times_worst: row.get::<i64, _>(8),
+        created_at: row.get::<String, _>(9),
+        updated_at: row.get::<String, _>(10),
     }
 }
