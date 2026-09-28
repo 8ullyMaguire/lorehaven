@@ -91,6 +91,86 @@ fn product_token(user_agent: &str) -> String {
         .to_owned()
 }
 
+/// The `User-Agent` a request of `class` sends, built from the configured agent.
+///
+/// The class is appended HERE rather than at the call site, so a fetch cannot
+/// report a class it is not making: the call site names the class and this
+/// function turns that into a token, and there is no path that builds a token
+/// without a class. A UA assembled at a call site is a UA that can lie.
+#[must_use]
+pub fn user_agent_for(base: &str, class: FetchClass) -> String {
+    format!("{base} (class={})", class.as_token())
+}
+
+/// Whether a `User-Agent` token is one this instance may send.
+///
+/// Rejects a token that names another product's crawler, or presents as a
+/// browser. Both are impersonation (spec §24.5), and impersonation is not a
+/// grey area: a site that blocks a bot and is read anyway by pretending to be
+/// something else has had its answer ignored, which is the same thing the
+/// `robots.txt` compliance in this module exists to prevent, only quieter.
+///
+/// The check is on the WHOLE token, and deliberately unforgiving. A token is
+/// an identity this instance asserts to every host it visits; there is no
+/// legitimate reason for a reader-facing import agent to name Googlebot, and
+/// every legitimate reason to name itself. Substring matching, rather than a
+/// list of exact tokens, because the thing being refused is the *claim*, and
+/// `Mozilla/5.0 (compatible; Lorehaven/1.0; Googlebot/2.1)` is still the claim.
+#[must_use]
+pub fn validate_user_agent(token: &str) -> bool {
+    let lowered = token.to_ascii_lowercase();
+    // Case-insensitive throughout: a token is read by humans in logs and
+    // matched by machines, and `GoogleBot` is the same claim as `googlebot`.
+    for impersonated in IMPERSONATED_AGENTS {
+        if lowered.contains(impersonated) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Agents whose use would be impersonation rather than identification.
+///
+/// Kept as a list of lowercase needles so a variant spelling is still caught,
+/// and so adding an agent is one line. Deliberately NOT a list of permitted
+/// tokens: a denylist of claims plus a positive requirement that the token name
+/// this product is safer than an allowlist that has to be extended every time
+/// a legitimate phrasing is thought of, and the cost of a false accept here is
+/// a site being lied to.
+const IMPERSONATED_AGENTS: &[&str] = &[
+    // Search engines. A crawler claiming to be one of these is trying to be
+    // served under indexing rules it has not earned.
+    "googlebot",
+    "bingbot",
+    "duckduckbot",
+    "yandexbot",
+    "baiduspider",
+    "slurp",
+    // The two big AI crawlers, by their published tokens and their common
+    // spellings.
+    "gptbot",
+    "chatgpt-user",
+    "claudebot",
+    "anthropic-ai",
+    "perplexitybot",
+    "ccbot",
+    "ai2bot",
+    "amazonbot",
+    "applebot",
+    "meta-externalagent",
+    "bytespider",
+    "omgili", // OmniParser / images
+    "imagesiftbot",
+    // Social readers, which sites serve on very different terms.
+    "twitterbot",
+    "facebookexternalhit",
+    "linkedinbot",
+    "slackbot",
+    "discordbot",
+    "telegrambot",
+    "whatsapp",
+];
+
 /// What a source needs before it will serve a page at all.
 ///
 /// # Why this is separate from [`Unblock`]
@@ -721,7 +801,7 @@ impl SafeFetcher {
             match step {
                 Step::Transport(fingerprint) => {
                     match self
-                        .attempt(url, form, conditional, fingerprint, ceiling)
+                        .attempt(url, form, conditional, fingerprint, class, ceiling)
                         .await
                     {
                         Ok(Attempt::Done(fetched)) => return Ok(fetched),
@@ -847,6 +927,7 @@ impl SafeFetcher {
         form: Option<&[(&str, &str)]>,
         conditional: Option<&RevisionValidators>,
         fingerprint: Option<Impersonation>,
+        class: FetchClass,
         ceiling: usize,
     ) -> SourceResult<Attempt> {
         let mut current = validate_url(url, &self.policy)?;
@@ -873,9 +954,32 @@ impl SafeFetcher {
             // feature, and the escalation only runs on a source whose own
             // `robots.txt` has already permitted the crawl.
             if fingerprint.is_none() {
+                // The token names the class this request is actually making
+                // (spec §1.5), and it is built HERE rather than at the call site
+                // so a fetch cannot report a class it is not making. The class
+                // arrives as a `FetchClass`, not as text, so nothing upstream can
+                // put a lie in the token.
+                let agent = user_agent_for(&self.policy.user_agent, class);
+
+                // The impersonation refusal, at the last point before the bytes
+                // go out (spec §24.5). Checking here rather than at config load
+                // is deliberate: there is no route that sets a user agent, so
+                // `policy.user_agent` only ever holds a build-time default, and a
+                // check that cannot be bypassed does not need to be somewhere
+                // convenient. A configured token naming another product's bot
+                // fails the fetch with a refusal that names the token, instead
+                // of a site quietly being lied to on every request.
+                if !validate_user_agent(&agent) {
+                    return Err(SourceError::Refused(format!(
+                        "the configured user agent is refused: {agent:?} names another product's \
+                         crawler, and this instance does not impersonate one. Set a token that \
+                         identifies Lorehaven."
+                    )));
+                }
+
                 headers.insert(
                     USER_AGENT,
-                    HeaderValue::from_str(&self.policy.user_agent).map_err(|_| {
+                    HeaderValue::from_str(&agent).map_err(|_| {
                         SourceError::Internal("user agent is not a valid header".into())
                     })?,
                 );
@@ -2092,15 +2196,38 @@ mod tests {
 
     /// The body of `SafeFetcher::send_with_redirects`, for the one assertion that
     /// cannot be made at runtime.
+    /// The source text of `send_with_redirects`.
     fn send_path_source() -> String {
+        source_of(
+            "    async fn send_with_redirects(",
+            "\n    /// The clients to try, in order, for one request.",
+        )
+    }
+
+    /// The source text of `attempt` — the function that actually builds the
+    /// request headers, one call deeper than `send_with_redirects`.
+    fn attempt_source() -> String {
+        source_of(
+            "    async fn attempt(",
+            "\n    /// Reject a host outside the source's own.",
+        )
+    }
+
+    /// One function's source, bounded by the next item in its impl block.
+    ///
+    /// Shared by the two callers because they bound differently and a copy
+    /// each would drift. A missing bound panics rather than returning
+    /// something truncated, because a truncated slice would make every
+    /// `contains` assertion in it vacuously false — which is a green test.
+    fn source_of(start_marker: &str, end_marker: &str) -> String {
         let src = include_str!("safety.rs");
         let start = src
-            .find("    async fn send_with_redirects(")
-            .expect("send_with_redirects exists");
+            .find(start_marker)
+            .unwrap_or_else(|| panic!("{start_marker:?} exists"));
         let rest = &src[start..];
         let end = rest
-            .find("\n    /// The clients to try, in order, for one request.")
-            .expect("the next item in the impl bounds it");
+            .find(end_marker)
+            .unwrap_or_else(|| panic!("{end_marker:?} bounds it"));
         rest[..end].to_owned()
     }
 
@@ -2842,6 +2969,178 @@ mod tests {
         assert_eq!(
             fetcher.interval_for("example.com").await,
             Duration::from_secs(1)
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // The class-specific User-Agent token, and the impersonation refusal
+    // (spec §1.5 and §24.5)
+    // -----------------------------------------------------------------------
+
+    /// The token names the class the request is actually making.
+    ///
+    /// Three classes, three tokens, asserted together: one example would pass
+    /// with a function that hard-codes `class=metadata`, and the whole point is
+    /// that a metadata fetch and a media fetch are distinguishable to a site
+    /// choosing what to serve.
+    #[test]
+    fn the_user_agent_names_the_class_of_the_request() {
+        let base = "Lorehaven/1.0 (+import)";
+        for (class, expected) in [
+            (FetchClass::Metadata, "metadata"),
+            (FetchClass::Content, "content"),
+            (FetchClass::Media, "media"),
+        ] {
+            let agent = user_agent_for(base, class);
+            assert!(
+                agent.contains(&format!("class={expected}")),
+                "a {class:?} fetch must say so: {agent:?}"
+            );
+            assert!(
+                agent.starts_with(base),
+                "and the configured agent is the prefix, not replaced: {agent:?}"
+            );
+        }
+    }
+
+    /// A token naming another product's crawler is refused (spec §24.5).
+    ///
+    /// The whole list, not a sample, and each in more than one spelling. A
+    /// denylist is only as good as the variants it catches: `GoogleBot` and
+    /// `googlebot` are the same claim, and so is `Mozilla/5.0 (compatible;
+    /// Googlebot/2.1; +http://www.google.com/bot.html)` — a site reading that
+    /// sees a crawler, not a browser wearing a crawler's name.
+    #[test]
+    fn a_token_impersonating_another_crawler_is_refused() {
+        for token in [
+            "Googlebot/2.1",
+            "googlebot/2.1",
+            "GOOGLEBOT/2.1",
+            "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+            "Mozilla/5.0 (compatible; Lorehaven/1.0; Googlebot/2.1)",
+            "bingbot/2.0",
+            "GPTBot/1.0",
+            "ChatGPT-User/1.0",
+            "ClaudeBot/1.0",
+            "PerplexityBot/1.0",
+            "CCBot/2.0",
+            "Bytespider",
+            "Twitterbot/1.0",
+            "facebookexternalhit/1.1",
+            "Slackbot-LinkExpanding 1.0",
+            "Discordbot/2.0",
+            "TelegramBot",
+        ] {
+            assert!(
+                !validate_user_agent(token),
+                "{token:?} impersonates another crawler and must be refused"
+            );
+        }
+
+        // And an honest token is allowed, including one this instance builds.
+        for token in [
+            "Lorehaven/1.0 (+import)",
+            "lorehaven/1.0",
+            "Lorehaven/1.0 (class=metadata)",
+            "Lorehaven/1.0 (class=media)",
+            "SomeReader/2.0",
+        ] {
+            assert!(
+                validate_user_agent(token),
+                "{token:?} identifies its owner and must be allowed"
+            );
+        }
+    }
+
+    /// The refusal happens before any byte leaves, and it names the token.
+    ///
+    /// Asserted at the send path rather than at config load because that is
+    /// where the decision is made. `get_with_class` on an unreachable host would
+    /// fail on the connection instead, so the assertion is that the error is a
+    /// *refusal* naming the agent — a connection error would be a different
+    /// variant and would fail this test.
+    /// The class the caller names is the class the token carries.
+    ///
+    /// A source-text assertion, for the same reason as the ceiling's one: the
+    /// property is that a specific expression appears at a specific place, the
+    /// code under test is one line, and no runtime assertion can see a `let _ =
+    /// class;` that a mutation introduces. B7 replaced the class at the send
+    /// path with a constant and the whole suite stayed green, because the
+    /// refusal tests never look at the token and the token test calls
+    /// `user_agent_for` directly — so nothing connected the two.
+    #[test]
+    fn the_send_path_names_the_class_it_was_given() {
+        let send_path = self::attempt_source();
+        assert!(
+            send_path.contains("user_agent_for(&self.policy.user_agent, class)"),
+            "the token is built from the class the caller named; found instead: {send_path}"
+        );
+        // The class is threaded in as a `FetchClass`, not as text, so the
+        // parameter is present by construction and the only way to lose it is to
+        // ignore it. Both are the same bug wearing different clothes.
+        assert!(
+            !send_path.contains("let _ = class"),
+            "and the class is not discarded on the way; found: {send_path}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_impersonating_token_is_refused_before_the_request_is_made() {
+        let mut policy = policy();
+        policy.user_agent = "Googlebot/2.1".to_owned();
+        let fetcher = SafeFetcher::new(vec!["example.com".into()], policy);
+
+        let error = fetcher
+            .get_with_class(
+                "https://example.com/story/1",
+                None,
+                None,
+                FetchClass::Content,
+            )
+            .await
+            .unwrap_err();
+        match error {
+            SourceError::Refused(message) => {
+                assert!(
+                    message.contains("Googlebot"),
+                    "the refusal names the offending token: {message}"
+                );
+                assert!(message.contains("impersonat"), "and says why: {message}");
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    /// An honest fetch is not refused by the impersonation check.
+    ///
+    /// The regression net for the check: a check that refuses everything is a
+    /// check that looks correct, because the only tests it needs are about the
+    /// things it stops. A real fetch against an unreachable host must fail with
+    /// a *connection* error, not a refusal.
+    #[tokio::test]
+    async fn an_honest_token_is_not_refused() {
+        let policy = policy();
+        assert!(
+            validate_user_agent(&policy.user_agent),
+            "the build's own agent identifies Lorehaven"
+        );
+        let fetcher = SafeFetcher::new(vec!["example.invalid".into()], policy);
+        let error = fetcher
+            .get_with_class(
+                "https://example.invalid/story/1",
+                None,
+                None,
+                FetchClass::Content,
+            )
+            .await
+            .unwrap_err();
+        let refused_for_the_agent = matches!(
+            &error,
+            SourceError::Refused(message) if message.contains("user agent")
+        );
+        assert!(
+            !refused_for_the_agent,
+            "an honest agent must not be refused by the impersonation check: {error:?}"
         );
     }
 

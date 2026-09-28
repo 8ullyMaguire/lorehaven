@@ -207,6 +207,16 @@ token is an abuse finding under §24.5, not a configuration option.
   source's catalogue entry, and is gone after its import run ends.
 - `honour_robots = false` alone yields `permissive`; both keys present yields
   the posture; the resolved value is what the API reports.
+- The token names the class of the request that carries it, and is built from
+  that class rather than assembled at a call site.
+- A token naming another product's crawler is refused before the request is
+  made, by name, in any letter case and whatever it is wrapped in. A token
+  identifying this instance is not refused by that check.
+
+**Build status.** The first six acceptance items are built and mutation-proved
+(phases A.1–A.5); the last two are built and mutation-proved (phase B). The
+"gone after its import run ends" clause is met by the run's scope being
+dropped rather than by a timer, so no acceptance test needs a clock.
 
 ---
 

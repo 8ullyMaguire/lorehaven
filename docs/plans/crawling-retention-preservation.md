@@ -3,8 +3,8 @@
 **Date:** 2026-09-27
 **Spec:** `docs/spec-amendments/crawling-retention-and-preservation.md`
 **Milestone:** M59
-**Status:** Phases A0 and A.1–A.5 built and green. Phases B, C1, C, D, E
-not started.
+**Status:** Phases A0, A.1–A.5 and B built and green. Phases C1, C, D, E not
+started.
 
 Read the amendment before this file. This file is the build order, the file
 paths, and the verification commands. Every phase below names the amendment
@@ -630,6 +630,45 @@ that rejects a token naming another product's bot, and a test
 `a_token_impersonating_another_crawler_is_refused`. There is no route that
 sets a UA, so this is the *only* place a token enters, which is what makes the
 check cheap rather than aspirational.
+
+**As built:** `user_agent_for(base, class) -> String` appends
+`(class=<token>)` and is called from `attempt`, the function that builds the
+headers, so the token cannot be assembled at a call site. `FetchClass::as_token`
+is deliberately separate from `as_str`: the stored spelling is a database value
+and an API response where changing it is a migration, the wire spelling is inside
+a string a site parses. `validate_user_agent(token) -> bool` refuses any token
+naming another product's crawler — search engines, AI crawlers, social readers —
+case-insensitively, and is called in `attempt` immediately before the header is
+built, so the refusal happens before any byte leaves. `FetchClass` is now
+threaded through `attempt` alongside the byte ceiling, for the same reason the
+ceiling is: a caller that supplied a number could supply any number.
+
+**Phase B mutations** (`scratch/prove_b.sh`, all seven turn the suite red):
+
+| # | mutation | caught by |
+|---|---|---|
+| B1 | the class is not in the token at all | `the_user_agent_names_the_class_of_the_request` |
+| B2 | the token hard-codes one class | same |
+| B3 | the impersonation check removed from the send path | `an_impersonating_token_is_refused_before_the_request_is_made` |
+| B4 | `validate_user_agent` always true (the list is dead code) | `a_token_impersonating_another_crawler_is_refused` + B3's |
+| B5 | the check case-sensitive | same two |
+| B6 | only the first agent on the list is checked | `a_token_impersonating_another_crawler_is_refused` |
+| B7 | the class dropped at the send path (every request claims `content`) | `the_send_path_names_the_class_it_was_given` |
+
+**B7 survived the first pass, and the reason is the interesting one.** The token
+test called `user_agent_for` directly and the refusal tests never looked at the
+token, so nothing connected the two: `user_agent_for` could be correct while the
+send path passed it a constant. This is the same seam as D6 (the ceiling) and the
+answer is the same kind — a source-text assertion on the one line that decides it,
+in the same style as the existing `the_send_path` check, with the reasoning
+written down. `send_path_source` was generalised into `source_of` so a second
+caller can bound a different function rather than copying the slicing.
+
+**B5 is why the list is lowercased once rather than lowercased per entry.** A
+per-entry `to_lowercase()` at match time is correct and slower; a comparison
+against a lowercase list is correct and obvious. The test asserts the mixed-case
+and the wrapped-in-a-Mozilla-comment spellings specifically, because those are
+the two a site actually sees and the two a naive `starts_with` check misses.
 
 ```bash
 cargo test -p lorehaven-scrapers user_agent 2>&1 | tail -10
