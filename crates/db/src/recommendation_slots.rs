@@ -202,7 +202,12 @@ pub async fn explain_slot(
                 instance_curation, blend_score, created_at AS served_at
            FROM recommendation_slots
           WHERE id = ? AND pseud_id = ?",
-        "SELECT id::text, work_id::text, position, reasons::text AS reasons, taste_signal,
+        // `position` is INT4 on PostgreSQL (a small ordinal) and `SlotRow`
+        // reads it as i64, so it needs the same ::bigint cast as blend_score.
+        // Without it the decode fails and the route returns a redacted 500 --
+        // invisible on SQLite, which has no INT4/INT8 distinction.
+        "SELECT id::text, work_id::text, position::bigint AS position,
+                reasons::text AS reasons, taste_signal,
                 seeded_by, recipe_stage, instance_curation, blend_score::bigint AS blend_score,
                 created_at::text AS served_at
            FROM recommendation_slots
@@ -242,7 +247,12 @@ pub async fn list_response_slots(
            FROM recommendation_slots
           WHERE pseud_id = ? AND request_id = ?
           ORDER BY position ASC",
-        "SELECT id::text, work_id::text, position, reasons::text AS reasons, taste_signal,
+        // `position` is INT4 on PostgreSQL (a small ordinal) and `SlotRow`
+        // reads it as i64, so it needs the same ::bigint cast as blend_score.
+        // Without it the decode fails and the route returns a redacted 500 --
+        // invisible on SQLite, which has no INT4/INT8 distinction.
+        "SELECT id::text, work_id::text, position::bigint AS position,
+                reasons::text AS reasons, taste_signal,
                 seeded_by, recipe_stage, instance_curation, blend_score::bigint AS blend_score,
                 created_at::text AS served_at
            FROM recommendation_slots
@@ -814,7 +824,16 @@ async fn apply_merge(
         "SELECT COUNT(*) FROM work_tags WHERE work_id = ? AND node_id = ?",
         "SELECT COUNT(*)::bigint AS count FROM work_tags WHERE work_id = ?::uuid AND node_id = ?",
     );
-    let move_sql = "UPDATE work_tags SET node_id = ? WHERE work_id = ? AND node_id = ?";
+    // Dialect-aware like its neighbours: the same literal in both arms sent a
+    // bare `?` to PostgreSQL, which is not a placeholder there.
+    let move_sql = db.sql(
+        "UPDATE work_tags SET node_id = ? WHERE work_id = ? AND node_id = ?",
+        // `node_id` is TEXT and `work_id` is UUID in migrations/postgres/0011 --
+        // casting node_id to uuid is both wrong and, because a uuid cast of a
+        // non-uuid string errors rather than no-op, it made the merge fail on
+        // PostgreSQL while leaving the row untouched.
+        "UPDATE work_tags SET node_id = $1 WHERE work_id = $2::uuid AND node_id = $3",
+    );
     let drop_sql = db.sql(
         "DELETE FROM work_tags WHERE work_id = ? AND node_id = ?",
         "DELETE FROM work_tags WHERE work_id = ?::uuid AND node_id = ?",
@@ -847,7 +866,7 @@ async fn apply_merge(
             record_action(db, proposal_id, "retarget_tags", from_node_id, work_id).await?;
             match db.backend() {
                 Backend::Sqlite => {
-                    sqlx::query(move_sql)
+                    sqlx::query(&move_sql)
                         .bind(to_node_id)
                         .bind(work_id)
                         .bind(from_node_id)
@@ -855,7 +874,7 @@ async fn apply_merge(
                         .await?;
                 }
                 Backend::Postgres => {
-                    sqlx::query(move_sql)
+                    sqlx::query(&move_sql)
                         .bind(to_node_id)
                         .bind(work_id)
                         .bind(from_node_id)
@@ -896,15 +915,24 @@ async fn apply_merge(
     // Aliases follow the tags, and the same collision rule applies.
     // The same rule as the tags: an alias that already points at the target is
     // left alone, so a merge cannot create a second row for one spelling.
-    let alias_sql = "UPDATE taxonomy_aliases
+    let alias_sql = db.sql(
+        "UPDATE taxonomy_aliases
                         SET node_id = ?
                       WHERE node_id = ?
                         AND NOT EXISTS (SELECT 1 FROM taxonomy_aliases existing
                                          WHERE existing.alias = taxonomy_aliases.alias
-                                           AND existing.node_id = ?)";
+                                           AND existing.node_id = ?)",
+        // node_id is TEXT here too, per 0011.
+        "UPDATE taxonomy_aliases
+                        SET node_id = $1
+                      WHERE node_id = $2
+                        AND NOT EXISTS (SELECT 1 FROM taxonomy_aliases existing
+                                         WHERE existing.alias = taxonomy_aliases.alias
+                                           AND existing.node_id = $3)",
+    );
     match db.backend() {
         Backend::Sqlite => {
-            sqlx::query(alias_sql)
+            sqlx::query(&alias_sql)
                 .bind(to_node_id)
                 .bind(from_node_id)
                 .bind(to_node_id)
@@ -912,7 +940,7 @@ async fn apply_merge(
                 .await?;
         }
         Backend::Postgres => {
-            sqlx::query(alias_sql)
+            sqlx::query(&alias_sql)
                 .bind(to_node_id)
                 .bind(from_node_id)
                 .bind(to_node_id)
