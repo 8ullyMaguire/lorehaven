@@ -3,12 +3,17 @@
 **Date:** 2026-09-27
 **Spec:** `docs/spec-amendments/crawling-retention-and-preservation.md`
 **Milestone:** M59
-**Status:** not started
+**Status:** Phase A0 built and green. Phases A, B, C1, C, D, E not started.
 
 Read the amendment before this file. This file is the build order, the file
 paths, and the verification commands. Every phase below names the amendment
 section it implements, because the amendment holds the reasoning and this file
 holds the typing.
+
+**Migration numbers are 0085 (A0), 0086 (C), 0087 (D), 0088 (E).** They were
+written as 0084–0087, and shifted twice — once when A0 was inserted, and once
+when A0 was built and found 0084 already reserved by migration 0083. See the
+note at the end of this file.
 
 ---
 
@@ -54,10 +59,10 @@ Amendment §11.10b. **New on 2026-09-27**, after a probe found that §11.10's fo
 tables have never existed. This phase carries the first migration in the plan
 and is the prerequisite for Phase D.
 
-### A0.1 Migration 0084, both dialects
+### A0.1 Migration 0085, both dialects
 
-`migrations/sqlite/0084_story_identity.sql` and
-`migrations/postgres/0084_story_identity.sql`, identical ids:
+`migrations/sqlite/0085_story_identity.sql` and
+`migrations/postgres/0085_story_identity.sql`, identical ids:
 
 ```sql
 CREATE TABLE IF NOT EXISTS story_identities (
@@ -133,7 +138,7 @@ records *that* a copy exists and *where*, never a body, and a reader with this
 instance's copy gains nothing from a member row.
 
 Verification state (`verified | unverified | dead`) is Phase D's column on this
-row, added in 0086. A0 leaves it `unverified` for every external member, which
+row, added in 0087. A0 leaves it `unverified` for every external member, which
 is honest: nothing has checked.
 
 ### A0.4 Verification
@@ -500,10 +505,10 @@ silently grant operators access above the age ceiling.
 Amendment §4. This is **M6-15**. A0 now carries the first migration, so this
 is the second.
 
-### C.1 Migration 0085, both dialects
+### C.1 Migration 0086, both dialects
 
-`migrations/sqlite/0085_instance_retention.sql` and
-`migrations/postgres/0085_instance_retention.sql`, identical ids (§2.1 of
+`migrations/sqlite/0086_instance_retention.sql` and
+`migrations/postgres/0086_instance_retention.sql`, identical ids (§2.1 of
 `docs/plans/README.md`):
 
 ```sql
@@ -599,7 +604,7 @@ cargo test -p lorehaven-app retention 2>&1 | tail -30
 cargo test --workspace 2>&1 | tail -5      # both backends
 ```
 
-Against live PostgreSQL as well — the `0085` migration must be applied and
+Against live PostgreSQL as well — the `0086` migration must be applied and
 tested on both dialects:
 
 ```bash
@@ -632,7 +637,7 @@ where a green suite lies.
 
 Amendment §2, §3. Third migration, and the phase with the most moving parts.
 
-### D.1 Migration 0086, both dialects
+### D.1 Migration 0087, both dialects
 
 ```sql
 CREATE TABLE IF NOT EXISTS preservation_destinations (
@@ -768,7 +773,7 @@ pub enum PreservationEligibility {
 
 **§33.1 is spec-only** — §33 opens with "Nothing in this section is
 implemented" — so the `redistribution` assertion is a **dependency of this
-phase, not an existing column**. Migration 0086 (or a small 0086a alongside
+phase, not an existing column**. Migration 0087 (or a small 0087a alongside
 it) adds `works.redistribution TEXT NOT NULL DEFAULT 'unstated'`, checked against
 `yes | ask | no | unstated`, editable only by the owning pseud. Check whether a
 `works` column of that name already exists before assuming it does not:
@@ -829,7 +834,7 @@ being farmed, and a reward system without it is a spam vector with a badge.
 Amendment §5, §19.15. Last, and it depends on C being real: a vote about a
 setting that does not exist is a vote about nothing.
 
-### E.1 Migration 0087, both dialects
+### E.1 Migration 0088, both dialects
 
 ```sql
 CREATE TABLE IF NOT EXISTS retention_proposals (
@@ -989,20 +994,20 @@ Follows the phases, in the same commit as the last of them.
 ## Order and why
 
 ```text
-A0 cross-source identity minimum      ← migration 0084; PREREQUISITE of D
+A0 cross-source identity minimum      ← migration 0085; PREREQUISITE of D
 A  robots posture + fetch class       ← no migration, amends working code
 B  class-specific UA token            ← same config surface as A
-C  retention built (M6-15)            ← migration 0085; the setting everything else is about
-C1 body audience (§7.7)               ← no migration of its own; rides C's 0085
+C  retention built (M6-15)            ← migration 0086; the setting everything else is about
+C1 body audience (§7.7)               ← no migration of its own; rides C's 0086
 D  preservation targets + rewards     ← needs A0's member row, A's class, C's setting
-E  retention proposals                ← migration 0087; needs C to be real before there is anything to vote on
+E  retention proposals                ← migration 0088; needs C to be real before there is anything to vote on
 F  docs + ledger                      ← with the last phase
 ```
 
 C1 is **inside** C rather than after it: the audience is a field on the same
 `works` / retention rows and a new arm of the same eligibility function, so
 splitting it invites two writers in `policy.rs` at once. It carries no migration
-of its own — `works.body_audience` lands in C's 0085.
+of its own — `works.body_audience` lands in C's 0086.
 
 A and C can run in parallel by different hands. D and E both touch
 `routes/retention.rs` and the admin surface, so they serialise.
@@ -1015,11 +1020,27 @@ destination is an edition member (§11.10b), so `preservation_targets` becomes
 the state half of a `story_identity_members` row rather than a parallel concept
 that a later identity milestone has to reconcile.
 
-Migration numbers shifted by one when A0 was inserted, so the numbers a reader
-has already seen quoted (`0084` for retention, `0085` for preservation) are now
-`0085`, `0086` and `0087`. Nothing has been built against any of those numbers,
-and the `job_kinds!` tree and the migration-id parity test are the only things
-that care about order.
+Migration numbers shifted by one when A0 was inserted, and by one more when
+A0 was built. The `job_kinds!` tree and the migration-id parity test are the
+only things that care about order, and neither is a reason to leave a plan
+claiming a number the repository has already used.
+
+| phase | first written as | after A0 was inserted | as built |
+|---|---|---|---|
+| A0 identity | 0084 | 0084 | **0085** |
+| C retention | 0085 | 0086 | 0086 |
+| D preservation | 0086 | 0087 | 0087 |
+| E proposals | 0087 | 0088 | 0088 |
+
+**0084 belongs to something else and always did.** Migration 0083 (M54, shipped)
+reserves it for the `bot_registrations.token_id` foreign key — gap D5 — and says
+so in its own header: the constraint cannot ride in 0083 because SQLite cannot
+`ALTER TABLE ... ADD CONSTRAINT` and PostgreSQL needs a UUID-to-TEXT column type
+migration first. A0 was written before 0083 shipped and took a number that was
+already spoken for. The collision is recorded here rather than papered over,
+because a plan that names a number twice is worse than one that names the wrong
+number: the first makes the second migration's author believe their number is
+free.
 
 **What is deliberately not in this plan.** §11.11 preservation *batches*
 (M6-10) stay unbuilt: they need an operator role, a permission basis, a dry-run

@@ -630,13 +630,15 @@ pub async fn get_openapi_spec(
 /// structural half of §23.2's guarantee, and the reason adding this endpoint
 /// does not weaken it.
 pub async fn describe_credential(
-    State(state): State<AppState>,
+    _state: State<AppState>,
     RequireActor(actor): RequireActor,
 ) -> ApiResult<Json<Value>> {
-    // The account is read back so the response cannot claim an identity the
-    // database no longer agrees with, rather than echoing the token's own
-    // claim. `RequireActor` already resolved the token from the Authorization
-    // header; this is the check that the row behind it still exists.
+    // Nothing is read back from the database, and that is deliberate rather
+    // than an omission. `RequireActor` resolved this credential from the
+    // Authorization header and verified the account behind it before this
+    // handler ran, so every field below is a property of a credential the
+    // server has already checked. Re-reading the row would add a query whose
+    // only possible outcome is the value the extractor already proved.
     let account_id = actor.account_id.to_string();
     let scopes: Vec<String> = actor.scopes.iter().map(|s| s.as_str().to_owned()).collect();
     let via = match actor.via {
