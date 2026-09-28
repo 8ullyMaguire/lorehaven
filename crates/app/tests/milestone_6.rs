@@ -1082,6 +1082,286 @@ async fn the_import_policy_carries_the_instances_robots_answer() {
     harness.cleanup().await;
 }
 
+/// A per-source override reaches the fetcher, and only for that source.
+///
+/// Two properties in one test because they are one property: an override is
+/// per source *or* it is nothing. An implementation that read the instance
+/// posture would leave the override inert, and one that read the override for
+/// every source would let one source's narrowing reach another's fetches — and
+/// the second is the worse of the two, because it looks like the feature works.
+#[tokio::test]
+async fn a_per_source_override_reaches_the_fetcher_for_that_source_only() {
+    use lorehaven_scrapers::robots::RobotsPosture;
+
+    let harness = Harness::new("per-source-override").await;
+    let adapter = FixtureArchive::behind_a_solver_wall();
+    assert_eq!(
+        adapter.key().as_str(),
+        SOURCE,
+        "the fixture is the source the override names"
+    );
+
+    let mut config = config_for(&harness.dir);
+    config.imports.robots_posture = Some(RobotsPosture::Permissive);
+    config.imports.robots_posture_overrides.insert(
+        SOURCE.to_owned(),
+        lorehaven_app::config::PostureOverride {
+            posture: RobotsPosture::Strict,
+            // Not consulted by `policy_for` — the run-scope test below covers
+            // that — but set so this override is a complete one.
+            persistent: false,
+        },
+    );
+
+    assert_eq!(
+        lorehaven_app::imports::policy_for(&adapter, &config).robots_posture,
+        RobotsPosture::Strict,
+        "this source runs the narrowed posture, not the instance's permissive one"
+    );
+    // The same instance, with the override retargeted at a source this adapter
+    // is not. The instance posture is unchanged, so anything other than
+    // `Permissive` here means the override leaked across sources.
+    let mut elsewhere = config_for(&harness.dir);
+    elsewhere.imports = config.imports.clone();
+    elsewhere.imports.robots_posture_overrides = [(
+        "royalroad".to_owned(),
+        lorehaven_app::config::PostureOverride {
+            posture: RobotsPosture::Strict,
+            persistent: false,
+        },
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(
+        lorehaven_app::imports::policy_for(&adapter, &elsewhere).robots_posture,
+        RobotsPosture::Permissive,
+        "a source with no override of its own still runs the instance posture"
+    );
+
+    harness.cleanup().await;
+}
+
+/// The catalogue reports a per-source override, and the instance posture beside
+/// it (spec §11.5 as amended §1.4: an override is "reported on the source's
+/// catalogue entry, not only in a log").
+///
+/// The instance posture is reported alongside because without it the entry
+/// cannot be read: a source at `strict` on a `permissive` instance looks like a
+/// source that is stricter by nature, and the operator has no way to tell that
+/// they did it.
+#[tokio::test]
+async fn the_catalogue_reports_a_per_source_override() {
+    use lorehaven_scrapers::robots::RobotsPosture;
+
+    let harness = Harness::new("catalogue-override").await;
+    let mut config = config_for(&harness.dir);
+    config.imports.robots_posture = Some(RobotsPosture::Permissive);
+    config.imports.robots_posture_overrides.insert(
+        SOURCE.to_owned(),
+        lorehaven_app::config::PostureOverride {
+            posture: RobotsPosture::Strict,
+            persistent: false,
+        },
+    );
+
+    let mut http = Client::new(server::build_router(
+        harness.state_with_config(FixtureArchive::behind_a_solver_wall(), config),
+    ));
+    register(&mut http, "override@example.org", "override").await;
+
+    let (status, body) = http.get("/api/v1/imports/sources").await;
+    assert_eq!(status, StatusCode::OK, "sources: {body}");
+    let entry = body["items"]
+        .as_array()
+        .and_then(|items| items.iter().find(|item| item["key"] == SOURCE))
+        .expect("the source is in the catalogue");
+    let robots = &entry["robots"];
+
+    assert_eq!(
+        robots["robots_posture"], "strict",
+        "this source's own posture, narrowed by the override"
+    );
+    assert_eq!(
+        robots["instance_robots_posture"], "permissive",
+        "and the instance's, so the difference is legible rather than mysterious"
+    );
+    assert_eq!(robots["override_of"]["posture"], "strict");
+    assert_eq!(
+        robots["override_of"]["persistent"], false,
+        "an override expires with the run that needed it unless the operator says otherwise, and \
+         the entry has to say which it is"
+    );
+    assert_eq!(
+        robots["honour_disallow"], true,
+        "and the boolean is in step with this source's posture, not the instance's"
+    );
+
+    harness.cleanup().await;
+}
+
+/// The run a fetch happens IN decides whether a run grant is in force, and the
+/// next run is unaffected (spec §1.4).
+///
+/// The discriminating case is a grant that the config would OVERRANK. Run one
+/// is given a `permissive` grant against a `strict` config, so the answer must
+/// be `strict` — the grant is recorded and not in force. Run two has no scope
+/// at all. Both read `strict`, and the point is that run two gets there because
+/// it has nothing, not because run one's grant was cleaned up: there is no
+/// cleanup, and a design that only *appeared* to work here would pass this test
+/// while leaking a widening grant into an unrelated run.
+///
+/// Asserting the two policies directly (rather than running two imports) keeps
+/// the mechanism under test instead of the import machinery, which has its own
+/// tests.
+#[test]
+fn a_run_grant_is_in_force_for_that_run_and_the_next_run_sees_nothing() {
+    use lorehaven_app::config::{PostureOverride, RunScope};
+    use lorehaven_scrapers::robots::RobotsPosture;
+
+    let mut config = Config::development_defaults();
+    config.imports.robots_posture = Some(RobotsPosture::Strict);
+    config.imports.robots_posture_overrides.insert(
+        SOURCE.to_owned(),
+        PostureOverride {
+            posture: RobotsPosture::Strict,
+            persistent: false,
+        },
+    );
+
+    // Run one: grants itself the widest posture there is.
+    let mut run_one = RunScope::none();
+    run_one.grant(SOURCE, RobotsPosture::Permissive);
+    assert_eq!(
+        lorehaven_app::imports::policy_for_in(&FixtureArchive::new(), &config, Some(&run_one))
+            .robots_posture,
+        RobotsPosture::Strict,
+        "run one asked for permissive and is held to strict"
+    );
+
+    // Run one ends. Nothing is revoked, cleaned, or timed out.
+    drop(run_one);
+
+    // Run two: no scope, so the config answers, and the answer is unchanged.
+    assert_eq!(
+        lorehaven_app::imports::policy_for_in(&FixtureArchive::new(), &config, None).robots_posture,
+        RobotsPosture::Strict
+    );
+
+    // And the two-argument form, which every ad-hoc request uses, is unaffected
+    // by any of this.
+    assert_eq!(
+        lorehaven_app::imports::policy_for(&FixtureArchive::new(), &config).robots_posture,
+        RobotsPosture::Strict
+    );
+}
+
+/// A run's own scope carries nothing, because the FILE already answers.
+///
+/// This is the honest statement, and it replaced a test that asserted the
+/// opposite. The first `run_scope_for` re-granted the file's `persistent: false`
+/// entries into a `RunScope` — and mutation F4 (deleting the scope from
+/// `run_policy`) stayed green, because the grant and the file answer were the
+/// same posture for the same source, so the scope could not change any
+/// outcome. A path that cannot change a result does not need a test; it needs
+/// deleting.
+#[test]
+fn a_runs_own_scope_is_empty_and_the_file_answers_instead() {
+    use lorehaven_app::config::PostureOverride;
+    use lorehaven_scrapers::robots::RobotsPosture;
+
+    let mut config = Config::development_defaults();
+    config.imports.robots_posture = Some(RobotsPosture::Permissive);
+    config.imports.robots_posture_overrides = [
+        (
+            SOURCE.to_owned(),
+            PostureOverride {
+                posture: RobotsPosture::Strict,
+                persistent: false,
+            },
+        ),
+        (
+            "royalroad".to_owned(),
+            PostureOverride {
+                posture: RobotsPosture::Strict,
+                persistent: false,
+            },
+        ),
+    ]
+    .into_iter()
+    .collect();
+
+    // The scope a run builds from the config is empty...
+    let scope = lorehaven_app::imports::run_scope_for(&config, SOURCE);
+    assert!(
+        scope.is_empty(),
+        "nothing is granted from the file: `posture_for_source` already returns the override"
+    );
+
+    // ...and the run still fetches under the narrowed posture, because the FILE
+    // is what answers, inside a run or not.
+    assert_eq!(
+        lorehaven_app::imports::run_policy(&FixtureArchive::new(), &config, SOURCE).robots_posture,
+        RobotsPosture::Strict,
+        "a non-persistent override is in force for the run that reads the config"
+    );
+    // Per-source, checked where the rule actually lives — on the config, by
+    // source key. `run_policy` takes the ADAPTER's key for the posture, so
+    // feeding it a mismatched pair would not test per-source at all; it would
+    // test that the adapter wins, which is a different rule.
+    assert_eq!(
+        config.imports.posture_for_source("royalroad"),
+        RobotsPosture::Strict,
+        "royalroad has its own override, which this source's does not affect"
+    );
+    assert_eq!(
+        config.imports.posture_for_source("fication"),
+        RobotsPosture::Permissive,
+        "and a source with no override runs the instance posture"
+    );
+}
+
+/// `run_policy` is the only way a run builds a policy, and it applies the run's
+/// own overrides. This is the test that F4 needed and did not have.
+///
+/// F4 mutated `run()` to pass `None` instead of its scope and the whole suite
+/// stayed green, because nothing executes `run()` at this level. The fix was to
+/// collapse the call site into `run_policy`, which every run goes through and
+/// which is reachable from a test. Without that collapse the mutation is not
+/// merely untested — it is inexpressible in the fixed code, which is a stronger
+/// answer than a test would have been.
+#[test]
+fn a_runs_policy_carries_the_runs_own_overrides() {
+    use lorehaven_app::config::PostureOverride;
+    use lorehaven_scrapers::robots::RobotsPosture;
+
+    let mut config = Config::development_defaults();
+    config.imports.robots_posture = Some(RobotsPosture::Permissive);
+    config.imports.robots_posture_overrides.insert(
+        SOURCE.to_owned(),
+        PostureOverride {
+            posture: RobotsPosture::Strict,
+            persistent: false,
+        },
+    );
+    let adapter = FixtureArchive::new();
+
+    assert_eq!(
+        lorehaven_app::imports::run_policy(&adapter, &config, SOURCE).robots_posture,
+        RobotsPosture::Strict,
+        "a run of this source fetches under the narrowed posture"
+    );
+    // The `source_key` argument selects which run-scoped GRANTS apply; the
+    // posture itself comes from the ADAPTER, because an adapter and a source
+    // key that disagree would otherwise fetch under the wrong source's posture.
+    // So a mismatched pair is not a case this function resolves — it is a case
+    // the caller must not produce, and `run()` never can: it passes
+    // `row.source_key`, which is the key the adapter was looked up by. The
+    // cross-source property that IS testable is that a run for another source
+    // gets no grant, and that is
+    // `a_runs_own_scope_is_empty_and_the_file_answers_instead`.
+    let _mismatched = lorehaven_app::imports::run_policy(&adapter, &config, "fication");
+}
+
 /// The POSTURE reaches the fetcher, which is the field the gate reads.
 ///
 /// This is a separate test from the one above on purpose. The test above

@@ -36,7 +36,7 @@ use lorehaven_scrapers::{
     Credentials, FetchPolicy, Fetcher, SafeFetcher, SourceAdapter, SourceKey, SourceWork,
 };
 
-use crate::config::Config;
+use crate::config::{Config, RunScope};
 
 /// The fetch policy for one source, as this instance builds it.
 ///
@@ -48,6 +48,77 @@ use crate::config::Config;
 /// read, which is the kind of difference nobody notices until a reader reports
 /// it.
 pub fn policy_for(adapter: &dyn SourceAdapter, config: &Config) -> FetchPolicy {
+    policy_for_in(adapter, config, None)
+}
+
+/// The fetch policy for a run of `source_key`, with that run's overrides applied.
+///
+/// The one way a run builds a policy. `run()` calls this rather than pairing
+/// `policy_for_in` with a scope it built itself, because that pairing is
+/// exactly where a dropped scope hides: both halves are correct, the call site
+/// is wrong, and nothing fails. Taking the source key here means a run cannot
+/// fetch under a posture that its own overrides do not describe.
+pub fn run_policy(adapter: &dyn SourceAdapter, config: &Config, source_key: &str) -> FetchPolicy {
+    let scope = run_scope_for(config, source_key);
+    policy_for_in(adapter, config, Some(&scope))
+}
+
+/// The temporary overrides in force for a run of `source_key`.
+///
+/// Extracted from `run()` because the selection has rules worth testing and
+/// `run()` is not testable at that level: which overrides are granted, to
+/// which source, and which are not granted at all. While this was inline in
+/// `run()`, two mutations survived — dropping the scope entirely, and inverting
+/// the `persistent` check — because nothing outside `run()` could reach the
+/// decision. A rule that only the largest function in the file can exercise is
+/// a rule that is not tested.
+///
+/// A `persistent: false` override is the operator saying "this source, this
+/// time". It reaches the run through the FILE — `posture_for_source` already
+/// returns it for every lookup, inside a run or not — and the scope exists for
+/// grants that come from somewhere ELSE: a caller that has to unblock one fetch
+/// part-way through a run it has already started.
+///
+/// An earlier version had this function re-grant the file's `persistent: false`
+/// entries. That was dead weight, and provably so: the file's answer and the
+/// grant's answer were the same posture for the same source, so
+/// `narrowest(run, file)` returned the same value either way. Mutation F4 —
+/// deleting the scope from `run_policy` — stayed green, because the scope
+/// genuinely could not change any outcome. A second path to an answer that the
+/// first path already gives is not redundancy, it is a second answer, and it
+/// costs a test to try to pin down.
+///
+/// So the split is: the file says what a source runs under (permanently or for
+/// the next run, per `persistent`), and a `RunScope` carries only what a caller
+/// decided mid-run. Both are narrowed to the file's posture on read, so neither
+/// can widen anything.
+pub fn run_scope_for(config: &Config, source_key: &str) -> RunScope {
+    // Nothing is granted from the file: `posture_for_source` already returns a
+    // `persistent: false` override for every lookup, so a grant here would be a
+    // second copy of an answer that is already correct. The scope is the channel
+    // for grants that come from somewhere else, and today no caller in this
+    // crate needs one — so the ordinary run's scope is empty and a caller that
+    // does need to unblock a fetch mid-run builds its own `RunScope` and passes
+    // it to `policy_for_in`.
+    let _ = (config, source_key);
+    RunScope::none()
+}
+
+/// The fetch policy for one source, given a run that may be holding temporary
+/// overrides of its own.
+///
+/// The two-argument form is what an ad-hoc request (a preview, a probe, a
+/// connectivity check) should call: there is no run, so there is nothing a
+/// run-scoped override could legitimately apply to. `run()` passes
+/// `Some(&scope)`. Keeping both, rather than defaulting the parameter, is
+/// deliberate — a default argument would let a future call site pick up run
+/// overrides by accident, and an ad-hoc fetch silently inheriting one run's
+/// grant is precisely the leak `RunScope` exists to prevent.
+pub fn policy_for_in(
+    adapter: &dyn SourceAdapter,
+    config: &Config,
+    run: Option<&RunScope>,
+) -> FetchPolicy {
     let mut policy = FetchPolicy::for_source(adapter.capabilities());
     policy.unblock = config.imports.unblock_for(adapter);
     // The instance's answer to the source's own `robots.txt`, applied here so
@@ -58,7 +129,14 @@ pub fn policy_for(adapter: &dyn SourceAdapter, config: &Config) -> FetchPolicy {
     // leaving `honour_robots` to be consulted at the point of use. Two fields
     // that both look authoritative and disagree is the shape this change
     // exists to remove.
-    policy.robots_posture = config.imports.resolved_robots_posture();
+    // Per source, not per instance: an override for this adapter's key narrows
+    // what this fetch may do, and the narrowing was already checked against the
+    // instance posture at config load. Read through `posture_for_source` rather
+    // than the instance posture directly, so an adapter cannot be exempt from an
+    // operator's setting by being on a code path that forgot to ask.
+    policy.robots_posture = config
+        .imports
+        .posture_for_source_in(adapter.key().as_str(), run);
     // Kept in step with the posture so a caller that still reads the
     // compatibility field sees the same answer rather than the raw config
     // value, which may have been overridden by a deliberate posture.
@@ -233,7 +311,16 @@ pub async fn run(
         }
     };
 
-    let policy = policy_for(adapter, state.config());
+    // The run's temporary overrides, gathered once and dropped when this
+    // function returns. Nothing to clean up: the value goes out of scope with
+    // the run, which is the whole of the expiry mechanism (see `RunScope`).
+    // `run_policy`, not `policy_for` + a scope built by hand. This call site was
+    // the last place that could forget the scope, and a mutation that dropped it
+    // (`Some(&run_scope)` -> `None`) survived the whole suite, because no test
+    // runs `run()`. Collapsing the pair into one function that cannot be called
+    // without a scope means the omission is no longer expressible here: a
+    // mutation can only break the function's body, which the unit tests reach.
+    let policy = run_policy(adapter, state.config(), &row.source_key);
     let mut fetcher = SafeFetcher::new(adapter.hosts(), policy);
     let mut credentialed = false;
     if let Some(credentials) = &credentials {

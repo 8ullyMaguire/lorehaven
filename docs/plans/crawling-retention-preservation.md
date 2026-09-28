@@ -3,7 +3,7 @@
 **Date:** 2026-09-27
 **Spec:** `docs/spec-amendments/crawling-retention-and-preservation.md`
 **Milestone:** M59
-**Status:** Phases A0 and A.1–A.4 built and green. Phases A.5, B, C1, C, D, E
+**Status:** Phases A0 and A.1–A.5 built and green. Phases B, C1, C, D, E
 not started.
 
 Read the amendment before this file. This file is the build order, the file
@@ -441,6 +441,87 @@ exercises a path the cache never takes), and `cargo fmt` had silently reflowed
 that arm back to a hardcoded `""` between two edits. `cargo fmt` erasing a
 binding is worth watching for in any test whose fixture carries data.
 
+**A.5 mutations** (`scratch/prove_a5.sh`, all nine turn the suite red):
+
+| # | mutation | caught by |
+|---|---|---|
+| E1 | the rank inverted — `Strict` ranked 2, still compared `<=` | `narrowing_is_reported_for_every_pair` |
+| E2 | the comparison flipped to `>=` | same |
+| E3 | the narrowing check removed entirely | `a_per_source_override_may_only_narrow`, `a_widening_override_stops_startup` |
+| E4 | a widening override **clamped** to the instance instead of refused | `a_widening_override_is_refused_by_name`, `a_widening_override_stops_startup` |
+| E5 | `posture_for_source` always returns the instance posture | `a_per_source_override_reaches_the_fetcher_for_that_source_only`, `the_catalogue_reports_a_per_source_override` |
+| E6 | `policy_for` reads the instance posture directly | `a_per_source_override_reaches_the_fetcher_for_that_source_only` |
+| E7 | the override key is not lowercased | `an_override_key_is_matched_case_insensitively` |
+| E8 | an override with no `posture` defaulted to `strict` | `an_override_with_no_posture_key_is_dropped_rather_than_defaulted` |
+| E9 | the catalogue reports the instance posture on every entry | `the_catalogue_reports_a_per_source_override` |
+
+**A.5b mutations — the run scope** (`scratch/prove_a5b.sh`):
+
+| # | mutation | caught by |
+|---|---|---|
+| F1 | `narrowest` returns the WIDER of the two, so a run grant wins | `a_run_grant_cannot_widen_what_the_config_allows`, `a_run_grant_is_in_force_for_that_run_and_the_next_run_sees_nothing`, `the_catalogue_reports_a_per_source_override` |
+| F2 | `caution_rank` inverted (`Strict = 2`) | 6 unit tests + `a_run_grant_is_in_force_for_that_run_and_the_next_run_sees_nothing` |
+| F3 | `posture_for_source_in` ignores the run entirely | `a_run_grant_cannot_widen_what_the_config_allows` |
+| F4 | `run_policy` drops its scope (`Some(&scope)` → `None`) | **vacuous — see below** |
+| F5 | the `persistent` check inverted, so only persistent grants apply | **vacuous — same finding as F4** |
+| F6 | the run grant key is not normalised | `a_run_scope_matches_its_source_key_the_way_the_config_does` |
+
+**F4 survived, and it was right to.** Extracting `run_scope_for` and `run_policy`
+put the decision within reach of a test, F5 then died, and F4 still would not.
+The reason is that the scope was **redundant**: `posture_for_source` already
+returns a `persistent: false` override on every lookup, so a run's grant and the
+file's answer were the same posture for the same source and
+`narrowest(run, file)` returned the same value whichever path it came from. A
+path that cannot change an outcome is not a path that needs a test — it is dead
+weight, and the correct response was to delete it. `run_scope_for` now returns an
+empty `RunScope`, the file answers, and F4 is recorded as vacuous rather than
+quietly deleted from the table: a mutation that cannot be killed because the code
+it targets does nothing is a *finding*, and the finding is "this path is
+redundant", not "the test suite is fine".
+
+`RunScope` survives as the channel for grants that come from somewhere other
+than the file — a caller that must unblock one fetch part-way through a run it
+has already started. No caller in this crate needs one yet, and
+`posture_for_source_in` narrows any such grant to the file's posture so it can
+never widen anything. Building the channel before the caller is deliberate: the
+alternative is a future caller reaching for the config when what it needs is a
+grant, and reaching for the config is how a temporary decision becomes a
+permanent setting.
+
+**F5 arrived at the same place from the other direction.** Inverting the
+`persistent` check turned the suite red — but only because a test asserted the
+redundant behaviour, and that test was deleted along with the redundancy. With
+both gone there is nothing left for F5 to break, because there is no longer any
+code that reads `persistent` to decide what a run is granted. Two mutations, two
+apparently different rules, one finding: the run-scope channel was carrying a
+copy of an answer the config already gave.
+
+The `a_run_is_granted_only_its_own_non_persistent_overrides` test was removed
+with it. A test for behaviour that no longer exists is worse than no test — it
+pins a shape back in place the moment someone reads the table and assumes the
+table is the spec.
+
+**E1 is the real bug, and it was live for a while.** The first `rank` ranked
+`Strict = 0` and compared with `>=` — which reads correctly at a glance and is
+exactly backwards: it lets a `strict` instance accept a `permissive` override,
+the one thing the rule exists to prevent. The second attempt ranked
+`Strict = 2` with `<=`, which is also wrong and subtler: it refuses the
+harmless case of an override *equal* to the instance, because a strict instance
+then rejects `strict`. Only `Strict = 0` with `<=` satisfies all nine pairs.
+Both halves have to move together, and a test of one pair cannot tell an
+inverted order from a correct one — hence the full 3x3 in both crates.
+
+**The mutation runner had a bug worth recording too.** It snapshotted files to
+`/tmp/a5_<basename>.rs`, and `imports.rs` names two different files in this repo
+(`crates/app/src/imports.rs` and `crates/app/src/routes/imports.rs`). The
+second `cp` silently overwrote the first, so `restore` put back the wrong file
+and E1 through E9 all reported the same unrelated compile error — which reads as
+"the mutations survived" and was really one broken snapshot. The runner now
+snapshots to a per-crate filename in its own directory, and `restore` runs
+`cargo build` afterwards: a mutation that unbalances a brace would otherwise
+make every *later* result meaningless while looking like evidence. A runner that
+does not verify its own restore is a runner whose output cannot be trusted.
+
 **D1's test is the one worth recording, because the first version of it was
 worthless.** It asserted on a real `get_with_class` call, which needs DNS; the
 `if let Ok(...)` never matched, the test passed, and it would have kept passing
@@ -461,6 +542,46 @@ Expiry is not a timer: the override is consulted through an
 `OverrideScope` handed to the import runner and dropped when the run ends, so
 there is no clock and nothing to clean up. A process that outlives one run
 holds the override in the same `RunScope` value the robots TTL already uses.
+
+**As built (A.5):** the override is
+`config.imports.posture_for_source(key) -> RobotsPosture`, consulted by
+`imports::policy_for` per adapter. The narrowing check is
+`robots::resolve_source_override(source, asked, instance)`, which returns
+`Err(WideningRefused { source, asked, instance })` at load time. Ranking is
+`Strict = 0 < MetadataOnly = 1 < Permissive = 2` — **low is the most
+cautious** — and the rule is `rank(asked) <= rank(instance)`, asserted over
+all nine pairs in both `scrapers` and `app` because a single pair cannot
+distinguish an inverted order from a correct one. The catalogue entry
+(`GET /api/v1/imports/sources`) reports `robots_posture` (this source),
+`instance_robots_posture` (the instance's), and `override_of`
+(`{posture, persistent}` or `null`), so "why is this one stricter?" is
+answerable on the page. An entry with no `posture` key is **dropped, not
+defaulted to `strict`** — defaulting would apply a narrowing nobody wrote.
+Keys are trimmed and lowercased, so a config naming `AO3` still reaches the
+`ao3` adapter. **Run scope (the second half of A.5, now built).** `config::RunScope` holds
+temporary per-source grants, and it expires by being **dropped**: `run()` builds
+one, passes it to `policy_for_in`, and the value dies with the run. There is no
+clock and nothing to sweep. `imports::run_scope_for(config, source_key)`
+decides which grants apply — a run gets its own source's `persistent: false`
+entries and nothing else, since a `persistent: true` override is already in the
+config file and needs no grant of its own. A run grant is **outranked, not
+refused**: `posture_for_source_in` takes `robots::narrowest(run, file)`, so a
+caller that grants itself `permissive` against a `strict` config still fetches
+under `strict`. `caution_rank` and `narrowest` live in `robots.rs` and are the
+only order in the codebase.
+
+`run()` calls `run_policy(adapter, config, source_key)` rather than pairing
+`policy_for_in` with a scope it built itself, so a dropped scope is not
+expressible at the call site. That collapse was forced by mutation F4 — see the
+A.5b table for why F4 turned out to be a finding about redundancy rather than a
+missing test.
+
+**The scope is empty for a config-derived run, and that is the correct design
+rather than an unfinished one.** `posture_for_source` already returns a
+`persistent: false` override on every lookup, so the run's own scope would carry
+the same posture from the same source and change no answer. The file decides
+what a source runs under; a `RunScope` exists for a grant that comes from
+somewhere else.
 
 ### A.6 Verification
 

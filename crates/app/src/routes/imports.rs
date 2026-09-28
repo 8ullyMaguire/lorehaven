@@ -294,22 +294,59 @@ struct RobotsView {
     /// that switching `honour_disallow` off cannot read as switching off the
     /// politeness rules beside it.
     honour_crawl_delay: bool,
-    /// The resolved posture, spelled as an operator wrote it. This is the
-    /// authoritative field; `honour_disallow` cannot express `metadata_only`
-    /// and is kept only for clients that predate it.
+    /// The posture THIS source runs under, spelled as an operator wrote it.
+    ///
+    /// May differ from the instance posture when the source has a narrowing
+    /// override (spec §11.5 as amended §1.4). It is authoritative for the entry
+    /// it appears on; `instance_robots_posture` is what a reader on the instance
+    /// sees, and the two are reported together so "why is this one stricter?" has
+    /// an answer on the page.
     robots_posture: &'static str,
+    /// The instance-wide posture, for comparison with the one above.
+    instance_robots_posture: &'static str,
+    /// Whether this source has a narrowing override, and whether it outlives the
+    /// import run that justified it.
+    ///
+    /// `null` when there is no override. Reported rather than inferred from a
+    /// differing `robots_posture`, because "no override" and "an override equal
+    /// to the instance" are the same posture and different facts.
+    override_of: Option<SourceOverrideView>,
     /// What happens to a forbidden path under this posture.
     note: &'static str,
 }
 
+/// A per-source narrowing override, as the catalogue reports it.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SourceOverrideView {
+    /// The narrowed posture.
+    pub posture: &'static str,
+    /// Whether it outlives the import run that needed it. §1.4's default is that
+    /// it does not, so an operator has to say so explicitly to get persistence.
+    pub persistent: bool,
+}
+
 impl RobotsView {
-    fn of(config: &crate::config::Config) -> Self {
+    fn of(config: &crate::config::Config, source_key: &str) -> Self {
         use lorehaven_scrapers::robots::RobotsPosture;
         // The RESOLVED posture, not the raw boolean. An operator who set
         // `robots_posture = strict` while a stale `honour_robots = false` sat in
         // the same file is running strict, and a view that reported the boolean
         // would tell them the opposite of what is happening.
-        let posture = config.imports.resolved_robots_posture();
+        let instance_posture = config.imports.resolved_robots_posture();
+        // This source's own posture, which an override may have narrowed.
+        let posture = config.imports.posture_for_source(source_key);
+        let override_of =
+            config
+                .imports
+                .robots_posture_overrides
+                .get(source_key)
+                .map(|override_| SourceOverrideView {
+                    posture: override_.posture.as_str(),
+                    persistent: override_.persistent,
+                });
+        // Read before the struct literal moves it, so the note below can still
+        // ask whether there was an override.
+        let has_override = override_of.is_some();
         Self {
             // Still a bool on the wire, because this field predates the posture
             // and a client may read it. It is the honest reading for exactly
@@ -318,8 +355,11 @@ impl RobotsView {
             honour_disallow: !matches!(posture, RobotsPosture::Permissive),
             honour_crawl_delay: true,
             robots_posture: posture.as_str(),
+            instance_robots_posture: instance_posture.as_str(),
+            override_of,
             // The note names the setting that ACTUALLY decided the answer, which
-            // is not always the posture.
+            // is not always the posture, and is a per-source override when there
+            // is one.
             //
             // A first version always wrote `imports.robots_posture =
             // permissive`, which is wrong whenever the instance got there the
@@ -329,14 +369,23 @@ impl RobotsView {
             // editing it would be a no-op: the value is already `permissive`. An
             // error message that names the wrong key is worse than none, because
             // the reader acts on it.
-            note: match (posture, config.imports.robots_posture) {
+            note: match (posture, config.imports.robots_posture, has_override) {
                 // Strict is the default and the note never has to point at a
                 // key: there is nothing to undo, and the sentence describes the
                 // behaviour rather than blaming a setting for it.
-                (RobotsPosture::Strict, _) => {
+                (RobotsPosture::Strict, _, true) => {
+                    "a narrowing override makes this source stricter than the instance: paths \
+                     a source's robots.txt forbids are refused, and the failure names the rule"
+                }
+                (RobotsPosture::Strict, _, _) => {
                     "paths a source's robots.txt forbids are refused, and the failure names the rule"
                 }
-                (RobotsPosture::MetadataOnly, _) => {
+                (RobotsPosture::MetadataOnly, _, true) => {
+                    "a narrowing override makes this source stricter than the instance: a \
+                     forbidden metadata path is read and discarded, and a forbidden content or \
+                     media path is refused. Set with `imports.robots_posture_overrides`"
+                }
+                (RobotsPosture::MetadataOnly, _, _) => {
                     "a forbidden metadata path is read and discarded, and a forbidden content or \
                      media path is refused; nothing read under this posture is stored. Set with \
                      `imports.robots_posture = metadata_only`"
@@ -344,12 +393,12 @@ impl RobotsView {
                 // Permissive arrived at through the deprecated key, so name that
                 // key: it is the one the operator wrote, and the only one whose
                 // removal would change the answer.
-                (RobotsPosture::Permissive, None) => {
+                (RobotsPosture::Permissive, None, _) => {
                     "this instance reads paths a source's robots.txt forbids, under \
                      `imports.honour_robots = false`; the source's own crawl delay is still \
                      enforced"
                 }
-                (RobotsPosture::Permissive, Some(_)) => {
+                (RobotsPosture::Permissive, Some(_), _) => {
                     "this instance reads paths a source's robots.txt forbids, under \
                      `imports.robots_posture = permissive`; the source's own crawl delay is \
                      still enforced"
@@ -409,13 +458,15 @@ async fn list_sources(
                 health: row.map_or_else(|| "unknown".to_owned(), |row| row.health.clone()),
                 last_checked_at: row.and_then(|row| row.last_checked_at.clone()),
                 capabilities: capabilities_of(adapter.as_ref()),
-                // The instance's own answer to every source's `robots.txt`,
-                // carried on each entry because this is the page an operator
-                // reads before wondering why one archive refuses. Instance-wide
-                // and therefore identical everywhere, which is the point: a
-                // per-source answer would be one an operator could set once and
-                // later be wrong about (spec §11.5).
-                robots: RobotsView::of(state.config()),
+                // This source's own answer to its `robots.txt`, carried on each
+                // entry because this is the page an operator reads before
+                // wondering why one archive refuses. Per source, because a
+                // narrowing override makes one source's answer differ from the
+                // instance's — and an operator staring at a stricter entry needs
+                // the instance's answer beside it to understand why (spec §11.5
+                // as amended §1.4). The override is run-scoped, so this is
+                // reported as an override rather than as the source's nature.
+                robots: RobotsView::of(state.config(), key.as_str()),
             }
         })
         .collect();
@@ -435,7 +486,7 @@ async fn list_sources(
                 health: row.health.clone(),
                 last_checked_at: row.last_checked_at.clone(),
                 capabilities: serde_json::json!({ "known": false }),
-                robots: RobotsView::of(state.config()),
+                robots: RobotsView::of(state.config(), &row.key),
             }),
     );
 

@@ -138,6 +138,125 @@ impl RobotsPosture {
 /// beat `honour_robots = false` on every existing config, so the compatibility
 /// key was accepted by the parser and ignored by the fetcher — which is worse
 /// than not having it, because the operator's own words are in the file.
+/// What happened when a per-source override asked for a posture wider than the
+/// instance's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WideningRefused {
+    /// The source the override named.
+    pub source: String,
+    /// What the override asked for.
+    pub asked: RobotsPosture,
+    /// What the instance runs, which is narrower.
+    pub instance: RobotsPosture,
+}
+
+impl std::fmt::Display for WideningRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "imports.robots_posture_overrides[\"{}\"] asks for `{}`, which is WIDER than this \
+             instance's `{}`. A per-source override may only narrow: the instance posture is the \
+             ceiling, and a source cannot be granted more than the instance has. Set the \
+             instance's own `imports.robots_posture` to `{}` if that is what you want for every \
+             source.",
+            self.source,
+            self.asked.as_str(),
+            self.instance.as_str(),
+            self.instance.as_str(),
+        )
+    }
+}
+
+impl std::error::Error for WideningRefused {}
+
+/// Whether `narrower` is at least as cautious as `wider`.
+///
+/// **The order is caution, not severity.** `Strict` is the most cautious and
+/// `Permissive` the least, and the check is `>=` on that ordering — so
+/// narrowing means moving *up* this list. The table:
+///
+/// | instance \| override | `strict` | `metadata_only` | `permissive` |
+/// |---|---|---|---|
+/// | `strict` | ok | **refused** | **refused** |
+/// | `metadata_only` | ok | ok | **refused** |
+/// | `permissive` | ok | ok | ok |
+///
+/// Two properties make this the right place to put the answer rather than at
+/// the call site. It is a total order, so `>=` is the whole rule and there is no
+/// third case to forget. And it is a *rank*, not a permission list, so adding a
+/// posture later is a compile error in the one place that ranks them, rather
+/// than a new row somebody has to remember to add to a table of pairs.
+/// How cautious a posture is, on one shared scale.
+///
+/// **Low is the most cautious**: `Strict` is 0, `Permissive` is 2. Public
+/// because a second place needs the same order — taking the narrower of two
+/// postures — and a second place with its own idea of the order is how the
+/// narrow-one rule came to be implemented backwards the first time. Every
+/// comparison in the codebase goes through this, and
+/// `narrowing_is_reported_for_every_pair` pins all nine pairs.
+#[must_use]
+pub fn caution_rank(posture: RobotsPosture) -> u8 {
+    match posture {
+        RobotsPosture::Strict => 0,
+        RobotsPosture::MetadataOnly => 1,
+        RobotsPosture::Permissive => 2,
+    }
+}
+
+/// The more cautious of two postures, and the one a run honours when the run and
+/// the config disagree.
+#[must_use]
+pub fn narrowest(a: RobotsPosture, b: RobotsPosture) -> RobotsPosture {
+    if caution_rank(a) <= caution_rank(b) {
+        a
+    } else {
+        b
+    }
+}
+
+#[must_use]
+pub fn narrows_or_equals(override_posture: RobotsPosture, instance: RobotsPosture) -> bool {
+    // Deliberately written as a comparison of ranks so a fourth variant cannot
+    // be added without deciding where it sits. Written as explicit `match` pairs
+    // it would compile, and the new variant would be unranked and unrefused.
+    // Delegated rather than re-ranked, so there is exactly ONE order in the
+    // codebase. An earlier version carried its own `fn rank` here, and a caller
+    // in `config.rs` grew a second one for the same comparison; the two
+    // disagreed and the narrower-of-two rule picked the wider posture. One
+    // scale, named, in the module that owns the enum.
+    caution_rank(override_posture) <= caution_rank(instance)
+}
+
+/// Resolve a per-source override against the instance posture, refusing a
+/// widening one by name (spec §11.5 as amended §1.4).
+///
+/// §11.5 originally refused a per-source switch outright because "an override
+/// could be made once and forgotten about". The objection was to *persistence*,
+/// not to granularity, so the granular form is allowed with the two conditions
+/// this function enforces: it may only narrow, and it is consulted through a run
+/// scope that is dropped when the run ends.
+///
+/// A refused override is an error rather than a silent clamp, because a clamp
+/// is indistinguishable from compliance: the operator set `strict` for one
+/// source, the instance stayed `permissive`, and the source was crawled
+/// permissively with nothing anywhere saying so. Refusing at load means the
+/// instance does not start with a setting the operator believes is in force.
+pub fn resolve_source_override(
+    source: &str,
+    asked: RobotsPosture,
+    instance: RobotsPosture,
+) -> Result<RobotsPosture, WideningRefused> {
+    if narrows_or_equals(asked, instance) {
+        Ok(asked)
+    } else {
+        Err(WideningRefused {
+            source: source.to_owned(),
+            asked,
+            instance,
+        })
+    }
+}
+
 pub fn resolve_posture(
     posture: Option<RobotsPosture>,
     honour_robots: Option<bool>,
@@ -679,6 +798,52 @@ mod tests {
     fn the_largest_delay_in_a_group_is_used() {
         let body = "User-agent: *\nCrawl-delay: 1\nCrawl-delay: 4\n";
         assert_eq!(rules_of(body).crawl_delay(), Some(Duration::from_secs(4)));
+    }
+
+    #[test]
+    fn narrowing_is_reported_for_every_pair() {
+        // In the scrapers crate as well as in the app, because the relation
+        // lives here and a bug in it should be visible without the app in the
+        // picture. The app test asserts the same table through the config file;
+        // this one pins the function itself.
+        //
+        // Rows are the INSTANCE, columns are the OVERRIDE, both in the order
+        // (strict, metadata_only, permissive). `true` = allowed.
+        //
+        //         instance \ override   strict  metadata_only  permissive
+        //         strict                     ok     REFUSED      REFUSED
+        //         metadata_only              ok     ok           REFUSED
+        //         permissive                 ok     ok           ok
+        //
+        // Read the first row carefully: with the instance at `strict`, an
+        // override of `metadata_only` is REFUSED, because `metadata_only` reads
+        // a forbidden path and `strict` does not — so it is wider, not
+        // narrower, however much "more than strict" sounds like more caution.
+        // `strict` is the top of the caution order and nothing overtakes it.
+        let postures = [
+            RobotsPosture::Strict,
+            RobotsPosture::MetadataOnly,
+            RobotsPosture::Permissive,
+        ];
+        // `true` where the override is at least as cautious as the instance.
+        let expected = [
+            // instance is strict
+            [true, false, false],
+            // instance is metadata_only
+            [true, true, false],
+            // instance is permissive
+            [true, true, true],
+        ];
+        for (instance, row) in postures.iter().zip(expected.iter()) {
+            for (asked, allowed) in postures.iter().zip(row.iter()) {
+                assert_eq!(
+                    narrows_or_equals(*asked, *instance),
+                    *allowed,
+                    "instance {instance:?} with an override of {asked:?} is {}",
+                    if *allowed { "allowed" } else { "REFUSED" }
+                );
+            }
+        }
     }
 
     #[test]

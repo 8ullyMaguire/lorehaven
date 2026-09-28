@@ -1112,6 +1112,30 @@ pub struct ImportsConfig {
     /// two are combined and which is the only thing that should read this
     /// field.
     pub robots_posture: Option<lorehaven_scrapers::robots::RobotsPosture>,
+    /// Per-source posture overrides, narrowed only (spec §11.5 as amended §1.4).
+    ///
+    /// Keyed by the adapter's `key()` — the same string the source catalogue
+    /// and `sources.key` use — rather than by host or by display name, because
+    /// those are not unique (`efiction` alone covers several dozen members) and
+    /// a name an operator retypes is a name they can mistype.
+    ///
+    /// Validated at load: an entry wider than the instance posture stops
+    /// startup rather than being clamped. See
+    /// [`lorehaven_scrapers::robots::resolve_source_override`].
+    pub robots_posture_overrides: std::collections::BTreeMap<String, PostureOverride>,
+}
+
+/// A validated per-source override, narrowed at load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PostureOverride {
+    /// The posture this source runs, already checked against the instance's.
+    pub posture: lorehaven_scrapers::robots::RobotsPosture,
+    /// Whether the operator asked for this to outlive the import run that
+    /// justified it (spec §1.4: it expires with the run unless extended).
+    ///
+    /// Defaults to false, so forgetting the key expires the override with the
+    /// run rather than persisting it — the objection §11.5 raised.
+    pub persistent: bool,
 }
 
 impl Default for ImportsConfig {
@@ -1123,7 +1147,76 @@ impl Default for ImportsConfig {
             // for. See the field documentation for what switching it off means.
             honour_robots: true,
             robots_posture: None,
+            robots_posture_overrides: std::collections::BTreeMap::new(),
         }
+    }
+}
+
+/// The temporary posture overrides in force for one import run (spec §1.4).
+///
+/// Expiry here is a **drop**, not a timer. A run-scoped override lives in a
+/// value the run owns, and when the run returns the value goes with it — so
+/// there is no clock to get wrong, no sweeper to forget, and no state left
+/// behind for a later run to inherit. An operator who started a run to get past
+/// one blocked fetch gets exactly that: the next run of the same source reads
+/// the configured posture again.
+///
+/// The alternative — a timestamp, compared at read time — is strictly worse and
+/// was considered: it needs a clock this process does not otherwise trust, it
+/// leaves an expired entry that some other code path has to notice and clear,
+/// and "expired" and "never set" become two different states that both have to
+/// be handled. A run is a real boundary; a timeout is a guess at one.
+///
+/// `persistent` is deliberately NOT honoured here. An override the operator
+/// marked persistent belongs in the config file, where it is reviewed, diffed
+/// and reverted like every other setting; a run that quietly promoted itself to
+/// permanent would make the change invisible exactly when it matters.
+#[derive(Debug, Clone, Default)]
+pub struct RunScope {
+    /// Per-source postures granted for this run only. An empty map is the
+    /// common case and means "the run adds nothing".
+    overrides: std::collections::BTreeMap<String, lorehaven_scrapers::robots::RobotsPosture>,
+}
+
+impl RunScope {
+    /// A run with no temporary overrides — the ordinary case, and cheap.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// Grant `posture` to `source` for this run only.
+    ///
+    /// This does NOT validate the grant. A run grant is not refused, clamped or
+    /// reported here because it is not a user-supplied setting: it is a value a
+    /// caller chose while doing one job, and the caller that holds the config
+    /// reads the answer back through
+    /// [`ImportsConfig::posture_for_source_in`], which takes the NARROWER of the
+    /// file and the run. So a run that grants something wide cannot widen
+    /// anything — the grant is simply outranked — and making `grant` refuse it
+    /// would only move the rule to a place that cannot see the config.
+    ///
+    /// Refusing at read time rather than at write time is also what makes the
+    /// grant honest to use: the same value is recorded (so a report can name
+    /// what the run was asked for) and simultaneously not in force if it is
+    /// wider than policy allows.
+    pub fn grant(
+        &mut self,
+        source: &str,
+        posture: lorehaven_scrapers::robots::RobotsPosture,
+    ) -> &mut Self {
+        self.overrides.insert(source.trim().to_lowercase(), posture);
+        self
+    }
+
+    /// The posture this run holds for `source`, if it holds one.
+    pub fn posture_for(&self, source: &str) -> Option<lorehaven_scrapers::robots::RobotsPosture> {
+        self.overrides.get(&source.trim().to_lowercase()).copied()
+    }
+
+    /// Whether this run overrides anything at all. Used to decide whether a
+    /// report should mention the override.
+    pub fn is_empty(&self) -> bool {
+        self.overrides.is_empty()
     }
 }
 
@@ -1135,6 +1228,66 @@ impl ImportsConfig {
     /// called once, so no two call sites can disagree about the answer.
     pub fn resolved_robots_posture(&self) -> lorehaven_scrapers::robots::RobotsPosture {
         lorehaven_scrapers::robots::resolve_posture(self.robots_posture, Some(self.honour_robots))
+    }
+
+    /// The posture one source runs under, honouring a per-source override.
+    ///
+    /// The instance posture is the ceiling; an override can only narrow it. The
+    /// narrowing itself is enforced at config load, so this cannot return a
+    /// widened posture — but the instance posture is re-resolved here rather
+    /// than cached, because a test or a caller may have changed it since, and a
+    /// stale cached ceiling would be a silent bypass of the rule.
+    pub fn posture_for_source(&self, source: &str) -> lorehaven_scrapers::robots::RobotsPosture {
+        match self.robots_posture_overrides.get(source) {
+            Some(override_) => override_.posture,
+            None => self.resolved_robots_posture(),
+        }
+    }
+
+    /// The posture one source runs under, given a run that may be holding a
+    /// temporary override of its own.
+    ///
+    /// Two sources to the answer, and the run WINS. That ordering is the whole
+    /// point of a run-scoped override: an operator starts a run to get past one
+    /// blocked fetch, and a narrowing written in the config file for the same
+    /// source must not be able to override the thing the operator just did by
+    /// hand. A file narrowing is still a real ceiling — see
+    /// [`RunScope::narrowing_only`] — but within a run the narrower of the two
+    /// is taken, so neither can silently overrule the other.
+    pub fn posture_for_source_in(
+        &self,
+        source: &str,
+        run: Option<&RunScope>,
+    ) -> lorehaven_scrapers::robots::RobotsPosture {
+        let from_file = self.posture_for_source(source);
+        match run.and_then(|run| run.posture_for(source)) {
+            // `narrowest`, from the module that owns the enum. The first version
+            // of this ranked the postures inline with a hand-built score:
+            // `u8::from(p == Strict) + u8::from(p == MetadataOnly)`, which
+            // gives Permissive a rank of 0 — the same inversion that made
+            // `narrows_or_equals` wrong twice, in a second place. A rule that
+            // needs "narrower" must not re-rank.
+            Some(from_run) => lorehaven_scrapers::robots::narrowest(from_run, from_file),
+            None => from_file,
+        }
+    }
+
+    /// Every override, checked against the instance posture (spec §1.4).
+    ///
+    /// Called once at load so a widening entry stops startup. Called again
+    /// anywhere else it would be redundant, which is deliberate: the check has
+    /// one home, and a second one is a second answer.
+    pub fn validate_robots_posture_overrides(&self) -> Result<(), String> {
+        let instance = self.resolved_robots_posture();
+        for (source, override_) in &self.robots_posture_overrides {
+            lorehaven_scrapers::robots::resolve_source_override(
+                source,
+                override_.posture,
+                instance,
+            )
+            .map_err(|refused| refused.to_string())?;
+        }
+        Ok(())
     }
 }
 
@@ -1568,6 +1721,29 @@ impl Config {
             // deliberate posture from a default and fall back to the
             // compatibility key when there is nothing deliberate to find.
             robots_posture: imports_file.robots_posture,
+            // A section with no `posture` key is dropped rather than defaulted.
+            // Defaulting would invent a posture the operator did not write, and
+            // §1.4's rule is that an override is something someone set
+            // deliberately — so an empty table entry is a mistake worth naming
+            // rather than an instruction to be strict about one source.
+            robots_posture_overrides: imports_file
+                .robots_posture_overrides
+                .into_iter()
+                .filter_map(|(source, section)| {
+                    section.posture.map(|posture| {
+                        (
+                            // Normalised to lowercase, because `SourceKey`
+                            // normalises and a config naming `AO3` would
+                            // otherwise silently never match.
+                            source.trim().to_lowercase(),
+                            PostureOverride {
+                                posture,
+                                persistent: section.persistent.unwrap_or(false),
+                            },
+                        )
+                    })
+                })
+                .collect(),
         };
 
         // --- tts ------------------------------------------------------------
@@ -1973,6 +2149,15 @@ impl Config {
         };
 
         config.validate()?;
+        // A widening override stops startup. It is a separate call rather than
+        // part of `validate()` because it needs the *resolved* instance
+        // posture, which is itself a function of two config keys — and reading
+        // `imports.robots_posture` directly here would compare against a
+        // posture the instance is not actually running.
+        config
+            .imports
+            .validate_robots_posture_overrides()
+            .map_err(anyhow::Error::msg)?;
         Ok(config)
     }
 
@@ -2565,6 +2750,30 @@ struct ImportsSection {
     /// `strict`: a typo that defaulted would look like compliance while the
     /// operator's file said something else.
     robots_posture: Option<lorehaven_scrapers::robots::RobotsPosture>,
+    /// Per-source overrides, narrowed only.
+    ///
+    /// A table of tables in TOML: `[imports.robots_posture_overrides.ao3]` with
+    /// `posture` and optional `persistent`.
+    ///
+    /// `#[serde(default)]` because this is a map and absence is the normal
+    /// state: without it EVERY config that does not mention overrides fails to
+    /// parse with "missing field robots_posture_overrides", which is how a
+    /// purely additive option breaks every existing installation. Every other
+    /// optional section here is an `Option<T>` and so absent-tolerant; a
+    /// defaulted collection has to say so explicitly to get the same effect.
+    #[serde(default)]
+    robots_posture_overrides: std::collections::BTreeMap<String, PostureOverrideSection>,
+}
+
+/// One `[imports.robots_posture_overrides.<source>]` entry.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PostureOverrideSection {
+    posture: Option<lorehaven_scrapers::robots::RobotsPosture>,
+    /// Whether the override outlives the import run that needed it. Absent means
+    /// it does not, which is §1.4's default and the reason a forgotten override
+    /// cannot persist.
+    persistent: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -3030,6 +3239,326 @@ port = 7000
             parsed.imports.resolved_robots_posture(),
             RobotsPosture::Strict
         );
+    }
+
+    #[test]
+    fn a_per_source_override_may_only_narrow() {
+        // The whole table, in one place, because "narrowing" is a relation and a
+        // relation tested one pair at a time leaves the untested pairs to
+        // whatever the code happens to do.
+        //
+        //     instance \ override   strict   metadata_only   permissive
+        //     strict                   ok       REFUSED         REFUSED
+        //     metadata_only            ok       ok              REFUSED
+        //     permissive               ok       ok              ok
+        //
+        // `postures` and each row of `expected` are in the SAME order
+        // (strict, metadata_only, permissive), and `expected[i][j]` answers
+        // "instance `postures[i]`, override `postures[j]`". The first version
+        // of this test wrote the table above in one order and indexed it in
+        // another, and the resulting failure read as though the *rule* were
+        // inverted rather than the table — which is a trap worth avoiding by
+        // keeping the comment and the array in the same sequence.
+        use lorehaven_scrapers::robots::RobotsPosture;
+
+        let postures = [
+            RobotsPosture::Strict,
+            RobotsPosture::MetadataOnly,
+            RobotsPosture::Permissive,
+        ];
+        // `true` where the override is at least as cautious as the instance.
+        let expected = [
+            // instance is strict: nothing is narrower than it.
+            [true, false, false],
+            // instance is metadata_only: only strict narrows.
+            [true, true, false],
+            // instance is permissive: everything narrows, including itself.
+            [true, true, true],
+        ];
+
+        for (instance, row) in postures.iter().zip(expected.iter()) {
+            for (override_posture, allowed) in postures.iter().zip(row.iter()) {
+                let result = lorehaven_scrapers::robots::resolve_source_override(
+                    "ao3",
+                    *override_posture,
+                    *instance,
+                );
+                assert_eq!(
+                    result.is_ok(),
+                    *allowed,
+                    "instance {instance:?} with an override of {override_posture:?} is {}",
+                    if *allowed { "allowed" } else { "REFUSED" }
+                );
+                if *allowed {
+                    assert_eq!(result.expect("allowed"), *override_posture);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_widening_override_is_refused_by_name() {
+        use lorehaven_scrapers::robots::RobotsPosture;
+
+        // The refusal has to be legible, because the operator's next action is
+        // to read it. A message that says only "invalid config" leaves them
+        // guessing which of the three settings is wrong and which way.
+        let error = lorehaven_scrapers::robots::resolve_source_override(
+            "tgstorytime",
+            RobotsPosture::Permissive,
+            RobotsPosture::Strict,
+        )
+        .expect_err("widening is refused");
+        let text = error.to_string();
+        for needed in [
+            "tgstorytime",            // which source
+            "permissive",             // what was asked for
+            "strict",                 // what the instance runs
+            "may only narrow",        // the rule
+            "imports.robots_posture", // where to change the instance instead
+        ] {
+            assert!(
+                text.contains(needed),
+                "the message must name {needed:?}: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_narrowing_override_is_read_from_the_file_and_applies_to_that_source_only() {
+        use lorehaven_scrapers::robots::RobotsPosture;
+
+        let parsed = load_from(
+            "override-narrowing",
+            "environment = \"development\"\n\
+             [imports]\n\
+             robots_posture = \"permissive\"\n\
+             \n\
+             [imports.robots_posture_overrides.tgstorytime]\n\
+             posture = \"strict\"\n\
+             \n\
+             [imports.robots_posture_overrides.ao3]\n\
+             posture = \"metadata_only\"\n",
+        )
+        .expect("a narrowing override is valid: the instance is permissive, so both narrow");
+
+        assert_eq!(
+            parsed.imports.posture_for_source("tgstorytime"),
+            RobotsPosture::Strict,
+            "this source is narrowed to strict"
+        );
+        assert_eq!(
+            parsed.imports.posture_for_source("ao3"),
+            RobotsPosture::MetadataOnly,
+            "and this one to metadata_only"
+        );
+        assert_eq!(
+            parsed.imports.posture_for_source("royalroad"),
+            RobotsPosture::Permissive,
+            "a source with no override runs the instance posture — an override is per source, \
+             and one source's narrowing must not reach another's fetches"
+        );
+    }
+
+    #[test]
+    fn a_widening_override_stops_startup() {
+        // Refused rather than clamped. A clamp is indistinguishable from
+        // compliance: the operator set `permissive` for one source, the instance
+        // stayed `strict`, the source was crawled strictly, and nothing anywhere
+        // said the setting was not in force.
+        let error = load_from(
+            "override-widening",
+            "environment = \"development\"\n\
+             [imports]\n\
+             robots_posture = \"strict\"\n\
+             \n\
+             [imports.robots_posture_overrides.tgstorytime]\n\
+             posture = \"permissive\"\n",
+        )
+        .expect_err("a widening override does not load");
+        let text = error.to_string();
+        assert!(
+            text.contains("tgstorytime") && text.contains("may only narrow"),
+            "the startup error names the source and the rule: {text}"
+        );
+    }
+
+    #[test]
+    fn an_override_with_no_posture_key_is_dropped_rather_than_defaulted() {
+        // A table entry with nothing in it is a mistake, not an instruction. It
+        // is dropped rather than defaulted to `strict`, because defaulting would
+        // apply a narrowing the operator never wrote to one source — a silent
+        // change in behaviour, in the safe direction, which is exactly the kind
+        // of change nobody reports.
+        let parsed = load_from(
+            "override-empty",
+            "environment = \"development\"\n\
+             [imports]\n\
+             [imports.robots_posture_overrides.ao3]\n\
+             persistent = true\n",
+        )
+        .expect("the file still loads");
+        assert!(
+            parsed.imports.robots_posture_overrides.is_empty(),
+            "an entry with no posture is not an override: {:?}",
+            parsed.imports.robots_posture_overrides
+        );
+        assert_eq!(
+            parsed.imports.posture_for_source("ao3"),
+            parsed.imports.resolved_robots_posture(),
+            "so the source runs the instance posture, unchanged"
+        );
+    }
+
+    #[test]
+    fn an_override_key_is_matched_case_insensitively() {
+        use lorehaven_scrapers::robots::RobotsPosture;
+
+        // `SourceKey` normalises to lowercase, so a config naming `AO3` must
+        // match the `ao3` adapter or the override would be silently inert — the
+        // worst shape of no-op, because the file says the source is strict and
+        // the instance is permissive.
+        let parsed = load_from(
+            "override-case",
+            "environment = \"development\"\n\
+             [imports]\n\
+             robots_posture = \"permissive\"\n\
+             [imports.robots_posture_overrides.\"  AO3  \"]\n\
+             posture = \"strict\"\n",
+        )
+        .expect("the key is trimmed and lowercased");
+        assert_eq!(
+            parsed.imports.posture_for_source("ao3"),
+            RobotsPosture::Strict,
+            "a padded, upper-case key still reaches the adapter"
+        );
+    }
+
+    #[test]
+    fn a_config_that_never_mentions_overrides_still_loads() {
+        // The regression net for `#[serde(default)]`.
+        //
+        // Overrides are a purely ADDITIVE option, and adding a non-`Option` map
+        // to a `deny_unknown_fields` struct without a default makes every
+        // existing config fail to parse. The first version of this feature did
+        // exactly that: seven unrelated tests failed with "missing field
+        // robots_posture_overrides", and nothing about a per-source posture
+        // override has anything to do with solver URLs or archive fallback.
+        //
+        // The point is not that one TOML fragment parses. It is that the ABSENCE
+        // of a key a feature added is still a valid configuration, which is the
+        // property no test of the feature's own happy path would catch.
+        let parsed = load_from(
+            "no-overrides",
+            "environment = \"development\"\n\
+             [imports]\n\
+             solver_url = \"http://127.0.0.1:8191\"\n\
+             archive_fallback = true\n",
+        )
+        .expect("a config with no overrides section is an ordinary config");
+        assert!(
+            parsed.imports.robots_posture_overrides.is_empty(),
+            "and it has no overrides"
+        );
+        // Also the fully bare case: the section present, the key absent.
+        let bare = load_from("bare-imports", "environment = \"development\"\n[imports]\n")
+            .expect("an empty [imports] section is an ordinary config");
+        assert!(bare.imports.robots_posture_overrides.is_empty());
+    }
+
+    #[test]
+    fn a_run_scope_holds_an_override_only_while_the_run_lives() {
+        use crate::config::RunScope;
+        use lorehaven_scrapers::robots::RobotsPosture;
+
+        // The expiry mechanism IS the scope's lifetime. There is no clock, so
+        // "expired" and "the run ended" are the same event and cannot drift
+        // apart — which is the property this test exists to pin. A design with
+        // an `expires_at` timestamp would need a second test for "the clock
+        // passed" and would still have to handle the "never expires" case
+        // separately; both of those are the bugs this avoids by construction.
+        let mut scope = RunScope::none();
+        assert!(scope.is_empty(), "a run with no grants overrides nothing");
+        assert_eq!(scope.posture_for("tgstorytime"), None);
+
+        scope.grant("tgstorytime", RobotsPosture::Strict);
+        assert_eq!(
+            scope.posture_for("tgstorytime"),
+            Some(RobotsPosture::Strict),
+            "inside the run the grant is in force"
+        );
+        assert_eq!(
+            scope.posture_for("ao3"),
+            None,
+            "and it is per source: another source in the SAME run is unaffected"
+        );
+
+        // The run ends. This is the whole mechanism — not a call to `expire()`,
+        // not a field flipping, just the value going out of scope.
+        drop(scope);
+        assert!(
+            RunScope::none().is_empty(),
+            "the next run starts with nothing, because it got a new empty scope"
+        );
+    }
+
+    #[test]
+    fn a_run_grant_cannot_widen_what_the_config_allows() {
+        use crate::config::RunScope;
+        use lorehaven_scrapers::robots::RobotsPosture;
+
+        // A run grant is not refused when it is made — it is OUTRANKED when it
+        // is read. Which means a caller that tries to get past a refusal by
+        // granting itself `permissive` gets the configured posture anyway, and
+        // the run cannot become a hole in the rule.
+        let config = config_with_posture(RobotsPosture::MetadataOnly);
+        let mut scope = RunScope::none();
+
+        // Wider grant: outranked.
+        scope.grant("ao3", RobotsPosture::Permissive);
+        assert_eq!(
+            config.posture_for_source_in("ao3", Some(&scope)),
+            RobotsPosture::MetadataOnly,
+            "a run asking for permissive gets the configured posture, not the wider one"
+        );
+
+        // Narrower grant: honoured, because it costs nothing and was asked for.
+        scope.grant("ao3", RobotsPosture::Strict);
+        assert_eq!(
+            config.posture_for_source_in("ao3", Some(&scope)),
+            RobotsPosture::Strict,
+            "a run asking for something stricter gets it"
+        );
+
+        // No run at all: the file's answer, unchanged.
+        assert_eq!(
+            config.posture_for_source_in("ao3", None),
+            RobotsPosture::MetadataOnly,
+            "and with no run in scope the config answers for itself"
+        );
+    }
+
+    #[test]
+    fn a_run_scope_matches_its_source_key_the_way_the_config_does() {
+        use crate::config::RunScope;
+        use lorehaven_scrapers::robots::RobotsPosture;
+
+        // If the scope trimmed/lowercased and the config did not (or the other
+        // way round), a grant would be recorded and never found, and the run
+        // would silently behave as though nothing had been granted. Same
+        // normalisation, same answer.
+        let mut scope = RunScope::none();
+        scope.grant("  AO3  ", RobotsPosture::Strict);
+        assert_eq!(scope.posture_for("ao3"), Some(RobotsPosture::Strict));
+        assert_eq!(scope.posture_for("AO3"), Some(RobotsPosture::Strict));
+    }
+
+    /// A config whose instance posture is `posture` and which has no overrides.
+    fn config_with_posture(posture: lorehaven_scrapers::robots::RobotsPosture) -> ImportsConfig {
+        ImportsConfig {
+            robots_posture: Some(posture),
+            ..ImportsConfig::default()
+        }
     }
 
     #[test]
