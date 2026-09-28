@@ -398,6 +398,37 @@ suites it broke.
    `BodyAudience::Anyone` with a comment saying so, which is honest and is the
    right thing to do rather than inventing a nullable column nobody asked for.
 
+### §7.7.3's other clauses, checked rather than assumed
+
+The spec's bullet list is longer than the paired test. Each of the rest was
+checked, and each is a place that **looked** like a leak:
+
+* **No route reports an audience.** `grep '"body_audience"' crates/app/src/routes/*.rs`
+  returns one doc comment and one validation-error string. Pinned by
+  `no_surface_reports_a_gated_works_audience`, verified by mutation: adding the
+  field to `PublicWorkView` takes it red printing
+  `"body_audience":"trust_at_least:4"`. `/api/v1/meta` keeps `body_mode` — the
+  spec calls it "an operator and public configuration fact" — and is asserted
+  never to mention an audience at all.
+* **"a gated work is never *counted* in a result total they can see."**
+  `search.rs:52` is `let total = results.len()`, so the count *is* the result
+  set by construction. A difference cannot arise, which is the strongest form
+  this property can take.
+* **The notification oracle.** No such notification exists — see above.
+* **The library page.** Renders `word_count` and `chapter_count`, which looks
+  exactly like the §7.7.3 problem — but those are `imports::LibraryItem` rows, a
+  *personal import list* with an optional `work_id`, not the `works` table the
+  audience applies to. Not a surface.
+
+**Still genuinely unbuilt: "identical timing shape."** §7.7.3 lists it beside
+status and body, and a paired test over two responses cannot assert it — a
+timing assertion in CI is a flake generator unless the threshold is drawn so
+loosely it proves nothing. The honest position is that the *code* has no timing
+branch on the audience (the gate is one `if` returning a `DenyReason`, not a
+slow path), and that this is argued rather than measured. **A property argued
+from the shape of the code is not a property tested**, and saying so is the
+whole point of this list.
+
 ### The three that are now closed, and what closing them cost
 
 **§7.7.3 indistinguishability — BUILT, and it found a third defect.**
