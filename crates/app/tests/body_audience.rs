@@ -17,10 +17,16 @@
 //! passes against a gate that refuses everything, and against a gate that
 //! admits everything, and so proves nothing about either.
 //!
-//! The route-level indistinguishability work §7.7.3 asks for — byte-identical
-//! responses against a non-existent work, across every surface that could imply
-//! a body — is NOT here. It is the larger half of the phase and is not yet
-//! built. These tests are about the two defects that were.
+//! The route-level indistinguishability work §7.7.3 asks for is a separate
+//! file, `body_audience_indistinguishability.rs`, and it found a third defect
+//! this one could not: a gated body answered **403** where an absent one
+//! answered 404. Three tests here asserted `FORBIDDEN` and had to change — the
+//! status is the contract, so changing it correctly breaks the tests that
+//! pinned the old one.
+//!
+//! This file is the one-sided version and that file is the paired one. Both
+//! exist because they fail differently: these assert *that* a reader is
+//! refused, that one asserts that refusing them reveals nothing.
 
 use axum::http::StatusCode;
 use lorehaven_app::config::Config;
@@ -208,10 +214,17 @@ async fn a_reader_below_the_threshold_is_refused_and_the_author_is_not() {
 
     let mut low = client_at(&tdb, &dir, "ba_low", 1).await;
     let (status, _) = low.get(format!("/api/v1/works/{work}")).await;
+    // `NOT_FOUND`, not `FORBIDDEN`: a refusal that answers 403 tells the
+    // reader the work exists and that the obstacle is audience-shaped (spec
+    // §7.7.3). The status IS the assertion here -- these three tests were
+    // written against the 403 contract and failed when the denial was moved to
+    // 404, which is the point of changing it. `body_audience_indistinguishability.rs`
+    // is the paired test; this file is the one-sided version of it.
     assert_eq!(
         status,
-        StatusCode::FORBIDDEN,
-        "trust 1 is outside a `trust_at_least:4` audience"
+        StatusCode::NOT_FOUND,
+        "trust 1 is outside a `trust_at_least:4` audience, and is told the work \
+         is absent rather than out of reach"
     );
 
     // The author still reaches their own work, audience or not.
@@ -363,7 +376,13 @@ async fn the_chapter_door_agrees_with_the_work_door() {
 
     let mut low = client_at(&tdb, &dir, "ba_low", 1).await;
     let (work_status, _) = low.get(format!("/api/v1/works/{work}")).await;
-    assert_eq!(work_status, StatusCode::FORBIDDEN, "the work door refuses");
+    // The work door refuses, and refuses *as absent* (spec §7.7.3): a 403 here
+    // would tell the reader the work exists.
+    assert_eq!(
+        work_status,
+        StatusCode::NOT_FOUND,
+        "the work door refuses, indistinguishably from an absent one"
+    );
 
     let mut qualified = client_at(&tdb, &dir, "ba_high", 4).await;
     let (work_status, body) = qualified.get(format!("/api/v1/works/{work}")).await;
@@ -390,10 +409,17 @@ async fn a_high_trust_level_does_not_open_a_role_audience() {
 
     let mut trusted = client_at(&tdb, &dir, "ba_trusted", 6).await;
     let (status, _) = trusted.get(format!("/api/v1/works/{work}")).await;
+    // `NOT_FOUND`, not `FORBIDDEN`: a refusal that answers 403 tells the
+    // reader the work exists and that the obstacle is audience-shaped (spec
+    // §7.7.3). The status IS the assertion here -- these three tests were
+    // written against the 403 contract and failed when the denial was moved to
+    // 404, which is the point of changing it. `body_audience_indistinguishability.rs`
+    // is the paired test; this file is the one-sided version of it.
     assert_eq!(
         status,
-        StatusCode::FORBIDDEN,
-        "trust 6 is not the curator role: a reader who engages a lot is not thereby a curator"
+        StatusCode::NOT_FOUND,
+        "trust 6 is not the curator role: a reader who engages a lot is not \
+         thereby a curator, and learns only that the work is absent"
     );
 
     // And the author, who is a contributor, still reaches their own work.
