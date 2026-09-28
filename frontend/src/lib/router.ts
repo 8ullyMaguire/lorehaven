@@ -49,6 +49,7 @@ export type RouteId =
   | 'quiz'
   | 'vanguard'
   | 'roadmap'
+  | 'roadmap-card'
   | 'directory'
   | 'analytics'
   | 'planned'
@@ -205,6 +206,22 @@ export function matchRoute(path: string): RouteMatch {
 
   if (normalised === '/community/search') {
     return { id: 'forum-search', path: normalised };
+  }
+
+  // `/roadmap/<cardId>`: one feature card in full, with the body §44.1 gives
+  // it. Placed before the `PLANNED_ROUTES` lookup because a parameterised
+  // path can never equal a fixed key, and after `FIXED_ROUTES` so the bare
+  // `/roadmap` board still resolves there.
+  //
+  // The id is decoded for the same reason `/works/<id>` is: it arrives
+  // percent-encoded from a link and is compared to a stored uuid.
+  const roadmapCardMatch = normalised.match(/^\/roadmap\/([^/]+)$/);
+  if (roadmapCardMatch) {
+    return {
+      id: 'roadmap-card',
+      path: normalised,
+      params: { cardId: decodeURIComponent(roadmapCardMatch[1]) },
+    };
   }
 
   const planned = PLANNED_ROUTES[normalised];

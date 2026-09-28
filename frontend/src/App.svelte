@@ -42,6 +42,7 @@
   import Quiz from './routes/Quiz.svelte';
   import Vanguard from './routes/Vanguard.svelte';
   import Roadmap from './routes/Roadmap.svelte';
+  import RoadmapCard from './routes/RoadmapCard.svelte';
   import Directory from './routes/Directory.svelte';
   import { handleLinkClick, matchRoute } from './lib/router';
   import { session } from './lib/session.svelte';
@@ -338,6 +339,8 @@
     <Quiz />
   {:else if route.id === 'vanguard'}
     <Vanguard />
+  {:else if route.id === 'roadmap-card'}
+    <RoadmapCard params={route.params} />
   {:else if route.id === 'roadmap'}
     <Roadmap />
   {:else if route.id === 'directory'}
