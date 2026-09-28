@@ -119,6 +119,19 @@ jobs:
       - name: SQLite migrations must not exceed the bundled engine's syntax
         run: python3 scripts/check-sqlite-migration-syntax.py
 
+      # A test file whose header claims it runs on both backends while pinning
+      # a sqlite:// URL is worse than one that never claimed it: the claim is
+      # what stops anyone looking. m29_transparency.rs did exactly this and four
+      # real PostgreSQL-only defects sat behind it -- a tag merge that never
+      # moved a tag, and an explanation route that returned a redacted 500. The
+      # check reads the header's CLAIM and the harness's WIRING separately,
+      # strips comments before deciding whether the selector is used (a comment
+      # saying "honour the backend selector" is not wiring), and exempts a
+      # sentence about a migration being cross-dialect, which is a claim about
+      # the schema and not about the suite.
+      - name: A suite must not claim dual-backend coverage it does not have
+        run: python3 scripts/find-single-backend-suites.py
+
   frontend:
     name: Frontend (check, test, build)
     runs-on: ubuntu-latest
