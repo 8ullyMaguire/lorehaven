@@ -13,7 +13,7 @@ use lorehaven_db::collaboration;
 use lorehaven_db::content;
 use lorehaven_domain::WorkId;
 
-use crate::auth::{MaybeSession, MaybeToken};
+use crate::auth::{MaybeSession, MaybeToken, RequireActor};
 use crate::http::{ApiError, ApiResult};
 use crate::routes::works::{actor_for, reading_decision, Reading};
 use crate::state::AppState;
@@ -601,6 +601,57 @@ pub async fn get_openapi_spec(
     ))
 }
 
+/// `GET /me/credential` — who am I, and what may this token do?
+///
+/// The endpoint the §23.2 bot side needs and Lorehaven did not have. A bot
+/// holds a bearer token; it has no session and no cookie jar, so it cannot call
+/// `GET /me/tokens` — that route is session-only, and answering a bearer token
+/// with "sign in to list tokens" made a linked bot unable to check its own
+/// scopes. Every scope check then fell back to the set cached at link time,
+/// which goes stale the moment a reader re-links with different scopes from
+/// Lorehaven's own UI.
+///
+/// So the *server* is the authority, and this is where a token asks. It is
+/// deliberately narrow.
+///
+/// - It returns the caller's own scopes and identity, and nothing about anyone
+///   else. There is no account parameter, so it cannot be pointed at another
+///   account.
+/// - It requires no particular scope. A token with no scopes left must still be
+///   able to discover that it has none, otherwise the bot's only recourse is a
+///   confusing 403 on an unrelated call.
+/// - It is authenticated by the credential itself. A revoked token is not
+///   resolved by `RequireActor` at all, so it is a 401 here — the same answer it
+///   would get anywhere else, and the signal `verify_credential` exists to read.
+///
+/// What it must never do is report a *destination*. This returns who the caller
+/// is, not where anything was sent. The bot has no way to tell Lorehaven where a
+/// message went, and this API offers no place to report one — which is the
+/// structural half of §23.2's guarantee, and the reason adding this endpoint
+/// does not weaken it.
+pub async fn describe_credential(
+    State(state): State<AppState>,
+    RequireActor(actor): RequireActor,
+) -> ApiResult<Json<Value>> {
+    // The account is read back so the response cannot claim an identity the
+    // database no longer agrees with, rather than echoing the token's own
+    // claim. `RequireActor` already resolved the token from the Authorization
+    // header; this is the check that the row behind it still exists.
+    let account_id = actor.account_id.to_string();
+    let scopes: Vec<String> = actor.scopes.iter().map(|s| s.as_str().to_owned()).collect();
+    let via = match actor.via {
+        crate::auth::Credential::Token => "token",
+        crate::auth::Credential::Session => "session",
+    };
+
+    Ok(Json(json!({
+        "account_id": account_id,
+        "pseud_id": actor.pseud_id.to_string(),
+        "via": via,
+        "scopes": scopes,
+    })))
+}
+
 pub fn router() -> axum::Router<AppState> {
     axum::Router::new()
         // Public read API
@@ -608,6 +659,8 @@ pub fn router() -> axum::Router<AppState> {
         .route("/public/search", get(public_search))
         // Token management
         .route("/me/tokens", get(list_tokens).post(issue_token))
+        // Bearer-authenticated identity. See `describe_credential`.
+        .route("/me/credential", get(describe_credential))
         .route("/me/tokens/{id}", post(revoke_token))
         // Bots
         .route("/me/bots", post(register_bot))

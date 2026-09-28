@@ -36,10 +36,29 @@ fn main() {
         ("postgres", "POSTGRES_MIGRATIONS"),
     ] {
         let dir = migrations_root.join(dialect);
-        println!("cargo:rerun-if-changed={}", dir.display());
 
         let mut files = migration_files(&dir);
         files.sort();
+
+        // One `rerun-if-changed` per FILE, not one for the directory.
+        //
+        // A directory entry is watched for its own mtime, and adding a file
+        // inside a directory does not change the directory's mtime on most
+        // filesystems. So `rerun-if-changed=<dir>` is satisfied after a build
+        // and then never fires again, and the catalogue silently lags: a new
+        // migration lands on disk, the build script does not re-run, and the
+        // binary applies an older schema than the repository describes. That is
+        // exactly what happened here — ten migrations (0074-0083) existed on
+        // disk and the embedded catalogue stopped at 0073, so
+        // `api_tokens.kind` was never added and `POST /me/tokens` failed with
+        // "table api_tokens has no column named kind".
+        //
+        // The directory entry is still declared, for the case where the
+        // directory itself is created or removed.
+        println!("cargo:rerun-if-changed={}", dir.display());
+        for (_, _, path) in &files {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
 
         let _ = writeln!(
             generated,

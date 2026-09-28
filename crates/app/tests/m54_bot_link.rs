@@ -144,6 +144,44 @@ impl Harness {
         (id, raw)
     }
 
+    /// Issue a token that carries an acting pseud, and return `(id, raw_secret)`.
+    ///
+    /// [`Self::issue`] passes `None` for the acting pseud, which is right for a
+    /// personal token — a session's own pseud is implicit — but `RequireActor`
+    /// refuses a *bearer* token with no acting pseud. So a test that wants to
+    /// exercise a bearer-authenticated route needs this one, and the difference
+    /// is the reason `/me/credential` returned 403 rather than 200 on a first
+    /// run against a token issued the other way.
+    async fn issue_acting(
+        &self,
+        account: &str,
+        pseud: &str,
+        scopes: &[&str],
+    ) -> (String, String) {
+        let raw = uuid::Uuid::new_v4().to_string();
+        let hash = lorehaven_app::crypto::hash_token(&raw);
+        let parsed: Vec<lorehaven_domain::api_scopes::Scope> = scopes
+            .iter()
+            .map(|s| {
+                use std::str::FromStr as _;
+                lorehaven_domain::api_scopes::Scope::from_str(s).expect("a known scope")
+            })
+            .collect();
+        let id = lorehaven_db::external::issue_token_acting(
+            self.tdb.db(),
+            account,
+            "bot",
+            "test-credential",
+            &hash,
+            &parsed,
+            None,
+            Some(pseud),
+        )
+        .await
+        .expect("issue a token with an acting pseud");
+        (id, raw)
+    }
+
     /// Register a bot through the API. Returns `(bot_id, raw_secret)`.
     async fn register_bot(&mut self, name: &str) -> (String, String) {
         let (status, body) = self
@@ -805,4 +843,196 @@ async fn the_atom_feed_is_also_a_constant() {
     let (status, body) = h.client.get("/api/v1/feeds/anyone/atom").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["feed"], "atom");
+}
+
+
+// ---------------------------------------------------------------------------
+// `GET /me/credential` — the endpoint the §23.2 bot side needs
+//
+// Added because lorebot's `verify_credential` called `GET /me/tokens`, which is
+// session-only. A bot holds a bearer token and has no cookie jar, so Lorehaven
+// answered `422 "sign in to list tokens"`, every link was unverifiable, and the
+// bot fell back to the scopes it had cached at link time — which go stale the
+// moment a reader re-links from Lorehaven's own UI.
+//
+// Found by running lorebot's end-to-end suite against a real instance. No unit
+// test could have found it: lorebot's own tests mocked the wrong endpoint, and a
+// mock answers whatever the code asks for, which is the one thing a mock cannot
+// check.
+//
+// The tests below pin what the endpoint does, and — more usefully — what it
+// must never do.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_bearer_token_can_describe_its_own_credential() {
+    let mut h = Harness::new("cred-happy").await;
+    h.signed_in("reader@example.test", "reader").await;
+    let account = h.current_account_id().await;
+    let pseud = h.current_pseud_id().await;
+    let (_id, raw) = h
+        .issue_acting(&account, &pseud, &["content.read", "library.read"])
+        .await;
+
+    let (status, body) = h
+        .client
+        .request_with("GET", "/api/v1/me/credential", None, Some(&raw))
+        .await;
+    assert_eq!(status, StatusCode::OK, "a live token describes itself: {body}");
+
+    // The scopes are the *server's*, which is the entire point. A reader can
+    // re-link with different scopes from Lorehaven's own UI; reporting the
+    // cached set would leave the bot using withdrawn authority, and reporting
+    // nothing would make it refuse work the token may do.
+    let scopes: Vec<&str> = body["scopes"]
+        .as_array()
+        .expect("a scopes array")
+        .iter()
+        .filter_map(|s| s.as_str())
+        .collect();
+    assert!(scopes.contains(&"content.read"), "{scopes:?}");
+    assert!(scopes.contains(&"library.read"), "{scopes:?}");
+    assert!(!scopes.contains(&"content.write"), "not granted: {scopes:?}");
+
+    assert_eq!(body["via"], "token", "it says which credential it was");
+    assert_eq!(body["account_id"], json!(account), "{body}");
+}
+
+/// A revoked token is refused, and refused *silently* — no scopes, no identity.
+///
+/// This is the signal `verify_credential` reads, and it is the whole reason a
+/// bot can tell "expired" from "still fine" instead of guessing.
+#[tokio::test]
+async fn a_revoked_token_cannot_describe_a_credential() {
+    let mut h = Harness::new("cred-revoked").await;
+    h.signed_in("reader@example.test", "reader").await;
+    let account = h.current_account_id().await;
+    let pseud = h.current_pseud_id().await;
+    let (id, raw) = h.issue_acting(&account, &pseud, &["content.read"]).await;
+
+    let (status, _) = h
+        .client
+        .post(&format!("/api/v1/me/tokens/{id}"), json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "revoke");
+
+    let (status, body) = h
+        .client
+        .request_with("GET", "/api/v1/me/credential", None, Some(&raw))
+        .await;
+    assert!(
+        status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN,
+        "a revoked token must be refused: {status} {body}"
+    );
+    assert!(
+        body.get("scopes").is_none() && body.get("account_id").is_none(),
+        "and must not describe a dead credential: {body}"
+    );
+}
+
+/// It describes the caller and nobody else.
+///
+/// There is no account parameter, so it cannot be pointed at another account.
+#[tokio::test]
+async fn it_describes_the_caller_and_nobody_else() {
+    let mut h = Harness::new("cred-self").await;
+    h.signed_in("me@example.test", "me").await;
+    let my_account = h.current_account_id().await;
+
+    h.switch_to("them@example.test", "them").await;
+    let their_account = h.current_account_id().await;
+    let their_pseud = h.current_pseud_id().await;
+    assert_ne!(my_account, their_account, "two real accounts");
+
+    let (_id, their_token) = h
+        .issue_acting(&their_account, &their_pseud, &["content.read"])
+        .await;
+    let (status, body) = h
+        .client
+        .request_with("GET", "/api/v1/me/credential", None, Some(&their_token))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["account_id"], json!(their_account),
+        "the token's own account, not the session's"
+    );
+}
+
+/// The one thing it must never do: report a destination.
+///
+/// §23.2's guarantee is structural — Lorehaven is never told where a message
+/// went, because the API offers nowhere to report it. This is the check that
+/// adding an authenticated `/me` endpoint did not quietly open one.
+#[tokio::test]
+async fn it_never_reports_where_anything_was_sent() {
+    let mut h = Harness::new("cred-nodest").await;
+    h.signed_in("reader@example.test", "reader").await;
+    let account = h.current_account_id().await;
+    let pseud = h.current_pseud_id().await;
+    let (_id, raw) = h.issue_acting(&account, &pseud, &["content.read"]).await;
+
+    let (status, body) = h
+        .client
+        .request_with("GET", "/api/v1/me/credential", None, Some(&raw))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let object = body.as_object().expect("an object");
+    for forbidden in [
+        "channel_id",
+        "conversation",
+        "destination",
+        "delivery",
+        "read_at",
+        "sent_at",
+        "chat",
+        "room",
+        "message_id",
+        "platform_user",
+    ] {
+        assert!(
+            !object.contains_key(forbidden),
+            "the credential description must not carry {forbidden}: {body}"
+        );
+    }
+}
+
+/// A session works too, and reports `via: "session"` with no scopes.
+///
+/// The distinction is load-bearing for the bot: an empty scope list means
+/// "granted nothing" for a token and "not applicable" for a session. Conflating
+/// them either leaves the bot using withdrawn authority or locks a signed-in
+/// user out of their own account.
+#[tokio::test]
+async fn a_session_reports_no_scopes_and_says_so() {
+    let mut h = Harness::new("cred-session").await;
+    h.signed_in("reader@example.test", "reader").await;
+    let account = h.current_account_id().await;
+
+    let (status, body) = h.client.get("/api/v1/me/credential").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["via"], "session", "{body}");
+    assert_eq!(body["account_id"], json!(account), "{body}");
+    assert_eq!(
+        body["scopes"].as_array().map(Vec::len),
+        Some(0),
+        "a session has no scope set: {body}"
+    );
+}
+
+/// An anonymous request is refused and says nothing about anyone.
+#[tokio::test]
+async fn an_anonymous_request_cannot_describe_a_credential() {
+    let mut anon = Harness::new("cred-anon").await;
+    let (status, body) = anon
+        .client
+        .request_with("GET", "/api/v1/me/credential", None, None)
+        .await;
+    assert!(
+        status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN,
+        "an anonymous describe must not succeed: {status} {body}"
+    );
+    assert!(
+        body.get("account_id").is_none() && body.get("scopes").is_none(),
+        "and must not leak anything: {body}"
+    );
 }
