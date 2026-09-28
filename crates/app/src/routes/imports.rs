@@ -294,19 +294,66 @@ struct RobotsView {
     /// that switching `honour_disallow` off cannot read as switching off the
     /// politeness rules beside it.
     honour_crawl_delay: bool,
-    /// What happens to a forbidden path while `honour_disallow` is false.
+    /// The resolved posture, spelled as an operator wrote it. This is the
+    /// authoritative field; `honour_disallow` cannot express `metadata_only`
+    /// and is kept only for clients that predate it.
+    robots_posture: &'static str,
+    /// What happens to a forbidden path under this posture.
     note: &'static str,
 }
 
 impl RobotsView {
     fn of(config: &crate::config::Config) -> Self {
+        use lorehaven_scrapers::robots::RobotsPosture;
+        // The RESOLVED posture, not the raw boolean. An operator who set
+        // `robots_posture = strict` while a stale `honour_robots = false` sat in
+        // the same file is running strict, and a view that reported the boolean
+        // would tell them the opposite of what is happening.
+        let posture = config.imports.resolved_robots_posture();
         Self {
-            honour_disallow: config.imports.honour_robots,
+            // Still a bool on the wire, because this field predates the posture
+            // and a client may read it. It is the honest reading for exactly
+            // two of the three postures, which is why the posture and the note
+            // are reported beside it.
+            honour_disallow: !matches!(posture, RobotsPosture::Permissive),
             honour_crawl_delay: true,
-            note: if config.imports.honour_robots {
-                "paths a source's robots.txt forbids are refused, and the failure names the rule"
-            } else {
-                "this instance reads paths a source's robots.txt forbids, under                  `imports.honour_robots = false`; the source's own crawl delay is still enforced"
+            robots_posture: posture.as_str(),
+            // The note names the setting that ACTUALLY decided the answer, which
+            // is not always the posture.
+            //
+            // A first version always wrote `imports.robots_posture =
+            // permissive`, which is wrong whenever the instance got there the
+            // other way — and on every existing config it does, because none of
+            // them name a posture yet. The operator who set `honour_robots =
+            // false` would be told to edit a key they have never heard of, and
+            // editing it would be a no-op: the value is already `permissive`. An
+            // error message that names the wrong key is worse than none, because
+            // the reader acts on it.
+            note: match (posture, config.imports.robots_posture) {
+                // Strict is the default and the note never has to point at a
+                // key: there is nothing to undo, and the sentence describes the
+                // behaviour rather than blaming a setting for it.
+                (RobotsPosture::Strict, _) => {
+                    "paths a source's robots.txt forbids are refused, and the failure names the rule"
+                }
+                (RobotsPosture::MetadataOnly, _) => {
+                    "a forbidden metadata path is read and discarded, and a forbidden content or \
+                     media path is refused; nothing read under this posture is stored. Set with \
+                     `imports.robots_posture = metadata_only`"
+                }
+                // Permissive arrived at through the deprecated key, so name that
+                // key: it is the one the operator wrote, and the only one whose
+                // removal would change the answer.
+                (RobotsPosture::Permissive, None) => {
+                    "this instance reads paths a source's robots.txt forbids, under \
+                     `imports.honour_robots = false`; the source's own crawl delay is still \
+                     enforced"
+                }
+                (RobotsPosture::Permissive, Some(_)) => {
+                    "this instance reads paths a source's robots.txt forbids, under \
+                     `imports.robots_posture = permissive`; the source's own crawl delay is \
+                     still enforced"
+                }
             },
         }
     }

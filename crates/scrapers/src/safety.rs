@@ -69,7 +69,7 @@ use url::Url;
 
 use crate::archive::ArchiveClient;
 use crate::engine::{Engine, Impersonation};
-use crate::robots::RobotsRules;
+use crate::robots::{FetchClass, RobotsPosture, RobotsRules};
 use crate::solver::{SolverClient, SolverConfig};
 use crate::{
     ConditionalFetch, Fetched, Fetcher, Provenance, RevisionValidators, SourceCapabilities,
@@ -296,7 +296,21 @@ pub struct FetchPolicy {
     /// other part of this system can overrule. Defaulting to `true` and letting
     /// it be switched off in configuration keeps that a decision somebody made
     /// and can point at, rather than a behaviour that ships on.
+    /// DEPRECATED, and kept only so a config written before the posture existed
+    /// still parses. Read [`FetchPolicy::robots_posture`] for the resolved
+    /// answer: **this field is not consulted by the fetcher**, and a caller that
+    /// sets it without also setting the posture has changed nothing. `false`
+    /// means `Permissive` and `true` means `Strict`; see
+    /// [`crate::robots::resolve_posture`].
     pub honour_robots: bool,
+    /// What this instance does about a `Disallow` (spec §11.5,
+    /// `imports.robots_posture`).
+    ///
+    /// This is the field the fetcher reads. `honour_robots` is the
+    /// compatibility key, and it is resolved into this one when the policy is
+    /// built, so there is exactly one answer at the point of use and no caller
+    /// has to know that both keys exist.
+    pub robots_posture: crate::robots::RobotsPosture,
 }
 
 impl Default for FetchPolicy {
@@ -316,6 +330,11 @@ impl Default for FetchPolicy {
             // thing robots.txt exists to be told about, so compliance is the
             // default and overriding it is an explicit edit.
             honour_robots: true,
+            // The field the fetcher actually reads, and the one the two
+            // compatibility keys resolve into. Default is `Strict`, matching
+            // `honour_robots: true` above — a caller that sets only the old
+            // field still gets compliance.
+            robots_posture: crate::robots::RobotsPosture::Strict,
         }
     }
 }
@@ -533,12 +552,36 @@ impl SafeFetcher {
         form: Option<&[(&str, &str)]>,
         conditional: Option<&RevisionValidators>,
     ) -> SourceResult<ConditionalFetch> {
+        // `Content` is the default here and the direction matters. §11.5 says
+        // the class is declared by the adapter that performs the fetch, so a
+        // caller that has not declared one is treated as asking for the most
+        // privileged class — which under `MetadataOnly` means a *refusal*, not
+        // a read-and-discard. Defaulting to `Metadata` instead would make an
+        // undeclared fetch the one case that gets through, which is the
+        // opposite of the safe direction.
+        self.get_with_class(url, form, conditional, FetchClass::Content)
+            .await
+    }
+
+    /// Fetch, declaring what kind of read this is (spec §11.5, `FetchClass`).
+    ///
+    /// The class is a parameter rather than something derived from the URL,
+    /// because a URL that looks like a chapter fetched as `Metadata` has to be
+    /// bounded as a metadata fetch. A fetcher that inferred it from the path
+    /// would let an adapter's guess raise its own ceiling.
+    async fn get_with_class(
+        &self,
+        url: &str,
+        form: Option<&[(&str, &str)]>,
+        conditional: Option<&RevisionValidators>,
+        class: FetchClass,
+    ) -> SourceResult<ConditionalFetch> {
         let parsed = validate_url(url, &self.policy)?;
         let host = shared_host(&parsed);
         // Read either way: the same file carries the pace, and a policy that
         // overrides `Disallow` has said nothing about how hard to knock.
         let robots = self.robots_for(&host).await;
-        match robots_gate(&robots, parsed.path(), self.policy.honour_robots) {
+        match robots_gate(&robots, parsed.path(), self.policy.robots_posture, class) {
             RobotsGate::Allowed => {}
             RobotsGate::Refused => {
                 return Err(SourceError::Refused(format!(
@@ -546,6 +589,12 @@ impl SafeFetcher {
                     parsed.path()
                 )))
             }
+            // Read it, keep none of it. Deliberately NOT routed through
+            // `record_robots_override`: nothing was overridden here, so this is
+            // not an operator decision to report. What the caller must do is
+            // discard the parse result, and a later phase enforces that with a
+            // parse target that has nowhere to put a body.
+            RobotsGate::ReadAndDiscarded => {}
             RobotsGate::Overridden => self.record_robots_override(&host, parsed.path()).await,
         }
         self.send_with_redirects(url, form, conditional, Escalation::Policy)
@@ -1301,26 +1350,61 @@ enum RobotsGate {
     Allowed,
     /// The rules forbid it and the instance honours them.
     Refused,
+    /// The rules forbid it, the posture is `MetadataOnly`, and this is a
+    /// metadata fetch: read it, keep none of it.
+    ///
+    /// Distinct from `Allowed` because **the bytes are discarded** — the whole
+    /// point of the posture is that nothing is stored, so a caller that treats
+    /// this as `Allowed` and persists the parse result has quietly turned
+    /// `metadata_only` into `permissive`. Distinct from `Overridden` because
+    /// nothing was overridden: the posture asked for the read and then declined
+    /// to keep it, so there is no operator decision being reported here.
+    ReadAndDiscarded,
     /// The rules forbid it and the instance has chosen to read it anyway.
     Overridden,
 }
 
 /// Decide a fetch against one host's rules (spec §11.5, "Honour `Disallow`").
 ///
-/// A pure function of the rules, the path and the policy, and deliberately so:
-/// the gate itself is only reachable through a real `robots.txt` fetch, and a
-/// branch reachable only through a live host is a branch no test exercises. This
-/// is the whole of the decision — the tracking that follows an override lives at
-/// the call site — so the three answers can be asserted against real rules
-/// parsed from real files.
-fn robots_gate(rules: &RobotsRules, path: &str, honour_robots: bool) -> RobotsGate {
+/// A pure function of the rules, the path, the posture and the class, and
+/// deliberately so: the gate itself is only reachable through a real
+/// `robots.txt` fetch, and a branch reachable only through a live host is a
+/// branch no test exercises. This is the whole of the decision — the tracking
+/// that follows an override lives at the call site — so every answer can be
+/// asserted against real rules parsed from real files.
+///
+/// The class is an input, never derived from the path. That is the single most
+/// important property of this signature: a URL that looks like a chapter
+/// fetched as `Metadata` is bounded as a metadata fetch, so the ceiling cannot
+/// be raised by an adapter's guess about what shape the URL has.
+///
+/// | `rules.allows(path)` | posture | class | result |
+/// |---|---|---|---|
+/// | true | any | any | `Allowed` |
+/// | false | `Strict` | any | `Refused` |
+/// | false | `MetadataOnly` | `Metadata` | `ReadAndDiscarded` |
+/// | false | `MetadataOnly` | `Content` \| `Media` | `Refused` |
+/// | false | `Permissive` | any | `Overridden` |
+fn robots_gate(
+    rules: &RobotsRules,
+    path: &str,
+    posture: RobotsPosture,
+    class: FetchClass,
+) -> RobotsGate {
     if rules.allows(path) {
         return RobotsGate::Allowed;
     }
-    if honour_robots {
-        RobotsGate::Refused
-    } else {
-        RobotsGate::Overridden
+    match posture {
+        RobotsPosture::Strict => RobotsGate::Refused,
+        // Only the metadata class survives this posture, and it survives only
+        // as a read whose bytes are thrown away. `Content` and `Media` fall
+        // through to `Refused` because "read it, store none of it" is a
+        // coherent instruction about a chapter listing and not about a chapter.
+        RobotsPosture::MetadataOnly => match class {
+            FetchClass::Metadata => RobotsGate::ReadAndDiscarded,
+            FetchClass::Content | FetchClass::Media => RobotsGate::Refused,
+        },
+        RobotsPosture::Permissive => RobotsGate::Overridden,
     }
 }
 
@@ -1779,41 +1863,127 @@ mod tests {
         // disallowed, which is why that member cannot be imported on a
         // compliant instance.
         let rules = crate::robots::RobotsRules::parse("User-agent: *\nDisallow: /\n", "Lorehaven");
+        let path = "/viewstory.php?sid=6369";
 
         assert_eq!(
-            robots_gate(&rules, "/viewstory.php?sid=6369", true),
+            robots_gate(&rules, path, RobotsPosture::Strict, FetchClass::Content),
             RobotsGate::Refused
         );
         // And the same rules under an instance that has overridden them.
         assert_eq!(
-            robots_gate(&rules, "/viewstory.php?sid=6369", false),
+            robots_gate(&rules, path, RobotsPosture::Permissive, FetchClass::Content),
             RobotsGate::Overridden
         );
     }
 
     #[test]
-    fn an_allowed_path_is_allowed_under_either_policy() {
+    fn metadata_only_reads_a_disallowed_metadata_path_and_discards_it() {
+        // The one new answer, and the reason the posture exists: the old
+        // boolean had no way to say "read it, keep none of it".
+        let rules = crate::robots::RobotsRules::parse("User-agent: *\nDisallow: /\n", "Lorehaven");
+
+        assert_eq!(
+            robots_gate(
+                &rules,
+                "/viewstory.php?sid=6369",
+                RobotsPosture::MetadataOnly,
+                FetchClass::Metadata
+            ),
+            RobotsGate::ReadAndDiscarded,
+            "a disallowed METADATA read survives this posture as a read whose bytes are thrown away"
+        );
+    }
+
+    #[test]
+    fn metadata_only_still_refuses_every_content_and_media_path() {
+        // The property that makes `metadata_only` a posture rather than a
+        // loophole. `ReadAndDiscarded` is scoped to `FetchClass::Metadata`, and
+        // a chapter under the same posture is refused outright — which is the
+        // only thing stopping "read it and discard it" from becoming "read it
+        // and keep the parts worth keeping".
+        let rules = crate::robots::RobotsRules::parse("User-agent: *\nDisallow: /\n", "Lorehaven");
+        let path = "/viewstory.php?sid=6369";
+
+        for class in [FetchClass::Content, FetchClass::Media] {
+            assert_eq!(
+                robots_gate(&rules, path, RobotsPosture::MetadataOnly, class),
+                RobotsGate::Refused,
+                "a disallowed {:?} path is refused under metadata_only, not read and discarded",
+                class
+            );
+        }
+    }
+
+    #[test]
+    fn the_class_is_never_inferred_from_the_path() {
+        // The single most important property of the new signature. A URL that
+        // looks exactly like a chapter page, fetched as `Metadata`, must come
+        // out the same as any other metadata fetch — because if a fetcher
+        // inferred the class from the path, an adapter's guess about a URL's
+        // shape would raise its own ceiling, and the "just the metadata" door
+        // would be a body door with a different name.
+        let rules = crate::robots::RobotsRules::parse("User-agent: *\nDisallow: /\n", "Lorehaven");
+        let chapter_shaped = "/viewstory.php?sid=6369";
+
+        // Identical to a plain metadata path, despite looking like prose.
+        assert_eq!(
+            robots_gate(
+                &rules,
+                chapter_shaped,
+                RobotsPosture::MetadataOnly,
+                FetchClass::Metadata
+            ),
+            RobotsGate::ReadAndDiscarded
+        );
+        // And the same URL declared as content is refused. The class is the only
+        // thing that differs between these two calls.
+        assert_eq!(
+            robots_gate(
+                &rules,
+                chapter_shaped,
+                RobotsPosture::MetadataOnly,
+                FetchClass::Content
+            ),
+            RobotsGate::Refused
+        );
+    }
+
+    #[test]
+    fn an_allowed_path_is_allowed_under_every_posture_and_class() {
         // The override is not a licence to reclassify everything: a path the
         // rules permit takes the same branch whether or not the instance
-        // honours them, so nothing is counted as an override that was not one.
+        // honours them, so nothing is counted as an override that was not one,
+        // and a read-and-discard is not recorded where nothing was overridden.
         let rules = crate::robots::RobotsRules::parse(
             "User-agent: *\nDisallow: /private/\nAllow: /\n",
             "Lorehaven",
         );
 
-        for honour in [true, false] {
+        for posture in [
+            RobotsPosture::Strict,
+            RobotsPosture::MetadataOnly,
+            RobotsPosture::Permissive,
+        ] {
+            for class in [FetchClass::Metadata, FetchClass::Content, FetchClass::Media] {
+                assert_eq!(
+                    robots_gate(&rules, "/viewstory.php?sid=1", posture, class),
+                    RobotsGate::Allowed,
+                    "{:?} under {posture:?}",
+                    class
+                );
+            }
+        }
+        // And the disallowed subtree still separates the postures.
+        for class in [FetchClass::Metadata, FetchClass::Content] {
             assert_eq!(
-                robots_gate(&rules, "/viewstory.php?sid=1", honour),
-                RobotsGate::Allowed,
-                "honour_robots = {honour}"
+                robots_gate(&rules, "/private/x", RobotsPosture::Strict, class),
+                RobotsGate::Refused
+            );
+            assert_eq!(
+                robots_gate(&rules, "/private/x", RobotsPosture::Permissive, class),
+                RobotsGate::Overridden
             );
         }
-        // And the disallowed subtree still separates the two policies.
-        assert_eq!(robots_gate(&rules, "/private/x", true), RobotsGate::Refused);
-        assert_eq!(
-            robots_gate(&rules, "/private/x", false),
-            RobotsGate::Overridden
-        );
     }
 
     #[test]
@@ -1821,28 +1991,55 @@ mod tests {
         // A `404` for `robots.txt` is a site with no restrictions (spec §11.5),
         // so it must produce neither a refusal nor a recorded override.
         let rules = crate::robots::RobotsRules::unrestricted();
-        assert_eq!(robots_gate(&rules, "/anything", true), RobotsGate::Allowed);
-        assert_eq!(robots_gate(&rules, "/anything", false), RobotsGate::Allowed);
+        for posture in [
+            RobotsPosture::Strict,
+            RobotsPosture::MetadataOnly,
+            RobotsPosture::Permissive,
+        ] {
+            assert_eq!(
+                robots_gate(&rules, "/anything", posture, FetchClass::Content),
+                RobotsGate::Allowed
+            );
+        }
     }
 
     #[test]
-    fn the_three_answers_are_the_whole_decision() {
-        // The gate answers only these three things, so a caller that handles
-        // all three has handled every case — which is the property that makes
-        // extracting it worth more than inlining it.
+    fn the_four_answers_are_the_whole_decision() {
+        // The gate answers only these four things, so a caller that handles all
+        // four has handled every case — which is the property that makes
+        // extracting it worth more than inlining it. A fifth answer added later
+        // must break this test, because a caller that does not handle it would
+        // otherwise have no arm to land in.
         let forbidding =
             crate::robots::RobotsRules::parse("User-agent: *\nDisallow: /\n", "Lorehaven");
         let allowing = crate::robots::RobotsRules::unrestricted();
 
         let answers = [
-            robots_gate(&forbidding, "/x", true),
-            robots_gate(&forbidding, "/x", false),
-            robots_gate(&allowing, "/x", true),
+            robots_gate(
+                &forbidding,
+                "/x",
+                RobotsPosture::Strict,
+                FetchClass::Content,
+            ),
+            robots_gate(
+                &forbidding,
+                "/x",
+                RobotsPosture::MetadataOnly,
+                FetchClass::Metadata,
+            ),
+            robots_gate(
+                &forbidding,
+                "/x",
+                RobotsPosture::Permissive,
+                FetchClass::Content,
+            ),
+            robots_gate(&allowing, "/x", RobotsPosture::Strict, FetchClass::Content),
         ];
         assert_eq!(
             answers,
             [
                 RobotsGate::Refused,
+                RobotsGate::ReadAndDiscarded,
                 RobotsGate::Overridden,
                 RobotsGate::Allowed
             ]
@@ -2331,6 +2528,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pacing_is_identical_under_every_posture() {
+        // Spec §11.5's own carve-out, and the row the plan insists be a test
+        // rather than a comment: `Permissive` is a statement about `Disallow`
+        // only. An instance that ignores a site's path rules is still bound by
+        // the time that site asked for, and the whole reason an operator can
+        // justify `permissive` at all is that the politeness half still holds.
+        //
+        // So the two axes must be independent: every posture gets the published
+        // `Crawl-delay`, and every posture gets the one-second floor when the
+        // host publishes nothing. A mutation that made the posture reach the
+        // pacing decision — the obvious way to "implement" `permissive` — would
+        // zero the delay for that row and be caught here.
+        for posture in [
+            RobotsPosture::Strict,
+            RobotsPosture::MetadataOnly,
+            RobotsPosture::Permissive,
+        ] {
+            let mut published = fetcher_with_robots(
+                Duration::from_millis(500),
+                "User-agent: *\nCrawl-delay: 3\nDisallow: /\n",
+            )
+            .await;
+            published.policy.robots_posture = posture;
+            assert_eq!(
+                published.interval_for("example.com").await,
+                Duration::from_secs(3),
+                "{posture:?} still waits the host's published Crawl-delay"
+            );
+
+            let mut unpublished =
+                fetcher_with_robots(Duration::from_millis(500), "User-agent: *\nDisallow: /\n")
+                    .await;
+            unpublished.policy.robots_posture = posture;
+            assert_eq!(
+                unpublished.interval_for("example.com").await,
+                Duration::from_secs(1),
+                "{posture:?} still falls back to the one-second floor, and `permissive` is not \
+                 an exemption from it"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn a_published_crawl_delay_is_used_as_the_gap() {
         let fetcher = fetcher_with_robots(
             Duration::from_millis(500),
@@ -2419,6 +2659,122 @@ mod tests {
         assert!(
             matches!(error, SourceError::Refused(_)),
             "expected a refusal, got {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_undeclared_fetch_is_refused_under_metadata_only() {
+        // The direction of the undeclared-class default is the whole point, and
+        // getting it backwards is a silent hole. `get_with_redirects` is what
+        // every adapter that has not been updated reaches, and it declares
+        // `Content` — so under `metadata_only` it is REFUSED.
+        //
+        // Defaulting to `Metadata` would make the one fetch that declared
+        // nothing the one fetch that gets through: an adapter nobody has
+        // updated would quietly read a forbidden path while a compliant one
+        // would not.
+        //
+        // This goes through `get` — the real trait method, so the real default
+        // — rather than naming the class in the assertion. A test that wrote
+        // `FetchClass::Content` next to the expectation would keep passing when
+        // the default changed underneath it, which is the failure this test
+        // exists to catch. The class is left undeclared on purpose: the caller
+        // under test is one that does not know the concept yet.
+        let mut fetcher =
+            fetcher_with_robots(Duration::from_millis(500), "User-agent: *\nDisallow: /\n").await;
+        fetcher.policy.robots_posture = RobotsPosture::MetadataOnly;
+
+        let error = fetcher
+            .get("https://example.com/story/1")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, SourceError::Refused(_)),
+            "a caller that declared no class is refused under metadata_only, which is the safe \
+             direction. Got {error:?} — if this is a network error rather than a refusal, the \
+             gate was passed and the ceiling was not applied."
+        );
+    }
+
+    #[tokio::test]
+    async fn a_declared_metadata_fetch_under_metadata_only_reaches_the_network() {
+        // The other half, and it is what makes the test above meaningful: the
+        // same fetcher, the same rules, the same posture, differing only in the
+        // declared class. If the refusal above came from the host rather than
+        // the gate, this one would fail too.
+        //
+        // It cannot assert success, because no network is reachable — so it
+        // asserts the failure is NOT a refusal. A `Refused` here would mean the
+        // posture refuses metadata, which is the opposite of what it is for.
+        let mut fetcher =
+            fetcher_with_robots(Duration::from_millis(500), "User-agent: *\nDisallow: /\n").await;
+        fetcher.policy.robots_posture = RobotsPosture::MetadataOnly;
+
+        let result = fetcher
+            .get_with_class(
+                "https://example.com/story/1",
+                None,
+                None,
+                FetchClass::Metadata,
+            )
+            .await;
+        if let Err(ref e) = result {
+            assert!(
+                !matches!(e, SourceError::Refused(_)),
+                "a declared METADATA fetch under metadata_only is not refused — the whole point \
+                 of the posture is to read it and discard it. Got {e:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_read_and_discarded_fetch_is_not_counted_as_an_override() {
+        // The counter is what an operator reads to answer "is this instance
+        // ignoring sites?", and `ReadAndDiscarded` is not that. It reads a
+        // forbidden path, yes — but it stores none of it, so nothing about the
+        // instance's stored corpus depends on the host's wishes being ignored.
+        //
+        // This is the one property of the new arm that a mutation to the
+        // `match` cannot reach: routing `ReadAndDiscarded` through
+        // `record_robots_override` still answers every gate assertion correctly,
+        // because the counter is not part of what the gate returns. Asserting the
+        // counter is what closes that.
+        let mut fetcher =
+            fetcher_with_robots(Duration::from_millis(500), "User-agent: *\nDisallow: /\n").await;
+        fetcher.policy.robots_posture = RobotsPosture::MetadataOnly;
+
+        let _ = fetcher
+            .get_with_class(
+                "https://example.com/story/1",
+                None,
+                None,
+                FetchClass::Metadata,
+            )
+            .await;
+
+        assert_eq!(
+            fetcher.robots_overrides(),
+            0,
+            "reading a forbidden path in order to discard it is not overriding the host, and a \
+             report that counts it would tell an operator this instance ignores robots.txt when it \
+             has stored nothing at all from the host"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_genuine_override_is_counted() {
+        // The other half, so the assertion above is about the distinction and
+        // not about a counter that never moves.
+        let mut fetcher =
+            fetcher_with_robots(Duration::from_millis(500), "User-agent: *\nDisallow: /\n").await;
+        fetcher.policy.robots_posture = RobotsPosture::Permissive;
+
+        let _ = fetcher.get("https://example.com/story/1").await;
+
+        assert_eq!(
+            fetcher.robots_overrides(),
+            1,
+            "a permissive posture really does read the forbidden path and really is counted"
         );
     }
 

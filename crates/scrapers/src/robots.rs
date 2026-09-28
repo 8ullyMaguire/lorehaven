@@ -29,6 +29,131 @@
 
 use std::time::Duration;
 
+/// What kind of read this is (spec §11.5, `FetchClass`).
+///
+/// Set at the call site by the adapter that declares it, **never inferred from
+/// a URL**. A chapter-shaped URL fetched as `Metadata` is still a metadata
+/// fetch and is still bounded as one, because inference from shape is precisely
+/// how a "just the metadata" door becomes a body door: the adapter's guess and
+/// the fetcher's ceiling then disagree, and the ceiling is the one that has to
+/// hold.
+///
+/// The three classes are not a ranking. `Media` is not "more than content" for
+/// robots purposes — a site may forbid `/media/` and allow `/story/`, and a
+/// linear scale would get one of those two cases wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FetchClass {
+    /// Title, author, tags, chapter list. Bounded at a fraction of the content
+    /// ceiling and parsed into a type with no field a body could arrive in.
+    Metadata,
+    /// Prose. The default for anything an adapter calls a chapter.
+    Content,
+    /// Image, audio, video bytes (§30.2's hosting policy decides what happens
+    /// to them afterwards).
+    Media,
+}
+
+impl FetchClass {
+    /// The stored spelling, for logs and for a source-catalogue entry that
+    /// reports what was fetched.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Metadata => "metadata",
+            Self::Content => "content",
+            Self::Media => "media",
+        }
+    }
+
+    /// Parse a stored spelling. `None` for anything this build cannot have
+    /// written, so a configuration naming a class this code does not have is
+    /// refused rather than defaulted — a typo that fell back to `Content` would
+    /// raise the ceiling, which is the direction that gets prose stored.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "metadata" => Some(Self::Metadata),
+            "content" => Some(Self::Content),
+            "media" => Some(Self::Media),
+            _ => None,
+        }
+    }
+}
+
+/// What an instance does about a `Disallow` it has been handed (spec §11.5,
+/// `imports.robots_posture`).
+///
+/// This replaces a boolean, and the third value exists because the old pair had
+/// no way to say "read it, keep none of it" — which is the one answer that is
+/// neither compliance nor defiance. `MetadataOnly` is that answer, and it is
+/// scoped to `FetchClass::Metadata` because a content or media path under the
+/// same posture is refused outright.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RobotsPosture {
+    /// Honour `Disallow` for every class. The default, and the old
+    /// `honour_robots = true`.
+    #[default]
+    Strict,
+    /// Read a disallowed **metadata** path, store none of it, and refuse every
+    /// content or media path outright.
+    MetadataOnly,
+    /// Honour nothing. The old `honour_robots = false`, kept because an
+    /// operator sometimes has a reason and §11.5 records it.
+    Permissive,
+}
+
+impl RobotsPosture {
+    /// The configuration spelling. This is the value `/api/v1/meta` and the
+    /// source catalogue report, so it is the one an operator reads.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Strict => "strict",
+            Self::MetadataOnly => "metadata_only",
+            Self::Permissive => "permissive",
+        }
+    }
+}
+
+/// The posture an instance actually runs, given both configuration keys.
+///
+/// `honour_robots` is the compatibility key and `robots_posture` is the real
+/// one, so the posture is an [`Option`]: a config that names neither must reach
+/// the default, and a type that cannot represent "absent" cannot tell an
+/// operator's deliberate `strict` from the same word arriving by default.
+///
+/// | `robots_posture` | `honour_robots` | result |
+/// |---|---|---|
+/// | `Some(p)` | anything | **`p`** — the posture wins |
+/// | `None` | `Some(false)` | `Permissive` |
+/// | `None` | `Some(true)` | `Strict` |
+/// | `None` | `None` | `Strict` |
+///
+/// The precedence is the load-bearing part. A config carrying a stale
+/// `honour_robots = false` from before the migration must not silently override
+/// a posture an operator has since chosen deliberately; the reverse precedence
+/// would let a key nobody edits any more outvote the one everybody edits.
+///
+/// The failure this table exists to prevent is the one an early version of this
+/// function had: taking `RobotsPosture` rather than `Option<RobotsPosture>`, and
+/// returning the posture unconditionally. A default-constructed `Strict` then
+/// beat `honour_robots = false` on every existing config, so the compatibility
+/// key was accepted by the parser and ignored by the fetcher — which is worse
+/// than not having it, because the operator's own words are in the file.
+pub fn resolve_posture(
+    posture: Option<RobotsPosture>,
+    honour_robots: Option<bool>,
+) -> RobotsPosture {
+    match posture {
+        // Deliberate, and it wins over both values of the compatibility key.
+        Some(p) => p,
+        // No posture named: fall back to the boolean so a config written before
+        // the migration behaves exactly as it did.
+        None => match honour_robots {
+            Some(false) => RobotsPosture::Permissive,
+            Some(true) | None => RobotsPosture::Strict,
+        },
+    }
+}
+
 /// One `Allow` or `Disallow` line, in the group that applies to us.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Directive {

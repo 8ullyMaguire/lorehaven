@@ -1002,6 +1002,61 @@ async fn an_instance_that_overrides_disallow_says_so_in_the_catalogue() {
     harness.cleanup().await;
 }
 
+/// The note names the setting that actually decided the answer.
+///
+/// The test above covers `honour_robots = false`, which is how every existing
+/// config reaches `permissive`. This one covers reaching it through the posture,
+/// where the note must name the *other* key. A note that always named
+/// `honour_robots` would send an operator to a key that is not in their file; a
+/// note that always named `robots_posture` would send every existing operator to
+/// a key they have never heard of, where setting it is a no-op because the value
+/// is already `permissive`. Both are wrong in the same way — they point at an
+/// edit that changes nothing — so both directions are asserted.
+#[tokio::test]
+async fn the_catalogue_names_the_posture_when_the_posture_is_what_decided() {
+    use lorehaven_scrapers::robots::RobotsPosture;
+
+    let harness = Harness::new("catalogue-posture").await;
+    let mut config = config_for(&harness.dir);
+    // Reached through the posture, with the compatibility key still at its
+    // default `true` — so the two keys disagree and the posture wins.
+    config.imports.robots_posture = Some(RobotsPosture::Permissive);
+    assert!(
+        config.imports.honour_robots,
+        "the compat key is at its default"
+    );
+
+    let mut http = Client::new(server::build_router(
+        harness.state_with_config(FixtureArchive::behind_a_solver_wall(), config),
+    ));
+    register(&mut http, "posture@example.org", "posture").await;
+
+    let (status, body) = http.get("/api/v1/imports/sources").await;
+    assert_eq!(status, StatusCode::OK, "sources: {body}");
+    let entry = body["items"]
+        .as_array()
+        .and_then(|items| items.iter().find(|item| item["key"] == SOURCE))
+        .expect("the source is in the catalogue");
+
+    let note = entry["robots"]["note"].as_str().expect("there is a note");
+    assert!(
+        note.contains("imports.robots_posture = permissive"),
+        "the note names the key the operator actually set: {note}"
+    );
+    assert!(
+        !note.contains("honour_robots"),
+        "and does not point at a key that is not in their file, where setting it would be a \
+         no-op: {note}"
+    );
+    // The resolved posture is on the wire, so a client does not have to infer
+    // the answer from the note's prose.
+    assert_eq!(entry["robots"]["robots_posture"], "permissive");
+    assert_eq!(entry["robots"]["honour_disallow"], false);
+    assert_eq!(entry["robots"]["honour_crawl_delay"], true);
+
+    harness.cleanup().await;
+}
+
 /// The setting reaches the fetcher, not only the catalogue.
 ///
 /// A catalogue that reported a setting the importer did not use would be worse
@@ -1022,6 +1077,67 @@ async fn the_import_policy_carries_the_instances_robots_answer() {
     assert!(
         !lorehaven_app::imports::policy_for(&adapter, &config).honour_robots,
         "and the override reaches the fetcher the importer builds"
+    );
+
+    harness.cleanup().await;
+}
+
+/// The POSTURE reaches the fetcher, which is the field the gate reads.
+///
+/// This is a separate test from the one above on purpose. The test above
+/// asserts `honour_robots`, and `policy_for` keeps that field in step with the
+/// posture — so a version that set only the deprecated bool, and left
+/// `robots_posture` at its default, would pass it while every fetch ran under
+/// `Strict` regardless of the operator's configuration. Asserting the field the
+/// gate actually reads is what closes that.
+#[tokio::test]
+async fn the_import_policy_carries_the_resolved_robots_posture() {
+    use lorehaven_scrapers::robots::RobotsPosture;
+
+    let harness = Harness::new("robots-posture-policy").await;
+    let adapter = FixtureArchive::behind_a_solver_wall();
+    let mut config = config_for(&harness.dir);
+
+    assert_eq!(
+        lorehaven_app::imports::policy_for(&adapter, &config).robots_posture,
+        RobotsPosture::Strict,
+        "an unmodified instance complies"
+    );
+
+    // The compatibility key alone still selects permissive on the POSTURE,
+    // not only on the deprecated bool.
+    config.imports.honour_robots = false;
+    assert_eq!(
+        lorehaven_app::imports::policy_for(&adapter, &config).robots_posture,
+        RobotsPosture::Permissive,
+        "`honour_robots = false` reaches the field the gate reads"
+    );
+
+    // And the third value, which the bool cannot express at all.
+    config.imports.robots_posture = Some(RobotsPosture::MetadataOnly);
+    assert_eq!(
+        lorehaven_app::imports::policy_for(&adapter, &config).robots_posture,
+        RobotsPosture::MetadataOnly,
+        "`metadata_only` is unreachable through the bool, so only the posture can carry it"
+    );
+
+    // The posture wins over a stale bool, all the way to the fetcher. The
+    // `honour_robots = false` set above is still in the config and disagrees,
+    // and the fetcher still gets `metadata_only` rather than `permissive`.
+    assert!(
+        !config.imports.honour_robots,
+        "the stale bool is still there, and still disagrees"
+    );
+    assert_eq!(
+        lorehaven_app::imports::policy_for(&adapter, &config).robots_posture,
+        RobotsPosture::MetadataOnly,
+        "and the deliberate posture is what the fetcher gets"
+    );
+    // The compatibility field is kept in step with the posture rather than
+    // with the raw config, so a caller reading it is not told the opposite.
+    assert!(
+        lorehaven_app::imports::policy_for(&adapter, &config).honour_robots,
+        "the deprecated bool reports compliance, because the resolved posture is not permissive"
     );
 
     harness.cleanup().await;

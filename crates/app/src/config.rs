@@ -1102,6 +1102,16 @@ pub struct ImportsConfig {
     /// An operator who switches this on is the one who has to say how much it
     /// cost, and the count is what answers that.
     pub honour_robots: bool,
+    /// What this instance does about a `Disallow` (spec §11.5,
+    /// `imports.robots_posture`).
+    ///
+    /// `None` means the operator named no posture, and is what makes the
+    /// compatibility key above meaningful: `honour_robots = false` then still
+    /// selects `permissive` instead of being silently overridden by a default.
+    /// See [`lorehaven_scrapers::robots::resolve_posture`], which is where the
+    /// two are combined and which is the only thing that should read this
+    /// field.
+    pub robots_posture: Option<lorehaven_scrapers::robots::RobotsPosture>,
 }
 
 impl Default for ImportsConfig {
@@ -1112,7 +1122,19 @@ impl Default for ImportsConfig {
             // Compliance, because the alternative is a crawler nobody asked
             // for. See the field documentation for what switching it off means.
             honour_robots: true,
+            robots_posture: None,
         }
+    }
+}
+
+impl ImportsConfig {
+    /// The posture this instance actually runs (spec §11.5).
+    ///
+    /// The posture wins when both keys are present, and `honour_robots` is the
+    /// fallback for a config written before the posture existed. One function,
+    /// called once, so no two call sites can disagree about the answer.
+    pub fn resolved_robots_posture(&self) -> lorehaven_scrapers::robots::RobotsPosture {
+        lorehaven_scrapers::robots::resolve_posture(self.robots_posture, Some(self.honour_robots))
     }
 }
 
@@ -1542,6 +1564,10 @@ impl Config {
             // rather than `ImportsConfig::default()`'s value read back, because
             // this is the line that decides it and it should read that way.
             honour_robots: imports_file.honour_robots.unwrap_or(true),
+            // `None` when absent, so `resolved_robots_posture` can tell a
+            // deliberate posture from a default and fall back to the
+            // compatibility key when there is nothing deliberate to find.
+            robots_posture: imports_file.robots_posture,
         };
 
         // --- tts ------------------------------------------------------------
@@ -2527,7 +2553,18 @@ struct ImportsSection {
     /// Whether an archived copy may be read as a last resort.
     archive_fallback: Option<bool>,
     /// Whether a path a source's `robots.txt` forbids is refused. Default true.
+    ///
+    /// DEPRECATED in favour of `robots_posture`, and kept because a config
+    /// written before the posture existed still has to load. `false` reads as
+    /// `permissive`.
     honour_robots: Option<bool>,
+    /// `strict | metadata_only | permissive`. Wins over `honour_robots` when
+    /// both are present, so a stale boolean cannot outvote a deliberate choice.
+    ///
+    /// An unrecognised value stops startup rather than falling back to
+    /// `strict`: a typo that defaulted would look like compliance while the
+    /// operator's file said something else.
+    robots_posture: Option<lorehaven_scrapers::robots::RobotsPosture>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -2860,6 +2897,139 @@ port = 7000
         )
         .expect("a partial imports section is valid");
         assert!(parsed.imports.honour_robots);
+    }
+
+    #[test]
+    fn a_robots_posture_is_read_from_the_file() {
+        use lorehaven_scrapers::robots::RobotsPosture;
+
+        for (spelling, expected) in [
+            ("strict", RobotsPosture::Strict),
+            ("metadata_only", RobotsPosture::MetadataOnly),
+            ("permissive", RobotsPosture::Permissive),
+        ] {
+            let parsed = load_from(
+                &format!("posture-{spelling}"),
+                &format!(
+                    "environment = \"development\"\n\
+                     [imports]\n\
+                     robots_posture = \"{spelling}\"\n"
+                ),
+            )
+            .unwrap_or_else(|e| panic!("{spelling} parses: {e}"));
+            assert_eq!(
+                parsed.imports.robots_posture,
+                Some(expected),
+                "{spelling} loads as itself"
+            );
+            assert_eq!(
+                parsed.imports.resolved_robots_posture(),
+                expected,
+                "and is the posture the instance runs"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unrecognised_posture_stops_startup_rather_than_defaulting() {
+        use lorehaven_scrapers::robots::RobotsPosture;
+
+        // A typo that fell back to `strict` would look like compliance while the
+        // operator's file said something else entirely — the instance would be
+        // refusing fetches the operator believes it is allowed to make, and the
+        // file gives no sign of it. This matches how `access_mode` and
+        // `rec.mode` already behave.
+        //
+        // The refusal is asserted at the deserialiser rather than through the
+        // file loader, because the loader wraps every parse failure in a
+        // message naming only the file — so a test written there proves the
+        // loader ran and nothing about which value was wrong. What has to be
+        // true is that this enum refuses, and the loader's refusal is a
+        // consequence of it.
+        let err = serde_json::from_str::<RobotsPosture>("\"strict-but-maybe\"")
+            .expect_err("an unrecognised posture is refused, not defaulted");
+        let text = err.to_string();
+        assert!(
+            text.contains("strict-but-maybe") || text.contains("unknown variant"),
+            "the message names the offending value or says it is unknown, so an operator can \
+             see which line is wrong: {text}"
+        );
+
+        // And the whole config really does refuse to load, not just this value
+        // in isolation.
+        load_from(
+            "posture-typo",
+            "environment = \"development\"\n\
+             [imports]\n\
+             robots_posture = \"strict-but-maybe\"\n",
+        )
+        .expect_err("and the operator's file is refused outright, so startup stops");
+    }
+
+    #[test]
+    fn the_posture_wins_over_a_stale_honour_robots() {
+        use lorehaven_scrapers::robots::RobotsPosture;
+
+        // Both keys present, and they disagree. The posture wins, because the
+        // boolean is the key nobody edits any more: letting it outvote the
+        // posture would mean an operator's deliberate choice is silently
+        // replaced by a value they left behind months ago.
+        let parsed = load_from(
+            "posture-wins",
+            "environment = \"development\"\n\
+             [imports]\n\
+             honour_robots = false\n\
+             robots_posture = \"strict\"\n",
+        )
+        .expect("both keys parse");
+        assert!(
+            !parsed.imports.honour_robots,
+            "the boolean is preserved exactly as written"
+        );
+        assert_eq!(
+            parsed.imports.resolved_robots_posture(),
+            RobotsPosture::Strict,
+            "and the posture is what the fetcher reads, so `strict` wins over the stale `false`"
+        );
+    }
+
+    #[test]
+    fn honour_robots_still_selects_permissive_when_no_posture_is_named() {
+        use lorehaven_scrapers::robots::RobotsPosture;
+
+        // The compatibility path, and the one an existing config takes. A
+        // version of `resolve_posture` that took `RobotsPosture` rather than
+        // `Option<RobotsPosture>` returned the default `Strict` here and made
+        // this file's own instruction a no-op — the key parsed, and nothing
+        // obeyed it.
+        let parsed = load_from(
+            "posture-compat",
+            "environment = \"development\"\n\
+             [imports]\n\
+             honour_robots = false\n",
+        )
+        .expect("a pre-posture config still loads");
+        assert_eq!(parsed.imports.robots_posture, None, "no posture was named");
+        assert_eq!(
+            parsed.imports.resolved_robots_posture(),
+            RobotsPosture::Permissive,
+            "`honour_robots = false` still means permissive"
+        );
+
+        // And the absence of both keys is strict, which is what an
+        // unconfigured instance does.
+        let parsed = load_from(
+            "posture-absent",
+            "environment = \"development\"\n\
+             [imports]\n\
+             archive_fallback = true\n",
+        )
+        .expect("a partial imports section is valid");
+        assert_eq!(parsed.imports.robots_posture, None);
+        assert_eq!(
+            parsed.imports.resolved_robots_posture(),
+            RobotsPosture::Strict
+        );
     }
 
     #[test]

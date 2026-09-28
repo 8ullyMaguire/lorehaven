@@ -52,8 +52,30 @@ pub fn policy_for(adapter: &dyn SourceAdapter, config: &Config) -> FetchPolicy {
     policy.unblock = config.imports.unblock_for(adapter);
     // The instance's answer to the source's own `robots.txt`, applied here so
     // every import path — preview, chapter fetch, update check — gets the same
-    // one. Defaults to compliance; see `ImportsConfig::honour_robots`.
-    policy.honour_robots = config.imports.honour_robots;
+    // one. Defaults to compliance; see `ImportsConfig::resolved_robots_posture`.
+    //
+    // The posture is the field the fetcher reads, so it is set here rather than
+    // leaving `honour_robots` to be consulted at the point of use. Two fields
+    // that both look authoritative and disagree is the shape this change
+    // exists to remove.
+    policy.robots_posture = config.imports.resolved_robots_posture();
+    // Kept in step with the posture so a caller that still reads the
+    // compatibility field sees the same answer rather than the raw config
+    // value, which may have been overridden by a deliberate posture.
+    //
+    // The question this answers is "does this policy override the rules?", so
+    // the bool is true for exactly the permissive posture. An earlier version
+    // asked "is the posture permissive?" and assigned that instead, which set
+    // the field to the answer to its own question — so the compatibility field
+    // read `false` on a strict instance and `true` on a permissive one, and
+    // the existing test that asserts it caught the inversion. The posture, not
+    // the bool, is what the fetcher reads, so nothing was crawling the wrong
+    // way; a reader of the deprecated field was simply being told the opposite
+    // of the truth.
+    policy.honour_robots = !matches!(
+        policy.robots_posture,
+        lorehaven_scrapers::robots::RobotsPosture::Permissive
+    );
     policy
 }
 use serde_json::{json, Value};

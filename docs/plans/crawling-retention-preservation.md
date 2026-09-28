@@ -3,7 +3,8 @@
 **Date:** 2026-09-27
 **Spec:** `docs/spec-amendments/crawling-retention-and-preservation.md`
 **Milestone:** M59
-**Status:** Phase A0 built and green. Phases A, B, C1, C, D, E not started.
+**Status:** Phases A0 and A.1–A.3 built and green. Phase A.4, B, C1, C, D, E
+not started.
 
 Read the amendment before this file. This file is the build order, the file
 paths, and the verification commands. Every phase below names the amendment
@@ -21,8 +22,8 @@ note at the end of this file.
 
 | Piece | Spec status | Code status | This plan |
 |---|---|---|---|
-| `honour_robots` override | live, §11.5 | **built** — `FetchPolicy::honour_robots`, `robots_gate`, per-host counter, first-per-host log | Phase A amends it |
-| `robots_gate` as a pure function | §11.5 | built, `safety.rs:1316` | Phase A extends the signature |
+| `honour_robots` override | live, §11.5 | **built** — `FetchPolicy::honour_robots`, `robots_gate`, per-host counter, first-per-host log | Phase A amends it — **done, A.2** |
+| `robots_gate` as a pure function | §11.5 | built, `safety.rs:1316` | Phase A extends the signature — **done, A.3** |
 | `cache \| aggregate` retention | §11.15, fully specified | **not built** — M6-15 `unsupported`: no setting, no refusal path, no admin route | Phase C |
 | Crossposting | §11.12 | not built (no `crosspost` symbol outside one test file name) | Phase D |
 | Preservation batches | §11.11 | not built — M6-10 `unsupported` | out of scope; Phase D reuses the destination machinery only |
@@ -232,6 +233,35 @@ function in `crates/domain/src/policy.rs`:
 pub fn resolve_posture(posture: RobotsPosture, honour_robots: Option<bool>) -> RobotsPosture
 ```
 
+**Built as two deviations from the sketch above.** Both are recorded here
+because the sketch is the thing a later reader trusts, and a divergence that
+is not written down is indistinguishable from a mistake.
+
+1. **`Option<RobotsPosture>`, not `RobotsPosture`.** The signature above cannot
+   distinguish an operator's deliberate `strict` from the same word arriving by
+   default, so with the non-optional type the default `Strict` beat
+   `honour_robots = false` on *every* existing config: the key parsed, the file
+   was accepted, and nothing obeyed it — worse than not having the key, because
+   the operator's own words are in the file. `None` means "named nothing" and is
+   what makes the compatibility fallback reachable. Mutation M3/M4 in the proof
+   below covers both directions.
+
+2. **`resolve_posture` lives in `crates/scrapers/src/robots.rs`, not
+   `crates/domain/src/policy.rs`.** `scrapers` does not depend on `domain`, and
+   the two are siblings over `lore-metadata`, so the plan's location would have
+   meant a new crate edge for a function that resolves a robots concept.
+   `app::config::ImportsConfig::resolved_robots_posture` is the only caller, so
+   the one-hop indirection buys nothing and the edge costs a build-order
+   constraint. Reached through `app` either way.
+
+The gate itself reads `FetchPolicy::robots_posture`; `honour_robots` is
+re-derived from the resolved posture inside `policy_for` so a caller reading the
+deprecated field is never told the opposite of the truth. That re-derivation was
+wrong in the first version — it stored `matches!(posture, Permissive)`, the
+answer to its own question rather than to the one the field means — and the
+pre-existing `the_import_policy_carries_the_instances_robots_answer` test caught
+it. Kept as mutation M8, which reproduces exactly that inversion.
+
 An **unrecognised** posture string stops startup, matching how
 `access_mode` and `rec.mode` already behave. A typo that fell back to
 `Strict` would look like compliance while crawling `Permissive`-intent.
@@ -267,6 +297,63 @@ Pacing is untouched by every row. `Crawl-delay` and the one-second floor
 (`default_interval_per_host`) are read and enforced identically under all
 three postures — **asserted by a test, not by a comment**, because that is the
 one property most likely to be broken by a later edit.
+
+### A.1–A.3 verification
+
+Twelve mutations, each of which must turn the suite red. Every one is a way the
+change can be wrong while still compiling and still looking correct:
+
+| # | mutation | caught by |
+|---|---|---|
+| M1 | `metadata_only` lets `Content` through | `metadata_only_still_refuses_every_content_and_media_path` |
+| M2 | an allowed path is gated on posture | `an_allowed_path_is_allowed_under_every_posture_and_class` |
+| M3 | the stale bool outvotes the posture | `the_posture_wins_over_a_stale_honour_robots` |
+| M4 | the compatibility key is ignored entirely | `honour_robots_still_selects_permissive_when_no_posture_is_named` |
+| M5 | an unrecognised posture defaults to `Strict` | `an_unrecognised_posture_stops_startup_rather_than_defaulting` |
+| M6 | an undeclared fetch defaults to `Metadata` | `an_undeclared_fetch_is_refused_under_metadata_only` |
+| M7 | `policy_for` never sets the posture | `the_import_policy_carries_the_resolved_robots_posture` |
+| M8 | `honour_robots` re-derived inverted | `the_import_policy_carries_the_instances_robots_answer` |
+| M9 | a declared metadata fetch is refused | `a_declared_metadata_fetch_under_metadata_only_reaches_the_network` |
+| M10 | a read-and-discard is counted as an override | `a_read_and_discarded_fetch_is_not_counted_as_an_override` |
+| M11 | `ReadAndDiscarded` becomes `Overridden` | `the_four_answers_are_the_whole_decision` |
+| M12 | the gate ignores the class | `metadata_only_reads_a_disallowed_metadata_path_and_discards_it` |
+| M13 | `ReadAndDiscarded` becomes a refusal | `a_declared_metadata_fetch_under_metadata_only_reaches_the_network` |
+| M14 | the catalogue note always names `robots_posture` | `an_instance_that_overrides_disallow_says_so_in_the_catalogue` |
+| M15 | the catalogue note always names `honour_robots` | `the_catalogue_names_the_posture_when_the_posture_is_what_decided` |
+| M16 | `robots_posture` dropped from the catalogue wire | `the_catalogue_names_the_posture_when_the_posture_is_what_decided` |
+
+M14 is a real bug this phase shipped, caught by a test written before the change
+rather than after it. The note unconditionally named
+`imports.robots_posture = permissive`, which is wrong for **every existing
+config** — none of them name a posture, so all of them reach `permissive` through
+`honour_robots = false`. The operator would have been pointed at a key absent
+from their file, where setting it is a no-op because the value already *is*
+`permissive`. An error message that names the wrong key is worse than none,
+because the reader acts on it. The note now branches on which key decided the
+answer, and M14/M15 pin both directions.
+
+M6, M7 and M10 **survived the first pass** and each found a real hole rather than
+a bad assertion. M6 and M7 passed only because no test read the field the gate
+reads — the existing test asserted the *deprecated* bool, which `policy_for`
+happens to keep in step. M10 passed because the counter is not part of what the
+gate returns, so routing the discarded read through `record_robots_override`
+satisfied every gate assertion. The three tests that closed them are named in
+the table.
+
+Two of the first-pass runs were also untrustworthy and are worth recording: M3
+and M4 reported through the wrong crate, and M10's substitution did not match
+the source (the arm carries a five-line comment, so the bare arm text is not
+present) and silently changed nothing. A mutation that fails to apply reads
+exactly like one that survived. Both scripts now assert the anchor count and
+print `mutation applied` before running, and the runners report a compile error
+as distinct from a pass.
+
+**A.1–A.3 are done. A.4 is not, and it is the half that makes `ReadAndDiscarded`
+mean anything.** The gate now answers `ReadAndDiscarded` and the fetcher now acts
+on it, but nothing yet stops a caller that received a discarded body from
+storing it — the arm's doc comment says a later phase enforces that, and that
+comment is currently the only thing between a discarded body and the database.
+A.4 is where the 1 MiB ceiling and the body-less parse target go.
 
 ### A.4 The metadata fetch cannot return a body
 
