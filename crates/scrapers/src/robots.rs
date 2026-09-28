@@ -54,6 +54,21 @@ pub enum FetchClass {
 }
 
 impl FetchClass {
+    /// The spelling that goes on the wire in a `User-Agent` token.
+    ///
+    /// Separate from [`FetchClass::as_str`] on purpose. The stored spelling is
+    /// a value in a database column and an API response, where changing it is a
+    /// migration; the token spelling is inside a string a site parses, and
+    /// `metadata_only` with an underscore in a UA is a spelling no site expects.
+    /// Two spellings, one enum, so adding a class forces a decision about both.
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::Metadata => "metadata",
+            Self::Content => "content",
+            Self::Media => "media",
+        }
+    }
+
     /// The stored spelling, for logs and for a source-catalogue entry that
     /// reports what was fetched.
     pub fn as_str(self) -> &'static str {
