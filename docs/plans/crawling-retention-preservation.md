@@ -352,6 +352,149 @@ cargo test -p lorehaven-scrapers user_agent 2>&1 | tail -10
 
 ---
 
+## Phase C1 — Body audience: who may read a body this instance holds
+
+Amendment §7.7. **New on 2026-09-27**, on the owner's instruction. This is a
+narrowing of §11.15's *baseline* (every eligible reader reads a cached body),
+not a per-request override — see the amendment's §6.1 for why those are
+different decisions.
+
+### C1.1 The change to `can_access_content`
+
+`crates/domain/src/policy.rs:263` already takes an `Actor` and already has a
+role-based grant:
+
+```rust
+pub struct Actor {
+    pub account_id: AccountId,
+    pub pseud_id: PseudId,
+    pub age_state: AgeState,
+    pub trusted_reviewer: bool,     // the only standing field today
+}
+```
+
+There is **no trust level and no role on `Actor`**, so this is not "add a
+check" — it is "give the one function every surface consults a notion of
+institutional standing it does not have". Add:
+
+```rust
+/// Who this actor is, for a body-audience check (spec §7.7).
+/// A grant, never a score: every variant is a fact about a role the account
+/// holds, so nothing here can be inferred from a preference signal.
+pub struct ActorStanding {
+    pub trust_level: i64,        // 0..6
+    pub is_operator: bool,
+    pub is_vanguard: bool,       // §16.18 membership, NOT a resonance score
+    pub is_curator: bool,        // §32 media curator role
+}
+```
+
+### C1.2 Order of evaluation — the part that must not be got wrong
+
+`policy.rs:281` today returns `Decision::Allow` unconditionally for
+`trusted_reviewer`, **before** the lifecycle check and before the rating
+ceiling. §7.7.2 says the audience is the opposite and must be placed after:
+
+```text
+1. contributor of this work        → allow
+2. author blocked the actor        → deny
+3. trusted_reviewer                → allow  (EXISTING, unchanged, §7.7.2
+                                                does not extend it)
+4. lifecycle publicly readable    → deny
+5. rating ceiling, age-dependent   → deny   ← runs BEFORE the audience
+6. body_audience                   → deny   ← new
+```
+
+Step 5 before step 6 is the whole safety property. **A `role:operator`
+audience on a `declared_minor` age state must still be refused by the minor
+ceiling.** The test that pins it is listed below and it is the one to write
+first in this phase.
+
+### C1.3 The audience type and its resolution
+
+New in `crates/domain/src/retention.rs`:
+
+```rust
+pub enum BodyAudience {
+    Anyone, AccountsOnly, TrustAtLeast(i64), RoleOperator, RoleVanguard, RoleCurator,
+}
+
+/// Narrowest wins. All three scopes may only narrow; a widening is refused by
+/// name at the setter, not silently ignored.
+pub fn resolve_audience(instance: BodyAudience, source: Option<BodyAudience>,
+                        work: Option<BodyAudience>) -> BodyAudience
+```
+
+Ranking `narrowest` needs an order, and the order is by *how much it removes*:
+`RoleVanguard < RoleCurator < RoleOperator < TrustAtLeast(4) < TrustAtLeast(2) <
+TrustAtLeast(1) < AccountsOnly < Anyone`. The `TrustAtLeast` arm is
+deliberately parameterised rather than one variant per level, so
+`TrustAtLeast(4)` is not accidentally equal to `TrustAtLeast(2)`.
+
+`works.body_audience` is **NULL when absent, never the string `'anyone'`** — an
+explicit `'anyone'` on a work would override a narrower instance default the
+moment anyone edited that work, which is a widening path. `NULL` means inherit.
+
+### C1.4 The indistinguishability work — this is most of the phase
+
+§7.7.3 is the requirement and it touches every surface. The places the current
+code would leak, found by reading the spec's own surfaces rather than by
+guessing:
+
+```bash
+cd ~/code-local/rust/lorehaven
+rg -n 'offline|download|export' crates/app/src/routes/library.rs | head
+rg -n 'new chapter|chapter.*available' crates/app/src/routes/notifications.rs | head
+rg -n 'word_count|chapter_count' crates/app/src/routes/works.rs | head
+```
+
+Each hit is a place a body-derived signal can reach a gated reader. The
+notification case is the subtle one: "new chapter available" is an existence
+oracle for a body, so on a gated work it must say *the work changed* and not
+that a chapter arrived.
+
+**The test that matters is a paired-response comparison**, not a set of
+assertions about status codes:
+
+```text
+a_gated_readers_responses_are_byte_identical_to_a_non_existent_works
+```
+
+It normalises the requested id out of both bodies and compares status, headers
+and payload across chapter read, work page, search, library, notification,
+feed, export and the API. A test that asserts `status == 404` passes while a
+`X-Body-Cached: true` header leaks the fact, and that is exactly the shape of
+defect this section exists to prevent.
+
+### C1.5 Verification
+
+```bash
+cd ~/code-local/rust/lorehaven
+cargo test -p lorehaven-app body_audience 2>&1 | tail -40
+cargo test -p lorehaven-domain policy 2>&1 | tail -20
+```
+
+```text
+the_rating_ceiling_is_evaluated_before_the_body_audience
+a_role_operator_audience_on_a_declared_minor_age_state_is_still_refused
+a_gated_readers_responses_are_byte_identical_to_a_non_existent_works
+a_gated_chapter_request_is_404_with_the_coarse_noun_and_never_403
+no_surface_renders_a_disabled_body_affordance_with_a_tooltip
+no_route_returns_a_body_audience_a_resonance_or_a_role_membership_list
+a_vanguard_gate_consults_membership_and_never_a_resonance_score
+a_source_or_work_audience_may_narrow_and_never_widen
+a_null_work_audience_inherits_and_an_explicit_anyone_does_not_override_a_narrower_default
+on_an_aggregate_instance_the_audience_is_inert_and_every_reader_is_refused_identically
+a_trusted_reviewer_branch_is_unchanged_by_this_phase
+```
+
+`a_trusted_reviewer_branch_is_unchanged_by_this_phase` is a regression net, not
+a feature test: §7.7.2 deliberately leaves the existing unconditional `Allow`
+alone, and a future edit that "tidies" it into the audience system would
+silently grant operators access above the age ceiling.
+
+---
+
 ## Phase C — retention, built as §11.15 specifies
 
 Amendment §4. This is **M6-15**. A0 now carries the first migration, so this
@@ -850,10 +993,16 @@ A0 cross-source identity minimum      ← migration 0084; PREREQUISITE of D
 A  robots posture + fetch class       ← no migration, amends working code
 B  class-specific UA token            ← same config surface as A
 C  retention built (M6-15)            ← migration 0085; the setting everything else is about
+C1 body audience (§7.7)               ← no migration of its own; rides C's 0085
 D  preservation targets + rewards     ← needs A0's member row, A's class, C's setting
 E  retention proposals                ← migration 0087; needs C to be real before there is anything to vote on
 F  docs + ledger                      ← with the last phase
 ```
+
+C1 is **inside** C rather than after it: the audience is a field on the same
+`works` / retention rows and a new arm of the same eligibility function, so
+splitting it invites two writers in `policy.rs` at once. It carries no migration
+of its own — `works.body_audience` lands in C's 0085.
 
 A and C can run in parallel by different hands. D and E both touch
 `routes/retention.rs` and the admin surface, so they serialise.
