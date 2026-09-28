@@ -119,13 +119,44 @@ async fn published_work(client: &mut test_support::TestClient, title: &str) -> S
 /// migration 0086 records — a stored `anyone` would override a narrower
 /// instance default, which is a widening path.
 async fn set_audience(tdb: &test_support::TestDb, work: &str, audience: Option<&str>) {
-    let value = audience.map(|a| a.to_owned());
-    sqlx::query("UPDATE works SET body_audience = ? WHERE id = ?")
-        .bind(value.as_deref())
-        .bind(work)
-        .execute(tdb.db().sqlite_pool().expect("sqlite"))
+    set_audience_raw(tdb, work, audience)
         .await
         .expect("set the work's audience");
+}
+
+/// The same write, returning the error so a test can assert a refusal.
+///
+/// Dialect-aware through `TestDb::sql`, which renumbers `?` to `$n` for
+/// PostgreSQL. The first version of this file called
+/// `tdb.db().sqlite_pool().expect("sqlite")` directly, which passed on SQLite
+/// and made **seven of the eight tests here fail with a bare `sqlite` panic**
+/// under `LOREHAVEN_TEST_PG_URL` — the handoff's own warning that a test which
+/// only ever runs on one engine proves nothing about the other.
+///
+/// `id` is cast `::uuid` in the PostgreSQL form because `works.id` is `UUID`
+/// there and the bind is a `&str`; without it PostgreSQL answers `42804`.
+async fn set_audience_raw(
+    tdb: &test_support::TestDb,
+    work: &str,
+    audience: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    let value = audience.map(|a| a.to_owned());
+    if tdb.is_postgres() {
+        let sql = tdb.sql("UPDATE works SET body_audience = ? WHERE id = ?::uuid");
+        sqlx::query(&sql)
+            .bind(value.as_deref())
+            .bind(work)
+            .execute(tdb.db().postgres_pool().expect("postgres"))
+            .await
+            .map(|_| ())
+    } else {
+        sqlx::query("UPDATE works SET body_audience = ? WHERE id = ?")
+            .bind(value.as_deref())
+            .bind(work)
+            .execute(tdb.db().sqlite_pool().expect("sqlite"))
+            .await
+            .map(|_| ())
+    }
 }
 
 // --- the gate ----------------------------------------------------------------
@@ -294,11 +325,7 @@ async fn an_unrecognised_audience_cannot_be_written() {
     test_support::register(&mut author, "author@test.dev", "ba_author").await;
     let work = published_work(&mut author, "Future Build Wrote This").await;
 
-    let result = sqlx::query("UPDATE works SET body_audience = ? WHERE id = ?")
-        .bind("a_value_from_the_future")
-        .bind(&work)
-        .execute(tdb.db().sqlite_pool().expect("sqlite"))
-        .await;
+    let result = set_audience_raw(&tdb, &work, Some("a_value_from_the_future")).await;
     assert!(
         result.is_err(),
         "the column must refuse a value the domain cannot rank; storing one leaves \

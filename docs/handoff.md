@@ -184,6 +184,59 @@ Per the house rule that a gate must be shown to catch a real defect:
   reinstated `ADD CONSTRAINT` and clean after restore
 - `cargo build --workspace --tests` — clean, 0 warnings
 
+### A test-isolation bug the full-suite gate found, in a file I had not touched
+
+`cargo test --workspace` failed one test that had passed in the earlier
+targeted runs: `user_search_ast::the_route_answers_a_valid_user_query_with_200`,
+a **500** from `/api/v1/users/search`, a route that does not touch the body
+audience at all. It passed 20/20 in isolation and 3/3 on three repeat runs.
+
+**"Passes alone" was the evidence, not a defence** — the same rule the handoff
+already states about `repeated_login_attempts_are_rate_limited`, and it was
+right again. The cause was in `test_support::scratch_dir`:
+
+```rust
+// before
+let dir = temp_dir().join(format!("lorehaven-test-{tag}-{pid}"));
+let _ = std::fs::remove_dir_all(&dir);
+```
+
+Unique per **(tag, process)**. All four HTTP tests in that file build their
+database through `setup(tag)` and then call `scratch_dir(tag)` again to hand the
+path to a router — so the second call `remove_dir_all`s the directory holding
+the SQLite file the first call is still connected to. The 500 is the route
+failing on a database that was deleted underneath it, which is why the SQL is
+correct and the test is right.
+
+**This is the third instance of one bug in this repo.** `vote_decay_parity` had
+its own local `scratch()` keyed on a bare nanosecond timestamp; the fix recorded
+in the M54 handoff was "use the atomic counter through `test_support::scratch_dir`"
+— which fixed that file and left the shared helper's own keying unchanged. The
+house convention was already the safe one; the helper was not.
+
+The tag is now a **label, not part of the identity**, and uniqueness comes from
+`unique_suffix()` — the same atomic counter the PostgreSQL scratch databases
+use. The tag stays in the path so a failed run's leftover says which test left
+it. Two tests pin it, and `scratch_dir_is_unique_per_call_not_per_tag` is proven
+red by mutation, naming the repeated path.
+
+**The lesson to keep, and it is about the previous fix rather than this one:**
+when a fixture's failure mode is a name collision, patching the one caller that
+collided fixes the symptom and leaves the collision reachable from the next
+file. `grep -rn "scratch_dir(" crates/app/tests/` would have shown four sites in
+one file and any number elsewhere; the fix that only worked for one file was
+already recorded as a fix.
+
+### Also fixed, both pre-existing
+
+* `route_inventory`'s `ROUTE_TABLE` entry for `get_card` still spelled the path
+  `/roadmap/cards/:id` after `a124f58` corrected the route to `{id}`. The mirror
+  of that fix, in the table, and the inventory test is what caught it.
+* A `needless_borrow` clippy warning in the audience check, and a comment that
+  claimed `ActorStanding::none()` "fails every audience above `AccountsOnly`".
+  It fails every audience above `Anyone` — a different fact, stated wrongly, in
+  the one place whose whole job is to say which audiences a default fails.
+
 ## Still open in this phase — and one of them is the larger half
 
 1. **§7.7.3's indistinguishability is NOT built.** The paired-response test the

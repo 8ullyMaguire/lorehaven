@@ -40,7 +40,26 @@ CREATE TABLE story_identities (
     -- The local work this identity is about. A crosspost this instance performed
     -- always has one; an identity with no local member is a purely-external
     -- grouping, which A0 does not create.
-    work_id           TEXT NOT NULL REFERENCES works (id) ON DELETE CASCADE,
+    -- `UUID`, not `TEXT`: `works.id` is `UUID` on PostgreSQL (0003), and
+    -- PostgreSQL will not create a foreign key between a TEXT column and a
+    -- UUID one. The first version of this file declared it TEXT, mirroring the
+    -- SQLite arm, and the entire PostgreSQL migration chain died at 0085 with
+    --
+    --     foreign key constraint "story_identities_work_id_fkey"
+    --     cannot be implemented
+    --
+    -- on every scratch database, so every dual-backend test in the project
+    -- failed during `migrate()` before a single assertion. This is the same
+    -- divergence the handoff records for the ten `TEXT` pseud foreign keys
+    -- (`comments.author_pseud` and friends): the SQLite arm is TEXT because
+    -- SQLite is dynamically typed and accepts either, and mirroring it into
+    -- PostgreSQL is the mistake.
+    --
+    -- The *local* id columns of these two tables stay TEXT: they are generated
+    -- by this instance, not referenced by anything, and nothing in this phase
+    -- joins them to a UUID. Only the two columns that reference `works` are
+    -- retyped.
+    work_id           UUID NOT NULL REFERENCES works (id) ON DELETE CASCADE,
     -- Canonical metadata is a COPY of the work's, not the authority. §11.10's
     -- merges are reversible, so an identity must be able to be dissolved back
     -- into its members without a work losing its title.
@@ -60,7 +79,8 @@ CREATE TABLE story_identity_members (
     -- Exactly one of the two, CHECK-enforced: a row with both or neither is a
     -- row that means two things, and a reader cannot be shown a row that means
     -- two things.
-    work_id             TEXT REFERENCES works (id) ON DELETE CASCADE,
+    -- `UUID` for the same reason as `story_identities.work_id` above.
+    work_id             UUID REFERENCES works (id) ON DELETE CASCADE,
     external_record_id  TEXT,
     -- One value ships: 'cross_posted'. See the SQLite file for why no inference
     -- path may add a second.
