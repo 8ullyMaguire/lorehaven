@@ -237,6 +237,77 @@ already recorded as a fix.
   It fails every audience above `Anyone` — a different fact, stated wrongly, in
   the one place whose whole job is to say which audiences a default fails.
 
+## PostgreSQL was not running at all, and the reason was a committed migration
+
+The first dual-backend run of this session failed **every** suite during
+`migrate()`, before a single assertion:
+
+```
+error returned from database: foreign key constraint
+  "story_identities_work_id_fkey" cannot be implemented
+```
+
+Migration **0085** (committed in `c066db1`, Phase A0) declared:
+
+```sql
+work_id  TEXT NOT NULL REFERENCES works (id) ON DELETE CASCADE
+```
+
+`works.id` is `UUID` on PostgreSQL (0003). PostgreSQL will not create a foreign
+key between a `TEXT` column and a `UUID` one — SQLite will, because it is
+dynamically typed, which is why the SQLite arm is TEXT and the two looked
+identical in review.
+
+**This is the divergence this file already records**, twice, for the ten `TEXT`
+pseud foreign keys (`comments.author_pseud` and friends). The lesson was
+written down and then not applied to the next table. The two columns are now
+`UUID`; the tables' own `id` columns stay `TEXT` because nothing references
+them.
+
+The same module had **four `::timestamptz` binds on columns 0085 spells TEXT**
+— the exact class `fix-timestamptz-binds.py` was disabled for adding, and the
+tool's own docstring asserts the false premise that started it. Removed. Three
+`work_id` binds needed `::uuid` for the mirror-image reason.
+
+**The 0085 repair unblocked the chain**: `analytics_gate` went from
+13/13-fail-at-`migrate()` to 13/13 pass on PostgreSQL.
+
+### A test that only ever ran on one engine
+
+`crates/app/tests/body_audience.rs` — written by me, hours earlier — had its
+`set_audience` helper call `tdb.db().sqlite_pool().expect("sqlite")` directly.
+On SQLite: 8/8. Under `LOREHAVEN_TEST_PG_URL`: **7 of 8 failed with a bare
+`sqlite` panic.** Now dialect-aware through `TestDb::sql`, 8/8 on each.
+
+This is the handoff's own standing warning — *without the dual-backend path
+those tests silently run on SQLite only, which is how a `::uuid` cast bug
+survives* — and it caught me on the first day of writing a suite for a feature
+whose entire purpose is a type gate.
+
+### Five real PostgreSQL faults the uncast checker had been reporting
+
+`check-uncast-pg-placeholders.py` reported 10 sites across 6 files. **Five were
+real**, and this file's note that the checker "reports OK" was about a
+different state of the tree:
+
+* `exchange.rs` (4) — `INT4` columns read into `i64`. PostgreSQL reports INT4
+  as INT4 and sqlx refuses to decode it into i64; SQLite accepts either. The
+  PostgreSQL arms now select `::bigint`.
+* `milestone_45_roadmap.rs` (1) — `roadmap_suggestions.account_id` is a UUID
+  column bound a `&str`: a 42804 on every suggestion-body read on PostgreSQL.
+
+**The remaining 5 are false positives, and the way that was established is the
+part worth keeping: by running the suites, not by reading the report.**
+`milestone_43_federation` 41/41, `milestone_18p42_vanguard_roles` 31/31,
+`milestone_18p59_bounties` 21/21 — because `federation_queue.attempts` is INT4
+and is read as `i32`, `bounty_contributions.contributor` is TEXT, and `amount`
+is already `CAST(... AS BIGINT)`.
+
+A checker that reports a site is a **hypothesis**. Only the engine settles it,
+and "I read the column type and it looked fine" settles nothing. The same
+applies to a report the checker does *not* make, which is why every gate in
+this repo is required to be seen going red.
+
 ## Still open in this phase — and one of them is the larger half
 
 1. **§7.7.3's indistinguishability is NOT built.** The paired-response test the
