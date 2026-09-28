@@ -1,5 +1,214 @@
 # Handoff
 
+## M59 Phase C1 — the body audience, and the SQLite this project actually runs
+
+The spec'd work (`§7.7`, `docs/plans/crawling-retention-preservation.md` §C1) is
+built through the domain layer and the work door, and **three real defects were
+found and fixed on the way in**. One of them broke every fresh database, one was
+a silent widening, and one is a bug that only a test asserting BOTH directions
+can catch.
+
+### The tree was unbuildable when I started, and half of it was not this project
+
+The previous session ended mid-rewrite with `crates/app/src/routes/arena.rs`
+and `frontend/src/routes/Arena.svelte` replaced by a **Glicko-2 pairwise arena**
+that did not compile: `lorehaven_db::fic_arena` and `lorehaven_db::works` do not
+exist, and `AppError` was unimported. Alongside it sat two untracked migrations,
+`0100_fic_arena.sql`, whose PostgreSQL arm contained a literal
+`CREATE TABLE)` on line 38 — a syntax error — and which declared
+`user_id INTEGER` and `work_id BIGINT` against `accounts(id)` and `works(id)`,
+which are `UUID` in this schema.
+
+I reverted all of it. Three reasons, in the order they mattered:
+
+1. **The spec names the other arena.** §0.4.2a is a 4-card Plackett-Luce ballot
+   with dimensional weights, and it is committed, tested, and referenced by
+   `M45-02` and `M45-56` in `docs/requirements.csv`. A Glicko-2 pairwise rewrite
+   is a different feature with a different shape, and **no requirement row, no
+   spec section and no plan mentions it.** A rewrite of a working, specified,
+   tested feature that nothing asks for is not a gap being closed.
+2. **It did not compile**, so nothing could be verified either way.
+3. **Its schema was wrong in ways that would not have been caught.** See above.
+
+If the pairwise arena is wanted, it is a new milestone with a requirements row,
+a spec amendment and a plan — not a working-tree edit. `docs/plans/` is where
+that starts.
+
+### The SQLite this project runs is not the SQLite on your PATH
+
+`migrations/sqlite/0086_body_audience.sql` opened with
+
+```sql
+ALTER TABLE works ADD CONSTRAINT works_body_audience_valid CHECK (...)
+```
+
+which is **valid SQL, works on this machine's system SQLite 3.53, and is a
+syntax error on the engine the tests link.** sqlx's `libsqlite3-sys` **bundles**
+SQLite — it does not use the system library — and the bundled version is
+**3.46.0**:
+
+```
+$ grep -m1 'SQLITE_VERSION ' ~/.cargo/registry/src/*/libsqlite3-sys-0.30.1/sqlite3/sqlite3.h
+#define SQLITE_VERSION        "3.46.0"
+```
+
+`ALTER TABLE ... ADD CONSTRAINT` arrived in **3.49.0**. Every fresh database
+died in `migrate()` before a single assertion, so the symptom was *all eight
+tests in the new suite failing with a syntax error pointing at a migration*,
+which reads as a broken test suite rather than a broken schema.
+
+**This is the third time in this repo that a dialect difference has been found
+by a version rather than by a rule**, and the shape is the same as the other
+two: valid SQL, one engine accepts it, the other does not, and nothing reports
+the difference. The two earlier ones are `ESCAPE ''` (the `LIKE` escape
+character, which SQLite has no default for and PostgreSQL defaults to
+backslash) and the ten `TEXT`/`UUID` pseud foreign keys.
+
+The fix is a `BEFORE INSERT` / `BEFORE UPDATE` trigger, and the **rename-and-
+recreate rebuild was refused on purpose**: `works` is referenced by 51 foreign
+keys, SQLite rewrites every referencing FK when a table is renamed, and
+migration 0075 exists precisely because that rewrite silently repointed
+`device_deliveries.export_job_id` at a dropped `export_jobs_old`. The
+`PRAGMA foreign_keys=OFF` window a rebuild needs is also a no-op inside the
+transaction `migrate()` runs each migration in — a problem the handoff records
+as still open.
+
+**The trigger and the PostgreSQL CHECK were verified to accept exactly the same
+18 values**, including the near-misses that matter: `trust_at_leastx` and
+`trust_at_leastely` are refused on both, `trust_at_least:banana` is accepted by
+both (and rejected later by the parser, which fails closed), and `' anyone'`
+with a leading space is refused on both. The first draft of the trigger used
+`NOT LIKE 'trust_at_least%'`, which accepts `trust_at_leastx` where the
+PostgreSQL CHECK does not — a divergence between the dialects in the one place
+the dialects must agree.
+
+**The cost of a trigger, stated rather than glossed:** it is not a CHECK.
+`PRAGMA table_info` does not report it, a schema dump does not show it, and a
+tool that reconstructs `works` from `sqlite_master` will lose it silently. The
+enforcement is real. `the_two_dialects_declare_the_same_columns_and_indexes`
+reads `CREATE TABLE` and `CREATE INDEX` only, so parity holds.
+
+### `scripts/check-sqlite-migration-syntax.py` — new gate, 14 self-test cases
+
+The version is read from `Cargo.lock` and the vendored header, so a `cargo
+update` that raises the bundled engine **retires these rules by itself**. If the
+lockfile or the header cannot be read the script **exits non-zero** rather than
+passing: a gate that cannot find the version it is checking against has nothing
+to say, and a gate that fails quiet is worse than no gate.
+
+Its self-test found **two real bugs in the gate on its first run**, which is
+the point of writing the negative cases first:
+
+* it asserted that `DROP COLUMN`, `RENAME COLUMN` and `RETURNING` were reported,
+  and the bundled 3.46 has had all three since 3.35/3.25/3.35 — so it was
+  asserting a falsehood about the version comparison. Those cases now run at a
+  version where the rule is genuinely active, plus a case asserting the bundled
+  engine does *not* report them.
+* its boundary case checked that a rule is active at the version that
+  introduced its construct, which is backwards. The comparison is
+  `version < introduced`, so a rule must be **inactive** at the introduction
+  version and **active** one release earlier.
+
+The gate is proven red on the actual defect: reinstating the `ADD CONSTRAINT`
+line into 0086 reports it at the right file and exits 1; restoring returns it
+to 0.
+
+### The two defects in the audience logic, both silent
+
+**An anonymous reader was served a body gated to `accounts_only`.** Two causes,
+stacked, and neither would have been found by a test asserting one status code.
+
+1. `can_access_content`'s anonymous arm returned `Allow` (or the rating refusal)
+   and **never consulted the audience at all.** The audience check was added at
+   step 6, which is only reached by a signed-in actor.
+2. Even once consulted, `standing_satisfies(AccountsOnly, ...)` returned `true`
+   unconditionally — because `ActorStanding` had **no way to say "has a
+   session".** `AccountsOnly` is a claim about *accounts*, and trust level 0
+   does not distinguish a new account from no account.
+
+`AccessPolicy::default()` has `anonymous_reading_enabled: true`, so on a stock
+instance the anonymous arm reaches the rating check and is allowed. The result
+was a body held for signed-in readers, served to every unauthenticated request.
+
+The fix is a `signed_in` field on `ActorStanding`, and `AccountsOnly` answers
+from it. `TrustAtLeast(0)` is deliberately **not** the same variant: a threshold
+of 0 *is* satisfied at level 0, and collapsing the two would mean an instance
+that named one had named the other.
+
+**A signed-in reader at trust 4 was refused a body held for trust 4.** The route
+called the three-argument `can_access_content`, which passes `None` for
+standing. That is the right default for a forgetful caller — `none()` fails
+every audience above `Anyone` — and the wrong answer at the one place that gates
+a body. The symptom is a gate that refuses everyone, which is **indistinguishable
+from a gate that works**, and every negative assertion in the suite passed for
+the wrong reason.
+
+`crates/db/src/standing.rs` is the one place that looks standing up, and it
+reads four tables in four queries rather than one `SELECT` with four
+`LEFT JOIN`s. That is deliberate and the comment says why: all four answers
+turn out to be "no, and that is a false, not an error", which is exactly what a
+join gets wrong by returning a row of nulls. A database error propagates as a
+500 rather than degrading to `none()` — the first is a visible bug, the second
+is a correct answer to a different question.
+
+### The test that was written with a wrong premise
+
+`an_anonymous_reader_is_refused_a_gated_body` asserted
+`Deny(AnonymousReadingDisabled)` and explained it as "anonymous reading is off
+by default, so the anonymous arm answers first". The first half is false —
+`AccessPolicy::default()` sets it to `true`, and anonymous reading is off by
+default at the *instance mode* level instead. The test was wrong about a
+default, and the code was wrong in a way the test could not see.
+
+Both halves are now asserted separately (instance posture off → that reason;
+instance posture on → `BodyNotInAudience`), plus a control that an ungated work
+is still readable — because a one-sided test passes against a gate that refuses
+everyone *and* against a gate that admits everyone.
+
+### Both fixes are proven to go red
+
+Per the house rule that a gate must be shown to catch a real defect:
+
+* reverting the standing lookup to `None` → **3 of 8 fail** (`403 where 200 is
+  expected`, on the allow-direction tests)
+* reverting `AccountsOnly => standing.signed_in` to `true` → **2 of 8 fail** in
+  the app suite and **2 of 10** in the domain suite
+
+### Verified
+
+- `cargo test -p lorehaven-domain --lib` — 620 pass
+- `cargo test -p lorehaven-db --lib` — 76 pass
+- `cargo test -p lorehaven-app --test body_audience` — 8 pass
+- SQLite trigger vs PostgreSQL CHECK — 18/18 identical verdicts, INSERT and UPDATE
+- `check-sqlite-migration-syntax.py --self-test` — 14 pass; the gate is red on a
+  reinstated `ADD CONSTRAINT` and clean after restore
+- `cargo build --workspace --tests` — clean, 0 warnings
+
+## Still open in this phase — and one of them is the larger half
+
+1. **§7.7.3's indistinguishability is NOT built.** The paired-response test the
+   amendment asks for — a gated reader's response byte-identical to a
+   non-existent work, across chapter read, work page, search, library,
+   notification, feed, export and the API — does not exist. This is the larger
+   half of Phase C1 and the reason the feature is not safe to offer yet. The
+   work page currently renders its chapter list and summary regardless of the
+   audience, which §7.7.3 names explicitly: no chapter list, no download or
+   export button, no "cached" badge, and **a disabled button with a tooltip is
+   an advertisement**.
+2. **The notification oracle.** "new chapter available" is an existence oracle
+   for a body; on a gated work it must say the work changed.
+3. **No admin door for `body_audience`.** The tests set it with raw SQL, and
+   `config.retention.default_body_audience` has no TOML surface wired to
+   `Config::from_file` yet — the field defaults and no test reads a config that
+   names it.
+4. **Media is not a §7.7 surface.** `crates/app/src/routes/media.rs` passes
+   `BodyAudience::Anyone` with a comment saying so, which is honest and is the
+   right thing to do rather than inventing a nullable column nobody asked for.
+5. **The source level of the three-level resolution does not exist yet.**
+   `resolve_audience` takes `source: Option<BodyAudience>` and every caller
+   passes `None`; `reading_decision` uses `narrowest` directly because the
+   source table has no column.
+
 ## `own.reading.trend`, and two SQL bugs that fail silently
 
 At `2947926`. SQLite and PostgreSQL are both green: **101 suites, 2167 tests,

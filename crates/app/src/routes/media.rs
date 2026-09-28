@@ -250,6 +250,13 @@ async fn direct_door_eligible(
                 actor_is_contributor: true,
                 author_blocked_actor: false,
                 via_deep_link: true,
+                // A contributor is allowed at step 1, before the audience is
+                // ever consulted, so the value here cannot change the answer.
+                // `Anyone` says that plainly rather than carrying a field media
+                // does not have — media is not yet a §7.7 surface, and inventing
+                // a nullable column for it now would be a schema change nobody
+                // asked for.
+                body_audience: lorehaven_domain::retention::BodyAudience::Anyone,
             },
             &lorehaven_domain::policy::AccessPolicy::default(),
         )
@@ -288,6 +295,11 @@ async fn direct_door_eligible(
                 .is_some_and(|user| user.account_id.to_string() == media.owning_account_id),
             author_blocked_actor: false,
             via_deep_link: true,
+            // As above: media rows carry no audience of their own yet, so the
+            // baseline is the honest value. When §7.7.4 brings media under the
+            // body audience, this becomes `parse_stored(media.body_audience)`
+            // and the surrounding test is what should fail first.
+            body_audience: lorehaven_domain::retention::BodyAudience::Anyone,
         },
         &policy,
     )

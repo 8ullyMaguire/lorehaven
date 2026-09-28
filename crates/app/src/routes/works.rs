@@ -52,7 +52,8 @@ use lorehaven_domain::permission::{
     ExclusionTarget, LineageEdge, LineageKind, Permission, PermissionStatement,
 };
 use lorehaven_domain::policy::{
-    can_access_content, Actor, ContentFacts, Decision, DenyReason, Lifecycle, Visibility,
+    can_access_content_with_standing, Actor, ContentFacts, Decision, DenyReason, Lifecycle,
+    Visibility,
 };
 use lorehaven_domain::{AppError, ChapterId, PseudId, RevisionId, WorkId};
 use serde::{Deserialize, Serialize};
@@ -1039,10 +1040,25 @@ pub(crate) async fn reading_decision(
     let actor_is_contributor =
         actor.is_some_and(|actor| contributors.iter().any(|c| c.pseud_id == actor.pseud_id));
 
+    // The work's own audience, with the instance's as the CEILING (spec §7.7).
+    //
+    // `narrowest`, not the work's value directly: a work row may name an
+    // audience WIDER than the instance default — an operator editing one work in
+    // a UI, or a value written by a build that predates a config change — and
+    // taking it at face value would let a single work opt out of the instance's
+    // policy. `narrowest` makes that impossible from either direction, and it is
+    // the whole of the three-level rule until the source level exists.
+    let body_audience = lorehaven_domain::retention::narrowest(
+        state.config().retention.default_body_audience,
+        lorehaven_domain::retention::BodyAudience::parse_stored(work.body_audience.as_deref())
+            .unwrap_or(state.config().retention.default_body_audience),
+    );
+
     let facts = ContentFacts {
         lifecycle: work.lifecycle_state(),
         visibility: parse_visibility(&work.visibility),
         rating: lorehaven_db::sessions::parse_rating(&work.rating),
+        body_audience,
         actor_is_contributor,
         author_blocked_actor: false,
         via_deep_link: true,
@@ -1057,7 +1073,30 @@ pub(crate) async fn reading_decision(
         return Reading::Contributor;
     }
 
-    match can_access_content(actor, &facts, &policy) {
+    // The actor's institutional standing, for the body audience (spec §7.7).
+    //
+    // Looked up here rather than defaulted, because the default is a denial:
+    // `can_access_content`'s three-argument form passes `None` for standing,
+    // and `ActorStanding::none()` fails every audience above `Anyone` — which
+    // is the correct direction for a forgetful caller and the wrong answer here.
+    // A signed-in reader at trust 4 would be refused a work explicitly held for
+    // trust 4, and the only symptom would be a gate that refuses everyone. A
+    // database failure in the lookup propagates as an error rather than
+    // degrading to `none()`, so it is a 500 and not a silent denial.
+    let standing = match lorehaven_db::standing::standing_for(
+        state.db(),
+        actor.map(|a| a.account_id.to_canonical_string()).as_deref(),
+    )
+    .await
+    {
+        Ok(standing) => standing,
+        Err(error) => {
+            tracing::error!(%error, "could not read the account's standing");
+            return Reading::Denied(AppError::Internal(error.into()));
+        }
+    };
+
+    match can_access_content_with_standing(actor, &facts, &policy, Some(&standing)) {
         Decision::Allow => {
             if !matches!(work.lifecycle_state(), Lifecycle::Published) {
                 return Reading::Denied(AppError::NotFound { resource: "work" });

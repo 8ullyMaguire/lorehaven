@@ -326,9 +326,7 @@ pub async fn post_suggest(
     if let Some(ref text) = body.body {
         if text.chars().count() > MAX_SUGGESTED_BODY {
             return Err(ApiError(AppError::Validation {
-                message: format!(
-                    "description must be {MAX_SUGGESTED_BODY} characters or fewer"
-                ),
+                message: format!("description must be {MAX_SUGGESTED_BODY} characters or fewer"),
                 field_errors: BTreeMap::new(),
             }));
         }

@@ -49,9 +49,10 @@
 use std::path::PathBuf;
 
 use lorehaven_db::roadmap::{
-    apply_elo_and_counters, arena_candidates, create_ballot, fetch_ballot,
+    apply_elo_and_counters, arena_candidates, create_ballot, fetch_ballot, find_card_by_id,
     find_card_by_title_normalized, insert_suggestion, list_cards, list_moves, mark_voted,
-    record_move, update_card_stage, upsert_card, Card, find_card_by_id};
+    record_move, update_card_stage, upsert_card, Card,
+};
 use test_support::TestDb;
 
 fn scratch_dir(tag: &str) -> PathBuf {
@@ -364,7 +365,10 @@ async fn a_frozen_card_still_takes_the_upsert() {
     upsert_card(h.db(), &edited).await.expect("re-upsert");
 
     let found = h.reload(&card.id).await.expect("card");
-    assert_eq!(found.stage, "rejected", "a rejected card is not resurrected");
+    assert_eq!(
+        found.stage, "rejected",
+        "a rejected card is not resurrected"
+    );
     assert_eq!(
         found.body, "Considered and declined; the reasoning is recorded here.",
         "and its reasoning can still be written"
@@ -1140,7 +1144,8 @@ async fn deleting_a_card_detaches_its_suggestion() {
 #[tokio::test]
 async fn a_suggestion_for_an_unknown_account_is_refused() {
     let h = Harness::new("rm-suggestion-unknown-account").await;
-    let result = insert_suggestion(h.db(), &uuid::Uuid::new_v4().to_string(), "hi", None, None).await;
+    let result =
+        insert_suggestion(h.db(), &uuid::Uuid::new_v4().to_string(), "hi", None, None).await;
     assert!(result.is_err());
 }
 
@@ -1224,7 +1229,10 @@ mark, a comma, and a — dash, so the round trip is not a trivially-empty string
 
     let found = h.reload(&card.id).await.expect("card");
     assert_eq!(found.body, prose, "the body survives the round trip");
-    assert_eq!(found.category, "general", "and category did not take its place");
+    assert_eq!(
+        found.category, "general",
+        "and category did not take its place"
+    );
     assert_eq!(found.title, "Cache tiers");
 }
 
@@ -1243,9 +1251,19 @@ async fn a_card_without_a_body_reads_as_empty() {
 #[tokio::test]
 async fn a_card_is_found_by_id_with_its_body() {
     let h = Harness::new("rm-body-by-id").await;
-    let card = h.card_with_body("Fandom preservation report", "idea", 1610.0, "Per-fandom dashboard.").await;
+    let card = h
+        .card_with_body(
+            "Fandom preservation report",
+            "idea",
+            1610.0,
+            "Per-fandom dashboard.",
+        )
+        .await;
 
-    let found = find_card_by_id(h.db(), &card.id).await.expect("query").expect("a card");
+    let found = find_card_by_id(h.db(), &card.id)
+        .await
+        .expect("query")
+        .expect("a card");
     assert_eq!(found.id, card.id);
     assert_eq!(found.title, "Fandom preservation report");
     assert_eq!(found.body, "Per-fandom dashboard.");
@@ -1293,9 +1311,15 @@ async fn a_suggestion_records_its_body_and_distinguishes_absent_from_empty() {
     let h = Harness::new("rm-suggestion-body").await;
     let who = h.account().await;
 
-    insert_suggestion(h.db(), &who, "with a description", Some("Here is why."), None)
-        .await
-        .expect("insert with body");
+    insert_suggestion(
+        h.db(),
+        &who,
+        "with a description",
+        Some("Here is why."),
+        None,
+    )
+    .await
+    .expect("insert with body");
     insert_suggestion(h.db(), &who, "with an empty one", Some(""), None)
         .await
         .expect("insert with empty body");

@@ -129,6 +129,7 @@ pub struct Config {
     pub rate_limits: crate::limiter::Limits,
     /// What the importer may do about a source that refuses a plain request.
     pub imports: ImportsConfig,
+    pub retention: RetentionConfig,
     /// Theme mode and gravity settings (spec §0.4.6).
     pub theme: ThemeConfig,
     /// Discovery feed diversity settings.
@@ -1220,6 +1221,29 @@ impl RunScope {
     }
 }
 
+/// Retention settings (spec §7.7 and §25).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetentionConfig {
+    /// The CEILING for every work's body audience.
+    ///
+    /// `Anyone` by default, which is §11.15's baseline: this feature narrows
+    /// access and nothing here may widen it. An operator who sets a narrower
+    /// default has gated every work on the instance, which is a legitimate and
+    /// reversible choice. An operator who sets a WIDER one than a work names
+    /// does not get that widening, because `narrowest` is what combines the
+    /// levels and the work still wins — which is why this is a ceiling and not a
+    /// fallback.
+    pub default_body_audience: lorehaven_domain::retention::BodyAudience,
+}
+
+impl Default for RetentionConfig {
+    fn default() -> Self {
+        Self {
+            default_body_audience: lorehaven_domain::retention::BodyAudience::Anyone,
+        }
+    }
+}
+
 impl ImportsConfig {
     /// The posture this instance actually runs (spec §11.5).
     ///
@@ -1905,6 +1929,7 @@ impl Config {
             age,
             rate_limits,
             imports,
+            retention: RetentionConfig::default(),
             theme: {
                 let t = file.theme.unwrap_or_default();
                 ThemeConfig {
@@ -2215,6 +2240,7 @@ impl Config {
             // drove a solver by default would make every test that fetches a page
             // depend on which escalations happened to be configured.
             imports: ImportsConfig::default(),
+            retention: RetentionConfig::default(),
             theme: ThemeConfig::default(),
             discovery: DiscoveryConfig::default(),
             tts: TtsConfig::default(),

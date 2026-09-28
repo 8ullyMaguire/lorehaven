@@ -101,6 +101,24 @@ jobs:
       - name: PostgreSQL backend-arm placeholders must be $n
         run: python3 scripts/check-pg-backend-arm-placeholders.py
 
+      # `ALTER TABLE ... ADD CONSTRAINT` is valid SQL and a syntax error on
+      # the SQLite this project links. sqlx's libsqlite3-sys BUNDLES 3.46.0 --
+      # it is not the system sqlite3 -- and ADD CONSTRAINT arrived in 3.49.0.
+      # Migration 0086 used it, and the failure was a migrate()-time syntax
+      # error on every fresh database, which reads as "every test in every
+      # suite failed" with nothing pointing at the migration. A developer with
+      # a newer sqlite3 on their PATH reproduces it working, which is the worst
+      # way for a migration defect to present.
+      #
+      # The version is read from Cargo.lock and the vendored header, so a
+      # `cargo update` that raises the bundled engine retires these rules by
+      # itself rather than leaving them to rot.
+      - name: SQLite migration syntax check (self-test)
+        run: python3 scripts/check-sqlite-migration-syntax.py --self-test
+
+      - name: SQLite migrations must not exceed the bundled engine's syntax
+        run: python3 scripts/check-sqlite-migration-syntax.py
+
   frontend:
     name: Frontend (check, test, build)
     runs-on: ubuntu-latest
