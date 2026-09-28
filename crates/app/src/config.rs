@@ -1929,7 +1929,24 @@ impl Config {
             age,
             rate_limits,
             imports,
-            retention: RetentionConfig::default(),
+            retention: RetentionConfig {
+                // `and_then(parse_stored)`: an unrecognised value yields `None`
+                // and therefore the default, which is the fail-closed direction
+                // for a field whose purpose is to withhold. It is NOT an error
+                // at load, deliberately — `deny_unknown_fields` already refuses
+                // an unknown *key*, and refusing an unknown *value* here would
+                // make a typo look like a broken instance rather than a setting
+                // that did not apply. The trade is stated here because it is a
+                // trade: an operator who writes `default_body_audience =
+                // "trusted_readers"` gets `Anyone` and no warning, and the only
+                // evidence is the parsed config.
+                default_body_audience: file
+                    .retention
+                    .as_ref()
+                    .and_then(|r| r.default_body_audience.as_deref())
+                    .and_then(|v| lorehaven_domain::retention::BodyAudience::parse_stored(Some(v)))
+                    .unwrap_or(lorehaven_domain::retention::BodyAudience::Anyone),
+            },
             theme: {
                 let t = file.theme.unwrap_or_default();
                 ThemeConfig {
@@ -2482,6 +2499,38 @@ struct FileConfig {
     instance: Option<InstanceSection>,
     /// Meta-ranker settings (spec §9.10).
     meta_ranker: Option<MetaRankerSection>,
+    /// Body-audience baseline (spec §7.7).
+    retention: Option<RetentionSection>,
+}
+
+/// The `[retention]` table (spec §7.7): who may read a body by default.
+///
+/// This table did not exist, and the absence was invisible. `retention:
+/// RetentionConfig::default()` was hardcoded at the file-load site, so
+/// `default_body_audience` was loadable in a Rust test and **unreachable in a
+/// deployment** — an operator control that reads as configurable and is not.
+/// The same shape as `rec.mode` below, and the same lesson: a value that is
+/// never read cannot be wrong, so nothing failed until something tried to set
+/// it.
+///
+/// `deny_unknown_fields` for the same reason every other section has it: a
+/// misspelled key in an operator file should be an error at load, not a setting
+/// that silently does not apply.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RetentionSection {
+    /// The instance-wide body audience. A *ceiling* for every work, not a
+    /// fallback: `narrowest` combines it with the work's own value, so a work
+    /// can narrow but never widen past it.
+    ///
+    /// A **string**, parsed by `BodyAudience::parse_stored`, rather than the
+    /// derived `Deserialize` — for two reasons. The derived form is
+    /// `{"trust_at_least": 4}`, which is not the spelling stored in the column
+    /// and not the spelling an operator would guess from the database. And
+    /// `parse_stored` is the parser that fails closed on a misspelling, so a
+    /// typo in this file inherits the instance default rather than becoming an
+    /// audience nobody chose.
+    default_body_audience: Option<String>,
 }
 
 /// The `[discovery]` table (spec §16.1a): which recommender the instance
@@ -3089,6 +3138,153 @@ port = 7000
             config: Some(path),
             ..GlobalArgs::default()
         })
+    }
+
+    /// `[retention] default_body_audience` is reachable from a file.
+    ///
+    /// This section did not exist until now, and the absence was invisible in
+    /// the way that hurts most: `default_body_audience` was a real field on
+    /// `Config`, so every test that needed a narrow instance baseline could set
+    /// it *in Rust*, and nothing failed. A deployment could not set it at all.
+    /// The same shape as `rec.mode` — a documented operator control that was
+    /// loadable in a test and unreachable in production, with no error anywhere
+    /// because a value nobody can set cannot be wrong.
+    ///
+    /// The test reads from a *file*, not by assigning a field, for exactly that
+    /// reason: an assignment test passes against the broken version, which is
+    /// what this one was verified to do.
+    #[test]
+    fn the_instance_body_audience_is_reachable_from_a_config_file() {
+        use lorehaven_domain::retention::BodyAudience;
+
+        let parsed = load_from(
+            "retention-trust",
+            "environment = \"development\"\n\
+             [retention]\n\
+             default_body_audience = \"trust_at_least:3\"\n",
+        )
+        .expect("an operator may set the instance body audience");
+        assert_eq!(
+            parsed.retention.default_body_audience,
+            BodyAudience::TrustAtLeast(3),
+            "the file must reach the field, parameterised level included"
+        );
+
+        // And the plain spellings round-trip, so the string form in TOML and
+        // the stored form in the column are the same vocabulary.
+        for (spelling, expected) in [
+            ("anyone", BodyAudience::Anyone),
+            ("accounts_only", BodyAudience::AccountsOnly),
+            ("role_operator", BodyAudience::RoleOperator),
+            ("role_vanguard", BodyAudience::RoleVanguard),
+            ("role_curator", BodyAudience::RoleCurator),
+            ("trust_at_least", BodyAudience::TrustAtLeast(0)),
+        ] {
+            let parsed = load_from(
+                &format!("retention-{spelling}"),
+                &format!(
+                    "environment = \"development\"\n\
+                     [retention]\n\
+                     default_body_audience = \"{spelling}\"\n"
+                ),
+            )
+            .expect("a known audience spelling loads");
+            assert_eq!(
+                parsed.retention.default_body_audience, expected,
+                "{spelling}"
+            );
+        }
+    }
+
+    /// An unrecognised audience inherits rather than becoming real, and an
+    /// unknown key is refused.
+    ///
+    /// Two different failures, deliberately handled two different ways.
+    ///
+    /// An unknown **value** falls back to `Anyone`, which is the *widest* — so
+    /// this is a widening path, and the honest thing is to say so rather than
+    /// dress it up. It is still the right choice: refusing the load would take
+    /// the whole service down for a typo in a field whose default is the safe
+    /// one.
+    ///
+    /// An unknown **key** is refused by `deny_unknown_fields`, because a
+    /// misspelled `default_body_audience` that silently does nothing is exactly
+    /// the failure this section exists to prevent.
+    ///
+    /// Note which of the three tests this one is: it passes against the
+    /// unwired version, because it only asserts *fallback* behaviour and the
+    /// unwired version falls back to exactly the same place. That is correct
+    /// and it is why the other two exist.
+    #[test]
+    fn an_unrecognised_audience_inherits_and_an_unknown_key_is_refused() {
+        use lorehaven_domain::retention::BodyAudience;
+
+        for nonsense in ["trusted_readers", "trust_at_leastx", " anyone"] {
+            let parsed = load_from(
+                &format!("retention-bad-{nonsense}"),
+                &format!(
+                    "environment = \"development\"\n\
+                     [retention]\n\
+                     default_body_audience = \"{nonsense}\"\n"
+                ),
+            )
+            .expect("a nonsense value loads rather than taking the instance down");
+            assert_eq!(
+                parsed.retention.default_body_audience,
+                BodyAudience::Anyone,
+                "{nonsense:?} must not become a real audience"
+            );
+        }
+
+        // A section that is silent keeps the default.
+        let parsed = load_from(
+            "retention-partial",
+            "environment = \"development\"\n\
+             [retention]\n",
+        )
+        .expect("a partial retention section is valid");
+        assert_eq!(parsed.retention.default_body_audience, BodyAudience::Anyone);
+
+        assert!(
+            load_from(
+                "retention-misspelled",
+                "environment = \"development\"\n\
+                 [retention]\n\
+                 default_body_audiencee = \"accounts_only\"\n",
+            )
+            .is_err(),
+            "a misspelled key must be refused at load, not silently ignored"
+        );
+    }
+
+    /// The instance default is a CEILING: a work may narrow past it, never widen.
+    ///
+    /// The config surface makes this reachable from a deployment for the first
+    /// time, so the direction of the combination is now something an operator can
+    /// observe — and the direction is the whole of §7.7's rule until the source
+    /// level exists.
+    #[test]
+    fn the_instance_audience_is_a_ceiling_a_work_may_narrow_past_it() {
+        use lorehaven_domain::retention::{narrowest, BodyAudience};
+
+        let parsed = load_from(
+            "retention-ceiling",
+            "environment = \"development\"\n\
+             [retention]\n\
+             default_body_audience = \"accounts_only\"\n",
+        )
+        .expect("loads");
+        let instance = parsed.retention.default_body_audience;
+        assert_eq!(instance, BodyAudience::AccountsOnly);
+
+        // A work may be stricter than the instance.
+        assert_eq!(
+            narrowest(instance, BodyAudience::RoleCurator),
+            BodyAudience::RoleCurator
+        );
+        // A work may NOT be looser, which is the widening this prevents: an
+        // operator editing one work must not be able to hand it to everyone.
+        assert_eq!(narrowest(instance, BodyAudience::Anyone), instance);
     }
 
     #[test]
