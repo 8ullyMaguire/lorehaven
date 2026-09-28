@@ -3696,6 +3696,16 @@ export function addIpfsPin(body: AddIpfsPinBody): Promise<{ id: string }> {
 export interface RoadmapCard {
   id: string;
   title: string;
+  /**
+   * §44.1: what the feature is and why it exists, on the order of a page.
+   *
+   * The board LISTS the title only; this is the prose behind it, carried on
+   * the board payload so opening a card costs no second request, and shown on
+   * the detail view. Never null — the column is `NOT NULL DEFAULT ''` — so an
+   * empty string is a real value meaning "no description yet", not a missing
+   * field. Render a placeholder for it rather than a blank region.
+   */
+  body: string;
   category: string;
   stage: string;
   elo_rating: number;
@@ -3740,10 +3750,36 @@ export interface ArenaVoteBody {
 export interface SuggestBody {
   title: string;
   category?: string;
+  /**
+   * An optional description of what is being suggested. Bounded at 8,000
+   * characters server-side (§44.1) and refused rather than truncated.
+   */
+  body?: string;
+}
+
+export interface RoadmapCardDetail {
+  card: RoadmapCard;
 }
 
 export function fetchRoadmapBoard(signal?: AbortSignal): Promise<RoadmapBoard> {
   return apiFetch<RoadmapBoard>('/roadmap', { signal });
+}
+
+/**
+ * One card in full, with its body. Public — no session, same as the board.
+ *
+ * `encodeURIComponent` is not decoration. Card ids are uuids today, but the
+ * suggest endpoint and any future seeder choose them, and an unescaped
+ * interpolation into a path is an injection surface the moment an id contains
+ * a slash or a `?`.
+ */
+export function fetchRoadmapCard(
+  cardId: string,
+  signal?: AbortSignal,
+): Promise<RoadmapCardDetail> {
+  return apiFetch<RoadmapCardDetail>(`/roadmap/cards/${encodeURIComponent(cardId)}`, {
+    signal,
+  });
 }
 
 export function fetchArenaBallot(): Promise<ArenaBallot> {

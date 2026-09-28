@@ -51,8 +51,7 @@ use std::path::PathBuf;
 use lorehaven_db::roadmap::{
     apply_elo_and_counters, arena_candidates, create_ballot, fetch_ballot,
     find_card_by_title_normalized, insert_suggestion, list_cards, list_moves, mark_voted,
-    record_move, update_card_stage, upsert_card, Card,
-};
+    record_move, update_card_stage, upsert_card, Card, find_card_by_id};
 use test_support::TestDb;
 
 fn scratch_dir(tag: &str) -> PathBuf {
@@ -81,6 +80,37 @@ impl Harness {
 
     fn db(&self) -> &lorehaven_db::Database {
         self.tdb.db()
+    }
+
+    /// Read `roadmap_suggestions.body` back by column name, on either backend.
+    ///
+    /// `exec` can only assert that a statement did not fail; this returns
+    /// values, which the absent-vs-empty test needs — it is the difference
+    /// between "the insert worked" and "the insert stored what was meant".
+    /// Dual-backend like `exec`, and reads by NAME rather than position
+    /// because the two dialects return the same column in the same place only
+    /// by accident.
+    async fn suggestion_bodies(&self, account_id: &str) -> Vec<(String, Option<String>)> {
+        match self.db().backend() {
+            lorehaven_db::Backend::Sqlite => {
+                sqlx::query_as::<_, (String, Option<String>)>(
+                    "SELECT raw_text, body FROM roadmap_suggestions WHERE account_id = ? ORDER BY raw_text",
+                )
+                .bind(account_id)
+                .fetch_all(self.db().sqlite_pool().expect("sqlite"))
+                .await
+                .expect("read suggestion bodies")
+            }
+            lorehaven_db::Backend::Postgres => {
+                sqlx::query_as::<_, (String, Option<String>)>(
+                    "SELECT raw_text, body FROM roadmap_suggestions WHERE account_id = $1 ORDER BY raw_text",
+                )
+                .bind(account_id)
+                .fetch_all(self.db().postgres_pool().expect("pg"))
+                .await
+                .expect("read suggestion bodies")
+            }
+        }
     }
 
     async fn exec(&self, query: &str) {
@@ -123,10 +153,21 @@ impl Harness {
 
     /// A card with the given stage and elo, inserted through the repository so
     /// the tests exercise the same write path the seeder does.
+    ///
+    /// Title-only by default: most of the suite is about ordering, dedup and
+    /// stage transitions, none of which involve prose. `card_with_body` is the
+    /// builder for the tests that are about the body.
     async fn card(&self, title: &str, stage: &str, elo: f64) -> Card {
+        self.card_with_body(title, stage, elo, "").await
+    }
+
+    /// As `card`, with a description. §44.1: the arena shows a card's body, so
+    /// the tests that exercise a body need a way to write one.
+    async fn card_with_body(&self, title: &str, stage: &str, elo: f64, body: &str) -> Card {
         let card = Card {
             id: format!("card-{}", uuid::Uuid::new_v4()),
             title: title.to_string(),
+            body: body.to_string(),
             category: "general".to_string(),
             stage: stage.to_string(),
             elo_rating: elo,
@@ -261,24 +302,36 @@ async fn a_card_in_an_ordinary_stage_does_move() {
     assert_eq!(h.reload(&card.id).await.expect("card").stage, "in_progress");
 }
 
-/// **The `WHERE` clause on `ON CONFLICT ... DO UPDATE` guards the entire
-/// update, not just the `stage = excluded.stage` assignment.** Once a card
-/// reaches `shipped` or `rejected` it is frozen: a re-seed carrying a new
-/// title, category or timestamp changes nothing at all, not even
-/// `updated_at`.
+/// **A `shipped`/`rejected` card's STAGE is frozen; its prose is not.**
 ///
-/// That is almost certainly not what §44.6 intended — the rule is about
-/// stage, and freezing a shipped card's *title* means a typo in a shipped
-/// feature can never be corrected by re-seeding. It is recorded as gap
-/// M45-D01 rather than fixed here, because moving the guard from the
-/// `WHERE` clause into the `stage = excluded.stage` expression is a
-/// behaviour change to a user-visible board and is a product decision.
+/// This test previously asserted the whole row was frozen — including the
+/// title — and recorded that as gap M45-D01, on the grounds that it was "not
+/// what §44.6 intended" but was a product decision rather than a bug fix. The
+/// body column forced the decision: 596 of the 667 seeded cards are `shipped`,
+/// so a whole-row freeze would have made 90% of the board permanently unable
+/// to carry the column that was added precisely so cards could be read. The
+/// arena would have looked finished and been 90% title-only.
+///
+/// The guard is now a `CASE` on the `stage` assignment rather than a `WHERE` on
+/// the whole update:
+///
+/// ```text
+/// stage = CASE WHEN roadmap_cards.stage IN ('shipped','rejected')
+///             THEN roadmap_cards.stage ELSE excluded.stage END
+/// ```
+///
+/// so a frozen card keeps its stage and has its title, category and body
+/// refreshed. §44.6's promise is about stage and is unchanged. A shipped
+/// feature's documentation is exactly the thing that ages worst and most needs
+/// correcting, and a typo in a shipped title is now fixable by re-seeding —
+/// which is what this test now proves.
 #[tokio::test]
-async fn a_protected_cards_whole_row_is_frozen() {
+async fn a_protected_cards_stage_is_frozen_but_its_prose_is_not() {
     let h = Harness::new("rm-protected-fields").await;
     let card = h.card("Exports", "shipped", 1500.0).await;
     let edited = Card {
         title: "Exports and imports".to_string(),
+        body: "Bulk export and import, shipped in v0.06.".to_string(),
         category: "platform".to_string(),
         stage: "idea".to_string(),
         ..card.clone()
@@ -286,9 +339,36 @@ async fn a_protected_cards_whole_row_is_frozen() {
     upsert_card(h.db(), &edited).await.expect("re-upsert");
 
     let found = h.reload(&card.id).await.expect("card");
-    assert_eq!(found.title, "Exports", "the title is frozen too");
-    assert_eq!(found.category, "general");
-    assert_eq!(found.stage, "shipped");
+    assert_eq!(found.stage, "shipped", "the stage is never downgraded");
+    assert_eq!(found.title, "Exports and imports", "prose refreshes");
+    assert_eq!(found.category, "platform", "prose refreshes");
+    assert_eq!(
+        found.body, "Bulk export and import, shipped in v0.06.",
+        "a shipped card's body is correctable — the reason the guard narrowed"
+    );
+}
+
+/// The stage guard is a `CASE`, so a frozen card must not be updatable in a
+/// way that silently skips the row either: the row is written, and only the
+/// stage assignment is conditional. If this ever reads `unchanged` for a
+/// `shipped` card, the guard has been widened back to a `WHERE`.
+#[tokio::test]
+async fn a_frozen_card_still_takes_the_upsert() {
+    let h = Harness::new("rm-frozen-upsert").await;
+    let card = h.card("Rejected idea", "rejected", 1500.0).await;
+    let edited = Card {
+        body: "Considered and declined; the reasoning is recorded here.".to_string(),
+        stage: "up_next".to_string(),
+        ..card.clone()
+    };
+    upsert_card(h.db(), &edited).await.expect("re-upsert");
+
+    let found = h.reload(&card.id).await.expect("card");
+    assert_eq!(found.stage, "rejected", "a rejected card is not resurrected");
+    assert_eq!(
+        found.body, "Considered and declined; the reasoning is recorded here.",
+        "and its reasoning can still be written"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -383,6 +463,7 @@ async fn cards_are_ordered_by_elo_then_matches_then_id() {
     let c = |id: &str, title: &str, elo: f64| Card {
         id: id.to_string(),
         title: title.to_string(),
+        body: String::new(),
         category: "general".to_string(),
         stage: "idea".to_string(),
         elo_rating: elo,
@@ -971,7 +1052,7 @@ async fn a_move_for_an_unknown_card_is_refused() {
 async fn an_unattached_suggestion_is_recorded() {
     let h = Harness::new("rm-suggestion").await;
     let who = h.account().await;
-    insert_suggestion(h.db(), &who, "please add dark mode", None)
+    insert_suggestion(h.db(), &who, "please add dark mode", None, None)
         .await
         .expect("insert_suggestion");
 
@@ -999,7 +1080,7 @@ async fn a_suggestion_can_attach_to_a_card() {
     let who = h.account().await;
     let card = h.card("A", "idea", 1500.0).await;
 
-    insert_suggestion(h.db(), &who, "extend this", Some(&card.id))
+    insert_suggestion(h.db(), &who, "extend this", None, Some(&card.id))
         .await
         .expect("insert_suggestion");
 
@@ -1028,7 +1109,7 @@ async fn deleting_a_card_detaches_its_suggestion() {
     let h = Harness::new("rm-suggestion-detach").await;
     let who = h.account().await;
     let card = h.card("A", "idea", 1500.0).await;
-    insert_suggestion(h.db(), &who, "extend this", Some(&card.id))
+    insert_suggestion(h.db(), &who, "extend this", None, Some(&card.id))
         .await
         .expect("insert_suggestion");
 
@@ -1059,7 +1140,7 @@ async fn deleting_a_card_detaches_its_suggestion() {
 #[tokio::test]
 async fn a_suggestion_for_an_unknown_account_is_refused() {
     let h = Harness::new("rm-suggestion-unknown-account").await;
-    let result = insert_suggestion(h.db(), &uuid::Uuid::new_v4().to_string(), "hi", None).await;
+    let result = insert_suggestion(h.db(), &uuid::Uuid::new_v4().to_string(), "hi", None, None).await;
     assert!(result.is_err());
 }
 
@@ -1119,4 +1200,125 @@ async fn updating_an_unknown_card_is_a_no_op() {
     update_card_stage(h.db(), &format!("card-{}", uuid::Uuid::new_v4()), "idea")
         .await
         .expect("update_card_stage");
+}
+
+// ---------------------------------------------------------------------------
+// The card body (spec §44.1, migration 0090)
+// ---------------------------------------------------------------------------
+
+/// A body written through the repository reads back byte-for-byte.
+///
+/// Worth pinning precisely because the column sits at index 2, immediately
+/// before `category`, and both are `String`. A mapper left on the old
+/// positions compiles, type-checks, and returns the category under the name
+/// `body` — with every other assertion in this file still green. Comparing
+/// the body against a distinctive string is what catches that specific
+/// swap; asserting the body merely "round-trips" against whatever the second
+/// column holds would not.
+#[tokio::test]
+async fn a_cards_body_round_trips_exactly() {
+    let h = Harness::new("rm-body-roundtrip").await;
+    let prose = "A page of prose about why this feature exists, with a quotation \
+mark, a comma, and a — dash, so the round trip is not a trivially-empty string.";
+    let card = h.card_with_body("Cache tiers", "idea", 1500.0, prose).await;
+
+    let found = h.reload(&card.id).await.expect("card");
+    assert_eq!(found.body, prose, "the body survives the round trip");
+    assert_eq!(found.category, "general", "and category did not take its place");
+    assert_eq!(found.title, "Cache tiers");
+}
+
+/// A card with no body reads as empty, not as an error and not as a missing
+/// field. 667 cards predate the column and none of them may break.
+#[tokio::test]
+async fn a_card_without_a_body_reads_as_empty() {
+    let h = Harness::new("rm-body-empty").await;
+    let card = h.card("Untitled idea", "idea", 1500.0).await;
+
+    let found = h.reload(&card.id).await.expect("card");
+    assert_eq!(found.body, "", "empty is a supported state, not a null");
+}
+
+/// `find_card_by_id` returns the same card `list_cards` does, body included.
+#[tokio::test]
+async fn a_card_is_found_by_id_with_its_body() {
+    let h = Harness::new("rm-body-by-id").await;
+    let card = h.card_with_body("Fandom preservation report", "idea", 1610.0, "Per-fandom dashboard.").await;
+
+    let found = find_card_by_id(h.db(), &card.id).await.expect("query").expect("a card");
+    assert_eq!(found.id, card.id);
+    assert_eq!(found.title, "Fandom preservation report");
+    assert_eq!(found.body, "Per-fandom dashboard.");
+    assert_eq!(found.elo_rating, 1610.0);
+}
+
+/// An unknown id is `None`, not a panic and not an error. §3.3: the route turns
+/// this into a 404 naming a coarse noun.
+#[tokio::test]
+async fn an_unknown_card_id_is_none() {
+    let h = Harness::new("rm-body-unknown-id").await;
+    h.card("Real card", "idea", 1500.0).await;
+
+    let found = find_card_by_id(h.db(), "card-does-not-exist")
+        .await
+        .expect("query");
+    assert!(found.is_none(), "an unknown id must not resolve to a card");
+}
+
+/// The arena serves bodies, because a MaxDiff choice is a judgement about the
+/// feature and the ballot is where that judgement is made.
+#[tokio::test]
+async fn the_arena_offers_cards_with_their_bodies() {
+    let h = Harness::new("rm-body-arena").await;
+    for i in 0..4 {
+        h.card_with_body(&format!("Idea {i}"), "idea", 1500.0, &format!("Body {i}."))
+            .await;
+    }
+
+    let candidates = arena_candidates(h.db(), 4).await.expect("candidates");
+    assert_eq!(candidates.len(), 4);
+    for c in &candidates {
+        assert!(
+            c.body.starts_with("Body "),
+            "every ballot card carries its body, got {:?}",
+            c.body
+        );
+    }
+}
+
+/// A suggestion records the description the member offered, and distinguishes
+/// "no description" (NULL) from "an empty description" ('').
+#[tokio::test]
+async fn a_suggestion_records_its_body_and_distinguishes_absent_from_empty() {
+    let h = Harness::new("rm-suggestion-body").await;
+    let who = h.account().await;
+
+    insert_suggestion(h.db(), &who, "with a description", Some("Here is why."), None)
+        .await
+        .expect("insert with body");
+    insert_suggestion(h.db(), &who, "with an empty one", Some(""), None)
+        .await
+        .expect("insert with empty body");
+    insert_suggestion(h.db(), &who, "with none at all", None, None)
+        .await
+        .expect("insert without body");
+
+    let rows = h.suggestion_bodies(&who).await;
+
+    assert_eq!(rows.len(), 3);
+    // Returns the BODY (not the row), so a missing row and a NULL body are
+    // different: `find` yields None for the former, `Some(None)` for the latter.
+    let body_of = |t: &str| rows.iter().find(|r| r.0 == t).map(|r| r.1.as_deref());
+    assert_eq!(body_of("with a description"), Some(Some("Here is why.")));
+    assert_eq!(body_of("with an empty one"), Some(Some("")));
+    assert_eq!(
+        body_of("with none at all"),
+        Some(None),
+        "an absent description is NULL, which is not the same as an empty one"
+    );
+    assert_eq!(
+        rows.iter().filter(|r| r.0 == "with none at all").count(),
+        1,
+        "the row exists; only its body is absent"
+    );
 }

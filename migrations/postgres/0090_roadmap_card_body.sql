@@ -1,0 +1,48 @@
+-- Roadmap card bodies (spec §44.1, amendment
+-- docs/spec-amendments/roadmap-card-bodies.md, ADR 0025).
+--
+-- Dialect: PostgreSQL.
+--
+-- The counterpart of migrations/sqlite/0090_roadmap_card_body.sql. Read that
+-- file first: it carries the reasoning, the NOT NULL DEFAULT '' decision, and
+-- the retention rule.
+--
+-- NUMBERING. 0090, and not something smaller. 0084 is reserved by 0083 for
+-- `bot_registrations.token_id` (gap D5) — see the NUMBERING note in
+-- migrations/sqlite/0085_story_identity.sql. 0086, 0087 and 0088 are claimed by
+-- the in-flight M59 retention work (0086_body_audience, and the M59 plan's
+-- later phases). `the_two_dialects_define_the_same_migration_ids` compares
+-- the two dialects against EACH OTHER, so it cannot see that two unrelated
+-- changes both claim 0086; that surfaces later as a checksum collision in the
+-- migration ledger. Check the free number at the moment you start rather than
+-- trusting a number written down in a plan.
+--
+-- PARITY. `the_two_dialects_declare_the_same_columns_and_indexes` in
+-- crates/db/src/migrate.rs parses CREATE TABLE bodies and inline REFERENCES.
+-- It does NOT parse `ALTER TABLE ... ADD COLUMN` — there is no "ADD COLUMN" in
+-- that parser — so this migration is invisible to it in BOTH files. That is a
+-- known blind spot in the check, not a licence to skip parity: the column name,
+-- position and default are identical to the SQLite file by inspection, and the
+-- two files are the pair the id-parity test does compare.
+--
+-- TYPE. TEXT, matching every other prose column in this schema. A TIMESTAMPTZ
+-- or a bounded VARCHAR would be defensible in isolation; this column carries
+-- operator-authored prose of unbounded-ish length (§44.5 bounds the suggest
+-- endpoint at 8,000 characters; the CSV is the authority and does not), and
+-- the schema stores prose as TEXT everywhere else.
+--
+-- The ALTER takes a brief ACCESS EXCLUSIVE lock. At 667 rows that is
+-- microseconds and it is the one-line form: this is an append of one nullable-
+-- to-read column with a constant default, which on PostgreSQL is a
+-- metadata-only operation (no table rewrite), unlike a volatile default or a
+-- NOT NULL column added without a default.
+--
+-- RE-RUN SAFETY. `IF NOT EXISTS`, which PostgreSQL accepts on ALTER TABLE
+-- ADD COLUMN and the SQLite file deliberately omits — SQLite has no such
+-- form, so the two files differ here by engine, not by oversight. Nothing
+-- needs it in any case: the runner records a checksum per applied migration
+-- and executes each at most once per database (crates/db/src/migrate.rs).
+--
+-- RETENTION (spec §4.1). As the SQLite file: no cascade, nothing deleted by it.
+
+ALTER TABLE roadmap_cards ADD COLUMN IF NOT EXISTS body TEXT NOT NULL DEFAULT '';
