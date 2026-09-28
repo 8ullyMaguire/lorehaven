@@ -244,6 +244,11 @@ impl ArchiveClient {
                     snapshot_url: target,
                     timestamp: snapshot.timestamp,
                 },
+                // Not a gated fetch: the archive and the solver both answer a
+                // request the fetcher already permitted, and the fixture path has no
+                // robots at all. Storable, and content-classed.
+                fetch_class: crate::robots::FetchClass::Content,
+                discarded: false,
             });
         }
 

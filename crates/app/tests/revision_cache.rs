@@ -27,7 +27,8 @@ use lorehaven_app::revisions::{CachingFetcher, PUBLIC_SCOPE};
 use lorehaven_db::revisions;
 use lorehaven_db::storage::BlobStore;
 use lorehaven_scrapers::{
-    ConditionalFetch, Fetched, Fetcher, Provenance, RevisionValidators, SourceError, SourceResult,
+    ConditionalFetch, FetchClass, Fetched, Fetcher, Provenance, RevisionValidators, SourceError,
+    SourceResult,
 };
 
 const SOURCE: &str = "ao3";
@@ -45,6 +46,16 @@ enum Answer {
     Page { body: String, etag: Option<String> },
     /// The source confirms the revision is unchanged.
     NotModified,
+    /// A page the posture requires be thrown away: the bytes are already gone by
+    /// the time it reaches here, exactly as a real discarded read arrives.
+    ///
+    /// `body` is supplied rather than fixed at `""` on purpose. A real discarded
+    /// read arrives with the bytes already cleared, so scripting it that way makes
+    /// "skip it because it was discarded" and "skip it because it is empty"
+    /// indistinguishable — and a mutation swapping one check for the other would
+    /// pass. Here the discarded page still carries bytes, so only the flag can
+    /// keep it out of the cache.
+    Discarded { body: String, etag: Option<String> },
     /// The source fails.
     Fail,
 }
@@ -121,6 +132,8 @@ impl Fetcher for Scripted {
                 etag,
                 last_modified: None,
                 provenance: Provenance::Source,
+                fetch_class: FetchClass::Content,
+                discarded: false,
             }),
             // A bare `GET` cannot receive a `304`; the trait's own default is to
             // read the page, so that is what this does.
@@ -131,7 +144,17 @@ impl Fetcher for Scripted {
                 etag: None,
                 last_modified: None,
                 provenance: Provenance::Source,
+                fetch_class: FetchClass::Content,
+                discarded: false,
             }),
+            // A discarded read arrives with the bytes already gone, exactly as a
+            // real one does — the fetcher clears them before anything downstream
+            // sees the page. Carrying a validator is the point: `remember` skips
+            // pages with none, so without one this would pass for the wrong
+            // reason.
+            Answer::Discarded { body, etag } => Ok(Fetched::from_source(url, body, None)
+                .discarded()
+                .with_etag(etag)),
             Answer::Fail => Err(SourceError::Network("scripted failure".to_owned())),
         }
     }
@@ -145,6 +168,8 @@ impl Fetcher for Scripted {
             etag: None,
             last_modified: None,
             provenance: Provenance::Source,
+            fetch_class: FetchClass::Content,
+            discarded: false,
         })
     }
 
@@ -165,6 +190,14 @@ impl Fetcher for Scripted {
                 );
                 Ok(ConditionalFetch::NotModified)
             }
+            // This is the arm the cache actually reaches — `remember` is fed from
+            // here, not from `get` — so without it the discarded-cache test would
+            // exercise a path the cache never takes.
+            Answer::Discarded { body, etag } => Ok(ConditionalFetch::Fetched(
+                Fetched::from_source(url, body, None)
+                    .discarded()
+                    .with_etag(etag),
+            )),
             Answer::Page { body, etag } => Ok(ConditionalFetch::Fetched(Fetched {
                 final_url: url.to_owned(),
                 body,
@@ -172,6 +205,8 @@ impl Fetcher for Scripted {
                 etag,
                 last_modified: None,
                 provenance: Provenance::Source,
+                fetch_class: FetchClass::Content,
+                discarded: false,
             })),
             Answer::Fail => Err(SourceError::Network("scripted failure".to_owned())),
         }
@@ -225,6 +260,60 @@ impl Harness {
 // ---------------------------------------------------------------------------
 // 1. A 304 serves the bytes we already hold
 // ---------------------------------------------------------------------------
+
+/// A discarded read is not filed in the cache (spec §11.5 amendment §1.2: a
+/// metadata fetch writes "no cache fill").
+///
+/// The failure this prevents is specific. `remember` files a page whenever it
+/// carries a validator, and the body of a discarded read is empty by the time it
+/// gets there. Caching it would store a zero-byte entry with a live `ETag`, and
+/// every later read of that URL would be answered `304` and served *nothing*,
+/// forever. A cache that remembers having seen a page it does not have is worse
+/// than one that forgot.
+#[tokio::test]
+async fn a_discarded_read_is_not_filed_in_the_cache() {
+    let harness = Harness::new("discarded-cache").await;
+    let inner = Scripted::new(vec![
+        // Discarded, but it DOES carry a validator — so the discard check is the
+        // only thing that can keep it out of the cache.
+        Answer::Discarded {
+            body: "<html>the forbidden chapter, in full</html>".to_owned(),
+            etag: Some("\"v1\"".to_owned()),
+        },
+        // A real page, which the cache would answer from what it held if the
+        // discarded read had been filed.
+        Answer::Page {
+            body: "<html>the real first revision</html>".to_owned(),
+            etag: Some("\"v2\"".to_owned()),
+        },
+    ]);
+    let log = inner.log();
+    let cache = harness.caching(inner, PUBLIC_SCOPE, ADAPTER);
+
+    let first = cache.get(URL).await.expect("the discarded read");
+    assert!(
+        first.discarded,
+        "the page says it was discarded, and it is the flag — not the body's length — that keeps \
+         it out of the cache"
+    );
+
+    let second = cache.get(URL).await.expect("the second read");
+    assert_eq!(
+        second.body, "<html>the real first revision</html>",
+        "the second read must come from the source, not from a cache entry filed by the \
+         discarded read — a zero-byte cache entry would be served here and parsed as an empty \
+         document"
+    );
+
+    let calls = log.calls.lock().expect("the log is not poisoned").clone();
+    assert_eq!(
+        calls[1], None,
+        "and no validator was offered on the second read, because the discarded one was never \
+         filed: a stale \"v1\" would have been sent against the wrong revision"
+    );
+
+    harness.cleanup();
+}
 
 #[tokio::test]
 async fn a_304_serves_the_body_the_source_says_is_unchanged() {

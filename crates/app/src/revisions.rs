@@ -123,6 +123,17 @@ impl<'a, F> CachingFetcher<'a, F> {
     /// about, so the row would be a body nobody may serve and a cache that only
     /// grows.
     async fn remember(&self, url: &str, page: &Fetched) {
+        // A discarded read is not cached (spec §11.5 amendment §1.2: a metadata
+        // fetch writes "no cache fill").
+        //
+        // The body is already empty by the time it gets here, so the bytes
+        // written would be zero and the cache would hold an entry that answers
+        // `304` forever while holding nothing. Checking the flag rather than the
+        // length is deliberate: an empty `304`-eligible cache entry is worse than
+        // a missing one, and the flag is the fact that distinguishes the two.
+        if page.discarded {
+            return;
+        }
         if page.etag.is_none() && page.last_modified.is_none() {
             return;
         }
@@ -191,6 +202,17 @@ impl<F: Fetcher> Fetcher for CachingFetcher<'_, F> {
                         // cached; serving it from the store does not make it an
                         // archive's copy.
                         provenance: Provenance::Source,
+                        // A cache hit is replaying a page that was already read
+                        // and stored, so it is storable. `Content` rather than
+                        // the class the original fetch declared, because the
+                        // cache does not record the class — and it does not need
+                        // to, since `remember` above never files a discarded read
+                        // and a stored one is by definition not discarded.
+                        // Guessing `Metadata` here would be the dangerous
+                        // direction: it would let a caller treat a replayed body
+                        // as a listing.
+                        fetch_class: lorehaven_scrapers::FetchClass::Content,
+                        discarded: false,
                     }),
                     None => {
                         tracing::warn!(

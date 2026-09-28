@@ -3,7 +3,7 @@
 **Date:** 2026-09-27
 **Spec:** `docs/spec-amendments/crawling-retention-and-preservation.md`
 **Milestone:** M59
-**Status:** Phases A0 and A.1–A.3 built and green. Phase A.4, B, C1, C, D, E
+**Status:** Phases A0 and A.1–A.4 built and green. Phases A.5, B, C1, C, D, E
 not started.
 
 Read the amendment before this file. This file is the build order, the file
@@ -348,13 +348,6 @@ exactly like one that survived. Both scripts now assert the anchor count and
 print `mutation applied` before running, and the runners report a compile error
 as distinct from a pass.
 
-**A.1–A.3 are done. A.4 is not, and it is the half that makes `ReadAndDiscarded`
-mean anything.** The gate now answers `ReadAndDiscarded` and the fetcher now acts
-on it, but nothing yet stops a caller that received a discarded body from
-storing it — the arm's doc comment says a later phase enforces that, and that
-comment is currently the only thing between a discarded body and the database.
-A.4 is where the 1 MiB ceiling and the body-less parse target go.
-
 ### A.4 The metadata fetch cannot return a body
 
 Three limits, all required (amendment §1.2):
@@ -377,6 +370,85 @@ Three limits, all required (amendment §1.2):
 **every existing import path picks the posture up at one place**. That is the
 property the whole amendment depends on: an adapter that could opt out of the
 posture would make the rule advisory.
+
+**Built, with limit 2 satisfied before it started and the other two taking a
+different shape than the sketch.**
+
+*Limit 2 needed nothing.* `SourceWork` has no prose field — the plan's own
+warning to check before assuming turned out to be worth heeding, and
+`preview_from_html` already returns a metadata-only type. No adapter had to be
+touched. The body lives in `SourceChapter::content_html`, which is a `Content`
+path, so it is the write list and the byte ceiling that bound it, not the parse
+type.
+
+*Limit 3 needed no write-list change either, because the discard happens earlier
+and harder.* `Fetched` gained `fetch_class` and `discarded`, and
+`SafeFetcher::label_fetched` applies the gate's answer to the page as it comes
+back. For `ReadAndDiscarded` it **clears `page.body`**, not merely setting the
+flag. That is the substantive decision in A.4: `Fetched::body` is a public field
+read directly by about forty call sites in the site adapters, so a flag only
+`storable_body` consults would be defeated by every one of them. An adapter that
+reaches for `page.body` gets an empty string and stores nothing. `storable_body`
+is kept as the accessor that *reports* the refusal, naming the posture; it is not
+the enforcement, because it cannot be.
+
+*Limit 1 is a class parameter rather than a number.* `send_with_redirects` now
+takes a `FetchClass` and derives its own ceiling via `SafeFetcher::ceiling_for`.
+It originally took `usize`, and the mutation that replaced that argument with
+`self.policy.max_bytes` **survived a full pass** — every ceiling test stayed
+green because they all tested `max_bytes_for` and none looked at the seam. The
+parameter type is the fix: a caller can no longer express a byte count at all.
+A source-text assertion in the test pins the call site, which is the one property
+no runtime assertion can see.
+
+**A.4 mutations** (all turn the suite red):
+
+| # | mutation | caught by |
+|---|---|---|
+| D1 | the discard deleted outright | `a_discarded_read_hands_back_no_bytes_at_all` |
+| D2 | flag set, body kept (advisory-only) | `a_discarded_read_hands_back_no_bytes_at_all` |
+| D3 | the discard keys off the class, not the gate | `an_allowed_metadata_read_is_storable` |
+| D4 | metadata gets the content ceiling | both ceiling tests |
+| D5 | every class gets 1 MiB | both ceiling tests |
+| D6 | the send path stops consulting the class | `the_ceiling_the_send_path_uses_is_the_one_the_class_asked_for` |
+| D7 | `storable_body` hands out the empty string | `a_discarded_read_hands_back_no_bytes_at_all` |
+| D8 | `ceiling_for` stops consulting the class | `the_ceiling_the_send_path_uses_is_the_one_the_class_asked_for` |
+
+**The cache fill needed its own limit and its own mutations.** Amendment §1.2 says
+a metadata fetch writes "no cache fill", and `CachingFetcher::remember` was filing
+one: it files any page carrying a validator, and a discarded read's body is empty
+by the time it gets there. The entry that results is a zero-byte blob with a live
+`ETag`, and every later read of that URL is answered `304` and served *nothing* —
+a cache that remembers having seen a page it does not have. `remember` now
+returns early on `discarded`.
+
+| # | mutation | caught by |
+|---|---|---|
+| C1 | the discarded check removed from `remember` | `a_discarded_read_is_not_filed_in_the_cache` |
+| C2 | the check inverted | same, plus 5 unrelated tests |
+| C3 | the check reads body length instead of the flag | same |
+
+**C3 is the one worth recording, and it is the same lesson as D1 in a different
+place.** The scripted discarded page originally carried `body: ""`, which is what
+a real discarded read looks like — so "skip it because it was discarded" and
+"skip it because it is empty" were the same test, and swapping one check for the
+other passed. The script now hands the discarded page real bytes
+(`body_len=43`, confirmed by instrumentation), so only the flag can keep it out
+of the cache. Two details had to be right for that, and both were wrong first:
+the `Answer::Discarded` arm had to be added to `get_conditional` as well as
+`get` (the cache reads only the former, so a test that scripted just `get`
+exercises a path the cache never takes), and `cargo fmt` had silently reflowed
+that arm back to a hardcoded `""` between two edits. `cargo fmt` erasing a
+binding is worth watching for in any test whose fixture carries data.
+
+**D1's test is the one worth recording, because the first version of it was
+worthless.** It asserted on a real `get_with_class` call, which needs DNS; the
+`if let Ok(...)` never matched, the test passed, and it would have kept passing
+with the discard deleted. The fix was to move the rule into
+`SafeFetcher::label_fetched` — a function callable with a body in hand, and
+called by the production path too, so the test and the fetch cannot drift. A
+test that asserts on a path which cannot execute on the test machine is not a
+weak test; it is a test that asserts nothing while reporting success.
 
 ### A.5 Per-source, run-scoped overrides
 
