@@ -181,6 +181,14 @@ impl Db {
                 let Some(rest) = query.strip_prefix("SELECT ") else {
                     return self.tdb.sql(query);
                 };
+                // The cast is applied HERE, to the part before FROM, which is
+                // what makes the resulting statement read `SELECT col::text
+                // FROM ...`. Building it this way rather than casting in a
+                // caller is why the column needs no cast of its own -- and why
+                // the literal below is a *template*, not a statement anyone can
+                // run. A checker reading it as SQL sees `SELECT {}::text{}` and
+                // reports a "SELECT with no FROM", which is a true observation
+                // about a string that was never a query.
                 match rest.find(" FROM ") {
                     Some(idx) => format!("SELECT {}::text{}", &rest[..idx], &rest[idx..]),
                     None => self.tdb.sql(query),
