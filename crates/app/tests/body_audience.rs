@@ -364,6 +364,134 @@ async fn an_unrecognised_audience_cannot_be_written() {
 /// `reading_decision` is reached from at least two places and a gate that
 /// consults it in one and not the other is a gate with a hole in it. Both
 /// directions, so this cannot pass against either extreme.
+/// An author can set and clear a work's audience through the edit door.
+///
+/// The admin door the phase was missing. Every other test in this file sets the
+/// column with raw SQL because there was no route for it — which meant the
+/// feature had a column, a gate, and no way for the person who owns the work to
+/// use it.
+///
+/// Both directions, because `COALESCE` cannot express "clear it": binding a SQL
+/// `NULL` is indistinguishable from not patching the column, so an author could
+/// set an audience and never take it off again. The patch carries a flag
+/// alongside the value for exactly that reason.
+#[tokio::test]
+async fn an_author_sets_and_clears_a_body_audience_through_the_edit_door() {
+    let dir = test_support::scratch_dir("ba_edit");
+    let tdb = test_support::TestDb::connect_with_dir("ba-edit", &dir).await;
+
+    let mut author = test_support::TestClient::new(router_for(&tdb, &dir));
+    test_support::register(&mut author, "author@test.dev", "ba_edit_author").await;
+    let work = published_work(&mut author, "Held For Someone Else").await;
+
+    // A low reader is inside the work while it is ungated.
+    let mut reader = client_at(&tdb, &dir, "ba_edit_low", 1).await;
+    let (status, body) = reader.get(format!("/api/v1/works/{work}")).await;
+    assert_eq!(status, StatusCode::OK, "ungated to begin with: {body}");
+
+    // Set it through the door. The optimistic version is read back rather than
+    // guessed, which is the same discipline `published_work` uses.
+    let (_, body) = author.get(format!("/api/v1/works/{work}")).await;
+    let version = body["version"].as_i64().expect("work version");
+
+    let (status, body) = author
+        .request(
+            "PATCH",
+            &format!("/api/v1/works/{work}"),
+            Some(json!({
+                "expected_version": version,
+                "body_audience": "trust_at_least:4",
+            })),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the author may gate their work: {body}"
+    );
+
+    // The reader is now outside it.
+    let (status, _) = reader.get(format!("/api/v1/works/{work}")).await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "and the door takes effect immediately"
+    );
+
+    // And may clear it back to inheriting the instance default, which is the
+    // case a plain `Option<String>` would silently turn into a no-op.
+    let (_, body) = author.get(format!("/api/v1/works/{work}")).await;
+    let version = body["version"].as_i64().expect("work version");
+    let (status, body) = author
+        .request(
+            "PATCH",
+            &format!("/api/v1/works/{work}"),
+            Some(json!({ "expected_version": version, "body_audience": null })),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the author may ungate their work: {body}"
+    );
+
+    let (status, body) = reader.get(format!("/api/v1/works/{work}")).await;
+    assert_eq!(status, StatusCode::OK, "and the gate is lifted: {body}");
+
+    tdb.cleanup().await;
+}
+
+/// A typo in the audience is a 400 about the field, not a public body.
+///
+/// The opposite of the config file's rule, deliberately. There, a misspelling
+/// inherits because refusing the load would take the instance down. Here the
+/// author plainly meant to gate something, and inheriting would leave a body
+/// public that its owner believes is withheld — the failure this whole feature
+/// exists to prevent, arrived at by the other route.
+#[tokio::test]
+async fn an_unrecognised_audience_from_the_edit_door_is_refused() {
+    let dir = test_support::scratch_dir("ba_edit_bad");
+    let tdb = test_support::TestDb::connect_with_dir("ba-edit-bad", &dir).await;
+
+    let mut author = test_support::TestClient::new(router_for(&tdb, &dir));
+    test_support::register(&mut author, "author@test.dev", "ba_eb_author").await;
+    let work = published_work(&mut author, "Never Gated By Accident").await;
+
+    let (_, body) = author.get(format!("/api/v1/works/{work}")).await;
+    let version = body["version"].as_i64().expect("work version");
+
+    let (status, body) = author
+        .request(
+            "PATCH",
+            &format!("/api/v1/works/{work}"),
+            Some(json!({ "expected_version": version, "body_audience": "trusted_readers" })),
+        )
+        .await;
+    assert_eq!(
+        status,
+        // 422, the house code for a field-level validation failure, not 400.
+        // The first draft of this asserted 400 and failed against a response
+        // that was correct in every other respect.
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "a misspelling is refused rather than inherited: {body}"
+    );
+    assert!(
+        body["error"]["field_errors"]["body_audience"].is_string(),
+        "and the error names the field, so the author knows what to fix: {body}"
+    );
+
+    // The work is still ungated -- a refused write changed nothing.
+    let mut reader = client_at(&tdb, &dir, "ba_eb_low", 1).await;
+    let (status, body) = reader.get(format!("/api/v1/works/{work}")).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the refused write left no trace: {body}"
+    );
+
+    tdb.cleanup().await;
+}
+
 #[tokio::test]
 async fn the_chapter_door_agrees_with_the_work_door() {
     let dir = test_support::scratch_dir("ba_chapter");
