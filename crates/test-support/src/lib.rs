@@ -672,6 +672,8 @@ fn is_uuid_column(column: &str) -> bool {
 pub struct TestClient {
     app: Router,
     cookies: Vec<(String, String)>,
+    /// Headers of the most recent response, for `get_with_headers`.
+    last_headers: axum::http::HeaderMap,
 }
 
 impl TestClient {
@@ -679,6 +681,7 @@ impl TestClient {
         Self {
             app,
             cookies: Vec::new(),
+            last_headers: axum::http::HeaderMap::new(),
         }
     }
 
@@ -762,6 +765,8 @@ impl TestClient {
             .await
             .expect("router is infallible");
         let status = response.status();
+        // Stashed before the body is drained, for `get_with_headers`.
+        self.last_headers = response.headers().clone();
         self.capture(&response);
         let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -790,6 +795,23 @@ impl TestClient {
 
     pub async fn get(&mut self, uri: impl AsRef<str>) -> (StatusCode, Value) {
         self.request("GET", uri.as_ref(), None).await
+    }
+
+    /// A GET that also returns the response headers.
+    ///
+    /// `get` and `request` drop the headers, which is fine for almost every
+    /// assertion and fatal for an indistinguishability check: a route that
+    /// answers a gated body with `X-Body-Cached: true` and an absent one
+    /// without it is leaking, and no `(StatusCode, Value)` comparison can see
+    /// that. §7.7.3 is exactly the requirement this exists for, and the
+    /// alternative — writing that comparison against a raw `oneshot` in the
+    /// test file — would duplicate the cookie and CSRF plumbing and drift.
+    pub async fn get_with_headers(
+        &mut self,
+        uri: impl AsRef<str>,
+    ) -> (StatusCode, axum::http::HeaderMap, Value) {
+        let (status, value) = self.request("GET", uri.as_ref(), None).await;
+        (status, self.last_headers.clone(), value)
     }
 
     pub async fn post(&mut self, uri: impl AsRef<str>, body: Value) -> (StatusCode, Value) {

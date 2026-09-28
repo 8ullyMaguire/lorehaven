@@ -1130,9 +1130,22 @@ pub(crate) async fn reading_decision(
             // Absence is reported as absence: a draft, a withheld work or a
             // work belonging to someone the actor is blocked by all look the
             // same from outside (spec §3.3).
-            DenyReason::NotPublished | DenyReason::BlockedByAuthor => {
-                AppError::NotFound { resource: "work" }
-            }
+            //
+            // `BodyNotInAudience` joins them for the same reason. A reader
+            // refused by the audience gate learns from a 403 that the work
+            // exists, and learns that the obstacle is audience-shaped rather
+            // than a rating ceiling, a sign-in requirement or a paywall — either
+            // fact is an existence oracle for a body the operator chose to
+            // withhold (spec §7.7.3). The status code is the one thing a client
+            // branches on, so a 403/404 split is a leak with no header
+            // required.
+            //
+            // The `DenyReason` itself is unchanged, so the domain still records
+            // exactly why: the *decision* keeps the reason, the *rendering*
+            // collapses it. `body_audience_indistinguishability.rs` is the test.
+            DenyReason::NotPublished
+            | DenyReason::BlockedByAuthor
+            | DenyReason::BodyNotInAudience => AppError::NotFound { resource: "work" },
             DenyReason::SignInRequired => AppError::AuthRequired,
             DenyReason::NotAuthenticated
             | DenyReason::AnonymousReadingDisabled
