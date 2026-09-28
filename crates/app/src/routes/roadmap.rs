@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use crate::auth::{MaybeSession, RequireSession};
 use crate::http::{ApiError, ApiResult};
 use crate::state::AppState;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 pub fn read_router() -> Router<AppState> {
     Router::new()
         .route("/roadmap", get(get_board))
+        .route("/roadmap/cards/:id", get(get_card))
         .route("/roadmap/changelog", get(get_changelog))
 }
 
@@ -57,6 +58,11 @@ fn group_by_stage(cards: Vec<lorehaven_db::roadmap::Card>) -> serde_json::Map<St
             arr.push(json!({
                 "id": card.id,
                 "title": card.title,
+                // §44.1: the board LISTS the title only, but the payload
+                // carries the body so clicking a card costs no second request.
+                // §44.5 records the resulting ~600 KB response as a deliberate
+                // trade against a loading state on the detail view.
+                "body": card.body,
                 "category": card.category,
                 "elo_rating": card.elo_rating,
                 "matches_played": card.matches_played,
@@ -66,6 +72,37 @@ fn group_by_stage(cards: Vec<lorehaven_db::roadmap::Card>) -> serde_json::Map<St
         }
     }
     map
+}
+
+/// `GET /api/v1/roadmap/cards/:id` — one card in full, including its body.
+///
+/// Public and session-free, on the same reasoning as the board: §44.5 makes
+/// prioritization public, and a body is part of what is public about a card.
+/// A member-gated body would make the arena's own reasoning less legible to
+/// exactly the audience the arena exists for.
+///
+/// §3.3: an unknown id is a 404 naming a coarse noun, never an identifier, so
+/// the response cannot be used to confirm that a given id exists.
+pub async fn get_card(
+    _maybe: MaybeSession,
+    State(state): State<AppState>,
+    Path(card_id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let card = roadmap::find_card_by_id(state.db(), &card_id)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e.into())))?
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "card" }))?;
+    Ok(Json(json!({ "card": {
+        "id": card.id,
+        "title": card.title,
+        "body": card.body,
+        "category": card.category,
+        "stage": card.stage,
+        "elo_rating": card.elo_rating,
+        "matches_played": card.matches_played,
+        "times_best": card.times_best,
+        "times_worst": card.times_worst,
+    }})))
 }
 
 /// `GET /api/v1/roadmap/arena` — one ballot (4 idea cards + pre-match Elo).
@@ -109,6 +146,10 @@ pub async fn get_arena(
         "cards": candidates.iter().map(|c| json!({
             "id": c.id,
             "title": c.title,
+            // §44.1: a MaxDiff choice is a judgement about the feature, so the
+            // ballot carries the body. Four cards is not a payload problem, and
+            // this is the surface where the judgement is actually made.
+            "body": c.body,
             "category": c.category,
             "elo_rating": c.elo_rating,
         })).collect::<Vec<_>>(),
@@ -236,7 +277,32 @@ pub async fn post_arena_vote(
 #[derive(Debug, Deserialize)]
 pub struct SuggestBody {
     pub title: String,
+    /// §44.1: an optional description of what is being suggested.
+    ///
+    /// Note what this endpoint does NOT do, because the spec's phrasing
+    /// ("otherwise creates an `idea` card") overstates the code: it records a
+    /// row in `roadmap_suggestions` and never creates a card. Cards come from
+    /// the seeder or from an operator. A body therefore has no card to live on
+    /// here, and forcing one to be created would make every typo a permanent
+    /// arena card — a spam vector on the one surface that is public.
+    ///
+    /// So the body is carried on the SUGGESTION, and an operator promoting a
+    /// suggestion to a card copies it across. That keeps §44.1's rule that the
+    /// description is the operator's, and it keeps the arena's membership under
+    /// operator control rather than under whoever typed fastest.
+    ///
+    /// Absent is `None`, distinct from an empty string, because "no description
+    /// offered" and "an empty description" are different submissions.
+    pub body: Option<String>,
 }
+
+/// §44.1: the bound on a member-supplied card body.
+///
+/// 8,000 characters is roughly two pages, comfortably more than the operator's
+/// CSV bodies and short enough that the field cannot be used as a data store.
+/// The CSV is the authority for real bodies and sets no bound; this is the
+/// member-facing edge only.
+const MAX_SUGGESTED_BODY: usize = 8_000;
 
 pub async fn post_suggest(
     State(state): State<AppState>,
@@ -254,14 +320,34 @@ pub async fn post_suggest(
         }));
     }
 
+    // Bound the body BEFORE the trust lookup's result is used for anything
+    // else, and refuse rather than truncate: a silently shortened description
+    // reads as a complete one.
+    if let Some(ref text) = body.body {
+        if text.chars().count() > MAX_SUGGESTED_BODY {
+            return Err(ApiError(AppError::Validation {
+                message: format!(
+                    "description must be {MAX_SUGGESTED_BODY} characters or fewer"
+                ),
+                field_errors: BTreeMap::new(),
+            }));
+        }
+    }
+
     let card = roadmap::find_card_by_title_normalized(state.db(), &body.title)
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
     let card_id = card.as_ref().map(|c| c.id.clone());
-    roadmap::insert_suggestion(state.db(), &account_id, &body.title, card_id.as_deref())
-        .await
-        .map_err(|e| ApiError(AppError::Internal(e.into())))?;
+    roadmap::insert_suggestion(
+        state.db(),
+        &account_id,
+        &body.title,
+        body.body.as_deref(),
+        card_id.as_deref(),
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e.into())))?;
 
     Ok((
         StatusCode::CREATED,
