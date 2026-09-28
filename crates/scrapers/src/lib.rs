@@ -41,6 +41,8 @@ pub mod csv;
 pub mod engine;
 pub mod registry;
 pub mod robots;
+
+pub use robots::{FetchClass, RobotsPosture};
 pub mod safety;
 pub mod sanitize;
 pub mod sites;
@@ -582,6 +584,25 @@ pub struct Fetched {
     /// Where the body came from, and whether that was anywhere other than the
     /// source.
     pub provenance: Provenance,
+    /// What kind of read produced this body (spec §11.5, `FetchClass`).
+    ///
+    /// **This is the field that makes `ReadAndDiscarded` mean anything.**
+    /// Without it, a caller holding a `Fetched` cannot tell a body it may store
+    /// from one it must not, and the only thing marking the difference is a
+    /// comment inside the fetcher.
+    pub fetch_class: FetchClass,
+    /// Set when the posture demanded this body be thrown away, which
+    /// `imports.robots_posture = metadata_only` does for a forbidden path.
+    ///
+    /// Kept beside the class rather than folded into it because "read it and
+    /// discard it" is a property of this one read, not of the class: a
+    /// `Metadata` fetch of an *allowed* path is storable, and a `Content` fetch
+    /// is refused rather than discarded, so neither class alone decides.
+    ///
+    /// `None` on every ordinary construction, and the safe direction to omit:
+    /// the absence of this flag is the absence of a rule, so a value that
+    /// reached the field by accident is a value that may be stored.
+    pub discarded: bool,
 }
 
 impl Fetched {
@@ -600,9 +621,72 @@ impl Fetched {
             etag: None,
             last_modified: None,
             provenance: Provenance::Source,
+            // `Content` and `discarded: false` because this constructor is how
+            // fixtures and the non-fetching paths build a page, and both of
+            // those are storable. The fetcher overrides both when the gate
+            // reaches a different answer.
+            fetch_class: FetchClass::Content,
+            discarded: false,
+        }
+    }
+
+    /// Mark this body as one the posture requires be thrown away.
+    #[must_use]
+    pub fn discarded(mut self) -> Self {
+        self.discarded = true;
+        self
+    }
+
+    /// Attach the `ETag` the source sent, for a scripted or replayed page.
+    #[must_use]
+    pub fn with_etag(mut self, etag: Option<String>) -> Self {
+        self.etag = etag;
+        self
+    }
+
+    /// This page's bytes, unless the posture forbids keeping them.
+    ///
+    /// **This is the A.4 limit that holds when the others are wrong.** The 1 MiB
+    /// ceiling and the body-less parse type can each be defeated on their own —
+    /// one by a caller that reads `self.body` instead of this, the other by an
+    /// adapter that stuffs prose into a field that is nominally metadata. This
+    /// cannot: a discarded read has no bytes to hand out at all, so there is
+    /// nothing for a wrong caller to store, however it reached for them.
+    ///
+    /// `Ok` carries the body. `Err` is a refusal that names the path and the
+    /// posture, because a caller that gets this needs to be able to say why
+    /// without having read the fetcher.
+    pub fn storable_body(&self) -> Result<&str, DiscardedBody> {
+        if self.discarded {
+            Err(DiscardedBody {
+                url: self.final_url.clone(),
+            })
+        } else {
+            Ok(&self.body)
         }
     }
 }
+
+/// A read the posture required to be thrown away, offered back as if it were
+/// storable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscardedBody {
+    /// The URL whose bytes were discarded, so a refusal can name what was lost.
+    pub url: String,
+}
+
+impl std::fmt::Display for DiscardedBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} was read under `imports.robots_posture = metadata_only`, which allows the read and \
+             forbids keeping it; its bytes are not available to store",
+            self.url
+        )
+    }
+}
+
+impl std::error::Error for DiscardedBody {}
 
 /// The validators a page was last seen with.
 ///

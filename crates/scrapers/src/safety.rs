@@ -355,6 +355,26 @@ impl FetchPolicy {
         }
         policy
     }
+
+    /// The largest body this class of read may accept (spec §11.5, amendment
+    /// §1.2).
+    ///
+    /// `Metadata` gets an eighth of the content ceiling, because a chapter
+    /// listing is small and a body is not — and the whole point of declaring a
+    /// class is that the ceiling follows the declaration rather than the URL. A
+    /// 1 MiB page that was declared `Content` is refused; a 1 MiB page declared
+    /// `Metadata` is also refused, because a metadata document that big is
+    /// itself the signal that the declaration was wrong.
+    ///
+    /// `Media` keeps the full ceiling: images and audio legitimately exceed
+    /// 1 MiB, and there is nothing to shrink them to.
+    #[must_use]
+    pub fn max_bytes_for(&self, class: FetchClass) -> usize {
+        match class {
+            FetchClass::Metadata => 1024 * 1024,
+            FetchClass::Content | FetchClass::Media => self.max_bytes,
+        }
+    }
 }
 
 /// Per-host politeness state: the last request's start, and the gate.
@@ -581,7 +601,11 @@ impl SafeFetcher {
         // Read either way: the same file carries the pace, and a policy that
         // overrides `Disallow` has said nothing about how hard to knock.
         let robots = self.robots_for(&host).await;
-        match robots_gate(&robots, parsed.path(), self.policy.robots_posture, class) {
+        // Bound once, because the gate is asked twice below and a second call
+        // is a second chance for the two answers to disagree — which is how a
+        // discarded read becomes a storable one.
+        let gate = robots_gate(&robots, parsed.path(), self.policy.robots_posture, class);
+        match gate {
             RobotsGate::Allowed => {}
             RobotsGate::Refused => {
                 return Err(SourceError::Refused(format!(
@@ -589,16 +613,79 @@ impl SafeFetcher {
                     parsed.path()
                 )))
             }
-            // Read it, keep none of it. Deliberately NOT routed through
-            // `record_robots_override`: nothing was overridden here, so this is
-            // not an operator decision to report. What the caller must do is
-            // discard the parse result, and a later phase enforces that with a
-            // parse target that has nowhere to put a body.
+            // Overridden, and read-and-discarded, are both "the read goes
+            // ahead". They differ in what happens to the result, and that is
+            // carried on the `Fetched` below rather than being decided here —
+            // the fetcher has no opinion about storage, and the flag is what
+            // makes the opinion enforceable by whoever does store.
             RobotsGate::ReadAndDiscarded => {}
             RobotsGate::Overridden => self.record_robots_override(&host, parsed.path()).await,
         }
-        self.send_with_redirects(url, form, conditional, Escalation::Policy)
+        // Label the result. A `ReadAndDiscarded` read is marked as discarded so
+        // that `Fetched::storable_body` refuses to hand its bytes out, which is
+        // the A.4 limit that holds when the byte ceiling and the parse type are
+        // each wrong on their own.
+        //
+        // Every other answer is marked with the class that was declared, so a
+        // caller can see what kind of read it received without having to have
+        // declared it itself.
+        self.send_with_redirects(url, form, conditional, Escalation::Policy, class)
             .await
+            .map(|fetch| match fetch {
+                ConditionalFetch::Fetched(mut page) => {
+                    Self::label_fetched(&mut page, class, gate);
+                    ConditionalFetch::Fetched(page)
+                }
+                other => other,
+            })
+    }
+
+    /// The byte ceiling this fetch hands to the transport.
+    ///
+    /// A separate function from [`FetchPolicy::max_bytes_for`] and from the
+    /// expression at the call site, because the mutation that deleted it was the
+    /// one that survived: the policy method was correct and tested, the call
+    /// site said `self.policy.max_bytes`, and every ceiling test stayed green
+    /// because none of them looked at the seam. One name, used by the send path
+    /// and asserted directly, cannot drift from itself.
+    fn ceiling_for(&self, class: FetchClass) -> usize {
+        // Follows the declared class, not the URL and not the policy's own
+        // `max_bytes`. A metadata read is capped at 1 MiB even on an instance
+        // that raised the content ceiling, because raising the content ceiling
+        // is an operator saying "I will store more prose", not "read more
+        // documents".
+        self.policy.max_bytes_for(class)
+    }
+
+    /// The labelling step, extracted so it can be tested without a network.
+    ///
+    /// This exists because the discard is applied at the very end of the fetch,
+    /// after the gate, and everything above that point needs DNS. A test that
+    /// asserts on a real `get_with_class` therefore asserts on a *connection
+    /// error* — the `if let Ok(...)` never matches, the test passes, and it
+    /// would keep passing if the discard were deleted outright. That is not a
+    /// hypothetical: an earlier version of these tests did exactly that, and a
+    /// mutation proved it.
+    ///
+    /// So the rule is applied by a function that can be called directly with a
+    /// body in hand. The network path calls this same function, so the test and
+    /// the production path cannot drift.
+    fn label_fetched(page: &mut crate::Fetched, class: FetchClass, gate: RobotsGate) {
+        page.fetch_class = class;
+        page.discarded = matches!(gate, RobotsGate::ReadAndDiscarded);
+        if page.discarded {
+            // The flag alone is advisory. `Fetched::body` is a public field
+            // read directly by about forty call sites in the site adapters, so a
+            // flag that only `storable_body` consults would be defeated by every
+            // one of them. Clearing the bytes makes the discard hold for a caller
+            // that never heard of the flag: an adapter parsing `page.body` gets
+            // an empty string and stores nothing, which is the whole point.
+            //
+            // The bytes are dropped, not relocated — nothing keeps a copy, so
+            // "read it and keep none of it" is true of memory too and not only
+            // of the database.
+            page.body = String::new();
+        }
     }
 
     /// Fetch with no regard for `robots.txt`.
@@ -614,7 +701,15 @@ impl SafeFetcher {
         form: Option<&[(&str, &str)]>,
         conditional: Option<&RevisionValidators>,
         escalation: Escalation,
+        class: FetchClass,
     ) -> SourceResult<ConditionalFetch> {
+        // Computed here rather than passed in, because a caller that supplied
+        // the number could supply any number: a `self.policy.max_bytes` at the
+        // call site survived a full mutation pass while every ceiling test
+        // stayed green, since none of them looked at the seam. Taking the class
+        // makes the class the only thing a caller can express, and this the one
+        // place the ceiling is derived.
+        let ceiling = self.ceiling_for(class);
         let steps = match escalation {
             Escalation::None => vec![Step::Transport(self.policy.unblock.fingerprint)],
             Escalation::Policy => self.escalation_steps(),
@@ -625,7 +720,10 @@ impl SafeFetcher {
         for step in steps {
             match step {
                 Step::Transport(fingerprint) => {
-                    match self.attempt(url, form, conditional, fingerprint).await {
+                    match self
+                        .attempt(url, form, conditional, fingerprint, ceiling)
+                        .await
+                    {
                         Ok(Attempt::Done(fetched)) => return Ok(fetched),
                         Ok(Attempt::Challenged) => {
                             challenged = true;
@@ -749,6 +847,7 @@ impl SafeFetcher {
         form: Option<&[(&str, &str)]>,
         conditional: Option<&RevisionValidators>,
         fingerprint: Option<Impersonation>,
+        ceiling: usize,
     ) -> SourceResult<Attempt> {
         let mut current = validate_url(url, &self.policy)?;
         let mut credential_sent_to: Option<String> = None;
@@ -833,12 +932,7 @@ impl SafeFetcher {
 
             let reply = authority
                 .engine
-                .send(
-                    &current,
-                    encoded_body.as_deref(),
-                    headers,
-                    self.policy.max_bytes,
-                )
+                .send(&current, encoded_body.as_deref(), headers, ceiling)
                 .await?;
 
             // Before any status handling, because a wall is not the page whatever
@@ -924,6 +1018,11 @@ impl SafeFetcher {
                 etag: reply.etag,
                 last_modified: reply.last_modified,
                 provenance: Provenance::Source,
+                // Not a gated fetch: the archive and the solver both answer a
+                // request the fetcher already permitted, and the fixture path has no
+                // robots at all. Storable, and content-classed.
+                fetch_class: crate::robots::FetchClass::Content,
+                discarded: false,
             })));
         }
 
@@ -1050,7 +1149,14 @@ impl SafeFetcher {
         // pacing, so asking the source to cache it would be asking it to make
         // the rules stale.
         let outcome = self
-            .send_with_redirects(&url, None, None, Escalation::None)
+            // `robots.txt` is read without consulting a gate, so there is no
+            // declared class for it. `Media` is the honest one: it carries the
+            // full ceiling, because a `robots.txt` larger than the content
+            // ceiling is not a metadata-fetch failure — it is a host we should
+            // stop negotiating with, and the file has to fit for it to be read
+            // at all. Naming the class rather than passing a number keeps the
+            // reasoning next to the choice instead of inside a bare `usize`.
+            .send_with_redirects(&url, None, None, Escalation::None, FetchClass::Media)
             .await;
         let rules = match outcome {
             // A site with no `robots.txt` has no restrictions. `404` arrives as
@@ -1290,6 +1396,13 @@ impl Fetcher for FixtureFetcher {
                 etag: None,
                 last_modified: None,
                 provenance: Provenance::Source,
+                // A fixture stands in for the network, and the fixture path has
+                // no `robots.txt` to consult — so this bypasses the gate and so
+                // bypasses the discard it would set. Deliberate: a test that
+                // seeds a page and expects it back must not have to declare a
+                // posture to get it.
+                fetch_class: crate::robots::FetchClass::Content,
+                discarded: false,
             }),
             None => Err(SourceError::Network(format!(
                 "no fixture recorded for {url}"
@@ -1945,6 +2058,97 @@ mod tests {
                 FetchClass::Content
             ),
             RobotsGate::Refused
+        );
+    }
+
+    #[test]
+    fn the_byte_ceiling_follows_the_declared_class() {
+        // Amendment §1.2 limit 1. The point is that the ceiling is chosen by the
+        // DECLARATION, so raising the instance's content ceiling cannot make a
+        // metadata read accept more — an operator who raised `max_bytes` said
+        // "I will store more prose", not "read more documents".
+        let mut policy = policy();
+        let base = policy.max_bytes;
+        assert!(
+            base > 1024 * 1024,
+            "the content ceiling is above the metadata one"
+        );
+
+        assert_eq!(policy.max_bytes_for(FetchClass::Metadata), 1024 * 1024);
+        assert_eq!(policy.max_bytes_for(FetchClass::Content), base);
+        assert_eq!(policy.max_bytes_for(FetchClass::Media), base);
+
+        // Raise it a long way. Metadata does not move; content and media do.
+        policy.max_bytes = 64 * 1024 * 1024;
+        assert_eq!(
+            policy.max_bytes_for(FetchClass::Metadata),
+            1024 * 1024,
+            "a raised content ceiling does not widen a metadata read, which is the property that \
+             makes the class worth declaring"
+        );
+        assert_eq!(policy.max_bytes_for(FetchClass::Content), 64 * 1024 * 1024);
+        assert_eq!(policy.max_bytes_for(FetchClass::Media), 64 * 1024 * 1024);
+    }
+
+    /// The body of `SafeFetcher::send_with_redirects`, for the one assertion that
+    /// cannot be made at runtime.
+    fn send_path_source() -> String {
+        let src = include_str!("safety.rs");
+        let start = src
+            .find("    async fn send_with_redirects(")
+            .expect("send_with_redirects exists");
+        let rest = &src[start..];
+        let end = rest
+            .find("\n    /// The clients to try, in order, for one request.")
+            .expect("the next item in the impl bounds it");
+        rest[..end].to_owned()
+    }
+
+    #[tokio::test]
+    async fn the_ceiling_the_send_path_uses_is_the_one_the_class_asked_for() {
+        // D6 survived the first pass: `max_bytes_for` was correct and thoroughly
+        // tested, and nothing connected it to the byte count handed to the
+        // transport. A `policy.max_bytes` at the call site left every ceiling
+        // test green while a metadata read accepted 8 MiB.
+        //
+        // The fix is the name: the send path and this test both call
+        // `SafeFetcher::ceiling_for`, so a call site that stops consulting it is
+        // a compile error rather than a silent widening. Asserting the
+        // expression again would not have caught D6 — that test would have
+        // restated the same one-liner.
+        let fetcher = fetcher_with_robots(Duration::from_millis(500), "User-agent: *\n").await;
+
+        // Also: the send path must DERIVE its ceiling from this function rather
+        // than carrying its own. `ceiling_for` being correct is not the same
+        // thing as the send path asking it, and a `self.policy.max_bytes` at
+        // the call site survived a mutation pass on exactly that distinction.
+        // The type now makes a caller supply a class, so the only remaining way
+        // to bypass the function is to ignore the parameter it was given — and
+        // that is what the source is checked for here, because no runtime
+        // assertion can see it.
+        //
+        // A source-text assertion is normally a smell. This one earns it: the
+        // property is that a specific expression appears at a specific place,
+        // the code under test is one line, and the alternative is a test that
+        // passes while the bug is present.
+        let send_path = self::send_path_source();
+        assert!(
+            send_path.contains("self.ceiling_for(class)"),
+            "the send path derives its ceiling from ceiling_for; found instead: {send_path}"
+        );
+        assert!(
+            !send_path.contains("self.policy.max_bytes,"),
+            "and does not reach for the policy's own ceiling; found: {send_path}"
+        );
+
+        assert_eq!(fetcher.ceiling_for(FetchClass::Metadata), 1024 * 1024);
+        assert_eq!(
+            fetcher.ceiling_for(FetchClass::Content),
+            fetcher.policy.max_bytes
+        );
+        assert_eq!(
+            fetcher.ceiling_for(FetchClass::Media),
+            fetcher.policy.max_bytes
         );
     }
 
@@ -2725,6 +2929,97 @@ mod tests {
                  of the posture is to read it and discard it. Got {e:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_discarded_read_hands_back_no_bytes_at_all() {
+        // The A.4 limit that holds when the other two are wrong. Asserted on a
+        // real body, not on a fetch that cannot succeed.
+        let mut page = crate::Fetched::from_source(
+            "https://example.com/story/1",
+            "<html>the entire forbidden chapter, in full</html>",
+            Some("text/html".to_owned()),
+        );
+        SafeFetcher::label_fetched(
+            &mut page,
+            FetchClass::Metadata,
+            RobotsGate::ReadAndDiscarded,
+        );
+
+        assert_eq!(
+            page.body, "",
+            "a read-and-discarded body is not available to an adapter that reached for \
+             `page.body` directly, which is what every site adapter does"
+        );
+        assert!(
+            page.discarded,
+            "and the page says so, so a caller can explain why"
+        );
+        assert_eq!(
+            page.fetch_class,
+            FetchClass::Metadata,
+            "the class is still reported"
+        );
+
+        let refusal = page.storable_body().expect_err(
+            "and the storable accessor refuses, rather than handing out an empty string that \
+             looks like an empty document",
+        );
+        assert!(
+            refusal.to_string().contains("metadata_only"),
+            "the refusal names the posture that caused it: {refusal}"
+        );
+    }
+
+    #[test]
+    fn a_storable_read_keeps_its_bytes() {
+        // The other three arms, so the test above is about the distinction and
+        // not about a labelling step that empties everything. A version that
+        // cleared the body unconditionally would satisfy the discard test and
+        // destroy every import.
+        for gate in [
+            RobotsGate::Allowed,
+            RobotsGate::Overridden,
+            RobotsGate::Refused,
+        ] {
+            let mut page = crate::Fetched::from_source(
+                "https://example.com/story/1",
+                "<html>the chapter</html>",
+                None,
+            );
+            SafeFetcher::label_fetched(&mut page, FetchClass::Content, gate);
+            assert_eq!(
+                page.body, "<html>the chapter</html>",
+                "{gate:?} is not a discard, so the bytes stay"
+            );
+            assert!(!page.discarded, "{gate:?} does not set the discard flag");
+            assert!(
+                page.storable_body().is_ok(),
+                "{gate:?} hands its bytes out to a storer"
+            );
+        }
+    }
+
+    #[test]
+    fn an_allowed_metadata_read_is_storable() {
+        // The subtle one: `metadata_only` discards a *forbidden* path, not
+        // every metadata read. A metadata fetch of an allowed path is ordinary
+        // and storable, and a labelling step that keyed off the class or the
+        // posture rather than the gate would throw it away — silently dropping
+        // the chapter listings that is what the instance is for.
+        let mut page = crate::Fetched::from_source(
+            "https://example.com/story/1",
+            "<html>title, author, chapter list</html>",
+            None,
+        );
+        SafeFetcher::label_fetched(&mut page, FetchClass::Metadata, RobotsGate::Allowed);
+
+        assert_eq!(
+            page.body, "<html>title, author, chapter list</html>",
+            "an ALLOWED metadata read is storable; the discard follows the gate, not the class"
+        );
+        assert!(!page.discarded);
+        assert_eq!(page.fetch_class, FetchClass::Metadata);
     }
 
     #[tokio::test]
