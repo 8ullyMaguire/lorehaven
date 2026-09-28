@@ -308,6 +308,40 @@ and "I read the column type and it looked fine" settles nothing. The same
 applies to a report the checker does *not* make, which is why every gate in
 this repo is required to be seen going red.
 
+### The sweeper was deleting live tests, and it is the same shape as the `ESCAPE ''` bug
+
+`test_support::sweep_idle_scratch_databases` dropped every `lh_test_%` database
+with no attached backend, reasoning that *no backends belongs to no run*. That
+is wrong in exactly the window where the sweeper runs — it is called **between**
+`CREATE DATABASE` and `Database::connect`, so a concurrent test binary has
+created its database and not yet attached a backend, which is precisely what
+"no backends" classifies as a leak:
+
+```
+connect to the scratch test database: connecting to PostgreSQL
+Caused by: error returned from database:
+  database "lh_test_anon_edge_10_1877600623394829" does not exist
+```
+
+The comment above the function argued for the behaviour at length, in prose, and
+was wrong. A reviewer reading it would have agreed with it. **This is the
+`ESCAPE ''` shape** — a correct-looking explanation, a valid piece of SQL, and
+an engine that disagrees — and the lesson is the same one: *a stated reason is a
+claim, and a claim is not a test.*
+
+The floor is now an **age**, decoded from the name. `unique_suffix()` is
+`(seconds << 20) | counter`, so the high bits are the creating process's start
+time and the low 20 are a counter. A database younger than `SWEEP_MIN_AGE_SECS`
+(300) is never dropped, whatever its backend count; `pg_stat_activity` stays a
+**second** gate rather than the only one — "no backend" is necessary, "old
+enough" is what makes it safe. The error direction is deliberate: a missed
+sweep costs one stale database, an over-eager one costs a live test.
+
+`the_sweeper_age_floor_matches_the_suffix_layout` pins the arithmetic, so a
+change to `unique_suffix`'s layout fails a test instead of silently decaying the
+sweeper into never-dropping or always-dropping. 13/13 and 10/10 on the two
+suites it broke.
+
 ## Still open in this phase — and one of them is the larger half
 
 1. **§7.7.3's indistinguishability is NOT built.** The paired-response test the
