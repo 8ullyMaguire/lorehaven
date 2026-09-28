@@ -66,6 +66,7 @@ pub mod secrets;
 pub mod sessions;
 pub mod settings;
 pub mod spoilers;
+pub mod standing;
 pub mod storage;
 pub mod story_identity;
 pub mod subscriptions;

@@ -137,10 +137,7 @@ pub async fn upsert_card(db: &Database, card: &Card) -> Result<(), sqlx::Error> 
 ///
 /// Uses the same `CARD_COLUMNS` constants as `list_cards`, so the positional
 /// mapper is the only place the column order is written down.
-pub async fn find_card_by_id(
-    db: &Database,
-    card_id: &str,
-) -> Result<Option<Card>, sqlx::Error> {
+pub async fn find_card_by_id(db: &Database, card_id: &str) -> Result<Option<Card>, sqlx::Error> {
     match db.backend() {
         Backend::Sqlite => {
             let sql = format!("SELECT {CARD_COLUMNS} FROM roadmap_cards WHERE id = ?");

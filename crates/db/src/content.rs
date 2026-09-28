@@ -77,6 +77,7 @@ struct WorkRow {
     withdrawn_at: Option<String>,
     show_public_ratings: i64,
     discussion_mode: String,
+    body_audience: Option<String>,
     created_at: String,
     updated_at: String,
     version: i64,
@@ -113,6 +114,13 @@ pub struct Work {
     pub show_public_ratings: bool,
     /// Discussion mode: thread_only/comments_only/both.
     pub discussion_mode: String,
+    /// Storage form of the body audience, `None` when the work names none.
+    ///
+    /// `None` means INHERIT, not "public" — see migration 0086 for why the
+    /// column is NULL rather than defaulting to a stored `'anyone'`. Kept as the
+    /// raw string here and parsed by the domain, so the database layer does not
+    /// need to know the audience vocabulary and a new variant is one change.
+    pub body_audience: Option<String>,
     /// Creation time, RFC 3339.
     pub created_at: String,
     /// Last change, RFC 3339.
@@ -363,12 +371,13 @@ pub enum PublicationOutcome {
 
 const WORK_COLUMNS: &str = "id, owner_pseud_id, title, summary, language, rating, visibility, \
     lifecycle, completion, scheduled_for, published_at, withdrawn_at, show_public_ratings, \
-    discussion_mode, created_at, updated_at, version";
+    discussion_mode, body_audience, created_at, updated_at, version";
 
 /// The same columns, cast to text for PostgreSQL.
 const WORK_COLUMNS_PG: &str = "id::text AS id, owner_pseud_id::text AS owner_pseud_id, title, \
     summary, language, rating, visibility, lifecycle, completion, scheduled_for, published_at, \
-    withdrawn_at, show_public_ratings, discussion_mode, created_at, updated_at, version";
+    withdrawn_at, show_public_ratings, discussion_mode, body_audience, created_at, updated_at, \
+    version";
 
 fn decode_work(row: WorkRow) -> ContentResult<Work> {
     Ok(Work {
@@ -386,6 +395,7 @@ fn decode_work(row: WorkRow) -> ContentResult<Work> {
         withdrawn_at: row.withdrawn_at,
         show_public_ratings: row.show_public_ratings != 0,
         discussion_mode: row.discussion_mode,
+        body_audience: row.body_audience,
         created_at: row.created_at,
         updated_at: row.updated_at,
         version: row.version,
@@ -1676,6 +1686,7 @@ mod tests {
             withdrawn_at: None,
             show_public_ratings: true,
             discussion_mode: "both".to_owned(),
+            body_audience: None,
             created_at: String::new(),
             updated_at: String::new(),
             version: 1,
