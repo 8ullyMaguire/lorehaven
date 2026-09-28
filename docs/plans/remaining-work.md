@@ -12,8 +12,8 @@ canonical feature inventory and the roadmap-board seed).
 ## Where the build actually stands (re-derived 2026-09-25)
 
 Verified from `docs/requirements.csv`: **588 rows implemented**
-(289 fully-tested, 183 locally-tested, 116 verified-e2e), **68 planned**,
-**4 deliberately unsupported**, 660 rows total. 51 milestone test files through
+(289 fully-tested, 183 locally-tested, 116 verified-e2e), **71 planned**,
+**4 deliberately unsupported**, 663 rows total. 51 milestone test files through
 M45 plus the M54–M58 suites, migrations to
 0083, 80 frontend routes, tags through `v0.51.0`. The
 platform core (M0–M15), the forum series (M31–M35), media resilience
@@ -257,7 +257,7 @@ The dead handlers were removed rather than left to rot. Restoring this means:
 ### M59 — Crawling posture, retention governance, and preservation (spec §11.5, §11.15, §11.12a, §11.15a, §11.15b, §19.15, amended)
 
 Spec: `docs/spec-amendments/crawling-retention-and-preservation.md`.
-Plan: `docs/plans/crawling-retention-preservation.md`. Rows: M59-01…M59-20,
+Plan: `docs/plans/crawling-retention-preservation.md`. Rows: M59-01…M59-23,
 all `planned`.
 
 `imports.honour_robots` becomes `imports.robots_posture`
@@ -275,9 +275,20 @@ Two things this deliberately does not build: §11.11 preservation *batches*
 because inherited `redistribution` permission needs the §23.7 transfer
 manifest, which is deferred. Local works are the shippable slice.
 
-Order: A posture+class → B UA token → C retention → D preservation → E
-proposals. A and C can run in parallel; D and E share the retention routes and
-serialise.
+**§11.10's cross-source identity is a prerequisite, and none of its four tables
+exists.** `story_identities` appears in the §3 data model and is absent from
+`crates/`, from `migrations/`, and from this CSV — so the roadmap seeder has
+never seen it either. What exists is `library_items` (0006) keyed on
+`UNIQUE(account_id, source_key, source_work_key)`, which means importing the
+same fic from two sites produces two unrelated rows and no link. Phase A0
+builds the minimum (`story_identities` + `story_identity_members`, one
+`edition_relation` value, no inference), and a preservation target becomes a
+*state column on an identity member* rather than a parallel table that a later
+identity milestone has to reconcile. M59-21…M59-23.
+
+Order: **A0 identity** → A posture+class → B UA token → C retention → D
+preservation → E proposals. A and C can run in parallel; D and E share the
+retention routes and serialise; D cannot start before A0 is green.
 
 ### Then — hardening and release
 

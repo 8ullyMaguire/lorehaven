@@ -48,6 +48,120 @@ holds the typing.
 
 ---
 
+## Phase A0 — Cross-source identity, the minimum Phase D needs
+
+Amendment §11.10b. **New on 2026-09-27**, after a probe found that §11.10's four
+tables have never existed. This phase carries the first migration in the plan
+and is the prerequisite for Phase D.
+
+### A0.1 Migration 0084, both dialects
+
+`migrations/sqlite/0084_story_identity.sql` and
+`migrations/postgres/0084_story_identity.sql`, identical ids:
+
+```sql
+CREATE TABLE IF NOT EXISTS story_identities (
+    id                TEXT PRIMARY KEY,
+    -- The local work this identity is about. A crosspost this instance
+    -- performed always has one; an identity with no local member is a
+    -- purely-external grouping, which A0 does not create.
+    work_id           TEXT NOT NULL REFERENCES works (id) ON DELETE CASCADE,
+    -- Canonical metadata is a COPY of the work's, not the authority. §11.10's
+    -- merges are reversible, so an identity must be able to be dissolved back
+    -- into its members without a work losing its title.
+    canonical_title   TEXT NOT NULL DEFAULT '',
+    status            TEXT NOT NULL DEFAULT 'active',
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    version           INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS story_identity_members (
+    id                  TEXT PRIMARY KEY,
+    identity_id         TEXT NOT NULL REFERENCES story_identities (id) ON DELETE CASCADE,
+    -- Exactly one of the two. A local member names a work; an external member
+    -- names a record at a site. Both are CHECK-enforced, because a row with
+    -- both or neither is a row that means two things.
+    work_id             TEXT REFERENCES works (id) ON DELETE CASCADE,
+    external_record_id  TEXT,
+    -- One value ships: 'cross_posted'. See below before adding a second.
+    edition_relation    TEXT NOT NULL DEFAULT 'cross_posted',
+    external_source_key TEXT,
+    external_url        TEXT,
+    created_at          TEXT NOT NULL,
+    UNIQUE (identity_id, work_id),
+    UNIQUE (identity_id, external_source_key, external_url),
+    CHECK ((work_id IS NULL) <> (external_record_id IS NULL))
+);
+```
+
+**Both tables from §3 are created empty** — `identity_merge_proposals` and
+`identity_merge_history` — so the data model is honest and
+`docs/requirements.csv` can seed a row for each. Nothing writes to them in A0.
+
+Retention behaviour, per §4.1: a member cascades with its identity and with its
+work. A member is **not** deleted when its external site dies — it is marked
+unavailable, because a vanished edition is a fact about the world and deleting
+the row would lose the provenance. Merges, when they exist, go in
+`identity_merge_history`, never as a row deletion.
+
+### A0.2 One relation, because one is what this instance can know
+
+`edition_relation` ships with exactly one value: `cross_posted`. That is not
+timidity, it is the only relation A0 can establish **without guessing**, because
+the instance performed the act itself.
+
+**No inference path may be written.** Not from title+author similarity, not from
+canonical URL, not from a shared tag set. A `translation` recorded as
+`cross_posted` tells a reader two texts are one; an `unrelated_lookalike`
+recorded as `cross_posted` is the specific failure §11.10 exists to prevent. The
+test to write:
+
+```text
+an_identity_member_cannot_be_created_by_similarity_of_title_author_or_url
+```
+
+A grep for the matcher is a second net, but the test is the one that matters:
+assert that every member row's `created_by` is a performed crosspost.
+
+### A0.3 What the reader sees
+
+A work page lists the identity's members as editions: this instance's copy
+first, then each external location with its own link. **"Do not grant access to
+another edition's body"** (§11.10) is the rule that matters here — a member row
+records *that* a copy exists and *where*, never a body, and a reader with this
+instance's copy gains nothing from a member row.
+
+Verification state (`verified | unverified | dead`) is Phase D's column on this
+row, added in 0086. A0 leaves it `unverified` for every external member, which
+is honest: nothing has checked.
+
+### A0.4 Verification
+
+```bash
+cd ~/code-local/rust/lorehaven
+cargo test -p lorehaven-app story_identity 2>&1 | tail -30
+```
+
+```text
+a_work_can_hold_an_external_member_naming_a_location_with_relation_cross_posted
+a_member_row_holds_exactly_one_of_work_id_or_external_record_id
+an_identity_resolves_to_one_work_page_listing_local_and_external_copies
+an_external_member_grants_no_access_to_any_body
+a_member_is_not_deleted_when_its_external_site_is_unavailable
+the_two_merge_tables_exist_and_nothing_writes_to_them
+an_identity_member_cannot_be_created_by_similarity_of_title_author_or_url
+every_member_row_names_a_crosspost_this_instance_performed
+the_two_dialects_define_the_same_migration_ids
+```
+
+The last-but-one and the parity test are the two that catch the failure modes
+that matter. A member created by a guess is unrecoverable — it tells a reader
+two different texts are the same book, and no later fix removes the wrong
+linkage that a reader already believed.
+
+---
+
 ## Phase A — `robots_posture` and the fetch class
 
 Amendment §1. Smallest phase, unblocks everything else, and the only phase
@@ -240,12 +354,13 @@ cargo test -p lorehaven-scrapers user_agent 2>&1 | tail -10
 
 ## Phase C — retention, built as §11.15 specifies
 
-Amendment §4. This is **M6-15**, and it is the first phase with a migration.
+Amendment §4. This is **M6-15**. A0 now carries the first migration, so this
+is the second.
 
-### C.1 Migration 0084, both dialects
+### C.1 Migration 0085, both dialects
 
-`migrations/sqlite/0084_instance_retention.sql` and
-`migrations/postgres/0084_instance_retention.sql`, identical ids (§2.1 of
+`migrations/sqlite/0085_instance_retention.sql` and
+`migrations/postgres/0085_instance_retention.sql`, identical ids (§2.1 of
 `docs/plans/README.md`):
 
 ```sql
@@ -341,7 +456,7 @@ cargo test -p lorehaven-app retention 2>&1 | tail -30
 cargo test --workspace 2>&1 | tail -5      # both backends
 ```
 
-Against live PostgreSQL as well — the `0084` migration must be applied and
+Against live PostgreSQL as well — the `0085` migration must be applied and
 tested on both dialects:
 
 ```bash
@@ -372,9 +487,9 @@ where a green suite lies.
 
 ## Phase D — preservation targets, verification, credits and clawback
 
-Amendment §2, §3. Second migration, and the phase with the most moving parts.
+Amendment §2, §3. Third migration, and the phase with the most moving parts.
 
-### D.1 Migration 0085, both dialects
+### D.1 Migration 0086, both dialects
 
 ```sql
 CREATE TABLE IF NOT EXISTS preservation_destinations (
@@ -389,27 +504,53 @@ CREATE TABLE IF NOT EXISTS preservation_destinations (
     version             INTEGER NOT NULL DEFAULT 1
 );
 
-CREATE TABLE IF NOT EXISTS preservation_targets (
-    id              TEXT PRIMARY KEY,
-    work_id         TEXT NOT NULL REFERENCES works (id) ON DELETE CASCADE,
-    destination_id  TEXT NOT NULL REFERENCES preservation_destinations (id) ON DELETE RESTRICT,
-    state           TEXT NOT NULL,   -- unverified | verified | dead | refused
-    verified_at     TEXT,
-    dead_at         TEXT,
-    evidence_hash   TEXT,            -- hash of the destination page's identifying fields
-    credits_paid    INTEGER NOT NULL DEFAULT 0,
-    created_by      TEXT NOT NULL REFERENCES accounts (id) ON DELETE RESTRICT,
-    created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL,
-    version         INTEGER NOT NULL DEFAULT 1,
-    UNIQUE (work_id, destination_id)
-);
+-- The preservation target IS an identity member. Phase A0's
+-- story_identity_members is where "this work also exists at that location"
+-- lives, so preservation adds STATE to that row rather than a second table
+-- saying the same thing in a different vocabulary. The 1:1 with
+-- preservation_destinations is enforced so a destination maps to one member.
+ALTER TABLE story_identity_members
+    ADD COLUMN destination_id TEXT REFERENCES preservation_destinations (id) ON DELETE RESTRICT;
+ALTER TABLE story_identity_members
+    ADD COLUMN state          TEXT NOT NULL DEFAULT 'unverified';  -- unverified|verified|dead|refused
+ALTER TABLE story_identity_members
+    ADD COLUMN verified_at    TEXT;
+ALTER TABLE story_identity_members
+    ADD COLUMN dead_at        TEXT;
+ALTER TABLE story_identity_members
+    ADD COLUMN evidence_hash  TEXT;   -- hash of the destination page's identifying fields
+ALTER TABLE story_identity_members
+    ADD COLUMN credits_paid   INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE story_identity_members
+    ADD COLUMN created_by     TEXT REFERENCES accounts (id) ON DELETE RESTRICT;
+ALTER TABLE story_identity_members
+    ADD COLUMN updated_at     TEXT;
+ALTER TABLE story_identity_members
+    ADD COLUMN version        INTEGER NOT NULL DEFAULT 1;
+CREATE UNIQUE INDEX idx_identity_member_destination
+    ON story_identity_members (destination_id) WHERE destination_id IS NOT NULL;
 ```
 
-The `UNIQUE` is load-bearing: it makes a duplicate crosspost an idempotent
-no-op rather than a second paid target. Retention behaviour: a target row
-cascades with its work, and `preservation_destinations` is `RESTRICT` because
+**Why the target is a member and not its own table.** A `preservation_targets`
+table and a `story_identity_members` table would both answer "does this work
+exist at that location, and what is its state". Two tables, one fact, and the
+reconciliation lands on whoever builds identity properly next — at which point
+the preservation data has to be migrated, not just joined. The cost of the
+ALTER-column shape is that `story_identity_members` now carries columns only
+Phase D uses, and the benefit is that the concept exists once.
+
+`credits_paid` sits here because the credit is owed to *a destination holding
+this work*, which is the member. The clawback finds it by
+`(destination_id, state)`; a dead member is a dead destination.
+
+The partial unique index is load-bearing: a duplicate crosspost is an
+idempotent no-op rather than a second paid target, and one destination cannot
+back two member rows. `preservation_destinations` is `RESTRICT` because
 deleting a destination must not silently orphan paid credits.
+
+A0's `created_at` stays NOT NULL and D's `updated_at`/`version` are added
+afterwards; **the ALTER block must be idempotent-safe for a fresh database**,
+so test a migration against a database that has A0 and one that does not.
 
 ### D.2 The verification fetch is a `Metadata` fetch
 
@@ -484,7 +625,7 @@ pub enum PreservationEligibility {
 
 **§33.1 is spec-only** — §33 opens with "Nothing in this section is
 implemented" — so the `redistribution` assertion is a **dependency of this
-phase, not an existing column**. Migration 0085 (or a small 0085a alongside
+phase, not an existing column**. Migration 0086 (or a small 0086a alongside
 it) adds `works.redistribution TEXT NOT NULL DEFAULT 'unstated'`, checked against
 `yes | ask | no | unstated`, editable only by the owning pseud. Check whether a
 `works` column of that name already exists before assuming it does not:
@@ -545,7 +686,7 @@ being farmed, and a reward system without it is a spam vector with a badge.
 Amendment §5, §19.15. Last, and it depends on C being real: a vote about a
 setting that does not exist is a vote about nothing.
 
-### E.1 Migration 0086, both dialects
+### E.1 Migration 0087, both dialects
 
 ```sql
 CREATE TABLE IF NOT EXISTS retention_proposals (
@@ -565,11 +706,18 @@ CREATE TABLE IF NOT EXISTS retention_proposals (
 -- A reader has one ballot per proposal. UNIQUE(account_id, proposal_id) is the
 -- whole anti-buy mechanism: a second vote updates the first, so a vote cannot
 -- be stacked.
+--
+-- NO WEIGHT COLUMN. §45.2 is explicit that governance votes are flat -- "every
+-- vote weighs 1. Taste affinity, trust level, and private preference are never
+-- part of governance" -- so a weight here would let a reading habit set instance
+-- policy. An earlier draft of this plan carried weight_bp off §16.16's demand
+-- weight; that inverted the arrow §19.2 refuses and was removed. The cost
+-- direction is handled by quorum_for() instead: one reader is one ballot, and a
+-- more expensive change needs more ballots.
 CREATE TABLE IF NOT EXISTS retention_proposal_votes (
     proposal_id  TEXT NOT NULL REFERENCES retention_proposals (id) ON DELETE CASCADE,
     account_id   TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
     support      INTEGER NOT NULL,   -- 1 | 0
-    weight_bp    INTEGER NOT NULL,   -- §16.16 demand weight, fixed at cast time
     cast_at      TEXT NOT NULL,
     PRIMARY KEY (proposal_id, account_id)
 );
@@ -585,10 +733,13 @@ CREATE TABLE IF NOT EXISTS retention_policy_changes (
 );
 ```
 
-`weight_bp` is fixed at cast time, matching what M58-04 already does for a
-directory vote's `base_weight`: the demand weight is what the voter was worth
-when they voted, and recomputing it later would let a weight change rewrite
-history.
+**Do not add a weight column to this table.** If a future draft wants one, the
+argument it has to beat is §45.2's flat-weights sentence, quoted above in the
+migration comment so it is read before the column is written rather than after.
+The M58 directory vote's `base_weight` is **not** a precedent for this: that is
+a ranking signal over entries, and §45.2 governs governance only — a directory
+ranking is not a governance vote. Conflating the two is how the wrong column
+gets justified.
 
 **This table is the privacy surface and it is the one to get right.**
 `retention_proposal_votes` has no route that returns a row from it. The
@@ -695,16 +846,31 @@ Follows the phases, in the same commit as the last of them.
 ## Order and why
 
 ```text
-A  robots posture + fetch class     ← no migration, amends working code
-B  class-specific UA token          ← same config surface as A
-C  retention built (M6-15)          ← first migration; the setting everything else is about
-D  preservation targets + rewards   ← needs A's class for verification, C's setting for aggregate
-E  retention proposals              ← needs C to be real before there is anything to vote on
-F  docs + ledger                    ← with the last phase
+A0 cross-source identity minimum      ← migration 0084; PREREQUISITE of D
+A  robots posture + fetch class       ← no migration, amends working code
+B  class-specific UA token            ← same config surface as A
+C  retention built (M6-15)            ← migration 0085; the setting everything else is about
+D  preservation targets + rewards     ← needs A0's member row, A's class, C's setting
+E  retention proposals                ← migration 0087; needs C to be real before there is anything to vote on
+F  docs + ledger                      ← with the last phase
 ```
 
-A and C could run in parallel by different hands. D and E both touch
+A and C can run in parallel by different hands. D and E both touch
 `routes/retention.rs` and the admin surface, so they serialise.
+
+**A0 was added on 2026-09-27 after a second probe found that none of §11.10's
+four identity tables exists.** The first draft of this plan treated Phase D's
+ground as empty, which it is — but the *concept* was not missing, only the
+implementation, and the concept is what Phase D hangs a destination on. A
+destination is an edition member (§11.10b), so `preservation_targets` becomes
+the state half of a `story_identity_members` row rather than a parallel concept
+that a later identity milestone has to reconcile.
+
+Migration numbers shifted by one when A0 was inserted, so the numbers a reader
+has already seen quoted (`0084` for retention, `0085` for preservation) are now
+`0085`, `0086` and `0087`. Nothing has been built against any of those numbers,
+and the `job_kinds!` tree and the migration-id parity test are the only things
+that care about order.
 
 **What is deliberately not in this plan.** §11.11 preservation *batches*
 (M6-10) stay unbuilt: they need an operator role, a permission basis, a dry-run
@@ -712,6 +878,16 @@ report and a batch rollback, and none of that is needed for a preservation
 *target*. Building the target first means the batch has a destination-side to
 attach to when it arrives. §23.7's transfer manifest is likewise untouched —
 Phase D refuses the imported-work case rather than quietly depending on it.
+
+**What A0 does not build.** `identity_merge_proposals` and
+`identity_merge_history` are *created by* A0 (empty, so §3's data model is
+honest and the roadmap seeds them) but nothing writes to them. Merges, the
+six-way classifier, evidence, quorum review and private grouping are §11.10's
+full scope and belong to their own milestone. `edition_relation` ships with one
+value, `cross_posted`, because that is the only one this instance can know for
+certain — it performed the act. A `translation` recorded as `cross_posted`
+tells a reader two texts are one, and that error is the one §11.10 exists to
+prevent.
 
 ---
 
