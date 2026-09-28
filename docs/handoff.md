@@ -227,6 +227,37 @@ file. `grep -rn "scratch_dir(" crates/app/tests/` would have shown four sites in
 one file and any number elsewhere; the fix that only worked for one file was
 already recorded as a fix.
 
+### And then the gate itself was wrong, in the direction that gets gates deleted
+
+After the five real faults were fixed the checker went on reporting those same
+five. **All five are correct code**, established by running the suites they live
+in on PostgreSQL, not by reading them: 41/41, 31/31, 21/21, 13/13, and
+`query_sql`'s round trip.
+
+`int4_sites` could see the migration's column type and nothing else. It assumed
+every INT4 column is decoded into an `i64` — but the **fault is the pair**: an
+INT4 column *and* a wide Rust type. Four of the five read as `i32`, or were
+already cast to BIGINT, or were never statements at all.
+
+Three changes, each because the rule reported something true and irrelevant:
+
+* the decode type, read from the surrounding Rust (`decoded_as_i64`);
+* the window had to look **backwards** as well — `query_scalar::<_, i32>(&db.sql(
+  "..."))` puts the type 40 characters to the *left* of the literal, and the
+  first version of the fix sat silent on an explicit `i32` right there;
+* `format!` templates are not statements. `SELECT {}::text{}` has no FROM and
+  never runs; it is how a caller *builds* the statement that does.
+
+**"A surviving mutation means the guarded line is DEAD or REDUNDANT" applied
+here and was wrong**, which is why it is written down: `query_scalar::<_, i32>`
+mutated to `::<_, i64>` — a real fault — and the gate stayed silent after the
+first round of fixes. The line was neither dead nor redundant; the *rule* was
+blind. Found only because the mutation was made and the expected red did not
+arrive. That is the whole argument for mutating a gate you have just changed.
+
+Both directions are now verified: `i32` -> `i64` is reported, and dropping a
+`CAST(amount AS BIGINT)` is reported. 25 self-test cases, all three gates clean.
+
 ### Also fixed, both pre-existing
 
 * `route_inventory`'s `ROUTE_TABLE` entry for `get_card` still spelled the path
@@ -287,7 +318,7 @@ whose entire purpose is a type gate.
 ### Five real PostgreSQL faults the uncast checker had been reporting
 
 `check-uncast-pg-placeholders.py` reported 10 sites across 6 files. **Five were
-real**, and this file's note that the checker "reports OK" was about a
+real** (below), and this file's note that the checker "reports OK" was about a
 different state of the tree:
 
 * `exchange.rs` (4) — `INT4` columns read into `i64`. PostgreSQL reports INT4
