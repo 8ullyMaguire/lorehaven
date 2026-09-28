@@ -32,6 +32,20 @@ enum Audience {
     Pseudonymous,
     /// Operator door — `RequireSession` + `require_operator`.
     Operator,
+    /// Token-or-session door, with no scope requirement — `RequireActor`.
+    ///
+    /// A distinct kind from `Scoped`, because the difference is exactly the one
+    /// that matters for `/me/credential`: a route behind `RequireActor` asks
+    /// *who are you* and not *what may you do*. A token with no scopes left must
+    /// still be able to discover that it has none — otherwise its only recourse
+    /// is a confusing 403 on an unrelated call, and it cannot tell "expired"
+    /// from "still fine".
+    ///
+    /// `RequireActorScoped` is that same question with a scope check bolted on,
+    /// so a `Scoped` route answers a token that lacks the scope with 403 and
+    /// never reveals the credential exists. Both are needed, and which one a
+    /// route uses is a claim about what it discloses, so it is enumerated.
+    Actor,
     /// Token-or-session door — `RequireActorScoped`.
     ///
     /// A distinct kind, not a flavour of `Authenticated`, because the two are
@@ -54,6 +68,7 @@ impl Audience {
             Audience::Authenticated => "RequireSession",
             Audience::Pseudonymous => "RequirePseud",
             Audience::Operator => "RequireSession",
+            Audience::Actor => "RequireActor",
             Audience::Scoped => "RequireActorScoped",
         }
     }
@@ -2181,6 +2196,24 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         method: "POST",
         path: "/me/tokens/{id}",
         audience: Audience::Public,
+    },
+    // `Audience::Actor`, not `Scoped` and not `Public`.
+    //
+    // Not `Public`: the route requires a credential; anonymous callers get 401.
+    //
+    // Not `Scoped`: `RequireActorScoped` would answer a token with no scopes
+    // with 403 and never reveal the credential exists, which defeats the
+    // endpoint's purpose. A bot whose reader revoked every scope has to be able
+    // to learn that, and "you are a token with no scopes" is the answer.
+    //
+    // The audience is checked against the handler's own extractor, so this is a
+    // claim about what the route discloses rather than a label.
+    RouteEntry {
+        file: "external.rs",
+        handler: "describe_credential",
+        method: "GET",
+        path: "/me/credential",
+        audience: Audience::Actor,
     },
     RouteEntry {
         file: "external.rs",
