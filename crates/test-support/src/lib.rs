@@ -101,9 +101,29 @@ fn unique_suffix() -> u64 {
     (base << 20) | (n & 0xF_FFFF)
 }
 
-/// Unique scratch directory per tag (also used for export/storage files).
+/// Unique scratch directory per call (also used for export/storage files).
+///
+/// **Every call is a distinct directory, including two calls with the same
+/// tag in the same test.** This was `format!("lorehaven-test-{tag}-{pid}")`,
+/// which is unique per (tag, process) and no more — and that was not enough.
+///
+/// The failure it caused: a test that builds its database through `setup(tag)`
+/// and then asks for `scratch_dir(tag)` again to hand the same path to a
+/// router gets the *same* directory, and `scratch_dir` opens with
+/// `remove_dir_all`. So the second call deletes the SQLite file out from under
+/// the first connection. The symptom is a 500 from a route whose SQL is
+/// correct, in a suite that passes every time it is run alone — the file
+/// `user_search_ast.rs` hit it on all four of its HTTP tests. Two tests
+/// sharing a tag across threads do the same thing to each other, and the
+/// winner depends on scheduling.
+///
+/// So the tag is now a *label* rather than part of the identity, and the
+/// identity is `unique_suffix()` — the same atomic-counter primitive
+/// PostgreSQL scratch databases use. The label is kept because a failing run's
+/// directory is then readable: `lorehaven-test-<tag>-<n>` says which test
+/// left it behind, which is the whole reason the tag was there.
 pub fn scratch_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("lorehaven-test-{}-{}", tag, std::process::id()));
+    let dir = std::env::temp_dir().join(format!("lorehaven-test-{}-{}", tag, unique_suffix()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -795,4 +815,55 @@ pub async fn sign_in_as(client: &mut TestClient, db: &TestDb, email: &str, handl
         .as_str()
         .expect("account id in /auth/me")
         .to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scratch_dir;
+
+    /// Two calls with the same tag must be two directories.
+    ///
+    /// The defect this pins: `scratch_dir` was keyed on (tag, pid), so a test
+    /// that called it twice with one tag got the same path twice — and the
+    /// function opens with `remove_dir_all`, so the second call deleted the
+    /// first call's SQLite file out from under a live connection. The symptom
+    /// was a 500 from a route whose SQL is correct, in a suite that passed
+    /// every time it ran alone.
+    ///
+    /// A property test rather than a single pair, because the two calls here
+    /// are adjacent and an implementation that only collided under
+    /// concurrency would pass them.
+    #[test]
+    fn scratch_dir_is_unique_per_call_not_per_tag() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..16 {
+            let dir = scratch_dir("the_same_tag");
+            assert!(
+                seen.insert(dir.clone()),
+                "scratch_dir returned {dir:?} twice for one tag: the second call removes the \
+                 first call's directory, which is a live SQLite database"
+            );
+        }
+    }
+
+    /// The tag survives in the path, because a leaked directory has to be
+    /// attributable to a test.
+    ///
+    /// The second half of the change: uniqueness came from a counter, and the
+    /// obvious way to keep names short is to drop the tag. That would make a
+    /// failed run's leftovers a wall of anonymous numbers, which is the reason
+    /// the tag was in the name to begin with.
+    #[test]
+    fn scratch_dir_keeps_its_tag_in_the_path() {
+        let dir = scratch_dir("attributable");
+        let name = dir
+            .file_name()
+            .expect("a file name")
+            .to_string_lossy()
+            .into_owned();
+        assert!(
+            name.contains("attributable"),
+            "the directory name must say which test left it: {name}"
+        );
+    }
 }

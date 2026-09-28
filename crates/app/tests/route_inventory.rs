@@ -3282,7 +3282,7 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         file: "roadmap.rs",
         handler: "get_card",
         method: "GET",
-        path: "/roadmap/cards/:id",
+        path: "/roadmap/cards/{id}",
         audience: Audience::Public,
     },
     RouteEntry {

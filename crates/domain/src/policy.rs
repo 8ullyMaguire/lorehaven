@@ -442,13 +442,13 @@ pub fn can_access_content_with_standing(
     // and the rating ceiling.
     //
     // `standing` defaults to `None` when a caller does not supply one, and
-    // `ActorStanding::none()` fails every audience above `AccountsOnly`. So a
-    // caller that forgets to look standing up gets a DENY, which is the only
-    // safe direction for a field whose default answer is "this reader may not
-    // have the body".
+    // `ActorStanding::none()` fails every audience above `Anyone` — including
+    // `accounts_only`, which answers from `signed_in` and not from the trust
+    // level. So a caller that forgets to look standing up gets a DENY, which
+    // is the only safe direction for a field whose default answer is "this
+    // reader may not have the body".
     let owned = standing.copied().unwrap_or_else(ActorStanding::none);
-    let standing = &owned;
-    if !crate::retention::standing_satisfies(facts.body_audience, &standing) {
+    if !crate::retention::standing_satisfies(facts.body_audience, &owned) {
         return Decision::Deny(Deny::BodyNotInAudience);
     }
 
