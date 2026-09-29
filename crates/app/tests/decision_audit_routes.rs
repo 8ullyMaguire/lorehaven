@@ -111,7 +111,7 @@ impl Client {
         if !self.cookies.is_empty() {
             builder = builder.header(header::COOKIE, self.cookie_header());
         }
-        if let Some(body) = &body {
+        if body.is_some() {
             builder = builder.header(header::CONTENT_TYPE, "application/json");
         }
         let request = match body {
