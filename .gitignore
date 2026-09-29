@@ -38,3 +38,8 @@ frontend/playwright-report/
 *.swp
 .idea/
 .vscode/
+
+# Compiled Python from scripts/. Committed once by accident; the churn on every
+# interpreter version change is not worth a diff entry.
+__pycache__/
+*.pyc
