@@ -83,9 +83,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "age_assessments.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of age_assessments into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "ap_activities.actor_id": {
    "treatment": "rekey_text",
@@ -108,9 +108,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "api_tokens.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of api_tokens into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "api_tokens.token_hash": {
    "treatment": "drop_column",
@@ -118,19 +118,19 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "arena_ballots.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of arena_ballots into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "arena_weights.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of arena_weights into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "author_earnings_ledger.author_account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of author_earnings_ledger into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "author_media_preferences.account_id": {
    "treatment": "rekey_text",
@@ -138,9 +138,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "bookmarks.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of bookmarks into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "bot_registrations.token_id": {
    "treatment": "drop_column",
@@ -293,14 +293,14 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "content_settings.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of content_settings into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "curator_rewards.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of curator_rewards into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "curator_roles.account_id": {
    "treatment": "rekey_text",
@@ -308,9 +308,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "device_deliveries.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of device_deliveries into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "device_deliveries.address": {
    "treatment": "drop_column",
@@ -318,9 +318,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "did_not_finish.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of did_not_finish into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "directory_votes.account_id": {
    "treatment": "rekey_text",
@@ -348,24 +348,24 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "export_jobs.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of export_jobs into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "feedback_allowlist.author_account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of feedback_allowlist into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "feedback_denylist.author_account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of feedback_denylist into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "feedback_preferences.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of feedback_preferences into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "forum_posts.body": {
    "treatment": "keep_gated",
@@ -373,14 +373,14 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
   },
   "guardian_authorizations.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of guardian_authorizations into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "import_jobs.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of import_jobs into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "instance_fingerprints.fingerprint_json": {
    "treatment": "drop_column",
@@ -393,9 +393,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "interaction_warmth.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of interaction_warmth into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "ip_policy.ip": {
    "treatment": "drop_table",
@@ -403,9 +403,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "library_items.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of library_items into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "link_challenges.token_id": {
    "treatment": "drop_column",
@@ -413,14 +413,14 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "media_collection_items.added_by_account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of media_collection_items into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "media_collections.owning_account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of media_collections into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "messages.body": {
    "treatment": "keep_gated",
@@ -428,19 +428,19 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
   },
   "notification_routes.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of notification_routes into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "notifications.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of notifications into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "password_credentials.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of password_credentials into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "password_credentials.password_hash": {
    "treatment": "drop_column",
@@ -448,19 +448,19 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "payment_events.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of payment_events into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "payouts.author_account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of payouts into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "pool_b_distributions.author_account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of pool_b_distributions into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "post_drafts.body": {
    "treatment": "keep_gated",
@@ -468,14 +468,14 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
   },
   "privacy_settings.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of privacy_settings into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "private_tags.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of private_tags into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "pseuds.account_id": {
    "treatment": "rekey_account",
@@ -533,19 +533,19 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "quiz_answers.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of quiz_answers into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "rating.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of rating into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "reader_note.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of reader_note into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "reader_note.body": {
    "treatment": "keep_gated",
@@ -553,29 +553,29 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
   },
   "reading_history_entry.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of reading_history_entry into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "reading_progress.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of reading_progress into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "reading_sessions.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of reading_sessions into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "reading_status.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of reading_status into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "recovery_tokens.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of recovery_tokens into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "recovery_tokens.token_hash": {
    "treatment": "drop_column",
@@ -583,9 +583,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "review.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of review into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "review.body": {
    "treatment": "keep_gated",
@@ -593,24 +593,24 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
   },
   "roadmap_ballots.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of roadmap_ballots into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "roadmap_suggestions.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of roadmap_suggestions into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "saved_views.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of saved_views into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "second_factors.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of second_factors into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "second_factors.encrypted_secret": {
    "treatment": "drop_table",
@@ -623,9 +623,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "sessions.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of sessions into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "sessions.active_pseud_id": {
    "treatment": "keep",
@@ -673,9 +673,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "shelves.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of shelves into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "source_credentials.secret_id": {
    "treatment": "drop_column",
@@ -683,14 +683,14 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "streak_milestones.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of streak_milestones into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "streaks.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of streaks into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "targeted_bounties.account_id": {
    "treatment": "rekey_text",
@@ -698,39 +698,39 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "taste_notification_queue.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of taste_notification_queue into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "taste_probes.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of taste_probes into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "typography_preference.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of typography_preference into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "update_checks.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of update_checks into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "user_devices.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of user_devices into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "vanguard_pins.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of vanguard_pins into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "vanguard_roles.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of vanguard_roles into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "webhook_deliveries.endpoint_id": {
    "treatment": "keep",
@@ -773,19 +773,19 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "work_entitlements.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of work_entitlements into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "work_kudos.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of work_kudos into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "work_loans.borrower_account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of work_loans into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+   "treatment": "rekey_account",
+   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
   "works.ai_training": {
    "treatment": "keep",
