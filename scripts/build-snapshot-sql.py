@@ -51,12 +51,14 @@ WHAT THIS SCRIPT DELIBERATELY DOES NOT DO
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import pathlib
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 POLICY = REPO / "docs" / "snapshot-column-policy.json"
@@ -86,9 +88,85 @@ ACCOUNT_KEYED = {
     "added_by_account_id", "owning_account_id", "borrower_account_id",
 }
 
-# Tables that are structural rather than data: a snapshot that recreates them
-# from its own schema must not also import the live instance's version.
-INTERNAL_TABLES = {"_migrations", "snapshot_rekey_notes"}
+# Tables that are structural rather than data.
+#
+# `snapshot_rekey_notes` is a comment table the mask writes for its own benefit.
+#
+# `_migrations` was here too, and that was a bug with a long fuse. It looked
+# right: a snapshot "recreates tables from its own schema, so it must not import
+# the live instance's ledger". But the snapshot does NOT recreate the ledger --
+# nothing in it emits one -- so excluding the table means the recipient restores a
+# database whose `_migrations` is EMPTY, and `lorehaven doctor` on a perfectly
+# restored snapshot reports all 89 migrations pending. 11.16.7 step 5 requires
+# the output to pass doctor, so a snapshot that restores but fails doctor is not
+# a snapshot, it is a file.
+#
+# Nothing is lost by shipping the ledger: every column is derived from the
+# migration files that already ship with the binary (version+name is the
+# filename, checksum is SHA-256 of the SQL), so it is reproducible rather than
+# disclosed, and it carries no row of user data.
+INTERNAL_TABLES = {"snapshot_rekey_notes"}
+
+#: Tables the snapshot reconstructs from data it already has, rather than copying.
+#: Keyed by table -> the SQL that populates it in the masked schema.
+REBUILT_TABLES = {
+    "_migrations": "migration_ledger",
+}
+
+
+
+def migration_ledger_rows() -> list[str]:
+    """The SQL that rebuilds `_migrations` in the masked schema.
+
+    Regenerated from the migration files rather than copied from the live
+    instance, so the snapshot's ledger is a function of what the binary ships --
+    checkable by anyone holding both -- instead of a fact about one host.
+
+    The row shape is copied from crates/db/src/migrate.rs:
+      * `version` is the PRIMARY KEY and is the bare `0001`, not `0001_identity`.
+        Putting the composite `Migration::id()` in `version` would look right and
+        be wrong: `pending()` matches on `Migration::id()`, so a ledger built
+        from the wrong field reports every migration as unapplied.
+      * `name` is the part after the first underscore.
+      * `checksum` is SHA-256 of the file's bytes, hex encoded -- the same
+        function `Migration::checksum()` computes, so `migrate` does not see a
+        changed migration on a recipient's machine.
+      * `applied_at` is the snapshot's own date. A rebuilt row was not applied
+        then; inventing the source instance's timestamp would be a fabricated
+        fact in a file whose whole purpose is to be verifiable. `doctor` does
+        not read this column.
+    """
+    rows = [
+        "-- _migrations: REBUILT from the migration files, not copied from the",
+        "-- live instance. See REBUILT_TABLES in this script for why excluding it",
+        "-- left every recipient's `lorehaven doctor` reporting all migrations",
+        "-- pending on a snapshot that had in fact restored perfectly.",
+        # Into `snapshot_masked`, NOT `public`. The ledger has to travel INSIDE
+        # the dumped schema or it does not travel at all: the pipeline dumps
+        # `-n snapshot_masked`, so a ledger written to `public` is invisible to
+        # pg_dump and the recipient still restores an empty one. Writing it to
+        # the public schema of the source database is a fix that works on the
+        # development database and fails on the artefact, which is the worst
+        # place for a fix to work.
+        "CREATE SCHEMA IF NOT EXISTS snapshot_masked;",
+        "CREATE TABLE IF NOT EXISTS snapshot_masked._migrations (",
+        "    version    TEXT PRIMARY KEY,",
+        "    name       TEXT NOT NULL,",
+        "    checksum   TEXT NOT NULL,",
+        "    applied_at TEXT NOT NULL",
+        ");",
+        "TRUNCATE snapshot_masked._migrations;",
+    ]
+    applied_at = datetime.now(timezone.utc).date().isoformat()
+    for path in sorted(MIGRATIONS.glob("*.sql")):
+        stem = path.stem
+        version, _, name = stem.partition("_")
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        rows.append(
+            f"INSERT INTO snapshot_masked._migrations (version, name, checksum, applied_at) "
+            f"VALUES ('{version}', '{name}', '{digest}', '{applied_at}');"
+        )
+    return rows
 
 
 def load_policy() -> dict[str, dict]:
@@ -444,6 +522,19 @@ def build(out: pathlib.Path, mode: str = "cache") -> dict:
         lines.append(f"CREATE TABLE snapshot_masked.{table} AS SELECT * FROM _mask_{table};")
         lines.append(f"DROP VIEW _mask_{table};")
         lines.append("")
+
+    # REBUILT TABLES. `_migrations` is regenerated from the migration files that
+    # already ship with the binary, not copied from the live instance.
+    #
+    # It is NOT in the schema the loop above walks, and cannot be: no migration
+    # creates it. `ensure_ledger()` in crates/db/src/migrate.rs creates it at
+    # runtime, from the runner, so it is absent from both sources this script
+    # reads (the migration files and the live schema). Gating the rebuild on
+    # having seen the table in the schema -- the obvious way to write this --
+    # therefore emits nothing, silently, and the snapshot goes out with an empty
+    # ledger again. So the rebuild is unconditional.
+    lines.extend(migration_ledger_rows())
+    lines.append("")
 
     out.write_text("\n".join(lines) + "\n")
     return {

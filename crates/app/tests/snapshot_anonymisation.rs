@@ -599,11 +599,36 @@ async fn no_snapshot_publishes_a_body_audience_value_or_the_column_that_holds_it
          rule that is readable is not one. This value also publishes the trust \
          THRESHOLD, which is the operationally useful part."
     );
+    // The COLUMN, not the token. This distinction cost a real debugging session
+    // and is worth stating: asserting the absence of the string "body_audience"
+    // anywhere in the dump is WRONG, because the migration ledger legitimately
+    // contains a row named `0086_body_audience` -- that migration exists, it
+    // added the column, and the ledger is a list of migration NAMES. A dump can
+    // therefore be entirely correct and still trip a substring assertion.
+    //
+    // What 11.16.6 actually forbids is the column SURVIVING: a `body_audience`
+    // column of NULLs still tells a recipient which works carry an audience rule
+    // at all, which is the disclosure. So the assertion is about the schema -- a
+    // CREATE TABLE for works, and a COPY whose column list includes it.
+    let works_create = text
+        .lines()
+        .skip_while(|l| !l.starts_with("CREATE TABLE snapshot_masked.works"))
+        .take_while(|l| !l.starts_with(");"))
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(
-        !text.contains("body_audience"),
-        "the snapshot still has a body_audience COLUMN. Every value may be redacted \
-         and this still tells a recipient which works carry an audience rule at all. \
-         11.16.6 says dropped ENTIRELY, and a column of NULLs is not that."
+        !works_create.contains("body_audience"),
+        "snapshot_masked.works still has a body_audience column:\n  {works_create}\n\
+         Every value may be redacted and this still tells a recipient which works \
+         carry an audience rule at all. 11.16.6 says dropped ENTIRELY, and a \
+         column of NULLs is not that."
+    );
+    assert!(
+        !text
+            .lines()
+            .any(|l| l.starts_with("COPY snapshot_masked.works") && l.contains("body_audience")),
+        "the works COPY lists body_audience, so the values are in the file even if \
+         the CREATE TABLE above looks clean."
     );
     // And the work itself must still be there -- the point is to drop the rule,
     // not the work. 11.16.6's companion clause keeps titles and metadata.
@@ -704,6 +729,165 @@ async fn an_account_id_re_keys_to_the_same_derivation_as_accounts_id_so_the_join
          foreign keys without re-keying accounts.id obscures the public handle \
          and leaves the identifier that still joins to the table holding the \
          email."
+    );
+    tdb.cleanup().await;
+}
+
+/// §11.16.7 step 5 — the snapshot restores into an empty PostgreSQL AND passes
+/// `lorehaven doctor`. Both halves, because the first half passing says nothing
+/// about the second, and that gap is where this requirement was quietly broken.
+///
+/// The bug this catches: `_migrations` was in the generator's `INTERNAL_TABLES`,
+/// so it was excluded from the dump. The reasoning sounded right — a snapshot
+/// recreates tables from its own schema, so it must not import the live ledger —
+/// but nothing in the snapshot ever *created* a ledger. A recipient restored a
+/// database with no `_migrations` table at all, `doctor` reported "89 migration(s)
+/// pending" on a snapshot that had restored perfectly, and every byte-level leak
+/// assertion stayed green. The anonymisation tests could not have caught it: they
+/// assert what is ABSENT, and this failure is a row that should have been
+/// PRESENT.
+///
+/// The fix regenerates the ledger from the migration files that already ship with
+/// the binary, so it is a function of the release rather than a fact about one
+/// host. Verified red: with the exclusion reinstated, this test fails and doctor
+/// exits 1 with all 89 migrations pending.
+#[tokio::test]
+async fn a_restored_snapshot_passes_doctor() {
+    let Some(_) = pg_url() else { return };
+    let tdb = TestDb::connect_with_dir(
+        "snapshot_doctor",
+        &test_support::scratch_dir("snapshot_doctor"),
+    )
+    .await;
+    if tdb.db().backend() != Backend::Postgres {
+        tdb.cleanup().await;
+        return;
+    }
+    seed_body_canary(&tdb).await;
+    apply_mask(&tdb).await;
+
+    let dir = test_support::scratch_dir("snapshot_doctor_dump");
+    let dump_path = dir.join("snapshot.sql");
+    // The ARTEFACT is the `snapshot_masked` schema and nothing else. Dumping the
+    // whole database is not a stricter test, it is a different artefact: it
+    // ships the unmasked `public.*` tables, and their live foreign keys, so the
+    // restore either fails on a relation the dump does not contain or succeeds
+    // against tables no recipient would ever receive.
+    let text = dump(&tdb, &["-n", "snapshot_masked"], &dump_path);
+    assert!(
+        text.contains("COPY snapshot_masked._migrations"),
+        "the dump carries no _migrations data, so a recipient restores a database \
+         with an empty or missing ledger and `lorehaven doctor` reports every \
+         migration pending. 11.16.7 step 5 requires the restore to PASS doctor, and \
+         a restore that then needs a migration run is not the snapshot.\n\
+         The ledger has to be written INSIDE the dumped schema: one written to \
+         `public` is invisible to `pg_dump -n snapshot_masked`, so it fixes the \
+         development database and not the artefact."
+    );
+
+    // Restore into a genuinely empty database, then run the real binary's doctor
+    // against it. Asserting on the ledger's row count would be a test of the
+    // helper; this is the requirement itself.
+    let restored = format!("lh_snapshot_doctor_restore_{}", std::process::id());
+    let create = std::process::Command::new("psql")
+        .args([
+            "-h",
+            "127.0.0.1",
+            "-U",
+            "postgres",
+            "-d",
+            "postgres",
+            "-c",
+            &format!("DROP DATABASE IF EXISTS {restored};"),
+            "-c",
+            &format!("CREATE DATABASE {restored};"),
+        ])
+        .env("PGPASSWORD", pg_password())
+        .output()
+        .expect("create the restore database");
+    assert!(create.status.success(), "could not create {restored}");
+
+    // Restore it AS `public`, because that is the only reading of "restores into
+    // an empty database" that means anything: a recipient is not going to point
+    // Lorehaven at a schema called `snapshot_masked`, and a check that restores
+    // the tables under their own name and then tests a different database is a
+    // check of the harness.
+    //
+    // So the schema is rewritten on the way in. The `CREATE SCHEMA` line is
+    // dropped rather than renamed, because `public` already exists in a fresh
+    // database and restoring it is an error that aborts the whole script under
+    // ON_ERROR_STOP -- which is how the first attempt at this failed.
+    let as_public = dir.join("snapshot_as_public.sql");
+    let rewritten = text
+        .lines()
+        .filter(|l| l.trim() != "CREATE SCHEMA snapshot_masked;")
+        .map(|l| l.replace("snapshot_masked", "public"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&as_public, rewritten).expect("write the rewritten dump");
+
+    let load = std::process::Command::new("psql")
+        .args([
+            "-h",
+            "127.0.0.1",
+            "-U",
+            "postgres",
+            "-d",
+            &restored,
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-q",
+            "-f",
+        ])
+        .arg(&as_public)
+        .env("PGPASSWORD", pg_password())
+        .output()
+        .expect("restore the dump");
+    assert!(
+        load.status.success(),
+        "the dump does not restore into an empty database:\n{}",
+        String::from_utf8_lossy(&load.stderr)
+    );
+
+    let url = format!(
+        "postgresql://postgres:{}@127.0.0.1:5432/{restored}",
+        pg_password()
+    );
+    let doctor = std::process::Command::new(env!("CARGO_BIN_EXE_lorehaven"))
+        .args(["doctor"])
+        .env("LOREHAVEN_DATABASE_URL", &url)
+        .output()
+        .expect("run lorehaven doctor against the restore");
+    let report = String::from_utf8_lossy(&doctor.stdout);
+    std::process::Command::new("psql")
+        .args([
+            "-h",
+            "127.0.0.1",
+            "-U",
+            "postgres",
+            "-d",
+            "postgres",
+            "-c",
+            &format!("DROP DATABASE IF EXISTS {restored};"),
+        ])
+        .env("PGPASSWORD", pg_password())
+        .output()
+        .expect("drop the restore database");
+
+    assert!(
+        doctor.status.success(),
+        "doctor FAILS against a snapshot that restored cleanly:\n{}\n{}",
+        report
+            .lines()
+            .filter(|l| l.starts_with("[FAIL]"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        "A recipient is the one who discovers a broken snapshot, and 11.16.7 \
+         exists to make sure they never have to."
+    );
+    assert!(
+        report.contains("all ") && report.contains("migration(s) applied"),
+        "doctor did not report the migration ledger as fully applied:\n{report}"
     );
     tdb.cleanup().await;
 }
