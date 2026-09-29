@@ -26,16 +26,16 @@
 use lorehaven_db::Backend;
 use test_support::TestDb;
 
-/// The `?`-style bind differs by dialect, and this suite only runs on Postgres.
-/// Kept as a named function so the "why Postgres only" reads in one place
-/// rather than at every call site.
-fn require_pg(tdb: &TestDb) {
-    assert_eq!(
-        tdb.db().backend(),
-        Backend::Postgres,
-        "the snapshot re-key is PostgreSQL-only by design: SQLite has no \
-         sha256 and no pgcrypto, and 11.16 is a pg_dump/psql feature"
-    );
+/// True when this run is against PostgreSQL, which is the only engine the
+/// snapshot re-key exists on: SQLite has no sha256 and no pgcrypto, and §11.16
+/// is a `pg_dump`/`psql` feature.
+///
+/// Returns rather than asserts, deliberately. Asserting turns "this suite does
+/// not apply to the engine you are running" into six red tests on every SQLite
+/// run — a whole-suite failure for a condition that is correct and expected.
+/// The repo's idiom is the same early return (`milestone_6.rs:1798`).
+fn on_postgres(tdb: &TestDb) -> bool {
+    tdb.db().backend() == Backend::Postgres
 }
 
 async fn rekey(tdb: &TestDb, sql: &str) -> String {
@@ -53,7 +53,10 @@ async fn the_same_pseud_id_rekeys_to_the_same_value_everywhere() {
         &test_support::scratch_dir("snapshot_rekey_determinism"),
     )
     .await;
-    require_pg(&tdb);
+    if !on_postgres(&tdb) {
+        tdb.cleanup().await;
+        return;
+    }
 
     let a = rekey(
         &tdb,
@@ -80,7 +83,10 @@ async fn two_different_pseud_ids_never_rekey_to_the_same_value() {
         &test_support::scratch_dir("snapshot_rekey_distinct"),
     )
     .await;
-    require_pg(&tdb);
+    if !on_postgres(&tdb) {
+        tdb.cleanup().await;
+        return;
+    }
 
     let a = rekey(
         &tdb,
@@ -107,7 +113,10 @@ async fn a_pseud_id_and_an_account_id_with_the_same_input_never_collide() {
         &test_support::scratch_dir("snapshot_rekey_salt_separation"),
     )
     .await;
-    require_pg(&tdb);
+    if !on_postgres(&tdb) {
+        tdb.cleanup().await;
+        return;
+    }
 
     let one = rekey(
         &tdb,
@@ -137,7 +146,10 @@ async fn the_rekey_is_a_version_four_uuid_and_not_merely_a_uuid_shaped_string() 
         &test_support::scratch_dir("snapshot_rekey_v4"),
     )
     .await;
-    require_pg(&tdb);
+    if !on_postgres(&tdb) {
+        tdb.cleanup().await;
+        return;
+    }
 
     let version = rekey(
         &tdb,
@@ -172,7 +184,10 @@ async fn the_rekey_is_not_the_identity_on_the_input() {
         &test_support::scratch_dir("snapshot_rekey_not_identity"),
     )
     .await;
-    require_pg(&tdb);
+    if !on_postgres(&tdb) {
+        tdb.cleanup().await;
+        return;
+    }
 
     // Mutation-proven, not assumed. Making `snapshot_pseud` return its input
     // unchanged -- a re-key that does nothing -- passes determinism (idempotent
@@ -206,7 +221,10 @@ async fn the_rekey_preserves_the_join_across_both_keys_at_once() {
         &test_support::scratch_dir("snapshot_rekey_join_survives"),
     )
     .await;
-    require_pg(&tdb);
+    if !on_postgres(&tdb) {
+        tdb.cleanup().await;
+        return;
+    }
     let pool = tdb.db().postgres_pool().expect("postgres handle");
 
     // Seed the real shape, which is two hops and not one: a work hangs off a

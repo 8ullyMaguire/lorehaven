@@ -58,6 +58,31 @@
 -- database that has it. digest() is a pure function, so this changes no result.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+-- The marker table, so the two dialects declare the same schema. The parity
+-- test `the_two_dialects_declare_the_same_columns_and_indexes` caught its
+-- absence here first, which is the test doing exactly the job its own comment
+-- describes: a table present in one dialect and absent in the other is a schema
+-- that works on SQLite and fails on PostgreSQL.
+--
+-- The VALUES differ per dialect -- SQLite's records that sha256 is unavailable
+-- there, PostgreSQL's records that the functions above implement it -- and that
+-- asymmetry is the point rather than an oversight. The schema is the contract;
+-- the note text is documentation.
+CREATE TABLE IF NOT EXISTS snapshot_rekey_notes (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+INSERT INTO snapshot_rekey_notes (key, value) VALUES
+    ('pseud_salt', 'lorehaven-snapshot-v1'),
+    ('account_salt', 'lorehaven-snapshot-v1-account'),
+    ('version_nibbles', 'version 4, RFC 4122 variant a, written into the hash output'),
+    ('must_run_on_a_copy',
+     'The mask cannot be applied in place in any order: '
+     || 'works_owner_pseud_id_fkey is checked per statement, so updating the child '
+     || 'first fails because the parent has no new value, and updating the parent '
+     || 'first fails because the child still has the old one. Copy, then mask.');
+
 CREATE OR REPLACE FUNCTION snapshot_pseud(raw uuid)
 RETURNS uuid
 LANGUAGE sql
