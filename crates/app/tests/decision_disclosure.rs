@@ -26,7 +26,6 @@ use axum::http::StatusCode;
 use lorehaven_app::config::{Config, DecisionProvider};
 use lorehaven_app::server;
 use lorehaven_app::state::AppState;
-use serde_json::Value;
 
 /// A router whose `[decisions]` section is whatever this test sets.
 ///
