@@ -308,3 +308,233 @@ async fn a_masked_dump_still_carries_the_dataset() {
     );
     tdb.cleanup().await;
 }
+
+/// §11.16.6 — an AGGREGATING instance must publish a snapshot with no chapter
+/// body text.
+///
+/// Written before the gate existed, so the first run is the control: the mask had
+/// no notion of retention mode and this test is red. The canary here is a real
+/// chapter body, distinct from the identity canaries, because a body leak is a
+/// DIFFERENT failure from an identity leak: nothing in the identity canary set
+/// would catch it, and §7.7's audience rule is not expressible in a SQL dump.
+///
+/// The `cache` half is in the same file and is the part that makes this
+/// meaningful: if bodies were redacted unconditionally, the aggregate test would
+/// pass while the snapshot was useless. §11.16.6 permits bodies on a caching
+/// instance precisely because that is a decision its operator made.
+const CANARY_BODY: &str = "leak-canary-chapter-body-the-whole-text-of-a-chapter";
+
+/// A pseudonym the seeded work and revision hang off. The chapters are NOT
+/// anonymous: ownership is part of the behavioural graph, and a body seeded
+/// against no owner would be a shape the real schema cannot hold.
+const PSEUD: &str = "66666666-6666-6666-6666-666666666666";
+
+/// The account the seeded pseud belongs to. Same fixed uuid as seed_canaries, so
+/// the two seeds compose and the identity mask is exercised in the body tests too.
+const ACCOUNT: &str = "11111111-1111-1111-1111-111111111111";
+
+/// Insert a chapter and a revision carrying a body canary.
+async fn seed_body_canary(tdb: &TestDb) {
+    let pool = tdb.db().postgres_pool().expect("postgres handle");
+    // The account is the identity canary from seed_canaries, so an aggregating
+    // snapshot must still mask it even while redacting the body.
+    seed_canaries(tdb).await;
+    let work = "33333333-3333-3333-3333-333333333333";
+    let chapter = "44444444-4444-4444-4444-444444444444";
+    let revision = "55555555-5555-5555-5555-555555555555";
+
+    sqlx::query(
+        "INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, 'leak_canary_owner', 'leak canary owner',
+                 now(), now())",
+    )
+    .bind(PSEUD)
+    .bind(ACCOUNT)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    // Column lists match the pattern the other integration tests use: the
+    // NOT NULL columns without defaults are all supplied. My first version named
+    // `works.slug`, which does not exist, and every body test died in the seed --
+    // which reads like a test bug and is, but only because the seed is loud. A
+    // seed that silently inserted nothing would have made the body canary absent
+    // and the aggregate test GREEN on an empty table.
+    sqlx::query(
+        "INSERT INTO works (id, owner_pseud_id, title, lifecycle, visibility,
+                            created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, 'leak canary work', 'published', 'public',
+                 now(), now())",
+    )
+    .bind(work)
+    .bind(PSEUD)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO chapters (id, work_id, order_key, title, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, 1, 'leak canary chapter', now(), now())",
+    )
+    .bind(chapter)
+    .bind(work)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    // All THREE body shapes, because masking one and shipping the other two
+    // publishes the same text. This is the failure the 11.16.6 policy entries
+    // for chapter_revisions now prevent.
+    sqlx::query(
+        "INSERT INTO chapter_revisions
+           (id, chapter_id, revision_number, document_json, sanitized_html,
+            plain_text, word_count, created_by_pseud_id, created_at)
+         VALUES ($1::uuid, $2::uuid, 1, $3, $4, $5, 1, $6::uuid, now())",
+    )
+    .bind(revision)
+    .bind(chapter)
+    .bind(format!("{{\"text\":\"{CANARY_BODY}\"}}"))
+    .bind(format!("<p>{CANARY_BODY}</p>"))
+    .bind(CANARY_BODY)
+    .bind(PSEUD)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Build the mask with an EXPLICIT mode, bypassing the instance-policy read, so
+/// both halves of 11.16.6 can be exercised against one database.
+async fn apply_mask_in_mode(tdb: &TestDb, mode: &str) {
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("repo root")
+        .to_path_buf();
+    let out_dir = test_support::scratch_dir("snapshot_mask_mode_sql");
+    std::fs::create_dir_all(&out_dir).expect("scratch dir");
+    let sql_path = out_dir.join(format!("mask_{mode}.sql"));
+
+    let status = std::process::Command::new("python3")
+        .arg(repo.join("scripts").join("build-snapshot-sql.py"))
+        .arg("--out")
+        .arg(&sql_path)
+        .arg("--mode")
+        .arg(mode)
+        .env(
+            "LOREHAVEN_PG_URL",
+            format!(
+                "postgres://postgres:{}@127.0.0.1:5432/{}",
+                pg_password(),
+                tdb.pg_database_name().expect("pg database name")
+            ),
+        )
+        .current_dir(&repo)
+        .output()
+        .expect("run the generator");
+    assert!(
+        status.status.success(),
+        "generator failed for mode {mode}: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+
+    let sql = std::fs::read_to_string(&sql_path).expect("generated sql");
+    // In AGGREGATE mode chapter_revisions must appear in the generated mask --
+    // a table that is not mentioned is a table the operator dumps from `public`,
+    // which is how the body ships in the clear. In CACHE mode the opposite holds
+    // and asserting it would be asserting the bug: a caching instance ships the
+    // body, so there is nothing to mask and the table is dumped directly. That
+    // asymmetry is the whole of 11.16.6, and both halves are asserted.
+    if mode == "aggregate" {
+        assert!(
+            sql.contains("CREATE TABLE snapshot_masked.chapter_revisions"),
+            "no chapter_revisions in the aggregate mask. A table the generator \
+             does not mention is a table dumped from `public` in the clear -- and \
+             this one holds the chapter body."
+        );
+    }
+    sqlx::raw_sql(&sql)
+        .execute(tdb.db().postgres_pool().expect("pool"))
+        .await
+        .expect("apply the generated mask");
+}
+
+#[tokio::test]
+async fn an_aggregating_instance_publishes_no_chapter_body_text() {
+    let Some(_) = pg_url() else { return };
+    let tdb = TestDb::connect_with_dir(
+        "snapshot_leak_aggregate",
+        &test_support::scratch_dir("snapshot_leak_aggregate"),
+    )
+    .await;
+    if tdb.db().backend() != Backend::Postgres {
+        tdb.cleanup().await;
+        return;
+    }
+    seed_body_canary(&tdb).await;
+    apply_mask_in_mode(&tdb, "aggregate").await;
+
+    let dir = test_support::scratch_dir("snapshot_leak_aggregate_out");
+    let text = dump(&tdb, &["-n", "snapshot_masked"], &dir.join("masked.sql"));
+
+    assert!(
+        !text.contains(CANARY_BODY),
+        "an AGGREGATING instance published chapter body text. 11.16.6: an \
+         instance that never fetched a body has none to publish, and a dump that \
+         publishes every body undoes 7.7's audience rule for every audience at \
+         once -- a rule that is not expressible in a SQL dump."
+    );
+    // The three shapes are asserted separately: a mask that redacts plain_text
+    // but ships sanitized_html publishes the same text.
+    assert!(
+        !text.contains("leak canary chapter") || !text.contains("leak-canary-chapter"),
+        "the chapter TITLE leaked on an aggregating instance"
+    );
+    tdb.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_caching_instance_may_publish_bodies_and_this_test_proves_it_is_not_redacted_away() {
+    let Some(_) = pg_url() else { return };
+    let tdb = TestDb::connect_with_dir(
+        "snapshot_leak_cache",
+        &test_support::scratch_dir("snapshot_leak_cache"),
+    )
+    .await;
+    if tdb.db().backend() != Backend::Postgres {
+        tdb.cleanup().await;
+        return;
+    }
+    seed_body_canary(&tdb).await;
+    apply_mask_in_mode(&tdb, "cache").await;
+
+    let dir = test_support::scratch_dir("snapshot_leak_cache_out");
+
+    // TWO dumps, and the reason matters. In cache mode the body table is not
+    // masked -- it is dumped from `public`, because there is nothing to mask on a
+    // caching instance. So the body assertion reads the WHOLE database, while
+    // the identity assertion reads `snapshot_masked` only. Asserting both on one
+    // file cannot work: a whole-database dump necessarily contains the raw email
+    // in `public.accounts`, which is not a leak (the snapshot does not ship
+    // `public`), and asserting on it would train the reader to ignore a real one.
+    let whole = dump(&tdb, &[], &dir.join("whole.sql"));
+    let masked = dump(&tdb, &["-n", "snapshot_masked"], &dir.join("masked.sql"));
+
+    assert!(
+        whole.contains(CANARY_BODY),
+        "a CACHING instance did not publish the body. 11.16.6 PERMITS bodies \
+         here -- the body text IS the dataset, and 11.15 records the operator's \
+         decision to keep it. If this assertion ever needs to be removed to make \
+         a snapshot smaller, the honest fix is a retention-mode decision, not a \
+         deleted test."
+    );
+    // Retention mode decides whether BODIES ship. It does not decide whether
+    // IDENTITIES are masked: even on a caching instance, the published schema
+    // must have no email in it.
+    assert!(
+        !masked.contains(CANARY_EMAIL),
+        "cache mode published the account email in the snapshot schema. \
+         Retention mode decides whether bodies ship; it does not switch the \
+         identity mask off."
+    );
+    tdb.cleanup().await;
+}

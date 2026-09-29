@@ -157,6 +157,21 @@
    "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of category_votes into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
+  "chapter_revisions.document_json": {
+   "treatment": "keep_gated",
+   "why": "The chapter body as a structural document. Same body, third shape; it contains the text as string values inside the JSON.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
+  },
+  "chapter_revisions.plain_text": {
+   "treatment": "keep_gated",
+   "why": "THE chapter body, as plain text. This is the column 11.16.6 is about, and it was not in the policy at all until M60-05: the M60-01 gate only required a decision for columns in TABLES it knew carried PII, and chapter_revisions was not one of them. A gate that cannot fail on the most sensitive column in the schema is not a gate.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
+  },
+  "chapter_revisions.sanitized_html": {
+   "treatment": "keep_gated",
+   "why": "The chapter body as rendered HTML. Same body, second shape -- masking plain_text alone would publish the whole text again.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
+  },
   "chapters.created_at": {
    "treatment": "keep",
    "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
@@ -352,6 +367,11 @@
    "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of feedback_preferences into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
+  "forum_posts.body": {
+   "treatment": "keep_gated",
+   "why": "Reader-authored post text. Gated with the rest: a reader's words are a body, whatever table they sit in.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
+  },
   "guardian_authorizations.account_id": {
    "treatment": "rekey_text",
    "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of guardian_authorizations into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
@@ -402,6 +422,11 @@
    "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of media_collections into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
+  "messages.body": {
+   "treatment": "keep_gated",
+   "why": "Private message text. Gated, and note the snapshot already drops the addressing columns -- a message with no participants but a body is still a body.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
+  },
   "notification_routes.account_id": {
    "treatment": "rekey_text",
    "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of notification_routes into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
@@ -436,6 +461,11 @@
    "treatment": "rekey_text",
    "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of pool_b_distributions into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+  },
+  "post_drafts.body": {
+   "treatment": "keep_gated",
+   "why": "Unpublished draft text. Gated; a draft is a body the author has not chosen to publish anywhere.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
   },
   "privacy_settings.account_id": {
    "treatment": "rekey_text",
@@ -517,6 +547,11 @@
    "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of reader_note into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
+  "reader_note.body": {
+   "treatment": "keep_gated",
+   "why": "Reader-authored note text. Gated.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
+  },
   "reading_history_entry.account_id": {
    "treatment": "rekey_text",
    "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of reading_history_entry into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
@@ -551,6 +586,11 @@
    "treatment": "rekey_text",
    "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of review into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+  },
+  "review.body": {
+   "treatment": "keep_gated",
+   "why": "Reader review text. Gated.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
   },
   "roadmap_ballots.account_id": {
    "treatment": "rekey_text",

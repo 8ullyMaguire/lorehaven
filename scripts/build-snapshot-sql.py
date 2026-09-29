@@ -229,7 +229,48 @@ def read_live_schema() -> dict[str, dict[str, str]] | None:
     return tables or None
 
 
-def build(out: pathlib.Path) -> dict:
+def read_instance_mode() -> str | None:
+    """The instance's own retention mode, or None if unreachable.
+
+    Read from `instance_retention_policy` rather than from a flag, because 11.15
+    records the operator's decision in exactly that row and a snapshot script
+    that takes the mode on the command line will eventually be run with the wrong
+    one by someone who did not read the help. A body published from an
+    aggregating instance is the failure 11.16.6 exists to prevent, and it should
+    not be one keystroke away.
+
+    `None` means the caller must decide, and `build()`'s `cache` default is the
+    direction that fails loudly (it publishes more, and the aggregate test is
+    red) rather than the direction that fails quietly.
+    """
+    url = os.environ.get("LOREHAVEN_PG_URL") or os.environ.get("LOREHAVEN_TEST_PG_URL")
+    if not url:
+        return None
+    try:
+        out = subprocess.run(
+            ["psql", url, "-tAc",
+             "SELECT body_mode FROM instance_retention_policy LIMIT 1;"],
+            capture_output=True, text=True, timeout=60, check=True,
+        ).stdout.strip()
+    except (subprocess.SubprocessError, OSError):
+        return None
+    return out if out in ("cache", "aggregate") else None
+
+
+def build(out: pathlib.Path, mode: str = "cache") -> dict:
+    """mode: 'cache' (bodies may ship) or 'aggregate' (bodies must not).
+
+    Spec 11.16.6: a published snapshot contains bodies only on an instance whose
+    retention mode publishes them. An AGGREGATING mirror has never fetched a body
+    by design, so it has none to publish and the snapshot must contain none --
+    and a CACHING instance may publish with them, because that is a decision its
+    operator made deliberately (11.15), not a default.
+
+    The default here is `cache`, deliberately, and it is the safe direction to
+    fail: it publishes MORE, so a wrong default is caught by the aggregate test
+    rather than shipped silently. The operator-facing default in `--mode` is the
+    opposite for the same reason in reverse -- see main().
+    """
     policy = load_policy()
     tables = read_live_schema() or parse_columns(MIGRATIONS)
 
@@ -253,6 +294,20 @@ def build(out: pathlib.Path) -> dict:
                 tdrop[col] = True
                 continue
             treatment = entry["treatment"] if entry else "keep"
+            if treatment == "keep_gated" and mode == "aggregate":
+                # NOT `''`. A NULL here would be indistinguishable from a chapter
+                # whose body was never fetched, and the whole point of aggregate
+                # mode is that no body WAS fetched -- so a reader of the snapshot
+                # could not tell "this instance stores no bodies" from "this
+                # chapter has no body", and would draw conclusions from the second
+                # that the data does not support. A constant saying so is honest.
+                replaced += 1
+                projection.append(
+                    f"    'redacted: instance runs in aggregate retention mode "
+                    f"(11.16.6)' AS \"{col}\""
+                )
+                colnames.append(col)
+                continue
             if treatment == "rekey_text":
                 rekeyed += 1
                 # A deterministic text re-key, NOT a constant. This exists because
@@ -302,9 +357,21 @@ def build(out: pathlib.Path) -> dict:
                 projection.append(f'    "{col}"')
             colnames.append(col)
 
-        if not any(p.strip().startswith(("snapshot_", "md5(", "'redacted'"))
-                   for p in projection):
-            # Nothing masked on this table: export it as data, not a view.
+        # A table with nothing masked on it is not exported as a masked table:
+        # the operator dumps those straight from `public`, which is cheaper and
+        # keeps the snapshot readable.
+        #
+        # The `'redacted:` prefix matters in AGGREGATE mode, where a `keep_gated`
+        # column IS the masking. Without it here, chapter_revisions is skipped
+        # entirely -- and skipped means "dump the original", so the table that
+        # holds the chapter body would ship in the clear through the one path
+        # that exists precisely to avoid masking. The first version of this check
+        # had three prefixes and the fourth was missing, and the test caught it by
+        # finding no chapter_revisions in the generated file at all.
+        if not any(
+            p.strip().startswith(("snapshot_", "md5(", "'redacted'", "'redacted:"))
+            for p in projection
+        ):
             continue
         drop_columns[table] = sorted(tdrop)
         views.append((table, projection, colnames))
@@ -390,10 +457,27 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=pathlib.Path, help="write the masking SQL here")
     ap.add_argument("--print-stats", action="store_true")
+    ap.add_argument(
+        "--mode",
+        choices=("cache", "aggregate", "instance"),
+        default="instance",
+        help=(
+            "cache: bodies may ship. aggregate: bodies are replaced with a "
+            "constant. instance: read the instance's own retention policy "
+            "(DEFAULT, and the only choice that can be right without the "
+            "operator thinking about it -- 11.16.6 makes a shared dump a "
+            "DECISION, so the decision has to come from somewhere recorded)."
+        ),
+    )
     args = ap.parse_args()
     if not args.out:
         ap.add_argument("--out", required=True, help="required")
-    stats = build(args.out)
+    mode = args.mode
+    if mode == "instance":
+        mode = read_instance_mode() or "cache"
+        if args.print_stats:
+            print(f"# retention mode: {mode} (read from instance_retention_policy)")
+    stats = build(args.out, mode)
     if args.print_stats:
         for k, v in stats.items():
             print(f"{k}: {v}")
