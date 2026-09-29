@@ -335,6 +335,16 @@ impl TestDb {
     }
 
     /// True when the suite is running against PostgreSQL.
+    /// The scratch PostgreSQL database's name, or None on SQLite.
+    ///
+    /// Exists for `snapshot_anonymisation`, which shells out to `pg_dump` and
+    /// needs the database that THIS test created. Deriving it from the env URL
+    /// instead dumps the template database, which exists, is empty of the
+    /// test's rows, and produces a passing leak assertion for the wrong reason.
+    pub fn pg_database_name(&self) -> Option<&str> {
+        self.pg_name.as_deref()
+    }
+
     pub fn is_postgres(&self) -> bool {
         self.db.backend() == Backend::Postgres
     }

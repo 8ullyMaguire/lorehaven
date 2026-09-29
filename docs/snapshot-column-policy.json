@@ -4,6 +4,7 @@
   "and for any column whose name says it carries an identity.",
   "Gate: python3 scripts/check-snapshot-pii.py",
   "",
+  "Treatments: keep | drop_column | drop_table | keep_gated | replace (text) | rekey_pseud (uuid, 11.16.3) | rekey_account (uuid, 11.16.3b).",
   "A pass means a decision EXISTS, not that it is right. The gate cannot see",
   "whether anyone thought about an entry, which is what reviewed_by is for.",
   "",
@@ -28,18 +29,18 @@
   },
   "accounts.email": {
    "treatment": "replace",
-   "why": "Chosen by a person, or the primary identifier.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "why": "The primary identifier. Replaced with a stable non-reversible placeholder: deterministic, so two rows with the same address still collide and a researcher can count distinct accounts, and irreversible because md5 of a known address is trivially reversed by brute force over the address space.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.2"
   },
   "accounts.email_verified_at": {
-   "treatment": "replace",
-   "why": "Chosen by a person, or the primary identifier.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "drop_column",
+   "why": "A timestamp adjacent to the email column, not an identifier. Dropped rather than redacted: a null 'verified at' alongside a redacted email is the honest value, and a constant string here would read as 'verified'.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "accounts.id": {
-   "treatment": "keep",
-   "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_account",
+   "why": "The account key every account_id foreign key points at. Re-keyed, not kept: a kept id is the value the re-keyed foreign keys must resolve TO, and leaving it raw is what makes a snapshot 'one column obscured'.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3/11.16.3b"
   },
   "accounts.is_curator": {
    "treatment": "keep",
@@ -82,34 +83,34 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "age_assessments.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of age_assessments into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "ap_activities.actor_id": {
-   "treatment": "replace",
-   "why": "An account join key reached through a federation actor, not an accounts row. Consistent re-key on the same basis as account_id; it is the same identity under another name.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of ap_activities into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "ap_actors.user_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of ap_actors into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "ap_follows.followed_actor_id": {
-   "treatment": "replace",
-   "why": "A federation actor join key, re-keyed on the same basis.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of ap_follows into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "ap_follows.follower_actor_id": {
-   "treatment": "replace",
-   "why": "A federation actor join key. Same deterministic re-key as account_id: it is the same identity reached through ActivityPub.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of ap_follows into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "api_tokens.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of api_tokens into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "api_tokens.token_hash": {
    "treatment": "drop_column",
@@ -117,29 +118,29 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "arena_ballots.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of arena_ballots into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "arena_weights.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of arena_weights into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "author_earnings_ledger.author_account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of author_earnings_ledger into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "author_media_preferences.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of author_media_preferences into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "bookmarks.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of bookmarks into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "bot_registrations.token_id": {
    "treatment": "drop_column",
@@ -152,9 +153,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "category_votes.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of category_votes into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "chapters.created_at": {
    "treatment": "keep",
@@ -222,9 +223,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "comments.author_pseud": {
-   "treatment": "replace",
-   "why": "pseud_id. Deterministic re-key via snapshot_pseud (11.16.3).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of comments into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "comments.body": {
    "treatment": "keep_gated",
@@ -257,9 +258,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "comments.id": {
-   "treatment": "replace",
-   "why": "pseud_id. Deterministic re-key via snapshot_pseud (11.16.3).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of comments into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "comments.subject_id": {
    "treatment": "keep",
@@ -272,29 +273,29 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "content_references.owner_id": {
-   "treatment": "replace",
-   "why": "An account join key. Same re-key as account_id.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of content_references into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "content_settings.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of content_settings into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "curator_rewards.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of curator_rewards into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "curator_roles.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of curator_roles into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "device_deliveries.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of device_deliveries into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "device_deliveries.address": {
    "treatment": "drop_column",
@@ -302,14 +303,14 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "did_not_finish.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of did_not_finish into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "directory_votes.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of directory_votes into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "dmca_takedowns.claimant_email": {
    "treatment": "drop_column",
@@ -322,44 +323,44 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "entry_moderation_votes.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of entry_moderation_votes into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "exchange_signals.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of exchange_signals into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "export_jobs.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of export_jobs into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "feedback_allowlist.author_account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of feedback_allowlist into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "feedback_denylist.author_account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of feedback_denylist into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "feedback_preferences.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of feedback_preferences into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "guardian_authorizations.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of guardian_authorizations into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "import_jobs.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of import_jobs into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "instance_fingerprints.fingerprint_json": {
    "treatment": "drop_column",
@@ -372,9 +373,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "interaction_warmth.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of interaction_warmth into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "ip_policy.ip": {
    "treatment": "drop_table",
@@ -382,9 +383,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "library_items.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of library_items into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "link_challenges.token_id": {
    "treatment": "drop_column",
@@ -392,29 +393,29 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "media_collection_items.added_by_account_id": {
-   "treatment": "replace",
-   "why": "Account join key. Consistent re-key.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of media_collection_items into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "media_collections.owning_account_id": {
-   "treatment": "replace",
-   "why": "Account join key. Consistent re-key.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of media_collections into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "notification_routes.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of notification_routes into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "notifications.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of notifications into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "password_credentials.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of password_credentials into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "password_credentials.password_hash": {
    "treatment": "drop_column",
@@ -422,34 +423,34 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "payment_events.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of payment_events into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "payouts.author_account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of payouts into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "pool_b_distributions.author_account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of pool_b_distributions into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "privacy_settings.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of privacy_settings into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "private_tags.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of private_tags into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "pseuds.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_account",
+   "why": "Second join key (11.16.3b). Re-keyed on its OWN salt so a published snapshot cannot join a pseudonym to its account.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3/11.16.3b"
   },
   "pseuds.bio": {
    "treatment": "replace",
@@ -482,9 +483,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "pseuds.id": {
-   "treatment": "replace",
-   "why": "pseud_id. Deterministic re-key via snapshot_pseud (11.16.3).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_pseud",
+   "why": "pseud_id itself. Deterministic re-key via snapshot_pseud: a CONSTANT here would fuse every pseudonym in the snapshot into one, which is why 'replace' was the wrong treatment for a uuid key. See 11.16.3.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3/11.16.3b"
   },
   "pseuds.updated_at": {
    "treatment": "keep",
@@ -502,44 +503,44 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "quiz_answers.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of quiz_answers into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "rating.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of rating into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "reader_note.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of reader_note into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "reading_history_entry.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of reading_history_entry into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "reading_progress.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of reading_progress into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "reading_sessions.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of reading_sessions into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "reading_status.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of reading_status into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "recovery_tokens.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of recovery_tokens into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "recovery_tokens.token_hash": {
    "treatment": "drop_column",
@@ -547,29 +548,29 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "review.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of review into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "roadmap_ballots.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of roadmap_ballots into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "roadmap_suggestions.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of roadmap_suggestions into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "saved_views.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of saved_views into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "second_factors.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of second_factors into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "second_factors.encrypted_secret": {
    "treatment": "drop_table",
@@ -582,9 +583,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "sessions.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of sessions into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "sessions.active_pseud_id": {
    "treatment": "keep",
@@ -632,9 +633,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "shelves.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of shelves into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "source_credentials.secret_id": {
    "treatment": "drop_column",
@@ -642,54 +643,54 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "streak_milestones.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of streak_milestones into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "streaks.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of streaks into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "targeted_bounties.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of targeted_bounties into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "taste_notification_queue.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of taste_notification_queue into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "taste_probes.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of taste_probes into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "typography_preference.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of typography_preference into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "update_checks.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of update_checks into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "user_devices.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of user_devices into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "vanguard_pins.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of vanguard_pins into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "vanguard_roles.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of vanguard_roles into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "webhook_deliveries.endpoint_id": {
    "treatment": "keep",
@@ -717,9 +718,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "webhook_endpoints.owner": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of webhook_endpoints into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "webhook_endpoints.secret": {
    "treatment": "drop_column",
@@ -732,19 +733,19 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "work_entitlements.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of work_entitlements into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "work_kudos.account_id": {
-   "treatment": "replace",
-   "why": "Second join key. Consistent re-key via snapshot_account, its own salt (11.16.3b).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of work_kudos into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "work_loans.borrower_account_id": {
-   "treatment": "replace",
-   "why": "Account join key. Consistent re-key.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "rekey_text",
+   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of work_loans into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
   "works.ai_training": {
    "treatment": "keep",
