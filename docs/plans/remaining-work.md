@@ -9,20 +9,74 @@ the forward plan. Every new milestone below gets rows in
 `docs/requirements.csv` before code starts (ADR 0023: the CSV is the
 canonical feature inventory and the roadmap-board seed).
 
-## Where the build actually stands (re-derived 2026-09-25)
+## Where the build actually stands (re-derived 2026-09-30)
 
-Verified from `docs/requirements.csv`: **588 rows implemented**
-(289 fully-tested, 183 locally-tested, 116 verified-e2e), **75 planned**,
-**4 deliberately unsupported**, 667 rows total. 51 milestone test files through
-M45 plus the M54–M58 suites, migrations to
-0083, 80 frontend routes, tags through `v0.51.0`. The
-platform core (M0–M15), the forum series (M31–M35), media resilience
-(M48–M51), roadmap consensus (M45), browse ordering (M43), export CTAs
-(M42), user settings (M47 complete, 9/9 requirements implemented-fully-tested) are built. What remains to the
-from-scratch spec is: the recommendation strategy registry, most source
-adapters, the bot, published OpenAPI, and the M45/M47 planned rows.
+**Re-derived from `docs/requirements.csv` and the tree, not carried forward.**
+The previous header (2026-09-25) claimed 588 implemented / 75 planned / 667
+total and "migrations to 0083"; all of those are now wrong, which is what the
+note at the top of this file exists to prevent.
+
+| | count |
+|---|---|
+| implemented (all three grades) | **611** |
+| — fully tested | 289 |
+| — locally tested | 206 |
+| — verified end-to-end | 116 |
+| planned | 60 |
+| built (not graded) | 7 |
+| deliberately unsupported | 4 |
+| evaluated and rejected | 1 |
+| **total rows** | **683** |
+
+Migrations: **91 per dialect**, last `0094_retention_proposals` (both
+`migrations/sqlite/` and `migrations/postgres/`, parity-tested by
+`the_two_dialects_declare_the_same_columns_and_indexes`). App test files: **118**.
+
+To re-derive, rather than believe:
+
+```sh
+python3 -c "import csv,collections; \
+  r=list(csv.DictReader(open('docs/requirements.csv'))); \
+  print(collections.Counter(x['status'] for x in r))"
+ls migrations/sqlite/*.sql | wc -l
+ls crates/app/tests/*.rs | wc -l
+```
+
+Built: the platform core (M0–M15), the forum series (M31–M35), media resilience
+(M48–M51), roadmap consensus (M45), browse ordering (M43), export CTAs (M42), user
+settings (M47), and **M59 crawling posture, retention governance and preservation
+(phases A–F complete; 15 of 27 requirement rows implemented — see
+the M59 section)**. Still to the from-scratch spec: the recommendation strategy
+registry, most source adapters, the bot, and a published OpenAPI document.
 
 ## Milestones
+
+### M59 — Crawling posture, retention governance, preservation (spec §5, §7.7, §19.15, §11.5, §11.15)
+
+Phases A–F are built and verified on both dialects. The amendment is
+`docs/spec-amendments/crawling-retention-and-preservation.md`; the plan is
+`docs/plans/crawling-retention-preservation.md`; the evidence is
+`docs/verification.md`'s two newest sections.
+
+What shipped: a named robots posture with per-adapter overrides, a
+class-specific UA token, body-audience baselines, the preservation credit loop
+and recheck pass, and community retention governance — reader proposals,
+ballots, an advisory/binding switch, operator respond and override, and a
+settlement pass.
+
+15 of 27 requirement rows are implemented. **The remaining
+12 are still `planned` and are not cosmetic** — they are the
+follow-on surface, not the phase's core:
+
+```
+M59-07 M59-10 M59-11 M59-12 M59-13 M59-14 M59-15 M59-16 M59-24 M59-25 M59-26 M59-27
+```
+
+Read those rows before assuming M59 is finished. Two of the three things a
+reader might call gaps are decisions, and are recorded as such in the
+amendment's build-status section: a retention ballot grants no trust, XP, badge
+or placement (deliberately — the plan's own reasoning applied against its own
+convenience), and the `[preservation]` config block is named `[media_resilience]`.
 
 ### M52 — Recommendation strategy registry (spec §16.1a, new)
 
