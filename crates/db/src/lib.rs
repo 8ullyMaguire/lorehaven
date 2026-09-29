@@ -123,6 +123,24 @@ pub enum Backend {
 pub const SYSTEM_ACCOUNT: uuid::Uuid =
     uuid::Uuid::from_u128(0x0195_9000_0000_4000_8000_0000_0000_0001);
 
+/// Whether `id` is the instance's own system account.
+///
+/// A predicate rather than a literal repeated at each call site, because three
+/// of them needed it and a fourth would arrive with the same reasoning. The
+/// account is identifiable on purpose — migration 0094 gives it a fixed literal
+/// id, a `system` status and a `.invalid` email, and says in the comment that
+/// this is so an operator can recognise it in a database dump — so excluding it
+/// is a fact rather than a heuristic.
+///
+/// It exists because `SELECT id FROM accounts ORDER BY created_at LIMIT 1`
+/// quietly stopped meaning "the account this harness registered" once the
+/// migration gave the system account an *earlier* `created_at` than any
+/// registration. Earliest-by-timestamp is oldest-row, not the account under
+/// test; those were the same row only until 0094 arrived.
+pub fn is_system_account(id: &uuid::Uuid) -> bool {
+    *id == SYSTEM_ACCOUNT
+}
+
 /// That constant, as the string a query binds.
 pub fn system_account() -> String {
     SYSTEM_ACCOUNT.to_string()
