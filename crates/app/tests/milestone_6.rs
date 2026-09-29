@@ -1558,10 +1558,31 @@ async fn a_transient_fetch_failure_stays_queued_for_retry() {
 
     let row = import_row(&harness, &import_id).await;
     assert_ne!(row.state, "completed", "a failed fetch is not a completion");
+
+    // This assertion CHANGED with M59-08, and the change is the point.
+    //
+    // It used to require `report_json` to be `None`: a body fetch that failed
+    // left no trace at all. That was not tidiness, it was the §11.15 gap — a
+    // fetch that failed midway produced a library item that looked imported,
+    // an import row stuck at `running` (neither retried nor failed), and
+    // nothing an operator could read to find out.
+    //
+    // The record is now written, and it is written with the CODE rather than
+    // only the prose, because §4.2's `works_past_saving` reads the code. So
+    // this test now pins the pair: the retry is still queued, AND the failure
+    // is legible. Losing either half is a regression, and the two are checked
+    // in that order on purpose — the retry is the spec's promise, the record
+    // is the mechanism that fulfils it.
+    let report = row.report_json.as_deref().unwrap_or_default();
     assert!(
-        row.report_json.is_none(),
-        "there is no plan report to write: {:?}",
-        row.report_json
+        report.contains("body_fetch_failed"),
+        "the failure is recorded with the code the preservation count reads, not \
+         only prose: {report}"
+    );
+    assert!(
+        report.contains("timed out"),
+        "and the record keeps the source's own reason, so an operator can tell a \
+         timeout from a refusal: {report}"
     );
 
     let job_id = imports::job_for_import(harness.tdb.db(), &import_id)
