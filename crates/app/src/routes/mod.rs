@@ -47,6 +47,7 @@ pub mod rating_integrity;
 pub mod reading;
 pub mod recommendation_transparency;
 pub mod retention;
+pub mod retention_proposals;
 pub mod roadmap;
 pub mod search;
 pub mod settings;

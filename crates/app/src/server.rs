@@ -487,6 +487,16 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // The reader-facing half of §5, amendment §5. Merged rather than nested
+        // under the admin retention router because these are reader routes: the
+        // gate is `retention_governance.proposal_min_trust`, not an operator
+        // check, and `require_operator` would be the wrong extractor for a
+        // reader who has earned trust.
+        .merge(classified(
+            routes::retention_proposals::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Recommendation transparency (M29): "why am I seeing this" explanations.
         .merge(classified(
             routes::recommendation_transparency::router(),
