@@ -266,7 +266,7 @@ async fn a_verified_target_is_paid_once_and_a_replayed_grant_pays_nothing() {
     let owner = preservation::reward_account_for_work(tdb.db(), &_work)
         .await
         .expect("owner");
-    let again = preservation::grant_credits(&tdb.db(), &member, &owner, 10)
+    let again = preservation::grant_credits(tdb.db(), &member, &owner, 10)
         .await
         .expect("replayed grant");
     assert_eq!(
@@ -297,12 +297,12 @@ async fn a_cap_destination_pays_nothing_and_posts_no_ledger_row() {
     let (tdb, account) = harness("cap_pays_nothing").await;
     let (_work, member) = paid_target(&tdb, &account, "aot", 10).await;
     // Simulate the ninth destination: verified, but the reward is zero.
-    let outcome = preservation::grant_credits(&tdb.db(), &member, &account, 0)
+    let outcome = preservation::grant_credits(tdb.db(), &member, &account, 0)
         .await
         .expect("zero grant");
     assert_eq!(outcome.credits(), 0);
 
-    let target = preservation::target_by_member(&tdb.db(), &member)
+    let target = preservation::target_by_member(tdb.db(), &member)
         .await
         .unwrap()
         .expect("target");
@@ -335,10 +335,10 @@ async fn a_dead_destination_reverses_its_credits_as_a_second_ledger_entry() {
         "nothing is reclaimed while the destination is live"
     );
 
-    preservation::set_state(&tdb.db(), &member, PreservationState::Dead, Some("gone"))
+    preservation::set_state(tdb.db(), &member, PreservationState::Dead, Some("gone"))
         .await
         .expect("mark dead");
-    let outcome = preservation::reclaim_credits(&tdb.db(), &member)
+    let outcome = preservation::reclaim_credits(tdb.db(), &member)
         .await
         .expect("reclaim");
 
@@ -368,16 +368,16 @@ async fn a_dead_destination_reverses_its_credits_as_a_second_ledger_entry() {
 async fn a_replayed_clawback_does_not_reclaim_twice() {
     let (tdb, account) = harness("clawback_replay").await;
     let (_work, member) = paid_target(&tdb, &account, "aot", 10).await;
-    preservation::set_state(&tdb.db(), &member, PreservationState::Dead, Some("gone"))
+    preservation::set_state(tdb.db(), &member, PreservationState::Dead, Some("gone"))
         .await
         .expect("dead");
 
-    let first = preservation::reclaim_credits(&tdb.db(), &member)
+    let first = preservation::reclaim_credits(tdb.db(), &member)
         .await
         .expect("first");
     assert_eq!(first, LedgerOutcome::Posted { credits: -10 });
 
-    let second = preservation::reclaim_credits(&tdb.db(), &member)
+    let second = preservation::reclaim_credits(tdb.db(), &member)
         .await
         .expect("second");
     assert_eq!(
@@ -418,7 +418,7 @@ async fn a_never_paid_target_reclaims_nothing() {
         .await
         .expect("record");
     // Still unverified, and never granted.
-    let outcome = preservation::reclaim_credits(&tdb.db(), &target.member_id)
+    let outcome = preservation::reclaim_credits(tdb.db(), &target.member_id)
         .await
         .expect("reclaim");
     assert_eq!(
@@ -519,11 +519,11 @@ async fn the_clawback_names_the_payee_from_the_ledger_not_from_the_work() {
          if it has"
     );
 
-    preservation::set_state(&tdb.db(), &member, PreservationState::Dead, Some("gone"))
+    preservation::set_state(tdb.db(), &member, PreservationState::Dead, Some("gone"))
         .await
         .expect("dead");
     assert_eq!(
-        preservation::reclaim_credits(&tdb.db(), &member)
+        preservation::reclaim_credits(tdb.db(), &member)
             .await
             .unwrap(),
         LedgerOutcome::Posted { credits: -7 }
