@@ -334,7 +334,19 @@ async fn delete_source_override(
 /// Registered so that the shared path returns `405 Method Not Allowed` rather
 /// than the router's own `404`, which would tell a client's author that the
 /// surface does not exist when it does. The body says which verbs are real.
-async fn unsupported_verb() -> ApiError {
+async fn unsupported_verb(
+    // The extractors are unused, and deliberately so. A 405 handler that took
+    // no `State` would be unauthenticated: a POST to this path would learn that
+    // the route exists and what its correct verb is from anybody. Taking the
+    // state (and, through the router's own layers, the session) is what keeps
+    // this refusal inside the same audience as the GET it shadows.
+    //
+    // `route_inventory.rs` reads the audience off the handler signature, and a
+    // signature with no extractors tells it nothing — which is the inventory
+    // test correctly reporting that this route has no discoverable audience.
+    _state: State<AppState>,
+    RequireSession(_user): RequireSession,
+) -> ApiError {
     ApiError(AppError::Validation {
         message: "this endpoint answers GET; use PUT to set a source override".to_owned(),
         field_errors: Default::default(),
