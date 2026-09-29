@@ -403,10 +403,25 @@ mod router {
     /// the very leak §7 forbids. `require_operator` compares against the same
     /// column, so the database is also the authoritative source here.
     async fn sole_account_id(db: &Database) -> String {
-        sqlx::query_scalar("SELECT id FROM accounts ORDER BY created_at LIMIT 1")
-            .fetch_one(db.sqlite_pool().expect("this file's harness is sqlite"))
-            .await
-            .expect("an account row exists after registration")
+        // **Not the first row in `accounts`.** Migration 0094 inserts the
+        // instance's own system account with `created_at = 2026-01-01`, earlier
+        // than any registration, so `ORDER BY created_at LIMIT 1` — and a bare
+        // `LIMIT 1` — return *it*. The symptom then surfaces three files away:
+        // a 404 on an endpoint that exists, or `RowNotFound` on a pseud.
+        //
+        // The system account is excluded explicitly rather than by relying on it
+        // sorting later, because it is identifiable on purpose: a fixed literal
+        // id, a `system` status, a `.invalid` email (migration 0094, which says
+        // so). `lorehaven_db::is_system_account` is the same fact in Rust.
+        sqlx::query_scalar(
+            "SELECT id FROM accounts
+             WHERE id != ?1   -- not the instance's system account
+             ORDER BY created_at LIMIT 1",
+        )
+        .bind(lorehaven_db::SYSTEM_ACCOUNT.to_string())
+        .fetch_one(db.sqlite_pool().expect("this file's harness is sqlite"))
+        .await
+        .expect("a registered account row exists after registration")
     }
 
     /// Build a router on a fresh database in the given rec mode.

@@ -187,10 +187,25 @@ mod router {
         /// forbids an endpoint that hands a client its own account id, so there
         /// is deliberately no such door to reach for.
         pub(crate) async fn sole_account_id(&self) -> String {
-            sqlx::query_scalar("SELECT id FROM accounts ORDER BY created_at LIMIT 1")
-                .fetch_one(self.db.sqlite_pool().expect("this harness is sqlite"))
-                .await
-                .expect("an account row exists after registration")
+            // **Not the first row in `accounts`.** Migration 0094 inserts the
+            // instance's own system account with `created_at = 2026-01-01`, earlier
+            // than any registration, so `ORDER BY created_at LIMIT 1` — and a bare
+            // `LIMIT 1` — return *it*. The symptom then surfaces three files away:
+            // a 404 on an endpoint that exists, or `RowNotFound` on a pseud.
+            //
+            // The system account is excluded explicitly rather than by relying on it
+            // sorting later, because it is identifiable on purpose: a fixed literal
+            // id, a `system` status, a `.invalid` email (migration 0094, which says
+            // so). `lorehaven_db::is_system_account` is the same fact in Rust.
+            sqlx::query_scalar(
+                "SELECT id FROM accounts
+                 WHERE id != ?1   -- not the instance's system account
+                 ORDER BY created_at LIMIT 1",
+            )
+            .bind(lorehaven_db::SYSTEM_ACCOUNT.to_string())
+            .fetch_one(self.db.sqlite_pool().expect("this harness is sqlite"))
+            .await
+            .expect("an account row exists after registration")
         }
 
         /// Register and sign in, leaving the account at its earned trust level.
@@ -512,7 +527,11 @@ async fn a_brand_new_account_at_tl0_may_not_submit() {
     assert_eq!(
         lorehaven_db::governance::trust_for(
             h.db(),
-            &sqlx::query_scalar::<_, String>("SELECT id FROM accounts LIMIT 1")
+            // Not `LIMIT 1`: see the note above. The system account is the
+            // only row that exists before this harness registers, so a bare
+            // `LIMIT 1` returns it.
+            &sqlx::query_scalar::<_, String>("SELECT id FROM accounts WHERE id != ?1 LIMIT 1",)
+                .bind(lorehaven_db::SYSTEM_ACCOUNT.to_string())
                 .fetch_one(h.db().sqlite_pool().expect("sqlite"))
                 .await
                 .expect("an account")
@@ -1267,7 +1286,7 @@ async fn real_work_id(h: &Harness) -> String {
                 .bind(&account_id)
                 .fetch_one(h.db().sqlite_pool().expect("sqlite"))
                 .await
-                .expect("the harness account has a pseud")
+                .expect("the registered account has a pseud")
                 .0
         }
         lorehaven_db::Backend::Postgres => {
@@ -1275,7 +1294,7 @@ async fn real_work_id(h: &Harness) -> String {
                 .bind(&account_id)
                 .fetch_one(h.db().postgres_pool().expect("postgres"))
                 .await
-                .expect("the harness account has a pseud")
+                .expect("the registered account has a pseud")
                 .0
         }
     };
