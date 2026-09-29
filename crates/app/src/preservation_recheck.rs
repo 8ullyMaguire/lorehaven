@@ -270,19 +270,23 @@ async fn check_one(
     // has to be bounded as a metadata fetch, so the declaration travels with
     // the call rather than being inferred from the path or pinned to the
     // fetcher. `get_declared` exists for exactly this caller.
-    let mut policy = FetchPolicy::default();
-    // The instance's robots posture, resolved. `imports.robots_posture` is an
-    // `Option` and `honour_robots` is a second, older field; `resolved_
-    // robots_posture` is what the fetcher is meant to read, and setting one
-    // field while leaving the other to be consulted at the point of use is the
-    // two-authoritative-fields shape `policy_for_in` exists to remove.
-    policy.robots_posture = state.config().imports.resolved_robots_posture();
-    // A recheck is background work against a third party, so it gets a short
-    // timeout: a slow destination should not hold a worker slot, and the next
-    // scheduled pass will try again. The floor matters because a sub-second
-    // timeout on a paced connection fails for the fetcher's own reasons rather
-    // than the destination's.
-    policy.timeout = TIMEOUT;
+    //
+    // The instance's robots posture, *resolved*: `imports.robots_posture` is an
+    // `Option` and `honour_robots` is a second, older field, and
+    // `resolved_robots_posture` is what the fetcher is meant to read. Setting
+    // one field while leaving the other to be consulted at the point of use is
+    // the two-authoritative-fields shape `policy_for_in` exists to remove.
+    //
+    // A recheck is background work against a third party, so the timeout is
+    // short: a destination that has not answered in ten seconds is not going to
+    // answer usefully in thirty, and the next scheduled pass will try again. The
+    // floor matters because a sub-second timeout on a paced connection fails for
+    // the fetcher's own reasons rather than the destination's.
+    let policy = FetchPolicy {
+        robots_posture: state.config().imports.resolved_robots_posture(),
+        timeout: TIMEOUT,
+        ..FetchPolicy::default()
+    };
     let fetcher = SafeFetcher::new(vec![host], policy);
 
     match fetcher.get_declared(&url, FetchClass::Metadata).await {
