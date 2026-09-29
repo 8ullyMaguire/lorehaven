@@ -49,6 +49,7 @@ correct SQL fails the self-test rather than shipping. See `ARM_TEST_CASES`.
 from __future__ import annotations
 
 import re
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -400,10 +401,75 @@ def self_test() -> int:
     return 0
 
 
+def check_parses() -> list[str]:
+    """Every SQLite migration must actually PARSE, not merely avoid new features.
+
+    A feature-age table cannot catch a dialect mistake, and this repository has
+    now had two of them in one day — both of the same shape: **prose written in
+    the shape the POSTGRES migrations use, which SQLite does not accept.**
+
+    * Adjacent string literals with no operator between them. PostgreSQL
+      concatenates `'aaa '` `'bbb '` implicitly; SQLite raises a syntax error on
+      the second one. The multi-line string looked identical to every other
+      multi-line string in the repository, because every other one is Postgres.
+
+    The failure is reported by `migrate()` before a single assertion, so it
+    presents as *every* test in *every* suite failing, and the error text names a
+    sentence rather than a file:
+
+        error returned from database: (code: 1) near "'publication feature
+        driven by pg_dump and psql. A local SQLite file has '": syntax error
+
+    Two suites about gallery capability levels went red; the actual cause was one
+    literal in one migration. A gate that parses the file says so in one line.
+
+    This is a parse check, not a semantic one: `executescript` against the host's
+    SQLite runs the DDL for real, which is what makes it authoritative about
+    syntax. It cannot know whether a statement is *correct*.
+    """
+    failures = []
+    # Cumulatively, in order, on one connection -- because a migration that
+    # ALTERs `works` cannot parse in isolation, and reporting 35 files for
+    # "no such table" would be noise that trains people to ignore this gate.
+    # This mirrors what `migrate()` actually does.
+    conn = sqlite3.connect(":memory:")
+    for path in sorted((ROOT / "migrations" / "sqlite").glob("*.sql")):
+        sql = path.read_text(encoding="utf-8", errors="replace")
+        try:
+            conn.executescript(sql)
+        except sqlite3.Error as exc:
+            failures.append(f"  {path.relative_to(ROOT)}: {exc}")
+            # Keep going: a syntax error does not always poison later files, and
+            # reporting every broken one at once is more useful than the first.
+            conn = sqlite3.connect(":memory:")
+            for prior in sorted((ROOT / "migrations" / "sqlite").glob("*.sql")):
+                if prior >= path:
+                    break
+                try:
+                    conn.executescript(prior.read_text(encoding="utf-8", errors="replace"))
+                except sqlite3.Error:
+                    pass
+    return failures
+
+
 def main(argv: list[str]) -> int:
     if "--self-test" in argv:
         return self_test()
-    return check()
+    if "--parse-only" in argv:
+        bad = check_parses()
+        if bad:
+            print(f"FAIL: {len(bad)} migration(s) do not parse as SQLite\n")
+            print("\n".join(bad))
+            return 1
+        print("OK: every migrations/sqlite/*.sql parses as SQLite")
+        return 0
+    rc = check()
+    bad = check_parses()
+    if bad:
+        print(f"\nFAIL: {len(bad)} migration(s) do not parse as SQLite\n", file=sys.stderr)
+        print("\n".join(bad), file=sys.stderr)
+        rc = 1
+    return rc
 
 
 if __name__ == "__main__":

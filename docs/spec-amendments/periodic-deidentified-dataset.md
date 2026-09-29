@@ -123,6 +123,40 @@ still resolve. The two derivations use different salts, which means an observer
 cannot learn that two accounts share a `pseud_id` and an `account_id` — which is
 the association §11.16.3's determinism was otherwise making trivial to compute.
 
+#### 11.16.3c The mask cannot be applied in place, and that is a property of the foreign keys
+
+Added 2026-09-29, from running the re-key against a real PostgreSQL rather than
+from reasoning about it.
+
+A snapshot that re-keys `pseuds.id` and `works.owner_pseud_id` **cannot do so in
+the live database, in any order.** Updating the child first trips
+`works_owner_pseud_id_fkey`, because `pseuds` does not yet hold the new value.
+Updating the parent first trips the same constraint, because `works` still holds
+the old one. PostgreSQL checks referential integrity per statement, so no
+ordering of two statements satisfies both directions.
+
+The requirement this creates: **masking happens on a copy.** The pipeline copies
+to a scratch database and masks there. Three things follow, and all three are
+safety properties rather than implementation details:
+
+1. **The live instance is never mutated**, not even transiently. A partially
+   applied mask is an instance where some pseudonyms have been replaced and
+   others have not — and the unreplaced ones are still real, still joined, and
+   indistinguishable from the synthetic ones by any column.
+2. **A failed mask leaves nothing to clean up.** A crash mid-mask against the
+   live database leaves the operator with a database they cannot restore from
+   their own backup with confidence about which rows moved.
+3. **The ordering constraint becomes a design choice** rather than an FK
+   violation, so the pipeline can be tested against a real constraint instead of
+   being written around one.
+
+This is also why the re-key is a **database function** rather than a value
+computed by a script: the function is what makes "the same input yields the same
+output in every table" structural, and the copy-then-mask shape is what makes
+the whole thing safe to run. Either one alone is insufficient — a script with a
+copy step still re-keys per row, and functions without a copy still cannot be
+applied.
+
 ### 11.16.4 What is NOT in the dump, and why the answer is not "everything risky"
 
 **Client IP addresses are not in the database and cannot leak from a dump.**
