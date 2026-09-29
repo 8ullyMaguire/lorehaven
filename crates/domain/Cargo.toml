@@ -8,6 +8,7 @@ description = "Domain primitives for Darkhold: identifiers, errors, policies"
 
 [dependencies]
 anyhow.workspace = true
+darkhold-decisions = { path = "../decisions" }
 darkhold-metadata = { path = "../metadata" }
 crc32fast.workspace = true
 base64.workspace = true
