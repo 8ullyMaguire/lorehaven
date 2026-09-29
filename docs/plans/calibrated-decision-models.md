@@ -296,7 +296,65 @@ $ cargo test -p lorehaven-app --test meta
 #          "deterministic" rather than omitting the field
 ```
 
-## Step 7 — deploy on thinkcentre
+## Step 7 — deploy on thinkcentre  *(BLOCKED, see below)*
+
+### Status as of 2026-09-29: the model is deployed; the Lorehaven service is not, and must not be
+
+What is verified working on `thinkcentre`:
+
+| check | result |
+|---|---|
+| Unsloth serving Laya | `gravity-decision-provider.service`, active, `Restart=on-failure` |
+| `/v1/systemone` answers | yes, via `curl` and via `lorehaven-decisions` |
+| `cargo build -p lorehaven-decisions --bin probe` on the host | ok |
+| probe → real model, correct key | `refund = 0.9816`, exit 0 |
+| probe → unreachable host | refuses, exit 1, `is_transient() == true` |
+
+So the model is deployed and configured and Lorehaven's client drives it. What
+is **not** done is rebuilding or restarting `lorehaven.service`, and the reason
+is not technical friction:
+
+**The deployed instance runs a different branch, 263 commits behind, and its
+database is 15 migrations behind.** `/personal/documents/code/rust/lorehaven`
+is on `fix/pawchive-tag-and-author-parsing` at `953dea0`; its binary was built
+Sep 25 and its `migrations/postgres/` has 72 files where this branch has 87.
+Deploying means applying migrations 0072–0091 to a **live Postgres database**
+that currently has 72 applied.
+
+That is a much larger change than "turn on a decision model", and it carries
+15 migrations belonging to other milestones (M45 roadmap cards, M59 retention,
+body audience, taste settings, taxonomy review) that have never run on this
+host. The audit that made this decidable:
+
+- **All 17 pending migrations are additive.** The single `DROP TABLE` match
+  across all of them is inside a comment in
+  `0075_fix_device_deliveries_export_job_fk.sql`.
+- **The numbering gaps (0084, 0088, 0089) are harmless.** sqlx records applied
+  versions, not sequence positions, so a gap is not a failure.
+- **0084 is absent on this branch too** — not a divergence introduced here.
+
+So the migrations would very likely apply cleanly. "Very likely" against a
+production database, at the cost of dragging five other milestones' schema
+changes into a live instance unrequested, is exactly the irreversible-and-costly
+case where the decision belongs to the operator and not to me.
+
+**The unblocking step is one command, once the branch question is settled:**
+
+```console
+$ ssh thinkcentre 'cd /personal/documents/code/rust/lorehaven && \
+    git merge --ff-only origin/feat/calibrated-decisions'
+# then, in the config, add the [decisions] section from
+# lorehaven.toml.example, and:
+$ systemctl --user restart lorehaven
+```
+
+Note the deployed binary is built with `CARGO_TARGET_DIR=/home/alvaro/.cargo-target/lorehaven`,
+per the unit file — not the default. A rebuild that omits it will not replace
+the running binary, and the service will restart onto the old one and look like
+it worked.
+
+### The original step, for the record
+
 
 The Lorehaven service reads its config from a file; the model is a separate
 long-running process. On thinkcentre:
