@@ -191,21 +191,123 @@ fn destination_from_row(row: DestinationRow) -> PreservationDestination {
     }
 }
 
-/// The `version::bigint` and `credits_paid::bigint` casts are load-bearing on
-/// PostgreSQL: an `INTEGER` column decoded into `i64` is refused by sqlx there
-/// and accepted on SQLite, which is the class of fault
-/// `check-uncast-pg-placeholders.py` exists to catch. Every statement that
-/// reads these two goes through the two helpers below rather than spelling its
-/// own arm, so a new caller cannot forget.
-const DESTINATION_COLUMNS: &str =
-    "id, name, base_url, match_rule, accepts_automated, enabled, created_at, \
-     updated_at, version::bigint AS version";
+/// The dialect's spelling of the columns this module reads.
+///
+/// **This is an enum and not a `db.sql(&a, &b)` pair because of a bug this file
+/// shipped first.** The first version carried the PostgreSQL casts
+/// (`version::bigint`, `verified_at::text`, `credits_paid::bigint`) in a single
+/// shared `const` used by *both* arms, on the reasoning that the casts were
+/// harmless. They are not: fourteen of this module's sixteen tests failed on
+/// SQLite with
+///
+///     error returned from database: (code: 1) unrecognized token: ":"
+///
+/// because SQLite was handed `SELECT ... version::bigint AS version` and `::`
+/// is not a token there. The casts are a *PostgreSQL* requirement satisfied in
+/// *both* dialects, which is the mirror image of the `created_by` DDL fault
+/// fixed in the same commit — there the two dialects' *schema* diverged and only
+/// PostgreSQL noticed; here the two dialects' *queries* diverged and only SQLite
+/// noticed. Neither is visible by reading one arm.
+///
+/// Resolving the list once per call, from the backend that is about to run the
+/// statement, is what makes it impossible to pair a column list with the wrong
+/// dialect: the two can no longer be chosen independently of each other.
+///
+/// The two lists are identical name for name, which is exactly what made the
+/// mismatch undetectable — a reader diffing them sees only casts. The names
+/// themselves are checked by
+/// `migrate::tests::a_preservation_member_row_carries_the_columns_both_dialects_declare`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Dialect {
+    Sqlite,
+    Postgres,
+}
 
-const TARGET_COLUMNS: &str = "m.id AS member_id, m.identity_id, m.work_id, \
-     m.destination_id, m.state, m.verified_at::text, m.dead_at::text, \
-     m.evidence_hash::text, m.credits_paid::bigint AS credits_paid, \
-     m.created_by::text, m.external_record_id, m.external_url::text, \
-     m.updated_at::text, m.version::bigint AS version";
+impl Dialect {
+    const fn of(db: &Database) -> Self {
+        match db.backend() {
+            Backend::Sqlite => Self::Sqlite,
+            Backend::Postgres => Self::Postgres,
+        }
+    }
+
+    /// The destination columns, with the casts this dialect needs.
+    const fn destinations(self) -> &'static str {
+        match self {
+            // `version` is INTEGER here and read as `i64`; SQLite has no
+            // integer-width distinction, so the bare column decodes fine.
+            Self::Sqlite => {
+                "id, name, base_url, match_rule, accepts_automated, enabled, \
+                             created_at, updated_at, version AS version"
+            }
+            // Two casts for the same reason, and the second is the one that cost
+            // a PostgreSQL run: `version` AND `accepts_automated` are `INTEGER`
+            // (`INT4`) columns, and sqlx refuses to decode an `INT4` into the
+            // `i64` the `DestinationRow` struct asks for --
+            //
+            //     error occurred while decoding column "accepts_automated":
+            //     mismatched types; Rust type `i64` (as SQL type `INT8`) is
+            //     not compatible with SQL type `INT4`
+            //
+            // `version::bigint` was cast from the start because every other
+            // module does. `accepts_automated` and `enabled` were not, on the
+            // reasoning that a flag is not a counter and so does not need a
+            // cast. It does. The `::int8` on all three is what makes the
+            // decode legal, and it is the pair a reviewer would most plausibly
+            // drop as redundant -- so it is spelled once here rather than in a
+            // SELECT somebody has to notice.
+            Self::Postgres => {
+                "id, name, base_url, match_rule, \
+                 accepts_automated::int8 AS accepts_automated, \
+                 enabled::int8 AS enabled, \
+                 created_at, updated_at, version::bigint AS version"
+            }
+        }
+    }
+
+    /// The target columns, with the casts this dialect needs.
+    const fn targets(self) -> &'static str {
+        match self {
+            Self::Sqlite => {
+                "m.id AS member_id, m.identity_id, i.work_id AS work_id, \
+                 m.destination_id, m.state, m.verified_at, m.dead_at, \
+                 m.evidence_hash, m.credits_paid, m.created_by, \
+                 m.external_record_id, m.external_url, m.updated_at, \
+                 m.version AS version"
+            }
+            // `work_id` is read from the IDENTITY, not from the member, and
+            // that is the second time this file got it wrong. The member's own
+            // `work_id` is NULL for an external member -- which every
+            // preservation target is -- so decoding it as `String` fails on
+            // PostgreSQL with
+            //
+            //   error occurred while decoding column "work_id": unexpected
+            //   null; try decoding as an `Option`
+            //
+            // The earlier comment in `parse_target` said as much and the SELECT
+            // did not do it: a comment describing a constraint the code does not
+            // satisfy is worse than no comment, because the next reader trusts
+            // it. `story_identities.work_id` is NOT NULL, which is what makes
+            // the join the source of the answer rather than a convenience.
+            //
+            // `verified_at` and friends are TEXT in this schema (0085 spells them
+            // TEXT to match `works`) and `credits_paid`/`version` are INTEGER
+            // columns read as `i64`, so each needs its own cast. The timestamps
+            // are cast to `::text` and NOT `::timestamptz` — they are not
+            // timestamps, and binding them as such is the fault class the
+            // handoff records.
+            Self::Postgres => {
+                "m.id AS member_id, m.identity_id, i.work_id::text AS work_id, \
+                 m.destination_id, m.state, m.verified_at::text, \
+                 m.dead_at::text, m.evidence_hash::text, \
+                 m.credits_paid::bigint AS credits_paid, \
+                 m.created_by::text, m.external_record_id, \
+                 m.external_url::text, m.updated_at::text, \
+                 m.version::bigint AS version"
+            }
+        }
+    }
+}
 
 fn parse_target(row: TargetRow) -> PreservationTarget {
     PreservationTarget {
@@ -235,6 +337,19 @@ fn parse_target(row: TargetRow) -> PreservationTarget {
 // Destinations
 // ---------------------------------------------------------------------------
 
+/// Build a statement that differs only in its column list, once per dialect.
+///
+/// The bug the two-`const`-then-one-`db.sql` shape invited was picking a
+/// column list independently of the arm it was interpolated into. Binding them
+/// together here means the caller passes a template with `{destinations}` or
+/// `{targets}` and this function is the only place that knows which spelling
+fn select_by_dialect(db: &Database, template: &str) -> String {
+    let dialect = Dialect::of(db);
+    template
+        .replace("{destinations}", dialect.destinations())
+        .replace("{targets}", dialect.targets())
+}
+
 /// Every configured destination, enabled or not, in name order.
 ///
 /// Both states are returned because the admin surface has to be able to show a
@@ -244,11 +359,10 @@ fn parse_target(row: TargetRow) -> PreservationTarget {
 /// two identically configured instances reporting different orders is the kind
 /// of difference that becomes a bug report.
 pub async fn list_destinations(db: &Database) -> Result<Vec<PreservationDestination>> {
-    let sqlite_sql =
-        format!("SELECT {DESTINATION_COLUMNS} FROM preservation_destinations ORDER BY name, id");
-    let postgres_sql =
-        format!("SELECT {DESTINATION_COLUMNS} FROM preservation_destinations ORDER BY name, id");
-    let sql = db.sql(&sqlite_sql, &postgres_sql);
+    let sql = select_by_dialect(
+        db,
+        "SELECT {destinations} FROM preservation_destinations ORDER BY name, id",
+    );
     let rows: Vec<DestinationRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
@@ -273,11 +387,11 @@ pub async fn enabled_destination(
     db: &Database,
     destination_id: &str,
 ) -> Result<Option<PreservationDestination>> {
-    let sqlite_sql = format!(
-        "SELECT {DESTINATION_COLUMNS} FROM preservation_destinations WHERE id = ? AND enabled != 0"
-    );
-    let postgres_sql = format!("SELECT {DESTINATION_COLUMNS} FROM preservation_destinations WHERE id = $1 AND enabled != 0");
-    let sql = db.sql(&sqlite_sql, &postgres_sql);
+    let sqlite_sql = "SELECT {destinations} FROM preservation_destinations \
+                      WHERE id = ? AND enabled != 0";
+    let postgres_sql = "SELECT {destinations} FROM preservation_destinations \
+                        WHERE id = $1 AND enabled != 0";
+    let sql = select_by_dialect(db, &db.sql(sqlite_sql, postgres_sql));
     let row: Option<DestinationRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
@@ -502,30 +616,42 @@ pub async fn record_target(
     )
     .await?;
 
-    // The member row A0 created has no state column value of its own — it
-    // defaults to 'unverified', which is exactly the state a crosspost starts
-    // in (§2.1: a crosspost is a request; only a confirmed record is worth
-    // paying for). `created_by` and `updated_at` are set here rather than in the
-    // INSERT above because `record_crossposted_location` is A0's function and
-    // does not know about Phase D's columns; adding them there would make A0's
-    // function depend on a migration that did not exist when it was written.
+    // `destination_id` is set HERE and not left to A0's function, and that is
+    // deliberate. `record_crossposted_location` writes `external_source_key`,
+    // which is a free-text label for "where else this lives" — it has no
+    // foreign key and it is what the edition list renders. `destination_id` is
+    // different in kind: it is a reference to a row in
+    // `preservation_destinations`, and a target is a target *because* it points
+    // at one. The first version of this function relied on A0 setting it, and
+    // the symptom was `target_by_member` returning `None` for a row that had
+    // just been written — every read here filters on
+    // `destination_id IS NOT NULL`, so a target without one is invisible to
+    // its own store while the INSERT reported success.
+    //
+    // So the UPDATE sets all three Phase D columns in one statement: the
+    // destination that makes it a target, the timestamp, and the credits index
+    // at zero. Setting `credits_paid` explicitly rather than relying on the
+    // column default keeps the value correct if a future migration ever changes
+    // that default to mean something else.
     let sql = db.sql(
         "UPDATE story_identity_members
-            SET created_by = ?, updated_at = ?, credits_paid = 0
+            SET destination_id = ?, created_by = ?, updated_at = ?, credits_paid = 0
           WHERE id = ?",
         // `created_by` references `accounts(id)`, which IS a UUID in this
         // schema, so the bind takes the cast. The other two are TEXT columns
         // (0085) bound bare — a `::timestamptz` here is the fault class the
         // handoff records.
         "UPDATE story_identity_members
-            SET created_by = $1::uuid, updated_at = $2, credits_paid = 0
-          WHERE id = $3",
+            SET destination_id = $1, created_by = $2::uuid, updated_at = $3, credits_paid = 0
+          WHERE id = $4",
     );
     let now = crate::identity::now_rfc3339();
+    let creator = created_by.map(|id| id.to_string());
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query(&sql)
-                .bind(created_by.map(|id| id.to_string()))
+                .bind(destination_id)
+                .bind(creator)
                 .bind(&now)
                 .bind(&member_id)
                 .execute(db.sqlite_pool().expect("sqlite handle"))
@@ -533,7 +659,8 @@ pub async fn record_target(
         }
         Backend::Postgres => {
             sqlx::query(&sql)
-                .bind(created_by.map(|id| id.to_string()))
+                .bind(destination_id)
+                .bind(creator)
                 .bind(&now)
                 .bind(&member_id)
                 .execute(db.postgres_pool().expect("postgres handle"))
@@ -552,17 +679,15 @@ pub async fn target_for_destination(
     identity_id: &str,
     destination_id: &str,
 ) -> Result<Option<PreservationTarget>> {
-    let sqlite_sql = format!(
-        "SELECT {TARGET_COLUMNS}
+    let sqlite_sql = "SELECT {targets}
                FROM story_identity_members m
-              WHERE m.identity_id = ? AND m.destination_id = ?"
-    );
-    let postgres_sql = format!(
-        "SELECT {TARGET_COLUMNS}
+              JOIN story_identities i ON i.id = m.identity_id
+             WHERE m.identity_id = ? AND m.destination_id = ?";
+    let postgres_sql = "SELECT {targets}
                FROM story_identity_members m
-              WHERE m.identity_id = $1 AND m.destination_id = $2"
-    );
-    let sql = db.sql(&sqlite_sql, &postgres_sql);
+              JOIN story_identities i ON i.id = m.identity_id
+             WHERE m.identity_id = $1 AND m.destination_id = $2";
+    let sql = select_by_dialect(db, &db.sql(sqlite_sql, postgres_sql));
     let row: Option<TargetRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
@@ -587,17 +712,15 @@ pub async fn target_by_member(
     db: &Database,
     member_id: &str,
 ) -> Result<Option<PreservationTarget>> {
-    let sqlite_sql = format!(
-        "SELECT {TARGET_COLUMNS}
+    let sqlite_sql = "SELECT {targets}
                FROM story_identity_members m
-              WHERE m.id = ? AND m.destination_id IS NOT NULL"
-    );
-    let postgres_sql = format!(
-        "SELECT {TARGET_COLUMNS}
+              JOIN story_identities i ON i.id = m.identity_id
+             WHERE m.id = ? AND m.destination_id IS NOT NULL";
+    let postgres_sql = "SELECT {targets}
                FROM story_identity_members m
-              WHERE m.id = $1 AND m.destination_id IS NOT NULL"
-    );
-    let sql = db.sql(&sqlite_sql, &postgres_sql);
+              JOIN story_identities i ON i.id = m.identity_id
+             WHERE m.id = $1 AND m.destination_id IS NOT NULL";
+    let sql = select_by_dialect(db, &db.sql(sqlite_sql, postgres_sql));
     let row: Option<TargetRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
@@ -627,21 +750,17 @@ pub async fn target_by_member(
 /// (NULL), which is irrelevant to the reward because only verified targets
 /// count toward it.
 pub async fn targets_for_work(db: &Database, work_id: &str) -> Result<Vec<PreservationTarget>> {
-    let sqlite_sql = format!(
-        "SELECT {TARGET_COLUMNS}
+    let sqlite_sql = "SELECT {targets}
                FROM story_identity_members m
                JOIN story_identities i ON i.id = m.identity_id
               WHERE i.work_id = ? AND m.destination_id IS NOT NULL
-              ORDER BY (m.verified_at IS NULL), m.verified_at, m.id"
-    );
-    let postgres_sql = format!(
-        "SELECT {TARGET_COLUMNS}
+              ORDER BY (m.verified_at IS NULL), m.verified_at, m.id";
+    let postgres_sql = "SELECT {targets}
                FROM story_identity_members m
                JOIN story_identities i ON i.id = m.identity_id
-              WHERE i.work_id = $1 AND m.destination_id IS NOT NULL
-              ORDER BY (m.verified_at IS NULL), m.verified_at, m.id"
-    );
-    let sql = db.sql(&sqlite_sql, &postgres_sql);
+              WHERE i.work_id = $1::uuid AND m.destination_id IS NOT NULL
+              ORDER BY (m.verified_at IS NULL), m.verified_at, m.id";
+    let sql = select_by_dialect(db, &db.sql(sqlite_sql, postgres_sql));
     let rows: Vec<TargetRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
@@ -779,19 +898,14 @@ pub async fn set_credits_paid(db: &Database, member_id: &str, credits: i64) -> R
 /// already been dealt with, so re-fetching them would spend a network request
 /// on a row whose answer is already recorded.
 pub async fn verified_targets(db: &Database) -> Result<Vec<PreservationTarget>> {
-    let sqlite_sql = format!(
-        "SELECT {TARGET_COLUMNS}
+    let sql = select_by_dialect(
+        db,
+        "SELECT {targets}
                FROM story_identity_members m
-              WHERE m.state = 'verified' AND m.destination_id IS NOT NULL
-              ORDER BY m.verified_at DESC, m.id"
+              JOIN story_identities i ON i.id = m.identity_id
+             WHERE m.state = 'verified' AND m.destination_id IS NOT NULL
+              ORDER BY m.verified_at DESC, m.id",
     );
-    let postgres_sql = format!(
-        "SELECT {TARGET_COLUMNS}
-               FROM story_identity_members m
-              WHERE m.state = 'verified' AND m.destination_id IS NOT NULL
-              ORDER BY m.verified_at DESC, m.id"
-    );
-    let sql = db.sql(&sqlite_sql, &postgres_sql);
     let rows: Vec<TargetRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
