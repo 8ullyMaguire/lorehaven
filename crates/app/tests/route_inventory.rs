@@ -1113,6 +1113,63 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Operator,
     },
     // ------------------------------------------------------------------
+    // Retention — operator-gated (spec §11.15, amendment §4.1-4.2)
+    //
+    // The amendment says `works_past_saving` "changes no behaviour and it is
+    // not public", so it is Operator like the rest of this block rather than
+    // Public or Stats — and the test for that is in retention_routes.rs, which
+    // asserts a non-operator gets a 404 rather than a 403.
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "retention.rs",
+        handler: "get_policy",
+        method: "GET",
+        path: "/admin/retention/policy",
+        audience: Audience::Operator,
+    },
+    RouteEntry {
+        file: "retention.rs",
+        handler: "patch_policy",
+        method: "PATCH",
+        path: "/admin/retention/policy",
+        audience: Audience::Operator,
+    },
+    RouteEntry {
+        file: "retention.rs",
+        handler: "get_sources",
+        method: "GET",
+        path: "/admin/retention/sources",
+        audience: Audience::Operator,
+    },
+    RouteEntry {
+        file: "retention.rs",
+        handler: "unsupported_verb",
+        method: "POST",
+        path: "/admin/retention/sources",
+        audience: Audience::Operator,
+    },
+    RouteEntry {
+        file: "retention.rs",
+        handler: "put_source_override",
+        method: "PUT",
+        path: "/admin/retention/sources/{source_key}",
+        audience: Audience::Operator,
+    },
+    RouteEntry {
+        file: "retention.rs",
+        handler: "delete_source_override",
+        method: "DELETE",
+        path: "/admin/retention/sources/{source_key}",
+        audience: Audience::Operator,
+    },
+    RouteEntry {
+        file: "retention.rs",
+        handler: "get_works_past_saving",
+        method: "GET",
+        path: "/admin/retention/works-past-saving",
+        audience: Audience::Operator,
+    },
+    // ------------------------------------------------------------------
     // Exports — session-scoped (authed_router)
     // ------------------------------------------------------------------
     RouteEntry {
