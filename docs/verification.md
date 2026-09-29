@@ -16,6 +16,145 @@
 
 # Verification log — Lorehaven
 
+## 2026-09-30 — M59 Phase E: retention proposals, ballots, advisory and binding governance
+
+**Commits:** `85346b9` (E.3 `roadmap.min_trust`), `539e6ae` (E.4 the four reader
+routes), `61b2d36` (E.2 the operator's routes, the settlement pass, the system
+account). Migration 0094 was **amended rather than added** — it had not been
+applied to any database, so the system account went into both dialect files
+directly. Any environment that has already applied 0094 needs a new migration.
+
+**Both dialects, executed.** The new suite runs on SQLite and on PostgreSQL, and
+this is stated because `docs/verification.md` §2.6 exists for the alternative:
+
+```sh
+cargo test -p lorehaven-app --test retention_proposal_routes
+#   19 passed; 0 failed   (SQLite)
+
+LOREHAVEN_TEST_PG_URL=postgres://postgres:***@127.0.0.1:5432/lorehaven_test \
+  cargo test -p lorehaven-app --test retention_proposal_routes
+#   19 passed; 0 failed   (PostgreSQL)
+```
+
+**Neighbouring suites, all green, none regressed:** `retention_proposals` 12,
+`retention_routes` 10, `retention_policy` 11, `milestone_45_roadmap` 55,
+`config_sections` 4, `device_delivery_fk` 3, `lorehaven-db` migration parity 2.
+
+## 2026-09-30 — M59 Phase F: the two governance settings are now loadable from a file
+
+**Commit:** `be68f32`. And the finding is the reason this section is worth a
+heading of its own, because it is a defect that looks like finished work.
+
+`roadmap.min_trust` and the four `retention_governance.*` settings were fields
+on `Config`, with defaults wired into `development_defaults()` and into the
+file-load path — and **no `FileConfig` member**. So:
+
+* a Rust test could set `config.retention_governance.widen_quorum = 4`;
+* the test asserting `required == 4` and `reached == false` passed;
+* and an operator editing `lorehaven.toml` had their key **silently ignored**.
+
+Every one of those tests was evidence that the widening bar is read from *the
+struct*. None was evidence that an operator can reach it. And the tests passing
+is what made it dangerous: a setting that reads as configurable and is not is
+worse than one that is absent, because the suite reads as proof it works. This
+is the same trap `RetentionSection`'s own doc comment in `config.rs` describes
+having already happened once, one section over — with the comment sitting there
+while it happened again.
+
+**Proved, not asserted.** `crates/app/tests/config_sections.rs` writes a real
+file and loads it through `GlobalArgs { config: Some(..) }` — the same door a
+deployment comes through, rather than a test-only route, because a test using
+another route would prove the struct deserialises and not that the binary's path
+reaches it. Four cases: every key set, one key set, three misspelled keys, and
+an absent file.
+
+**Verified by injection.** Replacing the two file reads with their defaults
+makes the suite fail (`3 passed; 1 failed`); the revert makes it pass
+(`4 passed; 0 failed`). That is the only evidence here that the test is testing
+something, and it is the step whose absence turns a test into a comment.
+
+Two smaller things the same commit fixed:
+
+* `device_delivery_fk`'s diagnostic asserted `COUNT(*) == 1` on `accounts`, so
+  migration 0094's system account broke it. The diagnostic's stated job is "prove
+  the account is really in THIS database" — the `mine` half. `total` is context
+  and belongs in the message, not the assertion: `mine=0, total=7` reads
+  differently from `mine=0, total=1`, which is the reason the count is there at
+  all.
+* `anyhow::Error`'s `Display` is only the outermost context (`parsing <path>`);
+  the `unknown field` line is one level down in the source chain, which
+  `Display` does not walk. The misspelling test uses `Error::chain()`. An earlier
+  version matched the first line only, which would have passed against a refusal
+  that never named the offending key — the one thing the test is for.
+
+**Workspace suite.** `cargo test --workspace` was still running when this section was written, so no workspace-wide count is claimed here. The per-suite counts below are from runs that completed.
+
+**One test verified by injection, and why that matters.**
+`no_response_exposes_a_ballot_or_its_voter` asserts on the *serialised text* of
+the reader-facing responses, refusing every plausible key a leak would use
+(`ballot`, `voter`, `voted`, `account`, `handle`, `opened_by`, …) **and** the
+three real account ids behind the ballots. Adding `opened_by` to the response
+projection makes it fail; the revert makes it pass. A test that has never failed
+is not evidence, and a name-whitelist assertion is exactly the kind that passes
+forever because nobody adds the field it is watching for — so the account-id
+check is what makes a leak under an unanticipated name still fail.
+
+**Six defects the tests found, and one of them was mine to have written.** These
+are recorded because none of them are re-derivable from reading the final code,
+which is correct:
+
+1. **The override wrote the proposal's mode, not the operator's.**
+   `OverrideBody.body_mode` was parsed, validated against the two legal values,
+   and recorded in the audit row — and then never used; the write went to
+   `proposal.proposed_mode`. An operator asking for `aggregate` on a proposal
+   that proposed `cache` got `cache`, with a 200 and an audit row that agreed
+   with them. Three records, two truths, no error. `apply` now takes the mode as
+   a parameter so a caller cannot forget it.
+
+2. **Advisory settlement finalised ballots.** The pass closed a `passed` ballot
+   as `passed`, which made `respond` unreachable for any ballot older than its
+   window — the job had finalised it, so the operator's route correctly reported
+   "already decided". Advisory settlement now reports and closes nothing, so the
+   proposal stays `open` and the pass is idempotent for free.
+
+3. **`open -> overridden` was refused by the store**, and the close silently
+   affected zero rows, so overriding a ballot still in flight returned 200 with
+   the setting changed and the proposal still reading `open`. That is the
+   ordinary case. Permitted, as a one-line addition to the source-state list,
+   which cannot affect any other transition.
+
+4. **The binding settlement could not record its own change.** The actor was the
+   nil UUID, refused by `REFERENCES accounts (id)`. Migration 0094 now inserts a
+   fixed system account and the pass uses it — `NULL` is refused by `NOT NULL`,
+   the nil UUID by the foreign key, and a reader's id by the feature's own
+   privacy property.
+
+5. **A dead quorum recomputation shaped like diligence.** `respond` and
+   `settle_one` both recomputed `quorum_for` and then gated on `tally.quorum`
+   instead, leaving `let _ = required;`. Deleted; `tally` is now the one place
+   the bar is derived.
+
+6. **`respond` closed before it applied**, so a failed apply left a ballot
+   recorded as passed with the setting unmoved. Reversed.
+
+**And the process failure worth naming.** Three explanatory comments written
+during this phase were wrong, each because the explanation was written before
+the evidence: a claim that `source_key IS ?` cannot match NULL on SQLite (it
+can — checked), a claim that `retention_policy_changes.actor` is nullable (that
+is `instance_retention_policy.updated_by` in migration **0087**, a different
+table; 0094 has `NOT NULL`), and a three-paragraph "diagnosis" of a bug that did
+not exist. The actual cause appeared in one line once `tracing::error!` was
+replaced with `eprintln!` — **tracing output is not captured by `#[tokio::test]`**
+— and it was `NOT NULL constraint failed: retention_policy_changes.actor`. The
+rule this earns: on a failing test, run it until the real error text appears
+before writing down a cause.
+
+**One migration-parity note.** `the_two_dialects_declare_the_same_columns_and_indexes`
+passes. The system account is a row, not a column, so it is not covered by that
+check; the two `INSERT`s are kept in step by hand and the `SYSTEM_ACCOUNT`
+constant's doc comment names the migration file so a mismatch is greppable.
+
+
 Newest first. Each section states what was verified, how, and the result.
 
 ## 2026-09-17 — M25 residuals, M24-02 dashboard, scoped-door pagination, leak sweep

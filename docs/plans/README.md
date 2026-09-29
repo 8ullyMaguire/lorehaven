@@ -5,6 +5,20 @@ built**. `docs/spec.md` says what the platform must do; these files say what to
 type, in what order, and how to check it. They are written for someone who
 knows Rust and Svelte but has never seen this repository.
 
+> **Status note (2026-09-30):** **M59 — crawling posture, retention governance
+> and preservation — is built through phase F** and verified on SQLite and
+> PostgreSQL. Plan:
+> `docs/plans/crawling-retention-preservation.md`. Amendment:
+> `docs/spec-amendments/crawling-retention-and-preservation.md`. Evidence:
+> `docs/verification.md`'s two newest sections; per-requirement rows in
+> `docs/requirements.csv` (`M59-01…M59-27`, 15 implemented and 12 still
+> `planned` — read those 12 before calling the milestone finished). One defect
+> from that build is worth knowing before repeating it: a setting with fields on
+> `Config` and no `FileConfig` member is **not configurable**, and every Rust
+> test that reads it will pass anyway. `crates/app/tests/config_sections.rs` is
+> the pattern — load a real file through `GlobalArgs { config: Some(..) }` and
+> assert the loaded `Config` carries the values.
+
 > **Status note (2026-09-24):** the live forward plan is now
 > `docs/plans/remaining-work.md` (ADR 0024 — the gap to the consolidated
 > from-scratch spec: M52 rec registry, M53 adapter porting, M54 bot port,

@@ -1,6 +1,7 @@
 # Lorehaven Spec Amendment — Crawling Posture, Retention Governance, and Preservation
 
-**Status:** Final plan
+**Status:** Built through Phase F, with one decision deliberately not made
+(see [Build status](#build-status-2026-09-30) below)
 **Date:** 2026-09-27
 **Source:** Owner brainstorm (robots flexibility, preservation rewards, trust-gated body visibility, community-voted retention)
 **Amends:** §7.6, §11.5, §11.11, §11.12, §11.15, §9.7.1, §9.7.2, §9.7.5, §9.7.6, §19.1, §25.2, §28.2, §38
@@ -9,6 +10,44 @@
 **Plan:** `docs/plans/crawling-retention-preservation.md`
 
 ---
+
+## Build status (2026-09-30)
+
+Phases A, B, C/C1, D, E and F are implemented; the verification record with the
+counts, on both dialects, is `docs/verification.md`'s two newest sections, and
+the per-requirement evidence is in `docs/requirements.csv` (`M59-01…M59-27`).
+
+Nothing in this amendment is struck. Three things are worth stating precisely,
+because each of them reads as a gap and two of them are not:
+
+1. **A vote grants nothing, deliberately.** §19.15 asks for preservation to be
+   rewarded, and Phase E does *not* grant trust, XP, a badge, or any placement
+   for opening or casting a retention ballot. That is the amendment's own
+   reasoning applied against its own convenience: the plan's own note records
+   that "a vote never grants the proposer anything personal" is cheap to state
+   now and expensive to retrofit, and a status ladder built out of a preference
+   poll is the specific failure that makes it expensive. So the property is
+   implemented and tested
+   (`opening_a_proposal_grants_no_trust_credit_badge_or_placement`), and the
+   reward is deferred rather than forgotten. The preservation *credits* of
+   Phase D (`media_resilience.mirror_add_credits` and friends) are a different
+   thing — they reward keeping a work alive, not expressing a preference — and
+   those are built.
+
+2. **`[preservation]` is `[media_resilience]`.** The plan's Phase F list
+   expected a config block named `[preservation]`. No such block exists, and none
+   was invented: the Phase D preservation settings — healthy-link floor, mirror
+   and archive credits, verify credits, daily cap, dead threshold — are
+   `[media_resilience]` in `docs/config-reference.md` and
+   `lorehaven.toml.example`, and have been since Phase D. The plan's name for the
+   block was wrong, not the build.
+
+3. **`[retention]` was missing from the reference entirely** and is added in
+   this phase, along with `[roadmap]` and `[retention_governance]`. The last two
+   had fields on `Config` with no `FileConfig` member, so they were unreachable
+   from a file while every test that read them passed; that is fixed and proved
+   in `crates/app/tests/config_sections.rs`, and it is the one defect in this
+   build that looked like finished work rather than an absence.
 
 ## Overview
 
