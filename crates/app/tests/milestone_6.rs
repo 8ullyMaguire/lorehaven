@@ -35,6 +35,7 @@ use lorehaven_app::worker::{Worker, WorkerOptions};
 use lorehaven_db::storage::BlobStore;
 use lorehaven_db::{imports, jobs, revisions, DatabaseConfig};
 use lorehaven_domain::jobs::{JobKind, RetryPolicy};
+use lorehaven_domain::retention::BodyMode; // §11.15 (M59-07/M59-08)
 use lorehaven_domain::AccountId;
 use lorehaven_scrapers::async_trait;
 use lorehaven_scrapers::registry::Registry;
@@ -74,6 +75,13 @@ struct FixtureArchive {
     full_html: String,
     /// When set, `fetch_chapters` fails with this. Proves the retry path.
     fail_chapters: Option<SourceError>,
+    /// Fails the PREVIEW rather than the chapter read. Separate from
+    /// `fail_chapters` because the two are different failures with different
+    /// consequences: a preview failure is where a vanished origin is first
+    /// detected (§11.15's `works_past_saving`), and a chapter failure is
+    /// where a body is lost (M59-08). One fixture that could do both would
+    /// make the two tests indistinguishable.
+    fail_preview: Option<SourceError>,
     /// When set, the adapter claims to need a credential. Proves that a
     /// missing credential is caught before a fetch rather than after.
     requires_auth: bool,
@@ -117,6 +125,7 @@ impl FixtureArchive {
             work_html: fixture("work.html"),
             full_html: fixture("work-full.html"),
             fail_chapters: None,
+            fail_preview: None,
             requires_auth: false,
             wall: Wall::None,
             calls: Arc::new(Calls::default()),
@@ -160,6 +169,15 @@ impl FixtureArchive {
     fn refusing(error: SourceError) -> Self {
         Self {
             fail_chapters: Some(error),
+            ..Self::new()
+        }
+    }
+
+    /// An adapter whose PREVIEW fails, which is the shape of a vanished origin:
+    /// the source was asked about the work and answered that it is not there.
+    fn origin_gone(error: SourceError) -> Self {
+        Self {
+            fail_preview: Some(error),
             ..Self::new()
         }
     }
@@ -219,6 +237,9 @@ impl SourceAdapter for FixtureArchive {
         _creds: Option<&Credentials>,
     ) -> SourceResult<SourceWork> {
         self.calls.previews.fetch_add(1, Ordering::SeqCst);
+        if let Some(error) = &self.fail_preview {
+            return Err(error.clone());
+        }
         self.inner.preview_from_html(&self.work_html, url)
     }
 
@@ -2638,6 +2659,276 @@ async fn the_library_reports_how_many_chapters_are_stored() {
     assert_eq!(
         item.chapter_count, 3,
         "the copy reports the chapters it holds, not the source's claim"
+    );
+
+    harness.cleanup().await;
+}
+
+// ---------------------------------------------------------------------------
+// §11.15 non-degradation. A body that fails to fetch is a failed import, never
+// a silent link. (M59-08)
+// ---------------------------------------------------------------------------
+
+/// On a caching instance, a body that fails to fetch leaves a **failed,
+/// retryable** import — and a library item that is visibly incomplete rather
+/// than a work that looks imported.
+///
+/// This is the test `docs/requirements.csv` says to write before the others,
+/// and the reason is in the spec: §11.15's non-degradation rule is "On a
+/// caching instance, a body that fails to fetch is a failed import that retries
+/// and eventually reports — never a work quietly reclassified as a link,
+/// because that turns a temporary source failure into a permanent loss of
+/// something the reader asked this instance to keep."
+///
+/// The failure is in the *bulk* fetch (`fetch_chapters`), which is the path the
+/// spec is about. A per-chapter failure is already handled — it writes a
+/// `failed` import_chapter row and the retry re-reads only that chapter — so
+/// testing the per-chapter case here would test the part that already works.
+///
+/// Three properties, and the middle one is the one a green suite lies about:
+///
+/// 1. the import is `failed` with a machine-readable code, not `completed`;
+/// 2. **the library item does not read as an imported work** — this is the
+///    "silent link" the rule forbids, and it is invisible to any test that only
+///    looks at the import row;
+/// 3. the queue row is `queued` with an attempt recorded, so a retry is
+///    actually pending rather than the work having been quietly given up on.
+#[tokio::test]
+async fn a_body_that_fails_to_fetch_leaves_a_retryable_import_and_never_a_silent_link() {
+    let harness = Harness::new("m5908-silent-link").await;
+    let (_client, account, pseud) = signed_in(&harness, "m5908@example.org", "m5908reader").await;
+
+    // The instance is explicitly `cache`. The default is `cache` and that is not
+    // enough for this test: a test that passed because of a default is testing
+    // the default, and the rule is about the mode the operator chose.
+    let actor: uuid::Uuid = account.to_string().parse().expect("an account id");
+    lorehaven_db::retention::write_policy(harness.tdb.db(), BodyMode::Cache, actor)
+        .await
+        .expect("set the instance to cache");
+
+    let state = harness.state_with(FixtureArchive::failing("the source timed out"));
+    let import_id = queue_import(&harness, account, &pseud, false).await;
+    run_passes(&state, 1).await;
+
+    // (1) The import is failed, and it says why in a code a caller can branch
+    // on rather than a sentence. §11.15 requires a refusal to name the policy;
+    // the same reasoning applies to a failure report — a reader's tooling
+    // cannot branch on prose.
+    let row = import_row(&harness, &import_id).await;
+    assert_eq!(
+        row.state, "failed",
+        "a body that failed to fetch is a failed import, not a completion: {:?}",
+        row.report_json
+    );
+    let report = row.report_json.as_deref().unwrap_or_default();
+    assert!(
+        report.contains("body_fetch_failed"),
+        "the failure is recorded under a stable code, not only as prose: {report}"
+    );
+
+    // (2) THE SILENT LINK. The item exists — the import writes it before the
+    // chapters, so that a cancelled import leaves a readable stub — and it
+    // carries the source URL. That is precisely the shape the rule forbids: a
+    // work page with a title, a summary and a link to elsewhere, which a reader
+    // cannot tell from an imported work.
+    //
+    // What is asserted is that no chapter was recorded as stored, so nothing
+    // downstream can present this as a work this instance holds. The item
+    // itself is left in place deliberately: deleting it would be the deletion
+    // workflow of §10.4, not an import's decision to make.
+    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
+        .await
+        .expect("chapters");
+    assert!(
+        chapters.iter().all(|chapter| chapter.state != "stored"),
+        "no chapter may be recorded as stored when the body fetch failed: {chapters:?}"
+    );
+    assert!(
+        chapters.is_empty(),
+        "the bulk fetch failed before any chapter was written: {chapters:?}"
+    );
+
+    // (3) The queue row is queued for another attempt, not failed. A body that
+    // failed to fetch is the *transient* case by definition: the source answered
+    // and the answer was a failure, which §11.15 treats as retryable so that a
+    // temporary source failure does not become a permanent loss.
+    let job_id = imports::job_for_import(harness.tdb.db(), &import_id)
+        .await
+        .expect("job id")
+        .expect("the import names its queue row");
+    let job = jobs::find(harness.tdb.db(), job_id.parse().expect("a job id"))
+        .await
+        .expect("read job")
+        .expect("the job exists");
+    assert_eq!(
+        job.state,
+        "queued",
+        "a failed body fetch must stay queued for retry: {}",
+        job.last_error.unwrap_or_default()
+    );
+    assert_eq!(job.attempts, 1, "the attempt is recorded");
+
+    harness.cleanup().await;
+}
+
+/// The mirror: on an *aggregating* instance the same import **succeeds**, stores
+/// no body, and the item is a reference to the work at its origin.
+///
+/// Both halves matter and they fail differently. Asserting only that an
+/// aggregating instance stores nothing would pass against an implementation
+/// that refused the import outright — which §11.15 forbids, because an
+/// aggregating instance importing a work is a complete record with metadata,
+/// attribution and a canonical link, and a reader who asked for that import has
+/// had it done. Asserting only that it succeeds would pass against one that
+/// stored the body anyway, which is the whole thing the setting exists to
+/// prevent.
+#[tokio::test]
+async fn an_aggregating_instance_imports_the_metadata_and_stores_no_body() {
+    let harness = Harness::new("m5908-aggregate").await;
+    let (_client, account, pseud) = signed_in(&harness, "m5908agg@example.org", "m5908agg").await;
+
+    let actor: uuid::Uuid = account.to_string().parse().expect("an account id");
+    lorehaven_db::retention::write_policy(harness.tdb.db(), BodyMode::Aggregate, actor)
+        .await
+        .expect("set the instance to aggregate");
+
+    // A WORKING adapter, so the only thing preventing storage is the setting.
+    // With a failing adapter this test would pass for the wrong reason, and the
+    // difference between "the policy refused" and "the source failed" is the
+    // entire claim.
+    let import_id = run_import(&harness, account, &pseud, FixtureArchive::new(), false).await;
+
+    let row = import_row(&harness, &import_id).await;
+    assert_eq!(
+        row.state, "completed",
+        "an aggregating instance importing a work is a success, not a refusal: {:?}",
+        row.report_json
+    );
+
+    // The record is real and complete as a record.
+    let item = imports::find_library_item(harness.tdb.db(), &account.to_string(), SOURCE, WORK_KEY)
+        .await
+        .expect("find item")
+        .expect("the item was created");
+    assert!(!item.title.is_empty(), "the title is there");
+    assert_eq!(
+        item.source_url, WORK_URL,
+        "the canonical link is there: an aggregated work is a reference to the work at its \
+         origin, and the link is the reference"
+    );
+
+    // And the body is not.
+    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
+        .await
+        .expect("chapters");
+    assert!(
+        chapters.is_empty(),
+        "an aggregating instance stores no body, and the fixture has three chapters to \
+         store: {chapters:?}"
+    );
+    let blobs = harness.store();
+    for chapter in &chapters {
+        let Some(checksum) = chapter.content_blob_checksum.as_ref() else {
+            continue;
+        };
+        assert!(
+            blobs.get(harness.tdb.db(), checksum).await.is_err(),
+            "no blob may exist for a chapter an aggregating instance declined to store"
+        );
+    }
+
+    harness.cleanup().await;
+}
+
+/// A per-source override narrows one source family and leaves the others
+/// caching, which §11.15 calls expressible ("Caching most sources while
+/// aggregating one is expressible").
+///
+/// Driven through the import path rather than the policy function, because the
+/// claim is about which *source* the decision lands on and only the import path
+/// knows which source it is importing from.
+#[tokio::test]
+async fn a_per_source_override_narrows_one_source_and_not_another() {
+    let harness = Harness::new("m5908-override").await;
+    let (_client, account, pseud) = signed_in(&harness, "m5908ovr@example.org", "m5908ovr").await;
+
+    let actor: uuid::Uuid = account.to_string().parse().expect("an account id");
+    // The instance caches; this one source family is narrowed.
+    lorehaven_db::retention::write_policy(harness.tdb.db(), BodyMode::Cache, actor)
+        .await
+        .expect("cache");
+    lorehaven_db::retention::write_source_override(
+        harness.tdb.db(),
+        SOURCE,
+        BodyMode::Aggregate,
+        actor,
+    )
+    .await
+    .expect("narrow this source");
+
+    let import_id = run_import(&harness, account, &pseud, FixtureArchive::new(), false).await;
+    let row = import_row(&harness, &import_id).await;
+    assert_eq!(row.state, "completed", "{:?}", row.report_json);
+    let chapters = imports::list_import_chapters(harness.tdb.db(), &import_id)
+        .await
+        .expect("chapters");
+    assert!(
+        chapters.is_empty(),
+        "the overridden source is not aggregated, so no body is stored: {chapters:?}"
+    );
+
+    harness.cleanup().await;
+}
+
+/// A vanished origin is recorded as `failed`, and a transient failure is not (M59-09).
+///
+/// Lives here rather than in `retention_routes.rs` because it drives the real import
+/// path, and `FixtureArchive` — the only adapter in the test suite that can be told
+/// to refuse a work — is defined in this file.
+///
+/// This is the signal the count reads, and it was missing: a `not_found` or
+/// `withheld` preview failure propagated out of the import with the job row left
+/// at `running` — neither queued for a retry nor recorded as failed. Driven
+/// through the import path, on both the counting side and the exclusion side,
+/// because the two halves of the definition are separate claims.
+#[tokio::test]
+async fn a_vanished_origin_is_recorded_and_a_transient_one_is_not() {
+    let harness = Harness::new("m5909-origin").await;
+    let (_client, account, pseud) = signed_in(&harness, "m5909v@example.org", "m5909v").await;
+    let actor: uuid::Uuid = account.to_string().parse().expect("an account id");
+    lorehaven_db::retention::write_policy(harness.tdb.db(), BodyMode::Aggregate, actor)
+        .await
+        .expect("set the instance to aggregate");
+
+    // A source that says the work is gone.
+    let state = harness.state_with(FixtureArchive::origin_gone(SourceError::NotFound));
+    let vanished = queue_import(&harness, account, &pseud, false).await;
+    run_passes(&state, 1).await;
+    let row = import_row(&harness, &vanished).await;
+    assert_eq!(
+        row.state, "failed",
+        "a vanished origin is a failed import, not one left at `running`: {:?}",
+        row.report_json
+    );
+    let report = row.report_json.as_deref().unwrap_or_default();
+    assert!(
+        report.contains("not_found"),
+        "the record carries the code the count reads, not only prose: {report}"
+    );
+
+    // A source that is merely rate-limiting is not a vanished origin, and must
+    // not be recorded as one — the job is still queued and the work is still
+    // there.
+    let throttled = harness.state_with(FixtureArchive::origin_gone(SourceError::RateLimited(
+        "slow down".to_owned(),
+    )));
+    let busy = queue_import(&harness, account, &pseud, false).await;
+    run_passes(&throttled, 1).await;
+    let busy_row = import_row(&harness, &busy).await;
+    assert_ne!(
+        busy_row.state, "failed",
+        "a rate limit is transient; recording it as `failed` would tell the operator a \
+         work is gone when the source said nothing of the kind"
     );
 
     harness.cleanup().await;

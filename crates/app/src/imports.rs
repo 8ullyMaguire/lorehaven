@@ -368,10 +368,51 @@ pub async fn run(
         .await
         .map_err(transient)?;
 
-    let work = adapter
+    // A preview that fails is where a vanished origin is DETECTED: the source
+    // answered, and its answer is that the work is not there or may not be
+    // served. `classify` has already decided whether that is fatal (it is, for
+    // both) and has produced the human sentence; what was missing is the record
+    // that lets anything later ask "which works is this instance past saving?".
+    //
+    // Before this, a `not_found` or `withheld` propagated out of `run` and left
+    // `import_jobs.state` at `running` — an import that is neither queued for a
+    // retry nor recorded as failed, which is the one state the schema's
+    // vocabulary has no word for. §11.15's `works_past_saving` needs a recorded
+    // answer here, and a work whose origin has vanished is precisely the case
+    // the count is about.
+    //
+    // The code is the *class*, not the message. `classify`'s message is prose
+    // that may be reworded; the code is what the count reads, so it has to be a
+    // stable word rather than a substring of a sentence. `not_found` and
+    // `withheld` are the two that mean the work is GONE; a rate limit or a
+    // network fault is transient and is left for the queue to retry.
+    let work = match adapter
         .preview(&fetcher, &url, credentials.as_deref())
         .await
-        .map_err(|error| classify(error, &row.source_key))?;
+    {
+        Ok(work) => work,
+        Err(error) => {
+            // Matched on the TYPED error, not on the rendered sentence. A
+            // substring test over `classify`'s message would break the day
+            // somebody rewords the prose, and the reworded build would
+            // silently stop recording vanished origins — the count would go to
+            // zero and look like good news.
+            if let Some(code) = origin_gone_code(&error) {
+                let classified = classify(error, &row.source_key);
+                if let Err(record_error) =
+                    fail_import(state, import_job_id, code, &classified.message()).await
+                {
+                    tracing::warn!(
+                        %record_error,
+                        "the source reported the work as gone and the import could not \
+                         be marked failed"
+                    );
+                }
+                return Err(classified);
+            }
+            return Err(classify(error, &row.source_key));
+        }
+    };
 
     // The planner compares the source's view against what is already held, so a
     // re-import reports what changed rather than importing blind. A missing item
@@ -460,7 +501,48 @@ pub async fn run(
         credentials: credentials.as_deref(),
         work: &work,
     };
-    let stored = store_chapters(state, &source, job, &row, &item).await?;
+    // §11.15 non-degradation, in one direction: "On a caching instance, a body
+    // that fails to fetch is a failed import that retries and eventually
+    // reports — never a work quietly reclassified as a link, because that turns
+    // a temporary source failure into a permanent loss of something the reader
+    // asked this instance to keep."
+    //
+    // The library item was written at the line above, before the chapters, so
+    // that a cancelled import leaves a readable stub rather than orphaned
+    // content. That is the right order for a *cancel*, and it is exactly the
+    // shape the spec forbids for a *failure*: the item now has a title, a
+    // summary and a `source_url`, and a reader looking at it sees a work that
+    // looks imported and is not. So the failure is recorded on the import row —
+    // `state = 'failed'` with a machine-readable code — and the error still
+    // propagates so the queue retries. The item is left in place deliberately:
+    // deleting it would be the deletion workflow of §10.4, not an import's
+    // decision to make.
+    //
+    // The other direction needs no code here and that is worth stating: an
+    // aggregating instance returns `Ok(vec![])` from `store_chapters` and is
+    // marked `completed`, because storing no body is what it was configured to
+    // do. Only a *failure* on a *caching* instance is the degradation §11.15
+    // names.
+    let stored = match store_chapters(state, &source, job, &row, &item).await {
+        Ok(stored) => stored,
+        Err(error) => {
+            let message = error.message();
+            // The write is best-effort in the sense that a failure to record
+            // must not replace the real error with a different one: the reader
+            // needs to know the body fetch failed, and "could not write the
+            // failure" would be a second, worse problem. So this logs and the
+            // original error is what propagates.
+            if let Err(record_error) =
+                fail_import(state, import_job_id, "body_fetch_failed", &message).await
+            {
+                tracing::warn!(
+                    %record_error,
+                    "a body fetch failed and the import could not be marked failed"
+                );
+            }
+            return Err(error);
+        }
+    };
 
     // §32.7.9: rescue media. Every image URL found in the chapters is
     // deduplicated and queued for archival. A URL already held by any work
@@ -611,6 +693,33 @@ fn classify(error: lorehaven_scrapers::SourceError, source_key: &str) -> Handler
     }
 }
 
+/// The code to record when the source says the work is gone, or `None`.
+///
+/// Two variants and no more, because the two mean different things and only one
+/// of them is a loss. `NotFound` is a dead link; `Withheld` is a work the source
+/// holds and will not serve — a moderation hold, a takedown in progress. Both are
+/// states the *source* is in, both are fatal rather than transient, and both mean
+/// this instance cannot get the text again without the source changing its mind.
+///
+/// Everything else is deliberately excluded, and the exclusions are the point:
+///
+/// * `RateLimited`, `Blocked`, `Network` — transient. The work is not gone, the
+///   fetch was unlucky, and the queue is already retrying. Counting these would
+///   make a busy afternoon look like a preservation debt.
+/// * `AuthRequired` — a credential problem. An operator who logs in again fixes
+///   it, and the work is still there.
+/// * `Parse`, `Unsupported`, `Internal`, `Refused` — this instance's problem, not
+///   the origin's. A parser that cannot read a page says nothing about whether
+///   the work exists.
+fn origin_gone_code(error: &lorehaven_scrapers::SourceError) -> Option<&'static str> {
+    use lorehaven_scrapers::SourceError as E;
+    match error {
+        E::NotFound => Some("not_found"),
+        E::Withheld(_) => Some("withheld"),
+        _ => None,
+    }
+}
+
 /// Record progress, ignoring a lost lease.
 ///
 /// A progress row is a courtesy to whoever is watching; failing a running import
@@ -742,6 +851,38 @@ async fn store_chapters(
                 row.source_key
             ))
         })?;
+
+    // §11.15: an aggregating instance never fetches a body into its storage. The
+    // check is HERE, at the one place a body is about to be stored, rather than
+    // at the fetch site — because the property is about *storage*, and a
+    // `Metadata` fetch that happened to return prose is still prose this
+    // instance must not keep. Checking earlier would put the rule in two places
+    // (the fetch and the write) and the write is the one that cannot be bypassed.
+    //
+    // The refusal is `Ok(vec![])` and not an `Err`, and that is deliberate: an
+    // aggregating instance importing a work is a *success*. It has the metadata,
+    // the attribution and the canonical link, which is the whole of what §11.15
+    // says such an instance produces. Returning an error would mark the import
+    // failed, and the reader would see a failed import for a work that was in
+    // fact imported exactly as this instance intends.
+    let retention = lorehaven_db::retention::resolve_for_source(
+        state.db(),
+        Some(&row.source_key),
+        /* source_blocked */ false,
+        /* vanished */ false,
+    )
+    .await
+    .map_err(transient)?;
+    if let Err(refusal) =
+        lorehaven_domain::retention::check_body_allowed(&retention, Some(&row.source_key))
+    {
+        tracing::info!(
+            source = %row.source_key,
+            code = refusal.code(),
+            "an aggregating instance is not storing this work's body"
+        );
+        return Ok(Vec::new());
+    }
 
     let previous = imports::list_import_chapters(state.db(), &row.id)
         .await

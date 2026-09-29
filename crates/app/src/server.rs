@@ -478,6 +478,15 @@ pub fn build_router(state: AppState) -> Router {
         // own CTA. Write class: mark and retract mutate; list is read but
         // should be authenticated (who marked what).
         .merge(classified(routes::cta::router(), RouteClass::Write, &state))
+        // Retention administration (M59 / spec §11.15). Operator-only, and the
+        // gate 404s a non-operator, so it is registered as an ordinary write
+        // route: the route's own extractor does the authorising and nothing
+        // above it needs to know the policy exists.
+        .merge(classified(
+            routes::retention::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Recommendation transparency (M29): "why am I seeing this" explanations.
         .merge(classified(
             routes::recommendation_transparency::router(),
