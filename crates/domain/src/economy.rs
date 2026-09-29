@@ -13,6 +13,29 @@ pub enum TxnType {
     Hold,
     Release,
     Capture,
+    /// A preservation reward, paid when a destination is *verified* carrying a
+    /// work (spec §2.1).
+    ///
+    /// A type of its own rather than `Grant` because the clawback has to find
+    /// it: `credit_transactions.type` is free TEXT, so a `preservation` row is
+    /// distinguishable from every other award without a schema change, and a
+    /// reader auditing their balance can see exactly which credits came from
+    /// preservation and therefore which a dead destination takes back.
+    ///
+    /// `credits` is a single-credit codebase and this is the seventh type, but
+    /// the alternative — folding it into `Grant` — makes the reversal
+    /// unauditable, which §2.3 explicitly requires: a reader who already spent
+    /// the credits has to see the debt, and that needs a row of its own.
+    Preservation,
+    /// The clawback for a `Preservation` whose destination stopped answering.
+    ///
+    /// A separate type and not a negative `Preservation`, so that
+    /// `WHERE type = 'preservation'` remains a complete statement of what was
+    /// paid out and the net is the sum of the two. The pair is
+    /// `preservation` + `preservation_reclaim`, and the idempotency keys are
+    /// `preservation:grant:<target>` and `preservation:reclaim:<target>`, so
+    /// both halves are individually replay-safe.
+    PreservationReclaim,
 }
 
 impl TxnType {
@@ -25,6 +48,8 @@ impl TxnType {
             Self::Hold => "hold",
             Self::Release => "release",
             Self::Capture => "capture",
+            Self::Preservation => "preservation",
+            Self::PreservationReclaim => "preservation_reclaim",
         }
     }
 }
@@ -41,6 +66,8 @@ impl std::str::FromStr for TxnType {
             "hold" => Ok(Self::Hold),
             "release" => Ok(Self::Release),
             "capture" => Ok(Self::Capture),
+            "preservation" => Ok(Self::Preservation),
+            "preservation_reclaim" => Ok(Self::PreservationReclaim),
             _ => Err(format!("unknown txn type: {s}")),
         }
     }
@@ -78,6 +105,8 @@ mod tests {
             TxnType::Hold,
             TxnType::Release,
             TxnType::Capture,
+            TxnType::Preservation,
+            TxnType::PreservationReclaim,
         ] {
             assert_eq!(TxnType::from_str(t.as_str()).unwrap(), t);
         }

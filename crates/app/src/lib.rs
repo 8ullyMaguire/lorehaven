@@ -28,6 +28,7 @@ pub mod longevity;
 pub mod media_fetch;
 pub mod media_job;
 pub mod narration;
+pub mod preservation_recheck;
 pub mod privacy;
 pub mod rec_engine;
 pub mod rec_preference;
