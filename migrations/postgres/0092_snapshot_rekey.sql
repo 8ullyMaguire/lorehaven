@@ -83,43 +83,74 @@ INSERT INTO snapshot_rekey_notes (key, value) VALUES
      || 'first fails because the parent has no new value, and updating the parent '
      || 'first fails because the child still has the old one. Copy, then mask.');
 
-CREATE OR REPLACE FUNCTION snapshot_pseud(raw uuid)
+CREATE OR REPLACE FUNCTION snapshot_pseud(src uuid)
 RETURNS uuid
-LANGUAGE sql
+LANGUAGE plpgsql
 IMMUTABLE
 PARALLEL SAFE
 AS $$
-  SELECT (
-      substr(hex, 1, 8) || '-' ||
-      substr(hex, 9, 4) || '-' ||
-      '4' || substr(hex, 14, 3) || '-' ||           -- version 4
-      'a' || substr(hex, 18, 3) || '-' ||           -- RFC 4122 variant
-      substr(hex, 21, 12)
-  )::uuid
-  FROM (
-    SELECT encode(digest(raw::text || 'lorehaven-snapshot-v1', 'sha256'), 'hex') AS hex
-  ) AS s;
+DECLARE
+    h text := encode(public.digest(src::text || 'lorehaven-snapshot-v1', 'sha256'::text), 'hex');
+BEGIN
+    -- plpgsql, NOT LANGUAGE sql. This is a fix, not a style choice: a
+    -- `LANGUAGE sql` function is INLINED into its calling query, and inside a
+    -- MATERIALIZED VIEW the inlined body's digest(text, 'sha256') loses its
+    -- argument types -- the literal resolves as `unknown`, no overload matches,
+    -- and the view fails with
+    --     function digest(text, unknown) does not exist
+    -- Called DIRECTLY the same function works, which is why this survived the
+    -- M60-01 tests: they called it, they never put it in a view. Found by
+    -- M60-02, whose whole job is to build a dump.
+    --
+    -- The parameter was also named `raw`, a reserved SQL word. That is not the
+    -- bug (the failure is the inlining, not the name) but a reserved word is a
+    -- poor name for a parameter in a re-keying function, so it is `src` now.
+    --
+    -- `public.digest`, SCHEMA-QUALIFIED. plpgsql resolves function names at
+    -- parse time under the CALLER's search_path, and a materialized view is
+    -- created with a search_path that does not include wherever pgcrypto was
+    -- installed. Unqualified, this fails at REFRESH time with
+    --     function digest(text, text) does not exist
+    -- even though `SELECT digest('a','sha256')` works in the same database.
+    -- The 'sha256'::text cast is for the same reason: the bare literal arrives
+    -- as `unknown` and no overload matches it.
+    --
+    -- Salt and digest are UNCHANGED, so a value re-keyed by the old definition
+    -- equals the value re-keyed by this one. Verified: new(x) = old(x) -> true.
+    RETURN (
+        substr(h, 1, 8) || '-' ||
+        substr(h, 9, 4) || '-' ||
+        '4' || substr(h, 14, 3) || '-' ||   -- version 4
+        'a' || substr(h, 18, 3) || '-' ||   -- RFC 4122 variant
+        substr(h, 21, 12)
+    )::uuid;
+END;
 $$;
 
 COMMENT ON FUNCTION snapshot_pseud(uuid) IS
   'Snapshot re-key for a pseud_id. Deterministic in the input alone, so every table that references the same pseud gets the same replacement. Published salt: the spec requires a third party to be able to verify the construction. NOT REVERSIBLE, and must not be dumped.';
 
-CREATE OR REPLACE FUNCTION snapshot_account(raw uuid)
+CREATE OR REPLACE FUNCTION snapshot_account(src uuid)
 RETURNS uuid
-LANGUAGE sql
+LANGUAGE plpgsql
 IMMUTABLE
 PARALLEL SAFE
 AS $$
-  SELECT (
-      substr(hex, 1, 8) || '-' ||
-      substr(hex, 9, 4) || '-' ||
-      '4' || substr(hex, 14, 3) || '-' ||
-      'a' || substr(hex, 18, 3) || '-' ||
-      substr(hex, 21, 12)
-  )::uuid
-  FROM (
-    SELECT encode(digest(raw::text || 'lorehaven-snapshot-v1-account', 'sha256'), 'hex') AS hex
-  ) AS s;
+DECLARE
+    h text := encode(public.digest(src::text || 'lorehaven-snapshot-v1-account', 'sha256'::text), 'hex');
+BEGIN
+    -- plpgsql, NOT LANGUAGE sql: a `LANGUAGE sql` function is INLINED into its
+    -- caller, and inside a materialized view the inlined digest() call loses its
+    -- argument types and fails with 'function digest(text, unknown) does not
+    -- exist'. See the note on snapshot_pseud above.
+    RETURN (
+        substr(h, 1, 8) || '-' ||
+        substr(h, 9, 4) || '-' ||
+        '4' || substr(h, 14, 3) || '-' ||
+        'a' || substr(h, 18, 3) || '-' ||
+        substr(h, 21, 12)
+    )::uuid;
+END;
 $$;
 
 COMMENT ON FUNCTION snapshot_account(uuid) IS
