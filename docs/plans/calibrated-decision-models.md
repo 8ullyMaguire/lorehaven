@@ -176,7 +176,45 @@ $ cargo test -p lorehaven-decisions reconcile   # MUST fail
 Restore in the same shell as the mutation, and confirm with `git diff` that the
 file is back — a restore that is not re-verified is an unreported revert.
 
-## Step 3 — the §11.14 call site
+## Step 3 — the §11.14 call site  *(PARTIAL, and the gap is not this step's)*
+
+`ImportedWork::classify_quality_calibrated` exists and is tested, and
+`reconcile` is reached through it. What it does **not** have is a production
+caller, and the reason is upstream of this plan:
+
+> **`ImportQuality` has no consumer outside `crates/domain`.**
+> `crates/app/src/` never calls `classify_quality` at all — neither the
+> deterministic one nor the calibrated one. The ledger is consistent with this:
+> M6-13 ("Import result quality: accepted, rejected with a reason, or held") is
+> marked `implemented-locally-tested`, not `implemented-fully-tested`.
+
+So §11.14's three-way classification is a **built, tested, and correct rule that
+nothing yet applies to a real import.** Wiring the calibrated call into the
+import worker — which is what Step 3 originally asked for — would be attaching a
+model to a decision point that does not exist yet: the worker has no
+`ImportQuality` to reconcile.
+
+That is M6-13's job, not M61's, and it is a larger piece of work (deciding what
+a *held* candidate does to an import row, a library item, and the reader's
+library). Doing it here would mean inventing that policy, which is the owner's
+call.
+
+**What is therefore true of the calibrated path today, stated precisely:**
+
+| claim | status |
+|---|---|
+| the policy is correct and is proven so | done, 8 reconcile tests + 4 mutation-killed directions |
+| a model can be reached and its number validated | done, verified against the live model on thinkcentre |
+| a decision is recorded and readable | done, migration 0088 + `/decisions/audit` |
+| an instance discloses its provider | done, `/api/v1/meta` |
+| an import consults it | **not done, and not possible until M6-13 has a consumer** |
+
+The honest summary: the calibrated path is complete from the model to the audit
+trail, and stops one step short of the import worker because the import worker
+does not yet make the decision it would be attached to.
+
+### The original step, for the record
+
 
 `crates/domain/src/imports.rs`: `ImportWork::classify_quality` stays exactly as
 it is. Add beside it:
