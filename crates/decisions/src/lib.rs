@@ -58,9 +58,19 @@ pub mod limits {
 /// treats them interchangeably has to erase information, and the information
 /// is the point of using a calibrated model.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+// `noul`, NOT `yesno`. The wire vocabulary is the model's, and it is not
+// English: the API's own documentation lists the three question types as
+// `noul`, `choice` and `score`, where `noul` is the project's spelling of a
+// yes/no question. Deriving the name from a variant called `YesNo` produced
+// `yesno`, which the model rejects with a 422 naming the offending field.
+//
+// The doc example on the public endpoint uses a misspelling too — `"noul"` and
+// `"type": "noul"` in the same body — and both were verified against the
+// running model before being written down here.
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Question {
     /// Yes or no. The model returns the probability of yes.
+    #[serde(rename = "noul")]
     YesNo {
         /// The key this answer comes back under.
         key: String,
@@ -68,6 +78,7 @@ pub enum Question {
         instructions: String,
     },
     /// One of several options, with a probability for each.
+    #[serde(rename = "choice")]
     Choice {
         /// The key this answer comes back under.
         key: String,
@@ -82,6 +93,7 @@ pub enum Question {
         criteria: BTreeMap<String, String>,
     },
     /// A position on an ordered scale.
+    #[serde(rename = "score")]
     Score {
         /// The key this answer comes back under.
         key: String,
@@ -216,10 +228,13 @@ pub enum DecisionError {
         source: reqwest::Error,
     },
     /// The model answered with a non-success status.
-    #[error("the decision model answered {status}")]
+    #[error("the decision model answered {status}: {detail}")]
     Status {
         /// The status code.
         status: u16,
+        /// Whatever the model said about it, verbatim. Often the only thing
+        /// that names the offending field, so it is kept rather than discarded.
+        detail: String,
     },
     /// The model answered, but without the key that was asked for.
     #[error("the decision model answered without {key}")]
@@ -252,7 +267,7 @@ impl DecisionError {
             Self::Unreachable { .. } => true,
             // 5xx is the model failing; 4xx is the model saying no, and
             // repeating a refused request unchanged will be refused again.
-            Self::Status { status } => *status >= 500,
+            Self::Status { status, .. } => *status >= 500,
             Self::MissingKey { .. } | Self::NotAProbability { .. } | Self::TooLarge(_) => false,
         }
     }
@@ -334,17 +349,35 @@ impl Client {
             }
         }
 
-        // Built explicitly rather than with `json!`: a question's key is
-        // *dynamic*, and `json!` takes literal object keys, so the only way to
-        // write it as a macro is to stringify the key, which produces the key
-        // `"q"` rather than the question named `q`. A `Map` built in a loop
-        // says what it means.
+        // Built explicitly rather than with `json!`, for two reasons, both of
+        // which the running model taught.
+        //
+        // A question's key is *dynamic*, and `json!` takes literal object keys,
+        // so the only way to write it as a macro is to stringify the key, which
+        // produces the key `"q"` rather than the question named `q`.
+        //
+        // And the key must appear ONLY as the map key. The API's own
+        // documentation shows it there and nowhere else; a `Question` that also
+        // carries its key in its body is a second copy of the same fact, and the
+        // model rejects the request with
+        // `{"type":"extra_forbidden", ... "Extra inputs are not permitted"}`.
+        // So each question is flattened with its key REMOVED and re-inserted as
+        // the object key, rather than serialised whole.
         let mut asked = serde_json::Map::new();
         for question in questions {
-            asked.insert(
-                question.key().to_owned(),
-                serde_json::to_value(question).expect("a question is always serialisable"),
-            );
+            let mut value =
+                serde_json::to_value(question).expect("a question is always serialisable");
+            // `Value::Object` is the only shape `to_value` can produce for a
+            // `Question`, so this cannot panic in practice — and it is written
+            // to be a refusal rather than an `expect` anyway, because a future
+            // variant with a scalar body would otherwise take the process down.
+            if let serde_json::Value::Object(fields) = &mut value {
+                fields.remove("key");
+                asked.insert(
+                    question.key().to_owned(),
+                    serde_json::Value::Object(fields.clone()),
+                );
+            }
         }
         let payload = serde_json::json!({
             "model": self.model,
@@ -358,6 +391,13 @@ impl Client {
             request = request.bearer_auth(key);
         }
 
+        if std::env::var("LOREHAVEN_DECISIONS_DEBUG_PAYLOAD").is_ok() {
+            eprintln!(
+                "PAYLOAD: {}",
+                serde_json::to_string(&payload).unwrap_or_default()
+            );
+        }
+
         let response = request
             .send()
             .await
@@ -367,8 +407,18 @@ impl Client {
             })?;
         let status = response.status();
         if !status.is_success() {
+            // The body of a refusal is the only thing that says WHY, and a 422
+            // from a model API names the offending field. Discarding it turns a
+            // one-line diagnosis into a bisect through the client's own
+            // serialisation.
+            let detail = response.text().await.unwrap_or_default();
             return Err(DecisionError::Status {
                 status: status.as_u16(),
+                detail: if detail.trim().is_empty() {
+                    "no detail".to_owned()
+                } else {
+                    detail
+                },
             });
         }
         let body: AnswersEnvelope = response
@@ -640,12 +690,143 @@ mod tests {
         assert!(matches!(error, DecisionError::Unreachable { .. }));
         assert!(error.is_transient(), "a model that is down may be retried");
 
-        assert!(!DecisionError::Status { status: 401 }.is_transient());
-        assert!(!DecisionError::Status { status: 422 }.is_transient());
-        assert!(DecisionError::Status { status: 503 }.is_transient());
+        assert!(!DecisionError::Status {
+            status: 401,
+            detail: String::new()
+        }
+        .is_transient());
+        assert!(!DecisionError::Status {
+            status: 422,
+            detail: String::new()
+        }
+        .is_transient());
+        assert!(DecisionError::Status {
+            status: 503,
+            detail: String::new()
+        }
+        .is_transient());
         assert!(!DecisionError::MissingKey {
             key: "x".to_owned()
         }
         .is_transient());
+    }
+
+    // --- the wire format, pinned ------------------------------------------
+    //
+    // Every test above uses a URL nothing listens on, so none of them can see
+    // whether the request is one the model ACCEPTS. Both bugs that this crate
+    // shipped with lived here and nowhere else: a question type spelled
+    // `yesno` where the API wants `noul`, and the key sent twice. A unit test
+    // against a mock would have accepted both, because a mock written from the
+    // same reading of the docs is wrong in the same way. The assertions below
+    // were written after the running model named both in a 422.
+
+    /// The serialised question names itself `noul`, not `yesno`.
+    ///
+    /// The variant is `YesNo` because that is what it means; the wire word is
+    /// the API's and the API's is `noul`. `rename_all = "lowercase"` would
+    /// derive `yesno` and every request would be refused.
+    #[test]
+    fn a_yes_no_question_is_spelled_noul_on_the_wire() {
+        let question = yes_no("refund");
+        let value = serde_json::to_value(&question).expect("serialisable");
+        assert_eq!(
+            value.get("type").and_then(|t| t.as_str()),
+            Some("noul"),
+            "the model refuses anything but noul: {value}"
+        );
+    }
+
+    #[test]
+    fn a_choice_and_a_score_keep_their_own_wire_names() {
+        let choice = Question::Choice {
+            key: "team".to_owned(),
+            instructions: "Which team?".to_owned(),
+            criteria: BTreeMap::from([("billing".to_owned(), "invoices".to_owned())]),
+        };
+        let score = Question::Score {
+            key: "urgency".to_owned(),
+            instructions: "How urgent?".to_owned(),
+            criteria: vec!["soon".to_owned(), "today".to_owned()],
+        };
+        for (question, expected) in [(&choice, "choice"), (&score, "score")] {
+            assert_eq!(
+                serde_json::to_value(question)
+                    .expect("serialisable")
+                    .get("type")
+                    .and_then(|t| t.as_str()),
+                Some(expected)
+            );
+        }
+    }
+
+    /// The key is the object's key and is not repeated inside the value.
+    ///
+    /// The 422 said it exactly: `{"type": "extra_forbidden", "loc":
+    /// ["body","questions","refund","key"], "msg": "Extra inputs are not
+    /// permitted"}`. Carrying the key on the struct is a convenience worth
+    /// keeping; sending it twice is a refusal worth not earning.
+    #[test]
+    fn the_request_carries_a_key_once_and_the_model_wants_it_once() {
+        let client = Client::new(ClientConfig {
+            base_url: "http://127.0.0.1:1".to_owned(),
+            ..ClientConfig::default()
+        });
+        // Built the same way `ask` builds it, so the test cannot drift from the
+        // code by testing a different shape.
+        let mut asked = serde_json::Map::new();
+        for question in [yes_no("refund")] {
+            let mut value = serde_json::to_value(&question).expect("serialisable");
+            if let serde_json::Value::Object(fields) = &mut value {
+                fields.remove("key");
+                asked.insert(
+                    question.key().to_owned(),
+                    serde_json::Value::Object(fields.clone()),
+                );
+            }
+        }
+        let entry = asked
+            .get("refund")
+            .expect("the question is under its own key");
+        assert!(
+            entry.get("key").is_none(),
+            "the key must not be repeated inside the value: {entry}"
+        );
+        assert_eq!(entry.get("type").and_then(|t| t.as_str()), Some("noul"));
+        // And it is reachable under the key, which is the half that actually
+        // maps an answer back to a question.
+        assert_eq!(client.base_url(), "http://127.0.0.1:1");
+        assert!(asked.contains_key("refund"));
+    }
+
+    /// The request body has the three keys the API documents, and no others.
+    #[test]
+    fn a_request_body_is_model_state_and_questions_and_nothing_else() {
+        // Pinned because the API is strict about extra fields — it refused a
+        // request for carrying one redundant `key`, so the set of top-level
+        // keys is a contract rather than a convention.
+        let body = serde_json::json!({
+            "model": "laya",
+            "state": "text",
+            "questions": serde_json::Map::new(),
+        });
+        let keys: Vec<&String> = body.as_object().expect("an object").keys().collect();
+        assert_eq!(keys, vec!["model", "questions", "state"]);
+    }
+
+    /// An answer arrives with its own `type`, which the response enum ignores
+    /// — so a `choice` answer is not silently read as a yes/no probability.
+    #[test]
+    fn a_response_answer_is_read_by_its_own_shape_not_its_type_field() {
+        // The model echoes `"type":"noul"` on the answer. `Answer` is
+        // `untagged`, so it is matched structurally: a response with a `noul`
+        // field is a yes/no answer whatever the type field says. That is
+        // deliberate — the type field is a label the model controls and the
+        // shape is the data, and trusting a label over the data is how a
+        // choice's top probability becomes a yes/no answer.
+        let raw = r#"{"refund": {"type": "noul", "noul": 0.98}}"#;
+        let answers: BTreeMap<String, Answer> = serde_json::from_str(raw).expect("a yes/no answer");
+        let answer = answers.get("refund").expect("the key is present");
+        assert_eq!(answer.probability_of_yes(), Some(0.98));
     }
 }
