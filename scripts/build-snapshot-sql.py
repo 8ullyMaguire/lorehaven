@@ -55,6 +55,7 @@ import hashlib
 import json
 import os
 import pathlib
+import random
 import re
 import subprocess
 import sys
@@ -335,7 +336,8 @@ def read_instance_mode() -> str | None:
     return out if out in ("cache", "aggregate") else None
 
 
-def build(out: pathlib.Path, mode: str = "cache") -> dict:
+def build(out: pathlib.Path, mode: str = "cache",
+          offset_days: int | None = None) -> dict:
     """mode: 'cache' (bodies may ship) or 'aggregate' (bodies must not).
 
     Spec 11.16.6: a published snapshot contains bodies only on an instance whose
@@ -353,6 +355,7 @@ def build(out: pathlib.Path, mode: str = "cache") -> dict:
     tables = read_live_schema() or parse_columns(MIGRATIONS)
 
     drop_tables, drop_columns, replaced, rekeyed, kept, views = set(), {}, 0, 0, 0, []
+    shifted = 0
 
     for table in sorted(tables):
         if table in INTERNAL_TABLES:
@@ -368,6 +371,10 @@ def build(out: pathlib.Path, mode: str = "cache") -> dict:
         projection, tdrop, colnames = [], {}, []
         for col in sorted(cols):
             entry = entries.get(col)
+            # The declared type, which decides HOW a timestamp is shifted: this
+            # schema stores them as RFC 3339 text in most tables and as
+            # timestamptz in 71 columns, and the two need different SQL.
+            ctype = cols_type.get(col, "text")
             if entry and entry["treatment"] == "drop_column":
                 tdrop[col] = True
                 continue
@@ -386,6 +393,66 @@ def build(out: pathlib.Path, mode: str = "cache") -> dict:
                 )
                 colnames.append(col)
                 continue
+            if treatment == "offset_timestamps":
+                # 11.16.5: a month offset is a LINKABLE IDENTIFIER. Two dumps
+                # shifted by the same offset join row-for-row on every timestamp,
+                # so each snapshot gets its own offset and the offset is applied
+                # INSIDE the snapshot rather than recorded beside it.
+                #
+                # Both storage types, because this schema is not consistent:
+                # timestamps are stored as RFC 3339 TEXT in most tables and as
+                # timestamptz in 71 columns. The text path parses, offsets and
+                # re-renders, which is lossy only for the zone designator -- and
+                # losing it is correct, since the offset is unpublished and a
+                # preserved `+02:00` would narrow the search for it.
+                #
+                # NULL stays NULL: a missing timestamp is not a timestamp at the
+                # epoch, and shifting NULL to NULL is the only honest option.
+                if offset_days is None:
+                    # No offset given: pass the value through untouched. NOT an
+                    # error, because running without --timestamp-offset is how an
+                    # operator takes a snapshot for their own analysis, and
+                    # refusing would make the flag look mandatory when the spec
+                    # only requires the offset to be unpublished.
+                    pass
+                elif ctype in ("timestamptz", "timestamp", "date"):
+                    projection.append(
+                        f'    ({col}::timestamptz + INTERVAL \'{offset_days} days\') AS "{col}"'
+                    )
+                    shifted += 1
+                    colnames.append(col)
+                    continue
+                else:
+                    # RFC 3339 text. A plain ::timestamptz cast parses it -- NOT
+                    # to_timestamp(), which takes (text, text) and has no
+                    # single-argument text overload, so the first version of this
+                    # emitted SQL that could not run at all. Then + interval shifts
+                    # it and to_char() renders it back in the same shape.
+                    #
+                    # The regex guard means a malformed row is passed through
+                    # untouched rather than aborting the whole snapshot: a bad
+                    # timestamp in one row must not cost the operator the entire
+                    # dump, and passing it through is the honest outcome -- the
+                    # row is conspicuous, not silently moved.
+                    #
+                    # The to_char format is 'YYYY-MM-DD"T"HH24:MI:SS"Z"' with NO
+                    # backslashes. Inside a single-quoted SQL string the double
+                    # quotes are already literal, so escaping them emits
+                    # backslashes into the DATA -- and a timestamp like
+                    # 2026-04-29\"T\"11:30:00\"Z\" does not raise, it just
+                    # stops parsing as RFC 3339, which is the worst kind of
+                    # wrong: a snapshot full of timestamps no reader can use.
+                    projection.append(
+                        f"    CASE WHEN {col} IS NULL THEN NULL\n"
+                        f"         WHEN {col} ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}' "
+                        f"THEN to_char(({col}::timestamptz) "
+                        f"+ INTERVAL '{offset_days} days', "
+                        f"'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')\n"
+                        f"         ELSE {col} END AS \"{col}\""
+                    )
+                    shifted += 1
+                    colnames.append(col)
+                    continue
             if treatment == "rekey_text":
                 rekeyed += 1
                 # A deterministic text re-key, NOT a constant. This exists because
@@ -539,6 +606,7 @@ def build(out: pathlib.Path, mode: str = "cache") -> dict:
     out.write_text("\n".join(lines) + "\n")
     return {
         "views": len(views), "replaced": replaced, "rekeyed": rekeyed,
+        "shifted": shifted,
         "kept": kept, "drop_tables": sorted(drop_tables),
         "drop_columns": {k: v for k, v in drop_columns.items() if v},
     }
@@ -560,15 +628,57 @@ def main() -> int:
             "DECISION, so the decision has to come from somewhere recorded)."
         ),
     )
+    ap.add_argument(
+        "--timestamp-offset",
+        type=int,
+        metavar="DAYS",
+        help=(
+            "Shift every timestamp by this many days, applied INSIDE the "
+            "snapshot. 11.16.5: a shared month offset is a linkable identifier "
+            "-- two dumps shifted by the same amount join row-for-row on every "
+            "timestamp -- so consecutive snapshots MUST use different offsets, "
+            "and this value is deliberately never written into the dump. It "
+            "appears in the generated SQL as an INTERVAL, so anyone reading the "
+            "mask can see that a shift happened but not how much. Omit it and "
+            "timestamps pass through unchanged."
+        ),
+    )
+    ap.add_argument(
+        "--random-timestamp-offset",
+        type=int,
+        metavar="MAX_DAYS",
+        help=(
+            "Pick a random offset in [1, MAX_DAYS] and use it, so consecutive "
+            "snapshots differ by construction rather than by operator "
+            "discipline. The chosen value is PRINTED to stderr and never stored: "
+            "the rotation check in check-snapshot-channel.py compares "
+            "fingerprints, not offsets."
+        ),
+    )
     args = ap.parse_args()
     if not args.out:
         ap.add_argument("--out", required=True, help="required")
+
+    if args.timestamp_offset is not None and args.random_timestamp_offset is not None:
+        ap.error("give --timestamp-offset or --random-timestamp-offset, not both")
+    offset = args.timestamp_offset
+    if args.random_timestamp_offset is not None:
+        if args.random_timestamp_offset < 1:
+            ap.error("--random-timestamp-offset must be at least 1 day: an offset of "
+                     "0 is not an offset, and a negative one moves timestamps INTO "
+                     "the past relative to their true date, which is a disclosure")
+        offset = random.randint(1, args.random_timestamp_offset)
+        print(f"# timestamp offset: {offset} days (unpublished; not stored in the dump)",
+              file=sys.stderr)
+    if offset == 0:
+        ap.error("--timestamp-offset 0 shifts nothing and would be recorded as a "
+                 "rotation that did not happen")
     mode = args.mode
     if mode == "instance":
         mode = read_instance_mode() or "cache"
         if args.print_stats:
             print(f"# retention mode: {mode} (read from instance_retention_policy)")
-    stats = build(args.out, mode)
+    stats = build(args.out, mode, offset_days=offset)
     if args.print_stats:
         for k, v in stats.items():
             print(f"{k}: {v}")

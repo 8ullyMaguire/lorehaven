@@ -18,9 +18,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "accounts.created_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "offset_timestamps",
+   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
   },
   "accounts.deleted_at": {
    "treatment": "keep",
@@ -73,9 +73,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "accounts.updated_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "offset_timestamps",
+   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
   },
   "accounts.version": {
    "treatment": "keep",
@@ -157,6 +157,11 @@
    "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of category_votes into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
   },
+  "chapter_revisions.created_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+  },
   "chapter_revisions.document_json": {
    "treatment": "keep_gated",
    "why": "The chapter body as a structural document. Same body, third shape; it contains the text as string values inside the JSON.",
@@ -173,9 +178,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
   },
   "chapters.created_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "offset_timestamps",
+   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
   },
   "chapters.current_revision_id": {
    "treatment": "keep",
@@ -203,9 +208,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "chapters.updated_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "offset_timestamps",
+   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
   },
   "chapters.version": {
    "treatment": "keep",
@@ -258,9 +263,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "comments.created_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "offset_timestamps",
+   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
   },
   "comments.deleted_at": {
    "treatment": "keep",
@@ -321,6 +326,16 @@
    "treatment": "rekey_account",
    "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+  },
+  "did_not_finish.created_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+  },
+  "did_not_finish.updated_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
   },
   "directory_votes.account_id": {
    "treatment": "rekey_text",
@@ -407,6 +422,26 @@
    "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
+  "library_items.created_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+  },
+  "library_items.last_synced_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+  },
+  "library_items.source_updated_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+  },
+  "library_items.updated_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+  },
   "link_challenges.token_id": {
    "treatment": "drop_column",
    "why": "Resolves to a live token row that is itself dropped.",
@@ -488,9 +523,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "pseuds.created_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "offset_timestamps",
+   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
   },
   "pseuds.deleted_at": {
    "treatment": "keep",
@@ -518,9 +553,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3/11.16.3b"
   },
   "pseuds.updated_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "offset_timestamps",
+   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
   },
   "pseuds.version": {
    "treatment": "keep",
@@ -542,6 +577,21 @@
    "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
+  "rating.created_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+  },
+  "rating.deleted_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+  },
+  "rating.updated_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+  },
   "reader_note.account_id": {
    "treatment": "rekey_account",
    "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
@@ -557,10 +607,30 @@
    "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
   },
+  "reading_history_entry.created_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+  },
+  "reading_history_entry.last_read_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+  },
   "reading_progress.account_id": {
    "treatment": "rekey_account",
    "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+  },
+  "reading_progress.created_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+  },
+  "reading_progress.updated_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
   },
   "reading_sessions.account_id": {
    "treatment": "rekey_account",
@@ -591,6 +661,26 @@
    "treatment": "keep_gated",
    "why": "Reader review text. Gated.",
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
+  },
+  "review.created_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+  },
+  "review.deleted_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+  },
+  "review.published_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+  },
+  "review.updated_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
   },
   "roadmap_ballots.account_id": {
    "treatment": "rekey_account",
@@ -633,9 +723,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "sessions.created_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "offset_timestamps",
+   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
   },
   "sessions.csrf_token_hash": {
    "treatment": "drop_column",
@@ -743,9 +833,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "webhook_endpoints.created_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "offset_timestamps",
+   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
   },
   "webhook_endpoints.events": {
    "treatment": "keep",
@@ -771,6 +861,11 @@
    "treatment": "keep",
    "why": "Operational or content metadata; carries no personal data.",
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+  },
+  "work_contributors.created_at": {
+   "treatment": "offset_timestamps",
+   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
   },
   "work_entitlements.account_id": {
    "treatment": "rekey_account",
@@ -823,9 +918,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "works.created_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "offset_timestamps",
+   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
   },
   "works.deleted_at": {
    "treatment": "keep",
@@ -908,9 +1003,9 @@
    "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
   },
   "works.updated_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+   "treatment": "offset_timestamps",
+   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
   },
   "works.version": {
    "treatment": "keep",
