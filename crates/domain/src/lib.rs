@@ -49,6 +49,7 @@ pub mod query_sql_user;
 pub mod reading;
 pub mod recommendation_transparency;
 pub mod retention;
+pub mod retention_quorum;
 pub mod settings;
 pub mod spoilers;
 pub mod stats;
