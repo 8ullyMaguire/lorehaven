@@ -732,6 +732,26 @@ impl SafeFetcher {
 
     /// Fetch, declaring what kind of read this is (spec §11.5, `FetchClass`).
     ///
+    /// **The public entry point for a class-declared read, and it is public
+    /// because a caller outside this crate needs it.** The preservation
+    /// recheck (M59, spec §2.5) is the first: it reads a destination archive's
+    /// public item page to decide whether the work is still preserved there,
+    /// and it must declare that read as `Metadata` so the 1 MiB ceiling and
+    /// `MetadataOnly` robots posture apply. With only [`Fetcher::get`] on the
+    /// public surface, its two options were both wrong — declaring `Content`
+    /// for a page it intends to compare and discard, or reaching into
+    /// `get_with_class`, which is private.
+    ///
+    /// The direction of the default is the same here as in
+    /// [`Self::get_with_redirects`]: an undeclared read is treated as the most
+    /// privileged class, because under `MetadataOnly` that is a *refusal* and
+    /// the alternative makes the undeclared case the one that gets through.
+    pub async fn get_declared(&self, url: &str, class: FetchClass) -> SourceResult<crate::Fetched> {
+        expect_fetched(self.get_with_class(url, None, None, class).await?)
+    }
+
+    /// Fetch, declaring what kind of read this is (spec §11.5, `FetchClass`).
+    ///
     /// The class is a parameter rather than something derived from the URL,
     /// because a URL that looks like a chapter fetched as `Metadata` has to be
     /// bounded as a metadata fetch. A fetcher that inferred it from the path

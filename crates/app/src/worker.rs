@@ -554,6 +554,9 @@ impl Worker {
                 })?;
                 crate::bulk_export::run_bulk(state, &payload).await
             }
+            JobKind::PreservationRecheck => {
+                crate::preservation_recheck::handle_recheck(state).await
+            }
         }
     }
 

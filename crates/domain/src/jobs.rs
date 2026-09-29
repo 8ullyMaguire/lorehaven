@@ -164,6 +164,21 @@ job_kinds! {
     #[doc = "audio blob and a `narration` edition is created with the machine"]
     #[doc = "producer labeled per §22.6/§30.8."]
     Narration => "narration",
+    #[doc = "Re-verify preservation targets and reclaim the credits of dead ones"]
+    #[doc = "(M59 / spec §11.12a, §2.3)."]
+    #[doc = ""]
+    #[doc = "A job because it is the only thing that reads a destination's item"]
+    #[doc = "page over the network, and §11.5's metadata ceiling and §11.5's pacing"]
+    #[doc = "both apply to every fetch it makes. One verified target is one"]
+    #[doc = "network round trip, so an instance with thousands of them cannot do"]
+    #[doc = "this inline on a request."]
+    #[doc = ""]
+    #[doc = "Bulk rather than Interactive on purpose: it competes with nothing a"]
+    #[doc = "reader is waiting for, it is outbound network work against"]
+    #[doc = "third-party archives, and §11.5's pacing exists to be gentle to them."]
+    #[doc = "An interactive class would let a hundred re-verifications delay the"]
+    #[doc = "import a reader just submitted."]
+    PreservationRecheck => "preservation_recheck",
 }
 /// The queue's claim classes — separate from the HTTP route rate classes
 /// (`crate::limiter::RouteClass`). The rate limiter guards the HTTP surface;
@@ -193,6 +208,9 @@ impl JobKind {
             Self::Derivative => ResourceClass::Interactive,
             Self::Narration => ResourceClass::Interactive,
             Self::MediaFetch => ResourceClass::Interactive,
+            // Bulk: outbound network work against third-party archives, and
+            // nothing a reader is waiting for. See the variant's doc comment.
+            Self::PreservationRecheck => ResourceClass::Bulk,
         }
     }
 
@@ -215,6 +233,10 @@ impl JobKind {
             Self::Derivative => 8,
             Self::Narration => 9,
             Self::MediaFetch => 10,
+            // 11, appended rather than renumbered: `kind_index` places a kind in
+            // a fixed array and existing indices are load-bearing for any
+            // array already persisted. A new kind takes the next free slot.
+            Self::PreservationRecheck => 11,
         }
     }
 }

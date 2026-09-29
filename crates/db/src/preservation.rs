@@ -28,6 +28,7 @@
 //! knows for certain.
 
 use anyhow::Result;
+use lorehaven_domain::economy::TxnType;
 use lorehaven_domain::preservation::{PreservationState, Redistribution};
 use uuid::Uuid;
 
@@ -1064,4 +1065,236 @@ pub async fn write_redistribution(
         }
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Credits: the grant and the clawback
+// ---------------------------------------------------------------------------
+
+/// What a grant or a clawback did, so a caller can report it without
+/// re-deriving it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LedgerOutcome {
+    /// A new entry was posted. `credits` is the amount.
+    Posted { credits: i64 },
+    /// The idempotency key had already been used; the existing entry stands.
+    ///
+    /// A distinct answer from `Posted { credits: 0 }`, and deliberately so: the
+    /// first means "this target is now worth nothing" and the second means "this
+    /// target already paid and I am not paying again". A caller reporting the
+    /// first as the second would tell a reader their fourth destination earned
+    /// nothing when it in fact earned a quarter of full, an hour ago.
+    AlreadyPosted { credits: i64 },
+}
+
+impl LedgerOutcome {
+    /// The amount, whichever way the call went.
+    #[must_use]
+    pub const fn credits(self) -> i64 {
+        match self {
+            Self::Posted { credits } | Self::AlreadyPosted { credits } => credits,
+        }
+    }
+
+    /// Whether this call actually wrote a ledger entry.
+    #[must_use]
+    pub const fn wrote(self) -> bool {
+        matches!(self, Self::Posted { .. })
+    }
+}
+
+/// The account a work's preservation credits are paid to.
+///
+/// §2.1 pays for preserving a *work*, and the corpus being preserved is the
+/// author's — so the destination is the work's owner, not the account that
+/// performed the crosspost. Paying whoever clicked would make the reward a
+/// measure of clicking, and it would pay a stranger to preserve somebody else's
+/// work.
+///
+/// A work with no owner pseud cannot happen (`works.owner_pseud_id` is NOT
+/// NULL), so this returns an error rather than an `Option`: a work that exists
+/// and cannot name an owner is a corrupt row, and silently paying nobody would
+/// make the reward vanish without a trace.
+pub async fn reward_account_for_work(db: &Database, work_id: &str) -> Result<String> {
+    let sql = db.sql(
+        "SELECT p.account_id FROM works w JOIN pseuds p ON p.id = w.owner_pseud_id WHERE w.id = ?",
+        "SELECT p.account_id::text FROM works w JOIN pseuds p ON p.id = w.owner_pseud_id WHERE w.id = $1::uuid",
+    );
+    let row: Option<String> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar(&sql)
+                .bind(work_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar(&sql)
+                .bind(work_id)
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    row.ok_or_else(|| {
+        anyhow::anyhow!("work {work_id} has no owner pseud to pay its preservation reward to")
+    })
+}
+
+/// Pay a verified target's reward, exactly once.
+///
+/// **Two entries are never balanced against each other here, and the grant is
+/// a single-sided entry.** `post_transaction` takes a list of entries and
+/// `entries_balanced` exists for double-entry bookkeeping; the grant posts one
+/// positive entry into `credits` with no offsetting debit, because the
+/// *source* of credits in this system is not another account. That is
+/// deliberate and it is what the clawback has to mirror: the clawback posts a
+/// single negative entry, so the pair reads as "paid N" then "reclaimed N" and a
+/// reader who spent the N sees the debt appear as its own row.
+///
+/// The idempotency key is `preservation:grant:<member_id>`, so a replayed
+/// verification — a retried job, a double-clicked button, a recheck that
+/// re-confirms a live target — returns `AlreadyPosted` and pays nothing.
+///
+/// A zero-credit reward is **not** posted at all. A destination past the cap
+/// "records and displays and pays nothing" (§2.2), and posting a zero entry
+/// would be a ledger row with no meaning that a reader's statement has to
+/// render and explain.
+pub async fn grant_credits(
+    db: &Database,
+    member_id: &str,
+    account: &str,
+    credits: i64,
+) -> Result<LedgerOutcome> {
+    if credits <= 0 {
+        return Ok(LedgerOutcome::Posted { credits: 0 });
+    }
+    let key = format!("preservation:grant:{member_id}");
+    let already = ledger_entry_for(db, &key).await?;
+    if let Some(amount) = already {
+        return Ok(LedgerOutcome::AlreadyPosted { credits: amount });
+    }
+    crate::economy::post_transaction(
+        db,
+        TxnType::Preservation,
+        &key,
+        member_id,
+        &[(account.to_owned(), "credits".to_owned(), credits)],
+    )
+    .await?;
+    set_credits_paid(db, member_id, credits).await?;
+    Ok(LedgerOutcome::Posted { credits })
+}
+
+/// Take back a dead target's reward, exactly once.
+///
+/// **A second ledger entry and never a balance edit.** §2.3 requires it and the
+/// reason is reader-facing: a reader who has already *spent* the credits has to
+/// see that they now owe them, and a balance mutation cannot show a debt —
+/// it just makes the number smaller, indistinguishable from having never been
+/// paid. So the clawback posts `preservation_reclaim` with a negative amount
+/// and the pair is legible in a statement.
+///
+/// The amount is read from `credits_paid` on the member rather than recomputed
+/// from the reward policy. Recomputing would be wrong the moment a policy
+/// changes: the clawback would take back what the *current* policy says a dead
+/// target is worth rather than what it was actually *paid*, and a policy change
+/// would silently confiscate balances.
+///
+/// A member with `credits_paid = 0` posts nothing. That is the cap case and the
+/// never-verified case, and in both the correct reversal is "nothing", which a
+/// zero row would only obscure.
+pub async fn reclaim_credits(db: &Database, member_id: &str) -> Result<LedgerOutcome> {
+    let paid = match target_by_member(db, member_id).await? {
+        Some(target) => target.credits_paid,
+        None => return Ok(LedgerOutcome::Posted { credits: 0 }),
+    };
+    if paid <= 0 {
+        return Ok(LedgerOutcome::Posted { credits: 0 });
+    }
+    let key = format!("preservation:reclaim:{member_id}");
+    let account = account_for_paid_credits(db, member_id).await?;
+    let already = ledger_entry_for(db, &key).await?;
+    if let Some(amount) = already {
+        return Ok(LedgerOutcome::AlreadyPosted { credits: -amount });
+    }
+    crate::economy::post_transaction(
+        db,
+        TxnType::PreservationReclaim,
+        &key,
+        member_id,
+        &[(account, "credits".to_owned(), -paid)],
+    )
+    .await?;
+    // `credits_paid` is set to 0 rather than left at the paid amount: it is the
+    // index the clawback reads, and leaving it would make a second recheck
+    // reverse the same credits again. The ledger keeps the record; this column
+    // tracks what is still outstanding.
+    set_credits_paid(db, member_id, 0).await?;
+    Ok(LedgerOutcome::Posted { credits: -paid })
+}
+
+/// The account a paid grant went to, read back from the ledger.
+///
+/// **Read from the entry rather than recomputed from the work's current
+/// owner**, and the reason is the same as the amount: works change hands. If a
+/// work is transferred, recomputing would claw back the *new* owner's credits —
+/// taking money from somebody who was never paid. The ledger entry names who
+/// was, and that is the only honest answer.
+///
+/// Returns an error when there is no grant to read, which the caller has
+/// already established by `credits_paid > 0`.
+async fn account_for_paid_credits(db: &Database, member_id: &str) -> Result<String> {
+    let sql = db.sql(
+        "SELECT account FROM credit_entries WHERE transaction_id =
+           (SELECT id FROM credit_transactions WHERE idempotency_key = ?)",
+        "SELECT account::text FROM credit_entries WHERE transaction_id =
+           (SELECT id FROM credit_transactions WHERE idempotency_key = $1)",
+    );
+    let row: Option<String> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_scalar(&sql)
+                .bind(format!("preservation:grant:{member_id}"))
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_scalar(&sql)
+                .bind(format!("preservation:grant:{member_id}"))
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    row.ok_or_else(|| {
+        anyhow::anyhow!(
+            "target {member_id} records credits_paid > 0 but no ledger entry \
+             preservation:grant:{member_id} exists; the two are written together and \
+             a disagreement between them is a bug, not a state to recover from"
+        )
+    })
+}
+
+/// The amount already posted under an idempotency key, or `None`.
+///
+/// `amount_bp` on `credit_entries` despite the name holds whole credits
+/// throughout this codebase — `post_transaction` binds the caller's `i64`
+/// straight into it. Reading it back as the amount is therefore correct, and the
+/// column name is a historical artefact rather than a scale to divide by.
+async fn ledger_entry_for(db: &Database, key: &str) -> Result<Option<i64>> {
+    let sql = db.sql(
+        "SELECT e.amount_bp FROM credit_entries e
+           JOIN credit_transactions t ON t.id = e.transaction_id
+          WHERE t.idempotency_key = ?",
+        "SELECT e.amount_bp::bigint AS amount_bp FROM credit_entries e
+           JOIN credit_transactions t ON t.id = e.transaction_id
+          WHERE t.idempotency_key = $1",
+    );
+    match db.backend() {
+        Backend::Sqlite => Ok(sqlx::query_scalar(&sql)
+            .bind(key)
+            .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+            .await?),
+        Backend::Postgres => Ok(sqlx::query_scalar(&sql)
+            .bind(key)
+            .fetch_optional(db.postgres_pool().expect("postgres handle"))
+            .await?),
+    }
 }
