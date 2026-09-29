@@ -316,6 +316,32 @@ impl Worker {
                 "loans past their window were recorded as expired; their copies are free again"
             );
         }
+        // Preservation: queue today's recheck (spec §2.3, §11.12a).
+        //
+        // **Enqueued, not run here.** This pass is storage work and returns
+        // promptly; a recheck makes outbound requests to third-party archives
+        // and §11.5's pacing is a per-host promise, so walking a thousand
+        // targets inline would hold the worker for minutes and hammer whoever
+        // is on the other end. The handler is the same either way; the queue is
+        // what keeps a slow destination off the maintenance path.
+        //
+        // **Keyed on the date, so it is once a day rather than once per pass.**
+        // This pass runs every 30 cycles, which on a busy instance is minutes.
+        // The key also means "did today's recheck run" is a row in `jobs` rather
+        // than a line in a log -- and `enqueue` is a no-op when the key exists,
+        // so several passes in one day cost one query.
+        let recheck_key = format!("preservation:recheck:{}", now.date().to_string());
+        let recheck = jobs::enqueue(
+            state.db(),
+            JobKind::PreservationRecheck,
+            "{}",
+            Some(&recheck_key),
+            None,
+            0,
+            &RetryPolicy::default(),
+        )
+        .await?;
+        tracing::debug!(%recheck, "queued the daily preservation recheck");
         Ok(())
     }
 
