@@ -35,8 +35,42 @@ struct MetaResponse {
     environment: &'static str,
     base_url: String,
     policy: PolicySummary,
+    /// What this instance classifies with, disclosed to every reader (amendment
+    /// §3.4). See [`DecisionsSummary`].
+    decisions: DecisionsSummary,
     topics: Vec<TopicSummary>,
     theme: ThemeSummary,
+}
+
+/// How this instance classifies, and with what (amendment §3.4).
+///
+/// Reported to EVERY reader, signed in or not, and that is the point. Spec
+/// §0.4.3 asks an instance to disclose what it is that decides; §11.15's
+/// retention setting gets the same treatment. A reader whose comments are
+/// filtered by a 678 MB local model is owed the knowledge that a model did it,
+/// and `/meta` is the one endpoint an integration already reads before it
+/// renders anything.
+///
+/// **A deterministic instance discloses `"deterministic"` rather than omitting
+/// the field.** Omission would be the same as absence, and a client that reads
+/// a missing field as "unknown, assume the worst" has learned nothing; a client
+/// that reads it as "not present" is entitled to that reading, and "present, and
+/// it is the instance's own classifiers" is the truth.
+///
+/// The thresholds travel with it. An operator who has moved `accept_threshold`
+/// has changed what this instance holds to be a work, and that is a setting a
+/// reader is being graded against.
+#[derive(Debug, Serialize)]
+struct DecisionsSummary {
+    /// `"deterministic"` or `"calibrated"`.
+    provider: &'static str,
+    /// The posterior at or above which an acceptance is kept. Meaningless under
+    /// `deterministic`, and still reported: a client rendering "your instance
+    /// grades with its own rules" should not have to special-case the field's
+    /// absence to avoid implying a number that is not in force.
+    accept_threshold: f64,
+    /// Below this the model is not consulted at all.
+    consult_floor: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -93,6 +127,11 @@ async fn meta(
             adult_max_rating: rating_name(policy.adult_max_rating),
             registration_open: true,
             csrf_required: config.security.csrf_required,
+        },
+        decisions: DecisionsSummary {
+            provider: config.decisions.provider.as_str(),
+            accept_threshold: config.decisions.accept_threshold,
+            consult_floor: config.decisions.consult_floor,
         },
         topics: config
             .site

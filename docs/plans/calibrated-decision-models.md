@@ -243,7 +243,16 @@ $ cargo test -p lorehaven-app --lib config
 # expected: a test that a NaN threshold is refused, not clamped
 ```
 
-## Step 5 — the audit trail
+## Step 5 — the audit trail  *(DONE, 2026-09-29 — commit 99039aa)*
+
+Delivered as specified. One deviation from the plan's SQL, and it is the plan's
+own draft that was wrong: `created_at` is declared `TEXT` in both dialects
+rather than a timestamp type, because the repository's existing rows store
+timestamps as TEXT and the Postgres read casts with `::text AS created_at`. A
+narrower `TIMESTAMPTZ` here would have been more correct and would have
+inconsisted with every neighbouring table.
+
+
 
 `/decisions/audit` currently returns `{ "items": [] }` — an endpoint that has
 always been empty. Give it a table:
@@ -281,7 +290,21 @@ $ cargo test -p lorehaven-db --lib decision
 #   the_two_dialects_declare_the_same_columns_and_indexes
 ```
 
-## Step 6 — disclosure on `/api/v1/meta`
+## Step 6 — disclosure on `/api/v1/meta`  *(DONE, 2026-09-29)*
+
+Delivered, with one addition the plan did not ask for and should have: the
+no-leak test pins the disclosure's **key set** to exactly
+`{provider, accept_threshold, consult_floor}`. A test that only asserts the
+three values are correct passes just as happily against a fourth field
+carrying the model host.
+
+A test bug worth recording, because the first version of it failed and the
+failure was the *test's* fault: scanning the whole `/meta` body for
+`base_url` and `localhost` fails against `base_url`'s pre-existing top-level
+occurrence, which is the instance's own public address. A whole-body scan is
+the wrong scope, and "delete the failing assertion" is the wrong fix.
+
+
 
 `crates/app/src/routes/meta.rs` gains the provider name and the two
 thresholds. §0.4.3 requires an instance to disclose what it is that decides;
