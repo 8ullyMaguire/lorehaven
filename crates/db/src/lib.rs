@@ -58,6 +58,7 @@ pub mod rating_integrity;
 pub mod reading;
 pub mod rec_strategy;
 pub mod recommendation_slots;
+pub mod retention;
 pub mod revisions;
 pub mod roadmap;
 pub mod roles;

@@ -211,6 +211,268 @@ impl BodyAudience {
     }
 }
 
+// ---------------------------------------------------------------------------
+// §11.15 — the retention setting itself.
+//
+// The audience above answers "who may read a body this instance holds". It
+// presupposes that it holds one. This half answers the prior question: does it?
+// ---------------------------------------------------------------------------
+
+/// Whether this instance stores fetched bodies, or is a catalogue of links
+/// (spec §11.15).
+///
+/// Two values and not three, for the reason §11.15 gives: the media setting
+/// (§30.2) needed a third because media has a player shell to omit, and text has
+/// no shell. A third value here would be a state with no behaviour behind it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BodyMode {
+    /// The fetched body is stored here and served from here. A library item is
+    /// a durable snapshot referenced by that reader's copy. The default, and the
+    /// behaviour of every instance built before this type existed.
+    #[default]
+    Cache,
+    /// Metadata, attribution, provenance and canonical links are stored; the
+    /// body is never fetched into this instance's storage. A library item is a
+    /// reference to the work at its origin.
+    Aggregate,
+}
+
+impl BodyMode {
+    /// The stored spelling. It is a database value and an API response where
+    /// changing it is a migration, so it is one function and not a serde derive
+    /// somebody can rename away.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Cache => "cache",
+            Self::Aggregate => "aggregate",
+        }
+    }
+
+    /// Parse a stored mode, `None` for absent or unrecognised.
+    ///
+    /// Absent and unrecognised are kept together for the same reason
+    /// `BodyAudience::parse_stored` keeps three inputs together, and with the
+    /// same asymmetry: an unrecognised mode fails **closed to `Cache`**, not to
+    /// `Aggregate`. That is the non-obvious part. A reader meeting a value from
+    /// a newer build would otherwise decide the opposite of what the operator
+    /// chose, and the two defaults differ in what they cost — `Aggregate` under
+    /// a `Cache` operator silently stops storing every body this instance holds,
+    /// which is a policy change made by a downgrade. `Cache` under an
+    /// `Aggregate` operator over-retains, which is the pre-existing behaviour of
+    /// every instance and is the §10.4 deletion workflow's business, not this
+    /// function's.
+    #[must_use]
+    pub fn parse_stored(value: Option<&str>) -> Option<Self> {
+        match value?.trim() {
+            "cache" => Some(Self::Cache),
+            "aggregate" => Some(Self::Aggregate),
+            _ => None,
+        }
+    }
+
+    /// Whether this mode stores bodies.
+    #[must_use]
+    pub const fn stores_bodies(self) -> bool {
+        matches!(self, Self::Cache)
+    }
+}
+
+/// Why a body was refused, as a stable code (spec §11.15, amendment §4.1).
+///
+/// The amendment adds this as an explicit addition to §11.15 precisely so that
+/// the six refusal paths are *enumerable*. The alternative — six hand-written
+/// strings at six call sites — drifts, and a caller that wants to know whether
+/// it is allowed to retry has no way to tell a rate limit from a policy.
+///
+/// Every variant names a *policy*, never a transient condition. A network error
+/// is not a refusal: it is a failure, it retries, and it must not be reported to
+/// a reader as the instance declining on purpose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RetentionReason {
+    /// The instance is set to `aggregate` and this source has no override.
+    Aggregate,
+    /// The instance is `cache`, but this source family is overridden to
+    /// `aggregate`. Distinct from `Aggregate` because the fix differs: the
+    /// operator narrows a source, and the source's own configuration is fine.
+    AggregateSourceOverride,
+    /// The source is blocked, so nothing may be fetched from it at all
+    /// (§11.6). Distinguished from the two above because it is not about
+    /// retention: widening the retention mode would not make this work.
+    SourceBlocked,
+    /// The origin is gone (§11.13) and this instance holds no body, so there is
+    /// nothing to serve and nothing to fetch. A dead end that no setting
+    /// recovers.
+    Vanished,
+}
+
+impl RetentionReason {
+    /// The stable wire code, which is the thing a caller may branch on.
+    #[must_use]
+    pub const fn as_code(self) -> &'static str {
+        match self {
+            Self::Aggregate => "RETENTION_AGGREGATE",
+            Self::AggregateSourceOverride => "RETENTION_AGGREGATE_SOURCE_OVERRIDE",
+            Self::SourceBlocked => "RETENTION_SOURCE_BLOCKED",
+            Self::Vanished => "RETENTION_VANISHED",
+        }
+    }
+
+    /// The human sentence a refusal carries, naming the policy.
+    ///
+    /// §11.15 requires that "every refusal names the instance's policy rather
+    /// than failing as a generic error", so this returns prose and not just a
+    /// code. The sentence is built from the code's own components rather than
+    /// stored beside it, so the two cannot drift.
+    #[must_use]
+    pub fn message(self, source_key: Option<&str>) -> String {
+        let source = source_key.unwrap_or("this instance");
+        match self {
+            Self::Aggregate => format!(
+                "{source} is set to aggregate: this instance keeps metadata and links, not \
+                 the text. Change the retention policy in admin settings if you want it to hold \
+                 bodies."
+            ),
+            Self::AggregateSourceOverride => format!(
+                "{source} is overridden to aggregate on this instance, even though the instance \
+                 itself caches bodies. Remove the source override in admin settings to store it."
+            ),
+            Self::SourceBlocked => format!(
+                "{source} is blocked, so nothing is fetched from it. Unblock the source first."
+            ),
+            Self::Vanished => format!(
+                "{source} is no longer reachable and this instance holds no body for this work, \
+                 so there is nothing to fetch."
+            ),
+        }
+    }
+}
+
+/// A refusal, carrying the code and the sentence together.
+///
+/// This exists because §11.15 requires that "every refusal names the instance's
+/// policy rather than failing as a generic error", and returning a bare
+/// `RetentionReason` cannot enforce that. A code is a branch condition; a
+/// call site that formats one into its own error has to re-derive the sentence,
+/// and the re-derived sentence is where the requirement goes to die — one site
+/// writes "not allowed", another writes "forbidden", and §11.15 is satisfied in
+/// the type and violated on the wire.
+///
+/// So the message is a field. The only way to produce the error is to produce
+/// the sentence with it, and `message()` is a getter rather than a constructor
+/// precisely so that no call site can assemble one by hand.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetentionRefusal {
+    /// Which of the four paths refused. What a caller branches on.
+    pub reason: RetentionReason,
+    /// The source the request was for, when the call site named one.
+    pub source_key: Option<String>,
+}
+
+impl RetentionRefusal {
+    /// The sentence a reader or an operator is shown.
+    ///
+    /// Names the policy and the thing to change. A refusal that only says "no"
+    /// costs the reader a support question, and §11.15's whole point is that the
+    /// operator's decision is visible to them.
+    #[must_use]
+    pub fn message(&self) -> String {
+        self.reason.message(self.source_key.as_deref())
+    }
+
+    /// The stable wire code, forwarded so a serialiser reads one shape.
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        self.reason.as_code()
+    }
+}
+
+impl std::fmt::Display for RetentionRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.code(), self.message())
+    }
+}
+
+impl std::error::Error for RetentionRefusal {}
+
+/// The retention policy as it applies to one body request.
+///
+/// Resolved once, at the door, so that no call site re-derives it. Every
+/// field is a fact rather than a question, which is what lets
+/// `check_body_allowed` be a total function with no database access.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedRetention {
+    /// The instance's own setting.
+    pub instance: BodyMode,
+    /// The per-source override, if this source has one. Narrowing only.
+    pub source: Option<BodyMode>,
+    /// Whether the source is blocked at all (§11.6).
+    pub source_blocked: bool,
+    /// Whether the origin is unreachable (§11.13) and no body is held.
+    pub vanished: bool,
+}
+
+/// Whether this instance may store a body for this source (spec §11.15).
+///
+/// The one function every storage path calls, so the six paths cannot disagree
+/// about the answer. Order matters and is the order the reasons are ordered in:
+/// a blocked source and a vanished origin are both answered before the mode,
+/// because neither is fixed by changing the mode, and reporting
+/// `RETENTION_AGGREGATE` to somebody whose source is blocked would send them to
+/// change a setting that cannot help them.
+///
+/// A per-source override may only narrow. `narrowest_mode` decides, so an
+/// override of `Cache` on an `Aggregate` instance resolves to `Aggregate`
+/// rather than being an error here — the *setter* refuses a widening by name
+/// (§11.15: "the reverse on an aggregate instance is not"), because refusing at
+/// the write is what makes the rule visible to the operator who typed it. A
+/// reader that widened through some other path still gets the safe answer here.
+pub fn check_body_allowed(
+    policy: &ResolvedRetention,
+    source_key: Option<&str>,
+) -> Result<(), RetentionRefusal> {
+    let refuse = |reason| RetentionRefusal {
+        reason,
+        source_key: source_key.map(str::to_owned),
+    };
+    if policy.source_blocked {
+        return Err(refuse(RetentionReason::SourceBlocked));
+    }
+    if policy.vanished {
+        return Err(refuse(RetentionReason::Vanished));
+    }
+    let effective = narrowest_mode(policy.instance, policy.source);
+    if effective == BodyMode::Aggregate {
+        return Err(refuse(if policy.source == Some(BodyMode::Aggregate) {
+            RetentionReason::AggregateSourceOverride
+        } else {
+            RetentionReason::Aggregate
+        }));
+    }
+    Ok(())
+}
+
+/// The narrower of two modes, where `aggregate` is the narrower.
+///
+/// `None` is "inherit", so the instance's own mode is returned unchanged. Two
+/// values make this a comparison rather than a rank table, but it is still one
+/// function because the direction is the thing that must not be guessed: a
+/// reader that returned the *wider* of two settings here would let a per-source
+/// `Cache` override restore storage on an aggregating instance, which is the
+/// one widening §11.15 refuses.
+#[must_use]
+pub fn narrowest_mode(instance: BodyMode, source: Option<BodyMode>) -> BodyMode {
+    match source {
+        None => instance,
+        Some(BodyMode::Aggregate) => BodyMode::Aggregate,
+        // `Cache` is wider, so it never wins over the instance — including when
+        // the instance is `Cache` too, where the two are the same answer.
+        Some(BodyMode::Cache) => instance,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -587,5 +849,289 @@ mod tests {
             standing_satisfies(BodyAudience::AccountsOnly, &fresh),
             "a signed-in account at trust 0 is exactly what `accounts_only` describes"
         );
+    }
+
+    // -- §11.15: the mode, the reasons, and the one function that reads them --
+
+    /// The source every test below asks about, so the `source_key` field of a
+    /// refusal is the same value in the expectation as in the result.
+    ///
+    /// Without this the equality assertions would compare a refusal built from
+    /// `Some("ao3")` against a stub with `None`, and every one of them would
+    /// fail for a reason that has nothing to do with the code under test. A
+    /// shared fixture is the difference between the test failing because the
+    /// policy is wrong and failing because the harness is.
+    fn refusal() -> RetentionRefusal {
+        RetentionRefusal {
+            reason: RetentionReason::Aggregate,
+            source_key: Some("ao3".to_owned()),
+        }
+    }
+
+    /// The stored spelling round-trips for both values.
+    ///
+    /// A writer and a reader of the same column disagreeing is a setting that
+    /// flips, so the pair is asserted rather than assumed. `parse_stored` takes
+    /// `Option` and `as_stored` returns `String` for the audience types, and the
+    /// same shape is used here so a caller cannot accidentally use one for the
+    /// other.
+    #[test]
+    fn a_body_mode_round_trips_through_its_stored_spelling() {
+        for mode in [BodyMode::Cache, BodyMode::Aggregate] {
+            assert_eq!(
+                BodyMode::parse_stored(Some(mode.as_str())),
+                Some(mode),
+                "{mode:?} does not survive its own stored spelling"
+            );
+        }
+        assert_eq!(BodyMode::default(), BodyMode::Cache);
+    }
+
+    /// An unrecognised mode is refused, and the caller's default decides.
+    ///
+    /// Both halves, because the dangerous failure is the *pair* agreeing: a
+    /// parser that returned `Some(Aggregate)` for garbage would make a
+    /// downgrade stop storing every body on the instance, and a test that only
+    /// asserted "not Cache" would pass against that. `None` is the only honest
+    /// answer, and the caller then uses `BodyMode::default()`.
+    #[test]
+    fn an_unrecognised_body_mode_is_refused_rather_than_guessed() {
+        for value in [
+            "",
+            "  ",
+            "CACHE",
+            "Aggregate",
+            "cached",
+            "agggregate",
+            "metadata",
+        ] {
+            assert_eq!(
+                BodyMode::parse_stored(Some(value)),
+                None,
+                "{value:?} must not parse as a mode: it is a value this build has never heard of"
+            );
+        }
+        assert_eq!(BodyMode::parse_stored(None), None);
+    }
+
+    /// The four codes are exactly the four the amendment names, and distinct.
+    ///
+    /// Enumerable on purpose (amendment §4.1): a test that lists them is what
+    /// makes a fifth reason a deliberate addition rather than a quiet one. Two
+    /// reasons sharing a code would let a caller branch on a code that does not
+    /// identify the case it was written for.
+    #[test]
+    fn the_refusal_codes_are_the_four_the_amendment_names() {
+        let reasons = [
+            RetentionReason::Aggregate,
+            RetentionReason::AggregateSourceOverride,
+            RetentionReason::SourceBlocked,
+            RetentionReason::Vanished,
+        ];
+        let expected = [
+            "RETENTION_AGGREGATE",
+            "RETENTION_AGGREGATE_SOURCE_OVERRIDE",
+            "RETENTION_SOURCE_BLOCKED",
+            "RETENTION_VANISHED",
+        ];
+        for (reason, code) in reasons.iter().zip(expected.iter()) {
+            assert_eq!(reason.as_code(), *code);
+            assert!(
+                !reason.message(Some("ao3")).is_empty(),
+                "{code} must carry a sentence naming the policy, not fail generically"
+            );
+        }
+        let mut seen: Vec<&str> = reasons.iter().map(|r| r.as_code()).collect();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), reasons.len(), "two reasons share a code");
+    }
+
+    /// A caching instance stores; an aggregating one refuses, and the reason
+    /// distinguishes the instance from a per-source override.
+    ///
+    /// The reason distinction is the substantive half. Both refusals say
+    /// "aggregate", but they are fixed by different actions — one by the
+    /// instance setting, one by removing a source override — and a reader sent
+    /// to the wrong one of those two settings concludes the operator is wrong
+    /// about something they are not.
+    #[test]
+    fn an_aggregate_instance_refuses_and_a_caching_one_stores() {
+        let caching = ResolvedRetention {
+            instance: BodyMode::Cache,
+            source: None,
+            source_blocked: false,
+            vanished: false,
+        };
+        assert_eq!(check_body_allowed(&caching, Some("ao3")), Ok(()));
+
+        let aggregating = ResolvedRetention {
+            instance: BodyMode::Aggregate,
+            ..caching
+        };
+        assert_eq!(
+            check_body_allowed(&aggregating, Some("ao3")),
+            Err(RetentionRefusal {
+                reason: RetentionReason::Aggregate,
+                ..refusal()
+            }),
+            "an aggregating instance with no override is the plain case"
+        );
+
+        let overridden = ResolvedRetention {
+            instance: BodyMode::Cache,
+            source: Some(BodyMode::Aggregate),
+            ..caching
+        };
+        assert_eq!(
+            check_body_allowed(&overridden, Some("ao3")),
+            Err(RetentionRefusal {
+                reason: RetentionReason::AggregateSourceOverride,
+                ..refusal()
+            }),
+            "the instance caches, so this refusal is the override's doing and says so"
+        );
+    }
+
+    /// A per-source override may narrow and never widen.
+    ///
+    /// The widening half is the one with teeth: a per-source `Cache` on an
+    /// `Aggregate` instance would restore storage the operator removed, and
+    /// §11.15 refuses that at the setter. This is the second line of defence,
+    /// for a row that reached the table by some other path — and a test that
+    /// only checked the narrowing would pass against a `narrowest_mode` that
+    /// returned the override unconditionally.
+    #[test]
+    fn a_per_source_override_may_only_narrow() {
+        assert_eq!(
+            narrowest_mode(BodyMode::Cache, Some(BodyMode::Aggregate)),
+            BodyMode::Aggregate,
+            "narrowing is expressible"
+        );
+        assert_eq!(
+            narrowest_mode(BodyMode::Aggregate, Some(BodyMode::Cache)),
+            BodyMode::Aggregate,
+            "a widening override must not restore storage on an aggregating instance"
+        );
+        assert_eq!(
+            narrowest_mode(BodyMode::Cache, Some(BodyMode::Cache)),
+            BodyMode::Cache,
+            "an override equal to the instance is the same answer"
+        );
+        assert_eq!(
+            narrowest_mode(BodyMode::Aggregate, None),
+            BodyMode::Aggregate,
+            "no override means the instance decides"
+        );
+
+        let widened = ResolvedRetention {
+            instance: BodyMode::Aggregate,
+            source: Some(BodyMode::Cache),
+            source_blocked: false,
+            vanished: false,
+        };
+        assert_eq!(
+            check_body_allowed(&widened, Some("ao3")),
+            Err(RetentionRefusal {
+                reason: RetentionReason::Aggregate,
+                ..refusal()
+            }),
+            "the read side refuses a widening row even though the setter would have"
+        );
+    }
+
+    /// A blocked source and a vanished origin outrank the mode.
+    ///
+    /// Both orders, because the ordering is the thing being asserted: a refused
+    /// call that names `RETENTION_AGGREGATE` when the source is blocked sends
+    /// the operator to change a setting that cannot unblock a source. The
+    /// blocked arm is the *first* check, so it wins even when the instance is
+    /// `Aggregate` too — which is the ambiguous case, and the reason it is in
+    /// the table twice rather than once.
+    #[test]
+    fn a_blocked_source_and_a_vanished_origin_outrank_the_mode() {
+        let blocked_while_caching = ResolvedRetention {
+            instance: BodyMode::Cache,
+            source: None,
+            source_blocked: true,
+            vanished: false,
+        };
+        assert_eq!(
+            check_body_allowed(&blocked_while_caching, Some("ao3")),
+            Err(RetentionRefusal {
+                reason: RetentionReason::SourceBlocked,
+                ..refusal()
+            })
+        );
+
+        let blocked_while_aggregating = ResolvedRetention {
+            instance: BodyMode::Aggregate,
+            source: None,
+            source_blocked: true,
+            vanished: false,
+        };
+        assert_eq!(
+            check_body_allowed(&blocked_while_aggregating, Some("ao3")),
+            Err(RetentionRefusal {
+                reason: RetentionReason::SourceBlocked,
+                ..refusal()
+            }),
+            "an aggregating instance also has a blocked source; the reason is still the block"
+        );
+
+        let vanished = ResolvedRetention {
+            instance: BodyMode::Cache,
+            source: None,
+            source_blocked: false,
+            vanished: true,
+        };
+        assert_eq!(
+            check_body_allowed(&vanished, Some("ao3")),
+            Err(RetentionRefusal {
+                reason: RetentionReason::Vanished,
+                ..refusal()
+            }),
+            "a vanished origin is a dead end no setting recovers"
+        );
+
+        let both = ResolvedRetention {
+            instance: BodyMode::Cache,
+            source: None,
+            source_blocked: true,
+            vanished: true,
+        };
+        assert_eq!(
+            check_body_allowed(&both, Some("ao3")),
+            Err(RetentionRefusal {
+                reason: RetentionReason::SourceBlocked,
+                ..refusal()
+            }),
+            "the earlier check wins when both hold; the order is the decision"
+        );
+    }
+
+    /// Every refusal names the source it was asked about.
+    ///
+    /// §11.15: "every refusal names the instance's policy rather than failing as
+    /// a generic error". A message that says "aggregate" without saying *which*
+    /// source is the generic error the sentence forbids, and on an instance with
+    /// per-source overrides it is genuinely ambiguous.
+    #[test]
+    fn every_refusal_names_the_source_it_was_asked_about() {
+        for reason in [
+            RetentionReason::Aggregate,
+            RetentionReason::AggregateSourceOverride,
+            RetentionReason::SourceBlocked,
+            RetentionReason::Vanished,
+        ] {
+            let named = reason.message(Some("archiveofourown"));
+            assert!(
+                named.contains("archiveofourown"),
+                "{reason:?} did not name the source: {named}"
+            );
+            // And with no source named, it still says something rather than
+            // rendering an empty sentence.
+            assert!(!reason.message(None).is_empty());
+        }
     }
 }

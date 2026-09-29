@@ -146,7 +146,7 @@ impl Harness {
 
     async fn new(tag: &str) -> Self {
         let dir = scratch_dir(tag);
-        let mut config = config_for(&dir);
+        let config = config_for(&dir);
         // `TestDb` rather than a bare `Database::connect`, so the PostgreSQL arm
         // gets its OWN database per test.
         //
