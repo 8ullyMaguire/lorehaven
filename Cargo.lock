@@ -1669,6 +1669,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lorehaven-decisions"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "lorehaven-domain"
 version = "0.1.0"
 dependencies = [

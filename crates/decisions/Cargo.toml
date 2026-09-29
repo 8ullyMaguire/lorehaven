@@ -1,0 +1,22 @@
+[package]
+name = "lorehaven-decisions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Calibrated decision models (Laya) for Lorehaven — a client, and the policy that makes a model's answer safe to act on"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# The client talks to a loopback address and nothing else. `rustls-tls` rather
+# than `native-tls` so an instance that points `base_url` at a remote host does
+# not need OpenSSL headers installed to build, which is the failure that turns
+# a config change into a compile error on the deployment host.
+reqwest = { workspace = true, features = ["json"] }
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+axum.workspace = true
