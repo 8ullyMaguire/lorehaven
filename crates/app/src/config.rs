@@ -2130,6 +2130,25 @@ impl Config {
             age,
             rate_limits,
             imports,
+            // Present on the struct and reachable from the file, or neither. The
+            // `retention:` line below documents this exact trap having happened once
+            // already, in the other direction.
+            roadmap: RoadmapConfig {
+                min_trust: file.roadmap.as_ref().and_then(|r| r.min_trust).unwrap_or(1),
+            },
+            retention_governance: match file.retention_governance.as_ref() {
+                Some(section) => RetentionGovernanceConfig {
+                    proposal_min_trust: section.proposal_min_trust.unwrap_or(1),
+                    widen_quorum: section.widen_quorum.unwrap_or(3),
+                    proposal_cooling_days: section.proposal_cooling_days.unwrap_or(7),
+                    binding_mode: section.binding_mode.unwrap_or(false),
+                },
+                // `Default` rather than four more literals: the numbers and the
+                // `false` live in the one `impl Default`, so a default that changes
+                // changes once and a file naming one key still gets the documented
+                // value for the other three.
+                None => RetentionGovernanceConfig::default(),
+            },
             retention: RetentionConfig {
                 // `and_then(parse_stored)`: an unrecognised value yields `None`
                 // and therefore the default, which is the fail-closed direction
@@ -2410,8 +2429,6 @@ impl Config {
                 }
             },
             // --- library (spec §38) --------------------------------------------
-            roadmap: RoadmapConfig::default(),
-            retention_governance: RetentionGovernanceConfig::default(),
             library: LibraryConfig {
                 update_check_retention_days: file
                     .library
@@ -2751,8 +2768,58 @@ struct FileConfig {
     meta_ranker: Option<MetaRankerSection>,
     /// Body-audience baseline (spec §7.7).
     retention: Option<RetentionSection>,
+    /// Roadmap participation (spec §29.4).
+    roadmap: Option<RoadmapSection>,
+    /// Retention governance (spec §5, §19.15, amendment §5).
+    retention_governance: Option<RetentionGovernanceSection>,
     /// Calibrated decision models (amendment `calibrated-decision-models.md`).
     decisions: Option<DecisionsSection>,
+}
+
+/// The `[roadmap]` file section (spec §29.4).
+///
+/// This section did not exist when `RoadmapConfig` did, and the absence was
+/// invisible: the three call sites in `routes/roadmap.rs` read
+/// `state.config().roadmap.min_trust`, a Rust test could set it, and every such
+/// test passed — while an operator editing `lorehaven.toml` found the key
+/// silently ignored. That is the same defect `RetentionSection`'s own doc
+/// comment describes one section below, and it is worth being explicit that the
+/// *tests passing is the symptom*, not the reassurance: a test that sets a field
+/// on the struct proves the struct is readable, not that the file reaches it.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RoadmapSection {
+    /// The trust level a reader needs to ballot, vote, or suggest on the
+    /// roadmap. Defaults to 1, which is what the three call sites used to
+    /// hardcode.
+    min_trust: Option<i64>,
+}
+
+/// The `[retention_governance]` file section (spec §5, §19.15, amendment §5).
+///
+/// `deny_unknown_fields` because a misspelled key here is a governance setting
+/// that reads as applied and is not — and a governance setting that silently
+/// did not apply is the failure mode §5.2's "the setting is the operator's, and
+/// it is stated once" exists to prevent.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RetentionGovernanceSection {
+    /// The trust level needed to open a proposal or cast a ballot. Default 1.
+    proposal_min_trust: Option<i64>,
+    /// The bar for a change that *widens* storage. Default 3, and clamped up to
+    /// three by `quorum_for` — a configured bar below three is refused, not
+    /// honoured, and one above the reader count is honoured and means "this
+    /// instance does not change storage policy by vote".
+    widen_quorum: Option<i64>,
+    /// How many days a ballot stays open. Default 7. Recorded as a stored
+    /// `closes_at` per proposal, so changing this does not move the deadline of
+    /// a ballot somebody is already voting in.
+    proposal_cooling_days: Option<i64>,
+    /// Whether a passed proposal changes the setting on its own. Default
+    /// `false`: in advisory mode the readers' decision is a record and an
+    /// operator applies it, so a quorum of three is an argument rather than an
+    /// instruction.
+    binding_mode: Option<bool>,
 }
 
 /// The `[retention]` table (spec §7.7): who may read a body by default.

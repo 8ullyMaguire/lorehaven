@@ -100,11 +100,64 @@ Source fetching and CAPTCHA settings.
 
 | Key | Type | Default | Purpose |
 |-----|------|---------|---------|
-| `honour_robots` | `bool` | `true` | Respect robots.txt |
+| `robots_posture` | `string?` | `None` | Robots policy: `strict`, `permissive`, or `off`. The real setting |
+| `honour_robots` | `bool` | `true` | Compatibility key. `false` selects `permissive`; `true` selects `strict` unless `robots_posture` says otherwise |
 | `solver_url` | `string?` | `None` | CAPTCHA solver URL |
 | `archive_fallback` | `bool` | `false` | Fallback to archive.org |
+| `robots_posture_overrides` | `table` | `{}` | Per-adapter overrides, keyed by the adapter's `key()` — e.g. `[imports.robots_posture_overrides.ao3]` |
+
+`robots_posture` and `honour_robots` are read together in
+`lorehaven_scrapers::robots::resolve_posture`, which is the only thing that
+should read either. `honour_robots` exists so an older config keeps working, and
+it is a fallback rather than a default: with `honour_robots = false` and no
+`robots_posture`, the posture is `permissive` — deliberately not overridden by a
+default, or the compatibility key would be a key that does nothing when it
+mattered.
 
 ## `[exports]`
+## `[retention]`
+
+Who may read a body by default (spec §7.7).
+
+| Key | Type | Default | Purpose |
+|-----|------|---------|---------|
+| `default_body_audience` | `string` | `"full"` | The body-audience baseline. See the `BodyAudience` variants in `lorehaven_domain::retention` |
+
+## `[roadmap]`
+
+Who may participate in the roadmap (spec §29.4). `deny_unknown_fields`, like
+every section here.
+
+| Key | Type | Default | Purpose |
+|-----|------|---------|---------|
+| `min_trust` | `int` | `1` | The trust level a reader needs to ballot, vote, or suggest. Refusals name the bar and the reader's own level |
+
+## `[retention_governance]`
+
+Who may propose a change to body retention, and whether a passed proposal is
+itself the decision (spec §5, §19.15, amendment §5). `deny_unknown_fields`.
+
+| Key | Type | Default | Purpose |
+|-----|------|---------|---------|
+| `proposal_min_trust` | `int` | `1` | The trust level needed to open a proposal or cast a ballot |
+| `widen_quorum` | `int` | `3` | The bar for a change that *widens* storage. Clamped **up** to 3: a value below three is refused, not honoured, because a bar under three is one person's second tap. A value *above* your reader count is honoured, and means "this instance does not change storage policy by vote" |
+| `proposal_cooling_days` | `int` | `7` | How many days a ballot stays open. Stored per proposal as a `closes_at`, so changing this does not move the deadline of a ballot somebody is already voting in |
+| `binding_mode` | `bool` | `false` | Whether a passed proposal changes the setting on its own. `false` (the default) is advisory: the readers' decision is a record, and an operator applies it with `POST /api/v1/admin/retention/proposals/{id}/respond` |
+
+The two modes, because the difference is the whole feature:
+
+* **Advisory** (`binding_mode = false`) — the settlement pass *reports* a passed
+  ballot and closes nothing. The proposal stays `open`, `respond` stays reachable,
+  and `retention_policy_changes` records the change only once an operator applies
+  it.
+* **Binding** (`binding_mode = true`) — a passed ballot commits at
+  `closes_at` (`quorum` supporters plus `proposal_cooling_days`), and the change
+  is recorded against the instance's system account, because no operator is
+  involved and naming a voter would put their own name on the row their ballot
+  produced.
+
+A narrowing change is judged at the ordinary bar of three; only a *widening* is
+judged at `widen_quorum`.
 
 Export file retention and CTA settings (spec §38, §42).
 
@@ -296,6 +349,11 @@ Age-gate settings.
 A malformed value refuses to start with a clear error message. Examples:
 
 - `retention_days = -1` → "exports.retention_days must be >= 0, got -1"
+- `media_resilience.{key} is a confidence percentage and must be between 0 and 100`
+- An unknown key in `[roadmap]` or `[retention_governance]` is refused with
+  `unknown field \`…\``, naming the key. A misspelled governance setting that
+  loaded as a default would be a setting that reads as applied and is not
+
 - `grant_ttl_secs = 0` → "exports.grant_ttl_secs must be > 0, got 0"
 - Unknown TOML key → "unknown field `[section].foo`"
 

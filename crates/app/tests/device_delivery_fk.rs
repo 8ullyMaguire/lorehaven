@@ -260,9 +260,18 @@ async fn a_device_delivery_row_may_omit_its_export_entirely() {
         .await
         .expect("count accounts")
     });
+    // **`mine == 1`, not `total == 1`.** The claim this diagnostic makes is that
+    // the account is present in THIS database, and that is the `mine` half.
+    // Asserting the table held exactly one row made the test break when
+    // migration 0094 inserted the instance's own system account — a second,
+    // expected row that has nothing to do with the delivery foreign key.
+    //
+    // `total` is still in the message, deliberately: it is what distinguishes a
+    // wrong pool from a rolled-back write, because `mine=0, total=7` reads
+    // differently from `mine=0, total=1`. Useful as context, wrong as an
+    // assertion.
     assert_eq!(
-        (total, mine),
-        (1, 1),
+        mine, 1,
         "the account must exist before the delivery FK is tested; \
          found {total} account(s), mine={mine}, looked for {account}"
     );

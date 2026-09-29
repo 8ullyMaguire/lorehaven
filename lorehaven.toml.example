@@ -93,6 +93,61 @@ format = "pretty"
 # not authentication. Nothing here defeats a login, an age gate, or a challenge.
 # honour_robots = true
 
+# The robots policy itself, as a named posture: `strict`, `permissive`, or `off`.
+# `honour_robots` above is the compatibility key for older files — `false`
+# selects `permissive` — and is a fallback rather than a default, so naming a
+# posture here is the way to say what you mean. Unset means the operator named no
+# posture, and `honour_robots` then decides.
+# robots_posture = "strict"
+
+# Per-adapter overrides, keyed by the adapter's `key()` (the same string the
+# source catalogue and `sources.key` use) rather than by host, because hosts are
+# not unique and a name you retype is a name you can mistype.
+# [imports.robots_posture_overrides.ao3]
+# robots_posture = "permissive"
+
+# --- What a reader of the archive may see ----------------------------------
+#
+# The baseline. Individual works are widened and narrowed from here, by an
+# operator or — see `[retention_governance]` below — by the readers themselves.
+# [retention]
+# default_body_audience = "full"
+
+# --- Who gets a say in storage, and whether a vote decides ----------------
+#
+# A reader's trust level gates the roadmap, not their standing in the
+# community: participation is a thing you earn, and a vote never grants the
+# proposer anything personal.
+# [roadmap]
+# min_trust = 1
+
+# Whether body-retention changes are decided by ballot or by operator, and how
+# many people it takes.
+#
+# `binding_mode = false` (the default) is ADVISORY: readers reach a decision and
+# the record says what they decided, but an operator applies it. Use this on an
+# instance you would rather not have surprised.
+#
+# `binding_mode = true` is BINDING: a passed ballot commits on its own once its
+# window shuts. Use it where "the readers decided" is a thing you want to be able
+# to say truthfully.
+#
+# `widen_quorum` applies only to a change that makes the archive KEEP MORE — a
+# change that stores less is judged at the ordinary bar of three, because a
+# proposal to delete is not the thing that costs anything. A value below three
+# is refused rather than honoured: a bar under three is one person's second tap.
+# A value above your reader count is honoured, and means this instance does not
+# change storage policy by vote.
+#
+# `proposal_cooling_days` is how long a ballot stays open, and it is recorded per
+# proposal when the proposal is opened — so changing it here does not move the
+# deadline of a ballot people are already voting in.
+# [retention_governance]
+# proposal_min_trust = 1
+# widen_quorum = 3
+# proposal_cooling_days = 7
+# binding_mode = false
+
 # A FlareSolverr-compatible service this instance may drive, e.g. Byparr or
 # obscura-solverr on loopback. Needed only for a source whose adapter declares it
 # answers a bot challenge a plain request cannot pass; without one, such a source
