@@ -230,6 +230,25 @@ psql "$LOREHAVEN_TEST_PG_URL" -tAc "
 # expected: t
 ```
 
+### FINDING, 2026-09-29: the mask cannot be applied in place, in ANY order
+
+Established by running it against a real Postgres, not by reading the spec, and
+it changes the pipeline's shape:
+
+* update the **child** first (`works.owner_pseud_id`) → trips
+  `works_owner_pseud_id_fkey`, because `pseuds` does not hold the new value yet
+* update the **parent** first (`pseuds.id`) → trips the same FK, because `works`
+  still holds the old value
+
+The constraint is checked **per statement**, so no ordering of two statements
+satisfies both directions. A masking pipeline that walks tables in place — the
+obvious first implementation, and the one alphabetical table order gives you —
+dies on a live database.
+
+**So: copy to a scratch database, then mask there.** The ordering constraint
+becomes a design choice instead of an FK violation, and the live instance is
+never mutated even transiently. `build-snapshot-sql.py` must implement this.
+
 ### D1.3 The end-to-end leak test
 
 `crates/app/tests/snapshot_anonymisation.rs` — the §11.16.7 test, and the one
