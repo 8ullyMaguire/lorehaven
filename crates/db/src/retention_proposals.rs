@@ -116,6 +116,14 @@ pub struct PolicyChange {
     pub from_mode: Option<BodyMode>,
     pub to_mode: BodyMode,
     pub source_key: Option<String>,
+    /// Who made the change.
+    ///
+    /// Always an account: the column is `NOT NULL REFERENCES accounts (id) ON
+    /// DELETE RESTRICT`, so an audit row with nobody on it is not
+    /// representable and a recorded decision cannot be orphaned by an account
+    /// deletion. A binding-mode settlement names
+    /// [`lorehaven_db::SYSTEM_ACCOUNT`] — the instance acting on the readers'
+    /// recorded decision, which is a fact and not a missing person.
     pub actor: String,
     pub reason: String,
     pub decided_at: String,
@@ -542,17 +550,33 @@ pub async fn close_proposal(
     // The permitted transitions, and why each is here:
     //
     // * `open -> passed | failed | expired` -- the ballot closed.
-    // * `passed -> overridden` -- the operator answered a passing ballot. The
-    //   setting was already changed by the commit, and the operator reversing
+    // * `open -> overridden` -- the operator answered a ballot that is **still
+    //   running**. The ordinary case: a reader opened a proposal, two of five
+    //   have voted, and the operator disagrees now rather than after a week of
+    //   waiting for a vote that is not coming. This was refused, and
+    //   `override_setting` already handled it -- the close silently affected
+    //   zero rows, so the route returned 200 with the setting changed and the
+    //   proposal still reading `open`, which is a governance record claiming
+    //   nothing was recorded.
+    // * `passed -> overridden` -- the operator answered a ballot that *had*
+    //   finished. The setting was already changed by the commit, so reversing
     //   it is a second fact about the same proposal, not a re-tally.
+    //
+    // Both `overridden` rows are the same act — the operator answering a
+    // ballot — and they differ only in whether the ballot finished first. There
+    // is no reading under which "the ballot must be decided before it can be
+    // overridden" makes sense: the override *is* the decision being recorded,
+    // not a precondition for it.
     //
     // Everything else is refused, so a second close of a terminal proposal
     // still reports "somebody else already closed this" rather than
     // overwriting a state another process chose. `passed -> failed` is
     // included in that refusal deliberately: a proposal that passed does not
-    // stop having passed because an operator later disagreed.
+    // stop having passed because an operator later disagreed. `failed ->
+    // overridden` is refused for a different reason: there is nothing left to
+    // disagree with, the ballot already failed and the setting never moved.
     let permitted_from: &[&str] = match state {
-        ProposalState::Overridden => &["passed"],
+        ProposalState::Overridden => &["open", "passed"],
         _ => &["open"],
     };
     let clause = permitted_from
@@ -613,6 +637,13 @@ pub async fn close_proposal(
 /// `from_mode` is what was in force *before* the write, passed in rather than
 /// re-read, because the caller read it to decide the bar and re-reading is a
 /// second answer to a question that was already answered.
+/// Record that a retention setting moved, and why.
+///
+/// `actor` is always an account. A binding-mode settlement passes
+/// [`crate::SYSTEM_ACCOUNT`], which is the point: the readers' decision moved
+/// the setting, the instance is what acted, and no reader's name is on the row
+/// — the ballot leak stays out of the audit trail because the actor is a system
+/// account rather than one of the three people who voted.
 pub async fn record_change(
     db: &Database,
     from_mode: Option<BodyMode>,

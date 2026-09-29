@@ -166,6 +166,15 @@ pub async fn effective_instance_mode(db: &Database) -> Result<BodyMode> {
 /// delete bodies already held — §11.15 says both explicitly, and the second is
 /// the deletion workflow of §10.4 rather than a policy change. Nothing in this
 /// function touches content, which is the property to keep.
+/// Set the instance's mode.
+///
+/// `updated_by` is a concrete `Uuid` because the column is
+/// `NOT NULL REFERENCES accounts (id)`. An earlier version made it `Option` on
+/// the strength of a comment in *another* table's migration: `0087`'s
+/// `instance_retention_policy.updated_by` is nullable, so "the instance acted"
+/// looked unrepresentable. It is representable — by naming a system account
+/// (see `lorehaven_db::SYSTEM_ACCOUNT`), which is what a binding-mode
+/// settlement passes here.
 pub async fn write_policy(
     db: &Database,
     mode: BodyMode,
@@ -265,6 +274,9 @@ pub async fn list_source_overrides(db: &Database) -> Result<Vec<StoredSourceOver
 /// "invalid". The alternative — accepting the row and letting the read side
 /// narrow it away — is the failure this exists to prevent, because the operator
 /// would see their change saved and no change in behaviour.
+/// Set a per-source override.
+///
+/// `updated_by` is a concrete `Uuid`, as in [`write_policy`].
 pub async fn write_source_override(
     db: &Database,
     source_key: &str,

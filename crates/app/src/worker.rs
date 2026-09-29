@@ -583,6 +583,19 @@ impl Worker {
             JobKind::PreservationRecheck => {
                 crate::preservation_recheck::handle_recheck(state).await
             }
+            JobKind::RetentionSettle => {
+                // A settlement failure is transient, not fatal: the pass is
+                // idempotent — `overdue_proposals` only returns `open`
+                // proposals and each outcome closes the one it settled — so a
+                // retry re-reads whatever the failed attempt left open and does
+                // not double-apply anything. Marking it fatal would strand a
+                // backlog of proposals on the first database hiccup.
+                let summary = crate::routes::retention_settle::run(state)
+                    .await
+                    .map_err(|error| HandlerError::Transient(error.to_string()))?;
+                tracing::info!(target: "lorehaven::retention", "{}", summary.describe());
+                Ok(())
+            }
         }
     }
 

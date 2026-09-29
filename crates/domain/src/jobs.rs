@@ -179,6 +179,16 @@ job_kinds! {
     #[doc = "An interactive class would let a hundred re-verifications delay the"]
     #[doc = "import a reader just submitted."]
     PreservationRecheck => "preservation_recheck",
+    /// Settles retention proposals whose ballot window has closed (plan E.2).
+    ///
+    /// **Bulk**, and for a different reason than `PreservationRecheck`. That one
+    /// is outbound network work; this one is a handful of local writes. But it
+    /// is the kind that *changes instance policy*, so a reader's import must
+    /// never queue behind it — a long pass over a backlog of proposals would
+    /// otherwise delay work a reader is watching, and the delay would be caused
+    /// by governance rather than by load, which is harder to explain and worse to
+    /// be on the receiving end of.
+    RetentionSettle => "retention_settle",
 }
 /// The queue's claim classes — separate from the HTTP route rate classes
 /// (`crate::limiter::RouteClass`). The rate limiter guards the HTTP surface;
@@ -211,6 +221,9 @@ impl JobKind {
             // Bulk: outbound network work against third-party archives, and
             // nothing a reader is waiting for. See the variant's doc comment.
             Self::PreservationRecheck => ResourceClass::Bulk,
+            // See the variant's doc comment: bulk so a governance pass cannot
+            // delay a reader's import.
+            Self::RetentionSettle => ResourceClass::Bulk,
         }
     }
 
@@ -237,6 +250,8 @@ impl JobKind {
             // a fixed array and existing indices are load-bearing for any
             // array already persisted. A new kind takes the next free slot.
             Self::PreservationRecheck => 11,
+            // 12, on the same reasoning: appended, never renumbered.
+            Self::RetentionSettle => 12,
         }
     }
 }

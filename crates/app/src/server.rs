@@ -497,6 +497,22 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // The operator's half of the proposal lifecycle (plan E.2). Same router
+        // as the reader's four, disjoint paths; the gate differs per handler,
+        // so it cannot be expressed by the mount.
+        .merge(classified(
+            routes::retention_proposal_admin::operator_router(),
+            RouteClass::Write,
+            &state,
+        ))
+        // The operator's trigger for the settlement pass. The pass itself is
+        // also a scheduled job, and both call the same function, so the button
+        // and the overnight run are provably the same thing.
+        .merge(classified(
+            routes::retention_settle::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // Recommendation transparency (M29): "why am I seeing this" explanations.
         .merge(classified(
             routes::recommendation_transparency::router(),

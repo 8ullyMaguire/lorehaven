@@ -103,7 +103,7 @@ async fn trust_refusal(
 /// serve one route is a worse trade than these six lines. **The two shapes must
 /// agree** — the tests assert `error.code` and `error.message` on refusals from
 /// both paths, so a divergence fails rather than reaching a client.
-fn error_response(status: StatusCode, code: &str, message: String) -> Response {
+pub(super) fn error_response(status: StatusCode, code: &str, message: String) -> Response {
     (
         status,
         axum::Json(json!({
@@ -119,12 +119,45 @@ fn error_response(status: StatusCode, code: &str, message: String) -> Response {
 /// refusal, so the two kinds cannot be confused at a call site: a refusal goes
 /// through `bad_request` or `refusal_response` and carries the reader's own
 /// words, and only a genuine fault lands here.
-fn internal(error: impl std::fmt::Display) -> Response {
+pub(super) fn internal(error: impl std::fmt::Display) -> Response {
     error_response(
         StatusCode::INTERNAL_SERVER_ERROR,
         "INTERNAL",
         error.to_string(),
     )
+}
+
+/// Take a JSON body, and say *which field* was wrong when it was.
+///
+/// The alternative — `Json<T>` in the signature — turns a typo into a bare
+/// status with no explanation, because axum renders `JsonRejection` as an empty
+/// body. That is why `deny_unknown_fields` on `CreateBody` is not by itself
+/// enough: it produces the right *outcome* and no usable *message*.
+///
+/// Scoped to the proposal routes rather than installed as a global
+/// `JsonRejection` handler on purpose. A global handler would change what every
+/// endpoint in the app says about a malformed body, which is a wider change
+/// than this milestone should make on its own; the right long-term home is a
+/// `FromRequestParts`-level extractor next to `ApiError` in `http.rs`, and this
+/// is the shape it should take when it goes there. Until then the two route
+/// modules that need it have it.
+///
+/// serde's message for an unknown field names the field, which is the property
+/// the plan's test requires: "refused by name", not merely "refused".
+fn json_body<T: serde::de::DeserializeOwned>(
+    payload: Result<Json<T>, axum::extract::rejection::JsonRejection>,
+) -> Result<T, Response> {
+    match payload {
+        Ok(Json(value)) => Ok(value),
+        Err(rejection) => Err(error_response(
+            rejection.status(),
+            "VALIDATION_FAILED",
+            format!(
+                "the request body is not the shape this route expects: {}",
+                rejection.body_text()
+            ),
+        )),
+    }
 }
 
 /// A `422` for a message the caller must fix.
@@ -168,6 +201,7 @@ fn refusal_response(message: &str) -> Response {
 
 /// The body for opening a proposal.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CreateBody {
     /// The mode being proposed, as a string.
     ///
@@ -185,6 +219,7 @@ struct CreateBody {
 
 /// The body for casting a ballot.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct VoteBody {
     support: bool,
 }
@@ -304,8 +339,13 @@ async fn one(
 async fn create(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
-    Json(body): Json<CreateBody>,
+    payload: Result<Json<CreateBody>, axum::extract::rejection::JsonRejection>,
 ) -> Result<(StatusCode, Json<Value>), Response> {
+    // `?` and nothing else: `json_body` hands back a `Response` already
+    // carrying the rejection's own status and message, and this handler's
+    // error type *is* `Response`. Mapping it anywhere would only discard the
+    // status the rejection chose.
+    let body = json_body(payload)?;
     if let Some(message) = trust_refusal(&state, &user, "open a retention proposal")
         .await
         .map_err(|error| internal(error))?
@@ -365,8 +405,13 @@ async fn vote(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
     Path(id): Path<String>,
-    Json(body): Json<VoteBody>,
+    payload: Result<Json<VoteBody>, axum::extract::rejection::JsonRejection>,
 ) -> Result<(StatusCode, Json<Value>), Response> {
+    // `?` and nothing else: `json_body` hands back a `Response` already
+    // carrying the rejection's own status and message, and this handler's
+    // error type *is* `Response`. Mapping it anywhere would only discard the
+    // status the rejection chose.
+    let body = json_body(payload)?;
     if let Some(message) = trust_refusal(&state, &user, "vote on a retention proposal")
         .await
         .map_err(|error| internal(error))?

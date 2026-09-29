@@ -117,3 +117,42 @@ CREATE INDEX IF NOT EXISTS idx_retention_votes_support
 -- and has to page through it.
 CREATE INDEX IF NOT EXISTS idx_retention_changes_recent
     ON retention_policy_changes (decided_at);
+
+-- THE INSTANCE'S OWN ACCOUNT.
+--
+-- `retention_policy_changes.actor` above is `NOT NULL REFERENCES accounts (id)
+-- ON DELETE RESTRICT`, deliberately: every recorded decision names an account,
+-- so an audit row is never a row with nobody on it and a decision cannot be
+-- orphaned by an account deletion. That constraint needs a third thing, which
+-- the two obvious answers are not.
+--
+-- A **binding-mode settlement** commits a setting on the readers' recorded
+-- decision with no operator involved. So its actor is not an operator, and it
+-- must not be one of the readers who voted:
+--
+-- * NULL is refused by `NOT NULL`, and would be wrong even if permitted. "No
+--   one did this" is a different claim from "the instance did this", and only
+--   the second is true.
+-- * the nil UUID is refused by the foreign key, which is the database correctly
+--   saying it is not an account.
+-- * a reader's id satisfies the constraint and destroys the feature's central
+--   privacy property, by putting one of the three voters' names on the row
+--   their own ballot produced. §45.2's argument against weights — a reading
+--   habit must not set instance policy — is the same argument, and a name in
+--   the audit trail is how a preference becomes a reputation.
+--
+-- So: a real account that is not a person. No login path, an email in the
+-- reserved `.invalid` TLD (RFC 2606, so it can never be deliverable and can
+-- never collide with a registration under the unique index on
+-- `lower(email)`), and `age_state` left `unknown` rather than `adult` because
+-- nothing that counts accounts should treat this as a reader.
+--
+-- The id is a fixed literal rather than a generated one so it is identifiable
+-- in a database dump: an operator seeing it knows at a glance that a row was
+-- written by the instance and not by a person. The version and variant nibbles
+-- are set so it is a well-formed v4-shaped UUID.
+INSERT OR IGNORE INTO accounts
+    (id, status, email, age_state, created_at, updated_at, version)
+VALUES
+    ('01959000-0000-4000-8000-000000000001', 'system', 'instance@retention.system.invalid', 'unknown',
+     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1);
