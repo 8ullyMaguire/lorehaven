@@ -191,10 +191,26 @@ pub async fn identity_by_id(db: &Database, identity_id: &str) -> Result<Option<S
         "SELECT id, work_id, canonical_title, status, created_at, updated_at, version
            FROM story_identities
           WHERE id = ?",
+        // **No cast on the bind, and this is worth being precise about**,
+        // because getting it wrong is a fault this function shipped once in
+        // each direction.
+        //
+        // `story_identities.id` is TEXT (0085), so `?::uuid` here is
+        //
+        //   operator does not exist: text = uuid
+        //
+        // and `$1` with no cast is right. `story_identities.work_id` is UUID
+        // (0003) but that is a *projected* column here, cast to `::text` on
+        // the way out, so it takes no bind.
+        //
+        // The inverse error is the one recorded in 0085 itself: a TEXT
+        // `work_id` would refuse the foreign key to `works`. The rule this
+        // file follows is that the bind takes the cast of the column it is
+        // COMPARED against, not of a column it is merely read from.
         "SELECT id, work_id::text, canonical_title::text, status,
                 created_at::text, updated_at::text, version::bigint AS version
            FROM story_identities
-          WHERE id = $1",
+          WHERE id = ?",
     );
     let row: Option<(String, String, String, String, String, String, i64)> = match db.backend() {
         Backend::Sqlite => {
