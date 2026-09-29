@@ -26,7 +26,6 @@ use axum::http::StatusCode;
 use darkhold_app::config::{Config, DecisionProvider};
 use darkhold_app::server;
 use darkhold_app::state::AppState;
-use serde_json::Value;
 
 /// A router whose `[decisions]` section is whatever this test sets.
 ///
