@@ -774,17 +774,24 @@ mod tests {
         });
         // Built the same way `ask` builds it, so the test cannot drift from the
         // code by testing a different shape.
-        let mut asked = serde_json::Map::new();
-        for question in [yes_no("refund")] {
-            let mut value = serde_json::to_value(&question).expect("serialisable");
-            if let serde_json::Value::Object(fields) = &mut value {
-                fields.remove("key");
-                asked.insert(
-                    question.key().to_owned(),
-                    serde_json::Value::Object(fields.clone()),
-                );
+        // The two things `ask` does to a question, written out because the
+        // function under test here is the SHAPE of the request and not the
+        // request: `ask` needs a live server, and this needs none.
+        fn shape(questions: &[Question]) -> serde_json::Map<String, serde_json::Value> {
+            let mut asked = serde_json::Map::new();
+            for question in questions {
+                let mut value = serde_json::to_value(question).expect("serialisable");
+                if let serde_json::Value::Object(fields) = &mut value {
+                    fields.remove("key");
+                    asked.insert(
+                        question.key().to_owned(),
+                        serde_json::Value::Object(fields.clone()),
+                    );
+                }
             }
+            asked
         }
+        let asked = shape(&[yes_no("refund")]);
         let entry = asked
             .get("refund")
             .expect("the question is under its own key");
