@@ -538,3 +538,80 @@ async fn a_caching_instance_may_publish_bodies_and_this_test_proves_it_is_not_re
     );
     tdb.cleanup().await;
 }
+
+/// §11.16.6 / §7.7.3 — no `body_audience` VALUE appears anywhere in a snapshot.
+///
+/// Two things are asserted, and the second is the one that is easy to miss:
+///
+/// 1. the audience VALUE (`trust_at_least:5`) — the obvious leak;
+/// 2. the COLUMN NAME (`body_audience`) — because a dump that still has a
+///    `body_audience` column tells a recipient which works carry an access rule
+///    at all, even with every value redacted. The spec's phrase is "dropped from
+///    the snapshot entirely", and a column of NULLs is not "entirely".
+///
+/// The canary is a REAL legal value, not a made-up one: `works_body_audience_valid`
+/// is a CHECK constraint, so a fake string cannot be stored and the test would
+/// seed nothing. A real value is also the better canary, because
+/// `trust_at_least:5` publishes the trust THRESHOLD — the most operationally
+/// revealing form the column takes.
+const CANARY_AUDIENCE: &str = "trust_at_least:5";
+
+async fn seed_audience_canary(tdb: &TestDb) {
+    let pool = tdb.db().postgres_pool().expect("postgres handle");
+    sqlx::query(
+        "INSERT INTO works (id, owner_pseud_id, title, lifecycle, visibility,
+                            body_audience, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, 'audience canary work', 'published', 'public',
+                 $3, now(), now())",
+    )
+    .bind("77777777-7777-7777-7777-777777777777")
+    .bind(PSEUD)
+    .bind(CANARY_AUDIENCE)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn no_snapshot_publishes_a_body_audience_value_or_the_column_that_holds_it() {
+    let Some(_) = pg_url() else { return };
+    let tdb = TestDb::connect_with_dir(
+        "snapshot_leak_audience",
+        &test_support::scratch_dir("snapshot_leak_audience"),
+    )
+    .await;
+    if tdb.db().backend() != Backend::Postgres {
+        tdb.cleanup().await;
+        return;
+    }
+    // seed_canaries creates the ACCOUNT but not the PSEUD the work hangs off;
+    // the body seed creates the pseud itself, so this composes the same way.
+    seed_body_canary(&tdb).await;
+    seed_audience_canary(&tdb).await;
+    apply_mask(&tdb).await;
+
+    let dir = test_support::scratch_dir("snapshot_leak_audience_out");
+    let text = dump(&tdb, &["-n", "snapshot_masked"], &dir.join("masked.sql"));
+
+    assert!(
+        !text.contains(CANARY_AUDIENCE),
+        "the snapshot published body_audience={CANARY_AUDIENCE}. 11.16.6: an access \
+         rule that is readable is not one. This value also publishes the trust \
+         THRESHOLD, which is the operationally useful part."
+    );
+    assert!(
+        !text.contains("body_audience"),
+        "the snapshot still has a body_audience COLUMN. Every value may be redacted \
+         and this still tells a recipient which works carry an audience rule at all. \
+         11.16.6 says dropped ENTIRELY, and a column of NULLs is not that."
+    );
+    // And the work itself must still be there -- the point is to drop the rule,
+    // not the work. 11.16.6's companion clause keeps titles and metadata.
+    assert!(
+        text.contains("audience canary work"),
+        "the seeded work vanished from the snapshot. Dropping the ACCESS RULE is \
+         not a licence to drop the work it applied to; the dataset loses the \
+         audience column, not the works."
+    );
+    tdb.cleanup().await;
+}
