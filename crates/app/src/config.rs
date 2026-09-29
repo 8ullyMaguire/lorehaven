@@ -176,6 +176,79 @@ pub struct Config {
     pub library: LibraryConfig,
     /// Where the configuration file was read from, if any.
     pub config_path: Option<PathBuf>,
+    /// Roadmap participation settings (spec §29.4).
+    pub roadmap: RoadmapConfig,
+    /// Retention governance settings (spec §5, §19.15, amendment §5).
+    pub retention_governance: RetentionGovernanceConfig,
+}
+
+/// Roadmap participation settings (spec §29.4).
+#[derive(Debug, Clone)]
+pub struct RoadmapConfig {
+    /// The trust level a reader needs to take part in the roadmap — vote on an
+    /// arena ballot, vote on a card, or suggest one.
+    ///
+    /// **This exists because the three call sites hardcoded `1`.** §29.4 says
+    /// roadmap participation is gated on a trust level, and the Phase E
+    /// amendment cites that sentence while adding a retention proposal route
+    /// gated the same way — which left §29.4's sentence decorative: an operator
+    /// who wanted a higher bar had no way to ask for one without a code change
+    /// and a release. The default is 1, so no existing instance changes
+    /// behaviour and the three sites that were already there are unchanged.
+    pub min_trust: i64,
+}
+
+impl Default for RoadmapConfig {
+    fn default() -> Self {
+        Self { min_trust: 1 }
+    }
+}
+
+/// Retention governance settings (spec §5, §19.15, amendment §5).
+#[derive(Debug, Clone)]
+pub struct RetentionGovernanceConfig {
+    /// The trust level needed to open a proposal or cast a ballot.
+    ///
+    /// Not 0 by default. A retention proposal changes what this instance stores
+    /// for every reader, and §5's point is that the decision is a *governance*
+    /// one — so the people making it are the ones the instance already knows
+    /// something about. 1 rather than 2, because 2 would exclude a
+    /// newly-registered reader from a vote on a decision they will live with.
+    pub proposal_min_trust: i64,
+    /// The instance's bar for a change that *widens* storage.
+    ///
+    /// Passed straight to `quorum_for`, which clamps it up to `MINIMUM_QUORUM`
+    /// (3) — a bar below three is a proposal decided by one person's second
+    /// tap. A bar *above* the number of readers is honoured and means "this
+    /// instance does not change storage policy by vote", which is a legitimate
+    /// thing for an operator to say.
+    pub widen_quorum: i64,
+    /// How long a proposal's ballot stays open, in days.
+    ///
+    /// Recorded as a stored `closes_at` per proposal rather than a day count
+    /// applied at read time, so an operator changing this does not silently
+    /// move the deadline of every open ballot.
+    pub proposal_cooling_days: i64,
+    /// Whether a passed proposal changes the setting on its own.
+    ///
+    /// `false` is the default and is the safe direction: in advisory mode the
+    /// readers' decision is recorded and an operator applies it, so a quorum of
+    /// three is an argument rather than an instruction. In binding mode a
+    /// proposal commits after `proposal_cooling_days`, which gives an operator
+    /// time to object — the asymmetry is §5.3's, and it is a setting because
+    /// both positions are defensible.
+    pub binding_mode: bool,
+}
+
+impl Default for RetentionGovernanceConfig {
+    fn default() -> Self {
+        Self {
+            proposal_min_trust: 1,
+            widen_quorum: 3,
+            proposal_cooling_days: 7,
+            binding_mode: false,
+        }
+    }
 }
 
 /// Work permission settings (spec §40).
@@ -2337,6 +2410,8 @@ impl Config {
                 }
             },
             // --- library (spec §38) --------------------------------------------
+            roadmap: RoadmapConfig::default(),
+            retention_governance: RetentionGovernanceConfig::default(),
             library: LibraryConfig {
                 update_check_retention_days: file
                     .library
@@ -2450,6 +2525,8 @@ impl Config {
             jobs: JobsConfig::default(),
             device: None,
             media_resilience: MediaResilienceConfig::default(),
+            roadmap: RoadmapConfig::default(),
+            retention_governance: RetentionGovernanceConfig::default(),
             library: LibraryConfig::default(),
             config_path: None,
         }
