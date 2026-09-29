@@ -55,6 +55,7 @@ pub mod notifications;
 pub mod outbox;
 pub mod permission;
 pub mod positivity;
+pub mod preservation;
 pub mod rating_integrity;
 pub mod reading;
 pub mod rec_strategy;

@@ -286,6 +286,10 @@ async fn apply_one(database: &Database, migration: &Migration) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // The store's own list, so the assertion and the code that reads the
+    // columns cannot drift: a column added to one and not the other is the
+    // failure, and this is what makes it a failure rather than a comment.
+    use crate::preservation;
     use std::collections::BTreeSet;
 
     #[test]
@@ -659,6 +663,83 @@ mod tests {
             "table-level constraints are not columns"
         );
         assert_eq!(schema["index:t_b"], vec!["b"]);
+    }
+
+    /// The gap in the parity test above, and the reason this test has to exist.
+    ///
+    /// `the_two_dialects_declare_the_same_columns_and_indexes` reads `CREATE
+    /// TABLE` and `CREATE INDEX` only, so a column brought in by
+    /// `ALTER TABLE ... ADD COLUMN` is **invisible to it** — one migration can
+    /// add a column the other does not, every existing test passes, and the two
+    /// engines then disagree at runtime. Migration 0093 adds nine columns that
+    /// way, so the gap is live rather than hypothetical.
+    ///
+    /// It was live for exactly one run: the first PostgreSQL run of Phase D
+    /// died in `migrate()` with `foreign key constraint
+    /// "story_identity_members_created_by_fkey" cannot be implemented`, because
+    /// `accounts.id` is UUID on PostgreSQL and the column was declared TEXT. The
+    /// SQLite twin accepted it, because SQLite is dynamically typed — which is
+    /// why the two files read as identical in review and are not.
+    ///
+    /// So this asserts the column SET of the added columns against the store's
+    /// own list, by reading both migration files. It does **not** assert the
+    /// column TYPES, and it cannot: `created_by` is deliberately TEXT in one
+    /// dialect and UUID in the other, because it references a column that is
+    /// TEXT in one dialect and UUID in the other. Asserting type equality here
+    /// would fail on a correct pair of files; the type divergence is carried by
+    /// the casts in the store instead, and the engine is what settles it.
+    #[test]
+    fn a_preservation_member_row_carries_the_columns_both_dialects_declare() {
+        for backend in [Backend::Sqlite, Backend::Postgres] {
+            let declared = added_columns_for_table(backend, "story_identity_members");
+            let expected: BTreeSet<String> = preservation::PRESERVATION_MEMBER_COLUMNS
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect();
+            assert_eq!(
+                declared, expected,
+                "{backend:?} 0093 adds a different set of preservation columns to \
+                 story_identity_members than PRESERVATION_MEMBER_COLUMNS lists; the store \
+                 reads all of them and a column missing from one dialect is a statement \
+                 that fails only on the engine it is missing from"
+            );
+        }
+    }
+
+    /// The `ADD COLUMN` names in one dialect's 0093 for one table.
+    ///
+    /// Narrow by table on purpose: the migration also adds a column to `works`,
+    /// and a scan that did not bound itself by table would return both sets and
+    /// compare them as one.
+    fn added_columns_for_table(backend: Backend, table: &str) -> BTreeSet<String> {
+        let migration = catalogue(backend)
+            .iter()
+            .find(|m| m.id().starts_with("0093"))
+            .expect("migration 0093 exists in both dialects");
+        let mut found = BTreeSet::new();
+        for line in strip_comments(migration.sql).lines() {
+            let trimmed = line.trim();
+            let Some(rest) = trimmed.strip_prefix("ALTER TABLE") else {
+                continue;
+            };
+            let rest = rest.trim();
+            let Some(after) = rest.strip_prefix(table) else {
+                continue;
+            };
+            let after = after.trim_start();
+            if !after.starts_with("ADD COLUMN") {
+                continue;
+            }
+            let name: String = after["ADD COLUMN".len()..]
+                .trim()
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() {
+                found.insert(name);
+            }
+        }
+        found
     }
 
     #[test]

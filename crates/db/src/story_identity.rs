@@ -177,6 +177,52 @@ pub async fn identity_for_work(db: &Database, work_id: &str) -> Result<Option<St
     ))
 }
 
+/// One identity by its own id, or `None`.
+///
+/// The inverse of [`identity_for_work`], and it exists because Phase D needs to
+/// answer "which work is this identity about?" from a caller that has the
+/// identity. Without it the only way to get there is to enumerate every work and
+/// match, or to have `record_target` trust the `work_id` it is handed — and a
+/// trusted `work_id` is how a preservation target ends up filed under one work
+/// and paid to another, which no read would reveal because every read joins
+/// through `story_identities.work_id`.
+pub async fn identity_by_id(db: &Database, identity_id: &str) -> Result<Option<StoryIdentity>> {
+    let sql = db.sql(
+        "SELECT id, work_id, canonical_title, status, created_at, updated_at, version
+           FROM story_identities
+          WHERE id = ?",
+        "SELECT id, work_id::text, canonical_title::text, status,
+                created_at::text, updated_at::text, version::bigint AS version
+           FROM story_identities
+          WHERE id = $1",
+    );
+    let row: Option<(String, String, String, String, String, String, i64)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(identity_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(identity_id)
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(row.map(
+        |(id, work_id, canonical_title, status, created_at, updated_at, version)| StoryIdentity {
+            id,
+            work_id,
+            canonical_title,
+            status,
+            created_at,
+            updated_at,
+            version,
+        },
+    ))
+}
+
 /// Create the identity for a work, and its local member, in one transaction.
 ///
 /// A work with an identity but no local member would be a group whose own copy
