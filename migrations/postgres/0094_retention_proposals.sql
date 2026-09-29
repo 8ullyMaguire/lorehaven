@@ -65,3 +65,18 @@ CREATE INDEX idx_retention_votes_support
 
 CREATE INDEX idx_retention_changes_recent
     ON retention_policy_changes (decided_at);
+
+-- THE INSTANCE'S OWN ACCOUNT. See the SQLite file for the full argument; the
+-- short version is that `actor` is `NOT NULL REFERENCES accounts (id) ON DELETE
+-- RESTRICT` on purpose, and a binding-mode settlement needs an actor that is
+-- neither an operator nor one of the readers who voted. This is it: a real
+-- account, not a person, identifiable by its fixed id in any dump.
+--
+-- `ON CONFLICT (id) DO NOTHING` rather than `OR IGNORE`, so the statement does
+-- not depend on which constraint names happen to be violated.
+INSERT INTO accounts
+    (id, status, email, age_state, created_at, updated_at, version)
+VALUES
+    ('01959000-0000-4000-8000-000000000001'::uuid, 'system', 'instance@retention.system.invalid', 'unknown',
+     '2026-01-01T00:00:00Z'::timestamptz, '2026-01-01T00:00:00Z'::timestamptz, 1)
+ON CONFLICT (id) DO NOTHING;

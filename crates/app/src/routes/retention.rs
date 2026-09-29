@@ -143,6 +143,7 @@ async fn patch_policy(
     // `AccountId` is a newtype over `Uuid` with a `From` in that direction, so
     // this is a conversion rather than a parse. Parsing the string form would be
     // a round trip through a representation the session already validated.
+    // A person, always: this is the operator's own session.
     let actor: uuid::Uuid = user.account_id.into();
 
     let before = retention::effective_instance_mode(state.db())
@@ -237,6 +238,7 @@ async fn put_source_override(
     // `AccountId` is a newtype over `Uuid` with a `From` in that direction, so
     // this is a conversion rather than a parse. Parsing the string form would be
     // a round trip through a representation the session already validated.
+    // A person, always: this is the operator's own session.
     let actor: uuid::Uuid = user.account_id.into();
 
     match retention::write_source_override(state.db(), &source_key, mode, actor).await {

@@ -104,6 +104,30 @@ pub enum Backend {
     Postgres,
 }
 
+/// The account that speaks for the instance itself.
+///
+/// **This literal must match the `INSERT` in migration 0094**
+/// (`migrations/{sqlite,postgres}/0094_retention_proposals.sql`). A mismatch
+/// surfaces as a foreign-key failure when a binding-mode settlement tries to
+/// record a change — not at migration time — which is the worst place to find
+/// out, so the migration's comment points here and this one points back.
+///
+/// It exists because `retention_policy_changes.actor` is
+/// `NOT NULL REFERENCES accounts (id) ON DELETE RESTRICT` and a binding-mode
+/// settlement commits a setting on the readers' recorded decision with no
+/// operator involved. NULL is refused, the nil UUID is refused by the foreign
+/// key, and a reader's id would put one of the voters' names on the row their
+/// own ballot produced. A system account is the fourth option: it satisfies the
+/// constraint, it is visibly not a person, and it keeps the ballot out of the
+/// audit trail.
+pub const SYSTEM_ACCOUNT: uuid::Uuid =
+    uuid::Uuid::from_u128(0x0195_9000_0000_4000_8000_0000_0000_0001);
+
+/// That constant, as the string a query binds.
+pub fn system_account() -> String {
+    SYSTEM_ACCOUNT.to_string()
+}
+
 impl Backend {
     /// Stable lowercase name for logs and health output.
     #[must_use]
