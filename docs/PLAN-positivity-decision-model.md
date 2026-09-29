@@ -83,25 +83,58 @@ a unit test with a fixture so a model swap cannot silently move it.
 ## 3. What is already safety-bounded
 
 `FeedbackPreferences` (line 61) with per-work overrides (`WorkFeedbackOverride`, line 79, resolved
-by `effective_...` at line 86) means the downstream consequence of a class is already policy-gated:
-`accept_constructive` and `ambiguous_auto` decide whether a given class is acted on at all, and
-`comments_enabled` can be false outright. A wrong classification is therefore bounded by existing
-policy rather than reaching users directly.
+by `effective_...` at line 86) means the downstream consequence of a class is already policy-gated.
+`delivery_outcome` (lines 130-142) is the whole policy in one match:
 
-**`ambiguous_auto` is the interesting one.** A decision model's most valuable property here is
-honest abstention — `Ambiguous` is exactly the label a probabilistic model can return with high
-honesty, and the policy flag already exists to decide what happens then. Whether that was the
-intended design of `ambiguous_auto` is **not yet checked** and is the first thing to read.
+```rust
+FeedbackClass::Positive      => Delivered,
+FeedbackClass::Constructive  if prefs.accept_constructive => Delivered,
+FeedbackClass::Constructive  => Held,
+FeedbackClass::Ambiguous     if prefs.ambiguous_auto      => Delivered,
+FeedbackClass::Ambiguous     => Held,
+FeedbackClass::Negative      => Held,
+```
+
+### `ambiguous_auto` — the question this plan opened with, now answered
+
+**It is exactly the abstention path, and it was designed as one.** Line 139 is the whole mechanism:
+`FeedbackClass::Ambiguous if prefs.ambiguous_auto => DeliveryOutcome::Delivered`. With the flag off
+(the `Default`, line 71) `Ambiguous` is **Held** for moderator review; with it on, `Ambiguous`
+delivers.
+
+`describe_policy` (line 160) renders it to the user in plain words —
+*"ambiguous feedback delivered"* vs *"held for review"* — so it is a visible, per-work,
+per-account preference rather than an internal constant.
+
+**Why this materially strengthens the case for a decision model here.** The policy is built around
+one class being *the uncertain one*, and it is the only class whose handling is a user-facing
+toggle. Today `Ambiguous` is produced by a keyword rule that returns confidence `3000` (0.30) for
+empty input and `4500` for "nothing matched" — that is, **the current classifier reports "ambiguous"
+mostly as a failure to decide anything.** A decision model is distinguished precisely by honest
+abstention with a calibrated probability, which is what this branch wants. The model would not be
+adding a capability the code lacks; it would be producing a *real* `Ambiguous` instead of a
+placeholder one.
+
+Also worth noting: `sender_receipt` (line 146) returns only `"Comment posted."` or
+`"Comment held for moderator review."` — spec 12.4's *"never the class or reason"*. So a wrong
+classification leaks nothing to the sender; the blast radius of an error is a held comment, which
+is the recoverable failure.
 
 ## 4. Suggested order, if this is ever picked up
 
-1. Read what `ambiguous_auto` was meant to do (spec 8.4 / 12.3 are cited in the code comments).
-2. Wire the existing `classify` first. Measure the class distribution over real review text.
-   A large `Ambiguous` or `Positive` share is the actual finding, and it may end the discussion.
-3. Only if marker matching is demonstrably inadequate, evaluate a decision model as a *drop-in
-   producer* for `Classification` — behind a config flag, dual-run against the markers.
-4. Keep `signals`. It is the one part of the current output that is real evidence rather than a
-   constant.
+1. ~~Read what `ambiguous_auto` was meant to do.~~ **Done — see §3.** It is the delivery toggle
+   for `Ambiguous`, it is user-facing via `describe_policy`, and the default is `false` (held).
+2. **Find the missing call site.** The module is complete and unwired; the actual question is why.
+   Nothing was ever classified, so there is no class distribution and no way to know whether the
+   markers are adequate. Establishing that requires real review text, not more code reading.
+3. Wire the existing `classify` first, behind whatever gate the spec intended. Measure the class
+   distribution. A large `Ambiguous` share would confirm the "placeholder abstention" reading in §3
+   and is itself the finding that justifies step 4.
+4. Only then evaluate a decision model as a *drop-in producer* for `Classification` — behind a
+   config flag, dual-run against the markers, with the `confidence_bp` mapping pinned by a fixture
+   test.
+5. Keep `signals`. It is the one part of the current output that is real evidence rather than a
+   constant, and it is what makes a dual-run disagreement diagnosable.
 
 ## 5. Verification
 
