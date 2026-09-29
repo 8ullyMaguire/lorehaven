@@ -114,9 +114,22 @@ pub async fn get_arena(
     let trust = governance::trust_for(state.db(), &account_id)
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
-    if trust < 1 {
+    // §29.4's gate, and it is `state.config().roadmap.min_trust` rather than
+    // a literal: the previous `1` made §29.4's sentence decorative, because an
+    // operator could not raise the bar without a code change. The default is
+    // still 1, so no existing instance changes who may ballots.
+    //
+    // `<` and not `<=`: a bar of 1 means trust 1 may ballot, which is what the
+    // old literal did. `<=` would exclude exactly the readers this replaces.
+    let min_trust = state.config().roadmap.min_trust;
+    if trust < min_trust {
         return Err(ApiError(AppError::Validation {
-            message: "trust level too low to get an arena ballot".into(),
+            // The bar is in the message. "trust level too low" is true and
+            // useless; a reader who is told what would be enough can act on it.
+            message: format!(
+                "trust level too low to get an arena ballot: this instance needs trust level \
+                 {min_trust} and yours is {trust}"
+            ),
             field_errors: BTreeMap::new(),
         }));
     }
@@ -174,9 +187,22 @@ pub async fn post_arena_vote(
     let trust = governance::trust_for(state.db(), &account_id)
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
-    if trust < 1 {
+    // §29.4's gate, and it is `state.config().roadmap.min_trust` rather than
+    // a literal: the previous `1` made §29.4's sentence decorative, because an
+    // operator could not raise the bar without a code change. The default is
+    // still 1, so no existing instance changes who may votes.
+    //
+    // `<` and not `<=`: a bar of 1 means trust 1 may vote, which is what the
+    // old literal did. `<=` would exclude exactly the readers this replaces.
+    let min_trust = state.config().roadmap.min_trust;
+    if trust < min_trust {
         return Err(ApiError(AppError::Validation {
-            message: "trust level too low to vote".into(),
+            // The bar is in the message. "trust level too low" is true and
+            // useless; a reader who is told what would be enough can act on it.
+            message: format!(
+                "trust level too low to vote: this instance needs trust level \
+                 {min_trust} and yours is {trust}"
+            ),
             field_errors: BTreeMap::new(),
         }));
     }
@@ -313,9 +339,22 @@ pub async fn post_suggest(
     let trust = governance::trust_for(state.db(), &account_id)
         .await
         .map_err(|e| ApiError(AppError::Internal(e.into())))?;
-    if trust < 1 {
+    // §29.4's gate, and it is `state.config().roadmap.min_trust` rather than
+    // a literal: the previous `1` made §29.4's sentence decorative, because an
+    // operator could not raise the bar without a code change. The default is
+    // still 1, so no existing instance changes who may suggests.
+    //
+    // `<` and not `<=`: a bar of 1 means trust 1 may suggest, which is what the
+    // old literal did. `<=` would exclude exactly the readers this replaces.
+    let min_trust = state.config().roadmap.min_trust;
+    if trust < min_trust {
         return Err(ApiError(AppError::Validation {
-            message: "trust level too low to suggest".into(),
+            // The bar is in the message. "trust level too low" is true and
+            // useless; a reader who is told what would be enough can act on it.
+            message: format!(
+                "trust level too low to suggest: this instance needs trust level \
+                 {min_trust} and yours is {trust}"
+            ),
             field_errors: BTreeMap::new(),
         }));
     }
