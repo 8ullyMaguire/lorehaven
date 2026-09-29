@@ -615,3 +615,95 @@ async fn no_snapshot_publishes_a_body_audience_value_or_the_column_that_holds_it
     );
     tdb.cleanup().await;
 }
+
+/// §11.16.3b — `account_id` is re-keyed on the SAME basis as `pseud_id`, with a
+/// different salt, and the join to `accounts` survives.
+///
+/// The spec calls this "the requirement most likely to be implemented backwards",
+/// and it was. 55 of 56 uuid `account_id` columns were classified `rekey_text`,
+/// which emits a `snp_` TEXT hash, while `accounts.id` is re-keyed to a uuid. A
+/// text hash cannot be compared with a uuid, so every one of those foreign keys
+/// was silently severed — and the snapshot still looked de-identified, because
+/// every behavioural column reads as pseudonymous. That is the failure mode the
+/// requirement describes in its own words.
+///
+/// Three assertions, because each catches a different way of getting this wrong:
+/// the JOIN survives; the two derivations DIFFER (same salt would let an observer
+/// learn that a pseud and an account belong together); and the original id
+/// appears nowhere in the bytes.
+#[tokio::test]
+async fn an_account_id_re_keys_to_the_same_derivation_as_accounts_id_so_the_join_survives() {
+    let Some(_) = pg_url() else { return };
+    let tdb = TestDb::connect_with_dir(
+        "snapshot_rekey_account",
+        &test_support::scratch_dir("snapshot_rekey_account"),
+    )
+    .await;
+    if tdb.db().backend() != Backend::Postgres {
+        tdb.cleanup().await;
+        return;
+    }
+    seed_body_canary(&tdb).await;
+    // A row that references the account through a NON-pseudonym column, so the
+    // join is proved on the account path specifically. `shelves` rather than
+    // `bookmarks` because every other bookmark column is NOT NULL with no
+    // default; a seed that names a column the table does not have reads as a
+    // test bug and is, and a seed that quietly inserts nothing makes the join
+    // assertion below pass on an empty table.
+    sqlx::query(
+        "INSERT INTO shelves (id, account_id, name, created_at, updated_at)
+         VALUES (gen_random_uuid(), $1::uuid, 'leak canary shelf', now(), now())",
+    )
+    .bind(ACCOUNT)
+    .execute(tdb.db().postgres_pool().expect("pool"))
+    .await
+    .unwrap();
+    apply_mask(&tdb).await;
+
+    let pool = tdb.db().postgres_pool().expect("pool");
+    let joined: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM snapshot_masked.shelves s
+           JOIN snapshot_masked.accounts a ON a.id = s.account_id",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
+
+    assert!(
+        joined > 0,
+        "no shelf joins the re-keyed accounts. A uuid account_id classified \
+         `rekey_text` is emitted as a `snp_` TEXT hash, which can never equal \
+         a uuid, so the foreign key and the key it points at are derived \
+         DIFFERENTLY and the relationship is destroyed. 11.16.3b: the snapshot \
+         LOOKS de-identified because every behavioural column is pseudonymous, \
+         while the identifier that still joins to the table holding the email \
+         is left behind."
+    );
+
+    // The same input must NOT produce the same output: a shared salt would let
+    // anyone holding one re-keyed table join a pseudonym to its account.
+    let same: bool =
+        sqlx::query_scalar("SELECT snapshot_pseud($1::uuid) = snapshot_account($1::uuid)")
+            .bind(ACCOUNT)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(
+        !same,
+        "snapshot_pseud and snapshot_account agree on the same input. They must \
+         use DIFFERENT salts: sharing one lets an observer learn that a given \
+         pseud_id and account_id belong to the same person, which is precisely \
+         the join 11.16.3b exists to prevent."
+    );
+
+    let dir = test_support::scratch_dir("snapshot_rekey_account_out");
+    let text = dump(&tdb, &["-n", "snapshot_masked"], &dir.join("masked.sql"));
+    assert!(
+        !text.contains(ACCOUNT),
+        "the original account id {ACCOUNT} is in the dump. Re-keying the \
+         foreign keys without re-keying accounts.id obscures the public handle \
+         and leaves the identifier that still joins to the table holding the \
+         email."
+    );
+    tdb.cleanup().await;
+}
