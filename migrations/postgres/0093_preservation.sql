@@ -46,7 +46,15 @@ ALTER TABLE story_identity_members ADD COLUMN verified_at TEXT;
 ALTER TABLE story_identity_members ADD COLUMN dead_at TEXT;
 ALTER TABLE story_identity_members ADD COLUMN evidence_hash TEXT;
 ALTER TABLE story_identity_members ADD COLUMN credits_paid INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE story_identity_members ADD COLUMN created_by TEXT REFERENCES accounts (id) ON DELETE RESTRICT;
+-- `UUID`, not TEXT. `accounts.id` is UUID (0001) and PostgreSQL will not create a
+-- foreign key between a TEXT column and a UUID one -- it refuses the DDL with
+-- `foreign key constraint "story_identity_members_created_by_fkey" cannot be
+-- implemented`. SQLite accepts it, because it is dynamically typed, which is
+-- why the SQLite file's spelling and this one looked identical in review. This
+-- is the tenth time in this repository that a dialect difference was found by
+-- *running* the engine rather than by reading the schema; migration 0085
+-- records the same class for `works.work_id`.
+ALTER TABLE story_identity_members ADD COLUMN created_by UUID REFERENCES accounts (id) ON DELETE RESTRICT;
 ALTER TABLE story_identity_members ADD COLUMN updated_at TEXT;
 ALTER TABLE story_identity_members ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
 

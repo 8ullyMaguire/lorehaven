@@ -97,6 +97,15 @@ ALTER TABLE story_identity_members ADD COLUMN verified_at TEXT;
 ALTER TABLE story_identity_members ADD COLUMN dead_at TEXT;
 ALTER TABLE story_identity_members ADD COLUMN evidence_hash TEXT;
 ALTER TABLE story_identity_members ADD COLUMN credits_paid INTEGER NOT NULL DEFAULT 0;
+-- TEXT here, UUID in the PostgreSQL file -- and that is a real divergence, not a
+-- slip. `accounts.id` is TEXT in this schema and UUID in that one, so the
+-- column has to match whichever the referencing table declares or PostgreSQL
+-- refuses the constraint. It is in PRESERVATION_MEMBER_COLUMNS, which is name
+-- only, so the parity test cannot see it; the assertion that the two migrations
+-- declare the same column SET is
+-- `a_preservation_member_row_carries_the_columns_both_dialects_declare` and the
+-- cast that the divergence forces on the store's binds is in
+-- `crates/db/src/preservation.rs::record_target`.
 ALTER TABLE story_identity_members ADD COLUMN created_by TEXT REFERENCES accounts (id) ON DELETE RESTRICT;
 ALTER TABLE story_identity_members ADD COLUMN updated_at TEXT;
 ALTER TABLE story_identity_members ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
