@@ -8,6 +8,7 @@ description = "Domain primitives for Lorehaven: identifiers, errors, policies"
 
 [dependencies]
 anyhow.workspace = true
+lorehaven-decisions = { path = "../decisions" }
 lorehaven-lore-metadata = { path = "../lore-metadata" }
 crc32fast.workspace = true
 base64.workspace = true

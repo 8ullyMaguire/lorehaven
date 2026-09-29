@@ -13,6 +13,7 @@
 //! operator's `lorehaven.toml` is a startup error with a precise message,
 //! not a silently ignored line.
 
+use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -130,6 +131,9 @@ pub struct Config {
     /// What the importer may do about a source that refuses a plain request.
     pub imports: ImportsConfig,
     pub retention: RetentionConfig,
+    /// Calibrated decision models (spec §11.14, amendment
+    /// `calibrated-decision-models.md`).
+    pub decisions: DecisionsConfig,
     /// Theme mode and gravity settings (spec §0.4.6).
     pub theme: ThemeConfig,
     /// Discovery feed diversity settings.
@@ -1244,6 +1248,130 @@ impl Default for RetentionConfig {
     }
 }
 
+/// Which provider answers a decision (amendment §3.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DecisionProvider {
+    /// The instance's own classifiers. The default, and the floor under
+    /// everything else: an instance with no model running behaves exactly as
+    /// it did before the feature existed.
+    #[default]
+    Deterministic,
+    /// A decision model, consulted as a second opinion beside the
+    /// deterministic answer. The model can narrow an acceptance to a hold and
+    /// can do nothing else.
+    Calibrated,
+}
+
+impl DecisionProvider {
+    /// The wire name, for `/api/v1/meta` (§3.4: an instance that classifies
+    /// with a model says so).
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Deterministic => "deterministic",
+            Self::Calibrated => "calibrated",
+        }
+    }
+}
+
+/// Calibrated decision models (amendment §3.3).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecisionsConfig {
+    /// Which provider answers a decision.
+    pub provider: DecisionProvider,
+    /// The base URL of the serving process. Loopback by default, and a remote
+    /// host is the operator's choice rather than this crate's.
+    pub base_url: String,
+    /// Which model to ask for.
+    pub model: String,
+    /// The bearer token, if the server wants one.
+    ///
+    /// Read from `LOREHAVEN_DECISIONS_API_KEY` rather than from the config
+    /// file: a file is a thing people paste into issues, and a pasted key is a
+    /// leaked key.
+    pub api_key: Option<String>,
+    /// How long to wait before falling back.
+    pub timeout_ms: u64,
+    /// The posterior at or above which an acceptance is kept.
+    pub accept_threshold: f64,
+    /// Below this the model is not consulted, because a near-zero posterior on
+    /// "is this a work?" is the deterministic path's own answer and paying for
+    /// a model to be told nothing is waste.
+    pub consult_floor: f64,
+}
+
+impl Default for DecisionsConfig {
+    fn default() -> Self {
+        Self {
+            provider: DecisionProvider::Deterministic,
+            base_url: "http://127.0.0.1:8888".to_owned(),
+            model: "laya".to_owned(),
+            api_key: std::env::var("LOREHAVEN_DECISIONS_API_KEY").ok(),
+            timeout_ms: 5_000,
+            accept_threshold: 0.90,
+            consult_floor: 0.10,
+        }
+    }
+}
+
+impl DecisionsConfig {
+    /// Is a posterior worth asking anybody about?
+    ///
+    /// Below the floor the deterministic path already knows the answer, and
+    /// above 1.0 the answer is certain enough that the model's opinion cannot
+    /// change the outcome — so neither end is worth a request.
+    #[must_use]
+    pub fn worth_asking_about(&self, posterior: f64) -> bool {
+        posterior.is_finite()
+            && posterior > self.consult_floor
+            && posterior <= 1.0
+            && posterior < self.accept_threshold
+    }
+
+    /// Reject an unusable configuration rather than clamping it.
+    ///
+    /// The comparison is `!(a <= b)` and not `a < b`, which is the whole
+    /// reason this function exists: every comparison against `NaN` is false,
+    /// so `NaN < NaN` is false and a validation written that way ACCEPTS a
+    /// `NaN` threshold. A `NaN` threshold then makes every acceptance hold
+    /// forever, because `p < NaN` is false for every `p` — including 1.0 —
+    /// so the direction inverts and the model becomes maximally cautious
+    /// without anyone deciding that.
+    pub fn check_thresholds(&self) -> Result<(), String> {
+        if !self.accept_threshold.is_finite() || !(0.0..=1.0).contains(&self.accept_threshold) {
+            return Err(format!(
+                "decisions.accept_threshold must be a probability in 0.0..=1.0, got {}",
+                self.accept_threshold
+            ));
+        }
+        if !self.consult_floor.is_finite() || !(0.0..=1.0).contains(&self.consult_floor) {
+            return Err(format!(
+                "decisions.consult_floor must be a probability in 0.0..=1.0, got {}",
+                self.consult_floor
+            ));
+        }
+        // `partial_cmp` rather than `!(a <= b)`, and the difference is the
+        // point. `a <= b` is false for a NaN, so `!(a <= b)` is true and does
+        // reject it — but only by accident, and the next reader cannot tell
+        // that from a deliberate double negative. `partial_cmp` returns `None`
+        // for incomparable values, so rejecting on `None` is the obvious
+        // reading, and the equality case is still accepted.
+        match self.consult_floor.partial_cmp(&self.accept_threshold) {
+            Some(Ordering::Less | Ordering::Equal) => {}
+            _ => {
+                return Err(format!(
+                    "decisions.consult_floor ({}) must not exceed accept_threshold ({}): a \
+                     floor above the ceiling asks about nothing, and a NaN in either is not \
+                     a threshold at all",
+                    self.consult_floor, self.accept_threshold
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 impl ImportsConfig {
     /// The posture this instance actually runs (spec §11.5).
     ///
@@ -1947,6 +2075,40 @@ impl Config {
                     .and_then(|v| lorehaven_domain::retention::BodyAudience::parse_stored(Some(v)))
                     .unwrap_or(lorehaven_domain::retention::BodyAudience::Anyone),
             },
+            decisions: {
+                let base = DecisionsConfig::default();
+                let d = file.decisions.as_ref();
+                DecisionsConfig {
+                    provider: d
+                        .and_then(|d| d.provider.as_deref())
+                        .map_or(base.provider, |raw| match raw {
+                            "deterministic" => DecisionProvider::Deterministic,
+                            "calibrated" => DecisionProvider::Calibrated,
+                            // An unrecognised provider name is the DEFAULT,
+                            // and the default is deterministic. The same
+                            // trade as `retention` above, and it is the right
+                            // direction: a typo in this field must not turn
+                            // into a model being consulted, and it must not
+                            // stop the instance from starting either.
+                            _ => DecisionProvider::Deterministic,
+                        }),
+                    base_url: d.and_then(|d| d.base_url.clone()).unwrap_or(base.base_url),
+                    model: d.and_then(|d| d.model.clone()).unwrap_or(base.model),
+                    // The environment wins over the file. A key in a config
+                    // file is a key in a git repository, a paste into an
+                    // issue, and a backup.
+                    api_key: std::env::var("LOREHAVEN_DECISIONS_API_KEY")
+                        .ok()
+                        .or_else(|| d.and_then(|d| d.api_key.clone())),
+                    timeout_ms: d.and_then(|d| d.timeout_ms).unwrap_or(base.timeout_ms),
+                    accept_threshold: d
+                        .and_then(|d| d.accept_threshold)
+                        .unwrap_or(base.accept_threshold),
+                    consult_floor: d
+                        .and_then(|d| d.consult_floor)
+                        .unwrap_or(base.consult_floor),
+                }
+            },
             theme: {
                 let t = file.theme.unwrap_or_default();
                 ThemeConfig {
@@ -2191,6 +2353,16 @@ impl Config {
         };
 
         config.validate()?;
+        // The decision thresholds are checked HERE rather than in
+        // `DecisionsConfig::check_thresholds`'s callers, because a NaN
+        // threshold in a config file is the one misconfiguration whose failure
+        // is silent: every instance still starts, every test still passes, and
+        // every acceptance is held forever because `p < NaN` is false. Refusing
+        // to load is the only place it can be caught.
+        config
+            .decisions
+            .check_thresholds()
+            .map_err(anyhow::Error::msg)?;
         // A widening override stops startup. It is a separate call rather than
         // part of `validate()` because it needs the *resolved* instance
         // posture, which is itself a function of two config keys — and reading
@@ -2258,6 +2430,7 @@ impl Config {
             // depend on which escalations happened to be configured.
             imports: ImportsConfig::default(),
             retention: RetentionConfig::default(),
+            decisions: DecisionsConfig::default(),
             theme: ThemeConfig::default(),
             discovery: DiscoveryConfig::default(),
             tts: TtsConfig::default(),
@@ -2501,6 +2674,8 @@ struct FileConfig {
     meta_ranker: Option<MetaRankerSection>,
     /// Body-audience baseline (spec §7.7).
     retention: Option<RetentionSection>,
+    /// Calibrated decision models (amendment `calibrated-decision-models.md`).
+    decisions: Option<DecisionsSection>,
 }
 
 /// The `[retention]` table (spec §7.7): who may read a body by default.
@@ -2531,6 +2706,37 @@ struct RetentionSection {
     /// typo in this file inherits the instance default rather than becoming an
     /// audience nobody chose.
     default_body_audience: Option<String>,
+}
+/// The `[decisions]` file section.
+///
+/// `deny_unknown_fields` is on the file as a whole, so an unknown key inside
+/// this section is refused like any other — which is the point of mirroring
+/// the surrounding style rather than adding a lenient variant.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DecisionsSection {
+    /// `deterministic` or `calibrated`.
+    #[serde(default)]
+    provider: Option<String>,
+    /// Where the model is served from.
+    #[serde(default)]
+    base_url: Option<String>,
+    /// Which model to ask for.
+    #[serde(default)]
+    model: Option<String>,
+    /// Read from the environment rather than here, so a key is never a
+    /// file that gets pasted into a bug report.
+    #[serde(default)]
+    api_key: Option<String>,
+    /// How long to wait before falling back to the deterministic path.
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+    /// The posterior at or above which an acceptance is kept.
+    #[serde(default)]
+    accept_threshold: Option<f64>,
+    /// Below this the model is not consulted at all.
+    #[serde(default)]
+    consult_floor: Option<f64>,
 }
 
 /// The `[discovery]` table (spec §16.1a): which recommender the instance
@@ -3886,6 +4092,7 @@ port = 7000
         assert_eq!(parsed.tts.engine, "piper");
         assert!(parsed.tts.piper_path.is_none());
         for section in [
+            "[decisions]",
             "[site]",
             "[server]",
             "[database]",
@@ -4332,5 +4539,168 @@ mode = "private"
         .expect("loads");
         assert_eq!(config.instance.preset, "genre_haven");
         assert_eq!(config.instance.mode, InstanceMode::Private);
+    }
+
+    // -----------------------------------------------------------------------
+    // Amendment `calibrated-decision-models.md` — [decisions]
+    // -----------------------------------------------------------------------
+
+    /// A `NaN` threshold is refused, not clamped and not accepted.
+    ///
+    /// This is the reason `check_thresholds` exists and the reason its
+    /// comparison is `!(a <= b)`. Every comparison against `NaN` is false, so a
+    /// validation written as `consult_floor < accept_threshold` is TRUE for a
+    /// pair of NaNs and quietly accepts them. The instance then starts, every
+    /// test passes, and `reconcile` holds every acceptance forever because
+    /// `p < NaN` is false even for `p = 1.0` — the direction inverts with no
+    /// visible symptom anywhere.
+    #[test]
+    fn a_nan_threshold_is_refused_rather_than_silently_accepted() {
+        for (field, value) in [("accept_threshold", f64::NAN), ("consult_floor", f64::NAN)] {
+            let config = DecisionsConfig {
+                accept_threshold: if field == "accept_threshold" {
+                    value
+                } else {
+                    0.9
+                },
+                consult_floor: if field == "consult_floor" { value } else { 0.1 },
+                ..DecisionsConfig::default()
+            };
+            assert!(
+                config.check_thresholds().is_err(),
+                "a NaN {field} must stop the instance from starting"
+            );
+        }
+    }
+
+    /// An infinite threshold is refused for the same reason and by the same
+    /// comparison — `INFINITY <= x` is false for every finite `x`.
+    #[test]
+    fn an_infinite_threshold_is_refused() {
+        let config = DecisionsConfig {
+            accept_threshold: f64::INFINITY,
+            ..DecisionsConfig::default()
+        };
+        assert!(config.check_thresholds().is_err());
+    }
+
+    /// A threshold outside `0.0..=1.0` is refused: `1.5` is not a probability,
+    /// and clamping it to `1.0` would make the model maximally cautious
+    /// without anybody choosing that.
+    #[test]
+    fn a_threshold_outside_the_unit_interval_is_refused() {
+        for threshold in [-0.1, 1.5, 2.0] {
+            let config = DecisionsConfig {
+                accept_threshold: threshold,
+                ..DecisionsConfig::default()
+            };
+            assert!(
+                config.check_thresholds().is_err(),
+                "{threshold} is not a probability"
+            );
+        }
+    }
+
+    /// A floor above the threshold is refused, because such a configuration
+    /// asks about nothing — and does so silently, which is worse.
+    #[test]
+    fn a_floor_above_the_threshold_is_refused() {
+        let config = DecisionsConfig {
+            accept_threshold: 0.5,
+            consult_floor: 0.6,
+            ..DecisionsConfig::default()
+        };
+        let error = config
+            .check_thresholds()
+            .expect_err("a floor above the ceiling asks about nothing");
+        assert!(error.contains("must not exceed"), "{error}");
+    }
+
+    /// The shipped example's `[decisions]` section parses to the values it
+    /// documents.
+    ///
+    /// The shipped-example test above proves the *file* parses; this proves the
+    /// section means what its comments say. An example that parses into
+    /// defaults is an operator who copied it, set `provider = "calibrated"`,
+    /// and got a deterministic instance with a threshold they never chose.
+    #[test]
+    fn the_shipped_example_decisions_section_means_what_it_says() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lorehaven.toml.example");
+        let body = std::fs::read_to_string(&path).expect("the example ships");
+        let file: toml::Value = toml::from_str(&body).expect("the example parses");
+        let section = file
+            .get("decisions")
+            .expect("the example documents [decisions]");
+
+        // The real parse, on the real file. Asserting against a hand-built
+        // `DecisionsConfig` instead would prove the example is well-formed TOML
+        // and say nothing about what the instance would do with it.
+        let loaded = load_from("decisions-example", &body)
+            .expect("the example loads")
+            .decisions;
+        assert_eq!(loaded.provider, DecisionProvider::Deterministic);
+        assert_eq!(
+            loaded.provider.as_str(),
+            section["provider"].as_str().unwrap()
+        );
+        assert_eq!(loaded.base_url, section["base_url"].as_str().unwrap());
+        assert_eq!(loaded.model, section["model"].as_str().unwrap());
+        assert_eq!(
+            loaded.accept_threshold,
+            section["accept_threshold"].as_float().unwrap()
+        );
+        assert_eq!(
+            loaded.consult_floor,
+            section["consult_floor"].as_float().unwrap()
+        );
+        // The key is not in the file, so the example must not read one.
+        assert!(
+            section.get("api_key").is_none(),
+            "the example must not ship a key field; the environment carries it"
+        );
+    }
+
+    /// The defaults are the defaults, and they are the safe ones.
+    #[test]
+    fn an_instance_that_configured_nothing_is_deterministic() {
+        let config = DecisionsConfig::default();
+        assert_eq!(
+            config.provider,
+            DecisionProvider::Deterministic,
+            "an instance that has not opted in must behave exactly as it did \
+             before the feature existed"
+        );
+        assert_eq!(config.provider.as_str(), "deterministic");
+        config
+            .check_thresholds()
+            .expect("the shipped defaults are valid");
+    }
+
+    /// The consult floor brackets the useful range, and the two ends are the
+    /// ones worth pinning: a posterior the deterministic path already knows,
+    /// and one the model's opinion cannot change.
+    #[test]
+    fn a_posterior_the_deterministic_path_already_knows_is_not_worth_a_request() {
+        let config = DecisionsConfig::default();
+        // Below the floor: the model would only confirm what a rejection or a
+        // hold already said.
+        assert!(!config.worth_asking_about(0.05));
+        // Above the threshold: `reconcile` would keep the acceptance unchanged,
+        // so the request buys nothing.
+        assert!(!config.worth_asking_about(0.95));
+        assert!(!config.worth_asking_about(1.0));
+        // In between: this is the only range where the model's answer changes
+        // the outcome, and it is the only range worth paying for.
+        assert!(config.worth_asking_about(0.5));
+    }
+
+    /// A `NaN` posterior is never worth asking about, because it fails every
+    /// comparison in the bracket above and would otherwise be waved through by
+    /// a test that only checks the range.
+    #[test]
+    fn a_nan_posterior_is_never_worth_a_request() {
+        let config = DecisionsConfig::default();
+        assert!(!config.worth_asking_about(f64::NAN));
     }
 }

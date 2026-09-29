@@ -259,3 +259,43 @@ seed_enabled = true
 # webhook_timeout_secs = 10
 # webhook_max_attempts = 5
 # webhook_base_delay_ms = 500
+
+# ---------------------------------------------------------------------------
+# Calibrated decision models (spec §11.14, amendment
+# docs/spec-amendments/calibrated-decision-models.md)
+#
+# OFF by default. With provider = "deterministic" nothing here is consulted and
+# the instance behaves exactly as it did before the feature existed.
+#
+# With provider = "calibrated" a decision model is asked whether a candidate is
+# really a work, and its answer can NARROW an acceptance to a hold. It cannot
+# reject and it cannot accept: §11.14's rejection is structural (an empty
+# author is arithmetic), and its acceptance rests on evidence a text model never
+# sees. The worst a bad model can do is send a work to a human.
+#
+# A machine learning model is doing the classification. Start with the audit
+# trail (GET /api/v1/decisions/audit, operator-only) and leave the threshold
+# where it is.
+# ---------------------------------------------------------------------------
+[decisions]
+provider = "deterministic"
+# Where the model is served. Unsloth Studio's default; a remote host is the
+# operator's own decision.
+base_url = "http://127.0.0.1:8888"
+# `laya` names whichever model the server has configured.
+model = "laya"
+# How long to wait before falling back to the deterministic path. Keep this
+# short: a cold model takes 10-20s to load and blocking an import on that is
+# worse than classifying without it.
+timeout_ms = 5000
+# The posterior at or above which an acceptance is kept. High on purpose:
+# §11.14's posture is "reject the obvious junk, hold the rest", so the unusual
+# case goes to a person. Lower it only after reading the audit trail.
+accept_threshold = 0.90
+# Below this the model is not consulted at all — a near-zero posterior on "is
+# this a work?" is the deterministic path's own answer.
+consult_floor = 0.10
+# The API key is NOT set here. Put it in the environment instead:
+#   LOREHAVEN_DECISIONS_API_KEY=sk-unsloth-...
+# A key in this file is a key in a git repository, a backup, and a paste into
+# a bug report.

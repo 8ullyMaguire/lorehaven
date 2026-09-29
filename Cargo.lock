@@ -1690,6 +1690,7 @@ dependencies = [
  "flate2",
  "hex",
  "hmac",
+ "lorehaven-decisions",
  "lorehaven-lore-metadata",
  "rand 0.8.8",
  "serde",

@@ -26,6 +26,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use lorehaven_decisions::reconcile::{self, QualityCall};
 use serde::{Deserialize, Serialize};
 
 /// One chapter as the planner sees it: where it sits, what identifies it, and
@@ -137,6 +138,61 @@ impl ImportedWork {
         }
 
         ImportQuality::Accepted
+    }
+
+    /// The calibrated call, when a decision model has been consulted
+    /// (§11.14, amendment `calibrated-decision-models.md` §3.1).
+    ///
+    /// `posterior` is the model's probability that this is a real work.
+    /// `None` means no model was consulted — the provider is deterministic,
+    /// the model was unreachable, the answer was refused as nonsense, or this
+    /// is an `aggregate` instance where no body was fetched and there is no
+    /// text to grade. All four are the same thing here, and all four leave
+    /// [`Self::classify_quality`]'s answer untouched.
+    ///
+    /// The model can only turn an acceptance into a hold. It cannot reject and
+    /// it cannot accept: §11.14's rejection is structural (an empty author is
+    /// arithmetic, not a judgement), and its acceptance rests on evidence a
+    /// text model never sees. The policy lives in
+    /// `lorehaven_decisions::reconcile` and this method is a call into it, not
+    /// a second implementation of it.
+    #[must_use]
+    pub fn classify_quality_calibrated(
+        &self,
+        posterior: Option<f64>,
+        accept_threshold: f64,
+    ) -> ImportQuality {
+        reconcile::reconcile(
+            QualityCall::from(self.classify_quality()),
+            posterior,
+            accept_threshold,
+        )
+        .into()
+    }
+}
+
+impl From<ImportQuality> for QualityCall {
+    /// Total by construction: every variant of `ImportQuality` maps, and there
+    /// is deliberately no catch-all arm. A new variant added to `ImportQuality`
+    /// must be given a meaning here, or this will not compile — which is the
+    /// point. A default arm here would let a future variant reach the model
+    /// unreconciled.
+    fn from(quality: ImportQuality) -> Self {
+        match quality {
+            ImportQuality::Accepted => Self::Accepted,
+            ImportQuality::Rejected { reason } => Self::Rejected { reason },
+            ImportQuality::Held { reason } => Self::Held { reason },
+        }
+    }
+}
+
+impl From<QualityCall> for ImportQuality {
+    fn from(call: QualityCall) -> Self {
+        match call {
+            QualityCall::Accepted => Self::Accepted,
+            QualityCall::Rejected { reason } => Self::Rejected { reason },
+            QualityCall::Held { reason } => Self::Held { reason },
+        }
     }
 }
 
@@ -765,6 +821,117 @@ mod tests {
             .with_chapter(ChapterIdentity::new("1", 1, "One").with_word_count(100));
         let first = work.classify_quality();
         let second = work.classify_quality();
+        assert_eq!(first, second);
+    }
+
+    // -----------------------------------------------------------------------
+    // §11.14 amendment — the calibrated call
+    // -----------------------------------------------------------------------
+
+    /// The threshold the tests below use, named so a reader can see the numbers
+    /// are on the same scale rather than being convenient.
+    const CALIBRATED_THRESHOLD: f64 = 0.90;
+
+    fn a_real_work() -> ImportedWork {
+        ImportedWork::new("A Long Quiet River", "someone")
+            .with_chapter(ChapterIdentity::new("c1", 1, "One").with_word_count(4_000))
+    }
+
+    /// A real title and a real author that reports no counted words. §11.14's
+    /// held case, and the one a rule that called junk would lose without trace.
+    fn a_work_with_no_words() -> ImportedWork {
+        ImportedWork::new("A Real Work", "someone")
+            .with_chapter(ChapterIdentity::new("c1", 1, "One"))
+    }
+
+    /// A real title, real words, and an author who is whitespace. The
+    /// structural rejection: §11.14's "certainly not a work", which no text
+    /// model can argue with because it is not a judgement.
+    fn a_work_with_no_author() -> ImportedWork {
+        ImportedWork::new("A Real Title", "   ")
+            .with_chapter(ChapterIdentity::new("c1", 1, "One").with_word_count(1_000))
+    }
+
+    /// With no model consulted, the calibrated call is exactly the deterministic
+    /// one.
+    ///
+    /// This is the deployed state of every instance that has not opted in, and
+    /// it is also the degradation path when a model goes down. A reader of the
+    /// calibrated path must be able to check that the ordinary answer is
+    /// untouched without reading `reconcile` — hence the equality over all
+    /// three verdicts rather than a spot check on one.
+    #[test]
+    fn a_disabled_provider_changes_nothing_about_any_verdict() {
+        let cases = [
+            (a_real_work(), "a real work"),
+            (a_work_with_no_words(), "a real work with no counted words"),
+            (a_work_with_no_author(), "a work with an empty author"),
+        ];
+        for (work, what) in cases {
+            assert_eq!(
+                work.classify_quality_calibrated(None, CALIBRATED_THRESHOLD),
+                work.classify_quality(),
+                "{what}: a provider that answered nothing must leave the answer alone"
+            );
+        }
+    }
+
+    /// A certain work is still certain, and a doubtful one is held rather than
+    /// refused.
+    ///
+    /// The second half is §11.14's distinction doing real work: a rejection is
+    /// "a reason shown to whoever asked" and a hold "waits for a decision".
+    /// Telling a reader their work is not a work because a model was not
+    /// confident is a different and much worse thing than asking a person to
+    /// look.
+    #[test]
+    fn a_certain_work_is_accepted_and_a_doubtful_one_is_held_not_refused() {
+        let work = a_real_work();
+        assert_eq!(
+            work.classify_quality_calibrated(Some(0.97), CALIBRATED_THRESHOLD),
+            ImportQuality::Accepted
+        );
+        assert!(matches!(
+            work.classify_quality_calibrated(Some(0.62), CALIBRATED_THRESHOLD),
+            ImportQuality::Held { .. }
+        ));
+    }
+
+    /// The model cannot overturn a structural rejection or promote a hold.
+    ///
+    /// Both are the amendment's asymmetry seen from the §11.14 side. The
+    /// `Some(1.0)` is the point: maximum confidence that the work is real.
+    #[test]
+    fn the_model_cannot_outvote_an_empty_author_or_a_zero_word_count() {
+        assert!(
+            matches!(
+                a_work_with_no_author()
+                    .classify_quality_calibrated(Some(1.0), CALIBRATED_THRESHOLD),
+                ImportQuality::Rejected { .. }
+            ),
+            "an empty author is arithmetic; no amount of prose argues against it"
+        );
+        assert!(
+            matches!(
+                a_work_with_no_words().classify_quality_calibrated(Some(1.0), CALIBRATED_THRESHOLD),
+                ImportQuality::Held { .. }
+            ),
+            "§11.14 makes a zero word count a rule, not a probability"
+        );
+    }
+
+    /// The calibrated call is pure, like the deterministic one it wraps.
+    ///
+    /// `classify_quality` promises this and the new method must not break the
+    /// promise: a work is classified once in the preview and again in the
+    /// update check, and two different answers for the same work would make
+    /// §11.14's "answers identically in the preview, the import and the update
+    /// check" false.
+    #[test]
+    fn the_calibrated_call_is_pure() {
+        let work = a_real_work();
+        let first = work.classify_quality_calibrated(Some(0.5), CALIBRATED_THRESHOLD);
+        let second = work.classify_quality_calibrated(Some(0.5), CALIBRATED_THRESHOLD);
         assert_eq!(first, second);
     }
 }
