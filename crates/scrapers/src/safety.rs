@@ -498,6 +498,29 @@ pub struct SafeFetcher {
     /// Zero unless the policy overrides, so it is also the honest report for an
     /// instance that complies.
     robots_overrides: AtomicU64,
+    /// How many paths have been read and DISCARDED — the host forbade them, the
+    /// posture is `MetadataOnly`, and the fetch was the metadata class.
+    ///
+    /// A separate counter from `robots_overrides` and not folded into it, because
+    /// the two mean opposite things and an operator asking "what did the posture
+    /// cost me?" needs both:
+    ///
+    /// * `robots_overrides` counts reads that would not have happened under a
+    ///   compliant policy. It is a number an operator may have to explain to a
+    ///   site's owner, and it is zero on a compliant instance.
+    /// * `robots_read_and_discarded` counts reads the posture ASKED FOR and then
+    ///   declined to keep. Nothing was overridden and nobody needs to be told
+    ///   about any of it individually — but the volume is the answer to whether
+    ///   `MetadataOnly` is throwing away the dataset.
+    ///
+    /// They were the same counter once, and folding them would have made the
+    /// posture's cost invisible: a `MetadataOnly` instance reaches
+    /// `ReadAndDiscarded` constantly, it is the only reason that posture exists,
+    /// and it reported nothing at all.
+    robots_read_and_discarded: AtomicU64,
+    /// Hosts already warned about a discarded read, so the warning is once per
+    /// host and the count carries the rest.
+    robots_discard_hosts: Mutex<HashSet<String>>,
     /// The hosts already reported, so the override is stated once per host
     /// rather than once per chapter.
     ///
@@ -576,6 +599,8 @@ impl SafeFetcher {
             credential_host: None,
             robots: Mutex::new(HashMap::new()),
             robots_overrides: AtomicU64::new(0),
+            robots_read_and_discarded: AtomicU64::new(0),
+            robots_discard_hosts: Mutex::new(HashSet::new()),
             robots_override_hosts: Mutex::new(HashSet::new()),
             solver: Mutex::new(None),
             archive: Mutex::new(None),
@@ -618,6 +643,48 @@ impl SafeFetcher {
     #[must_use]
     pub fn robots_overrides(&self) -> u64 {
         self.robots_overrides.load(Ordering::Relaxed)
+    }
+
+    /// How many forbidden paths have been read in order to throw the bytes away.
+    ///
+    /// The second half of M59-04, and deliberately a DIFFERENT number from
+    /// [`Self::robots_overrides`]. An operator reading this is asking "is
+    /// `MetadataOnly` throwing away the dataset?", and the answer to that is not
+    /// the answer to "is this instance ignoring sites?" — folding the two
+    /// together would make both unanswerable, and the existing test
+    /// `a_read_and_discarded_fetch_is_not_counted_as_an_override` is what keeps
+    /// them apart.
+    #[must_use]
+    pub fn robots_read_and_discarded(&self) -> u64 {
+        self.robots_read_and_discarded.load(Ordering::Relaxed)
+    }
+
+    /// Note that a forbidden path is read and then discarded.
+    ///
+    /// Once per host, like the override warning, and for the same reason: a log
+    /// line repeated until it is scrolled past is not a warning. The wording is
+    /// NOT the override's -- this is not an instance ignoring anybody, it is an
+    /// instance honouring a posture it was told to hold, and a log that reads
+    /// like an apology for a decision the operator made on purpose is its own
+    /// kind of wrong.
+    async fn record_robots_discard(&self, host: &str, path: &str) {
+        self.robots_read_and_discarded
+            .fetch_add(1, Ordering::Relaxed);
+        let first_time = {
+            let mut seen = self.robots_discard_hosts.lock().await;
+            seen.insert(host.to_owned())
+        };
+        if first_time {
+            tracing::debug!(
+                host,
+                path,
+                "this host's robots.txt disallows this path and the fetch class is \
+                 `Metadata`, so under `imports.robots_posture = metadata_only` it is \
+                 being read and the response discarded. Nothing from it is stored. This \
+                 is counted in robots_read_and_discarded, which is how the operator can \
+                 see what the posture is costing the dataset."
+            );
+        }
     }
 
     /// Note that a forbidden path is being read anyway.
@@ -698,7 +765,7 @@ impl SafeFetcher {
             // carried on the `Fetched` below rather than being decided here —
             // the fetcher has no opinion about storage, and the flag is what
             // makes the opinion enforceable by whoever does store.
-            RobotsGate::ReadAndDiscarded => {}
+            RobotsGate::ReadAndDiscarded => self.record_robots_discard(&host, parsed.path()).await,
             RobotsGate::Overridden => self.record_robots_override(&host, parsed.path()).await,
         }
         // Label the result. A `ReadAndDiscarded` read is marked as discarded so
@@ -3352,6 +3419,113 @@ mod tests {
             "reading a forbidden path in order to discard it is not overriding the host, and a \
              report that counts it would tell an operator this instance ignores robots.txt when it \
              has stored nothing at all from the host"
+        );
+    }
+
+    /// M59-04: every overridden OR DISCARDED read is counted per host, and the
+    /// first per host is logged.
+    ///
+    /// The counter existed and covered only half the requirement. `ReadAndDiscarded`
+    /// was `{}` in the match — a read that happens constantly on a `MetadataOnly`
+    /// instance, which is the only reason that posture exists, and it reported
+    /// nothing. An operator asking "what is the posture costing me?" got zero
+    /// for the posture's whole purpose.
+    ///
+    /// Two assertions, because "counted" and "counted once per host for the log"
+    /// are different claims and the second is the one that prevents a log flood:
+    /// three reads of the same host produce a count of 3 and a single warning.
+    #[tokio::test]
+    async fn a_read_and_discarded_fetch_is_counted_on_its_own_counter() {
+        let mut fetcher =
+            fetcher_with_robots(Duration::from_millis(500), "User-agent: *\nDisallow: /\n").await;
+        fetcher.policy.robots_posture = RobotsPosture::MetadataOnly;
+
+        for n in 1..=3 {
+            let _ = fetcher
+                .get_with_class(
+                    &format!("https://example.com/story/{n}"),
+                    None,
+                    None,
+                    FetchClass::Metadata,
+                )
+                .await;
+        }
+
+        assert_eq!(
+            fetcher.robots_read_and_discarded(),
+            3,
+            "three forbidden metadata reads were discarded and only {} were counted. \
+             M59-04: the counter is what lets an operator answer what the posture cost, \
+             and on a `MetadataOnly` instance this read is the posture's normal traffic.",
+            fetcher.robots_read_and_discarded()
+        );
+        // The other half of the requirement, and the reason the two counters are
+        // kept apart: this must NOT appear in the override count, which is the
+        // number an operator may have to explain to a site's owner.
+        assert_eq!(
+            fetcher.robots_overrides(),
+            0,
+            "a read-and-discard is not an override. `a_read_and_discarded_fetch_is_not_\
+             counted_as_an_override` already asserts this; it is repeated here because \
+             the two counters are the whole design and a mutation that moved this read \
+             to the override counter would pass the old test."
+        );
+        // Once per host, so the log is a warning rather than a flood.
+        assert!(
+            fetcher.robots_discard_hosts.lock().await.len() == 1,
+            "the discard warning is keyed per host, and one host has been read three times"
+        );
+    }
+
+    /// A second host is warned about separately, so "first per host" is not
+    /// "first overall" — which is the bug a single global flag would have.
+    ///
+    /// The first attempt at this used `example.org` and asserted two warnings.
+    /// It got one, and the *test* was wrong rather than the code: the fixture
+    /// only allows `example.com`, so the second request is refused before the
+    /// gate is reached and never counted. Worth recording, because "the test
+    /// went red" and "the test was wrong" look identical from the outside and
+    /// only one of them is a bug.
+    #[tokio::test]
+    async fn each_host_gets_its_own_discard_warning() {
+        let mut fetcher =
+            fetcher_with_robots(Duration::from_millis(500), "User-agent: *\nDisallow: /\n").await;
+        fetcher.policy.robots_posture = RobotsPosture::MetadataOnly;
+
+        // A second host this fetcher is allowed to talk to, with the same rules.
+        fetcher.allowed_hosts.push("other.example".into());
+        {
+            let mut cache = fetcher.robots.lock().await;
+            cache.insert(
+                "other.example".to_owned(),
+                RobotsEntry {
+                    rules: RobotsRules::parse("User-agent: *\nDisallow: /\n", "Lorehaven"),
+                    read_at: Instant::now(),
+                },
+            );
+        }
+
+        let _ = fetcher
+            .get_with_class("https://example.com/a", None, None, FetchClass::Metadata)
+            .await;
+        let _ = fetcher
+            .get_with_class("https://other.example/b", None, None, FetchClass::Metadata)
+            .await;
+
+        let hosts = fetcher.robots_discard_hosts.lock().await;
+        assert_eq!(
+            hosts.len(),
+            2,
+            "two hosts were read and discarded, so two hosts have been warned about. \
+             A single global flag would report 1 and leave the second site with no \
+             record that its rules were hit at all."
+        );
+        drop(hosts);
+        assert_eq!(
+            fetcher.robots_read_and_discarded(),
+            2,
+            "both reads counted, or the per-host keying is being reported for a read \
+             that never happened"
         );
     }
 
