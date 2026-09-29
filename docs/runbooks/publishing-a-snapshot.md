@@ -95,8 +95,15 @@ read -rs PASSPHRASE && echo "$PASSPHRASE" | scripts/check-snapshot-channel.py \
     --target "$ONION" \
     --file ~/.local/share/lorehaven/snapshots/lorehaven-YYYY-MM.sql.zst.age \
     --state-dir ~/.local/share/lorehaven/snapshot-state \
+    --timestamp-offset "$OFFSET" \
     --passphrase-fpr-stdin --record
 ```
+
+`$OFFSET` is the value `take-snapshot.sh` printed at the start of the run. It is
+deliberately in neither the dump nor the manifest: an offset recorded beside the
+data is a **published** offset, and two dumps shifted by the same amount join
+row-for-row on every timestamp (§11.16.5). The generated SQL shows only that a
+shift happened, which §11.16.3 needs for the construction to be checkable.
 
 The passphrase is read on **stdin**, never as an argument — an argument is
 visible in `ps` to every process on the machine.
@@ -115,9 +122,12 @@ same message, not in the same repository, not "just this once".
 
 ### 5. Record the publication
 
-The `--record` flag writes the passphrase **fingerprint** (salted), the
-destination, the date, the rule version, and the file name. Never the
-passphrase, never your hostname. This file is what makes next month's rotation
+The `--record` flag writes the passphrase **fingerprint** (salted, never the
+passphrase), the destination, the **offset value**, the date, the rule version and
+the file name. The offset is stored in the clear on purpose: it is not a secret,
+it is a fact about which snapshots must not be aligned, and the operator needs to
+read it when a refusal is unexplained. It is absent from the *dump*; the state
+directory is not published. This file is what makes next month's rotation
 check possible; if it is lost, the next snapshot cannot be proven to have
 rotated.
 

@@ -312,7 +312,7 @@ def load_state(state_dir: Path) -> dict:
 
 
 def check_not_repeated(state: dict, *, fpr: str | None, destination: str | None,
-                      when: str) -> None:
+                      when: str, offset: int | None = None) -> None:
     previous = state.get("snapshots", [])[-1] if state.get("snapshots") else None
     if not previous:
         return
@@ -322,6 +322,15 @@ def check_not_repeated(state: dict, *, fpr: str | None, destination: str | None,
             f"  {when} reuses the passphrase fingerprint recorded for the snapshot of\n"
             f"  {previous.get('date', 'an earlier date')}. Spec 11.17.3: a reused passphrase\n"
             f"  means one intercepted file is a standing key to every other.",
+        )
+    if offset is not None and previous.get("timestamp_offset") == offset:
+        raise refuse(
+            "the timestamp offset is the previous snapshot's",
+            f"  {when} reuses the offset recorded for {previous.get('date', 'an earlier date')}.\n"
+            f"  Spec 11.16.5: a month offset is a LINKABLE IDENTIFIER. Two dumps shifted by\n"
+            f"  the same amount join row-for-row on every timestamp, so the whole series\n"
+            f"  becomes attributable to one instance -- which is the correlation the monthly\n"
+            f"  cadence exists to prevent.",
         )
     if destination and previous.get("i2p_destination") == destination:
         raise refuse(
@@ -333,11 +342,18 @@ def check_not_repeated(state: dict, *, fpr: str | None, destination: str | None,
 
 
 def record(state: dict, state_dir: Path, *, fpr: str | None, destination: str | None,
-           when: str, rule_version: str, file: Path) -> Path:
+           when: str, rule_version: str, file: Path,
+           offset: int | None = None) -> Path:
     state.setdefault("snapshots", []).append({
         "date": when,
         "passphrase_fingerprint": fpr,
         "i2p_destination": destination,
+        # The offset itself, NOT a fingerprint: unlike the passphrase, an offset
+        # is not a secret, and storing only a fingerprint would make the
+        # rotation check a comparison of hashes that cannot be read by the
+        # operator debugging "why was this refused". The OFFSET is recorded; the
+        # PASSHRASE never is.
+        "timestamp_offset": offset,
         "rule_version": rule_version,
         "file": file.name,
         # No operator, no host, no passphrase: the state directory sits next to
@@ -423,7 +439,7 @@ def self_test() -> int:
         when = "2026-10-01"
         fpr = passphrase_fingerprint("correct horse battery staple")
         record(st, state_dir, fpr=fpr, destination="DEST-A", when=when,
-               rule_version="11.16.3", file=plain)
+               rule_version="11.16.3", file=plain, offset=45)
         st = load_state(state_dir)
 
         f, m = _expect_refusal("5 reused passphrase", check_not_repeated, st,
@@ -433,12 +449,16 @@ def self_test() -> int:
                                fpr=passphrase_fingerprint("a different one"),
                                destination="DEST-A", when=when)
         print(m); failures += not f
+        f, m = _expect_refusal("6 reused timestamp offset", check_not_repeated, st,
+                               fpr=passphrase_fingerprint("a different one"),
+                               destination="DEST-B", when=when, offset=45)
+        print(m); failures += not f
 
         # The positive control for 5/6: different everything must pass.
         try:
             check_not_repeated(st, fpr=passphrase_fingerprint("a different one"),
-                               destination="DEST-B", when="2026-11-01")
-            print("5+6 fresh passphrase and destination accepted")
+                               destination="DEST-B", when="2026-11-01", offset=46)
+            print("5+6 fresh passphrase, destination and offset accepted")
         except Refusal as r:
             print(f"5+6 REFUSED: {r}"); failures += 1
 
@@ -465,6 +485,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--passphrase-fpr-stdin", action="store_true",
                     help="read the passphrase on stdin and fingerprint it (never an argument)")
     ap.add_argument("--i2p-destination", help="the I2P destination string, if publishing over I2P")
+    ap.add_argument("--timestamp-offset", type=int,
+                    help="the month offset applied to this snapshot's timestamps, in days. "
+                         "Compared against the previous snapshot's: 11.16.5 makes a shared "
+                         "offset a linkable identifier across the whole series.")
     ap.add_argument("--rule-version", default="11.16.3")
     ap.add_argument("--record", action="store_true",
                     help="record this publication in the state directory after a pass")
@@ -487,6 +511,7 @@ def main(argv: list[str] | None = None) -> int:
         ("encryption", lambda: check_encrypted(args.file)),
         ("rotation", lambda: check_not_repeated(load_state(args.state_dir), fpr=fpr,
                                                  destination=args.i2p_destination,
+                                                 offset=args.timestamp_offset,
                                                  when=datetime.now().date().isoformat())),
     ]
     destination = None
@@ -507,7 +532,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.record:
         record(load_state(args.state_dir), args.state_dir, fpr=fpr,
                destination=args.i2p_destination, when=datetime.now().date().isoformat(),
-               rule_version=args.rule_version, file=args.file)
+               rule_version=args.rule_version, file=args.file,
+               offset=args.timestamp_offset)
     print(f"channel OK: publishing to {args.target}")
     return 0
 

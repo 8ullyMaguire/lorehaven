@@ -33,6 +33,11 @@ OUT=""
 SOURCE_URL="${LOREHAVEN_SOURCE_URL:-}"
 SKIP_RESTORE=0
 RULE_VERSION="11.16.3"
+# 11.16.5/11.17.4: the per-snapshot timestamp offset. Generated fresh per run so
+# consecutive snapshots differ by construction rather than by operator
+# discipline, and reported to stderr so it can be passed to
+# check-snapshot-channel.py --timestamp-offset without being written anywhere.
+OFFSET_MAX="${LOREHAVEN_OFFSET_MAX_DAYS:-365}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --out)            OUT="$2"; shift 2 ;;
@@ -90,8 +95,14 @@ MASK_SQL="$WORK/mask.sql"
 # The live schema is read from LOREHAVEN_PG_URL when it is set, and from the
 # migrations otherwise. Point it at the SCRATCH copy, not the source, so the
 # mask is generated from the database it will actually be applied to.
+# The offset is chosen here and printed, never stored: it goes into the SQL as an
+# INTERVAL and nowhere else. check-snapshot-channel.py compares the VALUE against
+# last month's, so a reuse is refused -- but the value must not be recorded in
+# the dump or the manifest, or it stops being a defence.
+OFFSET="$(python3 -c 'import random; print(random.randint(1, '"$OFFSET_MAX"'))')"
+echo "==> timestamp offset: $OFFSET days (unpublished)" >&2
 LOREHAVEN_PG_URL="postgresql:///$SCRATCH_DB" python3 scripts/build-snapshot-sql.py \
-  --out "$MASK_SQL" --mode instance
+  --out "$MASK_SQL" --mode instance --timestamp-offset "$OFFSET"
 
 step "applying the mask to the scratch database"
 psql -q -v ON_ERROR_STOP=1 -d "$SCRATCH_DB" -f "$MASK_SQL"
@@ -188,6 +199,10 @@ psql -q -At -d "$SCRATCH_DB" -c "
   echo "snapshot: $NAME"
   echo "date: $STAMP"
   echo "anonymisation_rule_version: $RULE_VERSION"
+  # No operator, no host, and NO OFFSET. An offset beside the dump is a published
+  # offset (11.16.5), and the whole point of the rotation is that a recipient
+  # holding two dumps cannot align them.
+  echo "timestamp_offset: unpublished"
   echo "restored_and_doctor_passed: $([ "$SKIP_RESTORE" -eq 0 ] && echo true || echo false)"
   echo
   cat "$OUT/$NAME.manifest.txt" 2>/dev/null || true
@@ -200,7 +215,8 @@ echo
 echo "Now: check the CHANNEL before publishing anything."
 echo "  scripts/check-snapshot-channel.py --self-test"
 echo "  scripts/check-snapshot-channel.py --target <onion> --file <the .age> \\"
-echo "      --state-dir ~/.local/share/lorehaven/snapshot-state --passphrase-fpr-stdin --record"
+echo "      --state-dir ~/.local/share/lorehaven/snapshot-state --passphrase-fpr-stdin \\"
+echo "      --timestamp-offset $OFFSET --record"
 echo
 echo "The file is encrypted and the bytes are checked. Neither of those says the"
 echo "TRANSFER is safe. See docs/runbooks/publishing-a-snapshot.md."

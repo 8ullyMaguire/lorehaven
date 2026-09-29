@@ -891,3 +891,194 @@ async fn a_restored_snapshot_passes_doctor() {
     );
     tdb.cleanup().await;
 }
+
+/// §11.16.5 / §11.17.4 — a month offset is a LINKABLE IDENTIFIER. Two dumps
+/// shifted by the same amount join row-for-row on every timestamp, so each
+/// snapshot must use its own offset, applied INSIDE the snapshot.
+///
+/// Four assertions, because the failure modes are different in kind and two of
+/// them are SILENT — they do not raise, they produce a value that looks like a
+/// timestamp and is not one:
+///
+///  1. the offset is applied (+45 days exactly, not approximately);
+///  2. intervals SURVIVE — the research value 11.16.5 names is "how long do
+///     people keep a work before abandoning it", so a shift that moved every
+///     timestamp by a different amount would answer a different question;
+///  3. the output still PARSES as RFC 3339 (see the to_char note in the
+///     generator: escaped quotes land in the DATA, they do not raise);
+///  4. the LIVE row is untouched — the mask is applied to a copy, and a shifted
+///     live table would mean the instance itself now lies about when things
+///     happened.
+#[tokio::test]
+async fn a_snapshot_shifts_every_timestamp_by_one_unpublished_offset() {
+    let Some(_) = pg_url() else { return };
+    let tdb = TestDb::connect_with_dir(
+        "snapshot_offset",
+        &test_support::scratch_dir("snapshot_offset"),
+    )
+    .await;
+    if tdb.db().backend() != Backend::Postgres {
+        tdb.cleanup().await;
+        return;
+    }
+    let pool = tdb.db().postgres_pool().expect("pool");
+    // Two accounts a known distance apart in time. The gap between them is the
+    // thing that must not change.
+    for (i, day) in ["2026-03-01", "2026-04-11"].iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO accounts (id, email, created_at, updated_at)
+             VALUES (gen_random_uuid(), $1, $2::text, $2::text)",
+        )
+        .bind(format!("offset-canary-{i}@example.invalid"))
+        .bind(format!("{day}T10:30:00Z"))
+        .execute(pool)
+        .await
+        .expect("seed an offset canary");
+    }
+
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("repo root")
+        .to_path_buf();
+    let sql_path = test_support::scratch_dir("snapshot_offset_sql").join("mask.sql");
+    let status = std::process::Command::new("python3")
+        .arg(repo.join("scripts").join("build-snapshot-sql.py"))
+        .arg("--out")
+        .arg(&sql_path)
+        .arg("--timestamp-offset")
+        .arg("45")
+        .arg("--mode")
+        .arg("cache")
+        .env(
+            "LOREHAVEN_PG_URL",
+            format!(
+                "postgres://postgres:{}@127.0.0.1:5432/{}",
+                pg_password(),
+                tdb.pg_database_name().expect("pg database name")
+            ),
+        )
+        .current_dir(&repo)
+        .output()
+        .expect("run the generator with an offset");
+    assert!(
+        status.status.success(),
+        "generator failed: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    sqlx::raw_sql(&std::fs::read_to_string(&sql_path).expect("mask sql"))
+        .execute(pool)
+        .await
+        .expect("apply the mask");
+
+    let row: (String, String) = sqlx::query_as(
+        "SELECT created_at, updated_at FROM snapshot_masked.accounts
+         ORDER BY created_at LIMIT 1",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("a masked account");
+
+    // (3) parses, and (1) shifted by exactly 45 days
+    let shifted: chrono::DateTime<chrono::Utc> = row.0.parse().unwrap_or_else(|e| {
+        panic!(
+            "the shifted timestamp {row:?} is not RFC 3339: {e}. \
+             A to_char format with escaped quotes produces a string that LOOKS like a \
+             timestamp and does not parse, and no error is raised anywhere."
+        )
+    });
+    assert_eq!(
+        shifted.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        "2026-04-15T10:30:00Z",
+        "the offset was not applied exactly. 11.16.5 wants a shift of a known size, \
+         and an approximate one would make the published dates unknowable."
+    );
+
+    // (2) the interval survives: both rows moved by the SAME amount
+    let span: i64 = sqlx::query_scalar(
+        "SELECT EXTRACT(EPOCH FROM (max(created_at::timestamptz)
+                                    - min(created_at::timestamptz)))::bigint
+           FROM snapshot_masked.accounts",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("the span");
+    assert_eq!(
+        span,
+        41 * 86_400,
+        "the gap between the two canaries changed from 41 days to {span}s. A shift \
+         that moved each timestamp by a different amount would preserve the shape of \
+         nothing, and 11.16.5 keeps timestamps precisely because 'how long do people \
+         keep a work before abandoning it' is the question the dataset exists for."
+    );
+
+    // (4) the live instance is untouched
+    let live: String = sqlx::query_scalar(
+        "SELECT created_at FROM accounts WHERE email = 'offset-canary-0@example.invalid'",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("the live row");
+    assert_eq!(
+        live, "2026-03-01T10:30:00Z",
+        "the mask shifted the LIVE table. The pipeline applies the mask to a scratch \
+         copy precisely so the instance never lies about when something happened, and \
+         a snapshot pipeline that edited its own source is not one."
+    );
+    tdb.cleanup().await;
+}
+
+/// Two snapshots must not share an offset, and the offset must not be in the file.
+///
+/// §11.17.4's rotation, asserted on the artefact. The second half matters as much
+/// as the first: an offset recorded *beside* the dump is a published offset, and a
+/// published offset is the linkability §11.16.5 is forbidding.
+#[test]
+fn two_snapshots_get_different_offsets_and_neither_records_its_own() {
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("repo root")
+        .to_path_buf();
+    let dir = test_support::scratch_dir("snapshot_offset_rotation");
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+
+    let mut offsets = Vec::new();
+    for i in 0..2 {
+        let path = dir.join(format!("mask{i}.sql"));
+        let out = std::process::Command::new("python3")
+            .arg(repo.join("scripts").join("build-snapshot-sql.py"))
+            .arg("--out")
+            .arg(&path)
+            .arg("--random-timestamp-offset")
+            .arg("365")
+            .arg("--mode")
+            .arg("cache")
+            .current_dir(&repo)
+            .output()
+            .expect("run the generator with a random offset");
+        assert!(out.status.success(), "generator failed");
+        let sql = std::fs::read_to_string(&path).expect("mask sql");
+        assert!(
+            sql.contains("INTERVAL"),
+            "no offset reached the generated SQL at all, so the timestamps are \
+             unshifted and two snapshots of the same instance align row-for-row"
+        );
+        // The published SQL carries the shift as an INTERVAL, so a reader can see
+        // THAT a shift happened -- which 11.16.3 requires for the construction to
+        // be checkable -- without learning how big it was. An offset recorded
+        // beside the data would be a published offset, and a published offset is
+        // the linkability 11.16.5 forbids, so the value goes only to stderr.
+        assert!(
+            !sql.contains("-- timestamp offset:"),
+            "the generated SQL records the offset value in a comment. 11.16.5: the              offset must be applied inside the snapshot, not recorded next to it."
+        );
+        offsets.push(sql);
+    }
+    assert_ne!(
+        offsets[0], offsets[1],
+        "two snapshots generated the SAME sql, so they share an offset and a recipient \
+         holding both can join them row-for-row on every timestamp. 11.16.5: a month \
+         offset is a linkable identifier."
+    );
+}
