@@ -924,16 +924,28 @@ async fn a_snapshot_shifts_every_timestamp_by_one_unpublished_offset() {
     let pool = tdb.db().postgres_pool().expect("pool");
     // Two accounts a known distance apart in time. The gap between them is the
     // thing that must not change.
+    //
+    // **The ids are generated here and captured, not left to `gen_random_uuid()`.**
+    // The mask scrambles every key through `snapshot_account(id)` (see
+    // `scripts/build-snapshot-sql.py`), so the masked table holds none of the
+    // original ids — which means "read the oldest row" was the only way this test
+    // could find its fixture, and that is a proxy for the row it seeded. It broke
+    // the moment migration 0094 added an account older than both canaries. With
+    // the ids in hand the masked ids are computable and the proxy is gone.
+    let mut canary_ids: Vec<uuid::Uuid> = Vec::new();
     for (i, day) in ["2026-03-01", "2026-04-11"].iter().enumerate() {
+        let id = uuid::Uuid::new_v4();
         sqlx::query(
             "INSERT INTO accounts (id, email, created_at, updated_at)
-             VALUES (gen_random_uuid(), $1, $2::text, $2::text)",
+             VALUES ($1::uuid, $2, $3::text, $3::text)",
         )
+        .bind(id.to_string())
         .bind(format!("offset-canary-{i}@example.invalid"))
         .bind(format!("{day}T10:30:00Z"))
         .execute(pool)
         .await
         .expect("seed an offset canary");
+        canary_ids.push(id);
     }
 
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -971,10 +983,47 @@ async fn a_snapshot_shifts_every_timestamp_by_one_unpublished_offset() {
         .await
         .expect("apply the mask");
 
+    // **Not `ORDER BY created_at LIMIT 1` with no exclusion.** Migration 0094
+    // inserts the instance's own system account with `created_at = 2026-01-01`,
+    // earlier than this fixture's account, so the oldest row in the masked
+    // snapshot is now a row that was never supposed to move. The failure that
+    // produced looks exactly like a date-arithmetic bug — the unshifted date
+    // minus 45 days — and nothing in it names the cause.
+    //
+    // Excluded by id rather than by a `created_at >` threshold: a date bound is
+    // a guess about when the instance row was written, and this account is
+    // identifiable on purpose (a fixed literal id, a `system` status, a
+    // `.invalid` email — migration 0094 says so, so an operator can spot it in a
+    // dump). Same exclusion as the other five harnesses, and the same reason.
+    // **By masked id, not by `ORDER BY created_at LIMIT 1`.** Two reasons, and the
+    // second is why the first is not enough:
+    //
+    // 1. Migration 0094's system account (`created_at = 2026-01-01`) is older
+    //    than both canaries, and the mask shifts every row equally, so it stays
+    //    the oldest. It is masked and shifted *correctly* — `2026-01-01 + 45 =
+    //    2026-02-15` was exactly the value this assertion rejected — which is why
+    //    the failure reads as a date-arithmetic bug and names nothing about row
+    //    identity.
+    // 2. **Excluding it by its original id does not work either**, because the
+    //    masked table holds no original ids: every key is projected through
+    //    `snapshot_account(id)`. `WHERE id != $1` on the *original* id matches
+    //    every row and excludes nothing.
+    //
+    // So this selects the canary BY its masked id rather than excluding the
+    // system account. Naming the row under test beats enumerating the rows it is
+    // not, and it is the form the other five harnesses could not use — there the
+    // ids survive, here they do not.
+    let masked_earlier_canary =
+        sqlx::query_scalar::<_, String>("SELECT snapshot_account($1::text::uuid)::text")
+            .bind(canary_ids[0].to_string())
+            .fetch_one(pool)
+            .await
+            .expect("the earlier canary's masked id");
     let row: (String, String) = sqlx::query_as(
         "SELECT created_at, updated_at FROM snapshot_masked.accounts
-         ORDER BY created_at LIMIT 1",
+             WHERE id = $1::text::uuid",
     )
+    .bind(masked_earlier_canary.clone())
     .fetch_one(pool)
     .await
     .expect("a masked account");
@@ -995,11 +1044,25 @@ async fn a_snapshot_shifts_every_timestamp_by_one_unpublished_offset() {
     );
 
     // (2) the interval survives: both rows moved by the SAME amount
+    // **Over the two canaries, not over the table.** `max - min` across every
+    // account spans the instance's system account too (migration 0094, dated
+    // 2026-01-01, where both canaries are dated March and April), which widens
+    // the gap from 41 days to 100. The assertion is about the two canaries, so it
+    // reads the two canaries — the same masked ids as the assertion above.
+    let masked_later_canary =
+        sqlx::query_scalar::<_, String>("SELECT snapshot_account($1::text::uuid)::text")
+            .bind(canary_ids[1].to_string())
+            .fetch_one(pool)
+            .await
+            .expect("the later canary's masked id");
     let span: i64 = sqlx::query_scalar(
         "SELECT EXTRACT(EPOCH FROM (max(created_at::timestamptz)
                                     - min(created_at::timestamptz)))::bigint
-           FROM snapshot_masked.accounts",
+           FROM snapshot_masked.accounts
+          WHERE id IN ($1::text::uuid, $2::text::uuid)",
     )
+    .bind(masked_earlier_canary.clone())
+    .bind(masked_later_canary)
     .fetch_one(pool)
     .await
     .expect("the span");
