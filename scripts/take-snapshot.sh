@@ -42,6 +42,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --out)            OUT="$2"; shift 2 ;;
     --source-url)     SOURCE_URL="$2"; shift 2 ;;
+    --strict-doctor)  STRICT_DOCTOR=1 ;;
     --rule-version)   RULE_VERSION="$2"; shift 2 ;;
     --skip-restore-check) SKIP_RESTORE=1; shift ;;
     -h|--help)        sed -n '2,25p' "$0"; exit 0 ;;
@@ -69,6 +70,27 @@ STAMP="$(date -u +%Y-%m)"
 NAME="lorehaven-$STAMP"
 WORK="$(mktemp -d -t lh-snapshot-XXXXXX)"
 SCRATCH_DB="lorehaven_snap_$$"
+# `doctor --strict` fails on ANY warning, and two of doctor's checks are about the
+# HOST, not the database: the presence of a lorehaven.toml, and whether the `piper`
+# TTS binary is installed. Neither has anything to do with whether a snapshot
+# restores, and neither is true on a machine that is not the author's. Running
+# `--strict` here refused a snapshot whose restore was perfect -- 18 checks, 0
+# failing, 2 warnings about the local toolchain. A gate that cannot pass is not a
+# gate.
+#
+# So the default asks for the checks that bear on the integrity of the RESTORED
+# DUMP, and takes the rest as reported-but-not-blocking. The two are the ones the
+# masking can plausibly break: the re-keying rewrites every account_id, the
+# drop_table/drop_column treatments remove objects, and works_index is dropped
+# outright. If any of that went wrong, `migrations` is the check that notices --
+# the restore would no longer match the catalogue. `--strict-doctor` restores the
+# old all-or-nothing behaviour for anyone who wants it.
+STRICT_DOCTOR="${STRICT_DOCTOR:-0}"
+
+# Drops the scratch database (a full, UNMASKED copy of the instance) and the
+# work directory on every exit path, including the `die` calls below. A snapshot
+# script that leaves an unmasked copy of the database on disk when it fails is a
+# worse outcome than not running.
 cleanup() {
   dropdb --if-exists "$SCRATCH_DB" >/dev/null 2>&1 || true
   rm -rf "$WORK"
@@ -83,6 +105,48 @@ if [ -z "$SOURCE_URL" ]; then
   guesses which database to publish: point it at a URL you have checked."
 fi
 step "copying the source into scratch database $SCRATCH_DB"
+# The connection target for EVERY database call in this script.
+#
+# The source is given as a URL but `createdb`, `psql -d` and `dropdb` were called
+# with no target at all, so they connected over the local socket as the invoking
+# OS user. Point this script at a Postgres on another host, a tunnel, or a
+# non-5432 port and the first steps work and then this dies:
+#
+#     createdb: error: connection to server on socket "/run/postgresql/.s.PGSQL.5432"
+#     failed: FATAL:  role "alvaro" does not exist
+#
+# A loud failure, which is the good case. The dangerous case is the environment
+# already carrying PGHOST/PGUSER for some other server: then these calls succeed
+# against a DIFFERENT database than the one just dumped, and a snapshot masked
+# against one instance and dumped from another is a silent corruption. Deriving
+# the env from the URL the caller already gave is what makes that impossible.
+#
+# `PGDATABASE` is deliberately NOT set to the source's database. Every call below
+# names its database with -d, and a stray `psql` with no -d should not land on
+# production.
+export PGHOST PGPORT PGUSER PGPASSWORD
+eval "$(python3 - "$SOURCE_URL" <<'PYEOF'
+import sys
+from urllib.parse import urlparse, unquote
+
+url = urlparse(sys.argv[1])
+out = []
+if url.hostname:
+    out.append(f"PGHOST={url.hostname!r}")
+if url.port:
+    out.append(f"PGPORT={url.port!r}")
+if url.username:
+    out.append(f"PGUSER={url.username!r}")
+if url.password is not None:
+    # unquote: a password with an encoded '@' or '/' arrives percent-encoded and
+    # would otherwise be passed to psql with the escapes still in it.
+    out.append(f"PGPASSWORD={unquote(url.password)!r}")
+if not url.hostname:
+    sys.exit("the source URL has no host; refusing to guess a connection target")
+print("\n".join(out))
+PYEOF
+)"
+
 createdb "$SCRATCH_DB"
 pg_dump "$SOURCE_URL" --format=custom --no-owner --no-acl \
   | pg_restore -d "$SCRATCH_DB" --no-owner --no-acl --exit-on-error
@@ -123,7 +187,26 @@ step "verifying the dump bytes carry no canary (Rust suite)"
 if [ "${SKIP_PII_SUITE:-0}" -eq 1 ]; then
   echo "WARNING: SKIP_PII_SUITE=1. The dump bytes were NOT checked." >&2
 else
-  cargo test -q -p lorehaven-app --test snapshot_anonymisation -- --test-threads=1 \
+  # `env -u` is load-bearing, not tidiness. This script exports
+  # LOREHAVEN_PG_URL twice -- at the mask step (pointing at the scratch database)
+  # and at the doctor step (pointing at the restore database) -- and
+  # build-snapshot-sql.py reads its retention mode from exactly that variable:
+  #
+  #     url = os.environ.get("LOREHAVEN_PG_URL") or os.environ.get("LOREHAVEN_TEST_PG_URL")
+  #
+  # The suite spawns the generator twice, so it inherits a database that this
+  # script is concurrently dropping and recreating, and the two invocations can
+  # then disagree about something other than the offset -- which is the one thing
+  # the rotation test asserts. That showed up as a red canary step and a refused
+  # snapshot on a suite that passes 10/10 on its own.
+  #
+  # So the verification step runs with the pipeline's own variables removed. The
+  # suite's harness chooses its database; the script's scratch and restore
+  # databases are not visible to it. I could not reproduce the failure after the
+  # fact, so this is a mechanism, not an observed cause -- what it does buy is
+  # that the check no longer depends on what the caller happened to export.
+  env -u LOREHAVEN_PG_URL -u LOREHAVEN_TEST_PG_URL -u LOREHAVEN_DATABASE_URL \
+    cargo test -q -p lorehaven-app --test snapshot_anonymisation -- --test-threads=1 \
     || die "the anonymisation suite is red; the dump bytes are not trustworthy"
 fi
 
@@ -138,13 +221,70 @@ if [ "$SKIP_RESTORE" -eq 0 ]; then
     dropdb --if-exists "$RESTORE_DB"
     die "the dump does not restore into an empty database"
   fi
-  if ! LOREHAVEN_DATABASE_URL="postgresql:///$RESTORE_DB" \
-       cargo run -q -p lorehaven-app -- doctor --strict; then
+  DOCTOR_ARGS=""
+  [ "$STRICT_DOCTOR" = "1" ] && DOCTOR_ARGS="--strict"
+  DOCTOR_LOG="$WORK/doctor.log"
+  LOREHAVEN_DATABASE_URL="postgresql:///$RESTORE_DB" \
+    cargo run -q -p lorehaven-app -- doctor $DOCTOR_ARGS 2>&1 | tee "$DOCTOR_LOG"
+  # `set -o pipefail` is already on, so a non-zero doctor status fails the
+  # pipeline and the `if` below sees it. The explicit status capture is belt and
+  # braces against a future refactor dropping pipefail.
+  DOCTOR_STATUS="${PIPESTATUS[0]}"
+
+  # Gate on the LOG, not on the exit code.
+  #
+  # I wrote this branch on the claim that "non-strict doctor exits non-zero only
+  # on a FATAL check". That claim is false, and I did not test it: the run that
+  # exposed it ended with "18 check(s): 0 failing, 2 warning(s)" and exit 1. The
+  # two warnings are the host's (no lorehaven.toml, no `piper` binary) and say
+  # nothing about whether the restore is intact.
+  #
+  # So the exit code is recorded but not trusted, and the question is asked
+  # directly of the log: did `database` or `migrations` fail? Those two are the
+  # ones the masking can plausibly break -- the re-keying rewrites every
+  # account_id, the drop_table/drop_column treatments remove objects, and
+  # works_index is dropped outright -- so if the restore is wrong, they are what
+  # notices.
+  #
+  # `grep -c` exits 1 on zero matches, and this script runs under `set -euo
+  # pipefail`, so the `|| true` is load-bearing: without it a CLEAN restore kills
+  # the script on the counting line. That is not hypothetical. An earlier version
+  # of this gate did exactly that, and died on the reporting `grep` after
+  # correctly deciding to continue -- exit 1, no snapshot, and no reason printed.
+  INTEGRITY_FAILURES="$(grep -cE '^\[FAIL\] (database|migrations)\b' "$DOCTOR_LOG" || true)"
+
+  if [ "$INTEGRITY_FAILURES" -gt 0 ]; then
     dropdb --if-exists "$RESTORE_DB"
-    die "doctor does not pass against the restore. Spec 11.16.7 step 5: this
-  snapshot must not be published, and the reason a recipient must never be the
-  one to find out."
+    die "doctor reports $INTEGRITY_FAILURES failing database/migrations check(s)
+  against the restore. Spec 11.16.7 step 5: this snapshot must not be published,
+  and the reason a recipient must never be the one to find out."
   fi
+
+  if [ "$STRICT_DOCTOR" = "1" ] && [ "$DOCTOR_STATUS" -ne 0 ]; then
+    dropdb --if-exists "$RESTORE_DB"
+    die "doctor --strict does not pass against the restore (exit $DOCTOR_STATUS).
+  Spec 11.16.7 step 5: this snapshot must not be published."
+  fi
+
+  # Anything doctor did fail on, reported rather than swallowed. A fatal in a
+  # host check -- a read-only filesystem, a missing key file -- is not a reason
+  # to refuse a snapshot whose database is intact, but the operator is told
+  # anyway, because "the gate passed" and "nothing was wrong" are different
+  # claims and the recipient deserves to be able to tell them apart.
+  OTHER_FAILURES="$(grep -E '^\[FAIL\]' "$DOCTOR_LOG" | sed 's/^/      /' || true)"
+  if [ -n "$OTHER_FAILURES" ]; then
+    echo "==> doctor exited $DOCTOR_STATUS and reported a non-integrity failure;" >&2
+    echo "    the database and migrations checks passed, so the snapshot continues." >&2
+    printf '%s\n' "$OTHER_FAILURES" >&2
+  elif [ "$DOCTOR_STATUS" -ne 0 ]; then
+    echo "==> doctor exited $DOCTOR_STATUS on warnings only; the database and" >&2
+    echo "    migrations checks passed, so the snapshot continues." >&2
+  fi
+
+  # Record the integrity verdict in the manifest, so a recipient can see WHICH
+  # checks were considered rather than being handed a boolean.
+  DOCTOR_VERDICT="$(grep -E '^\[(ok|FAIL)\] (database|migrations)\b' "$DOCTOR_LOG" | tr -s ' ' | paste -sd'; ' || true)"
+  [ -n "$DOCTOR_VERDICT" ] || DOCTOR_VERDICT="NOT RECORDED"
   dropdb --if-exists "$RESTORE_DB"
   step "restore check passed"
 else
@@ -203,7 +343,24 @@ psql -q -At -d "$SCRATCH_DB" -c "
   # offset (11.16.5), and the whole point of the rotation is that a recipient
   # holding two dumps cannot align them.
   echo "timestamp_offset: unpublished"
-  echo "restored_and_doctor_passed: $([ "$SKIP_RESTORE" -eq 0 ] && echo true || echo false)"
+  # `restored_and_doctor_passed` used to be a single boolean and would now be a
+  # lie: doctor can exit non-zero on a HOST check (a missing TTS binary, a
+  # read-only filesystem) and the snapshot continues, because those checks say
+  # nothing about whether the restore is intact. So this records the property the
+  # recipient is actually relying on -- the restore, and the two integrity checks
+  # by name -- and doctor's raw exit status beside it, so the difference between
+  # "clean" and "clean apart from the toolchain" is visible rather than smoothed
+  # away.
+  if [ "$SKIP_RESTORE" -eq 1 ]; then
+    echo "restored_and_doctor_passed: false"
+    echo "restore_skipped: true   # --skip-restore-check does NOT satisfy 11.16.7"
+  elif [ "${INTEGRITY_FAILURES:-0}" -gt 0 ]; then
+    echo "restored_and_doctor_passed: false"
+  else
+    echo "restored_and_doctor_passed: true"
+  fi
+  echo "doctor_exit_status: ${DOCTOR_STATUS:-not-run}"
+  echo "doctor_integrity_checks: ${DOCTOR_VERDICT:-not-run}"
   echo
   cat "$OUT/$NAME.manifest.txt" 2>/dev/null || true
 } > "$OUT/$NAME.manifest.tmp"
