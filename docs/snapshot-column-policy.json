@@ -1,1026 +1,1071 @@
 {
- "_comment": [
-  "M60-01 snapshot column policy. One entry per column of every covered table,",
-  "and for any column whose name says it carries an identity.",
-  "Gate: python3 scripts/check-snapshot-pii.py",
-  "",
-  "Treatments: keep | drop_column | drop_table | keep_gated | replace (text) | rekey_pseud (uuid, 11.16.3) | rekey_account (uuid, 11.16.3b).",
-  "A pass means a decision EXISTS, not that it is right. The gate cannot see",
-  "whether anyone thought about an entry, which is what reviewed_by is for.",
-  "",
-  "Treatments: replace | drop_column | drop_table | keep | keep_gated"
- ],
- "amends": "spec 11.16",
- "columns": {
-  "accounts.age_state": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "accounts.created_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "accounts.deleted_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "accounts.email": {
-   "treatment": "replace",
-   "why": "The primary identifier. Replaced with a stable non-reversible placeholder: deterministic, so two rows with the same address still collide and a researcher can count distinct accounts, and irreversible because md5 of a known address is trivially reversed by brute force over the address space.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.2"
-  },
-  "accounts.email_verified_at": {
-   "treatment": "drop_column",
-   "why": "A timestamp adjacent to the email column, not an identifier. Dropped rather than redacted: a null 'verified at' alongside a redacted email is the honest value, and a constant string here would read as 'verified'.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
-  },
-  "accounts.id": {
-   "treatment": "rekey_account",
-   "why": "The account key every account_id foreign key points at. Re-keyed, not kept: a kept id is the value the re-keyed foreign keys must resolve TO, and leaving it raw is what makes a snapshot 'one column obscured'.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3/11.16.3b"
-  },
-  "accounts.is_curator": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "accounts.permission_statement": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "accounts.status": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "accounts.taste_centroid_distance": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "accounts.taste_vector": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "accounts.taste_vector_computed_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "accounts.updated_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "accounts.version": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "age_assessments.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "ap_activities.actor_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of ap_activities into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
-  },
-  "ap_actors.user_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of ap_actors into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
-  },
-  "ap_follows.followed_actor_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of ap_follows into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
-  },
-  "ap_follows.follower_actor_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of ap_follows into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
-  },
-  "api_tokens.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "api_tokens.token_hash": {
-   "treatment": "drop_column",
-   "why": "A live session credential in a published file is account takeover, not a disclosure.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "arena_ballots.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "arena_weights.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "author_earnings_ledger.author_account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "author_media_preferences.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of author_media_preferences into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
-  },
-  "bookmarks.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "bot_registrations.token_id": {
-   "treatment": "drop_column",
-   "why": "Resolves to a live token row that is itself dropped.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "bot_registrations.user_agent": {
-   "treatment": "drop_column",
-   "why": "A precise browser/OS fingerprint is directly identifying and has no research value here.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "category_votes.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of category_votes into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
-  },
-  "chapter_revisions.created_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "chapter_revisions.document_json": {
-   "treatment": "keep_gated",
-   "why": "The chapter body as a structural document. Same body, third shape; it contains the text as string values inside the JSON.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
-  },
-  "chapter_revisions.plain_text": {
-   "treatment": "keep_gated",
-   "why": "THE chapter body, as plain text. This is the column 11.16.6 is about, and it was not in the policy at all until M60-05: the M60-01 gate only required a decision for columns in TABLES it knew carried PII, and chapter_revisions was not one of them. A gate that cannot fail on the most sensitive column in the schema is not a gate.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
-  },
-  "chapter_revisions.sanitized_html": {
-   "treatment": "keep_gated",
-   "why": "The chapter body as rendered HTML. Same body, second shape -- masking plain_text alone would publish the whole text again.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
-  },
-  "chapters.created_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "chapters.current_revision_id": {
-   "treatment": "keep",
-   "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "chapters.deleted_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "chapters.id": {
-   "treatment": "keep",
-   "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "chapters.order_key": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "chapters.title": {
-   "treatment": "keep_gated",
-   "why": "The dataset's reason to exist, and gated on aggregate retention mode (11.16.6).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "chapters.updated_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "chapters.version": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "chapters.work_id": {
-   "treatment": "keep",
-   "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "collaboration_invites.token_hash": {
-   "treatment": "drop_column",
-   "why": "A live session credential in a published file is account takeover, not a disclosure.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "comments.anchor_chapter_id": {
-   "treatment": "keep",
-   "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "comments.anchor_kind": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "comments.anchor_value": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "comments.author_pseud": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of comments into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
-  },
-  "comments.body": {
-   "treatment": "keep_gated",
-   "why": "The dataset's reason to exist, and gated on aggregate retention mode (11.16.6).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "comments.body_version": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "comments.classification_id": {
-   "treatment": "keep",
-   "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "comments.created_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "comments.deleted_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "comments.edited_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "comments.id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of comments into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
-  },
-  "comments.subject_id": {
-   "treatment": "keep",
-   "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "comments.subject_type": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "content_references.owner_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of content_references into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
-  },
-  "content_settings.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "curator_rewards.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "curator_roles.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of curator_roles into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
-  },
-  "device_deliveries.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "device_deliveries.address": {
-   "treatment": "drop_column",
-   "why": "A delivery address for a push channel; a live routing target, not research data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "did_not_finish.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "did_not_finish.created_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "did_not_finish.updated_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "directory_votes.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of directory_votes into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
-  },
-  "dmca_takedowns.claimant_email": {
-   "treatment": "drop_column",
-   "why": "A named complainant's email. A DMCA claimant is a natural person, not a pseud, and the whole point of the table is a legal claim against a specific person -- publishing it in a research dataset is a disclosure, not an anonymisation problem to solve later.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "download_grants.token_hash": {
-   "treatment": "drop_column",
-   "why": "A live session credential in a published file is account takeover, not a disclosure.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "entry_moderation_votes.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of entry_moderation_votes into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
-  },
-  "exchange_signals.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of exchange_signals into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
-  },
-  "export_jobs.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "feedback_allowlist.author_account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "feedback_denylist.author_account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "feedback_preferences.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "forum_posts.body": {
-   "treatment": "keep_gated",
-   "why": "Reader-authored post text. Gated with the rest: a reader's words are a body, whatever table they sit in.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
-  },
-  "guardian_authorizations.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "import_jobs.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "instance_fingerprints.fingerprint_json": {
-   "treatment": "drop_column",
-   "why": "A fingerprint of an instance is a tracking identifier by construction, and re-keying it would preserve exactly the correlation it exists to enable.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "instance_fingerprints.fingerprint_version": {
-   "treatment": "keep",
-   "why": "A format version, not an identifier. Kept so a consumer can tell a fingerprint it cannot parse from one that is absent.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "interaction_warmth.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "ip_policy.ip": {
-   "treatment": "drop_table",
-   "why": "Holds address material and rate-limit decisions. No research value.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "library_items.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "library_items.created_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "library_items.last_synced_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "library_items.source_updated_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "library_items.updated_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "link_challenges.token_id": {
-   "treatment": "drop_column",
-   "why": "Resolves to a live token row that is itself dropped.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "media_collection_items.added_by_account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "media_collections.owning_account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "messages.body": {
-   "treatment": "keep_gated",
-   "why": "Private message text. Gated, and note the snapshot already drops the addressing columns -- a message with no participants but a body is still a body.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
-  },
-  "notification_routes.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "notifications.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "password_credentials.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "password_credentials.password_hash": {
-   "treatment": "drop_column",
-   "why": "A credential. Anonymising a hash is meaningless and it has no research value.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "payment_events.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "payouts.author_account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "pool_b_distributions.author_account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "post_drafts.body": {
-   "treatment": "keep_gated",
-   "why": "Unpublished draft text. Gated; a draft is a body the author has not chosen to publish anywhere.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
-  },
-  "privacy_settings.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "private_tags.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "pseuds.account_id": {
-   "treatment": "rekey_account",
-   "why": "Second join key (11.16.3b). Re-keyed on its OWN salt so a published snapshot cannot join a pseudonym to its account.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3/11.16.3b"
-  },
-  "pseuds.bio": {
-   "treatment": "replace",
-   "why": "Free text written by a person. Identifies as surely as a handle does.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "pseuds.created_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "pseuds.deleted_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "pseuds.discoverability": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "pseuds.display_name": {
-   "treatment": "replace",
-   "why": "Chosen by a person, or the primary identifier.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "pseuds.handle": {
-   "treatment": "replace",
-   "why": "Chosen by a person, or the primary identifier.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "pseuds.id": {
-   "treatment": "rekey_pseud",
-   "why": "pseud_id itself. Deterministic re-key via snapshot_pseud: a CONSTANT here would fuse every pseudonym in the snapshot into one, which is why 'replace' was the wrong treatment for a uuid key. See 11.16.3.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3/11.16.3b"
-  },
-  "pseuds.updated_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "pseuds.version": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "push_subscriptions.endpoint": {
-   "treatment": "drop_column",
-   "why": "A device push endpoint is a bearer credential for someone else's inbox.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "quiz_answers.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "rating.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "rating.created_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "rating.deleted_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "rating.updated_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "reader_note.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "reader_note.body": {
-   "treatment": "keep_gated",
-   "why": "Reader-authored note text. Gated.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
-  },
-  "reading_history_entry.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "reading_history_entry.created_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "reading_history_entry.last_read_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "reading_progress.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "reading_progress.created_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "reading_progress.updated_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "reading_sessions.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "reading_status.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "recovery_tokens.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "recovery_tokens.token_hash": {
-   "treatment": "drop_column",
-   "why": "A live session credential in a published file is account takeover, not a disclosure.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "review.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "review.body": {
-   "treatment": "keep_gated",
-   "why": "Reader review text. Gated.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
-  },
-  "review.created_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "review.deleted_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "review.published_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "review.updated_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "roadmap_ballots.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "roadmap_suggestions.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "saved_views.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "second_factors.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "second_factors.encrypted_secret": {
-   "treatment": "drop_table",
-   "why": "The 2FA secret table. Whole table: it exists only to hold live second factors, and an encrypted second factor is a credential with a countdown.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "secrets.owner_id": {
-   "treatment": "drop_table",
-   "why": "The credential table itself. Whole table: its purpose is holding live secrets and none of it has research value in a published dataset.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "sessions.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "sessions.active_pseud_id": {
-   "treatment": "keep",
-   "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "sessions.created_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "sessions.csrf_token_hash": {
-   "treatment": "drop_column",
-   "why": "Same class as a session credential: it authenticates a write.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "sessions.expires_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "sessions.id": {
-   "treatment": "keep",
-   "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "sessions.last_seen_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "sessions.revoked_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "sessions.token_hash": {
-   "treatment": "drop_column",
-   "why": "A live session credential in a published file is account takeover, not a disclosure.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "sessions.user_agent": {
-   "treatment": "drop_column",
-   "why": "A precise browser/OS fingerprint is directly identifying and has no research value here.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "shelves.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "source_credentials.secret_id": {
-   "treatment": "drop_column",
-   "why": "Resolves to a stored credential; carries no value once the credential is dropped.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "streak_milestones.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "streaks.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "targeted_bounties.account_id": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of targeted_bounties into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
-  },
-  "taste_notification_queue.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "taste_probes.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "typography_preference.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "update_checks.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "user_devices.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "vanguard_pins.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "vanguard_roles.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "webhook_deliveries.endpoint_id": {
-   "treatment": "keep",
-   "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "webhook_endpoints.active": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "webhook_endpoints.created_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "webhook_endpoints.events": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "webhook_endpoints.id": {
-   "treatment": "keep",
-   "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "webhook_endpoints.owner": {
-   "treatment": "rekey_text",
-   "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of webhook_endpoints into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
-  },
-  "webhook_endpoints.secret": {
-   "treatment": "drop_column",
-   "why": "A bearer credential. Not PII -- a live secret.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "webhook_endpoints.url": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "work_contributors.created_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "work_entitlements.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "work_kudos.account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "work_loans.borrower_account_id": {
-   "treatment": "rekey_account",
-   "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
-  },
-  "works.ai_training": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.allow_dnf_feedback": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.body_audience": {
-   "treatment": "drop_column",
-   "why": "The 7.7 access rule ITSELF. 11.16.6: 'body_audience columns are dropped from the snapshot entirely -- an access rule that is readable is not one, and a dump that publishes the rule invites bypassing it.' It was marked `keep` and shipped verbatim: a snapshot built on 2026-09-29 carried a work with body_audience='trust_at_least:5' in the clear, which publishes both the audience and the trust THRESHOLD. Dropped, not redacted: a constant would still tell a recipient that this work is audience-restricted, and a null would tell them it is not. Absence is the only honest value here.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6 and 7.7.3"
-  },
-  "works.completion": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.contested": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.contested_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.contested_reason": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.created_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "works.deleted_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.discussion_mode": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.format": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.half_life_bp": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.id": {
-   "treatment": "keep",
-   "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.language": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.lifecycle": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.orphaned": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.owner_pseud_id": {
-   "treatment": "keep",
-   "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.permission_statement": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.published_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.rating": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.scheduled_for": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.show_public_ratings": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.summary": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.title": {
-   "treatment": "keep_gated",
-   "why": "The dataset's reason to exist, and gated on aggregate retention mode (11.16.6).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.updated_at": {
-   "treatment": "offset_timestamps",
-   "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
-   "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
-  },
-  "works.version": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.visibility": {
-   "treatment": "keep",
-   "why": "Operational or content metadata; carries no personal data.",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
-  },
-  "works.withdrawn_at": {
-   "treatment": "keep",
-   "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
-   "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+  "_comment": [
+    "M60-01 snapshot column policy. One entry per column of every covered table,",
+    "and for any column whose name says it carries an identity.",
+    "Gate: python3 scripts/check-snapshot-pii.py",
+    "",
+    "Treatments: keep | drop_column | drop_table | keep_gated | replace (text) | rekey_pseud (uuid, 11.16.3) | rekey_account (uuid, 11.16.3b).",
+    "A pass means a decision EXISTS, not that it is right. The gate cannot see",
+    "whether anyone thought about an entry, which is what reviewed_by is for.",
+    "",
+    "Treatments: replace | drop_column | drop_table | keep | keep_gated"
+  ],
+  "amends": "spec 11.16",
+  "columns": {
+    "accounts.age_state": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "accounts.created_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "accounts.deleted_at": {
+      "treatment": "keep",
+      "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "accounts.email": {
+      "treatment": "replace",
+      "why": "The primary identifier. Replaced with a stable non-reversible placeholder: deterministic, so two rows with the same address still collide and a researcher can count distinct accounts, and irreversible because md5 of a known address is trivially reversed by brute force over the address space.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.2"
+    },
+    "accounts.email_verified_at": {
+      "treatment": "drop_column",
+      "why": "A timestamp adjacent to the email column, not an identifier. Dropped rather than redacted: a null 'verified at' alongside a redacted email is the honest value, and a constant string here would read as 'verified'.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+    },
+    "accounts.id": {
+      "treatment": "rekey_account",
+      "why": "The account key every account_id foreign key points at. Re-keyed, not kept: a kept id is the value the re-keyed foreign keys must resolve TO, and leaving it raw is what makes a snapshot 'one column obscured'.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3/11.16.3b"
+    },
+    "accounts.is_curator": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "accounts.permission_statement": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "accounts.status": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "accounts.taste_centroid_distance": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "accounts.taste_vector": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "accounts.taste_vector_computed_at": {
+      "treatment": "keep",
+      "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "accounts.updated_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "accounts.version": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "age_assessments.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "ap_activities.actor_id": {
+      "treatment": "rekey_text",
+      "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of ap_activities into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+    },
+    "ap_actors.user_id": {
+      "treatment": "rekey_text",
+      "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of ap_actors into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+    },
+    "ap_follows.followed_actor_id": {
+      "treatment": "rekey_text",
+      "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of ap_follows into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+    },
+    "ap_follows.follower_actor_id": {
+      "treatment": "rekey_text",
+      "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of ap_follows into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+    },
+    "api_tokens.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "api_tokens.token_hash": {
+      "treatment": "drop_column",
+      "why": "A live session credential in a published file is account takeover, not a disclosure.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "arena_ballots.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "arena_weights.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "author_earnings_ledger.author_account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "author_media_preferences.account_id": {
+      "treatment": "rekey_text",
+      "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of author_media_preferences into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+    },
+    "bookmarks.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "bot_registrations.token_id": {
+      "treatment": "drop_column",
+      "why": "Resolves to a live token row that is itself dropped.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "bot_registrations.user_agent": {
+      "treatment": "drop_column",
+      "why": "A precise browser/OS fingerprint is directly identifying and has no research value here.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "category_votes.account_id": {
+      "treatment": "rekey_text",
+      "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of category_votes into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+    },
+    "chapter_revisions.created_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "chapter_revisions.document_json": {
+      "treatment": "keep_gated",
+      "why": "The chapter body as a structural document. Same body, third shape; it contains the text as string values inside the JSON.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
+    },
+    "chapter_revisions.plain_text": {
+      "treatment": "keep_gated",
+      "why": "THE chapter body, as plain text. This is the column 11.16.6 is about, and it was not in the policy at all until M60-05: the M60-01 gate only required a decision for columns in TABLES it knew carried PII, and chapter_revisions was not one of them. A gate that cannot fail on the most sensitive column in the schema is not a gate.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
+    },
+    "chapter_revisions.sanitized_html": {
+      "treatment": "keep_gated",
+      "why": "The chapter body as rendered HTML. Same body, second shape -- masking plain_text alone would publish the whole text again.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
+    },
+    "chapters.created_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "chapters.current_revision_id": {
+      "treatment": "keep",
+      "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "chapters.deleted_at": {
+      "treatment": "keep",
+      "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "chapters.id": {
+      "treatment": "keep",
+      "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "chapters.order_key": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "chapters.title": {
+      "treatment": "keep_gated",
+      "why": "The dataset's reason to exist, and gated on aggregate retention mode (11.16.6).",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "chapters.updated_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "chapters.version": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "chapters.work_id": {
+      "treatment": "keep",
+      "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "collaboration_invites.token_hash": {
+      "treatment": "drop_column",
+      "why": "A live session credential in a published file is account takeover, not a disclosure.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "comments.anchor_chapter_id": {
+      "treatment": "keep",
+      "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "comments.anchor_kind": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "comments.anchor_value": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "comments.author_pseud": {
+      "treatment": "rekey_text",
+      "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of comments into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+    },
+    "comments.body": {
+      "treatment": "keep_gated",
+      "why": "The dataset's reason to exist, and gated on aggregate retention mode (11.16.6).",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "comments.body_version": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "comments.classification_id": {
+      "treatment": "keep",
+      "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "comments.created_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "comments.deleted_at": {
+      "treatment": "keep",
+      "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "comments.edited_at": {
+      "treatment": "keep",
+      "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "comments.id": {
+      "treatment": "rekey_text",
+      "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of comments into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+    },
+    "comments.subject_id": {
+      "treatment": "keep",
+      "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "comments.subject_type": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "content_references.owner_id": {
+      "treatment": "rekey_text",
+      "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of content_references into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+    },
+    "content_settings.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "curator_rewards.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "curator_roles.account_id": {
+      "treatment": "rekey_text",
+      "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of curator_roles into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+    },
+    "device_deliveries.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "device_deliveries.address": {
+      "treatment": "drop_column",
+      "why": "A delivery address for a push channel; a live routing target, not research data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "did_not_finish.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "did_not_finish.created_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "did_not_finish.updated_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "directory_votes.account_id": {
+      "treatment": "rekey_text",
+      "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of directory_votes into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+    },
+    "dmca_takedowns.claimant_email": {
+      "treatment": "drop_column",
+      "why": "A named complainant's email. A DMCA claimant is a natural person, not a pseud, and the whole point of the table is a legal claim against a specific person -- publishing it in a research dataset is a disclosure, not an anonymisation problem to solve later.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "download_grants.token_hash": {
+      "treatment": "drop_column",
+      "why": "A live session credential in a published file is account takeover, not a disclosure.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "entry_moderation_votes.account_id": {
+      "treatment": "rekey_text",
+      "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of entry_moderation_votes into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+    },
+    "exchange_signals.account_id": {
+      "treatment": "rekey_text",
+      "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of exchange_signals into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+    },
+    "export_jobs.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "feedback_allowlist.author_account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "feedback_denylist.author_account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "feedback_preferences.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "forum_posts.body": {
+      "treatment": "keep_gated",
+      "why": "Reader-authored post text. Gated with the rest: a reader's words are a body, whatever table they sit in.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
+    },
+    "guardian_authorizations.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "import_jobs.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "instance_fingerprints.fingerprint_json": {
+      "treatment": "drop_column",
+      "why": "A fingerprint of an instance is a tracking identifier by construction, and re-keying it would preserve exactly the correlation it exists to enable.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "instance_fingerprints.fingerprint_version": {
+      "treatment": "keep",
+      "why": "A format version, not an identifier. Kept so a consumer can tell a fingerprint it cannot parse from one that is absent.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "interaction_warmth.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "ip_policy.ip": {
+      "treatment": "drop_table",
+      "why": "Holds address material and rate-limit decisions. No research value.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "library_items.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "library_items.created_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "library_items.last_synced_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "library_items.source_updated_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "library_items.updated_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "link_challenges.token_id": {
+      "treatment": "drop_column",
+      "why": "Resolves to a live token row that is itself dropped.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "media_collection_items.added_by_account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "media_collections.owning_account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "messages.body": {
+      "treatment": "keep_gated",
+      "why": "Private message text. Gated, and note the snapshot already drops the addressing columns -- a message with no participants but a body is still a body.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
+    },
+    "notification_routes.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "notifications.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "password_credentials.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "password_credentials.password_hash": {
+      "treatment": "drop_column",
+      "why": "A credential. Anonymising a hash is meaningless and it has no research value.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "payment_events.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "payouts.author_account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "pool_b_distributions.author_account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "post_drafts.body": {
+      "treatment": "keep_gated",
+      "why": "Unpublished draft text. Gated; a draft is a body the author has not chosen to publish anywhere.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
+    },
+    "privacy_settings.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "private_tags.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "pseuds.account_id": {
+      "treatment": "rekey_account",
+      "why": "Second join key (11.16.3b). Re-keyed on its OWN salt so a published snapshot cannot join a pseudonym to its account.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3/11.16.3b"
+    },
+    "pseuds.bio": {
+      "treatment": "replace",
+      "why": "Free text written by a person. Identifies as surely as a handle does.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "pseuds.created_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "pseuds.deleted_at": {
+      "treatment": "keep",
+      "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "pseuds.discoverability": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "pseuds.display_name": {
+      "treatment": "replace",
+      "why": "Chosen by a person, or the primary identifier.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "pseuds.handle": {
+      "treatment": "replace",
+      "why": "Chosen by a person, or the primary identifier.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "pseuds.id": {
+      "treatment": "rekey_pseud",
+      "why": "pseud_id itself. Deterministic re-key via snapshot_pseud: a CONSTANT here would fuse every pseudonym in the snapshot into one, which is why 'replace' was the wrong treatment for a uuid key. See 11.16.3.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3/11.16.3b"
+    },
+    "pseuds.updated_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "pseuds.version": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "push_subscriptions.endpoint": {
+      "treatment": "drop_column",
+      "why": "A device push endpoint is a bearer credential for someone else's inbox.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "quiz_answers.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "rating.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "rating.created_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "rating.deleted_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "rating.updated_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "reader_note.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "reader_note.body": {
+      "treatment": "keep_gated",
+      "why": "Reader-authored note text. Gated.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
+    },
+    "reading_history_entry.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "reading_history_entry.created_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "reading_history_entry.last_read_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "reading_progress.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "reading_progress.created_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "reading_progress.updated_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "reading_sessions.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "reading_status.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "recovery_tokens.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "recovery_tokens.token_hash": {
+      "treatment": "drop_column",
+      "why": "A live session credential in a published file is account takeover, not a disclosure.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "review.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "review.body": {
+      "treatment": "keep_gated",
+      "why": "Reader review text. Gated.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6"
+    },
+    "review.created_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "review.deleted_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "review.published_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "review.updated_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "roadmap_ballots.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "roadmap_suggestions.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "saved_views.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "second_factors.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "second_factors.encrypted_secret": {
+      "treatment": "drop_table",
+      "why": "The 2FA secret table. Whole table: it exists only to hold live second factors, and an encrypted second factor is a credential with a countdown.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "secrets.owner_id": {
+      "treatment": "drop_table",
+      "why": "The credential table itself. Whole table: its purpose is holding live secrets and none of it has research value in a published dataset.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "sessions.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "sessions.active_pseud_id": {
+      "treatment": "keep",
+      "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "sessions.created_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "sessions.csrf_token_hash": {
+      "treatment": "drop_column",
+      "why": "Same class as a session credential: it authenticates a write.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "sessions.expires_at": {
+      "treatment": "keep",
+      "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "sessions.id": {
+      "treatment": "keep",
+      "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "sessions.last_seen_at": {
+      "treatment": "keep",
+      "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "sessions.revoked_at": {
+      "treatment": "keep",
+      "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "sessions.token_hash": {
+      "treatment": "drop_column",
+      "why": "A live session credential in a published file is account takeover, not a disclosure.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "sessions.user_agent": {
+      "treatment": "drop_column",
+      "why": "A precise browser/OS fingerprint is directly identifying and has no research value here.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "shelves.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "source_credentials.secret_id": {
+      "treatment": "drop_column",
+      "why": "Resolves to a stored credential; carries no value once the credential is dropped.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "streak_milestones.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "streaks.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "targeted_bounties.account_id": {
+      "treatment": "rekey_text",
+      "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of targeted_bounties into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+    },
+    "taste_notification_queue.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "taste_probes.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "typography_preference.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "update_checks.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "user_devices.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "vanguard_pins.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "vanguard_roles.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "webhook_deliveries.endpoint_id": {
+      "treatment": "keep",
+      "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "webhook_endpoints.active": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "webhook_endpoints.created_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "webhook_endpoints.events": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "webhook_endpoints.id": {
+      "treatment": "keep",
+      "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "webhook_endpoints.owner": {
+      "treatment": "rekey_text",
+      "why": "FOREIGN KEY, and 'replace' was wrong: a CONSTANT here collapses every row of webhook_endpoints into one and destroys the join. Deterministically re-keyed so the graph survives. See 11.16.3 -- consistent pseudonymisation, not column destruction.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3"
+    },
+    "webhook_endpoints.secret": {
+      "treatment": "drop_column",
+      "why": "A bearer credential. Not PII -- a live secret.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "webhook_endpoints.url": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "work_contributors.created_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 event time. Shifted per snapshot, so consecutive dumps cannot be joined row-for-row on the timestamp, while every interval and ordering inside one dump survives -- which is the research value 11.16.5 says the dataset exists for ('how long do people keep a work before abandoning it').",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "work_entitlements.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "work_kudos.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "work_loans.borrower_account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous. The snapshot LOOKS de-identified and is not.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.3b"
+    },
+    "works.ai_training": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.allow_dnf_feedback": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.body_audience": {
+      "treatment": "drop_column",
+      "why": "The 7.7 access rule ITSELF. 11.16.6: 'body_audience columns are dropped from the snapshot entirely -- an access rule that is readable is not one, and a dump that publishes the rule invites bypassing it.' It was marked `keep` and shipped verbatim: a snapshot built on 2026-09-29 carried a work with body_audience='trust_at_least:5' in the clear, which publishes both the audience and the trust THRESHOLD. Dropped, not redacted: a constant would still tell a recipient that this work is audience-restricted, and a null would tell them it is not. Absence is the only honest value here.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16.6 and 7.7.3"
+    },
+    "works.completion": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.contested": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.contested_at": {
+      "treatment": "keep",
+      "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.contested_reason": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.created_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "works.deleted_at": {
+      "treatment": "keep",
+      "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.discussion_mode": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.format": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.half_life_bp": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.id": {
+      "treatment": "keep",
+      "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.language": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.lifecycle": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.orphaned": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.owner_pseud_id": {
+      "treatment": "keep",
+      "why": "A surrogate key or foreign key. Meaningless without the rows it joins to, and not an identity.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.permission_statement": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.published_at": {
+      "treatment": "keep",
+      "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.rating": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.scheduled_for": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.show_public_ratings": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.summary": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.title": {
+      "treatment": "keep_gated",
+      "why": "The dataset's reason to exist, and gated on aggregate retention mode (11.16.6).",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.updated_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER. Two dumps shifted by the same amount join row-for-row on every timestamp, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This column is an EVENT time -- when a row came into existence or changed -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. Treated as `keep` this column is what makes two monthly dumps joinable.",
+      "reviewed_by": "alvaro, 2026-09-29, spec 11.16.5 and 11.17.4"
+    },
+    "works.version": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.visibility": {
+      "treatment": "keep",
+      "why": "Operational or content metadata; carries no personal data.",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "works.withdrawn_at": {
+      "treatment": "keep",
+      "why": "Relative time is the research value. Absolute time is not an identifier (11.16.5).",
+      "reviewed_by": "alvaro, 2026-09-29, against spec 11.16"
+    },
+    "reader_body_copies.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the second join key the re-keying exists to preserve. The copy is a reader's OWN artefact, so preserving the join is what lets a researcher see that one account made one request, and re-keying is what stops that account being identified.",
+      "reviewed_by": "alvaro, 2026-09-30, against spec 11.16.3b"
+    },
+    "retention_body_requests.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the second join key the re-keying exists to preserve. The whole point of the row is WHICH reader asked and at what trust level, so the column has to survive as a join; trust_at_request is what makes the row meaningful and it is not an identity.",
+      "reviewed_by": "alvaro, 2026-09-30, against spec 11.16.3b and 6.2"
+    },
+    "retention_proposal_votes.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the second join key the re-keying exists to preserve. A ballot is already unstackable per account, so re-keying preserves the one-vote-per-account property without naming the voter -- which is the privacy property retention_proposals.rs exists to hold.",
+      "reviewed_by": "alvaro, 2026-09-30, against spec 11.16.3b and 19.15"
+    },
+    "works.redistribution": {
+      "treatment": "drop_column",
+      "why": "An AUTHOR'S OWN ASSERTION that this work may be redistributed (M45-14). Carried verbatim it tells a recipient which works are asserted-redistributable and which are not -- a fact about a real person's legal position, asserted for THIS instance's audience. drop_column, not keep_gated, and not redact, for the reason works.body_audience already carries in this file: absence is the only honest value. A gated copy still says the work is restricted; a constant says it less precisely. Dropping it removes the fact. The snapshot is a research corpus, not a record of who asserted what.",
+      "reviewed_by": "alvaro, 2026-09-30, against spec 11.16.6 and 7.7.3"
+    },
+    "reader_body_copies.plain_text": {
+      "treatment": "keep_gated",
+      "why": "The reader-visible body, in its two renderings. Treated as ONE decision with chapter_revisions.plain_text and .sanitized_html: masking the text alone would republish the whole body as HTML, which is the note those two entries already carry. Gated on 11.16.6's condition -- a snapshot taken while the instance is in `cache` may carry bodies, one taken in `aggregate` may not. The privacy point beyond the chapter case: this copy belongs to ONE reader, so account_id is re-keyed separately and the dump cannot say whose copy it is. Surfaced by the CONTENT_NAME_RE fan-out added in this commit, which exists precisely because the gate was silent on it.",
+      "reviewed_by": "alvaro, 2026-09-30, against spec 11.16.6 and 11.15b"
+    },
+    "reader_body_copies.sanitized_html": {
+      "treatment": "keep_gated",
+      "why": "The reader-visible body, in its two renderings. Treated as ONE decision with chapter_revisions.plain_text and .sanitized_html: masking the text alone would republish the whole body as HTML, which is the note those two entries already carry.",
+      "reviewed_by": "alvaro, 2026-09-30, against spec 11.16.6 and 11.15b"
+    },
+    "works_index.body_text": {
+      "treatment": "drop_table",
+      "why": "The full text of EVERY work on the instance, in one NOT NULL column. drop_table, not keep_gated, and the reason is the shape: the gate would be evaluated once, for the table, so a snapshot taken in the wrong mode publishes every body at once rather than refusing one. works_index is the search index and exists only to serve search, which is rebuilt from chapter_revisions -- gated per mode and re-derivable by a recipient. Dropping it loses nothing a research corpus needs.",
+      "reviewed_by": "alvaro, 2026-09-30, against spec 11.16.6"
+    },
+    "roadmap_suggestions.raw_text": {
+      "treatment": "drop_column",
+      "why": "A reader's OWN submitted prose, freely written, NOT NULL. Not body text in 11.16's sense: it is not a work's text, it is a person's. No mode-based gate is right here, because a `cache` instance would publish every suggestion ever made. The suggestion's existence, its card association and its ballot history all survive; the prose does not.",
+      "reviewed_by": "alvaro, 2026-09-30, against spec 11.16.6 and 7.7"
+    },
+    "critique_queue.excerpt": {
+      "treatment": "drop_column",
+      "why": "An excerpt of a FORUM POST -- a person's words, not a work's text, for the same reason as roadmap_suggestions.raw_text. The queue's research value is which posts were queued and in what order, and posted_at plus position give exactly that without the prose.",
+      "reviewed_by": "alvaro, 2026-09-30, against spec 11.16.6"
+    }
   }
- }
 }
