@@ -57,6 +57,7 @@ pub mod permission;
 pub mod positivity;
 pub mod preservation;
 pub mod rating_integrity;
+pub mod reader_body_copies;
 pub mod reading;
 pub mod rec_strategy;
 pub mod recommendation_slots;
