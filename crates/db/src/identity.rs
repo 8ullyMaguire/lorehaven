@@ -929,12 +929,17 @@ pub async fn count_excluding_system_accounts(
         "accounts" | "pseuds" | "sessions" => table,
         other => anyhow::bail!("refusing to count unknown table {other}"),
     };
-    // The cast on PostgreSQL is the reason this is a helper rather than inline
-    // SQL in a test: `accounts.id` is a UUID column, and Postgres refuses to
-    // compare text to it without `::uuid`.
+    // **Each arm gets its own placeholder.** `?1` is SQLite syntax and `$1` is
+    // Postgres syntax; writing `?1` on both arms gives the Postgres parser a `?`
+    // with no bound parameter, and the error it reports is
+    // `cannot cast type integer to uuid` — which names a CAST while the fault
+    // is numbering. `PREPARE … $1::uuid` succeeds, so that is the way to tell
+    // the two apart. The rule is stated at `crates/db/src/retention_proposals.rs`:
+    // "`$1`..`$6` and never `?::uuid, $1::uuid, ...` — sqlx numbers placeholders
+    // per arm".
     let sql = match db.backend() {
         crate::Backend::Sqlite => format!("SELECT COUNT(*) FROM {table} WHERE id != ?1"),
-        crate::Backend::Postgres => format!("SELECT COUNT(*) FROM {table} WHERE id != ?1::uuid"),
+        crate::Backend::Postgres => format!("SELECT COUNT(*) FROM {table} WHERE id != $1::uuid"),
     };
     match db.backend() {
         crate::Backend::Sqlite => Ok(sqlx::query_scalar(&sql)

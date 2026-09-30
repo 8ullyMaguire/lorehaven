@@ -89,6 +89,47 @@ impl Harness {
         }
     }
 
+    /// Accounts the *test* registered — not every row in `accounts`.
+    ///
+    /// Migration 0094 inserts the instance's own system account (a fixed id, a
+    /// `system` status, a `.invalid` email), so `count("accounts")` has counted
+    /// one extra row since it landed. For most tables the plain count is right
+    /// and a helper here would be noise; for `accounts` specifically, "how many
+    /// accounts does this test have" is the question almost every caller means,
+    /// and it is the one the plain count gets wrong.
+    async fn reader_count(&self) -> i64 {
+        // **Bound, not interpolated.** The id is a `SYSTEM_ACCOUNT` constant
+        // rather than anything a caller supplies, so this is not an injection
+        // surface — but a UUID spliced into a statement text reads as one, and
+        // the next person to add a parameter here inherits the question.
+        //
+        // **Each arm gets its OWN placeholder, which is the whole point.**
+        // `?1` is SQLite syntax; the Postgres arm speaks `$1`. Writing `?1` on
+        // both arms produces `cannot cast type integer to uuid` on Postgres —
+        // an error that names a CAST, while the fault is numbering: the bare
+        // `?` has no bound parameter, so the parser infers `integer` from
+        // nothing. `PREPARE … $1::uuid` succeeds, which is how you tell the two
+        // apart. The rule is the codebase's own, and it is written down at
+        // `crates/db/src/retention_proposals.rs:334`: "`$1`..`$6` and never
+        // `?::uuid, $1::uuid, ...` — sqlx numbers placeholders per arm".
+        let q = match self.db().backend() {
+            lorehaven_db::Backend::Sqlite => "SELECT COUNT(*) FROM accounts WHERE id != ?1",
+            lorehaven_db::Backend::Postgres => "SELECT COUNT(*) FROM accounts WHERE id != $1::uuid",
+        };
+        match self.db().backend() {
+            lorehaven_db::Backend::Sqlite => sqlx::query_scalar::<_, i64>(&q)
+                .bind(lorehaven_db::SYSTEM_ACCOUNT.to_string())
+                .fetch_one(self.db().sqlite_pool().expect("sqlite"))
+                .await
+                .expect("count reader accounts"),
+            lorehaven_db::Backend::Postgres => sqlx::query_scalar::<_, i64>(&q)
+                .bind(lorehaven_db::SYSTEM_ACCOUNT.to_string())
+                .fetch_one(self.db().postgres_pool().expect("pg"))
+                .await
+                .expect("count reader accounts"),
+        }
+    }
+
     /// A pseud to hold preferences. `(account, pseud_id)`.
     async fn reader(&self) -> (AccountId, String) {
         let account = create_account(
@@ -488,7 +529,12 @@ async fn deleting_a_pseud_cascades_its_preferences() {
     );
     // The account outlives the pseud -- a reader may re-pseud -- so only the
     // preferences cascade, not the identity behind them.
-    assert_eq!(h.count("accounts").await, 1, "the account is untouched");
+    assert_eq!(
+        h.reader_count().await,
+        1,
+        "the account is untouched — and `reader_count`, not the raw row count, \
+         because the instance's own system account is not this test's reader"
+    );
 }
 
 /// Several readers' preferences coexist and cascade independently.
