@@ -112,6 +112,11 @@ format = "pretty"
 # operator or — see `[retention_governance]` below — by the readers themselves.
 # [retention]
 # default_body_audience = "full"
+# body_request_min_trust = 2
+
+# The trust level a reader needs to ask this instance to fetch and keep an
+# external body for them personally (§11.15b). Default 2, floor 0. This gates
+# the REQUEST; no read path consults it, so a copy is not a readers'-tier.
 
 # --- Who gets a say in storage, and whether a vote decides ----------------
 #

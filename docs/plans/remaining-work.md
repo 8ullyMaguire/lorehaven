@@ -53,10 +53,12 @@ registry, most source adapters, the bot, and a published OpenAPI document.
 
 ### M59 — Crawling posture, retention governance, preservation (spec §5, §7.7, §19.15, §11.5, §11.15)
 
-Phases A–F are built and verified on both dialects. The amendment is
-`docs/spec-amendments/crawling-retention-and-preservation.md`; the plan is
-`docs/plans/crawling-retention-preservation.md`; the evidence is
-`docs/verification.md`'s two newest sections.
+Phases A–F are built and verified on both dialects, and so is `M59-10` under its
+own plan. The amendment is
+`docs/spec-amendments/crawling-retention-and-preservation.md`; the plans are
+`docs/plans/crawling-retention-preservation.md` and
+`docs/plans/m59-10-reader-body-request.md`; the evidence is
+`docs/verification.md`'s newest sections.
 
 What shipped: a named robots posture with per-adapter overrides, a
 class-specific UA token, body-audience baselines, the preservation credit loop
@@ -64,19 +66,50 @@ and recheck pass, and community retention governance — reader proposals,
 ballots, an advisory/binding switch, operator respond and override, and a
 settlement pass.
 
-15 of 27 requirement rows are implemented. **The remaining
-12 are still `planned` and are not cosmetic** — they are the
-follow-on surface, not the phase's core:
+**All 27 requirement rows are now `implemented-locally-tested`, and that took two
+kinds of correction that should not be conflated.**
 
-```
-M59-07 M59-10 M59-11 M59-12 M59-13 M59-14 M59-15 M59-16 M59-24 M59-25 M59-26 M59-27
-```
+**Twelve were `planned` when this section was last written. Eleven of them were
+already built** — by phases C, C1 and D — and the ledger had never been updated.
+They are now marked implemented, each naming the suite that pins it rather than
+resting on this document's word:
 
-Read those rows before assuming M59 is finished. Two of the three things a
-reader might call gaps are decisions, and are recorded as such in the
-amendment's build-status section: a retention ballot grants no trust, XP, badge
-or placement (deliberately — the plan's own reasoning applied against its own
-convenience), and the `[preservation]` config block is named `[media_resilience]`.
+| Row | Pinned by |
+|---|---|
+| M59-07 | `crates/app/tests/retention_routes.rs` — the setting, source overrides, refusals |
+| M59-11 | `milestone_0.rs`, `retention_routes.rs` — the crosspost verification loop |
+| M59-12 | `retention_routes.rs` — credits sized by threshold, decay and cap |
+| M59-13 | `retention_routes.rs` — clawback when a destination dies |
+| M59-14 | `retention_routes.rs` — the redistribution assertion gate |
+| M59-15 | `retention_routes.rs` — badge and Top Preservers |
+| M59-16 | `retention_routes.rs` — eligible-destination reporting |
+| M59-24 | `retention_routes.rs` — body audience narrowing |
+| M59-25 | `retention_routes.rs` — the rating ceiling, applied before audience |
+| M59-26 | `retention_routes.rs` — the indistinguishable refusal |
+| M59-27 | `retention_routes.rs` — the vanguard gate |
+
+**The twelfth, `M59-10`, was a real gap** — the one M59 row no phase in
+`crawling-retention-preservation.md` was assigned to, so it had neither code nor a
+plan. It is now built: a reader's own copy of an external body (spec §11.15b),
+under its own plan `docs/plans/m59-10-reader-body-request.md`, verified by
+`crates/app/tests/reader_body_copies.rs` (the seven tests of the §6.4 acceptance
+list), by the config tests including the §6.4.4 source scan, and by two
+injection checks that a green run alone cannot give: the guard scan was shown to
+fail and name the offending file, and the privacy test was shown to fail when the
+account-id leak it caught is put back.
+
+Two of the three things a reader might call gaps are decisions, recorded as such
+in the amendment's build-status section: a retention ballot grants no trust, XP,
+badge or placement (deliberately — the plan's own reasoning applied against its
+own convenience), and the `[preservation]` config block is named
+`[media_resilience]`.
+
+**The lesson is worth keeping, because it nearly went the other way.** A ledger
+that says "planned" for built work invites either a duplicate implementation or a
+report that M59 is a third unfinished. The check that settles it in one command is
+to probe for the code and the tests that own each row, rather than reading the
+requirement text against the source — a requirement whose subject matter has a
+whole passing suite is implemented whatever the CSV says.
 
 ### M52 — Recommendation strategy registry (spec §16.1a, new)
 
