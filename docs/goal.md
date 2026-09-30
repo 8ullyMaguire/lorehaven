@@ -91,8 +91,8 @@ A red gate that predates the work is part of the work.
 
 ## Scope, and what this brief adds
 
-`docs/requirements.csv` has 687 rows: **295 fully tested, 117 verified E2E, 228
-built but not verified end to end, 42 planned, 4 deliberately unsupported, 1
+`docs/requirements.csv` has 687 rows: **295 fully tested, 117 verified E2E, 230
+built but not verified end to end, 40 planned, 4 deliberately unsupported, 1
 evaluated and rejected.**
 
 *(Re-derived 2026-09-30. The previous figures here — 640 rows, 53 planned, and a
@@ -121,7 +121,7 @@ keystone authors, cross-language supply, sister-instance federation, the Discord
 bot, and the GDPR/DSA compliance tooling. Conflating the two has already cost one
 wrong line in this file; the CSV is the authority.
 
-**The 228 `implemented-locally-tested` rows are not free.** They are built, not
+**The 230 `implemented-locally-tested` rows are not free.** They are built, not
 verified end to end, and they need a verification pass, not new code. They
 inflate each remaining line item rather than forming a phase of their own.
 
@@ -132,8 +132,8 @@ exclusion — work that was consciously declined, not work deferred.
 
 - *Is all of the spec in scope?* **Yes — the owner's call, 2026-09-30.** All 45
   M45 rows are in scope, so the build runs to the whole spec rather than a
-  chosen subset. Three of them (M45-10, -11, -13) have since moved to
-  `implemented-locally-tested` under spec §47, so 42 remain `planned`.
+  chosen subset. Five of them (M45-10, -11, -13, -15, -49) have since moved to
+  `implemented-locally-tested` under spec §47, so 40 remain `planned`.
 - *M11-17 first, or M45?* Settled by the work itself: M11-17 is built and
   verified, so M45 is what remains.
 

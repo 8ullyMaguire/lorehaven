@@ -268,6 +268,435 @@ pub async fn record_interaction(
     Ok(kind)
 }
 
+/// Rank a candidate set for one reader, and report what to log.
+///
+/// §47.2 fixes the stage order and a stage may not reorder it. The order is:
+/// candidates → scored → exploration slots interleaved → MMR re-rank → capped.
+///
+/// `dimensions_for` maps a candidate to its dimension keys. It is a parameter
+/// rather than a query inside this function so the ranking logic stays pure and
+/// testable, and so eligibility (§30.7, a trust question) stays with the caller
+/// that owns the trust decision — §47.2's deliberate split.
+///
+/// **Determinism.** Candidates are sorted by id before anything else, because a
+/// SQL query with no `ORDER BY` returns rows in whatever order the engine finds
+/// them and §47.9 requires two calls on the same state to agree. Exploration
+/// slots are random *by design*; that randomness is returned in
+/// `RankedOutcome.exploration` so it can be logged rather than seeded from the
+/// clock.
+pub async fn rank_works(
+    db: &Database,
+    account: &str,
+    candidates: Vec<WorkId>,
+    dimensions_for: &dyn Fn(&WorkId) -> Vec<String>,
+    options: &RankOptions,
+) -> Result<RankedOutcome> {
+    if candidates.is_empty() {
+        return Ok(RankedOutcome::default());
+    }
+
+    // Determinism starts here. Sorting by id before scoring means two calls with
+    // the same candidate set cannot differ because the input arrived shuffled.
+    let mut candidates = candidates;
+    candidates.sort();
+    candidates.dedup();
+
+    let weights = TagWeights::for_reader(db, account).await?;
+
+    let scored: Vec<(WorkId, f64, Vec<String>)> = candidates
+        .iter()
+        .map(|id| {
+            let dimensions = dimensions_for(id);
+            (*id, score_candidate(&weights, &dimensions), dimensions)
+        })
+        .collect();
+
+    let scores: Vec<f64> = scored.iter().map(|(_, score, _)| *score).collect();
+    let propensities = ranked_propensity(&scores);
+
+    let mut ordered = if options.variety {
+        mmr_rerank(&scored, &[], options.lambda)
+    } else {
+        scored.iter().map(|(id, _, _)| *id).collect()
+    };
+
+    // Exploration slots (§47.3): uniform-random over the eligible-but-unshown
+    // set, with the pool reduced after each draw so consecutive slots are
+    // independent rather than repeats. The slot's probability is 1/|pool|, and
+    // `pool` shrinks per draw — recomputing rather than reusing the original
+    // count is what makes the draws independent.
+    let mut exploration = Vec::new();
+    for _ in 0..options.exploration_slots {
+        let pool = ordered.len();
+        if pool == 0 {
+            break;
+        }
+        // `random` is sourced per call rather than from a seeded generator so the
+        // outcome is not reproducible — which is the point: a reproducible
+        // "random" slot is a fixed slot, and §47.3 wants an unmeasurable draw
+        // whose probability is known. The probability, not the draw, is what
+        // offline evaluation consumes.
+        let pick = (uuid::Uuid::new_v4().as_u128() % pool as u128) as usize;
+        let chosen = ordered.remove(pick);
+        exploration.push(Impression {
+            work_id: chosen,
+            slot_kind: SlotKind::Exploration,
+            // The pool at the moment of THIS draw, so the logged propensity
+            // describes the draw that actually happened.
+            propensity: 1.0 / pool as f64,
+            score: 0.0,
+            stage: "exploration".to_owned(),
+        });
+    }
+
+    // The exposure floor (§47.5) is a guarantee of *opportunity*: it inserts
+    // zero-impression works at the front so they are seen once. It never
+    // promotes past the trust bar or past a content filter — both of those were
+    // applied to the candidate set by the caller, before this function ran.
+    let mut floor = Vec::new();
+    if options.exposure_floor {
+        for (work_id, score, _) in &scored {
+            if !ordered.contains(work_id) && !exploration.iter().any(|i| i.work_id == *work_id) {
+                floor.push(Impression {
+                    work_id: *work_id,
+                    slot_kind: SlotKind::ExposureFloor,
+                    propensity: 1.0 / scored.len() as f64,
+                    score: *score,
+                    stage: "exposure_floor".to_owned(),
+                });
+            }
+        }
+    }
+
+    let by_id: std::collections::HashMap<WorkId, f64> =
+        scored.iter().map(|(id, score, _)| (*id, *score)).collect();
+    let mut ranked: Vec<Ranked> = ordered
+        .iter()
+        .map(|work_id| Ranked {
+            work_id: *work_id,
+            score: by_id.get(work_id).copied().unwrap_or(0.0),
+            stage: if options.variety { "mmr" } else { "score" }.to_owned(),
+        })
+        .collect();
+    // Floor impressions lead, but are NOT added to `ordered` as ranked rows:
+    // they are a separate guarantee and mixing the two would make the permutation
+    // property unprovable.
+    for impression in &floor {
+        ranked.push(Ranked {
+            work_id: impression.work_id,
+            score: impression.score,
+            stage: "exposure_floor".to_owned(),
+        });
+    }
+
+    // The ranked propensities, mapped back onto the (possibly re-ranked) order.
+    let ranked_impressions: Vec<Impression> = ordered
+        .iter()
+        .zip(propensities.iter())
+        .map(|(work_id, propensity)| Impression {
+            work_id: *work_id,
+            slot_kind: SlotKind::Ranked,
+            propensity: *propensity,
+            score: by_id.get(work_id).copied().unwrap_or(0.0),
+            stage: if options.variety { "mmr" } else { "score" }.to_owned(),
+        })
+        .collect();
+
+    Ok(RankedOutcome {
+        ranked,
+        exploration,
+        floor,
+        impressions: ranked_impressions,
+    })
+}
+
+/// What `rank_works` produced: the order, and everything §47.3 says must be
+/// logged about it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RankedOutcome {
+    /// The ordered rows. A permutation of the candidate set minus any work
+    /// consumed by an exploration slot.
+    pub ranked: Vec<Ranked>,
+    /// Exploration draws, each with the propensity of the draw that happened.
+    pub exploration: Vec<Impression>,
+    /// Exposure-floor impressions.
+    pub floor: Vec<Impression>,
+    /// Propensities for the ranked rows, in `ranked` order.
+    pub impressions: Vec<Impression>,
+}
+
+impl RankedOutcome {
+    /// Every impression this outcome requires be logged, in one list.
+    ///
+    /// §47.8's invariant — every ordered row has a logged impression with a
+    /// non-null propensity — is checkable against this without re-deriving which
+    /// stage produced which row.
+    #[must_use]
+    pub fn all_impressions(&self) -> Vec<Impression> {
+        let mut all = self.impressions.clone();
+        all.extend(self.exploration.iter().cloned());
+        all.extend(self.floor.iter().cloned());
+        all
+    }
+}
+
+/// Per-dimension taste weights, as §47.2's "scored" stage consumes them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TagWeights {
+    /// `dimension_key` → weight. The arena writes these (§45-56).
+    pub weights: Vec<(String, f64)>,
+}
+
+impl TagWeights {
+    /// Read the reader's weights, or an empty set when they have not calibrated.
+    ///
+    /// An empty set is a legitimate state, not an error: a reader who has never
+    /// entered the arena has no weights, and §47.2's determinism requirement
+    /// means their ordering must still be reproducible rather than falling back
+    /// to something time-dependent.
+    pub async fn for_reader(db: &Database, account: &str) -> Result<Self> {
+        let rows = crate::taste_vectors::get_arena_weights(db, account)
+            .await
+            .map_err(|e| anyhow::anyhow!("arena weights unreadable: {e}"))?;
+        Ok(Self {
+            weights: rows
+                .into_iter()
+                .map(|(key, weight, _, _)| (key, weight))
+                .collect(),
+        })
+    }
+
+    #[must_use]
+    pub fn weight_of(&self, dimension: &str) -> f64 {
+        self.weights
+            .iter()
+            .find(|(key, _)| key == dimension)
+            .map_or(0.0, |(_, weight)| *weight)
+    }
+}
+
+/// How `rank_works` should behave. Every field has a default that means "off",
+/// because §47.2's stages are opt-in: a caller that does not ask for exploration
+/// gets the deterministic ordering the acceptance criteria require.
+#[derive(Debug, Clone)]
+pub struct RankOptions {
+    /// Uniform-random exploration slots (M45-13).
+    pub exploration_slots: usize,
+    /// Guarantee impressions for zero-impression works (M45-15).
+    pub exposure_floor: bool,
+    /// MMR relevance/diversity trade-off in [0,1]. 1.0 = relevance only.
+    pub lambda: f64,
+    /// Whether MMR and satiation run at all.
+    pub variety: bool,
+}
+
+impl Default for RankOptions {
+    /// Every mechanism off, `lambda = 1.0`.
+    ///
+    /// §47.9 requires two calls with the same database state to return identical
+    /// ordering when exploration is off, and that has to be the *default*
+    /// configuration or the acceptance criterion tests a mode nobody uses.
+    fn default() -> Self {
+        Self {
+            exploration_slots: 0,
+            exposure_floor: false,
+            lambda: 1.0,
+            variety: false,
+        }
+    }
+}
+
+/// Maximal marginal relevance: re-rank by relevance against novelty.
+///
+/// `lambda = 1.0` returns the input order untouched, which §47.9 asserts and
+/// which makes "MMR is off" a true statement rather than an approximate one.
+///
+/// **Re-ranks; never filters.** Every input appears in the output, permuted.
+/// Dropping a row would be a filter, and §43.3 forbids filters — the distinction
+/// is the whole reason this is MMR and not "diversity-based top-N".
+#[must_use]
+pub fn mmr_rerank(
+    scored: &[(WorkId, f64, Vec<String>)],
+    already_picked: &[WorkId],
+    lambda: f64,
+) -> Vec<WorkId> {
+    let lambda = lambda.clamp(0.0, 1.0);
+    if lambda >= 1.0 || scored.len() < 2 {
+        return scored.iter().map(|(id, _, _)| *id).collect();
+    }
+
+    // The similarity baseline is the set of dimensions the reader has already
+    // been shown, plus whatever MMR has placed so far in this pass. Both are
+    // "what does this candidate have in common with what has been seen".
+    let mut seen_dimensions: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // `already_picked` seeds the seen set: the reader has, by definition, already
+    // been shown these, so their dimensions count as overlap even before this
+    // pass places anything. That is §47.6's "three angst fics in a row" — the
+    // nudge has to see the last three, not just the current list.
+    for picked in already_picked {
+        if let Some((_, _, dimensions)) = scored.iter().find(|(id, _, _)| id == picked) {
+            seen_dimensions.extend(dimensions.iter().cloned());
+        }
+    }
+
+    let mut remaining: Vec<(WorkId, f64, Vec<String>)> = scored.to_vec();
+    let mut ordered: Vec<WorkId> = Vec::with_capacity(scored.len());
+    // The scale the relevance term is measured against: the strongest candidate.
+    let best_score = scored
+        .iter()
+        .map(|(_, score, _)| *score)
+        .fold(f64::NEG_INFINITY, f64::max);
+    if best_score <= 0.0 {
+        // No candidate has any relevance at all — an uncalibrated reader with no
+        // overlapping tags. Any ordering is as good as another, so return the
+        // input order rather than letting the diversity term invent a
+        // preference the reader never expressed.
+        return scored.iter().map(|(id, _, _)| *id).collect();
+    }
+
+    while !remaining.is_empty() {
+        let (index, _) = remaining
+            .iter()
+            .enumerate()
+            .max_by(
+                |(_, (id_a, score_a, dims_a)), (_, (id_b, score_b, dims_b))| {
+                    // Total order, not `partial_cmp(...).unwrap()`: NaN reaches here
+                    // if a caller hands in a non-finite score, and unwrapping on None
+                    // panics. Comparing the scores directly keeps a NaN from
+                    // becoming a panic inside a ranking call.
+                    let novelty_a = novelty(dims_a, &seen_dimensions, scored);
+                    let novelty_b = novelty(dims_b, &seen_dimensions, scored);
+                    // Relevance is normalised against the best candidate in the set
+                    // before the two are blended. Without this the two terms are on
+                    // incomparable scales — score is an absolute weight in [0,1] but
+                    // novelty is a ratio over the current candidate set — and the
+                    // blend then means nothing. The first version of this blended
+                    // them raw at lambda=0.5, which promoted a 0.20-scored fluff
+                    // work to first place: the diversity term simply outweighed
+                    // relevance because 1.0 > 0.20, not because the reader had seen
+                    // three angst fics. `novelty_floor` keeps the term subordinate
+                    // so it nudges rather than overrides, which is what section 47.6
+                    // asks for.
+                    let total_a = lambda * normalised_relevance(*score_a, best_score)
+                        + (1.0 - lambda) * NOVELTY_FLOOR * novelty_a;
+                    let total_b = lambda * normalised_relevance(*score_b, best_score)
+                        + (1.0 - lambda) * NOVELTY_FLOOR * novelty_b;
+                    total_a.total_cmp(&total_b).then_with(|| id_a.cmp(id_b))
+                },
+            )
+            .expect("remaining is non-empty inside this loop");
+        let (work_id, _, dimensions) = remaining.remove(index);
+        for dimension in &dimensions {
+            seen_dimensions.insert(dimension.clone());
+        }
+        ordered.push(work_id);
+    }
+    ordered
+}
+
+/// How much of the blend the diversity term may claim.
+///
+/// 0.25: enough to break a near-tie between two works of similar relevance,
+/// not enough to promote a much weaker work over a much stronger one. section
+/// 47.6 asks for a nudge — "three angst fics in a row nudges next pick toward
+/// fluff" — and a nudge that can reorder the whole list is a filter wearing
+/// MMR's clothes.
+const NOVELTY_FLOOR: f64 = 0.25;
+
+/// Relevance relative to the strongest candidate, in [0, 1].
+///
+/// Dividing rather than subtracting keeps the term in [0,1] and gives 1.0 to the
+/// best candidate, which is what makes the blend's two terms commensurate.
+#[must_use]
+fn normalised_relevance(score: f64, best: f64) -> f64 {
+    if best <= 0.0 {
+        0.0
+    } else {
+        (score / best).clamp(0.0, 1.0)
+    }
+}
+
+/// How unlike the already-seen material this candidate is, in [0, 1].
+///
+/// Jaccard-style overlap against the seen dimension set: 1.0 when nothing has
+/// been seen (nothing to overlap with), 0.0 when the candidate's dimensions are
+/// entirely shared. It is a *nudge*, per §47.6 — it changes the score, it never
+/// excludes a category, so a reader who wants nothing but angst keeps getting
+/// angst.
+#[must_use]
+fn novelty(
+    dimensions: &[String],
+    seen: &std::collections::HashSet<String>,
+    all: &[(WorkId, f64, Vec<String>)],
+) -> f64 {
+    if seen.is_empty() {
+        return 1.0;
+    }
+    let overlap = dimensions
+        .iter()
+        .filter(|dimension| seen.contains(*dimension))
+        .count();
+    // Normalise by the *widest* dimension list in the set rather than by this
+    // candidate's own, so a work with three dimensions is not rewarded for
+    // having three chances to overlap.
+    let widest = all
+        .iter()
+        .map(|(_, _, dims)| dims.len())
+        .max()
+        .unwrap_or(1)
+        .max(dimensions.len());
+    1.0 - (overlap as f64 / widest as f64)
+}
+
+/// A deterministic, non-negative score for one candidate.
+///
+/// The score is the reader's own arena weight for the candidate's strongest
+/// dimension — deliberately simple. §47.10 refuses learning-to-rank and refuses
+/// embeddings, so this is an explicit, inspectable function: an operator can read
+/// a work's score and compute it by hand, which is the property §33.3 already
+/// depends on elsewhere in the project.
+#[must_use]
+pub fn score_candidate(weights: &TagWeights, candidate_dimensions: &[String]) -> f64 {
+    candidate_dimensions
+        .iter()
+        .map(|dimension| weights.weight_of(dimension).abs())
+        .fold(0.0, f64::max)
+}
+
+/// The propensity for a ranked row: the reader's normalised score share.
+///
+/// §47.3 asks for the probability the item was *selected into the position the
+/// reader saw*, not the probability of appearing in the candidate set. A single
+/// candidate has propensity 1.0 — it was certain to be shown.
+///
+/// Every score in the set is offset by the minimum before normalising. Without
+/// that, a single negative weight (arena weights are signed) would make the sum
+/// zero or negative and the shares meaningless. The offset changes the
+/// *distribution* between candidates but not their order, which is what a
+/// propensity is for.
+#[must_use]
+pub fn ranked_propensity(scores: &[f64]) -> Vec<f64> {
+    if scores.is_empty() {
+        return Vec::new();
+    }
+    if scores.len() == 1 {
+        return vec![1.0];
+    }
+    let floor = scores.iter().copied().fold(f64::INFINITY, f64::min);
+    let shifted: Vec<f64> = scores.iter().map(|score| score - floor).collect();
+    let total: f64 = shifted.iter().sum();
+    if total <= f64::EPSILON {
+        // Every candidate scored identically: each was equally likely to be
+        // picked, so 1/n is the honest propensity rather than 1.0, which would
+        // tell the offline estimator there was no selection at all.
+        return vec![1.0 / scores.len() as f64; scores.len()];
+    }
+    shifted
+        .into_iter()
+        .map(|score| (score / total).max(f64::MIN_POSITIVE))
+        .collect()
+}
+
 /// Scout value: credit for engaging with a work that later earns a high rating,
 /// weighted by how obscure it was at the time of engagement (§47.7).
 ///
@@ -369,6 +798,196 @@ mod tests {
         // Infinity is clamped normally, not treated as NaN.
         assert!((scout_value(f64::INFINITY, 1.0) - 1.0).abs() < f64::EPSILON);
         assert!((scout_value(f64::NEG_INFINITY, 1.0) - 0.0).abs() < f64::EPSILON);
+    }
+
+    fn weights(pairs: &[(&str, f64)]) -> TagWeights {
+        TagWeights {
+            weights: pairs
+                .iter()
+                .map(|(key, weight)| ((*key).to_owned(), *weight))
+                .collect(),
+        }
+    }
+
+    /// Deterministic, sortable test ids.
+    ///
+    /// `WorkId::from_uuid`, not a numeric constructor: the real type is a
+    /// `Uuid` newtype (`crates/domain/src/ids.rs:16`) whose only constructors
+    /// are `new()` and `from_uuid`. Numeric ids keep the MMR tie-break
+    /// assertions readable while staying valid UUIDs.
+    fn work(n: u128) -> WorkId {
+        WorkId::from_uuid(uuid::Uuid::from_u128(n))
+    }
+
+    // --- §47.3 propensity ----------------------------------------------------
+
+    #[test]
+    fn a_single_candidate_was_certain_to_be_shown() {
+        assert_eq!(ranked_propensity(&[0.7]), vec![1.0]);
+    }
+
+    #[test]
+    fn propensities_sum_to_one_so_they_are_a_distribution() {
+        // The whole point of the number: it is a probability, and offline
+        // evaluation (M45-13) normalises by it. A set that does not sum to 1 is
+        // not a distribution and the correction is silently wrong.
+        let propensities = ranked_propensity(&[3.0, 1.0, 0.0]);
+        let total: f64 = propensities.iter().sum();
+        assert!((total - 1.0).abs() < 1e-9, "summed to {total}");
+        assert!(propensities.iter().all(|p| *p > 0.0), "{propensities:?}");
+    }
+
+    #[test]
+    fn identical_scores_mean_every_candidate_was_equally_likely() {
+        // 1/n rather than 1.0 each. 1.0 would tell the estimator there was no
+        // selection at all, which is a different claim about the world.
+        let propensities = ranked_propensity(&[2.0, 2.0, 2.0, 2.0]);
+        assert!(
+            propensities.iter().all(|p| (p - 0.25).abs() < 1e-12),
+            "{propensities:?}"
+        );
+    }
+
+    #[test]
+    fn a_negative_weight_does_not_produce_a_negative_propensity() {
+        // Arena weights are signed (Plackett-Luce can go negative), and a raw
+        // sum of them can be zero or negative — which would make the shares
+        // meaningless. The offset keeps every propensity positive.
+        let propensities = ranked_propensity(&[-2.0, 1.0, 4.0]);
+        assert!(propensities.iter().all(|p| *p > 0.0), "{propensities:?}");
+        let total: f64 = propensities.iter().sum();
+        assert!((total - 1.0).abs() < 1e-9, "summed to {total}");
+    }
+
+    #[test]
+    fn an_empty_candidate_set_has_no_propensities() {
+        assert!(ranked_propensity(&[]).is_empty());
+    }
+
+    // --- §47.6 / §47.9 MMR ---------------------------------------------------
+
+    #[test]
+    fn mmr_at_lambda_one_is_the_input_order_untouched() {
+        // §47.9's clause, and the one that makes "variety is off" a true
+        // statement rather than an approximate one.
+        let scored = vec![
+            (work(1), 0.9, vec!["angst".to_owned()]),
+            (work(2), 0.5, vec!["angst".to_owned()]),
+            (work(3), 0.1, vec!["fluff".to_owned()]),
+        ];
+        assert_eq!(
+            mmr_rerank(&scored, &[], 1.0),
+            vec![work(1), work(2), work(3)]
+        );
+    }
+
+    #[test]
+    fn mmr_re_ranks_but_never_filters() {
+        // §43.3: the output is a permutation. Every input appears exactly once.
+        let scored = vec![
+            (work(1), 0.9, vec!["angst".to_owned()]),
+            (work(2), 0.5, vec!["angst".to_owned()]),
+            (work(3), 0.1, vec!["fluff".to_owned()]),
+            (work(4), 0.4, vec!["humour".to_owned()]),
+        ];
+        let reranked = mmr_rerank(&scored, &[], 0.5);
+        let mut expected: Vec<WorkId> = scored.iter().map(|(id, _, _)| *id).collect();
+        expected.sort();
+        let mut actual = reranked.clone();
+        actual.sort();
+        assert_eq!(actual, expected, "a candidate was dropped, not re-ranked");
+        assert_eq!(reranked.len(), scored.len());
+    }
+
+    #[test]
+    fn three_angst_fics_in_a_row_nudge_the_fourth_toward_fluff() {
+        // §47.6's own worked example, as an assertion.
+        let scored = vec![
+            (work(1), 0.90, vec!["angst".to_owned()]),
+            (work(2), 0.85, vec!["angst".to_owned()]),
+            (work(3), 0.80, vec!["angst".to_owned()]),
+            (work(4), 0.20, vec!["fluff".to_owned()]),
+        ];
+        let relevance_only: Vec<WorkId> = scored.iter().map(|(id, _, _)| *id).collect();
+        let varied = mmr_rerank(&scored, &relevance_only[..3], 0.5);
+        assert_eq!(
+            varied.last().copied(),
+            Some(work(4)),
+            "the fluff work should be pulled forward by the diversity term, got {varied:?}"
+        );
+    }
+
+    #[test]
+    fn a_reader_who_asks_only_for_angst_still_gets_angst() {
+        // §47.6: satiation is a nudge, not a ban. With nothing but angst
+        // available, the order is unchanged — no category is excluded.
+        let scored = vec![
+            (work(1), 0.9, vec!["angst".to_owned()]),
+            (work(2), 0.5, vec!["angst".to_owned()]),
+            (work(3), 0.1, vec!["angst".to_owned()]),
+        ];
+        assert_eq!(
+            mmr_rerank(&scored, &[work(1), work(2)], 0.5),
+            vec![work(1), work(2), work(3)],
+            "satiation must not exclude a category the reader wants"
+        );
+    }
+
+    #[test]
+    fn mmr_of_a_single_candidate_is_that_candidate() {
+        let scored = vec![(work(1), 0.5, vec!["angst".to_owned()])];
+        assert_eq!(mmr_rerank(&scored, &[], 0.0), vec![work(1)]);
+    }
+
+    #[test]
+    fn mmr_survives_a_non_finite_score_without_panicking() {
+        // A caller handing in NaN must not turn a ranking into a panic. Compared
+        // with `total_cmp`, never `partial_cmp(..).unwrap()`.
+        let scored = vec![
+            (work(1), f64::NAN, vec!["angst".to_owned()]),
+            (work(2), 0.5, vec!["fluff".to_owned()]),
+        ];
+        let reranked = mmr_rerank(&scored, &[], 0.5);
+        assert_eq!(reranked.len(), 2);
+    }
+
+    #[test]
+    fn mmr_is_deterministic_across_repeated_calls() {
+        let scored = vec![
+            (work(1), 0.9, vec!["a".to_owned(), "b".to_owned()]),
+            (work(2), 0.7, vec!["a".to_owned()]),
+            (work(3), 0.7, vec!["c".to_owned()]),
+        ];
+        let first = mmr_rerank(&scored, &[], 0.3);
+        for _ in 0..5 {
+            assert_eq!(mmr_rerank(&scored, &[], 0.3), first);
+        }
+    }
+
+    // --- scoring -------------------------------------------------------------
+
+    #[test]
+    fn a_candidate_scores_its_strongest_dimension() {
+        let reader = weights(&[("angst", 0.4), ("fluff", 0.9)]);
+        let candidate = vec!["angst".to_owned(), "fluff".to_owned()];
+        assert!((score_candidate(&reader, &candidate) - 0.9).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_candidate_with_no_matching_dimension_scores_zero() {
+        let reader = weights(&[("angst", 0.9)]);
+        assert!((score_candidate(&reader, &["poetry".to_owned()]) - 0.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn an_uncalibrated_reader_scores_everything_zero() {
+        // The legitimate empty state, not an error: a reader who never entered
+        // the arena has no weights, and §47.2's determinism requirement means
+        // their ordering must still be reproducible.
+        let reader = TagWeights {
+            weights: Vec::new(),
+        };
+        assert!((score_candidate(&reader, &["angst".to_owned()]) - 0.0).abs() < 1e-12);
     }
 
     #[test]
