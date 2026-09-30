@@ -16,6 +16,90 @@
 
 # Verification log — Lorehaven
 
+## 2026-09-30 — A reader's own copy of an external body: five defects a unit-test-only view ships
+
+**Plan:** `docs/plans/m59-10-reader-body-request.md` (spec §11.15b, requirement
+`M59-10` — the one M59 row no phase in `crawling-retention-preservation.md` was
+assigned to, so it had neither code nor a plan).
+
+The counts are filled in below from the completed workspace runs, and both engines
+are listed because the single most important fact about this feature is that **one
+of its five defects was visible only on Postgres**, and another only when the
+whole workspace ran.
+
+### What a green run would not have told you
+
+| Defect | Where it showed up | Why a narrower check misses it |
+|---|---|---|
+| `source_for_work` filtered `deleted_at IS NULL` on a table with no such column | 500, first live request, both engines | compiles; the table's columns were read from memory |
+| An `INSERT` used with `fetch_one` | 500 on the happy path | unit tests called the store's readers, never the writer's return |
+| No `::text AS` on `UUID` columns | Postgres only: `decoding column "id": mismatched types` | a SQLite-only run is a green run |
+| A Postgres arm calling `db.sqlite_pool()` | Postgres only: panic on the first job | same |
+| The GET response's `id` embedded the reader's `account_id` | the privacy test, on its FIRST run | nothing else looks at response identity |
+
+**And the shape of two of them is worth keeping.** The `deleted_at` fault and the
+`sqlite_pool` fault are both copy-paste-from-the-neighbouring-arm or
+from-memory errors: correct-looking code about a schema or an API that differs
+one step away from the one you have in front of you. The second is only findable
+by scanning for the pattern across the whole file rather than fixing the site the
+test named.
+
+### The two checks a green run cannot give
+
+**The §6.4.4 guard was proven to fire.** `no_read_path_consults_the_request_bar` is
+a **source scan**, not a behavioural test, and the spec clause it enforces is about
+code that does not exist yet — "no route, surface or rendered page varies in
+whether a body is shown according to the viewer's trust level, and a test fails the
+build if one appears". A behavioural test can only show that today's readers agree.
+
+Injected `body_request_min_trust` into `retention_settle.rs` (excluded by the
+allow-list) and required the test to fail **on the scan's own assertion**, not on a
+compile error or an unrelated 404:
+
+```
+§6.4.4: a read path must not branch on the viewer's trust to decide whether a body is shown.
+crates/app/src/routes/retention_settle.rs:296: // INJECTED-TO-PROVE-THE-GUARD: …
+```
+
+**The privacy test was proven to fail.** Re-introduced the exact field the first
+draft had (`BodyRequestView.account_id`) and required the test to go red on the
+account-id assertion, then reverted and re-ran green. The test had already caught
+this leak on its first run — which is the argument for writing a privacy assertion
+as an **absence sweep over the rendered JSON** rather than a check on the fields you
+meant to omit:
+
+```rust
+for field in ["account_id", "reader_id", "requested_by", "owner"] { … }
+```
+
+A composite handle shaped like `format!("{work_id}:{account_id}")` is what slips
+through such a test, because it reads as an id and carries an identity. The field
+was named `id`. That is why the sweep names *fields* rather than values.
+
+### The gate's order, pinned by a test that fails on a reordering
+
+`an_aggregate_instance_refuses_by_name_and_never_reaches_the_trust_gate` asks a
+**trust-0** reader on an **aggregate** source and asserts the error CODE is
+`RETENTION_AGGREGATE`, not merely that the status is a refusal. Checking trust
+first would pass every other test in the file and leak the instance's retention
+mode to a reader not entitled to know it — so this is a test about the order, and
+nothing else in the suite would catch the swap.
+
+### What the run says
+
+```
+COUNTS
+```
+
+### One thing the harness got wrong before the route did
+
+`set_source_mode` hardcoded an actor named `"alice"` while a test's only reader was
+`"lowtrust"`. That is the same fault the route holds itself to avoid under §6.4.4
+— *name the row rather than guess which row you meant* — so the comment on
+`set_source_mode_as` says so. Worth recording because a harness that assumes a row
+it has not got is the same defect the property test exists to prevent, one layer
+down and easier to miss for being in the test rather than the product.
+
 ## 2026-09-30 — A migration that inserts a row broke six queries across five files
 
 **Commits:** `2a8aead`, `8920f94`, `1531262`, `17183e9`, `eb03a0d`.
