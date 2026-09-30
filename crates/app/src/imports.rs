@@ -309,6 +309,14 @@ pub async fn run(
             fail_import(state, import_job_id, "credential_expired", &message).await?;
             return Err(fatal(message));
         }
+        CredentialOutcome::Refused(message) => {
+            // `credential_refused`, not `credential_expired`: the three causes
+            // have three different fixes and an operator reading the import row
+            // has to be able to tell them apart. `fatal` and not a retry,
+            // because retrying sends the same credential the policy just refused.
+            fail_import(state, import_job_id, "credential_refused", &message).await?;
+            return Err(fatal(message));
+        }
     };
 
     // The run's temporary overrides, gathered once and dropped when this
@@ -568,6 +576,14 @@ enum CredentialOutcome {
     Missing,
     /// One exists and its expiry has passed.
     Expired(String),
+    /// One exists but §11.6 does not permit sending it: unbound, bound to a
+    /// different host, or stored without a consent record.
+    ///
+    /// Carries the store's own message rather than an enum, because the refusal
+    /// text is a requirement of §11.6's "actionable status" and rebuilding it at
+    /// the call site is how two call sites end up saying different things about
+    /// the same requirement.
+    Refused(String),
 }
 
 /// Find and decrypt the credential this import should use.
@@ -607,12 +623,40 @@ async fn resolve_credentials(
             imports::set_credential_status(state.db(), &chosen.id, "expired", true)
                 .await
                 .map_err(transient)?;
+            // §11.6's audit trail, and `expired` is an event of its own rather
+            // than a use: it is the moment the credential stopped being usable,
+            // and a trail that only recorded successes would date the end of a
+            // login from its next successful use, which can be never.
+            imports::record_credential_event(
+                state.db(),
+                &chosen.id,
+                &chosen.pseud_id,
+                imports::CredentialEvent::Expired,
+            )
+            .await
+            .map_err(transient)?;
             return Ok(CredentialOutcome::Expired(expires_at.clone()));
         }
     }
 
     if chosen.secret_id.is_empty() {
         return Ok(CredentialOutcome::Missing);
+    }
+
+    // §11.6 origin binding, enforced on the path that actually decrypts. The
+    // expiry check above reads only a date; this is the first point at which the
+    // secret would leave the process, so this is where the host it is bound to
+    // has to match. Refusing here means the import pauses with the store's own
+    // message rather than a fetch that a lookalike domain receives.
+    //
+    // The host comes from the adapter rather than the URL being fetched: the
+    // adapter's declared host is what §11.6 means by "origin", and a fetcher
+    // could legitimately be pointed at a path on that host, but never at another
+    // host with the credential attached.
+    if let Some(host) = adapter.hosts().into_iter().next() {
+        if let Err(refusal) = chosen.usable_for(&host, &rfc3339_now()) {
+            return Ok(CredentialOutcome::Refused(refusal.message()));
+        }
     }
 
     let cipher = crate::secrets::load_cipher(
@@ -631,12 +675,34 @@ async fn resolve_credentials(
         .await
         .map_err(transient)?;
 
+    // `used`, recorded at the moment of use and not at the moment of storage, so
+    // "when did we last send this login to the source" has an answer that is not
+    // "when did the reader save it".
+    imports::record_credential_event(
+        state.db(),
+        &chosen.id,
+        &chosen.pseud_id,
+        imports::CredentialEvent::Used,
+    )
+    .await
+    .map_err(transient)?;
+
     Ok(CredentialOutcome::Ready(Box::new(Credentials {
         source_key: SourceKey::new(row.source_key.clone()),
         username: chosen.label.clone(),
         secret,
         adult_allowed: false,
     })))
+}
+
+/// The current instant in the shape the credential columns hold.
+///
+/// One function rather than a second call to `now_utc` formatted inline, because
+/// `usable_for` compares against an RFC 3339 string and the two formats have to
+/// agree: a `usable_for` call that formatted the instant differently would refuse
+/// every credential, which is a failure that looks like a feature working.
+fn rfc3339_now() -> String {
+    crate::routes::imports::format_time(OffsetDateTime::now_utc())
 }
 
 /// Whether an RFC 3339 instant is in the past.

@@ -70,7 +70,7 @@ pub use engine::{is_bot_challenge, Impersonation};
 /// importer refuses the source before queueing instead of fetching a challenge
 /// it was never able to answer.
 pub const FINGERPRINT_SUPPORTED: bool = cfg!(feature = "cloudflare-impersonation");
-pub use registry::Registry;
+pub use registry::{CatalogueEntry, CredentialRequirement, Registry, SupportCounts};
 pub use safety::{FetchPolicy, FixtureFetcher, SafeFetcher, Unblock, Wall};
 pub use solver::{SolverClient, SolverConfig};
 
@@ -138,6 +138,57 @@ impl AuthKind {
             Self::Token => "token",
             Self::Password => "password",
             Self::SessionCookie => "session_cookie",
+        }
+    }
+}
+
+/// Where this build could verify a source, if it could.
+///
+/// # Why this is separate from health
+///
+/// [`crate::Wall`] and source health are claims about the **source**: whether it
+/// is up, degraded, or refusing us. This is a claim about **this build's
+/// relationship with** that source. A site that serves every other reader
+/// perfectly can still be unreachable from the machine this binary was built on —
+/// Cloudflare, a geo-block, a front door that only opens to a browser.
+///
+/// Folding the two together is how a build ends up publishing "unavailable" for a
+/// site that is up and healthy everywhere else, which is the exact overstatement
+/// spec §11.8 warns against when it says a source must not be labelled
+/// unavailable because of something local to one reader.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VerificationStatus {
+    /// This adapter was built against fixtures captured from the real site.
+    #[default]
+    Verified,
+    /// This host cannot reach the source at all.
+    ///
+    /// The reason is required rather than optional: a `blocked-here` with no
+    /// explanation is indistinguishable from a source that was never checked,
+    /// and an operator cannot act on either.
+    BlockedHere {
+        /// What the wall actually was, in operator words.
+        reason: &'static str,
+    },
+}
+
+impl VerificationStatus {
+    /// Whether this counts toward a support count.
+    ///
+    /// Spec §11.7: "Adapter counts are an outcome of verified implementation,
+    /// never a marketing claim." A count that included an unverified adapter is
+    /// the marketing claim the spec forbids.
+    #[must_use]
+    pub const fn counts_as_supported(&self) -> bool {
+        matches!(self, Self::Verified)
+    }
+
+    /// The stored spelling, matching the `sources.verification_status` column.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Verified => "verified",
+            Self::BlockedHere { .. } => "blocked-here",
         }
     }
 }
@@ -750,6 +801,21 @@ pub trait SourceAdapter: Send + Sync {
 
     /// What this adapter can do.
     fn capabilities(&self) -> SourceCapabilities;
+
+    /// Where this build could verify this source, if it could.
+    ///
+    /// Defaults to [`VerificationStatus::Verified`] because that is the honest
+    /// default for an adapter whose fixtures were captured from the real site:
+    /// the fixtures exist, and they were not written from memory. The twelve
+    /// ported adapters are all in this position, so the default keeps them
+    /// unchanged and correctly so.
+    ///
+    /// An adapter that has *never* been reachable from the build host overrides
+    /// this with [`VerificationStatus::BlockedHere`] and says why. It is a claim
+    /// about this host, not about the source — see [`VerificationStatus`].
+    fn verification(&self) -> VerificationStatus {
+        VerificationStatus::default()
+    }
 
     /// The least this source needs before it will serve a page, as measured.
     ///

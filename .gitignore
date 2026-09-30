@@ -43,3 +43,17 @@ frontend/playwright-report/
 # interpreter version change is not worth a diff entry.
 __pycache__/
 *.pyc
+
+# The global gitignore has `*credentials*`, to keep real secrets out of git.
+# That rule silently swallows `migrations/*/0096_source_credentials.sql` — a
+# schema migration whose name describes the TABLE it creates, and which holds no
+# secret at all. It stayed untracked while the migration applied locally, so the
+# vault worked here and would have been missing on every other checkout, with
+# `git add -A` reporting success the whole time. Repo's own rules win over the
+# global ones, so this negation restores it.
+!migrations/**/*credentials*.sql
+
+# Same trap for any future file whose NAME is about credentials rather than
+# contents. Prefer an explicit negation per file over loosening the global rule,
+# which exists to do its job for actual secrets.
+

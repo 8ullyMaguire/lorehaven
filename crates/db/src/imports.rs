@@ -252,6 +252,26 @@ pub struct SourceCredential {
     pub updated_at: String,
     /// Optimistic-concurrency version.
     pub version: i64,
+    /// Which kind of secret this is: `token`, `password` or `session_cookie`.
+    ///
+    /// `None` means "not recorded", which for a password or cookie means
+    /// *un-consented* rather than *consented by omission* — spec §11.6 requires
+    /// explicit consent, and a row written before this column existed has no
+    /// consent moment to record. [`SourceCredential::is_consented`] is the
+    /// reader of this; nothing treats `None` as consent.
+    pub kind: Option<String>,
+    /// The host this credential is bound to (spec §11.6, "origin-bound
+    /// credential use").
+    ///
+    /// `None` for a row stored before the column existed. We cannot reconstruct
+    /// which host it was created for, so such a row is refused for use rather
+    /// than tidied into a bound one — see [`SourceCredential::usable_for`].
+    pub origin_host: Option<String>,
+    /// When the reader consented to this credential being stored.
+    ///
+    /// Rewritten on every store rather than carried forward, because §11.6's
+    /// "re-consent for renewal" is only satisfiable if a renewal is a new act.
+    pub consent_at: Option<String>,
 }
 
 impl SourceCredential {
@@ -272,6 +292,156 @@ impl SourceCredential {
             None => true,
         }
     }
+
+    /// Whether a consent record exists for this credential.
+    ///
+    /// Kept separate from [`SourceCredential::usable_for`] because the two answer
+    /// different questions, and because consent is the one that is *recorded*
+    /// rather than derived: a token needs no consent under §11.6 ("prefer
+    /// source-issued tokens"), so a token row may legitimately have none and
+    /// still be usable, while a password or cookie row without one is not.
+    #[must_use]
+    pub fn is_consented(&self) -> bool {
+        self.consent_at.is_some()
+    }
+
+    /// Why this credential may not be used against `host`, or `None` if it may.
+    ///
+    /// This is spec §11.6's "origin-bound credential use", and the return type is
+    /// the load-bearing part. Returning a bare `bool` would leave every call site
+    /// to invent its own refusal text, and the text is the requirement: §11.6
+    /// asks for an *actionable* status, and "no" is not one.
+    ///
+    /// Three ways this can fail, each with a different fix, which is why they are
+    /// three cases rather than one:
+    ///
+    /// - **unbound** — the row predates origin binding, so there is no host to
+    ///   check against. The fix is to store it again, which records the origin.
+    /// - **wrong host** — a real cookie for a lookalike domain. The fix is to
+    ///   store a credential for the source actually being fetched.
+    /// - **unconsented** — a password or cookie with no consent record.
+    // No `#[must_use]`: `Result` already carries it, and clippy's
+    // `double_must_use` is right that the attribute adds nothing here.
+    pub fn usable_for(&self, host: &str, now: &str) -> Result<(), CredentialRefusal> {
+        if !self.is_usable(now) {
+            return Err(CredentialRefusal::Unusable {
+                status: self.status.clone(),
+            });
+        }
+        match self.origin_host.as_deref() {
+            None => Err(CredentialRefusal::Unbound {
+                label: self.label.clone(),
+            }),
+            Some(bound) if !same_host(bound, host) => Err(CredentialRefusal::WrongHost {
+                bound: bound.to_owned(),
+                asked: host.to_owned(),
+            }),
+            Some(_) => {
+                // A password or a cookie is the two kinds §11.6 gates behind
+                // explicit consent. A token is not: the same section prefers
+                // source-issued tokens, so requiring consent for one would mean
+                // gating the method the spec recommends.
+                if consent_required(self.kind.as_deref()) && !self.is_consented() {
+                    return Err(CredentialRefusal::Unconsented {
+                        kind: self.kind.clone().unwrap_or_else(|| "unknown".to_owned()),
+                    });
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Why a credential may not be used, in terms the reader can act on.
+///
+/// Spec §11.6: "Expired credentials pause affected jobs with actionable status."
+/// Actionable is doing the work — see [`CredentialRefusal::message`], which is
+/// where these become prose, so that no call site has to invent wording that
+/// drifts from what the spec asked for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CredentialRefusal {
+    /// Revoked, expired, or otherwise not in a usable state.
+    Unusable {
+        /// The status the row carries.
+        status: String,
+    },
+    /// Stored before origin binding existed, so no host can be checked.
+    Unbound {
+        /// The reader's label, so the message can say which one to re-store.
+        label: String,
+    },
+    /// Bound to a different host than the one being fetched.
+    WrongHost {
+        /// The host it is bound to.
+        bound: String,
+        /// The host the caller asked for.
+        asked: String,
+    },
+    /// A password or cookie with no consent record.
+    Unconsented {
+        /// The kind of secret, named so the reader knows what is being asked.
+        kind: String,
+    },
+}
+
+impl CredentialRefusal {
+    /// The operator-facing explanation.
+    ///
+    /// Every arm names the fix. The two this most easily gets wrong are the ones
+    /// with no obvious remedy: an unbound credential and an un-consented one
+    /// both read as "this credential exists and works" from the outside, so
+    /// without a named fix the reader has no idea the credential is being held
+    /// back from use.
+    #[must_use]
+    pub fn message(&self) -> String {
+        match self {
+            Self::Unusable { status } => format!(
+                "this credential is {status}; revoke it at \
+                 DELETE /api/v1/source-credentials/:id and store a new one"
+            ),
+            Self::Unbound { label } => format!(
+                "{label} was stored before this instance recorded which host a \
+                 credential belongs to, so it cannot be used against any site. \
+                 Store it again at POST /api/v1/source-credentials and it will \
+                 be bound to {label}'s source."
+            ),
+            Self::WrongHost { bound, asked } => format!(
+                "this credential is bound to {bound} and will not be sent to \
+                 {asked}. Origin binding is why a credential for one site cannot \
+                 be replayed against another; store a credential for {asked} \
+                 instead."
+            ),
+            Self::Unconsented { kind } => format!(
+                "this {kind} was stored without a recorded consent. §11.6 \
+                 requires explicit consent for a password or a session cookie, \
+                 so it will not be used until you store it again and confirm."
+            ),
+        }
+    }
+}
+
+/// Whether §11.6 requires a consent record for this kind of secret.
+///
+/// "Password or session-cookie storage requires explicit consent" — and §11.6's
+/// first choice is a source-issued token, so gating one would gate the method
+/// the spec recommends. An unknown kind is treated as requiring consent, because
+/// that is the direction a new kind must earn: the alternative is that adding a
+/// fourth `AuthKind` silently starts serving secrets nobody consented to.
+#[must_use]
+fn consent_required(kind: Option<&str>) -> bool {
+    !matches!(kind, Some("token"))
+}
+
+/// Whether two host strings are the same origin.
+///
+/// Lowercased, because a host is case-insensitive by definition and `WWW.Example.COM`
+/// is the same site as `www.example.com` — a comparison that called those two
+/// different would refuse a legitimate credential on a spelling difference. A
+/// port is *not* ignored, because a credential for `example.com:8080` is not
+/// automatically a credential for `example.com:443`.
+#[must_use]
+fn same_host(a: &str, b: &str) -> bool {
+    a.trim().eq_ignore_ascii_case(b.trim())
 }
 
 // ---------------------------------------------------------------------------
@@ -1348,6 +1518,20 @@ pub async fn latest_chapters_for_item(
 /// ciphertext by leaving it to cascade when its row is deleted by the caller —
 /// which is why the caller must delete the old secret, and why this function
 /// returns the *previous* secret id so that it can.
+///
+/// # Why the three M53-03 fields are arguments and not derived
+///
+/// `kind`, `origin_host` and `consent_at` are all things the *caller* knows and
+/// this function cannot. Deriving them would be the mistake: an adapter's current
+/// `AuthKind` is what the adapter says today, not what the reader was told when
+/// they consented, and writing today's value into a consent record is inventing
+/// one. The origin comes from the adapter's declared host list, and consent is
+/// an act by a person, so all three are passed in or not recorded at all.
+///
+/// `renewed` is recorded by the audit layer rather than here, because this
+/// function is the only place that knows a replacement happened — and §11.6's
+/// "re-consent for renewal" only means something if the renewal is visible.
+#[allow(clippy::too_many_arguments)]
 pub async fn upsert_source_credential(
     db: &Database,
     pseud_id: &str,
@@ -1355,6 +1539,9 @@ pub async fn upsert_source_credential(
     secret_id: &str,
     label: &str,
     expires_at: Option<&str>,
+    kind: Option<&str>,
+    origin_host: Option<&str>,
+    consent_at: Option<&str>,
 ) -> Result<(SourceCredential, Option<String>)> {
     let previous = find_credential_by_label(db, pseud_id, source_key, label).await?;
     let id = match &previous {
@@ -1363,29 +1550,44 @@ pub async fn upsert_source_credential(
     };
     let previous_secret = previous.as_ref().map(|row| row.secret_id.clone());
     let now = now_rfc3339();
+    // Every M53-03 column is overwritten on conflict rather than carried
+    // forward. For `consent_at` that is the point: §11.6 requires re-consent for
+    // renewal, so a rotation that kept the old timestamp would satisfy the word
+    // "consent" and none of its intent.
     let sql = db.sql(
         "INSERT INTO source_credentials (id, pseud_id, source_key, secret_id, label, status,
-                                         expires_at, created_at, updated_at, version)
-         VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, 1)
+                                         expires_at, created_at, updated_at, version,
+                                         kind, origin_host, consent_at)
+         VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, 1, ?, ?, ?)
          ON CONFLICT (pseud_id, source_key, label) DO UPDATE SET
              secret_id = excluded.secret_id,
              status = 'active',
              expires_at = excluded.expires_at,
              last_checked_at = NULL,
              updated_at = excluded.updated_at,
+             kind = excluded.kind,
+             origin_host = excluded.origin_host,
+             consent_at = excluded.consent_at,
              version = source_credentials.version + 1",
         "INSERT INTO source_credentials (id, pseud_id, source_key, secret_id, label, status,
-                                         expires_at, created_at, updated_at, version)
-         VALUES (?::uuid, ?::uuid, ?, ?::uuid, ?, 'active', ?, ?, ?, 1)
+                                         expires_at, created_at, updated_at, version,
+                                         kind, origin_host, consent_at)
+         VALUES (?::uuid, ?::uuid, ?, ?::uuid, ?, 'active', ?, ?, ?, 1, ?, ?, ?)
          ON CONFLICT (pseud_id, source_key, label) DO UPDATE SET
              secret_id = excluded.secret_id,
              status = 'active',
              expires_at = excluded.expires_at,
              last_checked_at = NULL,
              updated_at = excluded.updated_at,
+             kind = excluded.kind,
+             origin_host = excluded.origin_host,
+             consent_at = excluded.consent_at,
              version = source_credentials.version + 1",
     );
     let expires = expires_at.map(str::to_owned);
+    let kind = kind.map(str::to_owned);
+    let origin_host = origin_host.map(str::to_owned);
+    let consent_at = consent_at.map(str::to_owned);
     let now_for_bind = now.clone();
     run!(db, &sql, |query| {
         query
@@ -1397,6 +1599,9 @@ pub async fn upsert_source_credential(
             .bind(expires.clone())
             .bind(&now_for_bind)
             .bind(&now_for_bind)
+            .bind(kind.clone())
+            .bind(origin_host.clone())
+            .bind(consent_at.clone())
     })
     .await
     .with_context(|| format!("storing a {source_key} credential"))?;
@@ -1522,6 +1727,237 @@ pub async fn set_credential_status(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Credential audit trail (M53-03, spec §11.6)
+// ---------------------------------------------------------------------------
+
+/// The events §11.6's "audit events without secret contents" admits.
+///
+/// A closed set rather than a free string, and the closure is the point: an audit
+/// table with a free-text `event` column is an audit table that will eventually
+/// carry whatever a caller put in it, including a snippet of a rejected password
+/// pasted into an error message. The `CHECK` in migration 0096 enforces the same
+/// set at the schema, and
+/// `every_credential_event_the_store_accepts_is_accepted_by_the_schema` asserts
+/// the two agree — a store that accepts an event the schema rejects is a reader
+/// who gets an audit error on a legitimate credential action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CredentialEvent {
+    /// A credential was stored for the first time.
+    Created,
+    /// A credential was used for a fetch.
+    Used,
+    /// A credential was tested against its source.
+    Tested,
+    /// A use or test failed.
+    Failed,
+    /// A credential was revoked, and that stops it being used.
+    Revoked,
+    /// An existing credential was replaced, with fresh consent.
+    Renewed,
+    /// A credential passed its expiry.
+    Expired,
+}
+
+impl CredentialEvent {
+    /// The stored spelling, matching the `CHECK` constraint in migration 0096.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Used => "used",
+            Self::Tested => "tested",
+            Self::Failed => "failed",
+            Self::Revoked => "revoked",
+            Self::Renewed => "renewed",
+            Self::Expired => "expired",
+        }
+    }
+
+    /// Every event, for tests that assert the store and the schema agree.
+    pub const ALL: [Self; 7] = [
+        Self::Created,
+        Self::Used,
+        Self::Tested,
+        Self::Failed,
+        Self::Revoked,
+        Self::Renewed,
+        Self::Expired,
+    ];
+}
+
+/// One audit row: which credential did what, when, and under which pseud.
+///
+/// There is deliberately no free-text field and no column for anything derived
+/// from the secret. §11.6 says "audit events without secret contents", and the
+/// only reliable way to keep a secret out of an audit trail is for the audit
+/// trail to have nowhere to put one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CredentialAuditEvent {
+    /// Identifier.
+    pub id: String,
+    /// The credential this happened to.
+    pub credential_id: String,
+    /// The pseud that owns the credential.
+    pub pseud_id: String,
+    /// What happened.
+    pub event: String,
+    /// When.
+    pub occurred_at: String,
+}
+
+#[derive(FromRow)]
+struct CredentialAuditRow {
+    id: String,
+    credential_id: String,
+    pseud_id: String,
+    event: String,
+    occurred_at: String,
+}
+
+fn decode_audit_event(row: CredentialAuditRow) -> Result<CredentialAuditEvent> {
+    Ok(CredentialAuditEvent {
+        id: row.id,
+        credential_id: row.credential_id,
+        pseud_id: row.pseud_id,
+        event: row.event,
+        occurred_at: row.occurred_at,
+    })
+}
+
+const AUDIT_COLUMNS: &str = "id, credential_id, pseud_id, event, occurred_at";
+
+const AUDIT_COLUMNS_PG: &str = "id::text AS id, credential_id::text AS credential_id, \
+    pseud_id::text AS pseud_id, event, occurred_at";
+
+/// Record that something happened to a credential.
+///
+/// Pseud-scoped on write, deliberately. The caller passes both the credential id
+/// and the pseud, and the insert refuses if they disagree — because an audit row
+/// that names a credential belonging to a *different* pseud is exactly the leak
+/// §11.6's audit clause exists to prevent: it would let one reader see that
+/// another reader has a connection to a login-gated source, and when they last
+/// used it.
+pub async fn record_credential_event(
+    db: &Database,
+    credential_id: &str,
+    pseud_id: &str,
+    event: CredentialEvent,
+) -> Result<()> {
+    let owner_sql = db.sql(
+        "SELECT pseud_id FROM source_credentials WHERE id = ?",
+        "SELECT pseud_id::text FROM source_credentials WHERE id::text = ?",
+    );
+    let owner: Option<(String,)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&owner_sql)
+                .bind(credential_id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&owner_sql)
+                .bind(credential_id)
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+
+    // A missing credential is refused rather than recorded. `credential_id` is not
+    // a foreign key (migration 0096), so an insert naming a credential that never
+    // existed would succeed and leave a permanent audit row for something that
+    // never happened — and the one caller that can produce that is a request for
+    // a credential id the reader guessed.
+    let Some((owner_pseud,)) = owner else {
+        anyhow::bail!("no such credential");
+    };
+    if !same_host(&owner_pseud, pseud_id) {
+        // The mismatch means the caller passed a credential id that is not theirs.
+        // The message names no id and no secret, so it is safe to surface; the fix
+        // is the same as for any other cross-pseud access: do not write.
+        anyhow::bail!("the credential does not belong to this pseud");
+    }
+
+    let sql = db.sql(
+        "INSERT INTO credential_audit_events (id, credential_id, pseud_id, event, occurred_at)
+         VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO credential_audit_events (id, credential_id, pseud_id, event, occurred_at)
+         VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?)",
+    );
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = now_rfc3339();
+    run!(db, &sql, |query| {
+        query
+            .bind(&id)
+            .bind(credential_id)
+            .bind(pseud_id)
+            .bind(event.as_str())
+            .bind(&now)
+    })
+    .await
+    .with_context(|| format!("recording a credential {} event", event.as_str()))?;
+    Ok(())
+}
+
+/// Every audit row for one credential, newest first.
+pub async fn list_credential_events(
+    db: &Database,
+    credential_id: &str,
+) -> Result<Vec<CredentialAuditEvent>> {
+    let sql = sql_owned(
+        db,
+        format!(
+            "SELECT {AUDIT_COLUMNS} FROM credential_audit_events
+             WHERE credential_id = ? ORDER BY occurred_at DESC, id DESC"
+        ),
+        format!(
+            "SELECT {AUDIT_COLUMNS_PG} FROM credential_audit_events
+             WHERE credential_id::text = ? ORDER BY occurred_at DESC, id DESC"
+        ),
+    );
+    let rows: Vec<CredentialAuditRow> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(credential_id)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(credential_id)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    rows.into_iter().map(decode_audit_event).collect()
+}
+
+/// Pseudonyms holding at least one credential with no consent record.
+///
+/// §11.6's "re-consent for renewal" is only enforceable if something asks the
+/// question, and this is the sweep that does. Partial-index-backed: it reads only
+/// the rows where `consent_at IS NULL`, so a healthy instance pays nothing.
+pub async fn pseuds_with_unconsented_credentials(db: &Database) -> Result<Vec<String>> {
+    let sql = db.sql(
+        "SELECT DISTINCT pseud_id FROM source_credentials WHERE consent_at IS NULL",
+        "SELECT DISTINCT pseud_id::text FROM source_credentials WHERE consent_at IS NULL",
+    );
+    let rows: Vec<(String,)> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(rows.into_iter().map(|(pseud,)| pseud).collect())
+}
+
 /// Remove a connection, returning the secret it pointed at.
 ///
 /// The caller deletes that secret; the ciphertext is not this module's to hold.
@@ -1601,11 +2037,11 @@ const IMPORT_CHAPTER_COLUMNS_PG: &str = "id::text AS id, import_job_id::text AS 
     content_blob_checksum, chapter_id::text AS chapter_id, note";
 
 const CREDENTIAL_COLUMNS: &str = "id, pseud_id, source_key, secret_id, label, status, expires_at, \
-    last_checked_at, created_at, updated_at, version";
+    last_checked_at, created_at, updated_at, version, kind, origin_host, consent_at";
 
 const CREDENTIAL_COLUMNS_PG: &str = "id::text AS id, pseud_id::text AS pseud_id, source_key, \
     secret_id::text AS secret_id, label, status, expires_at, last_checked_at, created_at, \
-    updated_at, version";
+    updated_at, version, kind, origin_host, consent_at";
 
 #[derive(FromRow)]
 struct SourceRow {
@@ -1687,6 +2123,9 @@ struct SourceCredentialRow {
     created_at: String,
     updated_at: String,
     version: i64,
+    kind: Option<String>,
+    origin_host: Option<String>,
+    consent_at: Option<String>,
 }
 
 fn decode_source(row: SourceRow) -> Result<Source> {
@@ -1773,6 +2212,9 @@ fn decode_credential(row: SourceCredentialRow) -> Result<SourceCredential> {
         created_at: row.created_at,
         updated_at: row.updated_at,
         version: row.version,
+        kind: row.kind,
+        origin_host: row.origin_host,
+        consent_at: row.consent_at,
     })
 }
 

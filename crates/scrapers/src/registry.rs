@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 
 use url::Url;
 
-use crate::{SourceAdapter, SourceError, SourceKey, SourceResult};
+use crate::{AuthKind, SourceAdapter, SourceError, SourceKey, SourceResult};
 
 /// The adapters this build knows, and the sources it may use.
 pub struct Registry {
@@ -126,6 +126,42 @@ impl Registry {
             .ok_or_else(|| SourceError::Unsupported(format!("this build has no adapter for {key}")))
     }
 
+    /// Whether serving this source needs a stored credential, and what to do
+    /// about it if there is not one.
+    ///
+    /// # Why this is a refusal and not a warning
+    ///
+    /// M53-03 / spec §11.6: "Support source authentication only for adapters with
+    /// a documented authentication method." An adapter that declares
+    /// `AuthKind::Password` or `SessionCookie` is one this build has promised to
+    /// hold a secret for — and a promise made in a doc comment is not a promise
+    /// anything enforces.
+    ///
+    /// So the gate is here, at the point where the importer decides what to do,
+    /// and it returns the *actionable* refusal rather than letting the fetch
+    /// happen and fail: §11.6 requires expired or missing credentials to "pause
+    /// affected jobs with actionable status", and a 401 from the source says
+    /// nothing the reader can act on.
+    ///
+    /// A token is not gated here — it is an ordinary documented method, and
+    /// whether one has been stored is an instance matter, not a build one.
+    #[must_use]
+    pub fn credential_requirement(
+        &self,
+        adapter: &dyn SourceAdapter,
+        has_credential: bool,
+    ) -> Option<CredentialRequirement> {
+        let kind = adapter.capabilities().authentication;
+        if kind == AuthKind::None || has_credential {
+            return None;
+        }
+        Some(CredentialRequirement {
+            key: adapter.key(),
+            display_name: adapter.display_name().to_owned(),
+            kind,
+        })
+    }
+
     /// The source catalogue, for `GET /imports/sources` and the import page.
     #[must_use]
     pub fn catalogue(&self) -> Vec<CatalogueEntry> {
@@ -139,9 +175,136 @@ impl Registry {
                     key,
                     display_name: adapter.display_name().to_owned(),
                     capabilities: adapter.capabilities(),
+                    verification: adapter.verification(),
                 }
             })
             .collect()
+    }
+
+    /// How many sources this build supports, and which are excluded and why.
+    ///
+    /// # Why the excluded set is reported alongside the count
+    ///
+    /// Spec §11.7: "Do not promise a source count in advance. Adapter counts are
+    /// an outcome of verified implementation, never a marketing claim."
+    ///
+    /// A bare `supported` number cannot be checked against that sentence by
+    /// anyone but whoever wrote it — 12 looks the same whether 12 sources were
+    /// verified or 3 were and 9 are walls this host cannot get past. Returning
+    /// `blocked_here` and `total` next to it is what makes the claim auditable:
+    /// the excluded set is visible, so the reader of the count can see what was
+    /// left out and why.
+    ///
+    /// A `blocked-here` adapter is *not* disabled and *not* unhealthy. It is
+    /// shipped, it parses its fixtures, and it is simply unverified from this
+    /// host. Excluding it from a count is a statement about evidence, not about
+    /// whether the code works.
+    #[must_use]
+    pub fn support_counts(&self) -> SupportCounts {
+        let mut counts = SupportCounts::default();
+        for adapter in &self.adapters {
+            counts.total += 1;
+            let verification = adapter.verification();
+            if verification.counts_as_supported() {
+                counts.supported += 1;
+            } else {
+                counts.blocked_here += 1;
+                counts
+                    .blocked_reasons
+                    .push((adapter.key().to_string(), blocked_reason(verification)));
+            }
+        }
+        counts
+    }
+}
+
+/// A source that cannot be served without a credential this instance has not
+/// stored, and the message that says what to do about it.
+///
+/// # Why the message is the point
+///
+/// Spec §11.6: "Expired credentials pause affected jobs with actionable status."
+/// Actionable is doing the work in that sentence. A refusal that says "401" or
+/// "unauthorized" has told the reader about the source's opinion of them, which
+/// they cannot act on; a refusal that names the endpoint, the kind of secret, and
+/// the fact that consent is required tells them what to do next.
+///
+/// So the message is built here rather than assembled at each call site, where
+/// two of them would eventually drift into saying different things about the
+/// same requirement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CredentialRequirement {
+    /// The source's key.
+    pub key: SourceKey,
+    /// What the build calls the source, for a reader.
+    pub display_name: String,
+    /// The kind of secret this source needs.
+    pub kind: AuthKind,
+}
+
+impl CredentialRequirement {
+    /// The refusal a reader sees.
+    ///
+    /// The consent clause is not decoration: §11.6 requires "explicit consent"
+    /// for password and session-cookie storage, so an endpoint that offered to
+    /// store one without saying so would be asking for the secret without asking
+    /// for the consent, which is the thing the requirement exists to prevent.
+    #[must_use]
+    pub fn message(&self) -> String {
+        let secret = match self.kind {
+            AuthKind::Token => "an API token",
+            AuthKind::Password => "a username and password",
+            AuthKind::SessionCookie => "a session cookie",
+            AuthKind::None => return String::new(),
+        };
+        format!(
+            "{} needs {secret}, and this pseud has none stored. Add one at \
+             POST /api/v1/source-credentials (source_key: {}). \
+             Storing a password or cookie records explicit consent; you can \
+             revoke it at any time with DELETE /api/v1/source-credentials/:id.",
+            self.display_name, self.key
+        )
+    }
+}
+
+/// The wall's own words, or a placeholder that admits we did not record one.
+///
+/// A `BlockedHere` with a blank reason is a claim nobody can act on, so the type
+/// requires a reason and this only guards against a caller that passed `""`.
+fn blocked_reason(status: crate::VerificationStatus) -> String {
+    match status {
+        crate::VerificationStatus::Verified => String::new(),
+        crate::VerificationStatus::BlockedHere { reason } => {
+            if reason.trim().is_empty() {
+                "unreachable from the build host (no reason recorded)".to_owned()
+            } else {
+                reason.to_owned()
+            }
+        }
+    }
+}
+
+/// Support counts, with the excluded set visible.
+///
+/// See [`Registry::support_counts`] for why `supported` is reported this way.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SupportCounts {
+    /// Adapters verified against the real site. This is the number that may be
+    /// quoted.
+    pub supported: usize,
+    /// Adapters this host cannot reach, and so has not verified.
+    pub blocked_here: usize,
+    /// Every adapter shipped, verified or not.
+    pub total: usize,
+    /// Each blocked source with the wall that stopped us.
+    pub blocked_reasons: Vec<(String, String)>,
+}
+
+impl SupportCounts {
+    /// Whether the supported count is the whole build.
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        self.blocked_here == 0
     }
 }
 
@@ -154,6 +317,9 @@ pub struct CatalogueEntry {
     pub display_name: String,
     /// Its declared capabilities.
     pub capabilities: crate::SourceCapabilities,
+    /// Where this build could verify it, if it could. See
+    /// [`crate::VerificationStatus`] — a claim about this host, not the source.
+    pub verification: crate::VerificationStatus,
     /// Whether it may be used.
     pub enabled: bool,
     /// Why not, when it may not be.
