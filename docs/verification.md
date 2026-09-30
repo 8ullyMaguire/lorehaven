@@ -1,3 +1,135 @@
+## 2026-09-30 — M60 verified by running it: the published snapshot shipped the whole instance
+
+**Commits:** `a02dc51`, `9f665cf`, `c8f4505`
+**Plan:** `docs/plans/m60-snapshot-gate-and-promotion.md`
+
+Seven rows sat at `built` — machinery that exists and has never been checked
+against the standard `docs/goal.md` sets:
+
+> A requirement is done when it has evidence, not when a status flips. A row whose
+> machinery is unreachable — nothing writes the table, nothing enqueues the job —
+> is not tested by unit tests on the dead functions.
+
+Running each row's own verifier produced one critical disclosure defect and five
+more, and promoted all seven. This entry leads with the critical one because it
+is the most important thing this milestone produced.
+
+### The published snapshot contained the unmasked instance
+
+`take-snapshot.sh` ran `pg_dump -d "$SCRATCH_DB"` with **no schema filter**. The
+mask is built into a separate schema, `snapshot_masked`, and the scratch database
+still held the original `public` tables it was restored from at step 1 — nothing
+ever dropped them. So the published dump contained both:
+
+```
+public             277 tables   <- ORIGINAL, unmasked
+snapshot_masked     70 tables   <- the mask, correct and complete
+
+public.accounts.id          01959000-0000-4000-8000-000000000001
+public.accounts.email       instance@retention.system.invalid
+snapshot_masked.accounts.id 6d0b4fa3-e243-457b-af3c-8c49e72f226f
+snapshot_masked.accounts.email d314945a…@snapshot.invalid
+```
+
+`works_index`, `ip_policy` and `secrets` — which the policy says must never be
+published — were all present, as was `works.redistribution`, which had been
+dropped from the masked copy minutes earlier.
+
+**Every gate was green on it.** That is the finding, not a footnote:
+
+- the canary suite builds its own dump and never runs `take-snapshot.sh`;
+- the PII gate checks the *policy*, not the bytes;
+- `doctor` reads the migration ledger, which lives in `public` and was intact — so
+  it reported 18 checks, 0 failing, on a dump carrying the entire instance;
+- the name-based doctor gate added in this same session could not have caught it
+  either: `migrations` passes *precisely because* the unmasked schema is present.
+
+The pipeline's single defence was a sentence in `build-snapshot-sql.py`'s
+docstring — *"the dump is taken of THAT schema. The original schema is never
+dumped"* — which the script contradicted. Found only by decrypting the published
+artefact and restoring it, which nothing in the repo was doing.
+
+Fixed with `-n snapshot_masked`, plus an assertion on the shipped bytes that
+refuses to publish any original-schema table beyond the intended `_migrations`
+ledger. Proven to fire on a simulated breach (a dump of `public.works` plus the
+ledger counts 2 and refuses). Verified from the recipient side: 0 occurrences of
+the original account id, 0 of the original email, 0 of `works_index`,
+`ip_policy`, `secrets` or `redistribution`.
+
+### Five more defects, all found by running the pipeline
+
+| Defect | Symptom |
+|---|---|
+| `createdb`/`psql`/`dropdb` called with no connection target | `FATAL: role "alvaro" does not exist` — the script could not connect to the database it was given |
+| `doctor --strict` fails on *any* warning | refused a snapshot with 18 checks / 0 failing, because `piper` is not installed. A gate that cannot pass is not a gate |
+| bare `grep` under `set -euo pipefail` | exited 1 on a **clean** restore, dying on the line written to report which check failed |
+| `age -p` ignores a piped passphrase | the non-interactive branch — the one for cron — had never worked |
+| `$(...)` strips the trailing newline | age's confirmation prompt was never terminated; the script hung until killed |
+
+The last one cost four false negatives. A short passphrase, a long one, a file
+redirect, and `script -q` each "worked" run directly and each hung inside the
+script — because every probe changed the shell plumbing at the same time as the
+variable under test, and the plumbing was the cause. Three wrong regexes also
+preceded the right one for `doctor_integrity_checks`, which first recorded
+`NOT RECORDED` on a clean run and then listed all eighteen checks.
+
+Two verifications that reported success while checking nothing:
+
+- the intermediates cleanup removed `$WORK/$NAME.sql.zst`, which `zstd` never
+  wrote (it writes to `$OUT`), so it removed nothing — and the loop that *claims*
+  to confirm the removal checked the same two paths that never existed, reporting
+  "intermediates removed" over a 55 KB uncompressed snapshot left on disk;
+- `doctor_integrity_checks` matched `\\[ok\\]` but `render()` pads the marker to
+  `[ok  ]`, so a passing run recorded `NOT RECORDED`.
+
+### The PII gate was silent on the most sensitive column in the schema
+
+`check-snapshot-pii.py` was RED on four columns, two of them added by M59-10 hours
+earlier. Chasing it found a hole in the gate: `reader_body_copies.plain_text` — a
+reader's copy of an external body — got no decision asked for, while the
+`account_id` on the same table did, because only the latter name matches
+`IDENTITY_NAME_RE`. `M60-05`'s own policy note already described the failure:
+*"the M60-01 gate only required a decision for columns in TABLES it knew carried
+PII, and chapter_revisions was not one of them. A gate that cannot fail on the
+most sensitive column in the schema is not a gate."* So the fix was applied once,
+to one table, and the class was not fixed.
+
+A `CONTENT_NAME_RE` fan-out closes it, unanchored for the same reason the identity
+regex is. It immediately surfaced **five more** ungated body columns:
+
+- `works_index.body_text` — every work's full text in one `NOT NULL` column.
+  `drop_table`: the gate would be evaluated once *for the table*, so a snapshot in
+  the wrong mode publishes every body at once. It is the search index and is
+  rebuilt from `chapter_revisions`.
+- `roadmap_suggestions.raw_text`, `critique_queue.excerpt` — a reader's own
+  prose, not a work's text. No mode-based gate is right: a `cache` instance would
+  publish every suggestion ever made.
+- `reader_body_copies.plain_text` / `.sanitized_html` — `keep_gated`, same
+  condition as `chapter_revisions`, and one decision, because masking the text
+  alone republishes the body as HTML.
+
+A fourth self-test probe was added, because a fan-out with no failing test can be
+deleted by a later editor who sees no reason for it.
+
+### Gates
+
+- `check-snapshot-pii.py` exit 0 — 2014 columns across 276 tables, all decided.
+- `check-snapshot-pii.py --self-test` exit 0 — four properties, each demonstrated
+  by failing on a probe.
+- `check-snapshot-channel.py --self-test` exit 0 — 11 refusals run, 4 controls.
+- `snapshot_anonymisation` 10/10 on SQLite, 10/10 on PostgreSQL.
+- Full pipeline on a 277-table / 92-migration source: exit 0. Recipients can
+  decrypt the artefact, restore it (70 masked tables, 92-row ledger) and run
+  `doctor` against the result — 18 checks, 0 failing.
+- Two `--random-timestamp-offset` runs: 319 vs 291 days, 25 timestamp expressions
+  shifted per column.
+
+**Ledger after this pass:** 289 `implemented-fully-tested`, 225
+`implemented-locally-tested`, 116 `implemented-verified-e2e`, 4 `unsupported`,
+1 `evaluated-and-rejected`, and **48 `planned`** — 45 in M45, 2 in M53, 1 in M54.
+Those are genuinely unimplemented requirements, not verification debt. No row is
+left at `built`.
+
 ## 2026-09-16 — M24 complete: anchored comments, orphaning, CSV imports
 
 **Commits:** `b41c5f3`, `b435f5b`
@@ -15,6 +147,9 @@
 ## 2026-09-16 — PG dialect parity complete, SQLite regressions from the parity pass fixed
 
 # Verification log — Lorehaven
+
+
+
 
 ## 2026-09-30 — A reader's own copy of an external body: five defects a unit-test-only view ships
 
