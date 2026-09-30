@@ -8953,6 +8953,8 @@ M45-10 replaces overlap-based resonance in curation credit.
 > Separate repo: `~/code-local/rust/lorehaven-companion`. This section specifies
 > the **contract between the two repos** — the API surface the extension depends
 > on and the guarantees it relies on. The extension's own spec lives in its repo.
+> Its implementation plan is `lorehaven-companion/docs/PLAN.md`, forked from
+> upstream `8753a64`.
 
 ## 48.1 What is being forked, and what is not
 
