@@ -201,7 +201,9 @@ fn destination_from_row(row: DestinationRow) -> PreservationDestination {
 /// harmless. They are not: fourteen of this module's sixteen tests failed on
 /// SQLite with
 ///
-///     error returned from database: (code: 1) unrecognized token: ":"
+/// ```text
+/// error returned from database: (code: 1) unrecognized token: ":"
+/// ```
 ///
 /// because SQLite was handed `SELECT ... version::bigint AS version` and `::`
 /// is not a token there. The casts are a *PostgreSQL* requirement satisfied in
