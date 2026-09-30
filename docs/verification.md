@@ -1,3 +1,85 @@
+## 2026-09-30 — M54-01: the bot's e2e suite had never run, and it found a real bug
+
+**Plan:** `docs/plans/m54-bot-core.md` Part B · **Requirement:** `M54-01`
+
+`M54-01` was `planned`, which was simply wrong. `~/code-local/rust/lorebot` exists
+with all six crates, an API client, a platform-neutral core, and Discord,
+Telegram and Matrix adapters. It was `planned` because nothing had run it.
+
+### Eight of the nine e2e tests were passing without executing
+
+Each begins:
+
+```rust
+let Some(url) = instance_url() else { skip("…"); return; };
+```
+
+With no `LOREBOT_E2E_URL` they return early, and `cargo test` reports **9 passed**.
+So the count was 252 unit tests and 9 e2e "passes", and the 9 were worth nothing.
+This is worth stating plainly because it applies to the rest of the ledger: a
+suite that skips without configuration and reports the skip as a pass is
+indistinguishable from one that ran, unless someone reads the body.
+
+### Against a real instance, one of the nine failed
+
+`ScopeSet::parse` split on whitespace:
+
+```rust
+for part in raw.split_whitespace() { … }
+```
+
+Lorehaven's `external.rs` joins the scope array with `", "`, so a link seeded from
+what `GET /me/credential` actually reports is `"content.read,library.read"`.
+`split_whitespace` yields ONE part, `Scope::parse` does not recognise it, it lands
+in `unknown`, and `allows()` is false for **every** scope.
+
+The symptom is the worst shape this failure can take. `describe()` renders
+`unknown` too, so the bot *displayed* exactly the right scopes while refusing every
+action — and `/status` reported **"Lorehaven could not be reached"**, a
+misdiagnosis, because Lorehaven was reachable and had answered. A reader would
+have been told their instance was down.
+
+**Why 252 tests could not see it.** `to_wire` joins with a space, so `parse` and
+`to_wire` are mutually consistent. Every test written against that pair tests the
+pair, not the server's format. The defect is only visible at the seam between two
+components that each believe they are right — and the e2e suite exists precisely
+to be that seam, so it had to be made to run.
+
+Fixed in `crates/lorebot-api/src/model.rs`: split on comma **and** whitespace,
+discarding empties. Both separators occur and neither is going away — comma is what
+the server sends, space is what `to_wire` emits outbound. Three new tests in
+`crates/lorebot-api/tests/scope_parse.rs`, one of which keeps a genuinely unknown
+scope visible to the reader, because `unknown` exists so a scope this build does
+not recognise is shown rather than silently dropped, and a "just ignore what you
+cannot parse" fix would have taken that away.
+
+The third test was wrong when first written — it asserted that `""` grants
+`content.read`, which is the bug — and caught me, which is the argument for it.
+
+### The exit condition, checked in parts
+
+The plan's B4, verbatim: *a Discord, a Telegram and a Matrix adapter all pass the
+same core test suite; revoking a token takes effect on the next call; no code path
+reaches the DB.*
+
+| Clause | How it was checked |
+|---|---|
+| same suite, three adapters | `conformance::run` is called from `lorebot-discord/src/lib.rs:916`, `lorebot-telegram/src/lib.rs:910`, `lorebot-matrix/src/lib.rs:928`. **Proven load-bearing, not merely referenced:** injecting one deliberately failing case turned discord 25/1, telegram 20/1 and matrix 23/1 red; restoring the file returned all three green. A grep for the call sites proves nothing. |
+| revocation takes effect | `a_revoked_token_says_relink_and_never_the_raw_error` — and unlike the other eight, it had never run before this |
+| no DB path | No crate has `sqlx`, `postgres` or `lorehaven-db` in its `Cargo.toml` |
+
+### Gates
+
+- `lorebot` workspace: **255 tests, 0 failed** (252 unit + 9 e2e, the 9 against a
+  real 277-table Postgres instance on `127.0.0.1:3111` with a minted reader
+  token).
+- `cargo clippy --workspace --all-targets`: 0 warnings.
+- `cargo fmt --all`: clean.
+
+**Ledger:** 289 `implemented-fully-tested`, 225 `implemented-locally-tested`, 117
+`implemented-verified-e2e`, 4 `unsupported`, 1 `evaluated-and-rejected`, **47
+`planned`**.
+
 ## 2026-09-30 — M60 verified by running it: the published snapshot shipped the whole instance
 
 **Commits:** `a02dc51`, `9f665cf`, `c8f4505`
