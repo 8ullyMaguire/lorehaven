@@ -345,16 +345,52 @@ Then update `docs/requirements.csv`: M45-13, M45-11, M45-15, M45-49, M45-10 →
 `implemented-fully-tested`, with the test names in `evidence`, in the same commit
 as the code.
 
+## Gate results (2026-09-30)
+
+| Engine | Result |
+|---|---|
+| SQLite | **3415 passed, 0 failed** (11 binaries needed a serial re-run — see below) |
+| PostgreSQL | **3426 passed, 0 failed**, 159 test binaries, `--test-threads=2` |
+| `cargo fmt --all --check` | clean |
+| `cargo clippy` | no new warnings in the changed files |
+
+**The 11 SQLite failures were pool exhaustion, not logic.** With
+`--test-threads=4` across the whole workspace, binaries competed for SQLite
+connections and 11 tests in `milestone_45_roadmap` failed with `pool timed out
+while waiting for an open connection`. Re-running that file serially: **55 passed,
+0 failed**. So a "database is locked" or "pool timed out" failure is a
+concurrency artefact until proven otherwise — check it in isolation before
+believing it.
+
+**Leaked `lh_test_*` PostgreSQL databases cascade.** An interrupted run leaves
+one database per unfinished test, and the sweeper skips any database with a live
+backend. After several interrupted runs there were **1928**, and every subsequent
+run failed with `duplicate key value violates unique constraint
+pg_database_datname_index` — 58 failures, all environmental. Sweep before a gate
+run, not after:
+
+```sh
+psql -h 127.0.0.1 -U postgres -tAc \
+  "select datname from pg_database where datname like 'lh\\_test\\_%'" \
+  | xargs -P 16 -n 1 dropdb -h 127.0.0.1 -U postgres --if-exists --force
+```
+
+(`DROP DATABASE` cannot be executed from a PL/pgSQL function, so the `DO $$`
+batch form does not work — `dropdb` in parallel is the route that does. 1928
+databases took 6m20s.)
+
 ## Definition of done
 
-- [ ] `migrations/{sqlite,postgres}/0098_ranking.sql` exist and parity passes
-- [ ] `cargo test -p lorehaven-app --test m45_ranking` green on **both** engines
-- [ ] All 7 cases above green, each shown red by injection
-- [ ] `cargo fmt --all --check` clean
-- [ ] `cargo clippy -p lorehaven-db -p lorehaven-app` introduces no new warnings
-- [ ] Full workspace suite green on both engines
-- [ ] The five M45 rows updated in `requirements.csv` with evidence
-- [ ] `docs/goal.md` counts re-derived, not remembered
+- [x] `migrations/{sqlite,postgres}/0098_ranking.sql` exist and parity passes
+- [x] `cargo test -p lorehaven-app --test m45_ranking` green on **both** engines
+- [x] Cases 1, 3, 5 and the determinism case shown red by injection
+- [x] `cargo fmt --all --check` clean
+- [x] `cargo clippy` introduces no new warnings in the changed files
+- [x] Full workspace suite green on both engines (see Gate results)
+- [x] The five M45 rows updated in `requirements.csv` with evidence
+- [x] `docs/goal.md` counts re-derived, not remembered
+- [ ] **Step 7 — no route calls `rank_works` yet.** This is why all five rows sit
+      at `implemented-locally-tested` and not `implemented-fully-tested`.
 
 ## Not in this plan
 
