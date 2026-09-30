@@ -45,6 +45,7 @@ pub mod pseuds;
 pub mod quiz;
 pub mod rating_integrity;
 pub mod reader_body_copies;
+pub mod reader_body_fetch;
 pub mod reading;
 pub mod recommendation_transparency;
 pub mod retention;

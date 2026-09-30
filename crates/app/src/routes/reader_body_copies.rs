@@ -171,10 +171,18 @@ async fn request(
 
     // A copy that was already `ready` is not re-queued: the reader holds the
     // bytes, and a `202` promising work nobody will do is a lie. So `200` for
-    // `ready` and `202` for anything the job still has to settle.
+    // `ready` and `202` for anything the job still has to settle — and the enqueue
+    // rides the same branch rather than running unconditionally. The idempotency
+    // key would make a duplicate job a no-op, but not queueing work known to be
+    // redundant is clearer than queueing it and relying on that.
     let status = if copy.state == lorehaven_db::reader_body_copies::CopyState::Ready {
         StatusCode::OK
     } else {
+        if let Err(error) =
+            super::reader_body_fetch::enqueue(&state, &copy.id, user.account_id).await
+        {
+            return internal(error);
+        }
         StatusCode::ACCEPTED
     };
     let body = Json(json!({

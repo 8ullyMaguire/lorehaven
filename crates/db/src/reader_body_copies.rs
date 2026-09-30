@@ -606,6 +606,85 @@ async fn record_outcome(
     Ok(())
 }
 
+/// A copy's state by its own id, for the fetch job.
+///
+/// **Separate from `status_for` rather than a widened version of it.**
+/// `status_for` takes `(work_id, account_id)` because a reader route has both and
+/// §6.2's copy is the reader's own. A job has only the id, and giving
+/// `status_for` an `Option<Uuid>` would make a function with two ways to be
+/// called, one of them meaningless — and a caller that passed `None` would get
+/// whichever reader's copy sorted first.
+pub async fn status_by_id(db: &Database, id: &str) -> Result<Option<ReaderBodyCopy>> {
+    let sql = db.sql(
+        "SELECT id, work_id, account_id, source_key, chapter_key, state, reason_code, \
+                plain_text, sanitized_html, requested_at, settled_at, version \
+         FROM reader_body_copies WHERE id = ?1",
+        "SELECT id::text AS id, work_id::text AS work_id, account_id::text AS account_id, \
+                source_key, chapter_key, state, reason_code, plain_text, sanitized_html, \
+                requested_at::text AS requested_at, settled_at::text AS settled_at, \
+                version::bigint AS version \
+         FROM reader_body_copies WHERE id = $1::uuid",
+    );
+    let row: Option<ReaderBodyCopyRow> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(id)
+                .fetch_optional(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(id)
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
+    };
+    Ok(row.map(ReaderBodyCopyRow::into_copy))
+}
+
+/// Settle a copy as `Failed`: we could not find out, as against being told no.
+///
+/// **The distinction from `settle_refused` is a decision, not a nuance.**
+/// `request_copy` resets a `Failed` row to `pending` when the reader asks again,
+/// and leaves a `Refused` row alone — because a refusal is a standing answer
+/// about this source and a reader asking again is not what changes it, whereas a
+/// transport failure is a site being down and asking again is exactly the right
+/// retry. That is also why the job treats a transport error as `Failed` and a
+/// 403 as `Refused`: the site answered, and the answer was no.
+pub async fn settle_failed(db: &Database, id: &str, reason_code: &str) -> Result<bool> {
+    let now = crate::identity::now_rfc3339();
+    let sql = db.sql(
+        "UPDATE reader_body_copies \
+         SET state = 'failed', reason_code = ?2, plain_text = NULL, sanitized_html = NULL, \
+             settled_at = ?3, updated_at = ?3, version = version + 1 \
+         WHERE id = ?1 AND state = 'pending'",
+        "UPDATE reader_body_copies \
+         SET state = 'failed', reason_code = $2, plain_text = NULL, sanitized_html = NULL, \
+             settled_at = $3, updated_at = $3, version = version + 1 \
+         WHERE id = $1::uuid AND state = 'pending'",
+    );
+    let affected = match db.backend() {
+        Backend::Sqlite => sqlx::query(&sql)
+            .bind(id)
+            .bind(reason_code)
+            .bind(&now)
+            .execute(db.sqlite_pool().expect("sqlite handle"))
+            .await?
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
+            .bind(id)
+            .bind(reason_code)
+            .bind(&now)
+            .execute(db.postgres_pool().expect("postgres handle"))
+            .await?
+            .rows_affected(),
+    };
+    if affected > 0 {
+        record_outcome(db, id, "failed", Some(reason_code)).await?;
+    }
+    Ok(affected > 0)
+}
+
 /// The number of copies a work has, for tests and the settlement job.
 ///
 /// Named `count_copies` and not `count` because migration 0094's system account

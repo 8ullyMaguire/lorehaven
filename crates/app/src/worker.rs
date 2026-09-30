@@ -596,6 +596,18 @@ impl Worker {
                 tracing::info!(target: "lorehaven::retention", "{}", summary.describe());
                 Ok(())
             }
+            JobKind::BodyFetch => {
+                // The payload names the copy and nothing else. A copy id is
+                // already a per-reader fact with no reader's name in it, and the
+                // queue row's `requested_by` column is where that belongs — the
+                // same division `exports.rs:774` makes for export jobs.
+                let copy_id = Self::payload_id(
+                    &job.payload,
+                    crate::routes::reader_body_fetch::PAYLOAD_COPY_ID,
+                    "body_fetch",
+                )?;
+                crate::routes::reader_body_fetch::run(state, &copy_id).await
+            }
         }
     }
 
