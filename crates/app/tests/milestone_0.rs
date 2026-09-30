@@ -107,8 +107,23 @@ async fn migrations_apply_once_and_are_idempotent() {
         migrate::catalogue(db.backend()).len()
     );
 
-    // And the schema is really there.
-    assert_eq!(identity::count(&db, "accounts").await.expect("count"), 0);
+    // And the schema is really there — and still **empty**, which is the claim
+    // worth making. Migration 0094 inserts the instance's own system account, so
+    // the count of *all* accounts has been 1 on a fresh database ever since.
+    // What this test means is "migrating creates no user", so that is what it
+    // asserts. `count(accounts) == 0` would be a claim about the number of
+    // migrations that insert rows, wearing the costume of a claim about users.
+    assert_eq!(
+        identity::count_excluding_system_accounts(
+            &db,
+            "accounts",
+            &lorehaven_db::SYSTEM_ACCOUNT.to_string(),
+        )
+        .await
+        .expect("count"),
+        0,
+        "migrating a fresh database creates no user; the system account is not one"
+    );
 
     db.close().await;
     let _ = std::fs::remove_dir_all(dir);
@@ -165,7 +180,21 @@ async fn seeding_creates_a_usable_account_and_is_idempotent() {
 
     let first = seed::run(&config, &db, &seed_args()).await.expect("seed");
     assert_eq!(first.pseuds.len(), 2);
-    assert_eq!(identity::count(&db, "accounts").await.expect("accounts"), 1);
+    // One account *the seed created* — not one account in the table, which
+    // migration 0094 already made two. Same reasoning as the migrate test: the
+    // question is what this action produced, and the instance's own bookkeeping
+    // row is not part of the answer.
+    assert_eq!(
+        identity::count_excluding_system_accounts(
+            &db,
+            "accounts",
+            &lorehaven_db::SYSTEM_ACCOUNT.to_string(),
+        )
+        .await
+        .expect("accounts"),
+        1,
+        "the seed creates one account, and the system account is not it"
+    );
     assert_eq!(identity::count(&db, "pseuds").await.expect("pseuds"), 2);
 
     // The stored credential must actually verify the advertised password.
@@ -183,7 +212,19 @@ async fn seeding_creates_a_usable_account_and_is_idempotent() {
         .await
         .expect("re-seed");
     assert_eq!(second.account_id, first.account_id);
-    assert_eq!(identity::count(&db, "accounts").await.expect("accounts"), 1);
+    // Idempotence, and the same exclusion as above: re-seeding must not multiply
+    // rows, and the system account is not one of the seed's rows either way.
+    assert_eq!(
+        identity::count_excluding_system_accounts(
+            &db,
+            "accounts",
+            &lorehaven_db::SYSTEM_ACCOUNT.to_string(),
+        )
+        .await
+        .expect("accounts"),
+        1,
+        "re-seeding must not multiply accounts"
+    );
     assert_eq!(identity::count(&db, "pseuds").await.expect("pseuds"), 2);
 
     // Privacy defaults are recorded, not assumed at render time (spec §7).
