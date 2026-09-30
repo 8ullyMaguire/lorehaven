@@ -16,6 +16,76 @@
 
 # Verification log — Lorehaven
 
+## 2026-09-30 — A migration that inserts a row broke six queries across five files
+
+**Commits:** `2a8aead`, `8920f94`, `1531262`, `17183e9`, `eb03a0d`.
+
+This is the whole entry because the *pattern* is worth more than the 72
+failures, and because **not one of the 72 failed anywhere near the cause.**
+
+**What the migration did.** `0094_retention_proposals.sql` inserts a fixed system
+account. It had to: `retention_policy_changes.actor` is
+`NOT NULL REFERENCES accounts(id)`, and a binding-mode settlement acts with no
+operator — NULL is refused by `NOT NULL`, the nil UUID by the foreign key, and a
+reader's id would put one of the voters' names on the row their own ballot
+produced.
+
+**What broke.** The row carries `created_at = 2026-01-01`, earlier than anything
+a test registers. So every query that identified a row by *position* picked it
+up instead of the one it meant:
+
+| Site | Shape | Symptom it produced |
+|---|---|---|
+| `m52_08_rec_shadow.rs` | `ORDER BY created_at LIMIT 1` | `page not found` on an endpoint that exists |
+| `m57_metadata_exchange.rs` (×2) | the same, and a bare `LIMIT 1` | `one node despite the messy spelling: []`; `RowNotFound` on a pseud |
+| `milestone_0.rs` (×3) | `count(accounts) == 0` / `== 1` | counts off by one |
+| `milestone_43_browse.rs` | `count("accounts") == 1` | `the account is untouched` failing |
+| `snapshot_anonymisation.rs` (×2) | `ORDER BY created_at LIMIT 1`; `max - min` over the table | `left: 2026-02-15`, a date-arithmetic bug that was not one |
+| `device_delivery_fk.rs` | `COUNT(*) == 1` diagnostic | `mine=1, total=2` |
+
+**The snapshot one is the sharpest.** The failing assertion compared a timestamp
+against `2026-04-15T10:30:00Z` and got `2026-02-15T00:00:00Z` — which reads as an
+off-by-45-days error and is in fact the system account, correctly masked and
+correctly shifted, sorting first. `2026-01-01 + 45 = 2026-02-15` exactly. Three
+attempts and one probe were needed to see that; the probe printed three rows of
+each table and settled it in four lines.
+
+**Two fix shapes, and conflating them is a trap of its own.** "Which row?" — name
+it (`WHERE email = …`, as `milestone_18`/`19` already did and needed nothing), or
+exclude the instance row. "How many rows did *this action* create?" — the
+migration's row is not part of the answer, so exclude it **in the assertion**;
+`count(accounts) - 1` gives the right number by accident and breaks on the next
+instance-owned row.
+
+**And a third shape, deeper than either.** In `snapshot_anonymisation` the canary
+rows were seeded with `gen_random_uuid()` and their ids discarded, and the mask
+scrambles every key through `snapshot_account(id)` — so "the oldest row" was the
+only handle the test had, and excluding by the *original* id could never match.
+The fix is to generate and capture the ids, and read the row under test by its
+masked id. **Naming the row beats enumerating the rows it is not.**
+
+**The counts, per run:**
+
+```
+run A  (tree at 17183e9)  SQLite   3338 passed, 0 failed, 153 suites, 0 warnings
+run B  (same tree)        Postgres  red: snapshot_anonymisation (1)
+```
+
+The PostgreSQL run was the only one that could see the snapshot failure, because
+that test returns early on SQLite. `milestone_43_browse` and the six count sites
+were red on **both** engines from `2a8aead` onward and were green by `eb03a0d`;
+`snapshot_anonymisation` is green on both (10 each) at `eb03a0d`, and its shift
+assertion was verified by injection — a per-row-variable shift in the generator
+makes it fail, so the id-based select did not weaken it into a lookup that always
+finds something.
+
+**What none of this would have found by reading the diff.** Every site is a
+correct-looking query over a table whose contents had changed underneath it.
+The lesson is not "check your queries" — it is that **a migration that writes a
+row is a change to every query that assumed the table held only what the
+application put there**, and only a workspace-wide run, on both engines, finds
+them.
+
 ## 2026-09-30 — M59 Phase E: retention proposals, ballots, advisory and binding governance
 
 **Commits:** `85346b9` (E.3 `roadmap.min_trust`), `539e6ae` (E.4 the four reader
@@ -87,7 +157,19 @@ Two smaller things the same commit fixed:
   version matched the first line only, which would have passed against a refusal
   that never named the offending key — the one thing the test is for.
 
-**Workspace suite.** `cargo test --workspace` was still running when this section was written, so no workspace-wide count is claimed here. The per-suite counts below are from runs that completed.
+**Workspace suite.** `cargo test --workspace` was still running when this
+section was written, so no workspace-wide count is claimed here. The per-suite
+counts above are from runs that completed.
+
+> **Superseded — read this before citing the section above.** A workspace run
+> completed later, on a tree that includes five commits made *after* the Phase F
+> work: `2a8aead`, `8920f94`, `1531262`, `17183e9`, `eb03a0d`. Those five fixed
+> 72 failures the Phase F run had not reached yet, so a clean count from that
+> later run says nothing about the tree this section describes. What it does say
+> is recorded in its own section below, and the failures it found are the
+> interesting part: **a migration that inserts a row broke six queries across
+> five files** that could not name the row they meant, and none of the six failed
+> anywhere near the cause.
 
 **One test verified by injection, and why that matters.**
 `no_response_exposes_a_ballot_or_its_voter` asserts on the *serialised text* of
