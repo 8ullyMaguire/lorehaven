@@ -1109,7 +1109,26 @@ fn two_snapshots_get_different_offsets_and_neither_records_its_own() {
     let mut offsets = Vec::new();
     for i in 0..2 {
         let path = dir.join(format!("mask{i}.sql"));
-        let out = std::process::Command::new("python3")
+        // `LOREHAVEN_TEST_PG_URL` is removed from the child's environment on
+        // purpose. The generator treats that variable as "read the LIVE schema
+        // from this database instead of parsing the migrations"
+        // (scripts/build-snapshot-sql.py:276), and `LOREHAVEN_TEST_PG_URL`
+        // names the BASE database — the one every test creates its own database
+        // *inside* — so it holds no app tables at all (7 columns, against 277
+        // tables of schema). Pointed at it, the generator found nothing, wrote
+        // an empty 20KB mask file with no INTERVAL in it, and this test failed
+        // with "no offset reached the generated SQL".
+        //
+        // So the failure was never about the offset: it was a full-suite-only
+        // failure caused by an environment variable leaking into a subprocess,
+        // and it reproduced identically before migration 0098. Verified by
+        // running the generator at 6674609 with the same variable set — same
+        // zero-INTERVAL output.
+        //
+        // Removing the variable also keeps this test honest on both engines: it
+        // tests the offset logic, not which database happens to be reachable.
+        let mut command = std::process::Command::new("python3");
+        command
             .arg(repo.join("scripts").join("build-snapshot-sql.py"))
             .arg("--out")
             .arg(&path)
@@ -1118,6 +1137,9 @@ fn two_snapshots_get_different_offsets_and_neither_records_its_own() {
             .arg("--mode")
             .arg("cache")
             .current_dir(&repo)
+            .env_remove("LOREHAVEN_TEST_PG_URL")
+            .env_remove("LOREHAVEN_PG_URL");
+        let out = command
             .output()
             .expect("run the generator with a random offset");
         assert!(out.status.success(), "generator failed");

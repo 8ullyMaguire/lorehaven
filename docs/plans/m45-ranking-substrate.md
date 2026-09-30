@@ -207,52 +207,70 @@ quietly.
 
 ---
 
-## Step 4 — `rank_works`: the pipeline
+## Step 4 — `rank_works`: the pipeline (DONE)
 
 **Files:** `crates/db/src/ranking.rs`
 
-Per §47.2 the stage order is fixed and a stage may not reorder it. Signature:
+Signature as built:
 
 ```rust
-pub struct RankOptions {
-    /// Uniform-random exploration slots (M45-13). Default 0.
-    pub exploration_slots: usize,
-    /// Guarantee impressions for zero-impression works (M45-15).
-    pub exposure_floor: bool,
-    /// MMR diversity weight in [0,1]; 1.0 = relevance only (M45-49).
-    pub lambda: f64,
-    /// Whether MMR/satiation runs at all.
-    pub variety: bool,
-}
-
 pub async fn rank_works(
     db: &Database,
     account: &str,
     candidates: Vec<WorkId>,
+    dimensions_for: &dyn Fn(&WorkId) -> Vec<String>,
     options: &RankOptions,
-) -> Result<Vec<Ranked>>
+) -> Result<RankedOutcome>
 ```
 
-Implementation notes, each of which is an acceptance criterion in disguise:
+`dimensions_for` is a **parameter, not a query inside the function** — that keeps
+the ranking logic pure and testable, and keeps candidate *eligibility* with the
+caller that owns the trust decision (§30.7). §47.2's deliberate split.
 
-- **Determinism.** Sort candidates by id *before* scoring. Two calls with the
-  same database state must return identical ordering when
-  `exploration_slots == 0` (§47.9). An SQL query with no `ORDER BY` will not
-  give you this for free — the test asserts it and the test will find out.
-- **Propensity for a ranked row** is the reader's normalised score share:
-  `score_i / Σ scores` (1.0 when the set has one row). Document the choice.
-- **Exploration slots** draw uniformly from the eligible-but-unshown set, with
-  the pool reduced after each draw so consecutive slots are independent (§47.3).
-- **Satiation** reads the reader's recent picks' tags with a time decay, and
-  raises *scores* — it must never remove a candidate. A hard exclusion would be
-  a filter, and §43.3 forbids filters.
-- **MMR re-ranks the top of the list** and does not drop rows.
+`RankOptions::default()` has **every mechanism off and `lambda = 1.0`**. §47.9
+requires two calls with the same state to return identical ordering when
+exploration is off, and that has to be the *default* or the acceptance criterion
+tests a mode nobody uses.
 
-**Verify:**
-```sh
-cargo test -p lorehaven-app --test m45_ranking
-```
-Expected: the determinism, permutation, propensity and satiation tests pass.
+`RankedOutcome` returns `{ ranked, exploration, floor, impressions }` plus
+`all_impressions()`. §47.8's invariant is checkable against that without
+re-deriving which stage produced which row.
+
+### The three things that were wrong in the first draft
+
+1. **`ranked_propensity` had to offset by the minimum.** Arena weights are signed
+   (Plackett-Luce can go negative), so a raw sum can be zero or negative and the
+   shares become meaningless or negative. Now shifted by the floor score, which
+   changes the *distribution* between candidates but not their order.
+
+2. **Identical scores give `1/n`, not `1.0` each.** `1.0` would tell the offline
+   estimator there was no selection at all, which is a different claim about the
+   world.
+
+3. **MMR blended two incommensurable scales.** Relevance is an absolute weight in
+   [0,1]; novelty is a ratio over the current candidate set. Blending them raw at
+   `lambda = 0.5` promoted a **0.20-scored fluff work to first place** — not
+   because the reader had seen three angst fics, but because `1.0 > 0.20`. Fixed
+   by normalising relevance against the best candidate (`score / best`) and
+   bounding the diversity term at `NOVELTY_FLOOR = 0.25`.
+
+   This is caught by `three_angst_fics_in_a_row_nudge_the_fourth_toward_fluff`,
+   which is §47.6's own worked example written as an assertion. The test failed
+   on first run and the fix went into the blend, not into the test.
+
+### Two deliberate non-defensive choices
+
+- **`total_cmp`, never `partial_cmp(..).unwrap()`.** A caller handing in a NaN
+  score must not turn a ranking into a panic; `mmr_survives_a_non_finite_score_
+  without_panicking` covers it.
+- **Exploration randomness is `Uuid::new_v4()`, not a seeded generator.** A
+  *reproducible* random slot is a fixed slot. §47.3 wants an unmeasurable draw
+  whose probability is known — and the probability, not the draw, is what offline
+  evaluation consumes. The pool shrinks per draw, so consecutive slots are
+  independent rather than repeats, and each logs `1/|pool_at_that_draw|`.
+
+**Verified:** `cargo test -p lorehaven-db --lib` → **97 passed**, no clippy
+warnings in `ranking.rs`.
 
 ---
 
