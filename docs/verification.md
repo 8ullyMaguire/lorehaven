@@ -88,8 +88,19 @@ nothing else in the suite would catch the swap.
 ### What the run says
 
 ```
-COUNTS
+at 6fa8ec0  SQLite     3348 passed, 0 failed, 154 suites, 0 warnings
+at 6fa8ec0  PostgreSQL 3348 passed, 0 failed, 154 suites, 0 warnings
 ```
+
+Up from 3338 at Phase F: the 10 new tests are the 7 in `reader_body_copies.rs`
+and the 3 in `config_sections.rs`. 154 suites rather than 153 — the new file is
+its own suite.
+
+**The totals matching is the least interesting thing about them.** Two of the five
+defects in the table above were visible *only* here, on PostgreSQL: the missing
+`::text AS` casts and the `sqlite_pool()` on a Postgres arm. A SQLite-only run of
+this feature was green on 3348 minus everything, which is to say it was green on
+the arms that were correct.
 
 ### One thing the harness got wrong before the route did
 
