@@ -1311,12 +1311,35 @@ pub struct RetentionConfig {
     /// levels and the work still wins — which is why this is a ceiling and not a
     /// fallback.
     pub default_body_audience: lorehaven_domain::retention::BodyAudience,
+
+    /// The trust level a reader needs to ask this instance to fetch and keep an
+    /// external body for them personally (spec §11.15b, amendment §6.3).
+    ///
+    /// **Configurable, default 2, floor 0.** Configurable because the question
+    /// is preference-shaped -- "should this instance hold external text for one
+    /// reader?" -- and the answer carries no authority over any other reader,
+    /// any ranking, or any account, which is why it is a config key and not one
+    /// of the `const` bars §19.14 fixes.
+    ///
+    /// The floor is 0 because a `cache` instance already serves cached bodies to
+    /// any eligible reader; this setting governs only the extra cost of a body
+    /// nobody has asked for yet. Refusing every reader is a policy choice, not a
+    /// safety one, and 0 is the setting that says "anyone may ask".
+    ///
+    /// It governs the REQUEST and nothing else. §6.2 is explicit that a request
+    /// "does not create a readers'-tier around it", so no read path reads this
+    /// value: once the copy exists, every reader eligible for the work reads the
+    /// same thing. `no_read_path_consults_the_request_bar` fails the build if one
+    /// ever does, because the alternative is a body visible to some readers and
+    /// not others for a reason about their standing.
+    pub body_request_min_trust: i64,
 }
 
 impl Default for RetentionConfig {
     fn default() -> Self {
         Self {
             default_body_audience: lorehaven_domain::retention::BodyAudience::Anyone,
+            body_request_min_trust: 2,
         }
     }
 }
@@ -2166,6 +2189,15 @@ impl Config {
                     .and_then(|r| r.default_body_audience.as_deref())
                     .and_then(|v| lorehaven_domain::retention::BodyAudience::parse_stored(Some(v)))
                     .unwrap_or(lorehaven_domain::retention::BodyAudience::Anyone),
+                // §11.15b's bar. `unwrap_or(2)` rather than a second copy of
+                // the number, so the default lives in the one `impl Default`
+                // and a file naming one key still gets the documented value for
+                // the other.
+                body_request_min_trust: file
+                    .retention
+                    .as_ref()
+                    .and_then(|r| r.body_request_min_trust)
+                    .unwrap_or(2),
             },
             decisions: {
                 let base = DecisionsConfig::default();
@@ -2850,6 +2882,15 @@ struct RetentionSection {
     /// typo in this file inherits the instance default rather than becoming an
     /// audience nobody chose.
     default_body_audience: Option<String>,
+
+    /// The trust level needed to request a personal copy of an external body
+    /// (§11.15b). Default 2; see `RetentionConfig::body_request_min_trust`.
+    ///
+    /// On the file struct, not only on `RetentionConfig` -- see the note at
+    /// `roadmap.min_trust`, which is the same defect this milestone shipped
+    /// once: a field on the struct with no `FileConfig` member reads as
+    /// configurable in every test and is silently ignored in a real file.
+    body_request_min_trust: Option<i64>,
 }
 /// The `[decisions]` file section.
 ///
