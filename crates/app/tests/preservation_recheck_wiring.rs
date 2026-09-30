@@ -26,13 +26,39 @@ use lorehaven_app::worker::{Worker, WorkerOptions};
 use lorehaven_domain::jobs::JobKind;
 use test_support::TestDb;
 
+/// Scratch directory for a tag.
+///
+/// This is called TWICE per test with the same tag: once for
+/// `TestDb::connect_with_dir`, which migrates a SQLite file into it, and again
+/// from `state_for` to set `config.storage.root`. The `remove_dir_all` the
+/// obvious version does is therefore not harmless housekeeping -- on the second
+/// call it deletes the database the first call just migrated, and the test dies
+/// with "no such table: jobs".
+///
+/// So the directory is removed at most once per (process, tag): a repeat call
+/// returns the same live directory rather than recreating it. `test_support`'s own
+/// doc comment describes this hazard at lib.rs:122-131.
 fn scratch_dir(tag: &str) -> PathBuf {
+    use std::sync::Mutex;
+    static REMOVED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
     let dir = std::env::temp_dir().join(format!(
         "lorehaven-presrecheck-{tag}-{}-{:?}",
         std::process::id(),
         std::thread::current().id()
     ));
-    let _ = std::fs::remove_dir_all(&dir);
+    let first_call = {
+        let mut seen = REMOVED.lock().expect("scratch lock");
+        if seen.iter().any(|t| t == tag) {
+            false
+        } else {
+            seen.push(tag.to_string());
+            true
+        }
+    };
+    if first_call {
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
 }
