@@ -1181,6 +1181,24 @@ const ROUTE_TABLE: &[RouteEntry] = &[
     // second thing the inventory does not model. `roadmap.rs`'s
     // `post_suggest` is the same shape, for the same reason.
     // ------------------------------------------------------------------
+    // §11.15b: a reader's own copy of an external body. Both are
+    // `Authenticated` and not `Public`, because the copy is the requesting
+    // reader's and the trust bar is checked on the POST — a GET that served
+    // bytes to an unauthenticated caller would hand every copy to every reader.
+    RouteEntry {
+        file: "reader_body_copies.rs",
+        handler: "request",
+        method: "POST",
+        path: "/works/{id}/body-request",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "reader_body_copies.rs",
+        handler: "status",
+        method: "GET",
+        path: "/works/{id}/body-request",
+        audience: Audience::Authenticated,
+    },
     RouteEntry {
         file: "retention_proposals.rs",
         handler: "list",
