@@ -122,6 +122,7 @@ Who may read a body by default (spec §7.7).
 | Key | Type | Default | Purpose |
 |-----|------|---------|---------|
 | `default_body_audience` | `string` | `"full"` | The body-audience baseline. See the `BodyAudience` variants in `lorehaven_domain::retention` |
+| `body_request_min_trust` | `2` | `0` | The trust level a reader needs to ask this instance to fetch and keep an external body for them personally (§11.15b). Gates the **request** and nothing else: once a copy exists, every reader eligible for the work reads the same thing, and no read path consults this value. |
 
 ## `[roadmap]`
 

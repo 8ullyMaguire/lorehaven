@@ -9,6 +9,7 @@ knows Rust and Svelte but has never seen this repository.
 > and preservation — is built through phase F** and verified on SQLite and
 > PostgreSQL. Plan:
 > `docs/plans/crawling-retention-preservation.md`. Amendment:
+- **`m59-10-reader-body-request.md`** — a reader's own copy of an external body (spec §11.15b, requirement `M59-10`). The one M59 requirement row that no phase in `crawling-retention-preservation.md` was assigned to. Status: built.
 > `docs/spec-amendments/crawling-retention-and-preservation.md`. Evidence:
 > `docs/verification.md`'s two newest sections; per-requirement rows in
 > `docs/requirements.csv` (`M59-01…M59-27`, 15 implemented and 12 still
