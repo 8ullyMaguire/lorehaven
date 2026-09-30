@@ -189,6 +189,23 @@ job_kinds! {
     /// by governance rather than by load, which is harder to explain and worse to
     /// be on the receiving end of.
     RetentionSettle => "retention_settle",
+    /// Fetches one external body a reader asked for personally (plan M59-10,
+    /// spec §11.15b).
+    ///
+    /// **Bulk, and for a third reason distinct from its two neighbours.**
+    /// `PreservationRecheck` is bulk because it is outbound network work;
+    /// `RetentionSettle` is bulk because it changes instance policy and a
+    /// reader's import must not queue behind a governance pass. This one is bulk
+    /// because a fetch can occupy a worker for as long as the site takes to
+    /// answer — which is §6.2's whole reason for making the request a job rather
+    /// than a synchronous fetch. A reader who asked for a body must not hold up
+    /// everyone else's import while a third-party site stalls, nor queue behind a
+    /// backlog of other readers' fetches.
+    ///
+    /// The class is not politeness: a synchronous fetch IS the failure this job
+    /// exists to prevent, so the work must be reclaimable and a copy must never
+    /// sit in `pending` because a worker died mid-fetch.
+    BodyFetch => "body_fetch",
 }
 /// The queue's claim classes — separate from the HTTP route rate classes
 /// (`crate::limiter::RouteClass`). The rate limiter guards the HTTP surface;
@@ -224,6 +241,7 @@ impl JobKind {
             // See the variant's doc comment: bulk so a governance pass cannot
             // delay a reader's import.
             Self::RetentionSettle => ResourceClass::Bulk,
+            Self::BodyFetch => ResourceClass::Bulk,
         }
     }
 
@@ -252,6 +270,10 @@ impl JobKind {
             Self::PreservationRecheck => 11,
             // 12, on the same reasoning: appended, never renumbered.
             Self::RetentionSettle => 12,
+            // APPENDED, never inserted. These indices are persisted in `jobs`
+            // rows, so inserting a kind in the middle silently re-labels every
+            // queued job of a later kind. See `db-migration-integrity`.
+            Self::BodyFetch => 13,
         }
     }
 }
