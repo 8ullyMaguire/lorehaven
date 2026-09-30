@@ -91,42 +91,59 @@ A red gate that predates the work is part of the work.
 
 ## Scope, and what this brief adds
 
-`docs/requirements.csv` has 640 rows: **285 fully tested, 115 verified E2E, 183
-built but not verified end to end, 53 planned, 4 deliberately unsupported.**
+`docs/requirements.csv` has 687 rows: **295 fully tested, 117 verified E2E, 225
+built but not verified end to end, 45 planned, 4 deliberately unsupported, 1
+evaluated and rejected.**
 
-The 53 planned rows, by milestone:
+*(Re-derived 2026-09-30. The previous figures here — 640 rows, 53 planned, and a
+list naming M53/M54/M57 as open — were all stale: M57, M54, M53-03/-04 and the
+four `M38.doctor_*` rows have since been built, and `docs/requirements.csv` is
+the authority. Re-derive rather than believe:*
 
-| Milestone | Rows | What |
-|---|---|---|
-| M45 | 45 | the metadata exchange block — the dominant term in any estimate |
-| M57 | 4 | M11-17, -17a, -17b, -17c: the metadata exchange *endpoint* |
-| M53 | 2 | gated adapters (M53-03, -04) |
-| M54 | 2 | the bot core and its link flow (M54-01, -02) |
+```sh
+python3 -c "import csv,collections; \
+  r=list(csv.DictReader(open('docs/requirements.csv'))); \
+  print(collections.Counter(x['status'] for x in r))"
+```*
 
-The M11-17 family is order-independent and now has its foundation
-(`crates/lore-metadata`, committed `a33cf4b`) — the shared wire types, with the
-§0.3 privacy ban as an executable property rather than a validator. Build the
-endpoint on top of it, then M54, then M45.
+**Every remaining planned row is now M45.** That is a single dominant term, not
+a spread across five milestones, and it changes the shape of the remaining work:
+there is no ordering decision left inside the platform. M11-17 (`a33cf4b`), M54,
+M53 and the doctor rows are all done.
 
-**The 183 `implemented-locally-tested` rows are not free.** They are built, not
+**M45 is a gaps-review block, not spec §45.** The ID namespace and the spec
+section share a number by coincidence — spec §45 is *Directory Category
+Governance*, and all six of its `M45-45g*` rows plus `M45-45a` are already
+`implemented-fully-tested`. What is outstanding is `M45-10` … `M45-55`, the
+"gaps review" items: Scout-value curation credit, exposure floors, MMR variety
+re-ranking, operator taste-leakage, reason-tagged kudos, fic-finder bounties,
+keystone authors, cross-language supply, sister-instance federation, the Discord
+bot, and the GDPR/DSA compliance tooling. Conflating the two has already cost one
+wrong line in this file; the CSV is the authority.
+
+**The 225 `implemented-locally-tested` rows are not free.** They are built, not
 verified end to end, and they need a verification pass, not new code. They
 inflate each remaining line item rather than forming a phase of their own.
 
 **The 4 `unsupported` rows are never counted as remaining.** They are a standing
 exclusion — work that was consciously declined, not work deferred.
 
-**Two decisions are still open and are the user's to make.** Both are recorded in
-`docs/handoff.md`:
+**No decisions are open. Both are closed, and neither closed by an assumption.**
 
-- whether all 45 M45 rows are in scope for this build;
-- whether the M11-17 block goes first, or M45.
+- *Is all of the spec in scope?* **Yes — the owner's call, 2026-09-30.** All 45
+  M45 rows are in scope, so the build runs to the whole spec rather than a
+  chosen subset.
+- *M11-17 first, or M45?* Settled by the work itself: M11-17 is built and
+  verified, so M45 is what remains.
 
-An estimate built on either answer is wrong by the difference between them, so
-ask before quoting a date. The tail does not move at the platform core's rate:
-the remaining rows are first-of-their-kind integrations (a bot port, a DSAR
-export, a credential vault), where the rate is one to two orders of magnitude
-below the repetitive schema-and-route work the earlier throughput figure was
-measured on. Averaging the two produces a confident, wrong number.
+The four `unsupported` rows stay excluded — that is a standing decision about work
+consciously declined, not a question about scope.
+
+The tail does not move at the platform core's rate: the remaining rows are
+first-of-their-kind integrations (a bot port, a DSAR export, a credential vault),
+where the rate is one to two orders of magnitude below the repetitive
+schema-and-route work the earlier throughput figure was measured on. Averaging the
+two produces a confident, wrong number.
 
 ### Beyond the site: bots, local software, extension
 
@@ -168,7 +185,17 @@ two or three concrete examples of what breaking it costs.
 2. **The bot core** (M54-01, -02), against `/api/v1` only.
 3. **The Chromium extension**, after its own spec section, against the same API.
 4. **M53-03/-04** — the credential-vault-gated adapters.
-5. **M45** — the metadata exchange block, the dominant term.
+5. **M45** — the discovery-and-community growth block, the dominant term. (This
+   line previously read "the metadata exchange block", which is M57's job
+   description copied forward by mistake. M45 is the gaps-review block: Scout
+   credit, exposure floors, MMR re-ranking, taste leakage, kudos, bounties,
+   keystone authors, the Discord bot, GDPR/DSA compliance tooling.)
+
+*(Updated 2026-09-30: steps 1, 2 and 4 are done. M57's rows are all
+`implemented-fully-tested`, M54-01/-02 are `implemented-verified-e2e`, and
+M53-03/-04 are `implemented-fully-tested`. What is left is step 5, then the
+Chromium extension in step 3 — and the extension is gated on the API surface
+being real, which is why it comes last rather than because it is lowest value.)*
 
 Each step's exit condition is in `docs/plans/remaining-work.md` and its row in
 `docs/requirements.csv`.
