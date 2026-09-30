@@ -48,9 +48,16 @@ pub(crate) fn router() -> Router<AppState> {
 /// bytes, and is `None` unless the copy is `ready`. Deliberately **no
 /// `account_id`**: the copy is the caller's own, and serialising whose copy it is
 /// would put an account id in a response that has no reason to name one.
+///
+/// **No `id`.** The first draft carried `format!("{work_id}:{account_id}")` — a
+/// composite handle that embedded the reader's own account id, which the privacy
+/// test caught: `a_reader_cannot_read_another_readers_copy` asserts the response
+/// carries no account id, and it did. The test was right and the route was
+/// wrong. There is nothing here that needs an id: the work id plus the caller's
+/// own session already identify the copy, and no third party has business holding
+/// a handle for somebody else's request.
 #[derive(Debug, Serialize)]
 pub struct BodyRequestView {
-    pub id: String,
     pub work_id: String,
     pub source_key: String,
     pub state: &'static str,
@@ -220,7 +227,6 @@ async fn status(
 
     let settled_at = body.as_ref().map(|b| b.settled_at.clone());
     let view = BodyRequestView {
-        id: format!("{id}:{}", user.account_id),
         work_id: id.clone(),
         source_key: body
             .as_ref()

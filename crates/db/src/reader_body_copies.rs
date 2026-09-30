@@ -26,17 +26,27 @@
 //! **A work has no `source_key` column**, and this module is where the lookup
 //! lives. `works` (0003) carries no source at all; the link is `library_items`
 //! (0006), where `work_id` sits beside `source_key`. That relationship is
-//! ONE-TO-MANY — a re-import from a mirror adds a second row — so
-//! `source_for_work` takes the most recent non-deleted one and says so. A work
-//! with no library item yields `None` and the route refuses by name: there is no
-//! source, so there is no retention decision to apply, and defaulting to the
-//! instance mode would be a guess about where a work came from.
+//! ONE-TO-MANY — a re-import from a mirror adds a second row, and
+//! `UNIQUE (account_id, source_key, source_work_key)` permits one per account —
+//! so `source_for_work` takes the most recent row and says so. A work with no
+//! library item yields `None` and the route refuses by name: there is no source,
+//! so there is no retention decision to apply, and defaulting to the instance
+//! mode would be a guess about where a work came from.
 
 use anyhow::Result;
 use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::{Backend, Database};
+
+// Every SELECT in this module needs its UUID and timestamp columns cast to text
+// on the PostgreSQL arm — `id::text AS id`, `version::bigint AS version` — because
+// 0095's ids are `UUID` there and `TEXT` on SQLite, and a `String` row struct
+// cannot decode a `UUID` column. Without the cast a Postgres request fails with
+// "error occurred while decoding column \"id\": mismatched types". The idiom is
+// `PROPOSAL_COLUMNS_POSTGRES` in `retention_proposals.rs:188`; the INSERTs and
+// UPDATEs need none of it, because there PostgreSQL is casting a bound text
+// parameter at the comparison.
 
 /// Where a copy is in the fetch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,11 +125,17 @@ pub struct ReaderBodyCopyBody {
 /// case rather than falling back to the instance's mode — see the module
 /// header.
 pub async fn source_for_work(db: &Database, work_id: &str) -> Result<Option<String>> {
+    // No `deleted_at` filter, because `library_items` has no such column: it
+    // carries `created_at`/`updated_at`/`version` and retires a materialised
+    // import by `work_id` going NULL (`ON DELETE SET NULL` — the column comment
+    // says NULL is a private-library copy). A filter on a column that does not
+    // exist fails on the first real request on both engines, which is what it
+    // did until this comment was written.
     let sql = db.sql(
         "SELECT source_key FROM library_items \
-         WHERE work_id = ?1 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1",
+         WHERE work_id = ?1 ORDER BY created_at DESC LIMIT 1",
         "SELECT source_key FROM library_items \
-         WHERE work_id = $1::uuid AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1",
+         WHERE work_id = $1::uuid ORDER BY created_at DESC LIMIT 1",
     );
     let row: Option<(String,)> = match db.backend() {
         Backend::Sqlite => {
@@ -222,31 +238,44 @@ pub async fn request_copy(
            updated_at = $6, \
            version = reader_body_copies.version + 1",
     );
-    let row: (String,) = match db.backend() {
+    // `execute`, not `fetch_one`: an INSERT without `RETURNING` produces a row
+    // count, not a result set, so asking for a row fails on both engines with
+    // "no rows returned by a query that expected to return at least one row" —
+    // which is a 500 on the first real request, and what it did until this
+    // comment was written.
+    //
+    // `RETURNING` would read better on PostgreSQL, but `db.sql()` supplies one
+    // string per arm and this has to run on SQLite too. The id is already known
+    // — `copy_id_for` returned it, or the fresh `Uuid::new_v4()` above — and the
+    // read-back below is not wasted: it makes the returned `state` and `version`
+    // the database's values rather than the ones this function assumed. On the
+    // `ready` path in particular, the `CASE` in the upsert is the database
+    // deciding, and only a read-back reports what it decided.
+    match db.backend() {
         Backend::Sqlite => {
-            sqlx::query_as(&sql)
+            sqlx::query(&sql)
                 .bind(&copy_id)
                 .bind(work_id)
                 .bind(account_id.to_string())
                 .bind(source_key)
                 .bind(chapter_key)
                 .bind(&now)
-                .fetch_one(db.sqlite_pool().expect("sqlite handle"))
-                .await?
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
         }
         Backend::Postgres => {
-            sqlx::query_as(&sql)
+            sqlx::query(&sql)
                 .bind(&copy_id)
                 .bind(work_id)
                 .bind(account_id.to_string())
                 .bind(source_key)
                 .bind(chapter_key)
                 .bind(&now)
-                .fetch_one(db.postgres_pool().expect("postgres handle"))
-                .await?
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
         }
-    };
-    let id = row.0;
+    }
+    let id = copy_id;
 
     // The audit row §6.2 asks for, in the same transaction as the copy. Its
     // `trust_at_request` is the reader's level *now*, not a re-derivation later:
@@ -292,7 +321,8 @@ pub async fn request_copy(
 async fn copy_id_for(db: &Database, work_id: &str, account_id: &str) -> Result<Option<String>> {
     let sql = db.sql(
         "SELECT id FROM reader_body_copies WHERE work_id = ?1 AND account_id = ?2",
-        "SELECT id FROM reader_body_copies WHERE work_id = $1::uuid AND account_id = $2::uuid",
+        "SELECT id::text AS id FROM reader_body_copies \
+         WHERE work_id = $1::uuid AND account_id = $2::uuid",
     );
     let row: Option<(String,)> = match db.backend() {
         Backend::Sqlite => {
@@ -318,8 +348,10 @@ async fn copy_by_id(db: &Database, id: &str) -> Result<ReaderBodyCopy> {
         "SELECT id, work_id, account_id, source_key, chapter_key, state, reason_code, \
                 plain_text, sanitized_html, requested_at, settled_at, version \
          FROM reader_body_copies WHERE id = ?1",
-        "SELECT id, work_id, account_id, source_key, chapter_key, state, reason_code, \
-                plain_text, sanitized_html, requested_at, settled_at, version \
+        "SELECT id::text AS id, work_id::text AS work_id, account_id::text AS account_id, \
+                source_key, chapter_key, state, reason_code, plain_text, sanitized_html, \
+                requested_at::text AS requested_at, settled_at::text AS settled_at, \
+                version::bigint AS version \
          FROM reader_body_copies WHERE id = $1::uuid",
     );
     let raw: Option<ReaderBodyCopyRow> = match db.backend() {
@@ -390,9 +422,11 @@ pub async fn body_for(
         "SELECT work_id, chapter_key, source_key, plain_text, sanitized_html, settled_at \
          FROM reader_body_copies \
          WHERE work_id = ?1 AND account_id = ?2 AND state = 'ready' AND plain_text IS NOT NULL",
-        "SELECT work_id, chapter_key, source_key, plain_text, sanitized_html, settled_at \
+        "SELECT work_id::text AS work_id, chapter_key, source_key, plain_text, \
+                sanitized_html, settled_at::text AS settled_at \
          FROM reader_body_copies \
-         WHERE work_id = $1::uuid AND account_id = $2::uuid AND state = 'ready' AND plain_text IS NOT NULL",
+         WHERE work_id = $1::uuid AND account_id = $2::uuid \
+           AND state = 'ready' AND plain_text IS NOT NULL",
     );
     let row: Option<ReaderBodyCopyBody> = match db.backend() {
         Backend::Sqlite => {
@@ -423,7 +457,8 @@ pub async fn status_for(
     let sql = db.sql(
         "SELECT state, reason_code, requested_at FROM reader_body_copies \
          WHERE work_id = ?1 AND account_id = ?2",
-        "SELECT state, reason_code, requested_at FROM reader_body_copies \
+        "SELECT state, reason_code, requested_at::text AS requested_at \
+         FROM reader_body_copies \
          WHERE work_id = $1::uuid AND account_id = $2::uuid",
     );
     let row: Option<(String, Option<String>, String)> = match db.backend() {
@@ -438,7 +473,7 @@ pub async fn status_for(
             sqlx::query_as(&sql)
                 .bind(work_id)
                 .bind(account_id.to_string())
-                .fetch_optional(db.sqlite_pool().expect("postgres handle"))
+                .fetch_optional(db.postgres_pool().expect("postgres handle"))
                 .await?
         }
     };
