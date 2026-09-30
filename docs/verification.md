@@ -67,12 +67,15 @@ masked id. **Naming the row beats enumerating the rows it is not.**
 **The counts, per run:**
 
 ```
-run A  (tree at 17183e9)  SQLite   3338 passed, 0 failed, 153 suites, 0 warnings
-run B  (same tree)        Postgres  red: snapshot_anonymisation (1)
+at 507a3ab  SQLite     3338 passed, 0 failed, 153 suites, 0 warnings
+at 507a3ab  PostgreSQL 3338 passed, 0 failed, 153 suites, 0 warnings
 ```
 
-The PostgreSQL run was the only one that could see the snapshot failure, because
-that test returns early on SQLite. `milestone_43_browse` and the six count sites
+Both engines, both totals, from a clean tree. An earlier run at `17183e9` was
+**red on PostgreSQL** in `snapshot_anonymisation` (1 of 3339) and green on
+SQLite — because that test returns early off Postgres, so the engine that was
+never red is the one that could not have caught it. That asymmetry is the whole
+argument for running both, and it is why this section is not a single number. `milestone_43_browse` and the six count sites
 were red on **both** engines from `2a8aead` onward and were green by `eb03a0d`;
 `snapshot_anonymisation` is green on both (10 each) at `eb03a0d`, and its shift
 assertion was verified by injection — a per-row-variable shift in the generator
