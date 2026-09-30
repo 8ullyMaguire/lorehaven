@@ -256,9 +256,10 @@ async fn seed_weights(h: &Harness, account: &str) {
                 // `arena_weights.created_at` is TIMESTAMPTZ on PostgreSQL and
                 // `account_id` is UUID (migrations/postgres/0066_taste_arena.sql:26).
                 // `now()` rather than a bound string, and the explicit `::uuid`.
-                "INSERT INTO arena_weights (account_id, dimension_key, weight, elo_rating, \
-                 matches_played, created_at) \
-                 SELECT $1::uuid, $2, $3, 0, 0, now() WHERE NOT EXISTS \
+                "INSERT INTO arena_weights (id, account_id, dimension_key, weight, elo_rating, \
+                 matches_played, created_at, updated_at) \
+                 SELECT gen_random_uuid(), $1::uuid, $2, $3, 0, 0, now(), now() \
+                 WHERE NOT EXISTS \
                  (SELECT 1 FROM arena_weights WHERE account_id = $1::uuid AND dimension_key = $2)",
             )
             .bind(account)
@@ -269,14 +270,22 @@ async fn seed_weights(h: &Harness, account: &str) {
             .expect("seed arena weight (pg)");
         } else {
             sqlx::query(
-                "INSERT INTO arena_weights (account_id, dimension_key, weight, elo_rating, \
-                 matches_played, created_at) \
-                 SELECT ?, ?, ?, 0, 0, ? WHERE NOT EXISTS \
+                // `id`, `created_at` AND `updated_at` are all NOT NULL with no
+                // default (migrations/sqlite/0066_taste_arena.sql:19). The
+                // omission of two of them passed in isolation — where an earlier
+                // test had already inserted a row, so the NOT EXISTS guard
+                // short-circuited — and failed in a full-workspace run. That is
+                // the worst shape a fixture bug can take: green locally, red in
+                // the gate, and only when the suite order changes.
+                "INSERT INTO arena_weights (id, account_id, dimension_key, weight, elo_rating, \
+                 matches_played, created_at, updated_at) \
+                 SELECT lower(hex(randomblob(16))), ?, ?, ?, 0, 0, ?, ? WHERE NOT EXISTS \
                  (SELECT 1 FROM arena_weights WHERE account_id = ? AND dimension_key = ?)",
             )
             .bind(account)
             .bind(key)
             .bind(weight)
+            .bind(&now)
             .bind(&now)
             .execute(h.tdb.db().sqlite_pool().expect("sqlite"))
             .await
