@@ -1,6 +1,21 @@
 # Plan — M60: close the snapshot-policy gate's hole, then promote the 7 `built` rows
 
-**Status:** not started.
+**Status:** DONE. All seven rows promoted to `implemented-locally-tested`, each with
+the run that settles it. Two defects were found and fixed on the way: the PII gate
+was silent on the most sensitive column in the schema, and — the significant one —
+`take-snapshot.sh` published the **entire unmasked instance** beside the masked
+copy, with every gate in the repository green on it.
+
+**The lesson this plan was written to avoid, and did not avoid well enough.** The
+plan said "Step 2 before step 1 is wrong and would hide the point", and it was
+right about the gate — but it assumed the seven rows were seven verification tasks.
+Running M60-09's verifier instead found a critical disclosure defect in the
+pipeline that produces the artefact. A `built` row is not bookkeeping; it is
+untested machinery, and the one that publishes data to other people is the one
+that was broken.
+
+See `docs/verification.md` (top entry) for the full account.
+
 **Goal:** M60's seven `built` rows are code that has never been verified against
 the spec's own standard. Promoting them is the cheapest remaining work, and doing
 it honestly has already produced a gate failure.

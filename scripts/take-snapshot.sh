@@ -221,16 +221,22 @@ RAW="$WORK/$NAME.sql"
 # ship.
 PUBLIC_TABLES="$(grep -cE '^CREATE TABLE public\.' "$RAW" || true)"
 MASKED_TABLES="$(grep -cE '^CREATE TABLE snapshot_masked\.' "$RAW" || true)"
-if [ "$PUBLIC_TABLES" -ne 0 ]; then
-  die "the dump contains $PUBLIC_TABLES table(s) from the ORIGINAL schema. That is
-  the unmasked instance. Refusing to publish: the whole point of the mask is that
-  the original never leaves the operator's machine."
+# `_migrations` is the ONE original-schema table in the dump, deliberately: the
+# restore check reads it, and a migration name and checksum are not PII. Counted
+# separately rather than excluded from the grep, so the exception is visible in
+# the numbers instead of hidden in a pattern -- and so that a SECOND original
+# table appearing would still refuse.
+if [ "$PUBLIC_TABLES" -gt 1 ]; then
+  die "the dump contains $((PUBLIC_TABLES - 1)) table(s) from the ORIGINAL schema
+  beyond the intended _migrations ledger. That is the unmasked instance.
+  Refusing to publish: the whole point of the mask is that the original never
+  leaves the operator's machine."
 fi
 if [ "$MASKED_TABLES" -eq 0 ]; then
   die "the dump contains no snapshot_masked tables, so it is not a snapshot at all.
   Refusing to publish an empty or schema-less dump."
 fi
-echo "==> dump contains $MASKED_TABLES masked tables and 0 original-schema tables"
+echo "==> dump contains $MASKED_TABLES masked tables, plus the _migrations ledger"
 
 # The byte-level canary check lives in the Rust suite, because a canary has to be
 # a REAL legal value (works_body_audience_valid is a CHECK constraint), so the
@@ -344,7 +350,16 @@ if [ "$SKIP_RESTORE" -eq 0 ]; then
   # database and migrations checks had both passed. A verification that reports
   # nothing is indistinguishable from one that found nothing, which is the same
   # defect as the PII gate being silent on the body column.
-  DOCTOR_VERDICT="$(grep -E '^\[(ok|FAIL)' "$DOCTOR_LOG" | tr -s ' ' | paste -sd'; ' || true)"
+  #
+  # `render` pads the marker to the width of "FAIL", so a passing line begins
+  # `[ok  ]` — the padding is INSIDE the brackets, and the name is then padded to
+  # 16 columns. Three wrong patterns got here first, each of which either never
+  # matched (recording "NOT RECORDED" on a clean run) or dropped the name filter
+  # and listed all eighteen checks. So the shape is asserted below rather than
+  # trusted: if this grep ever stops matching exactly the two integrity checks,
+  # the manifest says NOT RECORDED instead of quietly reporting something else.
+  DOCTOR_VERDICT="$(grep -E '^\[(ok *|FAIL)\][[:space:]]+(database|migrations)[[:space:]]' "$DOCTOR_LOG" \
+    | tr -s ' ' | paste -sd'; ' || true)"
   case "$DOCTOR_VERDICT" in
     *database*|*migrations*) ;;
     *) DOCTOR_VERDICT="NOT RECORDED" ;;
