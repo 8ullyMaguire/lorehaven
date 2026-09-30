@@ -85,9 +85,11 @@ pub async fn log_impression(db: &Database, slot_id: &str, impression: &Impressio
     let sqlite = "UPDATE recommendation_slots
         SET slot_kind = ?, propensity = ?
         WHERE id = ?";
+    // `$3::uuid` required: `recommendation_slots.id` is a UUID column on
+    // PostgreSQL. `sql_owned` renumbers placeholders and adds no casts.
     let postgres = "UPDATE recommendation_slots
         SET slot_kind = $1, propensity = $2
-        WHERE id = $3";
+        WHERE id = $3::uuid";
     match db.backend() {
         Backend::Sqlite => {
             sqlx::query(sqlite)
@@ -201,6 +203,12 @@ pub async fn record_interaction(
             let sqlite = "UPDATE work_view_log
                 SET kind = ?, source = ?, obscurity_at_read = ?
                 WHERE work_id = ? AND viewer_hash = ? AND viewed_at = ?";
+            // `$4::uuid` and friends are required and `sql_owned` does not add
+            // them — it renumbers placeholders, nothing else. `work_view_log.work_id`
+            // is TEXT on PostgreSQL but `work_kudos.work_id` is UUID, so the cast
+            // has to be written per arm rather than once. Without it the failure
+            // is "operator does not exist: uuid = text", which names the operator
+            // rather than the missing cast.
             let postgres = "UPDATE work_view_log
                 SET kind = $1, source = $2, obscurity_at_read = $3
                 WHERE work_id = $4 AND viewer_hash = $5 AND viewed_at = $6";
@@ -239,7 +247,7 @@ pub async fn record_interaction(
                 WHERE work_id = ? AND account_id = ?";
             let postgres = "UPDATE work_kudos
                 SET kind = $1, source = $2, obscurity_at_read = $3
-                WHERE work_id = $4 AND account_id = $5";
+                WHERE work_id = $4::uuid AND account_id = $5::uuid";
             match db.backend() {
                 Backend::Sqlite => {
                     sqlx::query(sqlite)
