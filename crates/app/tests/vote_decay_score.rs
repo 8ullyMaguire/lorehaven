@@ -19,11 +19,9 @@ use lorehaven_domain::vote_decay::Decay;
 use test_support::{id, TestDb};
 
 fn scratch() -> std::path::PathBuf {
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    std::env::temp_dir().join(format!("lh-vote-score-{n}"))
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    std::env::temp_dir().join(format!("lh-vote-score-{}-{}", std::process::id(), n))
 }
 
 /// Insert an approved entry directly, so the test is about scoring and not
