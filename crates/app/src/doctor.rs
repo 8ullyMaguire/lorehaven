@@ -33,6 +33,27 @@ pub struct Check {
 pub struct Report {
     /// Every check, in the order it ran.
     pub checks: Vec<Check>,
+    /// What this run could not examine, and why (spec §38.7.2/§38.7.3).
+    ///
+    /// A separate list rather than a filter over `checks`, because the
+    /// requirement is that the report *ends* with what it did not check. A
+    /// consumer that only reads `checks` cannot see the difference between
+    /// "19 checks, all ok" and "19 checks, all ok, of the things that matter
+    /// most"; rendering keeps them separate and so does the struct.
+    pub not_checked: Vec<NotChecked>,
+}
+
+/// An area this run could not observe from this box.
+///
+/// The `reason` is mandatory and is the whole point: a bare skip is
+/// indistinguishable from a check that passed, which is what spec §38.7.2
+/// forbids.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotChecked {
+    /// The area, named so an operator knows what to go and look at.
+    pub area: &'static str,
+    /// Why this run could not observe it.
+    pub reason: String,
 }
 
 impl Report {
@@ -50,6 +71,32 @@ impl Report {
         self.checks
             .iter()
             .any(|check| check.severity == Severity::Warning)
+    }
+
+    /// Whether any check could not run.
+    #[must_use]
+    pub fn has_skips(&self) -> bool {
+        self.checks
+            .iter()
+            .any(|check| check.severity == Severity::Skipped)
+            || !self.not_checked.is_empty()
+    }
+
+    /// Record a check that could not run, with the reason it could not.
+    ///
+    /// Routed through `not_checked` rather than only into `checks`: the reason is
+    /// an operator-facing sentence, and §38.7.3 requires the report to end with
+    /// this list. Putting it in one place means a check cannot be skipped and then
+    /// reported as if it had run.
+    fn skip(&mut self, name: &'static str, area: &'static str, reason: impl Into<String>) {
+        let reason = reason.into();
+        self.push(Check {
+            name,
+            severity: Severity::Skipped,
+            detail: reason.clone(),
+            remedy: String::new(),
+        });
+        self.not_checked.push(NotChecked { area, reason });
     }
 
     fn push(&mut self, check: Check) {
@@ -85,7 +132,18 @@ impl Report {
 }
 
 /// Run every check.
-pub async fn run(config: &Config, _args: &DoctorArgs) -> Report {
+///
+/// `--strict` is threaded in so the *report* can say which findings were
+/// promoted, rather than only so the exit code changes. It is handled at the
+/// call site in `lib.rs` for the exit code, and here for the line a reader
+/// actually looks at.
+///
+/// A previous ledger note recorded this binding as a defect — "`--strict` is
+/// declared and ignored, so it returns zero with warnings". That was wrong: the
+/// flag was read at the call site and worked. Running the binary settled it
+/// (`doctor` exits 0, `doctor --strict` exits 1, same 19-check report), and the
+/// ledger row is corrected rather than the code bent to match the note.
+pub async fn run(config: &Config, args: &DoctorArgs) -> Report {
     let mut report = Report::default();
 
     // --- build --------------------------------------------------------------
@@ -122,6 +180,11 @@ pub async fn run(config: &Config, _args: &DoctorArgs) -> Report {
             Severity::Ok => report.ok(finding.code, finding.detail),
             Severity::Warning => report.warn(finding.code, finding.detail, finding.remedy),
             Severity::Fatal => report.fail(finding.code, finding.detail, finding.remedy),
+            // The audit's own skipped findings flow through the same skip path as
+            // the inlined checks below, so a precondition the audit could not
+            // meet is reported as not-checked rather than dropped by a match arm
+            // that did not know the variant existed.
+            Severity::Skipped => report.skip(finding.code, finding.code, finding.detail),
         }
     }
 
@@ -294,6 +357,46 @@ pub async fn run(config: &Config, _args: &DoctorArgs) -> Report {
         ),
     }
 
+    // --- what this run could not check --------------------------------------
+    //
+    // Spec §38.7.3: the report ends with what was NOT checked. These four are
+    // unobservable from the box on *every* run, not only when something is
+    // broken, which is precisely why the list is unconditional: an empty block
+    // would itself be the overstatement the clause forbids, because "I checked
+    // everything" is the claim the block exists to refuse.
+    //
+    // Each names an area a reader of this output would otherwise assume was
+    // covered, because `doctor` reports on the instance and these are properties
+    // of the *deployment* around it.
+    report.skip(
+        "backup-restore",
+        "backup restore",
+        "whether a backup taken from this instance can actually be restored. \
+         A successful backup is not evidence of a successful restore, and this \
+         run cannot attempt one without clobbering live data.",
+    );
+    report.skip(
+        "worker-egress",
+        "worker network egress",
+        "whether the background worker can reach the sources and hosts it needs. \
+         The worker is not running during this check, and no fetch is made from \
+         here on its behalf.",
+    );
+    report.skip(
+        "tls-termination",
+        "TLS termination",
+        "how this instance is served over the network. The listener this check \
+         can see binds a socket; whether a proxy in front of it presents a \
+         certificate is not observable from inside.",
+    );
+    report.skip(
+        "index-build",
+        "search index freshness",
+        "whether the search index reflects recent writes. Building it would be a \
+         mutation, and a diagnostic that mutates the instance it is diagnosing \
+         can report a problem it just caused.",
+    );
+
     // --- assets -------------------------------------------------------------
     match &config.assets.dir {
         Some(dir) if dir.join("index.html").exists() => report.ok(
@@ -308,10 +411,39 @@ pub async fn run(config: &Config, _args: &DoctorArgs) -> Report {
         None => report.ok("assets", "served from the compiled-in bundle"),
     }
 
+    // --- strict -------------------------------------------------------------
+    //
+    // The flag's effect on the exit code is applied by the caller; what belongs
+    // here is the line a reader looks at. Without it, `doctor --strict` and
+    // `doctor` print byte-identical output and differ only in an exit code the
+    // reader may never see — which is exactly the "a flag that does nothing"
+    // shape this project has been bitten by twice, in a subtler form: the flag
+    // does something, but nothing on screen says so.
+    if args.strict {
+        // Counted rather than reported as a boolean, because "the warnings above"
+        // is more useful with a number against it, and because a line saying
+        // "strict" with no count is the kind of reassurance a reader cannot check.
+        let warnings = report
+            .checks
+            .iter()
+            .filter(|check| check.severity == Severity::Warning)
+            .count();
+        report.ok(
+            "strict",
+            format!(
+                "enabled: {warnings} warning(s) above are treated as failures for \
+                 the exit code"
+            ),
+        );
+    }
+
     report
 }
 
 /// Render a report for a terminal.
+///
+/// Ends with the NOT CHECKED block (spec §38.7.3), so the last thing on screen
+/// is what the run did not examine rather than a count of what it did.
 #[must_use]
 pub fn render(report: &Report) -> String {
     let mut out = String::new();
@@ -320,6 +452,10 @@ pub fn render(report: &Report) -> String {
             Severity::Ok => "ok  ",
             Severity::Warning => "warn",
             Severity::Fatal => "FAIL",
+            // `skip`, not `warn`. A warning says "I looked and this is wrong";
+            // this says "I did not look", and rendering the second as the first
+            // is the overstatement spec §38.7.2 exists to prevent.
+            Severity::Skipped => "skip",
         };
         out.push_str(&format!("[{marker}] {:<16} {}\n", check.name, check.detail));
         if !check.remedy.is_empty() {
@@ -337,10 +473,33 @@ pub fn render(report: &Report) -> String {
         .iter()
         .filter(|c| c.severity == Severity::Warning)
         .count();
+    let skipped = report
+        .checks
+        .iter()
+        .filter(|c| c.severity == Severity::Skipped)
+        .count();
     out.push_str(&format!(
-        "\n{} check(s): {failures} failing, {warnings} warning(s)\n",
+        "\n{} check(s): {failures} failing, {warnings} warning(s), {skipped} not checked\n",
         report.checks.len()
     ));
+
+    // Spec §38.7.3: the report ENDS with what was not checked.
+    //
+    // Not conditional on the list being non-empty, because the four structural
+    // skips are unconditional: an empty block here would mean "nothing was out
+    // of reach", which is the claim this section exists to refuse. If a future
+    // change makes every area observable, the block should say so rather than
+    // disappear — silence would read as full coverage.
+    out.push_str("\nNOT CHECKED\n");
+    if report.not_checked.is_empty() {
+        out.push_str(
+            "  (none recorded — if you expected a skip here, the report is wrong; \
+             some areas are unobservable from this box on every run)\n",
+        );
+    }
+    for item in &report.not_checked {
+        out.push_str(&format!("  - {}: {}\n", item.area, item.reason));
+    }
     out
 }
 
@@ -427,6 +586,214 @@ mod tests {
         assert!(text.contains("[FAIL]"));
         assert!(text.contains("start the server"));
         assert!(text.contains("1 failing"));
+    }
+
+    // --- spec §38.7.2: a check that could not run -----------------------------
+
+    /// A skip renders as `skip`, and never as `ok` or `warn`.
+    ///
+    /// The three spellings are asserted individually because each is a distinct
+    /// overstatement: `ok` says "I looked and it is fine", `warn` says "I looked
+    /// and it is wrong", and this run knows neither. Spec §38.7.2 forbids both.
+    #[test]
+    fn a_skip_renders_as_neither_ok_nor_a_warning() {
+        let mut report = Report::default();
+        report.skip("peer", "federation peers", "no peer list is configured");
+        let text = render(&report);
+
+        assert!(text.contains("[skip]"), "{text}");
+        assert!(
+            !text.contains("[ok  ] peer"),
+            "a check that did not run reported ok: {text}"
+        );
+        assert!(
+            !text.contains("[warn] peer"),
+            "a check that did not run reported a warning: {text}"
+        );
+    }
+
+    /// A skip is counted separately from warnings, so `--strict` cannot promote
+    /// one into a failure.
+    ///
+    /// This is the coupling that makes `Severity::Skipped` a bad thing to be lazy
+    /// about: if skips counted as warnings, every `doctor --strict` run on a
+    /// healthy instance would exit 1 over four permanent structural skips, and
+    /// operators would learn to ignore the exit code entirely.
+    #[test]
+    fn a_skip_is_neither_a_warning_nor_a_failure() {
+        let mut report = Report::default();
+        report.skip("a", "area a", "not observable");
+        report.skip("b", "area b", "not observable");
+
+        assert!(!report.has_warnings(), "a skip counted as a warning");
+        assert!(!report.has_failures(), "a skip counted as a failure");
+        assert!(report.has_skips(), "a skip that has_skips does not see");
+
+        let text = render(&report);
+        assert!(text.contains("2 not checked"), "{text}");
+        assert!(text.contains("0 failing, 0 warning(s)"), "{text}");
+    }
+
+    /// The reason is mandatory, and it reaches the output.
+    ///
+    /// §38.7.2's word is "mandatory" and this is why: a bare skip is
+    /// indistinguishable from a check that passed, which is the thing the
+    /// requirement exists to stop. An operator who knows the area is unobservable
+    /// can go and check it by hand; one who sees a bare `skip` learns nothing.
+    #[test]
+    fn a_skip_carries_its_reason_into_the_report() {
+        let mut report = Report::default();
+        report.skip(
+            "search",
+            "search index freshness",
+            "the index is not built during a diagnostic",
+        );
+        let text = render(&report);
+
+        assert!(text.contains("search index freshness"), "{text}");
+        assert!(
+            text.contains("the index is not built during a diagnostic"),
+            "the reason did not reach the operator: {text}"
+        );
+    }
+
+    /// A warning alongside a skip is still just one warning.
+    ///
+    /// Asserted so the skip path cannot quietly start consuming warnings, which
+    /// would make `--strict` stop failing for the reasons it exists.
+    #[test]
+    fn a_skip_alongside_a_warning_leaves_the_warning_countable() {
+        let mut report = Report::default();
+        report.warn("disk", "nearly full", "free some space");
+        report.skip("peer", "federation peers", "no peer list is configured");
+
+        assert_eq!(
+            render(&report).matches("[warn]").count(),
+            1,
+            "the warning disappeared or doubled"
+        );
+        assert!(report.has_warnings());
+        assert!(!report.has_failures());
+    }
+
+    // --- spec §38.7.3: the report ends with what it did not check ------------
+
+    /// The NOT CHECKED block is present on a report with nothing wrong.
+    ///
+    /// The important part is the negative case: `Report::default()` has no skips
+    /// and no failures, and the block still prints. An empty block would mean "you
+    /// saw everything", which is the claim §38.7.3 exists to refuse — and the
+    /// four structural areas in `run` are unobservable on every single run.
+    #[test]
+    fn the_not_checked_block_appears_even_when_nothing_is_wrong() {
+        let report = Report::default();
+        let text = render(&report);
+
+        assert!(
+            text.contains("NOT CHECKED"),
+            "a clean report says nothing about coverage: {text}"
+        );
+        assert!(
+            text.contains("none recorded"),
+            "an empty list must say so rather than read as full coverage: {text}"
+        );
+    }
+
+    /// The block is last, so it is the last thing on screen.
+    ///
+    /// §38.7.3 says the report *ends* with it. A block printed in the middle is
+    /// followed by the summary line, and the summary is the thing a reader's eye
+    /// lands on — which is how "23 checks, 0 failing" becomes the headline and the
+    /// coverage caveat becomes a footnote.
+    #[test]
+    fn the_not_checked_block_comes_last() {
+        let mut report = Report::default();
+        report.fail("database", "unreachable", "start the server");
+        let text = render(&report);
+
+        let block = text.find("NOT CHECKED").expect("the block is present");
+        let summary = text.find("check(s):").expect("the summary is present");
+        assert!(
+            block > summary,
+            "the summary comes after the NOT CHECKED block, so the block is not \
+             last: {text}"
+        );
+        assert!(
+            text[block..].contains("check(s):") == false,
+            "something renders after the block: {text}"
+        );
+    }
+
+    /// The four structural skips are in every real run, not only broken ones.
+    ///
+    /// These are the areas a reader of a clean `doctor` run would otherwise
+    /// assume were covered, and which no check in `run` can observe. Pinning the
+    /// exact set means deleting one is a test failure rather than a quiet loss of
+    /// an admission.
+    #[tokio::test]
+    async fn every_run_ends_by_naming_what_it_cannot_observe() {
+        let mut config = Config::development_defaults();
+        let dir = std::env::temp_dir().join(format!("doctor-not-checked-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        config.storage.root = dir.join("storage");
+        config.database.url = format!("sqlite://{}/lh.sqlite?mode=rwc", dir.display());
+
+        let report = run(&config, &DoctorArgs { strict: false }).await;
+        let text = render(&report);
+
+        for area in [
+            "backup restore",
+            "worker network egress",
+            "TLS termination",
+            "search index freshness",
+        ] {
+            assert!(
+                text.contains(area),
+                "a clean run stopped naming {area}: {text}"
+            );
+        }
+        assert!(
+            report.not_checked.len() >= 4,
+            "expected the four structural skips, got {:?}",
+            report.not_checked
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- §38.7.1: --strict --------------------------------------------------
+
+    /// `--strict` changes the report, not only the exit code.
+    ///
+    /// The exit code is applied in `lib.rs` and is covered by running the binary;
+    /// this pins the half a unit test can reach — that the flag leaves a visible
+    /// mark. A run where it changes only an exit code a reader may never inspect
+    /// is the "a flag that does nothing" shape in a subtler form.
+    #[tokio::test]
+    async fn strict_says_on_the_report_that_it_is_on() {
+        let mut config = Config::development_defaults();
+        let dir = std::env::temp_dir().join(format!("doctor-strict-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        config.storage.root = dir.join("storage");
+        config.database.url = format!("sqlite://{}/lh.sqlite?mode=rwc", dir.display());
+
+        let plain = render(&run(&config, &DoctorArgs { strict: false }).await);
+        let strict = render(&run(&config, &DoctorArgs { strict: true }).await);
+
+        // Matched on the rendered check line, not the word "strict" anywhere:
+        // the NOT CHECKED reasons legitimately contain the word, so a bare
+        // substring test would fail for a reason that has nothing to do with the
+        // strictness marker.
+        assert!(
+            !plain.contains("[ok  ] strict"),
+            "a plain run claims strictness: {plain}"
+        );
+        assert!(
+            strict.contains("[ok  ] strict"),
+            "--strict left no mark on the report: {strict}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

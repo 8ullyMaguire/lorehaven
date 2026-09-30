@@ -19,6 +19,19 @@ pub enum Severity {
     Warning,
     /// Must not start.
     Fatal,
+    /// The check could not run at all.
+    ///
+    /// Spec §38.7.2, and the fourth state is the one that was missing. A check
+    /// whose precondition is absent — an unreachable federation peer, an
+    /// uncompiled search backend, the PostgreSQL arm when no URL is set — used to
+    /// be either omitted from the report or reported `Ok`, and both tell the
+    /// operator the instance was examined.
+    ///
+    /// It is deliberately *not* a `Warning`. A warning says "I looked and this is
+    /// wrong"; a skip says "I did not look". Rendering a skip as a warning
+    /// overstates coverage in the one direction that matters, and a skip counted
+    /// as a failure would train operators to ignore both.
+    Skipped,
 }
 
 /// A single observation about the configuration.
