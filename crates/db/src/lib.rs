@@ -56,6 +56,7 @@ pub mod outbox;
 pub mod permission;
 pub mod positivity;
 pub mod preservation;
+pub mod ranking;
 pub mod rating_integrity;
 pub mod reader_body_copies;
 pub mod reading;
