@@ -497,6 +497,16 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Write,
             &state,
         ))
+        // §11.15b's request and status. `Write` for the whole router, following
+        // `retention_proposals` above: a router gets ONE class, and this pair
+        // contains a POST that starts a job against a third-party site, which is
+        // the class that matters. The GET rides the stricter limit, which is the
+        // right way round for a reader polling a fetch they just asked for.
+        .merge(classified(
+            routes::reader_body_copies::router(),
+            RouteClass::Write,
+            &state,
+        ))
         // The operator's half of the proposal lifecycle (plan E.2). Same router
         // as the reader's four, disjoint paths; the gate differs per handler,
         // so it cannot be expressed by the mount.
