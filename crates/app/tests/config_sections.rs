@@ -105,18 +105,13 @@ fn a_misspelled_governance_key_is_refused_at_load_rather_than_ignored() {
         ),
         ("typo-roadmap", "[roadmap]\nmin_trust_level = 4\n"),
     ] {
-        let error = load(tag, body)
-            .err()
-            .unwrap_or_else(|| panic!("{tag}: a misspelled key must be refused"));
-        // The `Display` form of an `anyhow::Error` is only the outermost context
-        // — `parsing <path>` — and the `unknown field` line lives in the
-        // *source* chain, which `Display` does not walk. So the chain is walked
-        // explicitly. Matching the first line alone would pass against a refusal
-        // that never named the key, which is the whole thing being checked.
-        // `load` returns the error as a `String`, so the chain is not walkable
-        // from it — and `Display` on an `anyhow::Error` is only the outermost
-        // context (`parsing <path>`), with the `unknown field` line one level
-        // down. So the load is repeated here against the `anyhow::Error` itself.
+        // Loaded against the `anyhow::Error` itself rather than through `load`'s
+        // `String`, because the `unknown field` line is one level down the source
+        // chain: `Display` on an `anyhow::Error` is only the outermost context
+        // (`parsing <path>`) and does not walk it. Matching the first line alone
+        // would pass against a refusal that never named the key, which is the
+        // whole thing being checked — and `Error::source` is unavailable because
+        // `anyhow::Error` deliberately does not implement `std::error::Error`.
         let path = scratch_dir(tag).join("lorehaven.toml");
         std::fs::write(&path, body).expect("write config");
         let args = GlobalArgs {
