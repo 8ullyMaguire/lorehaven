@@ -1774,6 +1774,14 @@ async fn a_credential_round_trips_through_the_encrypted_store() {
         &secret_id,
         "a label",
         None,
+        // The three M53-03 fields. This test is about encryption, not about the
+        // vault's origin/consent policy, so it stores a bound and consented
+        // credential — a row with none of them is now refused for use, and a
+        // test about the ciphertext should not also be a test about why the
+        // credential is unusable.
+        Some("token"),
+        Some("archiveofourown.org"),
+        Some("2026-09-01T00:00:00Z"),
     )
     .await
     .expect("credential row");
@@ -2169,6 +2177,13 @@ async fn an_expired_credential_is_reported_before_the_import_starts() {
         &secret_id,
         "an old login",
         Some("2001-01-01T00:00:00Z"),
+        // Bound and consented, so this seeds the *expiry* path rather than the
+        // origin/consent refusal: the credential below is already expired, and a
+        // test about what happens to an expired credential should not be
+        // answering a different question on the way there.
+        Some("token"),
+        Some("archiveofourown.org"),
+        Some("2026-01-01T00:00:00Z"),
     )
     .await
     .expect("seed credential");

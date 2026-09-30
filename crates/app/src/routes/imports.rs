@@ -50,6 +50,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD as BASE64;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
+use lorehaven_db::imports::CredentialEvent;
 use lorehaven_db::{imports, library, revisions, secrets};
 use lorehaven_domain::imports::{plan_import, ChapterIdentity, ImportedWork};
 use lorehaven_domain::library::ReadingStatus;
@@ -1587,6 +1588,17 @@ struct CredentialRequest {
     /// credential that outlives the policy is not this request's to grant.
     #[serde(default)]
     expires_in_days: Option<i64>,
+    /// The reader's explicit consent to store this secret (spec §11.6:
+    /// "Password or session-cookie storage requires explicit consent").
+    ///
+    /// Defaults to `false` rather than `true`. That default is the whole reason
+    /// the field exists: a request that omits it has not consented, and an
+    /// endpoint that treated absence as consent would satisfy the word
+    /// "consent" with a field the client did not send. §11.6 also says to prefer
+    /// source-issued tokens, and a token needs none — so a reader storing a token
+    /// can leave this alone.
+    #[serde(default)]
+    consent: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -1600,6 +1612,15 @@ struct CredentialView {
     /// credential nobody has tested yet is neither.
     last_checked_at: Option<String>,
     created_at: String,
+    /// Which kind of secret this is, as recorded at the moment of consent.
+    /// Null for a row stored before the column existed.
+    kind: Option<String>,
+    /// The host this credential is bound to (spec §11.6 origin binding).
+    origin_host: Option<String>,
+    /// When the reader consented. Null means *no consent was recorded*, which is
+    /// not the same as consent — and for a password or cookie it means the
+    /// credential will not be used.
+    consent_at: Option<String>,
     /// Present only on create: what happens next, in words.
     guidance: Option<String>,
 }
@@ -1613,8 +1634,41 @@ fn credential_view(row: imports::SourceCredential) -> CredentialView {
         expires_at: row.expires_at,
         last_checked_at: row.last_checked_at,
         created_at: row.created_at,
+        kind: row.kind,
+        origin_host: row.origin_host,
+        consent_at: row.consent_at,
         guidance: None,
     }
+}
+
+/// The stored spelling of an `AuthKind`, matching migration 0096's `CHECK`.
+///
+/// Returns `None` for `AuthKind::None`, which is the case the route refuses
+/// before it gets here — a row recording "no secret required" would be a row
+/// with nothing to protect.
+fn credential_kind(kind: lorehaven_scrapers::AuthKind) -> Option<&'static str> {
+    match kind {
+        lorehaven_scrapers::AuthKind::None => None,
+        lorehaven_scrapers::AuthKind::Token => Some("token"),
+        lorehaven_scrapers::AuthKind::Password => Some("password"),
+        lorehaven_scrapers::AuthKind::SessionCookie => Some("session_cookie"),
+    }
+}
+
+/// The host a credential for this adapter is bound to.
+///
+/// Taken from the adapter's own declared host list rather than from the request,
+/// because §11.6's origin binding is a property of the adapter: a cookie for a
+/// lookalike domain is refused because the adapter says which hosts it serves.
+/// Taking it from the client would make the binding whatever the client asked
+/// for, which is exactly the thing the requirement exists to stop.
+///
+/// `None` when the adapter declares no hosts, and that is a refusal at the route
+/// rather than a NULL written to the row — a credential bound to nothing cannot
+/// be checked against anything, so storing one would create a row that is dead on
+/// arrival.
+fn adapter_origin_host(adapter: &dyn SourceAdapter) -> Option<String> {
+    adapter.hosts().into_iter().next()
 }
 
 async fn list_credentials(
@@ -1666,6 +1720,39 @@ async fn store_credential(
         }));
     }
 
+    // §11.6: "Password or session-cookie storage requires explicit consent." The
+    // refusal names the kinds, because a reader who does not know whether the
+    // adapter wants a password or a cookie cannot tell whether this applies to
+    // them.
+    let kind = credential_kind(adapter.capabilities().authentication);
+    if !request.consent && kind != Some("token") {
+        return Err(ApiError(AppError::Validation {
+            message: format!(
+                "{} uses a {} credential, and spec §11.6 requires explicit consent \
+                 to store one. Resubmit with \"consent\": true to record that you \
+                 have agreed to this instance holding this secret, encrypted, \
+                 bound to that source's origin, and revocable at any time.",
+                request.source_key,
+                kind.unwrap_or("unknown"),
+            ),
+            field_errors: Default::default(),
+        }));
+    }
+
+    // §11.6 origin binding, taken from the adapter rather than the client. An
+    // adapter that declares no host cannot produce a bound credential, and
+    // storing one anyway would create a row that fails every future use check.
+    let origin_host = adapter_origin_host(adapter).ok_or_else(|| {
+        ApiError(AppError::Validation {
+            message: format!(
+                "the {} adapter declares no host, so a credential for it cannot be \
+                 origin-bound and §11.6 does not allow storing one unbound.",
+                request.source_key
+            ),
+            field_errors: Default::default(),
+        })
+    })?;
+
     let days = request
         .expires_in_days
         .unwrap_or(DEFAULT_CREDENTIAL_DAYS)
@@ -1707,6 +1794,14 @@ async fn store_credential(
     .await
     .map_err(ApiError::from)?;
 
+    // The consent timestamp is a named binding because `format_time` takes an
+    // `OffsetDateTime` by value; an `if` expression would produce a temporary that
+    // the `.as_deref()` borrow outlives, and the compiler is right to refuse.
+    // `now_utc()` returns an `OffsetDateTime`, not an `Option` — the `.map` here
+    // is `Result`-shaped only because the sibling `expires_at` above is. Keeping
+    // both the same shape means one spelling of "absent" in this handler.
+    let consent_at = request.consent.then(|| format_time(times::now_utc()));
+
     let (row, replaced) = imports::upsert_source_credential(
         state.db(),
         &pseud_id.to_string(),
@@ -1714,8 +1809,26 @@ async fn store_credential(
         &secret_id,
         &request.label,
         expires_at.as_deref(),
+        kind,
+        Some(&origin_host),
+        // A consent record is written only when consent was actually given. The
+        // token case passes `None` rather than a timestamp, because §11.6 does
+        // not ask for consent there — and a timestamp recorded for a token would
+        // be a claim that the reader was asked something they were not.
+        consent_at.as_deref(),
     )
     .await?;
+
+    // The audit event is `Renewed` when a credential with this label already
+    // existed, which is what makes §11.6's "re-consent for renewal" observable:
+    // the renewal is a distinct event from the original store, and the consent
+    // timestamp above was rewritten rather than carried forward.
+    let event = if replaced.is_some() {
+        imports::CredentialEvent::Renewed
+    } else {
+        imports::CredentialEvent::Created
+    };
+    imports::record_credential_event(state.db(), &row.id, &pseud_id.to_string(), event).await?;
 
     // A label that already had a *different* secret row leaves that row behind
     // when the natural key changed (a rotated label, say). Removing it keeps the
@@ -1748,6 +1861,33 @@ async fn delete_credential(
     RequirePseud { pseud_id, .. }: RequirePseud,
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
+    // The credential is fetched first, and that ordering is load-bearing.
+    //
+    // `credential_audit_events.credential_id` is deliberately not a foreign key
+    // (see migration 0096) so the trail outlives the credential — otherwise
+    // revoking a login would delete the record that it was revoked, which is the
+    // one audit row an operator most wants. That same freedom means a `revoked`
+    // event recorded against a credential that does not exist would be a
+    // permanent row for something that never happened, so the existence check
+    // comes first and the event is only written for a credential that is really
+    // this reader's.
+    let owned = imports::get_source_credential(state.db(), &id)
+        .await?
+        .filter(|row| row.pseud_id == pseud_id.to_string())
+        .ok_or_else(|| {
+            ApiError(AppError::NotFound {
+                resource: "credential",
+            })
+        })?;
+
+    imports::record_credential_event(
+        state.db(),
+        &owned.id,
+        &pseud_id.to_string(),
+        lorehaven_db::imports::CredentialEvent::Revoked,
+    )
+    .await?;
+
     // One call, because the deletion is one act: the repository removes the
     // ciphertext and the schema cascades the row that named it. A route that
     // had to delete two things in the right order would eventually delete one.
@@ -1793,6 +1933,7 @@ async fn test_credential(
         Ok(Some(secret)) => secret,
         Ok(None) => {
             imports::set_credential_status(state.db(), &row.id, "invalid", true).await?;
+            record_audit(&state, &row, CredentialEvent::Failed).await?;
             return Ok(Json(serde_json::json!({
                 "credential_id": row.id,
                 "status": "invalid",
@@ -1812,6 +1953,22 @@ async fn test_credential(
             "detail": "this adapter declares no hosts to probe",
         })));
     };
+
+    // §11.6 origin binding, checked before the credential is decrypted into a
+    // fetcher. A credential bound to another host is refused here, with the
+    // refusal the store already words, rather than being sent to a host it does
+    // not belong to. This is the check the whole property rests on: everything
+    // above it decides *whether* to fetch, and this decides whether this secret
+    // is one that may be sent there.
+    let now = times::now_utc();
+    let now_text = format_time(now);
+    if let Err(refusal) = row.usable_for(&probe, &now_text) {
+        return Err(ApiError(AppError::Validation {
+            message: refusal.message(),
+            field_errors: Default::default(),
+        }));
+    }
+
     let url = format!("https://{probe}/")
         .parse::<url::Url>()
         .map_err(|error| ApiError(AppError::Internal(anyhow::anyhow!(error))))?;
@@ -1832,6 +1989,7 @@ async fn test_credential(
     match response {
         Ok(_) => {
             imports::set_credential_status(state.db(), &row.id, "active", true).await?;
+            record_audit(&state, &row, CredentialEvent::Tested).await?;
             Ok(Json(serde_json::json!({
                 "credential_id": row.id,
                 "status": "active",
@@ -1840,18 +1998,44 @@ async fn test_credential(
         }
         Err(lorehaven_scrapers::SourceError::AuthRequired(detail)) => {
             imports::set_credential_status(state.db(), &row.id, "invalid", true).await?;
+            record_audit(&state, &row, CredentialEvent::Failed).await?;
             Ok(Json(serde_json::json!({
                 "credential_id": row.id,
                 "status": "invalid",
                 "detail": format!("the source rejected the credential: {detail}"),
             })))
         }
-        Err(error) => Ok(Json(serde_json::json!({
-            "credential_id": row.id,
-            "status": row.status,
-            "detail": format!("the check could not be completed: {error}"),
-        }))),
+        Err(error) => {
+            // A transport or parse failure is not evidence about the credential,
+            // so it records neither `tested` nor `failed`: `tested` would claim
+            // the source answered, and `failed` would blame a login that may be
+            // perfectly good. The response says what happened and the audit trail
+            // stays silent, which is the honest reading of §11.6's "audit events
+            // without secret contents" — an audit trail is a record of decisions,
+            // not of every attempt.
+            Ok(Json(serde_json::json!({
+                "credential_id": row.id,
+                "status": row.status,
+                "detail": format!("the check could not be completed: {error}"),
+            })))
+        }
     }
+}
+
+/// Record one audit event against a credential the caller has already checked is
+/// this reader's.
+///
+/// Takes the row rather than `(id, pseud)` so the pseud cannot be mismatched by a
+/// caller: the credential's own `pseud_id` is authoritative, and a helper whose
+/// signature let a caller pass a different one would be a way to write an audit
+/// row against somebody else's credential.
+async fn record_audit(
+    state: &AppState,
+    row: &imports::SourceCredential,
+    event: CredentialEvent,
+) -> ApiResult<()> {
+    imports::record_credential_event(state.db(), &row.id, &row.pseud_id, event).await?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1974,14 +2158,14 @@ fn encode_cursor(created_at: &str, id: &str) -> String {
 }
 
 /// The clock, in one place, so this module has a single dependency on "now".
-mod times {
+pub(crate) mod times {
     pub fn now_utc() -> time::OffsetDateTime {
         time::OffsetDateTime::now_utc()
     }
 }
 
 /// RFC 3339 UTC, which is the only timestamp format this codebase stores.
-fn format_time(at: time::OffsetDateTime) -> String {
+pub(crate) fn format_time(at: time::OffsetDateTime) -> String {
     crate::format_rfc3339(at)
 }
 
