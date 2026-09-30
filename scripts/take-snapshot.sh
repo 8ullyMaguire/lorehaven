@@ -175,8 +175,62 @@ psql -q -v ON_ERROR_STOP=1 -d "$SCRATCH_DB" -f "$MASK_SQL"
 # 3. the byte-level PII check, on the masked copy
 # --------------------------------------------------------------------------- #
 step "dumping the masked database"
+
+# Dump the MASKED schema, and only that.
+#
+# This was `pg_dump -d "$SCRATCH_DB"` with no schema filter, which shipped the
+# entire unmasked instance alongside the mask. Decrypting the artefact this
+# pipeline produced and restoring it gives:
+#
+#     public             277 tables   <- ORIGINAL, unmasked
+#     snapshot_masked     70 tables   <- the mask, correct and complete
+#
+#     public.accounts.id          01959000-0000-4000-8000-000000000001
+#     snapshot_masked.accounts.id 6d0b4fa3-e243-457b-af3c-8c49e72f226f
+#
+# The masking is right. It was published next to what it hides. `works_index`,
+# `ip_policy` and `secrets` -- which the policy says must never be published --
+# were all present in `public`, and so was `works.redistribution`.
+#
+# build-snapshot-sql.py states the contract in its own docs: "the dump is taken of
+# THAT schema. The original schema is never dumped." Every gate was green on the
+# breach anyway: the canary suite builds its own dump and never runs this script,
+# the PII gate checks the policy rather than the dump, and `doctor` reads the
+# migration ledger -- which lives in `public` and is intact, so it reported
+# 18 checks / 0 failing on a dump carrying the whole instance. The pipeline's one
+# defence was a sentence in a docstring, which the script contradicted.
+#
+# `-n snapshot_masked` is that contract enforced. `_migrations` is pulled from
+# `public` separately and deliberately: the restore check needs the ledger, the
+# generator rebuilds it with a shifted timestamp, and a migration name and
+# checksum are not PII. No --exclude-table is needed: the generator already
+# omitted every drop_table from the masked schema, and the assertion below checks
+# the shipped bytes rather than trusting the generator to have been right.
 RAW="$WORK/$NAME.sql"
-pg_dump -d "$SCRATCH_DB" --no-owner --no-acl --no-security-labels > "$RAW"
+{
+  pg_dump -d "$SCRATCH_DB" -n snapshot_masked \
+    --no-owner --no-acl --no-security-labels
+  pg_dump -d "$SCRATCH_DB" -t _migrations \
+    --no-owner --no-acl --no-security-labels
+} > "$RAW"
+
+# What the pipeline is about to publish, asserted on the bytes themselves. No
+# earlier check could have caught the breach above, so this is the thing that
+# would have: the dump must contain the masked schema, and NO table from the
+# original. Cheap, before compression and encryption, on the exact bytes that
+# ship.
+PUBLIC_TABLES="$(grep -cE '^CREATE TABLE public\.' "$RAW" || true)"
+MASKED_TABLES="$(grep -cE '^CREATE TABLE snapshot_masked\.' "$RAW" || true)"
+if [ "$PUBLIC_TABLES" -ne 0 ]; then
+  die "the dump contains $PUBLIC_TABLES table(s) from the ORIGINAL schema. That is
+  the unmasked instance. Refusing to publish: the whole point of the mask is that
+  the original never leaves the operator's machine."
+fi
+if [ "$MASKED_TABLES" -eq 0 ]; then
+  die "the dump contains no snapshot_masked tables, so it is not a snapshot at all.
+  Refusing to publish an empty or schema-less dump."
+fi
+echo "==> dump contains $MASKED_TABLES masked tables and 0 original-schema tables"
 
 # The byte-level canary check lives in the Rust suite, because a canary has to be
 # a REAL legal value (works_body_audience_valid is a CHECK constraint), so the
@@ -283,8 +337,18 @@ if [ "$SKIP_RESTORE" -eq 0 ]; then
 
   # Record the integrity verdict in the manifest, so a recipient can see WHICH
   # checks were considered rather than being handed a boolean.
-  DOCTOR_VERDICT="$(grep -E '^\[(ok|FAIL)\] (database|migrations)\b' "$DOCTOR_LOG" | tr -s ' ' | paste -sd'; ' || true)"
-  [ -n "$DOCTOR_VERDICT" ] || DOCTOR_VERDICT="NOT RECORDED"
+  # `render` pads the marker: `[{marker}] {:<16} ...`, where the marker for a
+  # pass is the literal "ok  " (two trailing spaces, to match "FAIL"). So a
+  # regex written as `\[ok\]` -- which is what this line first was -- never
+  # matches, and the manifest silently recorded "NOT RECORDED" on a run whose
+  # database and migrations checks had both passed. A verification that reports
+  # nothing is indistinguishable from one that found nothing, which is the same
+  # defect as the PII gate being silent on the body column.
+  DOCTOR_VERDICT="$(grep -E '^\[(ok|FAIL)' "$DOCTOR_LOG" | tr -s ' ' | paste -sd'; ' || true)"
+  case "$DOCTOR_VERDICT" in
+    *database*|*migrations*) ;;
+    *) DOCTOR_VERDICT="NOT RECORDED" ;;
+  esac
   dropdb --if-exists "$RESTORE_DB"
   step "restore check passed"
 else
@@ -302,17 +366,63 @@ step "encrypting -- passphrase is read from stdin, never from argv"
 # passphrase is piped to `-p` on stdin. It is NEVER passed as an argument:
 # an argument is visible in `ps` to every process on the machine, which would
 # undo the only thing the passphrase is for.
-PASSPHRASE=""
+# `age` has NO passphrase-file option (`-p` is a boolean, there is no `-p PATH`)
+# and no environment variable, so the only way to feed it a passphrase without an
+# interactive terminal is to GIVE it one. `script(1)` allocates a pty, runs a
+# command under it, and forwards stdin.
+#
+# The passphrase is written twice because `age -p` prompts for it and then for its
+# confirmation when encrypting, and once when decrypting; one line leaves it
+# waiting and the pty never closes.
+#
+# 11.16.5 is the property that matters, and this satisfies it strictly: never in
+# argv, never in the environment, never written to disk. `ps` shows only
+# `script -qec ...`, which contains no secret. A passphrase-file version of this
+# fix was written first and discarded — age does not support one, and it would
+# have put a plaintext secret on disk next to the encrypted dump.
+command -v script >/dev/null || die "script(1) is required: age reads its passphrase
+  from a terminal, and script is how this non-interactive path provides one"
+
 if [ -t 0 ]; then
   echo "Encrypting $NAME. Type the passphrase (it will not echo):" >&2
-  read -rs PASSPHRASE
+  IFS= read -rs PASSPHRASE
   echo >&2
-  [ -n "$PASSPHRASE" ] || die "no passphrase given"
-  printf '%s' "$PASSPHRASE" | age -p -o "$OUT/$NAME.sql.zst.age"
-  unset PASSPHRASE
 else
-  printf '%s' "$(cat)" | age -p -o "$OUT/$NAME.sql.zst.age"
+  IFS= read -r PASSPHRASE || die "no passphrase on stdin"
 fi
+[ -n "$PASSPHRASE" ] || die "no passphrase given"
+
+# age prompts for the passphrase and then for its CONFIRMATION, so it needs the
+# line twice, and it needs each one TERMINATED. That last part is the whole bug
+# this comment exists to prevent:
+#
+#     AGE_INPUT="$(printf '%s\n%s\n' "$P" "$P")"    # <- strips the final newline
+#     printf '%s' "$AGE_INPUT" | script -qec "age -p ..." /dev/null
+#
+# Command substitution strips trailing newlines, so the second passphrase arrived
+# unterminated. age blocked on the second prompt, the pty never closed, and the
+# script hung until something killed it. So the passphrase is written straight
+# into the pipe by `printf`, where no substitution can strip its newlines.
+#
+# This cost four false negatives first: a short passphrase, a long one, a file
+# redirect, and `script -q` each "worked" run directly and each hung inside the
+# script — because every probe changed the shell plumbing at the same time as the
+# variable under test, and the plumbing was the cause. When a probe disconfirms
+# your hypothesis, change one thing at a time.
+#
+# `timeout` because age has no prompt timeout of its own, and a passphrase prompt
+# that can block forever is exactly the failure that cost the most time here.
+#
+# The passphrase never reaches argv, the environment, or disk: `ps` shows only
+# `script -qec ...`, which is what 11.16.5 actually requires.
+# zstd writes to $OUT (see the compress step), NOT to $WORK where RAW lives, so
+# this has to name $OUT/$NAME.sql.zst. Getting that wrong is silent until age
+# exits non-zero on a missing input, which is how it was found.
+printf '%s\n%s\n' "$PASSPHRASE" "$PASSPHRASE" \
+  | timeout 120 script -qec \
+      "age -p -o '$OUT/$NAME.sql.zst.age' '$OUT/$NAME.sql.zst'" /dev/null >/dev/null \
+  || die "age failed to encrypt the snapshot (or timed out after 120s)"
+unset PASSPHRASE
 
 # The intermediate is a plain-text copy of every row in the instance. Deleting it
 # is a security step, and confirming the deletion is what makes it a step rather
@@ -320,8 +430,21 @@ fi
 # and anything with a journal, shred does not reliably overwrite the blocks, and
 # its extra passes mostly cost time. What actually matters is that no
 # copy survives in the filesystem's free space -- which no shred can guarantee.
-rm -f "$RAW" "$RAW.zst"
-for leftover in "$RAW" "$RAW.zst"; do
+# Both intermediates, in both directories they have ever been created in. The
+# `.zst` is the *masked* dump, so it is not a plaintext leak of the instance — but
+# it is the whole snapshot in the clear, sitting next to the encrypted file that
+# is supposed to be the only artefact. Handing a recipient this directory hands
+# them the anonymised corpus with no passphrase, which defeats the distribution
+# control this milestone exists to implement. The old line removed
+# "$WORK/$NAME.sql.zst", which zstd never wrote, so it removed nothing.
+rm -f "$RAW" "$RAW.zst" "$OUT/$NAME.sql.zst"
+# Confirm rather than assume. This loop previously checked only the two $WORK
+# paths, and both were the paths that never existed -- so it was confirming the
+# absence of files it had never created, and reporting "intermediates removed"
+# while a 55 KB unmasked-compressed dump sat in $OUT. A check that cannot fail on
+# the file it is meant to be about is the same defect as the gate in
+# check-snapshot-pii.py: the verification has to name the real artefact.
+for leftover in "$RAW" "$RAW.zst" "$OUT/$NAME.sql.zst"; do
   [ -e "$leftover" ] && die "the intermediate $leftover still exists"
 done
 step "intermediates removed"
