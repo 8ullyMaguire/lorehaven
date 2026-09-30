@@ -1170,6 +1170,71 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Operator,
     },
     // ------------------------------------------------------------------
+    // Retention proposals (plan E, spec §5 / §19.15). The reader half is
+    // `RouteClass::Write` at the mount but `Audience::Authenticated`, because
+    // the door is `RequireSession` and the gate beyond it is
+    // `retention_governance.proposal_min_trust` — a trust level a reader can
+    // earn. `require_operator` would be the wrong extractor for the person the
+    // feature is for, and recording the audience as `Operator` here would make
+    // the inventory describe a gate the code does not have. There is no
+    // `Audience::Reader`: the enum names the DOOR, and the trust gate is a
+    // second thing the inventory does not model. `roadmap.rs`'s
+    // `post_suggest` is the same shape, for the same reason.
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "retention_proposals.rs",
+        handler: "list",
+        method: "GET",
+        path: "/retention/proposals",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "retention_proposals.rs",
+        handler: "create",
+        method: "POST",
+        path: "/retention/proposals",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "retention_proposals.rs",
+        handler: "one",
+        method: "GET",
+        path: "/retention/proposals/{id}",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "retention_proposals.rs",
+        handler: "vote",
+        method: "POST",
+        path: "/retention/proposals/{id}/vote",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "retention_proposal_admin.rs",
+        handler: "respond",
+        method: "POST",
+        path: "/admin/retention/proposals/{id}/respond",
+        audience: Audience::Operator,
+    },
+    RouteEntry {
+        // The handler is `override_setting` because `override` is a reserved
+        // word in every Rust edition; the PATH is `/override`, which is the
+        // contract a client sees. Reading `handler: "override"` off the route
+        // string is the mistake this row's value exists to prevent.
+        file: "retention_proposal_admin.rs",
+        handler: "override_setting",
+        method: "POST",
+        path: "/admin/retention/proposals/{id}/override",
+        audience: Audience::Operator,
+    },
+    RouteEntry {
+        file: "retention_settle.rs",
+        handler: "settle_now",
+        method: "POST",
+        path: "/admin/retention/proposals/settle",
+        audience: Audience::Operator,
+    },
+    // ------------------------------------------------------------------
     // Exports — session-scoped (authed_router)
     // ------------------------------------------------------------------
     RouteEntry {
