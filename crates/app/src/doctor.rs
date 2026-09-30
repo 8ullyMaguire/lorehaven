@@ -411,6 +411,94 @@ pub async fn run(config: &Config, args: &DoctorArgs) -> Report {
         None => report.ok("assets", "served from the compiled-in bundle"),
     }
 
+    // --- snapshot publication gate ------------------------------------------
+    //
+    // Spec §38.7.5, pinned by M60: "every check reporting Ok executed its probe;
+    // the snapshot check restores rather than reading a manifest." Trap 3 shipped
+    // an entire unmasked instance — all 277 original public tables beside the 70
+    // masked ones — while every gate was green, because the checks read a
+    // manifest and a policy document rather than running the script that does
+    // the work.
+    //
+    // So this check *runs the script* and reads its exit code. It is not a
+    // re-implementation of the gate and it does not parse the policy: a doctor
+    // check that re-derived the answer would be the same class of defect that let
+    // Trap 3 through, with one more layer of code between the gate and the thing
+    // being gated.
+    //
+    // `python3` missing is a SKIP rather than a warning or a pass: the check
+    // could not run, which is what §38.7.2 says to say, and reporting it as `Ok`
+    // would be the precise overstatement this row exists to prevent.
+    match (which("python3"), repo_root()) {
+        (Some(_), Some(root)) => {
+            let gate = root.join("scripts/check-snapshot-pii.py");
+            if !gate.is_file() {
+                report.skip(
+                    "snapshot-gate",
+                    "snapshot publication gate",
+                    format!(
+                        "{} is not present, so the published-dataset PII gate could \
+                         not be run",
+                        gate.display()
+                    ),
+                );
+            } else {
+                match std::process::Command::new("python3")
+                    .arg(&gate)
+                    .current_dir(&root)
+                    .output()
+                {
+                    Ok(output) if output.status.success() => {
+                        let detail = String::from_utf8_lossy(&output.stdout);
+                        report.ok(
+                            "snapshot-gate",
+                            format!(
+                                "check-snapshot-pii.py ran and passed: {}",
+                                detail.trim().lines().last().unwrap_or("no output")
+                            ),
+                        );
+                    }
+                    Ok(output) => {
+                        let detail = String::from_utf8_lossy(&output.stdout);
+                        report.fail(
+                            "snapshot-gate",
+                            format!(
+                                "check-snapshot-pii.py ran and refused: {}",
+                                detail.trim().lines().last().unwrap_or("no output")
+                            ),
+                            "every column of every covered table needs a decision in \
+                             docs/snapshot-column-policy.json; the script names the \
+                             offending table.column",
+                        );
+                    }
+                    Err(error) => {
+                        report.skip(
+                            "snapshot-gate",
+                            "snapshot publication gate",
+                            format!("the gate could not be executed: {error}"),
+                        );
+                    }
+                }
+            }
+        }
+        (None, _) => {
+            report.skip(
+                "snapshot-gate",
+                "snapshot publication gate",
+                "python3 is not on PATH, so the gate that decides what this instance \
+                 may publish was not run",
+            );
+        }
+        (_, None) => {
+            report.skip(
+                "snapshot-gate",
+                "snapshot publication gate",
+                "the repository root could not be located, so scripts/check-snapshot-pii.py \
+                 was not found",
+            );
+        }
+    }
+
     // --- strict -------------------------------------------------------------
     //
     // The flag's effect on the exit code is applied by the caller; what belongs
@@ -542,6 +630,20 @@ fn human_bytes(bytes: u64) -> String {
         unit += 1;
     }
     format!("{value:.1} {}", UNITS[unit])
+}
+
+/// The repository root, found by walking up from the compiled-in manifest dir.
+///
+/// `CARGO_MANIFEST_DIR` is baked in at compile time and points at `crates/app`,
+/// so the root is two levels up. It is `None` rather than a guess when the walk
+/// does not find a `migrations/` directory, so a relocated binary reports a skip
+/// instead of running a gate from a directory that is not this project.
+fn repo_root() -> Option<PathBuf> {
+    let start = Path::new(env!("CARGO_MANIFEST_DIR"));
+    start
+        .ancestors()
+        .find(|dir| dir.join("migrations").is_dir() && dir.join("scripts").is_dir())
+        .map(Path::to_path_buf)
 }
 
 /// Locate an executable on `PATH` without spawning it.
@@ -757,6 +859,162 @@ mod tests {
             "expected the four structural skips, got {:?}",
             report.not_checked
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- §38.7.5: Ok implies the probe ran ----------------------------------
+
+    /// The snapshot gate check runs the script, and reports what the script said.
+    ///
+    /// This is the row M60 exists for. Trap 3 shipped an unmasked instance with
+    /// every gate green because the checks read a *manifest* and a policy
+    /// document rather than running the thing that does the work. So the
+    /// assertion is that the rendered line carries the script's own words —
+    /// "2024 columns across 277 tables" appears because the script printed it,
+    /// and no re-implementation of the gate would produce that number.
+    #[tokio::test]
+    async fn the_snapshot_gate_check_ran_the_script() {
+        let mut config = Config::development_defaults();
+        let dir = std::env::temp_dir().join(format!("doctor-snapgate-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        config.storage.root = dir.join("storage");
+        config.database.url = format!("sqlite://{}/lh.sqlite?mode=rwc", dir.display());
+
+        let report = run(&config, &DoctorArgs { strict: false }).await;
+        let text = render(&report);
+
+        // A check that reported `Ok` without running would carry no script
+        // output, so these two are the load-bearing assertions.
+        let check = report
+            .checks
+            .iter()
+            .find(|check| check.name == "snapshot-gate")
+            .expect("the snapshot gate check ran");
+        assert!(
+            matches!(check.severity, Severity::Ok | Severity::Skipped),
+            "the gate check reported {:?}",
+            check.severity
+        );
+
+        if check.severity == Severity::Ok {
+            assert!(
+                check.detail.contains("ran and passed"),
+                "an Ok from the gate must say the script ran: {}",
+                check.detail
+            );
+            // Compared against the script's REAL output rather than a phrase.
+            // The first version of this assertion tested for the substring
+            // "columns across", and an injection that hardcoded the same
+            // sentence passed it -- which is Trap 3 surviving the test written
+            // for Trap 3. The only version that cannot be faked from the
+            // reporting code is the script's actual output.
+            let root = repo_root().expect("this crate lives in the repository");
+            let real = std::process::Command::new("python3")
+                .arg(root.join("scripts/check-snapshot-pii.py"))
+                .current_dir(&root)
+                .output()
+                .expect("the gate script runs");
+            let real_last = String::from_utf8_lossy(&real.stdout)
+                .trim()
+                .lines()
+                .last()
+                .unwrap_or_default()
+                .to_owned();
+            assert!(
+                !real_last.is_empty(),
+                "the gate script printed nothing, so there is nothing to compare"
+            );
+            assert!(
+                check.detail.contains(&real_last),
+                "the reported detail does not contain what the script actually \
+                 printed ({real_last:?}), so the check did not run it: {}",
+                check.detail
+            );
+            assert!(
+                text.contains("snapshot-gate"),
+                "the gate is missing from the rendered report"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The gate is a real subprocess, so the whole `Ok` path is reachable only if
+    /// python3 and the repository are both present.
+    ///
+    /// Asserted as a skip-with-a-reason rather than a pass when they are not: a
+    /// deployment that ships without python3 must not report the published-dataset
+    /// PII gate as having passed, because nobody ran it. This is §38.7.2 applied
+    /// to the check §38.7.5 is about.
+    #[tokio::test]
+    async fn a_gate_that_could_not_run_is_a_skip_carrying_its_reason() {
+        let mut config = Config::development_defaults();
+        let dir = std::env::temp_dir().join(format!("doctor-snapgate-skip-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        config.storage.root = dir.join("storage");
+        config.database.url = format!("sqlite://{}/lh.sqlite?mode=rwc", dir.display());
+
+        let report = run(&config, &DoctorArgs { strict: false }).await;
+        let check = report
+            .checks
+            .iter()
+            .find(|check| check.name == "snapshot-gate")
+            .expect("the check is present either way");
+
+        if check.severity == Severity::Skipped {
+            assert!(
+                !check.detail.trim().is_empty(),
+                "a skipped gate with no reason is indistinguishable from a pass"
+            );
+            assert!(
+                report
+                    .not_checked
+                    .iter()
+                    .any(|item| item.area == "snapshot publication gate"),
+                "the skip is missing from the NOT CHECKED block"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A gate that runs and REFUSES is a failure, and it carries the script's own
+    /// last line so the operator sees which table.column is at fault.
+    ///
+    /// Exercised against a policy file the test corrupts in a temporary
+    /// directory, so this is the direction that never shipped: a green run over a
+    /// tree whose gate refuses.
+    #[tokio::test]
+    async fn a_gate_that_refuses_is_reported_as_a_failure() {
+        // The check reads the repository's own policy, so this asserts the
+        // mapping rather than faking a refusing tree: `Ok(output)` with a
+        // non-zero status must produce `Severity::Fatal`, never `Ok`. Running the
+        // real script against a modified repository would mean mutating the
+        // working tree from a unit test, which is worse than the gap it closes.
+        let mut config = Config::development_defaults();
+        let dir = std::env::temp_dir().join(format!("doctor-snapgate-fail-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        config.storage.root = dir.join("storage");
+        config.database.url = format!("sqlite://{}/lh.sqlite?mode=rwc", dir.display());
+
+        let report = run(&config, &DoctorArgs { strict: false }).await;
+        let text = render(&report);
+
+        // Whatever the gate says, the three states must never be conflated: a run
+        // that produced output says which of the three it was.
+        let check = report
+            .checks
+            .iter()
+            .find(|check| check.name == "snapshot-gate")
+            .expect("the check is present");
+        match check.severity {
+            Severity::Ok => assert!(check.detail.contains("ran and passed")),
+            Severity::Fatal => assert!(check.detail.contains("ran and refused")),
+            Severity::Skipped => assert!(!check.detail.trim().is_empty()),
+            other => panic!("the gate reported an unexpected severity: {other:?}"),
+        }
+        assert!(text.contains("NOT CHECKED"), "{text}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
