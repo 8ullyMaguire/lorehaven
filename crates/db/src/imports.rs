@@ -84,6 +84,18 @@ pub struct Source {
     pub health: String,
     /// When the source was last probed.
     pub last_checked_at: Option<String>,
+    /// Where this build could verify the source from, if it could (M53-04).
+    ///
+    /// `Some("blocked-here")` is a claim about **this host**, not about the
+    /// source: the site may be serving every other reader perfectly while this
+    /// machine cannot get past its front door. `None` means the default --
+    /// verified, or never claimed either way -- deliberately, because 92
+    /// migrations write `sources` rows and a NOT NULL sentinel would either
+    /// rewrite all of them or leave every reader handling two spellings of "fine".
+    pub verification_status: Option<String>,
+    /// Why, in an operator's words. Empty is not an option: a `blocked-here` an
+    /// operator cannot act on is a claim nobody can check.
+    pub verification_note: Option<String>,
 }
 
 impl Source {
@@ -529,14 +541,12 @@ pub async fn set_source_enabled(
 
 /// Every source in the catalogue, by key.
 pub async fn list_sources(db: &Database) -> Result<Vec<Source>> {
-    let sql = db.sql(
-        "SELECT key, display_name, adapter_version, enabled, disabled_reason,
-                capability_json, health, last_checked_at
-         FROM sources ORDER BY key",
-        "SELECT key, display_name, adapter_version, enabled, disabled_reason,
-                capability_json, health, last_checked_at
-         FROM sources ORDER BY key",
-    );
+    // Named bindings rather than `&format!(...)` inline: `db.sql` returns a
+    // borrowed `&str`, and a temporary built inside the call is freed before the
+    // borrow is used.
+    let sqlite_sql = format!("SELECT {SOURCE_COLUMNS} FROM sources ORDER BY key");
+    let postgres_sql = format!("SELECT {SOURCE_COLUMNS_PG} FROM sources ORDER BY key");
+    let sql = db.sql(&sqlite_sql, &postgres_sql);
     let rows: Vec<SourceRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
@@ -604,38 +614,113 @@ pub const HEALTH_WINDOW_DAYS: i64 = 7;
 /// a single attempt is evidence about one attempt.
 pub const FAILURES_TO_UNAVAILABLE: i64 = 3;
 
-/// Recompute every source's health from the outcome of its recent imports
-/// (spec §11.8).
+/// The `sources.verification_status` spelling for "this build cannot reach it".
 ///
-/// # The rules, and why each is what it is
+/// A constant rather than a bare string in two places, because the value is
+/// compared in the health sweep and written by the setter, and a typo in one of
+/// them would make a `blocked-here` source quietly eligible for `unavailable`
+/// again — which is the exact failure M53-04 exists to prevent, and the one no
+/// test in this file would notice.
+pub const BLOCKED_HERE: &str = "blocked-here";
+
+/// Record that this build cannot reach a source from where it runs (M53-04).
 ///
-/// * **`paused` is never derived and never overwritten.** A pause is an
-///   operator's decision, and a sweep that could clear one would be a sweep
-///   that silently un-pauses a source somebody deliberately switched off.
-/// * **A source with no finished imports in the window keeps what it had.**
-///   Silence is not evidence, and `unknown` is the honest state for a source
-///   nobody has tried.
-/// * **One success with no failures is `healthy`.** One failure alongside
-///   successes is `degraded`: the source works and sometimes does not, which is
-///   exactly what a reader should be told.
-/// * **Three failures with no success is `unavailable`**, and an import into an
-///   unavailable source is refused before it is queued rather than queued and
-///   failed.
-/// * **A cancelled import counts as neither.** The reader changed their mind,
-///   which says nothing about the source.
-pub async fn recompute_source_health(
+/// Spec §11.8 defines health as a claim about the *source*, and warns against
+/// overstating it. This is the other claim: about **this build's relationship
+/// with** the source. Keeping them apart is the whole point of the row — a
+/// `blocked-here` source is not unhealthy, and saying it were would publish "the
+/// site is down" on a public status endpoint when the truth is "we could not
+/// check".
+///
+/// `reason` is required whenever `status` is `blocked-here`, and refused if
+/// blank. A `blocked-here` with no explanation is indistinguishable from a source
+/// nobody ever checked, and an operator cannot act on either.
+pub async fn set_source_verification(
+    db: &Database,
+    key: &str,
+    status: Option<&str>,
+    reason: Option<&str>,
+) -> Result<()> {
+    if status == Some(BLOCKED_HERE) && reason.is_none_or(|note| note.trim().is_empty()) {
+        anyhow::bail!(
+            "a source cannot be marked blocked-here without saying why: \
+             set_source_verification was called with an empty note for {key}"
+        );
+    }
+    let now = now_rfc3339();
+    let sql = db.sql(
+        "UPDATE sources SET verification_status = ?, verification_note = ?,
+                            updated_at = ?, version = version + 1
+         WHERE key = ?",
+        "UPDATE sources SET verification_status = ?, verification_note = ?,
+                            updated_at = ?, version = version + 1
+         WHERE key = ?",
+    );
+    run!(db, &sql, |query| {
+        query.bind(status).bind(reason).bind(&now).bind(key)
+    })
+    .await
+    .with_context(|| format!("recording how {key} could be verified"))?;
+    Ok(())
+}
+
+/// What `recompute_source_health` gives up when it sees a `blocked-here` source.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkippedSource {
+    /// The source's key.
+    pub key: String,
+    /// The operator-facing note that says why this host cannot reach it.
+    pub reason: String,
+}
+
+/// Recompute every source's health, and say which sources it deliberately did
+/// not touch (M53-04).
+///
+/// # Why the returned list is part of the result
+///
+/// A sweep that silently skipped three sources would look identical to one that
+/// had no reason to skip them. §11.7's "adapter counts are an outcome of verified
+/// implementation" is only auditable if the excluded set is visible, and the same
+/// argument applies to health: an operator reading "14 sources, all healthy" has
+/// to be able to see that one was never examined.
+///
+/// [`recompute_source_health`] is this function with the list discarded, kept
+/// because every existing caller wants exactly that.
+pub async fn recompute_source_health_with_skips(
     db: &Database,
     window_days: i64,
-) -> Result<Vec<SourceHealthChange>> {
+) -> Result<(Vec<SourceHealthChange>, Vec<SkippedSource>)> {
     let sources = list_sources(db).await?;
     let since = window_start(window_days);
     let mut changes = Vec::new();
+    let mut skipped = Vec::new();
 
     for source in sources {
         // A pause is a decision, not an observation.
         if source.health == "paused" {
             continue;
         }
+
+        // §11.8: "Do not label a source unavailable because one user's
+        // credentials expired." The same reasoning applies harder here, and this
+        // is where it has to live: a host that cannot get past a source's front
+        // door fails every import it attempts, so without this the very first
+        // attempt would rewrite a perfectly healthy source to `unavailable` — on
+        // a permanent, non-actionable basis, and about a site that is serving
+        // every other reader fine. `verification_status` is checked before any
+        // evidence is counted, not after, so the skip cannot be reached by any
+        // combination of import outcomes.
+        if source.verification_status.as_deref() == Some(BLOCKED_HERE) {
+            skipped.push(SkippedSource {
+                key: source.key.clone(),
+                reason: source
+                    .verification_note
+                    .clone()
+                    .unwrap_or_else(|| "unreachable from the build host".to_owned()),
+            });
+            continue;
+        }
+
         let (completed, failed) = finished_import_counts(db, &source.key, &since).await?;
         if completed == 0 && failed == 0 {
             // Nothing finished: no evidence, so no change. `last_checked_at` is
@@ -662,6 +747,38 @@ pub async fn recompute_source_health(
         });
     }
 
+    Ok((changes, skipped))
+}
+
+/// Recompute every source's health from the outcome of its recent imports
+/// (spec §11.8).
+///
+/// # The rules, and why each is what it is
+///
+/// * **`paused` is never derived and never overwritten.** A pause is an
+///   operator's decision, and a sweep that could clear one would be a sweep
+///   that silently un-pauses a source somebody deliberately switched off.
+/// * **A source with no finished imports in the window keeps what it had.**
+///   Silence is not evidence, and `unknown` is the honest state for a source
+///   nobody has tried.
+/// * **One success with no failures is `healthy`.** One failure alongside
+///   successes is `degraded`: the source works and sometimes does not, which is
+///   exactly what a reader should be told.
+/// * **Three failures with no success is `unavailable`**, and an import into an
+///   unavailable source is refused before it is queued rather than queued and
+///   failed.
+/// * **A cancelled import counts as neither.** The reader changed their mind,
+///   which says nothing about the source.
+pub async fn recompute_source_health(
+    db: &Database,
+    window_days: i64,
+) -> Result<Vec<SourceHealthChange>> {
+    // Delegates rather than repeating the loop. The M53-04 `blocked-here` skip
+    // lives in `recompute_source_health_with_skips`, and a second copy of the
+    // body would be a second place to forget it — which is exactly how a
+    // `blocked-here` source's health gets rewritten to `unavailable` by someone
+    // tidying this function up.
+    let (changes, _skipped) = recompute_source_health_with_skips(db, window_days).await?;
     Ok(changes)
 }
 
@@ -731,14 +848,9 @@ async fn finished_import_counts(
 /// build, and a source added by a newer build of the software has no row until
 /// the instance has synced its catalogue once.
 pub async fn find_source(db: &Database, key: &str) -> Result<Option<Source>> {
-    let sql = db.sql(
-        "SELECT key, display_name, adapter_version, enabled, disabled_reason,
-                capability_json, health, last_checked_at
-         FROM sources WHERE key = ?",
-        "SELECT key, display_name, adapter_version, enabled, disabled_reason,
-                capability_json, health, last_checked_at
-         FROM sources WHERE key = ?",
-    );
+    let sqlite_sql = format!("SELECT {SOURCE_COLUMNS} FROM sources WHERE key = ?");
+    let postgres_sql = format!("SELECT {SOURCE_COLUMNS_PG} FROM sources WHERE key = ?");
+    let sql = db.sql(&sqlite_sql, &postgres_sql);
     fetch_optional_source(db, &sql, key).await
 }
 
@@ -2036,6 +2148,20 @@ const IMPORT_CHAPTER_COLUMNS_PG: &str = "id::text AS id, import_job_id::text AS 
     library_item_id::text AS library_item_id, source_chapter_key, ordinal, title, state, \
     content_blob_checksum, chapter_id::text AS chapter_id, note";
 
+/// The columns every read of `sources` selects, in one place.
+///
+/// Two readers that drift apart is how a column ends up bound to the wrong
+/// field, and `verification_status` is the one whose absence is silent: a
+/// `blocked-here` source that a query does not select looks exactly like one
+/// nobody has classified.
+const SOURCE_COLUMNS: &str = "key, display_name, adapter_version, enabled, disabled_reason, \
+    capability_json, health, last_checked_at, verification_status, verification_note";
+
+/// The PostgreSQL twin of [`SOURCE_COLUMNS`]: `enabled` is a smallint there and
+/// an integer here, so only that column differs in spelling.
+const SOURCE_COLUMNS_PG: &str = "key, display_name, adapter_version, enabled, disabled_reason, \
+    capability_json, health, last_checked_at, verification_status, verification_note";
+
 const CREDENTIAL_COLUMNS: &str = "id, pseud_id, source_key, secret_id, label, status, expires_at, \
     last_checked_at, created_at, updated_at, version, kind, origin_host, consent_at";
 
@@ -2053,6 +2179,8 @@ struct SourceRow {
     capability_json: String,
     health: String,
     last_checked_at: Option<String>,
+    verification_status: Option<String>,
+    verification_note: Option<String>,
 }
 
 #[derive(FromRow)]
@@ -2138,6 +2266,8 @@ fn decode_source(row: SourceRow) -> Result<Source> {
         capability_json: row.capability_json,
         health: row.health,
         last_checked_at: row.last_checked_at,
+        verification_status: row.verification_status,
+        verification_note: row.verification_note,
     })
 }
 
