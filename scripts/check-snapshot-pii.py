@@ -94,6 +94,42 @@ IDENTITY_NAME_RE = re.compile(
     re.I,
 )
 
+
+# Columns whose NAME establishes that they carry a BODY -- the reader-visible
+# text of a work, in its two renderings. Gated on ANY table, for the same reason
+# IDENTITY_NAME_RE is, and unanchored for the same reason: anchoring with `^` made
+# `submitter_ip` pass, because real names are qualified in front far more often
+# than not. A content regex anchored the same way would recognise only
+# `plain_text` and miss `chapter_plain_text`, `cached_body_html` and `raw_text` --
+# the forms an author actually writes.
+#
+# THIS EXISTS BECAUSE A GATE WAS SILENT ON THE MOST SENSITIVE COLUMN IN THE
+# SCHEMA. `chapter_revisions.plain_text` carries the body, and it was not in the
+# policy at all until M60-05; the M60-01 gate only asked about columns in tables
+# it already knew carried PII, and chapter_revisions was not one of them. That
+# fix was applied to ONE TABLE and the class was not fixed, so M59-10's
+# `reader_body_copies` -- a reader's copy of an external body, added three hours
+# after that note was written -- sailed past with no decision asked for. The
+# account_id on that same table WAS caught, because that name matches
+# IDENTITY_NAME_RE, which is what made the omission visible at all.
+#
+# Deliberately NOT included: name, title, description, summary. They are
+# content-adjacent and extremely common, and adding them would ask about
+# `works.title` and every `*_name` in the schema -- turning the gate into noise on
+# every future migration, which is how a gate gets ignored. This names the shapes
+# that carry a BODY.
+#
+# The same false-positive trade the identity regex already makes: a question costs
+# a line in the JSON policy, a missed column costs a disclosure.
+CONTENT_NAME_RE = re.compile(
+    r"("
+    r"plain_?text|sanitized_?html|raw_?html|raw_?text|"
+    r"document_?json|body_?text|body_?html|"
+    r"excerpt|full_?text|chapter_?text"
+    r")",
+    re.I,
+)
+
 # CREATE TABLE [IF NOT EXISTS] name ( ... )  -- and ALTER TABLE ... ADD COLUMN.
 CREATE_TABLE_RE = re.compile(
     r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z0-9_]*)\s*\(",
@@ -171,7 +207,8 @@ def check(tables: dict[str, set[str]], policy: dict[str, dict]) -> list[str]:
                 continue
             # A covered table needs EVERY column decided. Any other table needs
             # one only if the column name itself says it carries an identity.
-            if is_covered_table or IDENTITY_NAME_RE.search(col):
+            if (is_covered_table or IDENTITY_NAME_RE.search(col)
+                    or CONTENT_NAME_RE.search(col)):
                 undecided.append(f"{table}.{col}")
     return undecided
 
@@ -211,6 +248,7 @@ def self_test(tables: dict[str, set[str]], policy: dict[str, dict]) -> int:
       1. it passes on the real tree (otherwise it proves nothing)
       2. it FAILS on a new column in a covered table
       3. it FAILS on a new column whose name says it carries an identity
+      4. it FAILS on a new column whose name says it carries a BODY, on any table
     """
     failures = []
     if check(tables, policy):
@@ -235,6 +273,18 @@ def self_test(tables: dict[str, set[str]], policy: dict[str, dict]) -> int:
     if check(probe3, policy3):
         failures.append("a decided column was still reported undecided")
 
+    # THE FOURTH PROPERTY, and the one this fan-out was added for. A body-text
+    # column on a table that is neither covered nor identity-bearing must still be
+    # caught: that is the exact shape the gate was silent on. Without this probe
+    # the CONTENT_NAME_RE fan-out could be deleted by a later editor who saw no
+    # failing test, and the hole would reopen silently.
+    probe4 = {t: set(c) for t, c in tables.items()}
+    probe4.setdefault("reader_body_copies", set()).add("plain_text")
+    policy4 = {k: v for k, v in policy.items()
+               if k != "reader_body_copies.plain_text"}
+    if not check(probe4, policy4):
+        failures.append("a BODY-TEXT column on an uncovered table was NOT caught")
+
     if failures:
         print("SELF-TEST FAILED -- the gate cannot be trusted:\n")
         for f in failures:
@@ -243,6 +293,7 @@ def self_test(tables: dict[str, set[str]], policy: dict[str, dict]) -> int:
     print("SELF-TEST OK: gate passes the real tree, and fails on:")
     print("  - a new column in a covered table")
     print("  - an identity-named column on any table")
+    print("  - a BODY-TEXT column on any table (the fan-out added for M59-10)")
     print("  - and stops reporting once a decision exists")
     return 0
 
