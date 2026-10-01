@@ -466,6 +466,91 @@ pub enum QueryAst {
     Or(Vec<QueryAst>),
     /// Logical NOT.
     Not(Box<QueryAst>),
+    /// A work has this character, with these properties.
+    ///
+    /// §15.3. The first of the two nodes that were specified in §15.3 and had no
+    /// implementation until migration 0103 gave them a schema.
+    ExistsCharacter(CharacterAssertion),
+    /// A work has a relationship satisfying these bounds.
+    ///
+    /// §15.3. `Not(ExistsRelationship { .. }))` is journey 12's second half: "X
+    /// present, no relationship involving X".
+    ExistsRelationship(RelationshipAssertion),
+}
+
+/// §15.1: a character, bounded.
+///
+/// `prominence` and `attributes_*` are **bounds on one character**, not on the
+/// work. That is the whole point of the type, and it is what §15.3's rule
+/// ("never allow one character to satisfy another character's attributes")
+/// protects: because the bounds live in one struct next to one `character_id`,
+/// the compiler is structurally unable to scatter them across separate `EXISTS`
+/// clauses.
+///
+/// The three `attributes_*` fields are distinct rather than one list with a mode
+/// flag because the difference between "all of these" and "any of these" is the
+/// difference between a conjunction and a disjunction, and a mode flag on a
+/// `Vec` is a mode somebody will eventually forget to check.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CharacterAssertion {
+    /// §15.3: `character_id`. The node id, not a display name.
+    pub character_id: String,
+    /// §15.1: `prominence = protagonist`. Empty means "any prominence".
+    pub prominence: Vec<String>,
+    /// §15.1: `roles = [mentor]`. Empty means "any role".
+    pub roles: Vec<String>,
+    /// §15.1: `attributes_all = [BAMF]`. Every listed attribute must be present.
+    pub attributes_all: Vec<String>,
+    /// Any one of these suffices.
+    pub attributes_any: Vec<String>,
+    /// Restrict to characters that are a point of view.
+    ///
+    /// An `Option<bool>` rather than a bool: `None` means "no opinion", which is
+    /// different from `Some(false)` ("must NOT be POV") and different again from
+    /// `Some(true)`. Collapsing the first two loses a real query.
+    pub is_pov: Option<bool>,
+}
+
+impl CharacterAssertion {
+    /// Whether this assertion bounds anything at all beyond "this character is here".
+    ///
+    /// A bare `exists_character` with no bounds is a legitimate query — it is
+    /// `character:X` — but the compiler still emits it as a correlated `EXISTS`
+    /// rather than folding it into `work_tags`, because `work_characters` and
+    /// `work_tags` are different facts: a tag can name a character without
+    /// recording that character as *present in the work*.
+    pub fn is_bare(&self) -> bool {
+        self.prominence.is_empty()
+            && self.roles.is_empty()
+            && self.attributes_all.is_empty()
+            && self.attributes_any.is_empty()
+            && self.is_pov.is_none()
+    }
+}
+
+/// §15.2: a relationship, bounded.
+///
+/// `participant_any` is a list rather than a single id because §15.2 requires
+/// supporting more than two participants, and "any of these participants" is the
+/// natural query: *any romantic pairing involving X or Y*.
+///
+/// `excluded_participants` exists for the query §15.3 does not spell out but the
+/// use case needs: "X with anyone **except** Y". It compiles to a correlated
+/// `NOT EXISTS` **within the same relationship row**, which is the only correct
+/// compilation — an `AND NOT EXISTS` at the top level would exclude every work
+/// containing a X-with-someone-else pairing, not just X-with-Y.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RelationshipAssertion {
+    /// Any of these participants makes the relationship count.
+    pub participant_any: Vec<String>,
+    /// §15.2: `Kind = romantic`. Empty means "any kind".
+    pub kind_any: Vec<String>,
+    /// §15.2: `Prominence = central`. Empty means "any prominence".
+    pub prominence: Vec<String>,
+    /// §15.2: `Dynamics = [enemies_to_lovers]`. Empty means "any".
+    pub dynamics: Vec<String>,
+    /// A relationship containing any of these does **not** count.
+    pub excluded_participants: Vec<String>,
 }
 
 /// A parse error with the character offset of the mistake.
