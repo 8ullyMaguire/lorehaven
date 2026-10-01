@@ -68,11 +68,28 @@ Every change passes, before it is committed:
 | doctests | `cargo test -p <touched> --doc` | **standalone — never mixed with target flags** |
 | E2E | Playwright, one suite at a time | for anything user-facing |
 
-**Two single-backend blind spots have already cost real defects.** A PG-only INT4
-into `i64` decode, and a doctest target that never compiled. Neither is visible
-on SQLite. A change that can only fail on one backend must be gated on both, and
-doctests run as their own command because cargo refuses to mix `--doc` with
-target-selecting flags.
+**Three failure modes have already cost real defects.** A PG-only INT4 into `i64`
+decode; a doctest target that never compiled; and a gate failure that was the
+*machine*, not the code. None is visible on SQLite. A change that can only fail on
+one backend must be gated on both, and doctests run as their own command because
+cargo refuses to mix `--doc` with target-selecting flags.
+
+The third one is worth stating as a rule, because it presents as a code error and
+cost real time to diagnose:
+
+> **Before reading a gate failure as a code failure, check whether the artefact
+> the error names is newer than your own run.** `~/.cargo/config.toml` sets a
+> **global** `target-dir`, so every project on this host compiles into the same
+> `deps/`. A concurrent build elsewhere can write a second copy of a crate into
+> it mid-run, and cargo's rustdoc invocation then names that crate twice:
+> `found crates (hex and hex) with colliding StableCrateId values`, reported at
+> whatever line of yours happens to use it.
+
+Tells: `cargo tree -i <crate>` shows one version; the rlibs have different md5s at
+the same size; and their mtimes fall inside your run. Fix the contention, not the
+dependency — and gate at `--test-threads=2` on SQLite when another agent session is
+compiling, or the same contention shows up as
+`pool timed out while waiting for an open connection`.
 
 Full-workspace runs on both backends before a milestone is called done, and before
 a deploy. If a gate is red, clear it — including issues that predate the change.
