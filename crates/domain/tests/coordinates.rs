@@ -64,11 +64,13 @@ fn work_of(chapters: usize, words_each: usize, dialogue: usize) -> Corpus {
         chapters: (0..chapters)
             .map(|c| ChapterText {
                 word_count: words_each,
-                plain_text: format!(
-                    "{} {}",
-                    chapter(2, words_each / 4).plain_text,
-                    format!("marker{c}"),
-                ),
+                // `format!("marker{c}")` inside the args of another `format!` is
+                // just `c`: the inner call exists only to turn an integer into text,
+                // and the outer one already does that for every argument it is given.
+                // The marker is not cosmetic, though -- it is what keeps two chapters
+                // from being byte-identical, which is the degenerate corpus this
+                // fixture exists to avoid.
+                plain_text: format!("{} marker{c}", chapter(2, words_each / 4).plain_text),
             })
             .collect(),
         dialogue_words: dialogue,

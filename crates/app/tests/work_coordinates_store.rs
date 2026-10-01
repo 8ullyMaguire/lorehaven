@@ -75,11 +75,11 @@ async fn a_measured_work_reads_back_identically() {
     let corpus = corpus_of(3, 800, 240);
     let expected = expected_measured(3, 800, 240);
 
-    wc::measure_and_store(&db.db(), &work, &corpus, 7, "2026-10-01T12:00:00Z")
+    wc::measure_and_store(db.db(), &work, &corpus, 7, "2026-10-01T12:00:00Z")
         .await
         .expect("store coordinates");
 
-    let read = wc::measured_coordinates(&db.db(), &work)
+    let read = wc::measured_coordinates(db.db(), &work)
         .await
         .expect("read coordinates")
         .expect("the work was just measured, so it must have coordinates");
@@ -116,13 +116,13 @@ async fn an_unmeasurable_work_is_absent_not_zero() {
         short.word_count()
     );
 
-    wc::measure_and_store(&db.db(), &work, &short, 1, "2026-10-01T12:00:00Z")
+    wc::measure_and_store(db.db(), &work, &short, 1, "2026-10-01T12:00:00Z")
         .await
         .expect("store an unmeasurable outcome");
 
     // The read that hands out coordinates must return None, NOT a zeroed struct.
     assert!(
-        wc::measured_coordinates(&db.db(), &work)
+        wc::measured_coordinates(db.db(), &work)
             .await
             .expect("read")
             .is_none(),
@@ -149,11 +149,11 @@ async fn a_single_chapter_work_is_measured_with_no_spread() {
         "one chapter has no distribution; the fixture must actually be single-chapter"
     );
 
-    wc::measure_and_store(&db.db(), &work, &corpus, 2, "2026-10-01T12:00:00Z")
+    wc::measure_and_store(db.db(), &work, &corpus, 2, "2026-10-01T12:00:00Z")
         .await
         .expect("store");
 
-    let read = wc::measured_coordinates(&db.db(), &work)
+    let read = wc::measured_coordinates(db.db(), &work)
         .await
         .expect("read")
         .expect("a single-chapter work is still measured");
@@ -181,13 +181,13 @@ async fn a_recomputation_replaces_the_previous_row() {
     // Measure twice with different text. A second opinion must replace the first,
     // not accumulate beside it — that is what makes a backfill safe to re-run.
     let first = corpus_of(4, 800, 0);
-    wc::measure_and_store(&db.db(), &work, &first, 1, "2026-10-01T12:00:00Z")
+    wc::measure_and_store(db.db(), &work, &first, 1, "2026-10-01T12:00:00Z")
         .await
         .expect("first measurement");
 
     let second = corpus_of(2, 800, 400);
     let expected_second = expected_measured(2, 800, 400);
-    wc::measure_and_store(&db.db(), &work, &second, 2, "2026-10-01T13:00:00Z")
+    wc::measure_and_store(db.db(), &work, &second, 2, "2026-10-01T13:00:00Z")
         .await
         .expect("second measurement");
 
@@ -197,7 +197,7 @@ async fn a_recomputation_replaces_the_previous_row() {
         "one work has one set of coordinates; a recompute must replace, not duplicate"
     );
 
-    let read = wc::measured_coordinates(&db.db(), &work)
+    let read = wc::measured_coordinates(db.db(), &work)
         .await
         .expect("read")
         .expect("measured");
@@ -207,7 +207,7 @@ async fn a_recomputation_replaces_the_previous_row() {
     );
 
     // And the version moved with it, so a stale row is detectable.
-    let stored = wc::stored_coordinates(&db.db(), &work)
+    let stored = wc::stored_coordinates(db.db(), &work)
         .await
         .expect("read stored")
         .expect("a row exists");
@@ -232,7 +232,7 @@ async fn a_batch_read_returns_only_measured_works() {
         let work = id(&format!("coord-batch-measured-{i}"));
         fixture_work(&db, &work).await;
         wc::measure_and_store(
-            &db.db(),
+            db.db(),
             &work,
             &corpus_of(3, 800, 100 * i),
             1,
@@ -247,7 +247,7 @@ async fn a_batch_read_returns_only_measured_works() {
         let work = id(&format!("coord-batch-short-{i}"));
         fixture_work(&db, &work).await;
         wc::measure_and_store(
-            &db.db(),
+            db.db(),
             &work,
             &corpus_of(1, 100, 0),
             1,
@@ -265,7 +265,7 @@ async fn a_batch_read_returns_only_measured_works() {
     asked.extend(unmeasured.clone());
     asked.push(never.clone());
 
-    let batch = wc::measured_coordinates_for(&db.db(), &asked)
+    let batch = wc::measured_coordinates_for(db.db(), &asked)
         .await
         .expect("batch read");
 
@@ -306,11 +306,11 @@ async fn the_unmeasurable_reason_survives_the_round_trip() {
         let work = id(&format!("coord-reason-{label}"));
         fixture_work(&db, &work).await;
 
-        wc::measure_and_store(&db.db(), &work, &corpus, 1, "2026-10-01T12:00:00Z")
+        wc::measure_and_store(db.db(), &work, &corpus, 1, "2026-10-01T12:00:00Z")
             .await
             .expect("store an unmeasurable outcome");
 
-        let stored = wc::stored_coordinates(&db.db(), &work)
+        let stored = wc::stored_coordinates(db.db(), &work)
             .await
             .expect("read stored")
             .expect("a row exists");
@@ -340,7 +340,7 @@ async fn coordinates_can_be_measured_from_stored_chapters() {
     fixture_chapters(&db, &work, &author, 3, 800).await;
 
     // Pull the prose out of the database the way a backfill would, and measure it.
-    let (corpus, _) = wc::corpus_for_work(&db.db(), &work, 240)
+    let (corpus, _) = wc::corpus_for_work(db.db(), &work, 240)
         .await
         .expect("read chapters")
         .expect("the fixture wrote three chapters");
@@ -357,7 +357,7 @@ async fn coordinates_can_be_measured_from_stored_chapters() {
          coordinates agree with the number the platform already shows"
     );
 
-    let measured = wc::measure_and_store(&db.db(), &work, &corpus, 1, "2026-10-01T12:00:00Z")
+    let measured = wc::measure_and_store(db.db(), &work, &corpus, 1, "2026-10-01T12:00:00Z")
         .await
         .expect("store");
 
@@ -366,7 +366,7 @@ async fn coordinates_can_be_measured_from_stored_chapters() {
         outcome.is_measured(),
         "2400 words of real prose must be measurable, got {outcome:?}"
     );
-    let read = wc::measured_coordinates(&db.db(), &work)
+    let read = wc::measured_coordinates(db.db(), &work)
         .await
         .expect("read")
         .expect("measured");
@@ -391,7 +391,7 @@ async fn a_cleared_work_is_absent_rather_than_stale() {
     let work = id("coord-cleared");
     fixture_work(&db, &work).await;
     wc::measure_and_store(
-        &db.db(),
+        db.db(),
         &work,
         &corpus_of(3, 800, 100),
         1,
@@ -400,7 +400,7 @@ async fn a_cleared_work_is_absent_rather_than_stale() {
     .await
     .expect("store");
     assert!(
-        wc::measured_coordinates(&db.db(), &work)
+        wc::measured_coordinates(db.db(), &work)
             .await
             .expect("read")
             .is_some(),
@@ -408,18 +408,18 @@ async fn a_cleared_work_is_absent_rather_than_stale() {
     );
 
     assert!(
-        wc::clear_coordinates(&db.db(), &work).await.expect("clear"),
+        wc::clear_coordinates(db.db(), &work).await.expect("clear"),
         "clearing an existing row must report that it removed one"
     );
     assert!(
-        wc::measured_coordinates(&db.db(), &work)
+        wc::measured_coordinates(db.db(), &work)
             .await
             .expect("read")
             .is_none(),
         "a cleared work must read as absent; a stale coordinate is worse than none"
     );
     assert!(
-        !wc::clear_coordinates(&db.db(), &work)
+        !wc::clear_coordinates(db.db(), &work)
             .await
             .expect("clear again"),
         "clearing a row that is not there must report honestly rather than claim a removal"
@@ -487,11 +487,11 @@ async fn both_engines_report_the_same_coordinates() {
         other => panic!("[{which}] the fixture must be measurable, got {other:?}"),
     };
 
-    wc::measure_and_store(&db.db(), &work, &corpus, 3, "2026-10-01T12:00:00Z")
+    wc::measure_and_store(db.db(), &work, &corpus, 3, "2026-10-01T12:00:00Z")
         .await
         .expect("store");
 
-    let read = wc::measured_coordinates(&db.db(), &work)
+    let read = wc::measured_coordinates(db.db(), &work)
         .await
         .expect("read")
         .unwrap_or_else(|| panic!("[{which}] the work must be measured"));

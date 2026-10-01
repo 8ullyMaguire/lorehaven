@@ -231,7 +231,7 @@ async fn characters_persist_and_read_back() {
     fixture_work(&db, &work).await;
 
     wc::upsert_character(
-        &db.db(),
+        db.db(),
         &lorehaven_db::work_characters::WorkCharacter {
             work_id: work.clone(),
             character_node_id: "alice".into(),
@@ -243,7 +243,7 @@ async fn characters_persist_and_read_back() {
     .await
     .expect("upsert alice");
     wc::upsert_character(
-        &db.db(),
+        db.db(),
         &lorehaven_db::work_characters::WorkCharacter {
             work_id: work.clone(),
             character_node_id: "bob".into(),
@@ -255,7 +255,7 @@ async fn characters_persist_and_read_back() {
     .await
     .expect("upsert bob");
 
-    let all = wc::characters_for_work(&db.db(), &work)
+    let all = wc::characters_for_work(db.db(), &work)
         .await
         .expect("read characters");
     assert_eq!(all.len(), 2, "both characters must persist");
@@ -263,7 +263,7 @@ async fn characters_persist_and_read_back() {
     // `is_pov` is BIGINT on PostgreSQL and INTEGER on SQLite. Decoding it as i64
     // fails on neither, but decoding as bool would fail on both — which is why the
     // round trip asserts the bool, not the integer.
-    let alice = wc::character_in_work(&db.db(), &work, "alice")
+    let alice = wc::character_in_work(db.db(), &work, "alice")
         .await
         .expect("read alice")
         .expect("alice is present");
@@ -298,7 +298,7 @@ async fn prominence_orders_by_rank_not_alphabetically() {
         ("bob", "supporting"),
     ] {
         wc::upsert_character(
-            &db.db(),
+            db.db(),
             &lorehaven_db::work_characters::WorkCharacter {
                 work_id: work.clone(),
                 character_node_id: node.into(),
@@ -311,7 +311,7 @@ async fn prominence_orders_by_rank_not_alphabetically() {
         .expect("upsert");
     }
 
-    let order = wc::characters_for_work(&db.db(), &work)
+    let order = wc::characters_for_work(db.db(), &work)
         .await
         .expect("read")
         .into_iter()
@@ -345,7 +345,7 @@ async fn one_character_does_not_satisfy_another_characters_attributes() {
         ("carol", "cameo"),
     ] {
         wc::upsert_character(
-            &db.db(),
+            db.db(),
             &lorehaven_db::work_characters::WorkCharacter {
                 work_id: work.clone(),
                 character_node_id: node.into(),
@@ -357,7 +357,7 @@ async fn one_character_does_not_satisfy_another_characters_attributes() {
         .await
         .expect("upsert");
     }
-    wc::add_character_attribute(&db.db(), &work, "carol", "vampire", "2026-01-01T00:00:00Z")
+    wc::add_character_attribute(db.db(), &work, "carol", "vampire", "2026-01-01T00:00:00Z")
         .await
         .expect("attach the vampire attribute to Carol");
 
@@ -447,7 +447,7 @@ async fn an_attribute_needs_its_character_present() {
     // Alice is in `work` but not in `other_work`. The composite FK must reject an
     // attribute that names her in the work she is not part of.
     wc::upsert_character(
-        &db.db(),
+        db.db(),
         &lorehaven_db::work_characters::WorkCharacter {
             work_id: work.clone(),
             character_node_id: "alice".into(),
@@ -460,7 +460,7 @@ async fn an_attribute_needs_its_character_present() {
     .expect("upsert alice into the first work");
 
     let result = wc::add_character_attribute(
-        &db.db(),
+        db.db(),
         &other_work,
         "alice",
         "vampire",
@@ -477,7 +477,7 @@ async fn an_attribute_needs_its_character_present() {
     // The legitimate one still works, so the test above is not just "the write path
     // is broken".
     assert!(wc::add_character_attribute(
-        &db.db(),
+        db.db(),
         &work,
         "alice",
         "vampire",
@@ -498,17 +498,17 @@ async fn a_ship_is_a_set_so_ab_and_ba_are_one() {
     let ship = "ship-set-identity-ship-ab";
 
     // Insert in one order...
-    assert!(wc::add_ship_participant(&db.db(), ship, "alice")
+    assert!(wc::add_ship_participant(db.db(), ship, "alice")
         .await
         .expect("alice"));
-    assert!(wc::add_ship_participant(&db.db(), ship, "bob")
+    assert!(wc::add_ship_participant(db.db(), ship, "bob")
         .await
         .expect("bob"));
 
     // ...and the reverse order on a second ship node with the same participants.
     // Because identity is the set, these two rows are indistinguishable, which is
     // the property an `ord` column would destroy.
-    let participants = wc::ship_participants(&db.db(), ship)
+    let participants = wc::ship_participants(db.db(), ship)
         .await
         .expect("read participants");
     assert_eq!(
@@ -519,15 +519,12 @@ async fn a_ship_is_a_set_so_ab_and_ba_are_one() {
 
     // Idempotent: adding alice again is not a new fact.
     assert!(
-        !wc::add_ship_participant(&db.db(), ship, "alice")
+        !wc::add_ship_participant(db.db(), ship, "alice")
             .await
             .expect("re-add alice"),
         "adding an existing participant must report no change"
     );
-    assert_eq!(
-        wc::ship_participants(&db.db(), ship).await.unwrap().len(),
-        2
-    );
+    assert_eq!(wc::ship_participants(db.db(), ship).await.unwrap().len(), 2);
 
     db.cleanup().await;
 }
@@ -542,17 +539,17 @@ async fn the_relationship_type_belongs_to_the_work() {
     fixture_work(&db, &fic_one).await;
     fixture_work(&db, &fic_two).await;
     let ship = format!("{tag}-ship-ab");
-    wc::add_ship_participant(&db.db(), &ship, "alice")
+    wc::add_ship_participant(db.db(), &ship, "alice")
         .await
         .unwrap();
-    wc::add_ship_participant(&db.db(), &ship, "bob")
+    wc::add_ship_participant(db.db(), &ship, "bob")
         .await
         .unwrap();
 
     // The same pairing, claimed two different ways by two different works. This is
     // exactly the case a ship node carrying rel_type could not represent.
     wc::upsert_relationship(
-        &db.db(),
+        db.db(),
         &lorehaven_db::work_characters::WorkRelationship {
             id: "rel-romantic".into(),
             work_id: fic_one.clone(),
@@ -567,7 +564,7 @@ async fn the_relationship_type_belongs_to_the_work() {
     .await
     .expect("fic one is romantic");
     wc::upsert_relationship(
-        &db.db(),
+        db.db(),
         &lorehaven_db::work_characters::WorkRelationship {
             id: "rel-platonic".into(),
             work_id: fic_two.clone(),
@@ -582,12 +579,8 @@ async fn the_relationship_type_belongs_to_the_work() {
     .await
     .expect("fic two is platonic");
 
-    let one = wc::relationships_for_work(&db.db(), &fic_one)
-        .await
-        .unwrap();
-    let two = wc::relationships_for_work(&db.db(), &fic_two)
-        .await
-        .unwrap();
+    let one = wc::relationships_for_work(db.db(), &fic_one).await.unwrap();
+    let two = wc::relationships_for_work(db.db(), &fic_two).await.unwrap();
     assert_eq!(one.len(), 1);
     assert_eq!(two.len(), 1);
     assert_eq!(one[0].rel_type, "romantic");
@@ -602,7 +595,7 @@ async fn the_relationship_type_belongs_to_the_work() {
 
     // And "relationships involving Alice" sees both, because it joins through the
     // participant set rather than matching the ship node by name.
-    let involving = wc::relationships_involving(&db.db(), &fic_one, "alice")
+    let involving = wc::relationships_involving(db.db(), &fic_one, "alice")
         .await
         .unwrap();
     assert_eq!(
@@ -622,12 +615,12 @@ async fn one_work_makes_one_claim_of_a_kind_about_a_pairing() {
     let work = id("rel-one-claim-work");
     fixture_work(&db, &work).await;
     let ship = format!("{tag}-ship-ab");
-    wc::add_ship_participant(&db.db(), &ship, "alice")
+    wc::add_ship_participant(db.db(), &ship, "alice")
         .await
         .unwrap();
 
     wc::upsert_relationship(
-        &db.db(),
+        db.db(),
         &lorehaven_db::work_characters::WorkRelationship {
             id: "rel-1".into(),
             work_id: work.clone(),
@@ -645,7 +638,7 @@ async fn one_work_makes_one_claim_of_a_kind_about_a_pairing() {
     // Re-claiming the same kind is an UPDATE, so a `NOT ... type:romantic`
     // exclusion cannot be defeated by a duplicate row.
     wc::upsert_relationship(
-        &db.db(),
+        db.db(),
         &lorehaven_db::work_characters::WorkRelationship {
             id: "rel-2-different-id".into(),
             work_id: work.clone(),
@@ -660,7 +653,7 @@ async fn one_work_makes_one_claim_of_a_kind_about_a_pairing() {
     .await
     .expect("re-claim the same kind");
 
-    let all = wc::relationships_for_work(&db.db(), &work).await.unwrap();
+    let all = wc::relationships_for_work(db.db(), &work).await.unwrap();
     assert_eq!(
         all.len(),
         1,
@@ -684,16 +677,16 @@ async fn journey_twelve_excludes_only_matching_relationships() {
     let work = id("journey12-work");
     fixture_work(&db, &work).await;
     let ship = format!("{tag}-ship-ab");
-    wc::add_ship_participant(&db.db(), &ship, "alice")
+    wc::add_ship_participant(db.db(), &ship, "alice")
         .await
         .unwrap();
-    wc::add_ship_participant(&db.db(), &ship, "bob")
+    wc::add_ship_participant(db.db(), &ship, "bob")
         .await
         .unwrap();
 
     for node in ["alice", "bob"] {
         wc::upsert_character(
-            &db.db(),
+            db.db(),
             &lorehaven_db::work_characters::WorkCharacter {
                 work_id: work.clone(),
                 character_node_id: node.into(),
@@ -706,7 +699,7 @@ async fn journey_twelve_excludes_only_matching_relationships() {
         .unwrap();
     }
     wc::upsert_relationship(
-        &db.db(),
+        db.db(),
         &lorehaven_db::work_characters::WorkRelationship {
             id: "j12-rel".into(),
             work_id: work.clone(),
@@ -786,7 +779,7 @@ async fn invalid_values_are_refused_before_the_database() {
     fixture_work(&db, &work).await;
 
     let bad_prominence = wc::upsert_character(
-        &db.db(),
+        db.db(),
         &lorehaven_db::work_characters::WorkCharacter {
             work_id: work.clone(),
             character_node_id: "alice".into(),
@@ -802,7 +795,7 @@ async fn invalid_values_are_refused_before_the_database() {
     );
 
     let bad_rel = wc::upsert_relationship(
-        &db.db(),
+        db.db(),
         &lorehaven_db::work_characters::WorkRelationship {
             id: "bad".into(),
             work_id: work.clone(),
@@ -859,7 +852,7 @@ async fn both_engines_report_the_same_substrate() {
     fixture_work(&db, &work).await;
 
     wc::upsert_character(
-        &db.db(),
+        db.db(),
         &lorehaven_db::work_characters::WorkCharacter {
             work_id: work.clone(),
             character_node_id: "alice".into(),
@@ -870,7 +863,7 @@ async fn both_engines_report_the_same_substrate() {
     )
     .await
     .expect("upsert");
-    let read = wc::character_in_work(&db.db(), &work, "alice")
+    let read = wc::character_in_work(db.db(), &work, "alice")
         .await
         .unwrap()
         .expect("present");
@@ -934,7 +927,7 @@ async fn the_query_language_finds_characters_and_pairings() {
         (&solo_work, "alice", "cameo"),
     ] {
         wc::upsert_character(
-            &db.db(),
+            db.db(),
             &lorehaven_db::work_characters::WorkCharacter {
                 work_id: work.clone(),
                 character_node_id: node.into(),
@@ -954,9 +947,7 @@ async fn the_query_language_finds_characters_and_pairings() {
         (&poly_ship, "bob"),
         (&poly_ship, "carol"),
     ] {
-        wc::add_ship_participant(&db.db(), ship, node)
-            .await
-            .unwrap();
+        wc::add_ship_participant(db.db(), ship, node).await.unwrap();
     }
 
     for (work, ship, kind) in [
@@ -964,7 +955,7 @@ async fn the_query_language_finds_characters_and_pairings() {
         (&poly_work, &poly_ship, "platonic"),
     ] {
         wc::upsert_relationship(
-            &db.db(),
+            db.db(),
             &lorehaven_db::work_characters::WorkRelationship {
                 id: format!("ql-rel-{}", &work[..8]),
                 work_id: work.clone(),

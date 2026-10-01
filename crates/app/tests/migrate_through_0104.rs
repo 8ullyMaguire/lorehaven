@@ -29,7 +29,7 @@ async fn node(db: &TestDb, id: &str) {
          VALUES ('{id}', 'character', '{id}', '{}', '2026-01-01T00:00:00Z')",
         id.to_lowercase()
     ));
-    exec(&db, &sql).await.expect("a node inserts");
+    exec(db, &sql).await.expect("a node inserts");
 }
 
 /// Run a statement on whichever pool the harness built.
@@ -57,12 +57,12 @@ async fn exec(db: &TestDb, sql: &str) -> Result<(), sqlx::Error> {
 /// counted as the constraint biting. An assertion that cannot say which error it
 /// saw will do that again.
 async fn refused(db: &TestDb, sql: &str) -> bool {
-    exec(&db, sql).await.is_err()
+    exec(db, sql).await.is_err()
 }
 
 /// The error text a statement produced, or None if it succeeded.
 async fn refusal(db: &TestDb, sql: &str) -> Option<String> {
-    exec(&db, sql).await.err().map(|e| e.to_string())
+    exec(db, sql).await.err().map(|e| e.to_string())
 }
 
 /// Read one text value.

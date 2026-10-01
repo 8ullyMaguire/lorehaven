@@ -301,17 +301,20 @@ fn render_scoped(p: &ScopedPredicate) -> Result<SqlFragment, QueryError> {
     let mut binds: Vec<String> = Vec::new();
     let joined = format!("/{}//", withs.join("//"));
 
-    let mut clauses = vec![
+    // Plain string literals, not `format!`: none of these has an interpolation, and
+    // `format!` on a constant is a runtime no-op that reads like something is being
+    // substituted. The `(a)`/`(b)` split is the whole point of the pair -- `a`
+    // names every participant, `b` admits no unnamed one -- so a future edit that
+    // drops `b` would silently let a ship value name a subset of its participants.
+    let mut clauses: Vec<String> = vec![
         // (a) every participant of the ship is named in the value
-        format!(
-            "EXISTS (SELECT 1 FROM ship_participants sp WHERE sp.ship_node_id = wr.ship_node_id \
-             AND (? || '%') LIKE '%/' || sp.character_node_id || '/%')"
-        ),
+        "EXISTS (SELECT 1 FROM ship_participants sp WHERE sp.ship_node_id = wr.ship_node_id \
+         AND (? || '%') LIKE '%/' || sp.character_node_id || '/%')"
+            .to_owned(),
         // (b) no participant of the ship is unnamed in the value
-        format!(
-            "NOT EXISTS (SELECT 1 FROM ship_participants sm WHERE sm.ship_node_id = wr.ship_node_id \
-             AND (? || '%') NOT LIKE '%/' || sm.character_node_id || '/%')"
-        ),
+        "NOT EXISTS (SELECT 1 FROM ship_participants sm WHERE sm.ship_node_id = wr.ship_node_id \
+         AND (? || '%') NOT LIKE '%/' || sm.character_node_id || '/%')"
+            .to_owned(),
     ];
     // (a) and (b) share one bind of the joined value, so it is bound twice. There is
     // no back-reference: `rewrite_placeholders` numbers every `?` in order.
@@ -320,10 +323,11 @@ fn render_scoped(p: &ScopedPredicate) -> Result<SqlFragment, QueryError> {
 
     // (c) every name in the value is a participant of the ship
     for w in &withs {
-        clauses.push(format!(
+        clauses.push(
             "EXISTS (SELECT 1 FROM ship_participants sq WHERE sq.ship_node_id = wr.ship_node_id \
              AND sq.character_node_id = ?)"
-        ));
+                .to_owned(),
+        );
         binds.push((*w).to_owned());
     }
 
