@@ -292,22 +292,47 @@ pub async fn record_interaction(
 /// slots are random *by design*; that randomness is returned in
 /// `RankedOutcome.exploration` so it can be logged rather than seeded from the
 /// clock.
+/// Rank a candidate set for one reader.
+///
+/// `dimensions_for` is `+ Send + Sync` on purpose. A bare `&dyn Fn` is neither,
+/// so a caller that holds the reference across this function's own `.await`
+/// produces a future that is not `Send`, and an axum handler that calls it fails
+/// to compile with an opaque `Handler` trait error that names neither the
+/// closure nor the reason. Stating the bound here makes the compiler name the
+/// argument instead, and every real caller (a `move` closure over a
+/// `HashMap<String, Vec<String>>`) satisfies it.
 pub async fn rank_works(
     db: &Database,
     account: &str,
     candidates: Vec<WorkId>,
-    dimensions_for: &dyn Fn(&WorkId) -> Vec<String>,
+    dimensions_for: &(dyn Fn(&WorkId) -> Vec<String> + Send + Sync),
     options: &RankOptions,
 ) -> Result<RankedOutcome> {
     if candidates.is_empty() {
         return Ok(RankedOutcome::default());
     }
 
-    // Determinism starts here. Sorting by id before scoring means two calls with
-    // the same candidate set cannot differ because the input arrived shuffled.
-    let mut candidates = candidates;
-    candidates.sort();
-    candidates.dedup();
+    // Deduplicate WITHOUT reordering.
+    //
+    // The first draft sorted by id here, on the reasoning that a sorted input
+    // cannot differ because the input arrived shuffled. That is true and it is
+    // the wrong property: sorting by id makes the output a function of the
+    // UUIDs, so when taste cannot separate two candidates -- an unweighted
+    // reader, or two works with equal scores -- the order handed back is
+    // lexicographic-by-uuid. The caller's ranking, which is the *engine's*
+    // ranking, is discarded and replaced by an accident of identifier
+    // assignment.
+    //
+    // The determinism §47.9 asks for is "two calls on the same database state
+    // agree". Stability is preserved by keeping the caller's order: the same
+    // input order produces the same output, and a different input order is a
+    // different input. Duplicates are removed with a seen-set rather than
+    // `sort()+dedup()` for the same reason.
+    let mut seen = std::collections::HashSet::with_capacity(candidates.len());
+    let mut candidates: Vec<WorkId> = candidates
+        .into_iter()
+        .filter(|id| seen.insert(*id))
+        .collect();
 
     let weights = TagWeights::for_reader(db, account).await?;
 
@@ -322,10 +347,31 @@ pub async fn rank_works(
     let scores: Vec<f64> = scored.iter().map(|(_, score, _)| *score).collect();
     let propensities = ranked_propensity(&scores);
 
+    // Both paths order by SCORE, descending. The no-variety path used to
+    // return `scored` in input order, which meant `rank_works` only ever ranked
+    // by taste when MMR was switched on -- with `variety: false` it was a
+    // pass-through, and the caller's ordering was returned unchanged. That was
+    // invisible while the function sorted candidates by id first, because the
+    // uuid order then became the output order and a uuid-ordered list looks
+    // exactly like a ranked one until you check which way round it is.
+    let score_of = |id: &WorkId| -> f64 {
+        scored
+            .iter()
+            .find(|(candidate, _, _)| candidate == id)
+            .map_or(0.0, |(_, score, _)| *score)
+    };
     let mut ordered = if options.variety {
         mmr_rerank(&scored, &[], options.lambda)
     } else {
-        scored.iter().map(|(id, _, _)| *id).collect()
+        let mut by_score: Vec<WorkId> = scored.iter().map(|(id, _, _)| *id).collect();
+        // Stable, so candidates with equal scores keep the caller's order
+        // rather than being reshuffled by the sort.
+        by_score.sort_by(|a, b| {
+            score_of(b)
+                .partial_cmp(&score_of(a))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        by_score
     };
 
     // Exploration slots (§47.3): uniform-random over the eligible-but-unshown
@@ -738,6 +784,67 @@ pub fn scout_value(obscurity_at_read: f64, later_rating: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The no-variety path orders by score, descending.
+    ///
+    /// This was a pass-through: with `variety: false` `rank_works` returned the
+    /// candidates in input order, so it only ranked by taste when MMR happened
+    /// to be switched on. The 20 other tests in this file all pass with that bug
+    /// in place, because every one of them either uses `variety: true` or has
+    /// equal scores -- so the gap is invisible from inside this module and was
+    /// found by a route-level test in `m29_transparency.rs` instead.
+    ///
+    /// `rank_works` needs a `Database`, so what is asserted here is the ordering
+    /// rule itself, on the same `(WorkId, f64, Vec<String>)` shape it consumes.
+    /// The integration test is what proves the route gets it.
+    #[test]
+    fn the_no_variety_path_orders_by_score_descending() {
+        let scored: Vec<(WorkId, f64, Vec<String>)> = vec![
+            (work(1), 0.2, vec![]),
+            (work(2), 0.9, vec![]),
+            (work(3), 0.5, vec![]),
+        ];
+        let score_of = |id: &WorkId| -> f64 {
+            scored
+                .iter()
+                .find(|(candidate, _, _)| candidate == id)
+                .map_or(0.0, |(_, score, _)| *score)
+        };
+        let mut by_score: Vec<WorkId> = scored.iter().map(|(id, _, _)| *id).collect();
+        by_score.sort_by(|a, b| {
+            score_of(b)
+                .partial_cmp(&score_of(a))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let scores: Vec<f64> = by_score.iter().map(score_of).collect();
+        assert_eq!(scores, vec![0.9, 0.5, 0.2], "score order, not input order");
+    }
+
+    /// A non-finite score must not panic the sort.
+    ///
+    /// `f64::max` in `score_candidate` cannot produce NaN, but a caller can hand
+    /// `rank_works` a set where one score is NaN via the database (a NULL weight
+    /// read as NaN by some driver), and `partial_cmp` returns `None` there.
+    /// `unwrap_or(Equal)` is what keeps that from becoming a panic inside a
+    /// ranking call -- the same reasoning as the MMR comparison above it.
+    #[test]
+    fn a_nan_score_does_not_panic_the_ordering() {
+        let scored: Vec<(WorkId, f64, Vec<String>)> =
+            vec![(work(1), f64::NAN, vec![]), (work(2), 0.9, vec![])];
+        let score_of = |id: &WorkId| -> f64 {
+            scored
+                .iter()
+                .find(|(candidate, _, _)| candidate == id)
+                .map_or(0.0, |(_, score, _)| *score)
+        };
+        let mut by_score: Vec<WorkId> = scored.iter().map(|(id, _, _)| *id).collect();
+        by_score.sort_by(|a, b| {
+            score_of(b)
+                .partial_cmp(&score_of(a))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        assert_eq!(by_score.len(), 2, "both candidates survive the sort");
+    }
 
     #[test]
     fn a_slot_kind_round_trips_through_its_database_spelling() {
