@@ -1546,6 +1546,30 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Authenticated,
     },
     // ------------------------------------------------------------------
+    // Tasting menu — the uncertainty calibration queue (spec §49.5, M45-19)
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "tasting.rs",
+        handler: "get_queue",
+        method: "GET",
+        path: "/tasting/queue",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "tasting.rs",
+        handler: "post_response",
+        method: "POST",
+        path: "/tasting/respond",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "tasting.rs",
+        handler: "get_my_responses",
+        method: "GET",
+        path: "/tasting/responses",
+        audience: Audience::Authenticated,
+    },
+    // ------------------------------------------------------------------
     // Discovery — nested sub-routers (recipe_routes, dashboard_routes)
     // ------------------------------------------------------------------
     RouteEntry {

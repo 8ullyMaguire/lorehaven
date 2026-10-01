@@ -1,3 +1,91 @@
+## 2026-10-01 — M45-19: the tasting menu's selector was tested and unreachable
+
+**Plan:** `docs/plans/m45-phase1-taste-signal.md` step 3 · **Requirement:** `M45-19`
+
+`M45-19` was `planned`, and the plan's step 3 was next. What was actually true is
+sharper: `crates/db/src/tasting.rs` had a selector, an ordering, a session bound
+and 14 passing unit tests — and **nothing in the application called any of it**.
+`docs/goal.md` names that shape by name ("a unit test on a function nothing
+calls"), so the row was correctly `planned` and the work was to build the door.
+
+### The selector's one number was wrong, and only a probe would have found it
+
+`uncertainty_for` divided by `10_000.0`, with a comment claiming "10_000bp is the
+arena's own scale". It is not. `weights_from_elos`
+(`crates/domain/src/taste_vector.rs:743`) normalises every reader's weights to
+**sum 1.0**. A probe through the production function, not a hand-written number:
+
+```
+STORED_WEIGHT=1 UNCERTAINTY=0.9999
+```
+
+for a dimension rated 1900 after 40 matches. The consequence is not a slightly-off
+score: §49.5's queue *orders by uncertainty*, so a range that is constant across
+the whole library collapses to the `work_id` tie-break. The calibration queue was
+"the lexicographically first N works", for every reader, permanently.
+
+Fixed by squashing against the reader's **own peak weight**, so a change upstream
+cannot re-open it. The old unit test used a literal `9000.0` and passed against
+the broken code — the exact value that hid the bug — so the replacement test goes
+through `weights_from_elos` and cannot drift from the scale it is checking.
+
+### A second bug, in the code written to fix the first
+
+The weight update clamped at `0.0`, reasoning that the arena's normaliser is
+non-negative. That is a misreading: the substrate treats these weights as
+**signed** — `score_candidate` takes `.abs()`, and `ranked_propensity` offsets
+every score by the minimum precisely "because arena weights are signed"
+(`ranking.rs:787`). So a cold-start reader's *decline* computed `0.0 - 0.10`,
+clamped back to `0.0`, and was recorded as a success while moving nothing. Caught
+by `a_declined_sample_is_recorded_and_trains_the_profile`, which now asserts the
+**sign** (`weight < 0.0`) rather than the existence of a weight.
+
+### Two mutations survived the first version of the suite, and both were real
+
+| mutation | first run | after |
+|---|---|---|
+| decline raises the weight | **SURVIVED** | killed — the sign assertion |
+| partial unique index → plain index | **SURVIVED** | killed — `one_work_cannot_have_two_open_samples` |
+| order most-certain-first | killed | — |
+| recorded uncertainty is a constant | killed | — |
+| reinstate the `10_000.0` divisor | killed | — |
+
+The index mutation survived because `candidate_works` filters *answered* works, so
+an **open but unanswered** sample never reaches the insert that the index guards.
+The test that kills it draws a sample in one session, leaves it unanswered, and
+asks again in a second.
+
+### Five `::uuid` casts, invisible on SQLite
+
+0099 declares `tasting_samples` with three types in one table: `id` and
+`account_id` TEXT, `work_id` UUID. Five queries cast them as UUID. Every one is
+accepted by SQLite's dynamic typing and fails on PostgreSQL with `operator does
+not exist: text = uuid` — four runs of HTTP 500s before the schema was read
+directly. `arena_weights.account_id` **is** a real UUID, so the fix was per-query
+rather than blanket; both facts are now written down in the module header.
+
+### Gates
+
+| gate | result |
+|---|---|
+| `cargo fmt --all -- --check` | exit 0 |
+| `cargo test -p lorehaven-app --test tasting_menu` (SQLite) | **14 passed, 0 failed, exit 0** |
+| `cargo test -p lorehaven-app --test tasting_menu` (PostgreSQL 15, `--test-threads=2`) | **14 passed, 0 failed, exit 0** |
+| `cargo test -p lorehaven-app --test route_inventory` | 2 passed, exit 0 |
+| `cargo test -p lorehaven-db --lib migrate` | 9 passed — dialect parity incl. migration 0100 |
+| `cargo test -p lorehaven-db --test migration_catalogue` | 6 passed — 0100 registered in both dialects |
+| `cargo test -p lorehaven-db --no-fail-fast` | 121 + 6 + 8 passed, 0 failed |
+
+PostgreSQL was brought up for this: `docker run -d -p 127.0.0.1:55433:5432
+postgres:15-alpine`, matching the `LOREHAVEN_TEST_PG_URL` the handoff records. The
+server the handoff names was not running on this host.
+
+**`cargo clippy --workspace` is still red**, on 10 findings that predate this
+change and sit in `retention_proposals.rs`, `retention_proposal_admin.rs`,
+`worker.rs` and `doctor.rs` — none of which this work touched. `warnings = "deny"`
+makes them build failures, so the workspace clippy gate cannot pass until they are
+fixed. That is the next unit.
+
 ## 2026-09-30 — M54-01: the bot's e2e suite had never run, and it found a real bug
 
 **Plan:** `docs/plans/m54-bot-core.md` Part B · **Requirement:** `M54-01`

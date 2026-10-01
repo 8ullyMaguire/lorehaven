@@ -351,6 +351,16 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // The tasting menu (§49.5). `Write` rather than `Default` because
+        // `POST /tasting/respond` mutates the reader's taste weights, and the
+        // class is what the rate limiter reads: a calibration queue a reader can
+        // be rate-limited out of is a queue they abandon, and a queue they can
+        // hammer is a way to move their own profile without reading anything.
+        .merge(classified(
+            routes::tasting::router(),
+            RouteClass::Write,
+            &state,
+        ))
         .merge(classified(
             routes::media_resilience::router(),
             RouteClass::Default,
