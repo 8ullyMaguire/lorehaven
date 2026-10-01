@@ -344,7 +344,7 @@ pub async fn rank_works(
     // by `sort()+dedup()`, `with_no_weights_the_feed_stays_in_engine_order`
     // fails. Neither test passes because of the other.
     let mut seen = std::collections::HashSet::with_capacity(candidates.len());
-    let mut candidates: Vec<WorkId> = candidates
+    let candidates: Vec<WorkId> = candidates
         .into_iter()
         .filter(|id| seen.insert(*id))
         .collect();
