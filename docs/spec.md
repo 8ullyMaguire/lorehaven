@@ -8,6 +8,40 @@ This document specifies intended behavior. It does not claim that any feature, a
 
 **Amendment — crawling posture, retention governance, and preservation (2026-09-27):** `docs/spec-amendments/crawling-retention-and-preservation.md` amends §7.6, §11.5, §11.11, §11.12, §11.15, §9.7.1, §9.7.2, §9.7.5, §9.7.6, §19.1, §25.2, §28.2 and §38, and adds §7.7, §11.10b, §11.12a, §11.15a, §11.15b and §19.15. In summary: `imports.honour_robots` becomes the three-valued `imports.robots_posture` (`strict | metadata_only | permissive`) with every fetch declaring a class; §11.15's `cache | aggregate` retention is built as specified with a per-reader body-request door; preservation targets earn credits and a badge for **verified live** preservation with a clawback when a destination dies; an operator may narrow who reads a cached body via `body_audience` (with a reader outside it learning nothing at all, byte-identical to a non-existent work); and a retention setting may be decided by a trust-gated community vote in `advisory` (default) or opt-in `binding` mode. Where it and this document conflict, the amendment governs. Implementation plan: `docs/plans/crawling-retention-preservation.md` (milestone M59).
 
+# Spec amendment: advanced search, Phase 2 — the query planner
+
+**Amendment — advanced search, Phase 2 (2026-10-01):** This amendment adds
+**§15.4.1** (scoped sub-predicates, matching modes, expansion, typed values,
+complexity budget, pretty-printer and diagnostics) and adds **§15.4.1.7**'s
+deferral record. It amends **§15.3** and **§15.4**.
+
+In summary: the query language gains parenthesised **scoped sub-predicates**
+(`ship:(with:"A" with:"B" type:romantic)`) whose fields bind to one row of one
+relation, because §15.3's rule that one character must never satisfy another
+character's attributes is otherwise unreachable from the text surface — the
+uncorrelated two-term form matches works where the pairing and the type come from
+*different* relationship rows, which is measured, not hypothesised. It gains
+`min_match(n, …)` for quantified conjunctions, `+children`/`^n` **taxonomy
+expansion** over the materialised closure (migrations 0104/0105), typed
+`ValueKind`s with `low..high` ranges and explicit comparison operators, a
+**complexity budget** (AST depth, term count, expansion size, `min_match` arity)
+that refuses a query by name rather than truncating it, one canonical
+`ast -> text` **pretty-printer** with a `parse(print(ast)) == ast` property,
+**span-based diagnostics**, and `query_version` on saved views with AST-transform
+migration.
+
+Two items from the source proposal are **refused as duplicates**: its `Ref(...)`
+term becomes §15.4's existing query-alias mechanism rather than a second one, and
+general regex is dropped in favour of §15.5's wildcards and `pg_trgm` suggestions.
+One item is **deferred rather than refused**: embeddings and inferred tags. §47.10
+and §49.9 refuse them *until §47.3's evaluation harness has data* — in those words,
+not permanently — so semantic search is deferred, and
+`work_index_policy.allow_embedding` defaults to `0` so the deferral is a database
+default rather than an intention. Where this amendment and the main document
+conflict, this amendment governs. Rationale and the full decision record: ADR 0026
+(`docs/adr/0026-search-stays-on-sql.md`). Implementation plan:
+`docs/plans/advanced-search-as-built.md` (Phase 2), milestone M46-05.
+
 **ADR 0024 (2026-09-24):** This repository is the base for the consolidated from-scratch specification. The FicNexus gap analysis (`docs/spec-gaps-ficnexus.md`) is resolved by adoption: §16.1a adds the recommendation strategy registry (RRF blend, golden legacy-parity test, `rec.mode`), §11.16 adds the adapter porting backlog (port source: `fanfic-scrapers`, fixture-gated), §23.2 names the bot port source (`fanfic-archivist-bot`). Remaining work to that target state is planned in `docs/plans/remaining-work.md`.
 
 ---
@@ -2408,6 +2442,158 @@ mood:comfort AND status:complete
 Define operator precedence and implicit conjunction explicitly. Parser produces the same typed AST as the visual filter builder. Malformed syntax produces helpful errors. Never pass user query text directly as SQL.
 
 **Query aliases.** A reader may define a macro — `myfandom:` expanding to `fandom:x fandom:y tag:z` — as a named shorthand over the same AST. Aliases are private, expand before parsing, cannot shadow the built-in fields, and are expandable in the interface so a shared search link never depends on the recipient's aliases.
+
+### 15.4.1 Scoped sub-predicates, matching modes, and expansion
+
+M46-05, adopting Phase 2 of `docs/plans/advanced-search-as-built.md`. Everything in
+this subsection is **new mechanics** — §15.3 and §15.4 specified neither. It is
+written as leaves under §15.4 rather than as a new top-level section so no
+§-number moves and no cross-reference breaks.
+
+#### 15.4.1.1 Why scoped sub-predicates exist
+
+§15.3 requires that one character never satisfy another character's attributes, and
+its example JSON already shows the shape: `attributes_all` hangs off
+`exists_character`, not off a sibling term. The query language needs the same
+guarantee, and it cannot get it from implicit conjunction.
+
+`ship:"A/B" AND type:romantic` is two independent terms. `A/B` may be satisfied by
+one relationship row and `type:romantic` by a different one, so the pair returns
+works where A/B exists *somehow* and *something else* is romantic. A reader writing
+that expects one relationship, and the result is wrong in a way that looks right.
+This is measured, not hypothesised: the uncorrelated three-`EXISTS` compilation
+returns 1 on a fixture (Alice protagonist, Carol vampire) where the correlated form
+returns 0.
+
+So the grammar gains a parenthesised sub-predicate whose fields bind to **one row of
+one relation**:
+
+```text
+ship:(with:"Obi-Wan Kenobi" with:"Anakin Skywalker" type:romantic prominence:primary)
+warning:("Major Character Death" depiction:on_page)
+```
+
+Fields inside a sub-predicate are correlated; fields outside it are not. That is the
+whole rule, and it is the same rule §15.3 already states for the AST.
+
+#### 15.4.1.2 Matching modes
+
+```text
+min_match(2, tag:"Found Family", tag:"Hurt/Comfort", tag:"Banter")
+```
+
+matches works having **at least two** of the three terms. It is a quantified
+conjunction over a term list, and it exists because §15.7's filter list is conjunctive
+only: there is currently no way to ask "any two of these". `min_match(0, …)` is
+refused as meaningless, and `min_match(n, …)` with `n` greater than the term count
+is refused as unsatisfiable, rather than silently returning nothing.
+
+Note the relationship to `min_match`'s natural neighbour: it is **not** a synonym for
+a disjunction and not a synonym for a threshold on a score. It counts *satisfied
+terms*, which is why it composes with the complexity budget below — a
+`min_match` over a long list is one term for budget purposes, priced by its arity.
+
+#### 15.4.1.3 Expansion
+
+```text
+tag:"Fake Dating"+children
+tag:"Fake Dating"+children^2
+```
+
+`+children` widens a taxonomy term to its descendants through the materialised
+closure (migration 0104's `taxonomy_closure`); `^2` caps depth. The reader-visible
+result must name the path taken — "Fake Dating → children" as a chip — because an
+expansion that silently adds tags the reader did not name is indistinguishable from
+a wrong result.
+
+**Two rules that are not negotiable, both from the plan's own risk list:**
+
+* **`implies` edges are off unless the reader asks.** A curator's bad edge would
+  otherwise distort every query that touches the affected tags. `tag:X` follows
+  `parent` only; `implies` requires an explicit `implies:` term, and when it is used
+  the expansion chip says so.
+* **Expansion is budgeted and capped.** Depth is capped by the `^n` suffix and by
+  instance config; a term whose expansion exceeds the cap is an error naming the cap,
+  not a truncated result. A silently truncated expansion is the worst outcome,
+  because the reader cannot tell that results are missing.
+
+#### 15.4.1.4 Values, ranges, and comparisons
+
+```text
+words:20k..100k
+updated:<2y
+kudos_pct(fandom):>80
+```
+
+`ValueKind` gains `Duration`, `Count`, `Percentile` and `Ref`, so a category error
+stays typed rather than becoming a string comparison that silently does nothing.
+Ranges are `low..high` and are half-open at the low end. `kudos_pct(<scope>)` is the
+fandom-normalised form §15.10 needs and is a `Percentile` value compared with an
+explicit operator, never a bare number.
+
+**`Ref` is §15.4's query alias, not a new mechanism.** §15.4 already specifies
+aliases — private, expanded before parsing, unable to shadow built-in fields,
+expandable in the interface. A `Ref` value *is* that: a field's value may be an alias
+name, resolved through the same alias table. The as-built plan proposed a separate
+`Ref(...)` term; adopting a second mechanism beside a working one is how two
+spellings of the same thing end up meaning different things, so `Ref` is the alias
+table and nothing more.
+
+#### 15.4.1.5 Complexity budget
+
+The plan's §6 asks for "complexity budgets on the AST (max depth, terms, expansion
+size) so one query can't become a denial of service", and nothing in §15 currently
+provides one. Search is already rate-limited (`[rate_limits] search.burst`,
+`search.per_minute`), which bounds *frequency* but not the *cost of one query*: a
+single query with a deep `OR` tree and a wide `+children` expansion is one request
+doing unbounded work.
+
+So the parser and compiler enforce, on every query:
+
+| Bound | Default | Why it exists |
+|---|---|---|
+| AST depth | 8 | nesting is what makes a compiled predicate exponentially wide |
+| term count | 24 | the disjunctive form a reader can type by hand |
+| expansion size | 200 nodes | an uncapped closure walk is a table scan wearing a disguise |
+| `min_match` arity | 8 | it is a term list like any other |
+
+Exceeding a bound is a **parse error naming the bound and the value**, never a
+truncation. A truncated query returns wrong results while looking successful, which
+is the same failure mode the rest of this subsection is about. The values are
+instance config under §38.6.
+
+#### 15.4.1.6 Pretty-printer and diagnostics
+
+Chips, shareable URLs, saved views and recommendation recipes all render a query
+back to the reader, so there is exactly one canonical `ast -> text` printer and every
+surface uses it. The property `parse(print(ast)) == ast` is enforced by property
+tests plus golden files, because a printer that does not round-trip turns a shared
+link into a different query for the person who receives it.
+
+Diagnostics are **span-based**: "unknown field `fandm`, did you mean `fandom`?" with
+the offending span, so the omnibox can underline it. §15.4 already requires
+"helpful errors" and "error locations"; this fixes the shape.
+
+Saved views record a `query_version`, bumped when the grammar changes in a way that
+alters meaning. Old views migrate by **AST transform**, never by re-parsing their
+text, because a grammar change is exactly when re-parsing is least safe.
+
+#### 15.4.1.7 Deliberately not in this subsection
+
+* **Reader confirmation of author tags.** §49.2 counts reader- and
+  wrangler-confirmed tags toward gravity, and migration 0105 ships
+  `work_tag_votes` feeding `confidence` only. What a reader's confirmation *does*
+  to an author-applied tag is still unspecified, and this subsection does not
+  guess. Recorded as an open question, not a design.
+* **Embeddings and inferred tags.** §47.10 and §49.9 refuse these **until §47.3's
+  evaluation harness has data**, not permanently — both sections say so in those
+  words. Semantic search is therefore deferred, not cancelled, and
+  `work_index_policy.allow_embedding` defaults to 0 so the deferral is a database
+  default rather than an intention. See ADR 0026.
+* **Regex.** Dropped in favour of wildcards and `pg_trgm` fuzzy matching, per §15.5.
+  Regex on entity-name fields is not adopted here: §15.5's answer is suggestions,
+  not silent correction, and a registered function with a statement timeout is a
+  separate decision.
 
 ## 15.5 Fuzzy matching and typo tolerance
 

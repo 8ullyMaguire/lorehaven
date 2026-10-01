@@ -38,47 +38,72 @@ reference here costs nothing and defers the question honestly.
 **Consequence:** the `Plan` boundary is where a future engine would enter, and
 nothing above it would change. No third engine is introduced now.
 
-### 2. Reader-applied tags: NO
+### 2. Reader-applied tags: PARTLY — confidence yes, gravity no
 
 The reference proposes three tag sources — author-applied, reader-applied, and
 machine-inferred — each with a confidence level.
 
-Spec §49.2 is unambiguous: *"Only confirmed tags count toward gravity"*, and
-confirmed means author-confirmed. §15.17 then builds a whole review lifecycle for
-entities that arrive from outside, precisely so unverified names are **visible as
-unverified** rather than folded in.
+Spec §49.2 says: *"A tag contributes to gravity **only if it is reader- or
+wrangler-confirmed.** Author-applied and machine-inferred tags are stored and
+displayed, and are not counted."*
 
-A reader-tag layer is not merely unadopted in this ADR; it would have to be
-hard-excluded from gravity, confidence, ranking, and every aggregate, or it
-becomes a griefing vector: any account could attach any tag to any work and
-influence what other readers see. The exclusion would need enforcing in every
-write path forever.
+**This ADR originally refused reader tags outright and that was wrong on two
+counts**, both found by re-reading the section rather than its headline:
 
-**Consequence:** no `work_tag_votes` table. `work_tags` gains no reader-facing
-write path. If reader tags are ever wanted, that is an amendment to §49.2, not a
-schema detail.
+* §49.2 already *names reader confirmation* as one of the two qualifying kinds. A
+  reader layer is not something the spec excludes; it is something it anticipates.
+* The section's own scope is **gravity**, not display and not search. A reader
+  vote that never touches gravity is not a griefing vector, because it changes
+  nothing other readers see.
 
-### 3. ML-inferred tags and embeddings: NO
+What is genuinely refused is a reader layer that feeds **ranking or any aggregate**.
+So the split is:
+
+* **Adopted:** `work_tag_votes` (migration 0105) — one vote per
+  (work, tag, pseudonymous voter), CHECKed to -1|0|1, feeding
+  `work_tags.confidence` only. `voter_pseud_id` has no reversible mapping
+  anywhere, per §11.17's rule that a reader headcount is not derivable.
+* **Refused:** any reader contribution to gravity, ranking, or counts of readers.
+  `work_tag_votes` has no foreign key into any ranking input, and §49.2's
+  contribution cap stays as specified.
+* `work_tags.source` remains constrained to `'author'` in the database, so
+  "a reader tag is never a gravity input" is an invariant rather than a convention
+  every write path must remember. **Reader *confirmation* of an author tag is a
+  separate, still-unspecified question — see the amendment in §15.4a.**
+
+### 3. ML-inferred tags and embeddings: DEFERRED, not refused
 
 The reference proposes inferred tropes/tone/POV/tense as filterable, plus
 embedding search with pgvector.
 
-Spec §47.10 refuses learning-to-rank in the ranking path; §49.9 reiterates:
-*"No learning-to-rank, no embeddings, no ML."* This is not a preference about
-quality — it is about what a self-hosted, single-instance, volunteer-run archive
-can promise its readers.
+§47.10 and §49.9 both refuse it, and **this ADR originally quoted them as a blanket
+ban. They are not.** Both are scoped, and both name the same reason:
 
-The most concrete evidence is already in the tree. §49.3's work coordinates
-(M45-14, `crates/domain/src/coordinates.rs`) are **four arithmetic measures over
-text** — sentence-length variance, dialogue ratio, type-token ratio,
-chapter-length spread — and §49.3 gives the reason: *"an embedding is a fifth
-that costs the instance CPU it may not have."* The same sentence is why those
-coordinates are reproducible byte-for-byte and why their tests pin determinism
-rather than tolerance.
+> §47.10: *"adding one now would mean the offline evaluation in §47.3 has nothing to
+> evaluate yet."*
+> §49.9: *"A model added here would have no evaluation data until §47.3's propensity
+> logging has run."*
 
-**Consequence:** no `work_vibe` inferred axes, no `model_version` columns, no
-vector store. Where the reference wants a learned signal, this project wants an
-arithmetic one — and says so in the spec.
+So the refusal is **"not until §47.3's evaluation harness exists"**, not "never".
+That is a sequencing constraint, and this project can satisfy it: §7's eval
+harness (`search_query_log`, nDCG@k, zero-result rate) is unbuilt work, not a
+permanent bar. Phase 5 of the as-built plan is therefore **deferred, not cancelled**.
+
+What is true, and is the strongest evidence for the arithmetic-first preference:
+§49.3's work coordinates (M45-14, `crates/domain/src/coordinates.rs`) are **four
+arithmetic measures over text**, and §49.3 gives the reason: *"an embedding is a
+fifth that costs the instance CPU it may not have."* That is why those coordinates
+are byte-for-byte reproducible and why their tests pin determinism.
+
+**Consequence for now:** no `work_vibe` inferred axes and no vector store in the
+retrieval path. `work_passages.model_version` (migration 0105) exists anyway, because
+if embeddings are ever added, a passage computed by an unlabelled model is
+indistinguishable from one computed by a different model, and the search returns
+confident nonsense. `work_index_policy.allow_embedding` defaults to **0**, so the
+deferral is enforced by a database default rather than by intent.
+
+The amendment in §15.4a makes the sequencing explicit so a future session does not
+have to re-derive it.
 
 ## What *is* adopted
 
