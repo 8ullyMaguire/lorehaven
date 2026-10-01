@@ -460,6 +460,121 @@ pub async fn curate_node(
     Ok(affected > 0)
 }
 
+/// Curate a name in **both** vocabularies, atomically.
+///
+/// §15.17 keeps two tables describing one state: `taxonomy_nodes` (what a tag
+/// browser reads, what `search_nodes` searches, what `work_tags` references) and
+/// `canonical_entities` (the exchange's own view, carrying the curator's account and
+/// timestamps). Migration 0082 states the rule this function exists to enforce:
+///
+/// > Two tables describing one state must not spell it two ways, or a query
+/// > joining them silently drops every curated row.
+///
+/// Until now the two writes were two calls in a route handler
+/// (`routes/exchange.rs::curate_entity`), which has three consequences:
+///
+/// 1. **It is a route-only invariant.** Any other caller — a job, an import, the
+///    admin path — curates one table and silently misses the other. `curate_node`
+///    and `curate_entity` are both `pub`, so that is not a compiler error.
+/// 2. **It is not atomic.** The first write commits before the second begins, so a
+///    failure between them leaves a name curated in one vocabulary and unverified in
+///    the other — the exact state 0082 says a join drops.
+/// 3. **The pair is the only place that knows they must be written together.** A
+///    fourth writer would have no way to learn that.
+///
+/// So the pairing moves into the db layer, where it is one call, one transaction,
+/// and reachable by anything that can reach the other two.
+///
+/// `Ok(false)` when neither table had the name: a curate of a name that does not
+/// exist is not a silent success, and the route maps that to 404 rather than
+/// reporting `curated: true` for work that never happened.
+///
+/// Neither write may demote: both `UPDATE`s are already narrow (they set
+/// `review_status = 'curated'` and `canonical` on a `(kind, norm)` match), and
+/// `ensure_node_from_signal`'s update arm deliberately excludes both columns, so a
+/// later signal cannot undo this.
+pub async fn curate_name(
+    db: &Database,
+    kind: &str,
+    norm: &str,
+    canonical_form: &str,
+    curator: &str,
+) -> Result<bool> {
+    let now = crate::identity::now_rfc3339();
+    // Two statements rather than one: the tables have no shared key (one is keyed
+    // (kind, norm), the other by a uuid `id`), so there is no single statement that
+    // writes both. `taxonomy_nodes` also keeps its own `created_at`.
+    let node_sql = db.sql(
+        "UPDATE taxonomy_nodes SET canonical = ?, review_status = 'curated'
+         WHERE kind = ? AND norm = ?",
+        "UPDATE taxonomy_nodes SET canonical = $1, review_status = 'curated'
+         WHERE kind = $2 AND norm = $3",
+    );
+    let entity_sql = db.sql(
+        "UPDATE canonical_entities
+         SET canonical = ?, review_status = 'curated', curated_by = ?, curated_at = ?, updated_at = ?
+         WHERE kind = ? AND norm = ?",
+        "UPDATE canonical_entities
+         SET canonical = $1, review_status = 'curated', curated_by = $2, curated_at = $3, updated_at = $4
+         WHERE kind = $5 AND norm = $6",
+    );
+
+    match db.backend() {
+        Backend::Sqlite => {
+            let mut tx = db.sqlite_pool().expect("sqlite").begin().await?;
+            let node = sqlx::query(&node_sql)
+                .bind(canonical_form)
+                .bind(kind)
+                .bind(norm)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+            let entity = sqlx::query(&entity_sql)
+                .bind(canonical_form)
+                .bind(curator)
+                .bind(&now)
+                .bind(&now)
+                .bind(kind)
+                .bind(norm)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+            if node == 0 && entity == 0 {
+                tx.rollback().await?;
+                return Ok(false);
+            }
+            tx.commit().await?;
+            Ok(true)
+        }
+        Backend::Postgres => {
+            let mut tx = db.postgres_pool().expect("postgres").begin().await?;
+            let node = sqlx::query(&node_sql)
+                .bind(canonical_form)
+                .bind(kind)
+                .bind(norm)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+            let entity = sqlx::query(&entity_sql)
+                .bind(canonical_form)
+                .bind(curator)
+                .bind(&now)
+                .bind(&now)
+                .bind(kind)
+                .bind(norm)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+            if node == 0 && entity == 0 {
+                tx.rollback().await?;
+                return Ok(false);
+            }
+            tx.commit().await?;
+            Ok(true)
+        }
+    }
+}
+
 /// The nodes awaiting review, most-reinforced first (§15.17's queue).
 ///
 /// `ORDER BY signal_count DESC` is the whole point of the function, so it is in
