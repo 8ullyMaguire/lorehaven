@@ -126,6 +126,22 @@ even with the confirmation filter deleted. Renamed to `a-filler*` / `z-real*` so
 the padding sorts first, which is the situation the test is about. It now fails
 with the filter removed, alongside two others.
 
+### Gate at `f2891ed`
+
+| backend | passed | failed |
+|---|---|---|
+| PostgreSQL | 2900 | 0 (exit 0) |
+| SQLite | 2850 | 11, all `pool timed out while waiting for an open connection` |
+
+The SQLite failures are the gate's own resource story, not a defect: `milestone_25`
+passes 11/11 in isolation, and every one of the 11 panics comes from
+`test-support/src/lib.rs:319` — the connect helper — with no assertion failure
+behind it. They appeared while a *second* project (`tessera-db`, another agent
+session) was running concurrent cargo tests against the same Postgres and CPU;
+load average was 19–41 at the time. So `--test-threads=2` is confirmed as the
+right SQLite setting on a busy machine, which is the plan's own advice from the
+§47 gate, now with the evidence attached.
+
 ## Step 3 — the tasting menu (M45-19)
 
 Migration 0099 also gets `tasting_samples` and `tasting_responses`. §49.5's four

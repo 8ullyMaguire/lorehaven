@@ -575,6 +575,18 @@ impl TagWeights {
             .find(|(key, _)| key == dimension)
             .map_or(0.0, |(_, weight)| *weight)
     }
+
+    /// Whether the reader has weighed this dimension at all.
+    ///
+    /// §49.5's uncertainty needs the distinction, and `weight_of` cannot express
+    /// it: a reader who has never weighed `space` and one whose weight settled at
+    /// zero both read 0.0, and they are opposite cases. The first is the maximum-
+    /// uncertainty case the tasting menu exists to sample; the second is a settled
+    /// opinion the menu should leave alone.
+    #[must_use]
+    pub fn has(&self, dimension: &str) -> bool {
+        self.weights.iter().any(|(key, _)| key == dimension)
+    }
 }
 
 /// How `rank_works` should behave. Every field has a default that means "off",
