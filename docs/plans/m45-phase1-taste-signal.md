@@ -215,9 +215,57 @@ evidence that the fix addresses the cause rather than the symptom.
 The 3 remaining SQLite failures are the load, not the code: all three panicked in
 `test-support/src/lib.rs:319` with no assertion behind them, at load average 24–40
 with another agent session building. `revision_cache` passes 11/11 in isolation and
-the doctest passes while that same load is present. Nothing here claims a fully
-green SQLite run at high load; the claim is narrower and checkable — the failures
-are not reproducible in isolation and are not the collision.
+the doctest passes while that same load is present.
+
+### The target-dir fix had a second-order cost, and the disk said so
+
+With the private target dir in place the cold rebuild produced **325 GB** and
+filled `/home` to 81%:
+
+```
+debug/deps/         259G
+debug/incremental/   63G
+liblorehaven_app-*.rlib   502M / 505M / 513M / 482M / 503M   (five builds)
+```
+
+One ~500 MB rlib per build, five times over, each carrying full type and variable
+DWARF. Linking then began failing for reasons unrelated to the code. `[profile.dev]
+debug = "line-tables-only"` cuts `lorehaven-db`'s rlib to **99 MB** and a clean
+`target/` for that crate to **1.3 GB instead of 30 GB** — and keeps the one thing
+the debug profile is read for, which is a panic saying `lib.rs:319` rather than an
+address.
+
+Two build stalls also showed up in this stretch and they are **not the same fault**:
+
+| STAT | wchan | meaning | response |
+|---|---|---|---|
+| `T<l` | `do_signal_stop` | **stopped** — a `SIGTSTP` hit the whole process group, including the agent's own shell; 34 procs sat there for 57 min | `kill -CONT` |
+| `S<l` | `futex_wait` | **deadlocked** linkers, 0.3% CPU for 9 min | kill the orphans |
+
+The deadlock recipe (`kill -9` every `rustc`) applied to the merely-stopped build
+would have thrown away 57 minutes of compilation.
+
+### Gate at `edffa3b`
+
+| backend | passed | failed | exit |
+|---|---|---|---|
+| PostgreSQL | **3027** | 0 | **0** |
+| SQLite | 2804 | 1, `doctor::tests::the_snapshot_gate_check_ran_the_script` | 101 |
+| `colliding StableCrateId` | **0** | | |
+| pool timeouts | **0** | | |
+
+The one SQLite failure is **stale, not a defect**: the run began before `edffa3b`
+fixed it. `cargo test -p lorehaven-app --lib doctor` → **17 passed, 0 failed**
+immediately afterwards. It was a real gate failure when first seen — §11.16
+requires a decision per column and migration 0101's `taste_signals.account_id` and
+`taste_signal_imports.account_id` had none — fixed as `rekey_account`, because 61 of
+the other 68 `account_id` columns already are and `rekey_text` would emit a `snp_`
+TEXT hash that cannot be compared with a uuid, destroying the join while every
+behavioural test still passes.
+
+Notably the load was 21 during this run, well above the 6–7 that had produced the
+pool timeouts, and there were **none** — `--test-threads=2` plus no concurrent build
+in the target dir is the working combination.
 
 ## Step 3 — the tasting menu (M45-19)
 
