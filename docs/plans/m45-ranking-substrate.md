@@ -336,14 +336,54 @@ and confirm case 5 fails. A test that has never been seen red is not evidence.
 
 **Files:** `crates/app/src/routes/discovery.rs` (additive only)
 
-Call `rank_works` from the existing personalized path, replacing the
-`ORDER BY w.updated_at DESC` *ordering* only. **Leave the candidate selection
-alone** — §47.2 splits eligibility (a trust question, §30.7) from ordering (a
-taste question). Replacing the `w.updated_at DESC` clause is the whole change.
+> **Corrected 2026-10-01, before the edit.** This step previously said to replace
+> `ORDER BY w.updated_at DESC`. **There is no such clause in this route.** The
+> ordering is `r.sort_by_key(|c| -c.score)` at `discovery.rs:347`, and `score` is
+> not a taste signal — every engine sets it to `(limit - idx)`, i.e. it just
+> restates each engine's own position. So the real finding is stronger than the
+> plan assumed: discovery has **no taste-based ordering at all**, which is
+> consistent with `personalized_recommendations` ordering by `w.updated_at DESC`
+> *inside* `crates/db/src/discovery.rs`. Fix the wrong clause reference rather
+> than code to it.
+
+What step 7 actually is:
+
+1. Take the blended candidate ids the route already computes, and reorder them
+   with `rank_works` instead of by `score`. **Leave candidate selection alone** —
+   §47.2 splits eligibility (a trust question, §30.7) from ordering (a taste
+   question), and the existing engine blend is the selector.
+2. The route already has a `dimensions_for` problem to solve: `rank_works` takes
+   a `&dyn Fn(&WorkId) -> Vec<String>`, and the route has no tag list per work
+   in hand. `lorehaven_db::taxonomy::tag_names_for_work` exists and is already
+   called at `discovery.rs:369` for theme gravity — reuse that shape rather than
+   inventing a second tag fetch.
+3. **Order of operations matters.** Half-life (`discovery.rs:318`), operator
+   affinity (`:342`) and theme gravity (`:353`) all reorder `blended` *after* the
+   blend. `rank_works` must run where those operators can still be honoured, or
+   installing it will silently drop all three. Decide and record that, do not
+   discover it by diffing output.
+4. `rank_works` is **only meaningful for a signed-in reader** — it loads
+   `TagWeights::for_reader(db, account)`. Anonymous discovery must keep its
+   current path, and that is a branch, not a detail.
+5. Log the impressions. `RankedOutcome::all_impressions()` (ranking.rs:443) is the
+   one call that satisfies §47.8, and **nothing logs them yet** — that is why
+   M45-49 is `implemented-locally-tested` and why the extension's impression story
+   in §48 is blocked. This is the step that unblocks both.
 
 Then update `docs/requirements.csv`: M45-13, M45-11, M45-15, M45-49, M45-10 →
 `implemented-fully-tested`, with the test names in `evidence`, in the same commit
 as the code.
+
+**A test that must go red first.** The route's ordering is currently
+`sort_by_key(|c| -c.score)`, so pinning the order to `score` in a test is
+vacuous — it is what the code already does. The test worth writing is one that
+gives two works *opposite* engine positions and the *same* score-derived
+ordering, then asserts the taste profile decides. Without that, step 7 can be
+"done" by a test that proves nothing.
+
+**Do not claim M45-10 (`scout_value`) from this step** unless the route actually
+reads it. `scout_value` is a curation-credit computation, not a feed ordering; if
+step 7 does not call it, M45-10 stays `implemented-locally-tested`.
 
 ## Gate results (2026-09-30, re-verified after two test-isolation fixes)
 
