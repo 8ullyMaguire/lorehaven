@@ -1977,6 +1977,34 @@ fn now_rfc3339() -> String {
 async fn tag_with(db: &Database, work: &str, tag: &str) {
     let node = make_node(db, tag).await;
     tag_work(db, work, &node).await;
+    // 49.2: a tag counts toward gravity only once confirmed, so a fixture that
+    // tags a work without confirming leaves it invisible to the ranker. The
+    // ordering tests below were written before that column existed and went red
+    // the moment it did -- which is the filter working, not a regression.
+    //
+    // Confirming here rather than in each test means the default for a *ranking*
+    // fixture is a tag that actually ranks. `tag_unconfirmed` is the opt-out, and
+    // it exists so 49.2's own test can state the negative case without hand-
+    // writing the UPDATE.
+    lorehaven_db::tag_confirmation::confirm(
+        db,
+        work,
+        &node,
+        lorehaven_db::tag_confirmation::TagConfirmation::Reader,
+        None,
+    )
+    .await
+    .expect("confirm tag");
+}
+
+/// Tag a work WITHOUT confirming it (spec §49.2's negative case).
+///
+/// Deliberately separate from `tag_with` rather than a boolean argument: a
+/// `confirm: bool` parameter invites `tag_with(.., false)` at a call site with no
+/// way to tell what the `false` means.
+async fn tag_unconfirmed(db: &Database, work: &str, tag: &str) {
+    let node = make_node(db, tag).await;
+    tag_work(db, work, &node).await;
 }
 
 /// Set a reader's arena weight for one dimension, in basis points.
@@ -2334,6 +2362,93 @@ async fn a_signed_in_readers_feed_is_ordered_by_taste() {
         liked_at < other_at,
         "the reader weights `space` 9x `knitting`, so the liked work leads. \
          liked={liked} other={other} liked_at={liked_at:?} other_at={other_at:?} served={items:?}"
+    );
+}
+
+/// §49.2: an unconfirmed tag moves nobody's ranking — the twin of the test above.
+///
+/// Same fixture, same weights, one difference: the tags are never confirmed. The
+/// reader's 9000 basis points on `space` are still on file, the engine still
+/// offers `other` first, and the feed must come back in **engine order** — which
+/// is `other` first, because that is what the engine produced and taste is not
+/// allowed to speak for a tag nobody confirmed.
+///
+/// This is the assertion that makes M45-16 true rather than merely present. The
+/// column exists, the unit tests pass, and without this test a route that read
+/// every tag regardless of confirmation would still be green on all of them.
+///
+/// It is also the test that fails if the filter is moved to the wrong layer. If
+/// the confirmation check were inside `rank_works` rather than at the read, this
+/// would still pass — but `with_no_weights_the_feed_stays_in_engine_order` and
+/// `a_signed_in_readers_feed_is_ordered_by_taste` would need re-deriving, and
+/// §49.7's "applied where the weights are read" would be a claim rather than a
+/// fact. The three together pin the placement as well as the behaviour.
+#[tokio::test]
+async fn an_unconfirmed_tag_does_not_move_a_readers_ranking() {
+    let harness = Harness::new("m47_unconfirmed").await;
+    let mut reader = harness.reader("Taster").await;
+    let account = account_of(&harness.db, "Taster").await;
+    let pseud = pseud_of(&harness.db, &account.to_string()).await;
+
+    let liked = make_published_work(&harness.db, &pseud.to_string(), "Liked").await;
+    let other = make_published_work(&harness.db, &pseud.to_string(), "Other").await;
+    // Identical timestamps to the taste test, so the engine's order is the same
+    // one it would be there. The ONLY difference between the two tests is the
+    // confirmation.
+    touch(&harness.db, &other, "2026-02-01T00:00:00Z").await;
+    touch(&harness.db, &liked, "2026-01-01T00:00:00Z").await;
+    tag_unconfirmed(&harness.db, &liked, "space").await;
+    tag_unconfirmed(&harness.db, &other, "knitting").await;
+
+    weight(&harness.db, &account, "space", 9000).await;
+    weight(&harness.db, &account, "knitting", 1000).await;
+
+    // PREMISE, so a fixture error reads as a fixture error. The tags must exist —
+    // `taxonomy::tag_names_for_work` reads through the same join the ranker uses —
+    // and they must be UNCONFIRMED, or this test would pass for the wrong reason.
+    {
+        let tags = lorehaven_db::taxonomy::tag_names_for_work(&harness.db, &liked)
+            .await
+            .expect("tags");
+        assert_eq!(tags, vec!["space".to_string()], "PREMISE: liked is tagged");
+        let with_state =
+            lorehaven_db::tag_confirmation::tags_with_confirmation(&harness.db, &liked)
+                .await
+                .expect("confirmation state");
+        assert_eq!(
+            with_state[0].confirmation,
+            lorehaven_db::tag_confirmation::TagConfirmation::Unconfirmed,
+            "PREMISE: and the tag is unconfirmed"
+        );
+        assert!(
+            !with_state[0].confirmation.counts_toward_gravity(),
+            "PREMISE: unconfirmed does not count"
+        );
+        // And the filter itself, asked directly.
+        let contributing =
+            lorehaven_db::tag_confirmation::gravity_contributing_tags(&harness.db, &liked, 5)
+                .await
+                .expect("contributing tags");
+        assert!(
+            contributing.is_empty(),
+            "PREMISE: an unconfirmed work contributes no dimensions: {contributing:?}"
+        );
+    }
+
+    let (status, body) = reader.get("/api/v1/discovery").await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let items = served_ids(&body);
+    let other_at = items.iter().position(|w| w == &other);
+    let liked_at = items.iter().position(|w| w == &liked);
+    assert!(
+        other_at.is_some() && liked_at.is_some(),
+        "both served: {items:?}"
+    );
+    assert!(
+        other_at < liked_at,
+        "§49.2: an unconfirmed tag cannot reorder the feed, so the engine's order \
+         survives. liked={liked} other={other} liked_at={liked_at:?} other_at={other_at:?} \
+         served={items:?}"
     );
 }
 

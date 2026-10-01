@@ -161,9 +161,19 @@ async fn apply_taste_ordering_and_log(
     }
     let db = state.db();
 
-    // Tags per work, for `dimensions_for`. `taxonomy::tag_names_for_work` is
-    // already called in this handler for theme gravity; a second fetch with a
-    // different name would be the same query written twice.
+    // Tags per work, for `dimensions_for` -- and this is 49.2's filter, applied
+    // HERE rather than inside `rank_works` and rather than by cleaning the
+    // stored weights.
+    //
+    // Here, because 49.7 requires it: cleaning the weights would let a
+    // newly-confirmed tag retroactively rewrite a profile calibrated without it,
+    // and the reader would have no way to explain why their feed changed.
+    // Not in `rank_works`, because 47.2's contract is unchanged by 49 -- 49
+    // decides what the ranker is *told*, never what it is allowed to ask.
+    //
+    // Confirmed tags only, capped per work. An unconfirmed tag is displayed and
+    // searchable but moves nobody's ranking, and the cap means a work cannot
+    // buy attention with tag volume.
     let mut tags_by_work: std::collections::HashMap<String, Vec<String>> =
         std::collections::HashMap::new();
     for c in &ranked {
@@ -171,7 +181,13 @@ async fn apply_taste_ordering_and_log(
         if tags_by_work.contains_key(&key) {
             continue;
         }
-        let tags = match lorehaven_db::taxonomy::tag_names_for_work(db, &key).await {
+        let tags = match lorehaven_db::tag_confirmation::gravity_contributing_tags(
+            db,
+            &key,
+            lorehaven_db::tag_confirmation::DEFAULT_CONTRIBUTION_CAP,
+        )
+        .await
+        {
             Ok(t) => t.into_iter().map(|t| t.to_lowercase()).collect(),
             Err(error) => {
                 tracing::warn!(

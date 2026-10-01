@@ -286,10 +286,16 @@ pub async fn record_interaction(
 /// testable, and so eligibility (§30.7, a trust question) stays with the caller
 /// that owns the trust decision — §47.2's deliberate split.
 ///
-/// **Determinism.** Candidates are sorted by id before anything else, because a
-/// SQL query with no `ORDER BY` returns rows in whatever order the engine finds
-/// them and §47.9 requires two calls on the same state to agree. Exploration
-/// slots are random *by design*; that randomness is returned in
+/// **Determinism.** 47.9 requires two calls on the same state to agree, so the
+/// result must not depend on the order candidates arrived in. The first draft
+/// sorted by id *before* scoring, which achieved that and destroyed the caller's
+/// ranking: for any candidate taste could not separate, the returned order became
+/// lexicographic-by-uuid. The id sort is now the *last* tie-break in the score
+/// sort below, so only otherwise-equal candidates are reordered. See the comment
+/// at the tie-break for why both properties cannot hold at once and why 47.2
+/// settles it.
+///
+/// Exploration slots are random *by design*; that randomness is returned in
 /// `RankedOutcome.exploration` so it can be logged rather than seeded from the
 /// clock.
 /// Rank a candidate set for one reader.
