@@ -199,9 +199,25 @@ impl QueryField {
         }
     }
 
-    /// Whether this field carries an ordering, so `>`, `<` and `..` mean
-    /// something on it.
+    /// Whether this field names a taxonomy term, and so has a closure to expand
+    /// through.
     ///
+    /// §15.4.1.3. `+children` walks `parent` edges in `taxonomy_closure` (migration
+    /// 0104), which only taxonomy nodes have. Allowing it on `words` or `title`
+    /// would put the suffix in a value where it matches nothing, so the check is
+    /// here instead: an allowlist of the fields that resolve to a node, which makes
+    /// adding an expandable field a deliberate act.
+    pub fn is_taxonomy(self) -> bool {
+        matches!(
+            self,
+            QueryField::Fandom
+                | QueryField::Character
+                | QueryField::Relationship
+                | QueryField::Tag
+                | QueryField::Mood
+        )
+    }
+
     /// Whether this field carries an ordering, so `>`, `<` and `..` mean
     /// something on it.
     ///
@@ -476,6 +492,79 @@ pub enum QueryAst {
     /// §15.3. `Not(ExistsRelationship { .. }))` is journey 12's second half: "X
     /// present, no relationship involving X".
     ExistsRelationship(RelationshipAssertion),
+    /// A fielded sub-predicate whose fields all bind to ONE row of ONE relation.
+    ///
+    /// §15.4.1.1, new in M46-05. `ship:(with:"A" with:"B" type:romantic)`.
+    ///
+    /// This node exists because §15.3's rule -- never let one character satisfy
+    /// another character's attributes -- is not reachable from the text surface
+    /// without it. `ship:"A/B" AND type:romantic` is two independent terms: the
+    /// pairing may come from one relationship row and the type from another, so
+    /// the pair matches works where A/B exists *somehow* and *something else* is
+    /// romantic. That is wrong in a way that looks right, and it was measured
+    /// rather than hypothesised: the uncorrelated compilation returns 1 on a
+    /// fixture (Alice protagonist, Carol vampire) where the correlated form
+    /// returns 0.
+    ///
+    /// Fields inside bind to the same row. Fields outside are ordinary terms and
+    /// are not correlated with anything -- the same rule §15.3 states for the AST.
+    Scoped(ScopedPredicate),
+    /// At least `n` of the contained terms must hold.
+    ///
+    /// §15.4.1.2, new in M46-05. `min_match(2, tag:"A", tag:"B", tag:"C")`.
+    ///
+    /// A quantified conjunction, which §15.7's conjunctive-only filter list could
+    /// not express. It counts SATISFIED TERMS -- not a score threshold, and not a
+    /// disjunction -- which is why it is a distinct node rather than sugar over
+    /// `Or`: `min_match(2, a, b)` and `a OR b` are different questions and must
+    /// not compile to the same thing.
+    MinMatch {
+        /// How many of `terms` must hold. Always at least 1: `min_match(0, …)`
+        /// is refused at parse time as meaningless rather than matching everything.
+        needed: usize,
+        terms: Vec<QueryAst>,
+    },
+    /// A taxonomy term widened to its descendants.
+    ///
+    /// §15.4.1.3, new in M46-05. `tag:"Fake Dating"+children` or `+children^2`.
+    ///
+    /// `depth` is the cap; `None` means the instance default. Expansion follows
+    /// `parent` edges only -- `implies` requires the reader to ask for it
+    /// explicitly, because a curator's bad edge would otherwise distort every
+    /// query touching the affected tags.
+    Expand {
+        field: QueryField,
+        term: String,
+        depth: Option<u32>,
+    },
+}
+
+/// A parenthesised fielded sub-predicate: `ship:(with:"A" with:"B" type:romantic)`.
+///
+/// §15.4.1.1, new in M46-05. `relation` names WHICH relation the fields bind to —
+/// the row a renderer must find — and `fields` are the bounds on that one row.
+///
+/// `relation` is a `QueryField` rather than a bare string so an unknown relation
+/// name is a parse error naming the known ones, which is §15.4.1.6's span-based
+/// diagnostic requirement rather than a value that fails later at render time.
+///
+/// Field order is preserved because it is the reader's order and the pretty-printer
+/// must round-trip; a set would print in an arbitrary order and `parse(print(ast))`
+/// would not be stable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopedPredicate {
+    /// The relation whose single row these fields constrain.
+    pub relation: QueryField,
+    /// Bounds on that one row, in the order written.
+    pub fields: Vec<ScopedField>,
+}
+
+/// One `key:value` bound inside a [`ScopedPredicate`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopedField {
+    /// The bound's name, e.g. `with` or `type`.
+    pub key: String,
+    pub value: String,
 }
 
 /// §15.1: a character, bounded.
@@ -572,20 +661,191 @@ impl QueryError {
 /// Parse a query string into an AST.
 ///
 /// Supports: quoted phrases, fielded search (`field:value`), `AND`/`OR`/`NOT`,
-/// parentheses, and leading `-` exclusions.
+/// parentheses, leading `-` exclusions, comparisons, ranges, scoped
+/// sub-predicates, `min_match` and expansion.
+///
+/// Every bound in [`QueryBudget`] is enforced here, and exceeding one is an error
+/// naming the bound and the value. Search is already rate-limited
+/// (`[rate_limits] search.burst`), which bounds how OFTEN a query arrives; a single
+/// query with a deep `OR` tree and a wide `+children` expansion is one request doing
+/// unbounded work, so the per-query cost is bounded too. Truncating instead would
+/// return a wrong answer that looks like a successful one.
 pub fn parse_query(input: &str) -> std::result::Result<QueryAst, QueryError> {
+    parse_query_with(input, QueryBudget::default())
+}
+
+/// Parse with an explicit budget. Instance config supplies this (§15.4.1.5, §38.6).
+pub fn parse_query_with(
+    input: &str,
+    budget: QueryBudget,
+) -> std::result::Result<QueryAst, QueryError> {
     let mut parser = Parser::new(input);
-    parser.parse()
+    parser.budget = budget;
+    let ast = parser.parse()?;
+    budget.check(&ast, 0)?;
+    Ok(ast)
+}
+
+/// Per-query cost bounds. §15.4.1.5, new in M46-05.
+///
+/// Defaults are the spec's. Every field is instance config under §38.6, and a
+/// bound of 0 means "no limit" rather than "match nothing" — a cap of zero results
+/// is never a useful configuration and treating it as one would silently break
+/// every query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueryBudget {
+    /// Maximum AST nesting depth. Depth is what makes a compiled predicate
+    /// exponentially wide, which is why it is capped separately from term count.
+    pub max_depth: usize,
+    /// Maximum terms in the whole query.
+    pub max_terms: usize,
+    /// Maximum nodes one `+children` expansion may reach.
+    pub max_expansion: usize,
+    /// Maximum terms inside one `min_match`.
+    pub max_min_match_arity: usize,
+}
+
+impl Default for QueryBudget {
+    fn default() -> Self {
+        Self {
+            max_depth: 8,
+            max_terms: 24,
+            max_expansion: 200,
+            max_min_match_arity: 8,
+        }
+    }
+}
+
+impl QueryBudget {
+    /// Walk the AST and refuse the first bound exceeded.
+    ///
+    /// Checked after parsing rather than during, so a single traversal decides
+    /// every bound and the error names the outermost thing that is too large. A
+    /// parse-time check inside the recursive descent would report the innermost
+    /// violation, which for a deeply nested query is not what the reader needs to
+    /// fix first.
+    pub fn check(&self, ast: &QueryAst, depth: usize) -> std::result::Result<(), QueryError> {
+        if self.max_depth != 0 && depth > self.max_depth {
+            return Err(QueryError::new(
+                format!(
+                    "this query nests {depth} levels deep, past the limit of {}",
+                    self.max_depth
+                ),
+                0,
+            ));
+        }
+        let mut terms = 0usize;
+        self.walk(ast, depth, &mut terms)
+    }
+
+    fn walk(
+        &self,
+        ast: &QueryAst,
+        depth: usize,
+        terms: &mut usize,
+    ) -> std::result::Result<(), QueryError> {
+        *terms += 1;
+        if self.max_terms != 0 && *terms > self.max_terms {
+            return Err(QueryError::new(
+                format!("this query has more than {} terms", self.max_terms),
+                0,
+            ));
+        }
+        match ast {
+            QueryAst::And(v) | QueryAst::Or(v) => {
+                for t in v {
+                    self.walk(t, depth + 1, terms)?;
+                }
+            }
+            QueryAst::Not(inner) => self.walk(inner, depth + 1, terms)?,
+            // A scoped predicate is ONE term to the budget -- it compiles to a
+            // single EXISTS however many bounds it carries. Pricing it by arity
+            // would price it against a structure that does not exist at runtime.
+            QueryAst::Scoped(_) => {}
+            QueryAst::MinMatch {
+                needed,
+                terms: inner,
+            } => {
+                if self.max_min_match_arity != 0 && inner.len() > self.max_min_match_arity {
+                    return Err(QueryError::new(
+                        format!(
+                            "min_match has {} terms, past the limit of {}",
+                            inner.len(),
+                            self.max_min_match_arity
+                        ),
+                        0,
+                    ));
+                }
+                // `needed` is validated at parse time; re-checked here so a
+                // hand-built AST cannot smuggle an unsatisfiable one past the
+                // parser. A `MinMatch` that can never hold is the same class of
+                // silent-nothing as a backwards range.
+                if *needed == 0 || *needed > inner.len() {
+                    return Err(QueryError::new(
+                        format!(
+                            "min_match needs {needed} of {} terms, which can never be satisfied",
+                            inner.len()
+                        ),
+                        0,
+                    ));
+                }
+                for t in inner {
+                    self.walk(t, depth + 1, terms)?;
+                }
+            }
+            QueryAst::Expand { depth: cap, .. } => {
+                // An explicit `^n` larger than the instance's cap is refused here
+                // rather than clamped, so the reader learns their expansion will
+                // not run as written.
+                if let Some(n) = cap {
+                    if self.max_expansion != 0 && *n as usize > self.max_expansion {
+                        return Err(QueryError::new(
+                            format!(
+                                "expansion depth {n} is past the limit of {}",
+                                self.max_expansion
+                            ),
+                            0,
+                        ));
+                    }
+                }
+            }
+            QueryAst::Text(_)
+            | QueryAst::Phrase(_)
+            | QueryAst::Fielded(..)
+            | QueryAst::Comparison(..)
+            | QueryAst::ExistsCharacter(..)
+            | QueryAst::ExistsRelationship(..) => {}
+        }
+        Ok(())
+    }
 }
 
 struct Parser<'a> {
     input: &'a str,
     pos: usize,
+    /// Carried so `parse_query_with` can install an instance budget. The bounds are
+    /// enforced by [`QueryBudget::check`] after parsing; the parser only needs the
+    /// value for the two checks that must happen mid-parse to produce a good
+    /// message (`min_match` arity, expansion depth).
+    budget: QueryBudget,
+    /// Nesting depth reached so far, counted during the descent.
+    ///
+    /// The AST alone cannot measure this: `parse_primary` returns the inner node for
+    /// a parenthesised group, so `((((a))))` and `a` produce the SAME tree and a
+    /// post-parse walk sees depth 1 either way. A reader can type arbitrarily deep
+    /// nesting, and it is exactly the nesting that makes the compiled predicate
+    /// exponentially wide -- so the depth is counted as it is entered.
+    depth: usize,
 }
 
 impl<'a> Parser<'a> {
     fn new(input: &'a str) -> Self {
-        Self { input, pos: 0 }
+        Self {
+            input,
+            pos: 0,
+            budget: QueryBudget::default(),
+            depth: 0,
+        }
     }
 
     fn parse(&mut self) -> std::result::Result<QueryAst, QueryError> {
@@ -692,7 +952,25 @@ impl<'a> Parser<'a> {
             return Ok(QueryAst::Text(String::new()));
         }
 
+        // `min_match(n, term, term, ...)` is checked BEFORE the bare-group case,
+        // because both start with a word and `min_match` is a function-shaped term,
+        // not a group. A bare `(` after the identifier check below would otherwise
+        // never be reached for this input.
+        if self.peek_word("min_match") {
+            return self.parse_min_match();
+        }
+
         if self.input[self.pos..].starts_with('(') {
+            self.depth += 1;
+            if self.budget.max_depth != 0 && self.depth > self.budget.max_depth {
+                return Err(QueryError::new(
+                    format!(
+                        "this query nests {} levels deep, past the limit of {}",
+                        self.depth, self.budget.max_depth
+                    ),
+                    self.pos,
+                ));
+            }
             self.pos += 1;
             let inner = self.parse_or()?;
             self.skip_ws();
@@ -700,6 +978,7 @@ impl<'a> Parser<'a> {
                 return Err(QueryError::new("expected ')'".to_owned(), self.pos));
             }
             self.pos += 1;
+            self.depth -= 1;
             return Ok(inner);
         }
 
@@ -748,6 +1027,18 @@ impl<'a> Parser<'a> {
             let field = &term[..colon];
             if let Some(f) = QueryField::parse(field) {
                 let after_colon = &term[colon + 1..];
+
+                // A scoped sub-predicate: `ship:(with:"A" type:romantic)`.
+                //
+                // Checked before the comparison operators because `after_colon` is
+                // empty here — the `(` is the next character in the INPUT, since the
+                // term scan stops at `(`. Reading it as an operator would produce
+                // "expected a field value" for a perfectly well-formed correlated
+                // predicate, which is the category error §15.4.1.6's diagnostics
+                // exist to avoid.
+                if after_colon.is_empty() && self.input[self.pos..].starts_with('(') {
+                    return self.parse_scoped(f);
+                }
 
                 // A comparison operator, longest match first.
                 let (op, value) = if let Some(v) = after_colon.strip_prefix(">=") {
@@ -830,6 +1121,18 @@ impl<'a> Parser<'a> {
                         let QueryAst::Phrase(value) = self.parse_phrase()? else {
                             unreachable!()
                         };
+                        // NOT an early return: a quoted value can carry a range or an
+                        // expansion suffix, and returning here made `tag:"X"+children`
+                        // parse as `tag:"X"` followed by the free text `+children`.
+                        // The reader would get a silently narrower query that looks
+                        // like it worked. Both suffixes are read from the input, so
+                        // they work identically for quoted and unquoted values.
+                        if let Some(node) = self.try_range(f, &value, start)? {
+                            return Ok(node);
+                        }
+                        if let Some(node) = self.take_expansion_suffix(f)? {
+                            return Ok(node);
+                        }
                         return Ok(QueryAst::Fielded(f, value));
                     }
                     return Err(QueryError::new("expected a field value", self.pos));
@@ -844,6 +1147,38 @@ impl<'a> Parser<'a> {
                 // "you wrote a range where I expected a value".
                 if let Some(node) = self.try_range(f, value, start)? {
                     return Ok(node);
+                }
+
+                // `tag:"Fake Dating"+children` or `+children^2`.
+                //
+                // Two cases, and both are needed:
+                //
+                // * QUOTED (`tag:"Fake Dating"+children`) -- the term scan stopped at
+                //   the closing quote, so the suffix is the next characters in the
+                //   INPUT and `current_value` recovers the term from the text.
+                // * UNQUOTED (`tag:Fake+children`) -- the term scan does NOT stop at
+                //   `+`, so the suffix arrived inside `value`. Handling only the
+                //   quoted form made `tag:Fake+children` a `Fielded` whose value is
+                //   literally "Fake+children", which matches nothing and looks like
+                //   a correct search. The `+` is split off here.
+                if let Some(node) = self.take_expansion_suffix(f)? {
+                    return Ok(node);
+                }
+                if let Some((head, _tail)) = value.split_once('+') {
+                    if head.is_empty() {
+                        return Err(QueryError::new(
+                            format!("{}: needs a term before +children", f.as_str()),
+                            start,
+                        ));
+                    }
+                    // Put the cursor on the `+` so the suffix reader sees the marker
+                    // in the input exactly as it does for a quoted value. The value
+                    // began at `start + colon + 1` (the colon is one byte), and
+                    // `head` is its prefix, so the `+` is that far along.
+                    self.pos = start + colon + 1 + head.len();
+                    if let Some(node) = self.take_expansion_suffix(f)? {
+                        return Ok(node);
+                    }
                 }
 
                 return Ok(QueryAst::Fielded(f, value.to_owned()));
@@ -934,6 +1269,348 @@ impl<'a> Parser<'a> {
         } else {
             QueryAst::And(parts)
         }))
+    }
+
+    /// True when `word` is here and is not merely the prefix of a longer
+    /// identifier.
+    ///
+    /// A plain `starts_with` would make `min_matches:2` parse as `min_match` with
+    /// the reader's field silently consumed. The next character must not be a word
+    /// character, mirroring what `peek_keyword` already does for `AND`/`OR`/`NOT`.
+    fn peek_word(&self, word: &str) -> bool {
+        if !self.input[self.pos..].starts_with(word) {
+            return false;
+        }
+        match self.input[self.pos + word.len()..].chars().next() {
+            None => true,
+            Some(c) => !(c.is_alphanumeric() || c == '_' || c == ':'),
+        }
+    }
+
+    /// `min_match(n, term, term, ...)`.
+    ///
+    /// §15.4.1.2. The arity and the `n <= arity` check happen HERE rather than in the
+    /// budget walk, because only here can the error point at the reader's own `n`:
+    /// the budget check is a backstop for hand-built ASTs, and a message about
+    /// "terms" when the reader wrote a number reads as though their number was
+    /// ignored.
+    fn parse_min_match(&mut self) -> std::result::Result<QueryAst, QueryError> {
+        let start = self.pos;
+        self.pos += "min_match".len();
+        self.skip_ws();
+        if !self.input[self.pos..].starts_with('(') {
+            return Err(QueryError::new(
+                "min_match needs an argument list: min_match(2, tag:\"A\", tag:\"B\")",
+                self.pos,
+            ));
+        }
+        self.pos += 1;
+        self.skip_ws();
+
+        // The count.
+        let count_start = self.pos;
+        while self.pos < self.input.len() {
+            let c = self.input[self.pos..].chars().next().unwrap();
+            if c.is_ascii_digit() {
+                self.pos += 1;
+            } else {
+                break;
+            }
+        }
+        if self.pos == count_start {
+            return Err(QueryError::new(
+                "min_match's first argument is how many terms must match, e.g. \
+                 min_match(2, tag:\"A\", tag:\"B\")",
+                count_start,
+            ));
+        }
+        let needed: usize = self.input[count_start..self.pos]
+            .parse()
+            .map_err(|_| QueryError::new("min_match's count is too large", count_start))?;
+        if needed == 0 {
+            return Err(QueryError::new(
+                "min_match(0, ...) would match everything, so it is not a filter",
+                count_start,
+            ));
+        }
+
+        // The terms, comma separated to the closing paren.
+        let mut terms = Vec::new();
+        loop {
+            self.skip_ws();
+            if self.pos >= self.input.len() {
+                return Err(QueryError::new(
+                    "min_match is missing its closing ')'",
+                    self.pos,
+                ));
+            }
+            if self.input[self.pos..].starts_with(')') {
+                self.pos += 1;
+                break;
+            }
+            if self.input[self.pos..].starts_with(',') {
+                self.pos += 1;
+                continue;
+            }
+            let term = self.parse_not()?;
+            if term == QueryAst::Text(String::new()) {
+                return Err(QueryError::new("min_match has an empty term", self.pos));
+            }
+            terms.push(term);
+            if self.budget.max_min_match_arity != 0 && terms.len() > self.budget.max_min_match_arity
+            {
+                return Err(QueryError::new(
+                    format!(
+                        "min_match has more than {} terms",
+                        self.budget.max_min_match_arity
+                    ),
+                    start,
+                ));
+            }
+        }
+
+        if terms.is_empty() {
+            return Err(QueryError::new(
+                "min_match needs at least one term to count",
+                start,
+            ));
+        }
+        if needed > terms.len() {
+            // An unsatisfiable count is refused rather than returning nothing, for
+            // the same reason a backwards range is: an empty result page the reader
+            // has to reverse-engineer is the worse outcome.
+            return Err(QueryError::new(
+                format!(
+                    "min_match needs {needed} of {} terms, so it can never match",
+                    terms.len()
+                ),
+                start,
+            ));
+        }
+        Ok(QueryAst::MinMatch { needed, terms })
+    }
+
+    /// `relation:(key:value key:value)` — a correlated sub-predicate.
+    ///
+    /// §15.4.1.1. Called from `parse_term` once a `field:` is recognised AND the
+    /// next character is `(`, which is what distinguishes `ship:(...)` from a plain
+    /// `ship:value`.
+    fn parse_scoped(&mut self, relation: QueryField) -> std::result::Result<QueryAst, QueryError> {
+        let start = self.pos;
+        // Refused here rather than at render time so the error carries the reader's
+        // offset and can be underlined (§15.4.1.6). A renderer can only report
+        // offset 0, which points at the start of the whole query.
+        if relation != QueryField::Relationship {
+            return Err(QueryError::new(
+                format!(
+                    "{} has no single row to scope a sub-predicate to; only \
+                     `relationship:` does",
+                    relation.as_str()
+                ),
+                start,
+            ));
+        }
+        self.pos += 1; // the '('
+        let mut fields = Vec::new();
+        loop {
+            self.skip_ws();
+            if self.pos >= self.input.len() {
+                return Err(QueryError::new(
+                    format!("{}:( is missing its closing ')'", relation.as_str()),
+                    self.pos,
+                ));
+            }
+            if self.input[self.pos..].starts_with(')') {
+                self.pos += 1;
+                break;
+            }
+
+            // One `key:value`, where the value may be quoted.
+            let key_start = self.pos;
+            while self.pos < self.input.len() {
+                let c = self.input[self.pos..].chars().next().unwrap();
+                if c.is_whitespace() || c == ':' || c == ')' {
+                    break;
+                }
+                self.pos += c.len_utf8();
+            }
+            let key = self.input[key_start..self.pos].to_owned();
+            if key.is_empty() {
+                return Err(QueryError::new(
+                    format!("{}:( expects `key:value` pairs", relation.as_str()),
+                    key_start,
+                ));
+            }
+            if !self.input[self.pos..].starts_with(':') {
+                return Err(QueryError::new(
+                    format!(
+                        "{key:?} in {}(:) needs a value, as {key}:\"...\"",
+                        relation.as_str()
+                    ),
+                    self.pos,
+                ));
+            }
+            self.pos += 1; // the ':'
+
+            let value = if self.input[self.pos..].starts_with('"') {
+                let QueryAst::Phrase(v) = self.parse_phrase()? else {
+                    unreachable!("parse_phrase returns a Phrase")
+                };
+                v
+            } else {
+                let v_start = self.pos;
+                while self.pos < self.input.len() {
+                    let c = self.input[self.pos..].chars().next().unwrap();
+                    if c.is_whitespace() || c == ')' {
+                        break;
+                    }
+                    self.pos += c.len_utf8();
+                }
+                self.input[v_start..self.pos].to_owned()
+            };
+            if value.is_empty() {
+                return Err(QueryError::new(
+                    format!("{key}: in {}(:) needs a value", relation.as_str()),
+                    self.pos,
+                ));
+            }
+            // The accepted key set is fixed and small, so an unknown key is caught
+            // here where the error can name it and underline it. Letting it through
+            // to the renderer would defer the complaint to compile time, with no
+            // span.
+            if !matches!(
+                key.as_str(),
+                "with" | "participant" | "type" | "rel_type" | "prominence" | "label"
+            ) {
+                return Err(QueryError::new(
+                    format!(
+                        "{key:?} is not a relationship bound; expected one of with, \
+                         type, prominence, label"
+                    ),
+                    key_start,
+                ));
+            }
+            fields.push(ScopedField { key, value });
+        }
+
+        if fields.is_empty() {
+            return Err(QueryError::new(
+                format!("{}(:) needs at least one key:value pair", relation.as_str()),
+                start,
+            ));
+        }
+        if !fields
+            .iter()
+            .any(|f| matches!(f.key.as_str(), "with" | "participant"))
+        {
+            return Err(QueryError::new(
+                format!(
+                    "a scoped {} needs at least one `with:` naming a participant; \
+                     without one it would match every relationship in the instance",
+                    relation.as_str()
+                ),
+                start,
+            ));
+        }
+        Ok(QueryAst::Scoped(ScopedPredicate { relation, fields }))
+    }
+
+    /// Read a `+children` / `+children^N` suffix if one follows the current value.
+    ///
+    /// §15.4.1.3. Returns `Ok(Some(node))` when an expansion was consumed, and
+    /// `Ok(None)` when there is no suffix — in which case the value stands alone and
+    /// the caller emits a plain `Fielded`.
+    ///
+    /// Only taxonomy fields expand. `words:1000+children` is a category error, and
+    /// saying so beats storing the `+children` in the value where it matches nothing.
+    fn take_expansion_suffix(
+        &mut self,
+        field: QueryField,
+    ) -> std::result::Result<Option<QueryAst>, QueryError> {
+        if !self.input[self.pos..].starts_with('+') {
+            return Ok(None);
+        }
+        let marker_start = self.pos;
+        if !field.is_taxonomy() {
+            return Err(QueryError::new(
+                format!(
+                    "{} is not a taxonomy term, so it has no children to expand to",
+                    field.as_str()
+                ),
+                marker_start,
+            ));
+        }
+        // The value has already been read into the caller's `value`; recover it from
+        // the input so the node carries the term the reader typed.
+        let term = self.current_value(marker_start);
+        self.pos += 1; // '+'
+
+        const MARKER: &str = "children";
+        if !self.input[self.pos..].starts_with(MARKER) {
+            return Err(QueryError::new(
+                "the only expansion is +children (optionally +children^2)",
+                marker_start,
+            ));
+        }
+        self.pos += MARKER.len();
+
+        // An optional `^N` depth cap.
+        let mut depth = None;
+        if self.input[self.pos..].starts_with('^') {
+            let caret = self.pos;
+            self.pos += 1;
+            let num_start = self.pos;
+            while self.pos < self.input.len() {
+                let c = self.input[self.pos..].chars().next().unwrap();
+                if c.is_ascii_digit() {
+                    self.pos += 1;
+                } else {
+                    break;
+                }
+            }
+            if self.pos == num_start {
+                return Err(QueryError::new(
+                    "expansion depth needs a number, as +children^2",
+                    caret,
+                ));
+            }
+            let n: u32 = self.input[num_start..self.pos]
+                .parse()
+                .map_err(|_| QueryError::new("expansion depth is too large", num_start))?;
+            if self.budget.max_expansion != 0 && n as usize > self.budget.max_expansion {
+                return Err(QueryError::new(
+                    format!(
+                        "expansion depth {n} is past the limit of {}",
+                        self.budget.max_expansion
+                    ),
+                    caret,
+                ));
+            }
+            depth = Some(n);
+        }
+        Ok(Some(QueryAst::Expand { field, term, depth }))
+    }
+
+    /// The literal value immediately before `end`, stripped of surrounding quotes.
+    ///
+    /// A recovery helper rather than a parameter: the value was consumed by
+    /// `parse_term` before this runs, and threading it through would mean changing
+    /// the signature of the equality path for one caller. It walks backwards over
+    /// the already-parsed text, so it cannot see past the value.
+    fn current_value(&self, end: usize) -> String {
+        let before = &self.input[..end];
+        let trimmed = before.trim_end();
+        if let Some(stripped) = trimmed.strip_suffix('"') {
+            // Quoted: the opening quote is the last `"` before the closing one.
+            if let Some(open) = stripped.rfind('"') {
+                return stripped[open + 1..].to_owned();
+            }
+        }
+        // Unquoted: back to the `:` that introduced it.
+        match trimmed.rfind(':') {
+            Some(c) => trimmed[c + 1..].to_owned(),
+            None => trimmed.to_owned(),
+        }
     }
 
     fn skip_ws(&mut self) {

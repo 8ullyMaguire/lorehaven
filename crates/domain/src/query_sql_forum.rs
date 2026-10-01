@@ -77,6 +77,27 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
             "character and relationship queries only apply to works",
             0,
         )),
+        // §15.4.1.1's `Scoped` is a correlation over a WORK relation row -- the same
+        // reason as above. `ship:(with:"A")` names a relationship row, and a forum
+        // post has none.
+        QueryAst::Scoped(_) => Err(QueryError::new(
+            "a scoped sub-predicate names a work relationship, so it only applies to works",
+            0,
+        )),
+        // `min_match` is not work-specific: it counts satisfied terms, so it is
+        // answerable over any entity. Refusing it here would be wrong, and this
+        // renderer is the wrong place to implement it -- a shared counting helper
+        // belongs in query_sql.rs so the work and forum renderings cannot drift.
+        // Until that helper exists, refusing is the honest answer; silently
+        // compiling it as a plain AND would answer a different question than the
+        // reader asked, which is the failure §15.4.1.2 names.
+        QueryAst::MinMatch { .. } => Err(QueryError::new(
+            "min_match is not available on this search yet",
+            0,
+        )),
+        // §15.4.1.3's expansion walks the taxonomy closure, which hangs off
+        // `work_tags` for a work. A forum post has no taxonomy of its own.
+        QueryAst::Expand { .. } => Err(QueryError::new("tag expansion only applies to works", 0)),
         QueryAst::Not(inner) => {
             let inner = render_node(inner)?;
             let sql = if needs_null_guard(&inner.sql) {

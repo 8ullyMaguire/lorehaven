@@ -4,6 +4,7 @@
 
 use crate::query::{
     CharacterAssertion, CompareOp, QueryAst, QueryError, QueryField, RelationshipAssertion,
+    ScopedPredicate,
 };
 
 /// A rendered SQL fragment with its bind parameters.
@@ -85,6 +86,9 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
         }
         QueryAst::ExistsCharacter(a) => render_exists_character(a),
         QueryAst::ExistsRelationship(a) => render_exists_relationship(a),
+        QueryAst::Scoped(p) => render_scoped(p),
+        QueryAst::MinMatch { needed, terms } => render_min_match(*needed, terms),
+        QueryAst::Expand { field, term, depth } => render_expand(*field, term, *depth),
         QueryAst::Not(inner) => {
             let inner = render_node(inner)?;
             // `NOT NULL` is NULL, not true, so a negated predicate over columns
@@ -227,6 +231,245 @@ fn render_exists_character(a: &CharacterAssertion) -> Result<SqlFragment, QueryE
 /// on a delimited pattern rather than `=`. The delimiters matter: `enemies_to_lovers`
 /// must not match a hypothetical `enemies_to_lovers_2`, and
 /// `',enemies_to_lovers,' LIKE '%,enemies_to_lovers,%'` is what prevents that.
+/// Compile §15.4.1.1's `Scoped` — `ship:(with:"A" with:"B" type:romantic)`.
+///
+/// ## Why the bounds live INSIDE one EXISTS
+///
+/// Every clause below is inside a single `EXISTS (SELECT 1 FROM work_relationships
+/// wr WHERE wr.work_id = works.id AND ...)`. That is the whole point of the node,
+/// and it is the same rule `render_exists_character` exists to enforce: a `with:`
+/// and a `type:` that resolved against *different* relationship rows would match a
+/// work where A/B is present somehow and something else entirely is romantic —
+/// wrong in a way that looks right.
+///
+/// The two shapes are distinguishable in the output, which is what makes a test able
+/// to assert the correlation rather than the presence of the right words. The wrong
+/// compilation emits two sibling `EXISTS`; the right one emits one.
+///
+/// ## `with:` is a participant set, so it needs all three clauses
+///
+/// Same measurement as `relationship:` in M46-01, and the same three-clause
+/// requirement: naming every participant of the ship, naming no participant the ship
+/// does not have, and having every named character actually be a participant. With
+/// only the first two, asking for the poly `{alice,bob,carol}` also matches the duo
+/// `{alice,bob}` — alice and bob *are* named, and the duo has no unnamed participant.
+///
+/// Names are bound one each, and membership is a `LIKE` on a `//`-delimited pattern.
+/// `string_to_array` is PostgreSQL-only, `instr` is SQLite-only, and counting
+/// separators by `length` arithmetic is wrong for any name containing a space.
+fn render_scoped(p: &ScopedPredicate) -> Result<SqlFragment, QueryError> {
+    if p.relation != QueryField::Relationship {
+        return Err(QueryError::new(
+            format!(
+                "{} has no single row to scope a sub-predicate to; only `relationship:` \
+                 does",
+                p.relation.as_str()
+            ),
+            0,
+        ));
+    }
+
+    // Group the bounds: every `with:` names a participant, the rest constrain the row.
+    let mut withs: Vec<&str> = Vec::new();
+    let mut row_bounds: Vec<(&str, &str)> = Vec::new();
+    for f in &p.fields {
+        match f.key.as_str() {
+            "with" | "participant" => withs.push(f.value.as_str()),
+            "type" | "rel_type" => row_bounds.push(("wr.rel_type", f.value.as_str())),
+            "prominence" => row_bounds.push(("wr.prominence", f.value.as_str())),
+            "label" => row_bounds.push(("wr.label", f.value.as_str())),
+            other => {
+                return Err(QueryError::new(
+                    format!(
+                        "{other:?} is not a relationship bound; expected one of \
+                         with, type, prominence, label"
+                    ),
+                    0,
+                ))
+            }
+        }
+    }
+
+    if withs.is_empty() {
+        return Err(QueryError::new(
+            "a scoped relationship needs at least one `with:` naming a participant; \
+             without one it would match every relationship in the instance",
+            0,
+        ));
+    }
+
+    let mut binds: Vec<String> = Vec::new();
+    let joined = format!("/{}//", withs.join("//"));
+
+    let mut clauses = vec![
+        // (a) every participant of the ship is named in the value
+        format!(
+            "EXISTS (SELECT 1 FROM ship_participants sp WHERE sp.ship_node_id = wr.ship_node_id \
+             AND (? || '%') LIKE '%/' || sp.character_node_id || '/%')"
+        ),
+        // (b) no participant of the ship is unnamed in the value
+        format!(
+            "NOT EXISTS (SELECT 1 FROM ship_participants sm WHERE sm.ship_node_id = wr.ship_node_id \
+             AND (? || '%') NOT LIKE '%/' || sm.character_node_id || '/%')"
+        ),
+    ];
+    // (a) and (b) share one bind of the joined value, so it is bound twice. There is
+    // no back-reference: `rewrite_placeholders` numbers every `?` in order.
+    binds.push(joined.clone());
+    binds.push(joined);
+
+    // (c) every name in the value is a participant of the ship
+    for w in &withs {
+        clauses.push(format!(
+            "EXISTS (SELECT 1 FROM ship_participants sq WHERE sq.ship_node_id = wr.ship_node_id \
+             AND sq.character_node_id = ?)"
+        ));
+        binds.push((*w).to_owned());
+    }
+
+    for (column, value) in row_bounds {
+        clauses.push(format!("{column} = ?"));
+        binds.push(value.to_owned());
+    }
+
+    let sql = format!(
+        "(EXISTS (SELECT 1 FROM work_relationships wr WHERE wr.work_id = works.id AND {}))",
+        clauses.join(" AND ")
+    );
+    Ok(SqlFragment { sql, binds })
+}
+
+/// Compile §15.4.1.2's `min_match(n, ...)`.
+///
+/// Compiled as a count over a list of parenthesised predicates:
+///
+/// ```sql
+/// (SELECT COUNT(*) FROM (SELECT (<p1>) AS ok UNION ALL SELECT (<p2>) AS ok ...) s) >= n
+/// ```
+///
+/// `COUNT(*) >= n` rather than `COUNT(*) = n`: "at least two" is what the reader
+/// asked, and a work satisfying all three must still match.
+///
+/// Each arm is a sub-select rather than a bare term, because the arms must be
+/// scored independently and `UNION ALL` is what keeps them separate -- a bare
+/// `p1 UNION ALL p2` would return rows of booleans and have no row to score.
+///
+/// The NULL handling is not incidental. A predicate over a NULL-able column
+/// -- `works.summary`, `works_index.body_text` -- yields NULL, not false, and
+/// `SUM` skips NULL, so one NULL-valued term would drop the whole count to NULL and
+/// the `>= n` comparison would be NULL, which a WHERE clause reads as false: the work
+/// would vanish from a result it belongs in. Scoring each arm to 1/0 first means
+/// NULL is unsatisfied, which is what it means.
+fn render_min_match(needed: usize, terms: &[QueryAst]) -> Result<SqlFragment, QueryError> {
+    if terms.is_empty() {
+        return Err(QueryError::new(
+            "min_match needs at least one term to count",
+            0,
+        ));
+    }
+    if needed == 0 || needed > terms.len() {
+        return Err(QueryError::new(
+            format!(
+                "min_match needs {needed} of {} terms, which can never be satisfied",
+                terms.len()
+            ),
+            0,
+        ));
+    }
+
+    let mut arms = Vec::with_capacity(terms.len());
+    let mut binds = Vec::new();
+    for t in terms {
+        let f = render_node(t)?;
+        // CASE WHEN ... THEN 1 ELSE 0 END, and not COALESCE(pred, 0).
+        //
+        // Measured on both engines, because the two obvious forms are both broken
+        // here and neither fails at compile time:
+        //   COALESCE(pred, 0)  -- PostgreSQL: "COALESCE types boolean and integer
+        //                          cannot be matched". SQLite accepts it.
+        //   SUM(pred)          -- PostgreSQL: "function sum(boolean) does not exist".
+        //   pred::int          -- SQLite: parse error.
+        // CASE WHEN is the form both accept, and it scores a NULL predicate as 0 on
+        // both -- verified against a NULL-able column, where `pred` is NULL and the
+        // score is 0. That is the behaviour needed: a work whose summary is NULL has
+        // not satisfied `summary:"x"`, and must count as unsatisfied rather than
+        // making the whole SUM NULL and the row silently vanish.
+        arms.push(format!(
+            "SELECT CASE WHEN ({}) THEN 1 ELSE 0 END AS ok",
+            f.sql
+        ));
+        binds.extend(f.binds);
+    }
+
+    let sql = format!(
+        "((SELECT SUM(ok) FROM ({}) s) >= {})",
+        arms.join(" UNION ALL "),
+        needed
+    );
+    Ok(SqlFragment { sql, binds })
+}
+
+/// Compile §15.4.1.3's `tag:"X"+children`.
+///
+/// The term's own node resolves the reader's name to a node id, and the closure
+/// supplies the descendants. Both the name and the descendant set are matched
+/// against `work_tags`, so a work carrying the parent OR any descendant matches.
+///
+/// `rel = 'parent'` is in the predicate, not implied: `taxonomy_closure` also holds
+/// `implies` rows, and following those would silently widen every expansion. §9's
+/// risk list says implication edges are curator-only and default off, and this is
+/// where "off" is enforced.
+///
+/// The depth cap is a `depth <= n` bound on the closure, which is a column, so the
+/// cap costs nothing and cannot be forgotten. `None` means the instance default and
+/// omits the bound — the closure's own size then bounds it, which is why
+/// `QueryBudget::max_expansion` is checked at parse time rather than here.
+fn render_expand(
+    field: QueryField,
+    term: &str,
+    depth: Option<u32>,
+) -> Result<SqlFragment, QueryError> {
+    // Resolve the reader's name to a node id, then match either the node itself or
+    // any descendant of it. Two EXISTS in one AND-of-OR shape rather than a join,
+    // so a work with no tags at all is excluded rather than producing a NULL row.
+    let base = render_node(&QueryAst::Fielded(field, term.to_owned()))?;
+    let depth_bound = match depth {
+        Some(n) => format!(" AND tc.depth <= {n}"),
+        None => String::new(),
+    };
+
+    let sql = format!(
+        "({base_sql} OR EXISTS (SELECT 1 FROM taxonomy_closure tc \
+         WHERE tc.ancestor_id = (SELECT tn.id FROM taxonomy_nodes tn WHERE tn.norm = ? AND tn.kind = ?) \
+           AND tc.rel = 'parent'{depth_bound} \
+           AND EXISTS (SELECT 1 FROM work_tags wt WHERE wt.work_id = works.id \
+             AND wt.node_id = tc.descendant_id)))",
+        base_sql = base.sql
+    );
+    let mut binds = base.binds;
+    // The closure needs the SAME name the base field resolved, so it re-binds rather
+    // than reusing a placeholder: there is no back-reference to the first one.
+    let norm = term.to_lowercase().trim().to_owned();
+    binds.push(norm);
+    binds.push(field_taxonomy_kind(field).to_owned());
+    Ok(SqlFragment { sql, binds })
+}
+
+/// The `taxonomy_nodes.kind` a taxonomy field's values live under.
+fn field_taxonomy_kind(field: QueryField) -> &'static str {
+    match field {
+        QueryField::Fandom => "fandom",
+        QueryField::Character => "character",
+        QueryField::Relationship => "ship",
+        QueryField::Mood => "mood",
+        // Tag covers every remaining taxonomy kind -- trope, genre, setting,
+        // format, pov, tense, freeform -- so it cannot name one kind. `IN` over
+        // the kinds a tag may be is the honest form, and the caller's base
+        // predicate already restricts by the tag's own semantics.
+        _ => "tag",
+    }
+}
+
 fn render_exists_relationship(a: &RelationshipAssertion) -> Result<SqlFragment, QueryError> {
     if a.participant_any.is_empty() {
         return Err(QueryError::new(
