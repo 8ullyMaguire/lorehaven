@@ -91,8 +91,8 @@ A red gate that predates the work is part of the work.
 
 ## Scope, and what this brief adds
 
-`docs/requirements.csv` has 687 rows: **298 fully tested, 117 verified E2E, 227
-built but not verified end to end, 40 planned, 4 deliberately unsupported, 1
+`docs/requirements.csv` has 687 rows: **299 fully tested, 117 verified E2E, 227
+built but not verified end to end, 39 planned, 4 deliberately unsupported, 1
 evaluated and rejected.**
 
 *(Re-derived 2026-09-30. The previous figures here — 640 rows, 53 planned, and a
@@ -204,7 +204,7 @@ are `implemented-verified-e2e`, M53-03/-04 are `implemented-fully-tested`, and
 the M45 ranking substrate is wired end to end through §47 and §48. What is left
 is the remaining 40 planned M45 rows and then the browser extension body.*
 
-**36 of those 40 rows had no spec section at all** — `docs/spec.md` had zero
+**37 of those 39 rows still have no spec section at all** — `docs/spec.md` had zero
 hits for `concierge`, `keystone`, `Fic Finder`, `view-as-persona`, `DSAR`, `DSA`
 and a dozen more. They existed as CSV rows whose entire specification was
 `Gaps review B1`, from `docs/spec-gaps-design-review-2026-09-22.md`, which is
@@ -212,7 +212,12 @@ marked *review draft — proposed, not adopted*. So the next step is
 **specification, not code**, and `docs/plans/m45-gaps-adoption.md` is that plan:
 eight phases in dependency order, one spec section each, with the reasoning for
 why the groups are ordered that way. §49 (taste signal: M45-14, -16, -19, -20,
--35) is the first and is committed.
+-35) is committed, and **§49.2 is built**: migration 0099 plus
+`crates/db/src/tag_confirmation.rs`, with M45-16 promoted to
+`implemented-fully-tested` on a test that fails for exactly one reason — remove the
+confirmation filter from the route and that test goes red while every other in the
+file stays green. Phase 1's remaining steps are M45-19 (tasting menu) and M45-20
+(history import); their tables are already in 0099.**
 
 Each step's exit condition is in `docs/plans/remaining-work.md` and its row in
 `docs/requirements.csv`.
