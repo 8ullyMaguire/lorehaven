@@ -123,6 +123,29 @@ This enables:
 | **Journey 12: X present, no relationship involving X** | `EXISTS(work_characters X) AND NOT EXISTS(relationship involving X)` |
 | primary ship only | add `wr.prominence='primary'` |
 
+> **As built (M46-04).** The plan says to re-key `content_warnings`; it is a
+> **sibling table, `work_warnings`**, not a re-key. `content_warnings.post_id` is a
+> *forum post* (TEXT, referencing `forum_posts(id)`), written and read by
+> `crates/db/src/spoilers.rs` behind `routes/spoilers.rs` and pinned by five tests in
+> `milestone_34_spoilers.rs`. Re-keying would mean a table rebuild with a live route
+> behind it — the operation 0082, 0103 and 0104 all decline on the same grounds.
+>
+> The two answer different questions: a reader's free-text mark on a post versus an
+> author's taxonomy-typed declaration about a work or chapter. Keeping them separate
+> also stops a work warning being silently attached to an unrelated post.
+>
+> `declaration` keeps `none_apply` and `creator_chose_not_to_say` **distinct**:
+> collapsing them would let a creator's silence read as a clean bill of health.
+> Uniqueness over the nullable `chapter_id` is `UNIQUE NULLS NOT DISTINCT` on
+> PostgreSQL and a unique index on `coalesce(chapter_id, '')` on SQLite, because an
+> expression inside a table-level UNIQUE constraint is rejected on SQLite
+> ("expressions prohibited in PRIMARY KEY and UNIQUE constraints").
+>
+> Also in 0105: `work_tag_votes` (the reader layer behind `work_tags.confidence`, keyed
+> on a pseudonymous id with no reversible mapping per §11.17) and `work_index_policy`
+> plus `work_passages`. `work_index_policy.allow_embedding` defaults to **0**, because
+> §47.10/§49.9 forbid inferred data influencing anything.
+
 ### Warnings
 
 Re-key `content_warnings` from `post_id` to works and chapters:

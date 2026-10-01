@@ -1,5 +1,5 @@
-//! Migration 0104 must APPLY on whichever backend the harness picks, and its
-//! constraints must BITE once it has.
+//! Migrations 0104 and 0105 must APPLY on whichever backend the harness picks, and
+//! their constraints must BITE once they have.
 //!
 //! Both halves are needed, and the first version of this file had only the first,
 //! which is how a real defect got through:
@@ -49,8 +49,20 @@ async fn exec(db: &TestDb, sql: &str) -> Result<(), sqlx::Error> {
 
 /// Whether the database refused a statement. A constraint that does not bite
 /// reports `false` here, which is the whole point.
+///
+/// `why` is the error text, and it matters more than it looks: a mutation check
+/// showed this helper reporting `true` for a duplicate work-scoped warning on
+/// PostgreSQL even with plain `UNIQUE` in place -- which PostgreSQL demonstrably
+/// permits, since NULL != NULL in a unique index. Some *other* error was being
+/// counted as the constraint biting. An assertion that cannot say which error it
+/// saw will do that again.
 async fn refused(db: &TestDb, sql: &str) -> bool {
     exec(&db, sql).await.is_err()
+}
+
+/// The error text a statement produced, or None if it succeeded.
+async fn refusal(db: &TestDb, sql: &str) -> Option<String> {
+    exec(&db, sql).await.err().map(|e| e.to_string())
 }
 
 /// Read one text value.
@@ -99,10 +111,12 @@ async fn the_full_chain_applies_through_0104() {
         applied.len(),
         applied.last()
     );
-    assert!(
-        applied.iter().any(|m| m.contains("0104")),
-        "0104 must be in the applied set, got {applied:?}"
-    );
+    for want in ["0104", "0105"] {
+        assert!(
+            applied.iter().any(|m| m.contains(want)),
+            "{want} must be in the applied set, got {applied:?}"
+        );
+    }
     db.cleanup().await;
 }
 
@@ -269,6 +283,311 @@ async fn the_new_tables_refuse_impossible_shapes() {
         "the depth-0 self row is what +children needs: without it expansion \
          excludes the node the reader asked for"
     );
+
+    db.cleanup().await;
+}
+
+/// A work to hang warnings, votes and policies off.
+///
+/// `works` has exactly four NOT NULL columns with no default -- `id`,
+/// `owner_pseud_id`, `created_at`, `updated_at` -- read from
+/// `information_schema` rather than guessed, after two rounds of "null value in
+/// column ..." from PostgreSQL. A work needs an owner, and an owner needs an
+/// account, so the fixture creates the whole chain.
+///
+/// Ids are literal strings cast on PostgreSQL only, because `works.id` is TEXT on
+/// SQLite and UUID on PostgreSQL and a bound string does not match a uuid column.
+/// That asymmetry is the same one `TestDb::fetch_text_column` exists to paper over.
+async fn work(db: &TestDb, id: &str) {
+    let short = &id[..8];
+    let cast = if db.is_postgres() { "::uuid" } else { "" };
+    exec(
+        db,
+        &format!(
+            "INSERT INTO accounts (id, email, created_at, updated_at) \
+             VALUES ('{id}'{cast}, 'w{short}@example.invalid', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+        ),
+    )
+    .await
+    .expect("an account inserts");
+    exec(
+        db,
+        &format!(
+            "INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at) \
+             VALUES ('{id}'{cast}, '{id}'{cast}, 'wp{short}', 'W Pseud {short}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+        ),
+    )
+    .await
+    .expect("a pseud inserts");
+    exec(
+        db,
+        &format!(
+            "INSERT INTO works (id, owner_pseud_id, title, created_at, updated_at) \
+             VALUES ('{id}'{cast}, '{id}'{cast}, 'w', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+        ),
+    )
+    .await
+    .expect("a work inserts");
+}
+
+/// A taxonomy node of kind 'warning', which is what work_warnings references.
+async fn warning_node(db: &TestDb, id: &str) {
+    let sql = format!(
+        "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) \
+         VALUES ('{id}', 'warning', '{id}', '{}', '2026-01-01T00:00:00Z')",
+        id.to_lowercase()
+    );
+    exec(db, &sql).await.expect("a warning node inserts");
+}
+
+fn lit(db: &TestDb, s: &str) -> String {
+    // Casts a uuid literal on PostgreSQL only, for the same reason `work` does.
+    if db.is_postgres() {
+        s.replace("__UUID__", "::uuid")
+    } else {
+        s.replace("__UUID__", "")
+    }
+}
+
+#[tokio::test]
+async fn work_warnings_refuse_impossible_shapes() {
+    let dir = scratch_dir("migrate_0105_warnings");
+    let db = TestDb::connect_with_dir("migrate_0105_warnings", &dir).await;
+    work(&db, "11111111-1111-1111-1111-111111111111").await;
+    warning_node(&db, "wn1").await;
+
+    // `chapter` and `node` are passed already-quoted-or-NULL by the caller; the two
+    // enum-ish values are passed BARE and quoted exactly once here. Quoting in both
+    // places produced ''"on_page"'' and a syntax error at "on_page", which is the
+    // kind of double-quoting bug that reads as a database problem.
+    let insert = |chapter: &str, node: &str, severity: &str, depiction: &str, declaration: &str| {
+        format!(
+            "INSERT INTO work_warnings (work_id, chapter_id, warning_node_id, severity, depiction, declaration, created_at, updated_at) \
+             VALUES ('11111111-1111-1111-1111-111111111111'__UUID__, {chapter}, {node}, {severity}, '{depiction}', '{declaration}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+        )
+    };
+
+    // The domains the plan leaves as bare column names.
+    assert!(
+        refused(
+            &db,
+            &lit(&db, &insert("NULL", "'wn1'", "3", "on_page", "declared"))
+        )
+        .await,
+        "severity outside 1|2 must be refused"
+    );
+    assert!(
+        refused(
+            &db,
+            &lit(&db, &insert("NULL", "'wn1'", "1", "hinted", "declared"))
+        )
+        .await,
+        "an unrecognised depiction must be refused rather than stored and ignored"
+    );
+    assert!(
+        refused(
+            &db,
+            &lit(&db, &insert("NULL", "'wn1'", "1", "on_page", "probably"))
+        )
+        .await,
+        "an unrecognised declaration must be refused"
+    );
+    assert!(
+        refused(
+            &db,
+            &lit(&db, &insert("NULL", "'nope'", "1", "on_page", "declared"))
+        )
+        .await,
+        "a warning must not reference a taxonomy node that does not exist"
+    );
+
+    // `none_apply` and `creator_chose_not_to_say` are different states and both
+    // must be storable -- the point of keeping them apart. Values are passed BARE
+    // and quoted once, inside `insert`.
+    for declaration in [
+        "declared",
+        "none_apply",
+        "creator_chose_not_to_say",
+        "reader_flagged",
+    ] {
+        let node = format!("wn_{declaration}");
+        warning_node(&db, &node).await;
+        exec(
+            &db,
+            &lit(
+                &db,
+                &insert("NULL", &format!("'{node}'"), "1", "on_page", declaration),
+            ),
+        )
+        .await
+        .unwrap_or_else(|e| panic!("{declaration} must be accepted:\n{e}"));
+    }
+
+    // Null-chapter uniqueness: NULL does not compare equal to NULL, so this is
+    // where a plain UNIQUE would silently let a work-scoped warning land twice.
+    warning_node(&db, "wn_dup").await;
+    exec(
+        &db,
+        &lit(&db, &insert("NULL", "'wn_dup'", "1", "on_page", "declared")),
+    )
+    .await
+    .expect("first work-scoped warning");
+    let dup = lit(&db, &insert("NULL", "'wn_dup'", "1", "on_page", "declared"));
+    let err = refusal(&db, &dup).await;
+    assert!(
+        err.is_some(),
+        "the same work-scoped warning must not be insertable twice: a NULL chapter \
+         does not collide with itself under a plain UNIQUE, which is the whole \
+         reason the uniqueness is an expression index / NULLS NOT DISTINCT"
+    );
+    println!(
+        "DUP REFUSAL ON {backend}: {err:?}",
+        backend = if db.is_postgres() {
+            "postgres"
+        } else {
+            "sqlite"
+        }
+    );
+    // A chapter-scoped one is a different row and must be accepted.
+    exec(
+        &db,
+        &lit(
+            &db,
+            &insert("'ch1'", "'wn_dup'", "1", "on_page", "declared"),
+        ),
+    )
+    .await
+    .expect("the same warning scoped to a chapter is a different row");
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn tag_votes_refuse_weights_outside_the_domain() {
+    let dir = scratch_dir("migrate_0105_votes");
+    let db = TestDb::connect_with_dir("migrate_0105_votes", &dir).await;
+    work(&db, "22222222-2222-2222-2222-222222222222").await;
+    warning_node(&db, "tn1").await;
+
+    let vote = |v: &str, voter: &str| {
+        format!(
+            "INSERT INTO work_tag_votes (work_id, node_id, voter_pseud_id, vote, created_at, updated_at) \
+             VALUES ('22222222-2222-2222-2222-222222222222'__UUID__, 'tn1', '{voter}', {v}, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+        )
+    };
+    for good in ["-1", "0", "1"] {
+        exec(&db, &lit(&db, &vote(good, &format!("p{good}"))))
+            .await
+            .unwrap_or_else(|e| panic!("vote {good} must be accepted:\n{e}"));
+    }
+    assert!(
+        refused(&db, &lit(&db, &vote("5", "p5"))).await,
+        "a vote weight outside -1|0|1 must be refused"
+    );
+    assert!(
+        refused(&db, &lit(&db, &vote("-2", "pm2"))).await,
+        "a negative weight beyond -1 must be refused"
+    );
+    // One vote per (work, tag, voter): a second vote is a conflict, not a second
+    // row that would double-count the confidence aggregate.
+    assert!(
+        refused(&db, &lit(&db, &vote("1", "p1"))).await,
+        "a reader must not hold two votes on the same tag for the same work"
+    );
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn index_policy_refuses_non_boolean_flags() {
+    let dir = scratch_dir("migrate_0105_policy");
+    let db = TestDb::connect_with_dir("migrate_0105_policy", &dir).await;
+    work(&db, "33333333-3333-3333-3333-333333333333").await;
+
+    // The default matters: a work with no explicit policy must not be embeddable,
+    // because §47.10/§49.9 forbid inferred data influencing anything.
+    exec(
+        &db,
+        &lit(
+            &db,
+            "INSERT INTO work_index_policy (work_id, created_at, updated_at) \
+             VALUES ('33333333-3333-3333-3333-333333333333'__UUID__, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        ),
+    )
+    .await
+    .expect("a policy row inserts");
+    // Read as text, not as a number: a bare INTEGER column decodes as INT4 on
+    // PostgreSQL and INTEGER on SQLite, and neither matches the i64/INT8 the
+    // `number` helper asks for. `CAST(... AS TEXT)` is portable here because the
+    // column is already an integer -- unlike a uuid column, where the cast is
+    // valid on one engine and a syntax error on the other.
+    assert_eq!(
+        text(
+            &db,
+            "SELECT CAST(allow_embedding AS TEXT) FROM work_index_policy"
+        )
+        .await,
+        "0",
+        "embedding must be off unless a policy says otherwise: §47.10/§49.9 forbid \
+         inferred data influencing anything, so the default cannot be permissive"
+    );
+    assert_eq!(
+        text(
+            &db,
+            "SELECT CAST(fetch_remote AS TEXT) FROM work_index_policy"
+        )
+        .await,
+        "1",
+        "fetching defaults on: a work in the catalogue is indexable by default"
+    );
+
+    assert!(
+        refused(
+            &db,
+            &lit(&db, "UPDATE work_index_policy SET allow_embedding = 2")
+        )
+        .await,
+        "a flag outside 0|1 must be refused"
+    );
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn passages_refuse_impossible_offsets() {
+    let dir = scratch_dir("migrate_0105_passages");
+    let db = TestDb::connect_with_dir("migrate_0105_passages", &dir).await;
+    work(&db, "44444444-4444-4444-4444-444444444444").await;
+
+    let passage = |seq: i32, start: i32, end: i32, chapter: &str| {
+        format!(
+            "INSERT INTO work_passages (id, work_id, chapter_id, seq, text, start_offset, end_offset, created_at) \
+             VALUES ('p{seq}{start}', '44444444-4444-4444-4444-444444444444'__UUID__, {chapter}, {seq}, 'x', {start}, {end}, '2026-01-01T00:00:00Z')"
+        )
+    };
+    exec(&db, &lit(&db, &passage(0, 0, 120, "NULL")))
+        .await
+        .expect("a work-level passage inserts");
+    exec(&db, &lit(&db, &passage(1, 100, 220, "'ch1'")))
+        .await
+        .expect("a chapter passage inserts");
+
+    assert!(
+        refused(&db, &lit(&db, &passage(2, 200, 100, "'ch1'"))).await,
+        "a passage running backwards must be refused"
+    );
+    assert!(
+        refused(&db, &lit(&db, &passage(3, -1, 50, "'ch1'"))).await,
+        "a negative start offset must be refused"
+    );
+    assert!(
+        refused(&db, &lit(&db, &passage(1, 0, 50, "'ch1'"))).await,
+        "two passages of one chapter must not share a position"
+    );
+    // The same seq in a different chapter is a different position.
+    exec(&db, &lit(&db, &passage(1, 0, 50, "'ch2'")))
+        .await
+        .expect("the same seq in another chapter is a different passage");
 
     db.cleanup().await;
 }
