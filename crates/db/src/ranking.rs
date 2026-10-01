@@ -323,11 +323,26 @@ pub async fn rank_works(
     // ranking, is discarded and replaced by an accident of identifier
     // assignment.
     //
-    // The determinism §47.9 asks for is "two calls on the same database state
-    // agree". Stability is preserved by keeping the caller's order: the same
-    // input order produces the same output, and a different input order is a
-    // different input. Duplicates are removed with a seen-set rather than
-    // `sort()+dedup()` for the same reason.
+    // Deduplicate WITHOUT reordering.
+    //
+    // The first draft sorted by id here, on the reasoning that a sorted input
+    // cannot differ because the input arrived shuffled. That is true and it is
+    // the wrong property: sorting by id makes the output a function of the
+    // UUIDs, so when taste cannot separate two candidates -- an unweighted
+    // reader, or two works with equal scores -- the order handed back is
+    // lexicographic-by-uuid. The caller's ranking, which is the *engine's*
+    // ranking, is discarded and replaced by an accident of identifier
+    // assignment.
+    //
+    // So the sort is not here. Duplicates are removed with a seen-set, and the
+    // ordering that 47.2 actually asks for -- independent of arrival order -- is
+    // established by the `WorkId` tie-break at the score sort below, which only
+    // ever orders candidates that are otherwise equal.
+    //
+    // Verified in both directions: with the tie-break removed,
+    // `two_calls_on_the_same_state_agree_exactly` fails; with this dedup replaced
+    // by `sort()+dedup()`, `with_no_weights_the_feed_stays_in_engine_order`
+    // fails. Neither test passes because of the other.
     let mut seen = std::collections::HashSet::with_capacity(candidates.len());
     let mut candidates: Vec<WorkId> = candidates
         .into_iter()
@@ -364,12 +379,26 @@ pub async fn rank_works(
         mmr_rerank(&scored, &[], options.lambda)
     } else {
         let mut by_score: Vec<WorkId> = scored.iter().map(|(id, _, _)| *id).collect();
-        // Stable, so candidates with equal scores keep the caller's order
-        // rather than being reshuffled by the sort.
+        // Score descending, then `WorkId` ascending as an explicit tie-break.
+        //
+        // §47.2 asks for the result to be independent of arrival order, so the
+        // stable sort's "keep the caller's order" is NOT what is wanted here: it
+        // would let a candidate win a tie purely by being passed in first. Ties
+        // on `WorkId` instead, which is a property of the candidate.
+        //
+        // Sorting by id *last* is not the defect fixed in 84c8216. That sorted by
+        // id *before* scoring, which replaced the caller's ranking outright for
+        // any candidate taste could not separate -- an unweighted reader got a
+        // lexicographic feed instead of the engine's. Ordering only the otherwise
+        // equal pairs leaves every score-resolved pair where the ranking put it,
+        // and
+        // `with_no_weights_the_feed_stays_in_engine_order` in
+        // `m29_transparency.rs` is what proves that through a live route.
         by_score.sort_by(|a, b| {
             score_of(b)
                 .partial_cmp(&score_of(a))
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.cmp(b))
         });
         by_score
     };
@@ -424,6 +453,19 @@ pub async fn rank_works(
 
     let by_id: std::collections::HashMap<WorkId, f64> =
         scored.iter().map(|(id, score, _)| (*id, *score)).collect();
+
+    // §47.2 requires the result to be independent of arrival order, so a
+    // candidate cannot win or lose a tie by being passed in first. Ties are
+    // broken by `WorkId`, which is the only key available that is a property of
+    // the candidate rather than of the call.
+    //
+    // This is deliberately NOT the same as sorting by id before scoring, which is
+    // what the first draft did. Sorting by id *first* replaced the caller's
+    // ranking outright for any candidate taste could not separate -- an
+    // unweighted reader got a lexicographic feed instead of the engine's. Sorting
+    // by id *last* only orders candidates that are otherwise equal, which is
+    // what a deterministic tie-break is for, and leaves every score-resolved pair
+    // exactly where the ranking put it.
     let mut ranked: Vec<Ranked> = ordered
         .iter()
         .map(|work_id| Ranked {
