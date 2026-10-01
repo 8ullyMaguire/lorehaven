@@ -330,7 +330,10 @@ impl Worker {
         // The key also means "did today's recheck run" is a row in `jobs` rather
         // than a line in a log -- and `enqueue` is a no-op when the key exists,
         // so several passes in one day cost one query.
-        let recheck_key = format!("preservation:recheck:{}", now.date().to_string());
+        // `{now.date()}` rather than `{now.date().to_string()}`: `Date`
+        // implements `Display`, so `to_string()` is a redundant round trip
+        // through a `String` only to be formatted again.
+        let recheck_key = format!("preservation:recheck:{}", now.date());
         let recheck = jobs::enqueue(
             state.db(),
             JobKind::PreservationRecheck,

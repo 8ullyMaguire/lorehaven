@@ -821,7 +821,7 @@ mod tests {
              last: {text}"
         );
         assert!(
-            text[block..].contains("check(s):") == false,
+            !text[block..].contains("check(s):"),
             "something renders after the block: {text}"
         );
     }

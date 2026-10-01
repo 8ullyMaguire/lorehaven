@@ -117,12 +117,12 @@ impl Harness {
             lorehaven_db::Backend::Postgres => "SELECT COUNT(*) FROM accounts WHERE id != $1::uuid",
         };
         match self.db().backend() {
-            lorehaven_db::Backend::Sqlite => sqlx::query_scalar::<_, i64>(&q)
+            lorehaven_db::Backend::Sqlite => sqlx::query_scalar::<_, i64>(q)
                 .bind(lorehaven_db::SYSTEM_ACCOUNT.to_string())
                 .fetch_one(self.db().sqlite_pool().expect("sqlite"))
                 .await
                 .expect("count reader accounts"),
-            lorehaven_db::Backend::Postgres => sqlx::query_scalar::<_, i64>(&q)
+            lorehaven_db::Backend::Postgres => sqlx::query_scalar::<_, i64>(q)
                 .bind(lorehaven_db::SYSTEM_ACCOUNT.to_string())
                 .fetch_one(self.db().postgres_pool().expect("pg"))
                 .await

@@ -557,7 +557,7 @@ async fn an_anonymous_caller_is_refused_and_learns_nothing_about_the_proposals()
             "{method} {path} without a session: {status} {body}"
         );
         assert!(
-            body.to_string().contains("aggregate") == false,
+            !body.to_string().contains("aggregate"),
             "a refusal must not echo a proposal's contents: {body}"
         );
     }
