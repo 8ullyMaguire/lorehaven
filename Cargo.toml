@@ -97,3 +97,15 @@ unsafe_code = "forbid"
 lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
+
+# Debug builds were writing a ~500 MB rlib for lorehaven-app alone, and the
+# workspace has ~130 test targets each linking their own copy. Ten builds of churn
+# put `target/` at 325 GB and filled the disk to 81%, at which point linking
+# started failing for reasons that had nothing to do with the code.
+#
+# `debug = "line-tables-only"` keeps what a panic message needs -- file, line,
+# function -- and drops the type and variable DWARF that makes the rlibs huge.
+# A test failure still reports `src/lib.rs:319`, which is the only reason the
+# debug profile is read at all.
+[profile.dev]
+debug = "line-tables-only"
