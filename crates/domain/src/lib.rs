@@ -11,6 +11,7 @@ pub mod charging;
 pub mod community;
 pub mod consensus;
 pub mod content;
+pub mod coordinates;
 pub mod derivative;
 pub mod directory;
 pub mod discovery;
