@@ -91,7 +91,7 @@ A red gate that predates the work is part of the work.
 
 ## Scope, and what this brief adds
 
-`docs/requirements.csv` has 687 rows: **295 fully tested, 117 verified E2E, 230
+`docs/requirements.csv` has 687 rows: **298 fully tested, 117 verified E2E, 227
 built but not verified end to end, 40 planned, 4 deliberately unsupported, 1
 evaluated and rejected.**
 
@@ -187,19 +187,23 @@ two or three concrete examples of what breaking it costs.
 3. **The Chromium extension**, after its own spec section, against the same API.
 4. **M53-03/-04** — the credential-vault-gated adapters.
 5. **M45** — the discovery-and-community growth block, the dominant term. Spec
-   §47 and `docs/plans/m45-ranking-substrate.md` now cover its first five rows
-   (M45-10, -11, -13, -15, -49); steps 1–3 of that plan are committed, and steps
-   4 (`rank_works`) and 6 (the suite) are open. (This
+   §47 and `docs/plans/m45-ranking-substrate.md` cover its first five rows
+   (M45-10, -11, -13, -15, -49), and **all seven steps of that plan are now
+   committed** — including step 7, which wires `rank_works` into
+   `GET /api/v1/discovery` and gives `log_impression` its first caller. Three of
+   the five rows are `implemented-fully-tested`; M45-10 (`scout_value`) and
+   M45-15 (exposure floor) deliberately stay `implemented-locally-tested` because
+   the route does not call them, and the CSV says so per row. (This
    line previously read "the metadata exchange block", which is M57's job
    description copied forward by mistake. M45 is the gaps-review block: Scout
    credit, exposure floors, MMR re-ranking, taste leakage, kudos, bounties,
    keystone authors, the Discord bot, GDPR/DSA compliance tooling.)
 
-*(Updated 2026-09-30: steps 1, 2 and 4 are done. M57's rows are all
-`implemented-fully-tested`, M54-01/-02 are `implemented-verified-e2e`, and
-M53-03/-04 are `implemented-fully-tested`. What is left is step 5, then the
-Chromium extension in step 3 — and the extension is gated on the API surface
-being real, which is why it comes last rather than because it is lowest value.)*
+*(Updated 2026-10-01: M57's rows are all `implemented-fully-tested`, M54-01/-02
+are `implemented-verified-e2e`, M53-03/-04 are `implemented-fully-tested`, and
+the M45 ranking substrate is wired end to end. What is left is the remaining 40
+planned M45 rows, then the browser extension — which now has spec §48 and a
+forked repo at `~/code-local/rust/lorehaven-companion`.*)
 
 Each step's exit condition is in `docs/plans/remaining-work.md` and its row in
 `docs/requirements.csv`.

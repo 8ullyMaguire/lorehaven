@@ -2056,6 +2056,12 @@ async fn touch(db: &Database, work_id: &str, when: &str) {
 
 /// A work's stored `updated_at`, so a test can check its own premise.
 async fn updated_at_of(db: &Database, work: &str) -> String {
+    // `::text` on the PostgreSQL arm, and `String` on both: `updated_at` is
+    // TIMESTAMPTZ there and TEXT on SQLite, so asking sqlx for an
+    // `OffsetDateTime` on one side and a `String` on the other compiles and then
+    // fails at decode time on the side that does not match. This is the
+    // single-backend blind spot in the gate table, and it is a fixture problem
+    // rather than a product one -- but it is invisible until the PG run.
     let sql = db.sql(
         "SELECT updated_at FROM works WHERE id = ?",
         "SELECT updated_at::text FROM works WHERE id = ?::uuid",
@@ -2066,22 +2072,24 @@ async fn updated_at_of(db: &Database, work: &str) -> String {
             .fetch_one(db.sqlite_pool().expect("sqlite"))
             .await
             .expect("updated_at"),
-        lorehaven_db::Backend::Postgres => sqlx::query_scalar::<_, time::OffsetDateTime>(&sql)
+        lorehaven_db::Backend::Postgres => sqlx::query_scalar::<_, String>(&sql)
             .bind(work)
             .fetch_one(db.postgres_pool().expect("postgres"))
             .await
-            .expect("updated_at")
-            .to_string(),
+            .expect("updated_at"),
     }
 }
 
 /// The propensities recorded against a pseud's slots, as `(work_id, propensity)`.
 async fn logged_propensities(db: &Database, pseud: uuid::Uuid) -> Vec<(String, f64)> {
+    // `work_id::text` on the PostgreSQL arm for the same reason as
+    // `updated_at::text` above: the column is UUID there and TEXT on SQLite, and
+    // a `String` row type cannot decode a UUID.
     let sql = db.sql(
         "SELECT work_id, propensity FROM recommendation_slots
          WHERE pseud_id = ? AND propensity IS NOT NULL
          ORDER BY position ASC",
-        "SELECT work_id, propensity FROM recommendation_slots
+        "SELECT work_id::text, CAST(propensity AS DOUBLE PRECISION) FROM recommendation_slots
          WHERE pseud_id = ?::uuid AND propensity IS NOT NULL
          ORDER BY position ASC",
     );

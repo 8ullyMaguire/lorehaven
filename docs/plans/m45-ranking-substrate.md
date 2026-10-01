@@ -467,8 +467,34 @@ does not work — `dropdb` in parallel does. 1928 databases: 6m20s.)
 - [x] Full workspace suite green on both engines (see Gate results)
 - [x] The five M45 rows updated in `requirements.csv` with evidence
 - [x] `docs/goal.md` counts re-derived, not remembered
-- [ ] **Step 7 — no route calls `rank_works` yet.** This is why all five rows sit
-      at `implemented-locally-tested` and not `implemented-fully-tested`.
+- [x] **Step 7 — `GET /api/v1/discovery` calls `rank_works` and logs every served
+      row** (`84c8216`, `5d22356`). M45-11, -13 and -49 are now
+      `implemented-fully-tested`. M45-10 (`scout_value`) and M45-15 (exposure
+      floor) stay `implemented-locally-tested` on purpose: the route does not
+      call them, and a row that claims otherwise is the thing §"What complete
+      means" in `docs/goal.md` exists to prevent.
+
+### What wiring the route found
+
+Two defects in `rank_works` that no test in its own module could see, because
+every one of them either used `variety: true` or had equal scores:
+
+1. `candidates.sort()` before scoring made the output a function of the UUIDs.
+   Whenever taste could not separate two candidates, the caller's engine ranking
+   was replaced by lexicographic order — and a uuid-ordered list looks exactly
+   like a ranked one until you check which way round it is.
+2. With `variety: false` the ordering was `scored.iter()` — input order, never
+   sorted by score. So the "relevance only" path was a pass-through and
+   `rank_works` only ranked by taste when MMR happened to be switched on.
+
+(2) was hidden by (1). Both are fixed, with the reasoning in the commits and a
+unit test each — the second of which was verified red before green.
+
+A third, in the same class and found the same way: `RankOptions::default()` has
+`lambda: 1.0`, and `mmr_rerank` short-circuits at `lambda >= 1.0`. So
+`variety: true` with the default lambda is a **no-op** — taste computed, paid
+for, and discarded. The route now sets `lambda: 0.7` explicitly. A mechanism that
+looks configured and is not is its own failure mode, and there are now three.
 
 ## Not in this plan
 
