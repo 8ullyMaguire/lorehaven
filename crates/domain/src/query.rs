@@ -735,15 +735,17 @@ impl QueryBudget {
             ));
         }
         let mut terms = 0usize;
-        self.walk(ast, depth, &mut terms)
+        self.walk(ast, &mut terms)
     }
 
-    fn walk(
-        &self,
-        ast: &QueryAst,
-        depth: usize,
-        terms: &mut usize,
-    ) -> std::result::Result<(), QueryError> {
+    /// Walks the AST enforcing `max_terms`.
+    ///
+    /// No `depth` parameter: `check` already refuses an over-deep AST at the entry
+    /// point, so threading depth through the recursion only ever incremented a
+    /// number nothing read. `max_terms` is the limit that actually bites while
+    /// walking, because it also bounds the flat case -- a thousand terms joined by
+    /// `and` is legal and shallow.
+    fn walk(&self, ast: &QueryAst, terms: &mut usize) -> std::result::Result<(), QueryError> {
         *terms += 1;
         if self.max_terms != 0 && *terms > self.max_terms {
             return Err(QueryError::new(
@@ -754,10 +756,10 @@ impl QueryBudget {
         match ast {
             QueryAst::And(v) | QueryAst::Or(v) => {
                 for t in v {
-                    self.walk(t, depth + 1, terms)?;
+                    self.walk(t, terms)?;
                 }
             }
-            QueryAst::Not(inner) => self.walk(inner, depth + 1, terms)?,
+            QueryAst::Not(inner) => self.walk(inner, terms)?,
             // A scoped predicate is ONE term to the budget -- it compiles to a
             // single EXISTS however many bounds it carries. Pricing it by arity
             // would price it against a structure that does not exist at runtime.
@@ -790,7 +792,7 @@ impl QueryBudget {
                     ));
                 }
                 for t in inner {
-                    self.walk(t, depth + 1, terms)?;
+                    self.walk(t, terms)?;
                 }
             }
             QueryAst::Expand { depth: cap, .. } => {
