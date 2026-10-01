@@ -86,6 +86,7 @@ pub mod thread_modes;
 pub mod translation;
 pub mod typed_votes;
 pub mod work_backlink;
+pub mod work_characters;
 pub mod work_coordinates;
 pub mod work_discussion;
 pub mod work_metrics;
