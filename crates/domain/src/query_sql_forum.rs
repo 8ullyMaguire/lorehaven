@@ -64,6 +64,19 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
         QueryAst::Comparison(field, op, value) => render_comparison(*field, *op, value),
         QueryAst::And(parts) => join(parts, " AND "),
         QueryAst::Or(parts) => join(parts, " OR "),
+        // §15.3's `ExistsCharacter` and `ExistsRelationship` are WORK-scoped: they
+        // read `work_characters`, `work_relationships` and `ship_participants`, and
+        // compile against `works.id`. There is no forum post row for them to attach to, so
+        // an error is the only honest rendering.
+        //
+        // Rejecting rather than ignoring is the point. A `_ => false` arm would
+        // type-check and would silently turn "character:Alice" in a forum search
+        // into a query that matches nothing -- a reader would conclude the post
+        // does not mention Alice, when in fact the engine never looked.
+        QueryAst::ExistsCharacter(_) | QueryAst::ExistsRelationship(_) => Err(QueryError::new(
+            "character and relationship queries only apply to works",
+            0,
+        )),
         QueryAst::Not(inner) => {
             let inner = render_node(inner)?;
             let sql = if needs_null_guard(&inner.sql) {

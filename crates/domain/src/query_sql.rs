@@ -2,7 +2,9 @@
 //!
 //! Spec §15.3. Pure functions — no I/O.
 
-use crate::query::{CompareOp, QueryAst, QueryError, QueryField};
+use crate::query::{
+    CharacterAssertion, CompareOp, QueryAst, QueryError, QueryField, RelationshipAssertion,
+};
 
 /// A rendered SQL fragment with its bind parameters.
 #[derive(Debug, Clone, PartialEq)]
@@ -81,6 +83,8 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
                 binds,
             })
         }
+        QueryAst::ExistsCharacter(a) => render_exists_character(a),
+        QueryAst::ExistsRelationship(a) => render_exists_relationship(a),
         QueryAst::Not(inner) => {
             let inner = render_node(inner)?;
             // `NOT NULL` is NULL, not true, so a negated predicate over columns
@@ -104,6 +108,183 @@ fn render_node(ast: &QueryAst) -> Result<SqlFragment, QueryError> {
             })
         }
     }
+}
+
+/// Compile §15.3's `ExistsCharacter`.
+///
+/// ## The correlation rule, and why this function is shaped the way it is
+///
+/// §15.3: *"Compile bound predicates into SQL `EXISTS` clauses. Never allow one
+/// character to satisfy another character's attributes."*
+///
+/// The naive compilation of "character A, prominence protagonist, attribute
+/// vampire" is three independent clauses:
+///
+/// ```sql
+/// EXISTS (SELECT 1 FROM work_characters wc WHERE wc.work_id = works.id AND wc.character_node_id = ?)
+/// AND EXISTS (SELECT 1 FROM work_characters wc WHERE wc.work_id = works.id AND wc.prominence = ?)
+/// AND EXISTS (SELECT 1 FROM work_character_attributes a WHERE a.work_id = works.id AND a.attribute_node_id = ?)
+/// ```
+///
+/// and it is **wrong**. Nothing correlates them, so a work where *Alice* is the
+/// protagonist and *Bob* is the vampire matches — a result assembled from two
+/// different characters who have nothing to do with each other. Measured against
+/// real PostgreSQL 15 during this build: the uncorrelated form returns 1 on exactly
+/// that fixture, while the correlated form below returns 0. That difference is the
+/// whole clause.
+///
+/// So every bound becomes a predicate **on the one `work_characters` row**, and
+/// the attributes are tested by an `EXISTS` that names *that row's*
+/// `character_node_id`. There is exactly one character per assertion, which is
+/// also why `CharacterAssertion` holds a single `character_id` rather than a list:
+/// a list would make "the same character" unexpressible.
+///
+/// Alias `wc` is fixed and short because it appears inside a nested `EXISTS`
+/// three times; a generated alias would be unreadable in a log line.
+///
+/// `taxonomy_nodes` is joined for attributes and roles because those are node ids
+/// and a reader searching by name must find the node. `norm` is matched rather
+/// than `canonical` for the same reason every other taxonomy predicate in this
+/// file uses `norm`: the user types lowercase.
+fn render_exists_character(a: &CharacterAssertion) -> Result<SqlFragment, QueryError> {
+    let mut binds: Vec<String> = vec![a.character_id.clone()];
+    let mut clauses: Vec<String> = vec!["wc.character_node_id = ?".to_owned()];
+
+    if !a.prominence.is_empty() {
+        let list = placeholders(a.prominence.len());
+        clauses.push(format!("wc.prominence IN ({list})"));
+        binds.extend(a.prominence.iter().cloned());
+    }
+    // `Some(true)`/`Some(false)` are the only two values, so this is a literal
+    // rather than a bind. That is safe precisely because the type admits nothing
+    // else -- the alternative, a bind, would put a boolean on the wire to express
+    // a two-valued domain, and `None` would still have to be omitted separately.
+    if let Some(v) = a.is_pov {
+        clauses.push(format!("wc.is_pov = {}", if v { 1 } else { 0 }));
+    }
+    if !a.roles.is_empty() {
+        let list = placeholders(a.roles.len());
+        clauses.push(format!(
+            "EXISTS (SELECT 1 FROM work_character_attributes ra \
+             JOIN taxonomy_nodes rt ON rt.id = ra.attribute_node_id \
+             WHERE ra.work_id = wc.work_id AND ra.character_node_id = wc.character_node_id \
+               AND rt.norm IN ({list}))"
+        ));
+        binds.extend(a.roles.iter().map(|r| r.to_lowercase()));
+    }
+
+    // `attributes_all` is one correlated EXISTS PER attribute rather than a
+    // `GROUP BY ... HAVING COUNT(*) = n`. The aggregate form is shorter and is the
+    // wrong shape: it counts attributes without checking *which*, so a work with
+    // three unrelated attributes would satisfy a two-attribute query. N small
+    // correlated subqueries are both correct and predictable, and the compiler is
+    // not the hot path — the index on (attribute_node_id, work_id) is.
+    for attribute in &a.attributes_all {
+        clauses.push(
+            "EXISTS (SELECT 1 FROM work_character_attributes aa \
+             JOIN taxonomy_nodes at ON at.id = aa.attribute_node_id \
+             WHERE aa.work_id = wc.work_id AND aa.character_node_id = wc.character_node_id \
+               AND at.norm = ?)"
+                .to_owned(),
+        );
+        binds.push(attribute.to_lowercase());
+    }
+
+    if !a.attributes_any.is_empty() {
+        let list = placeholders(a.attributes_any.len());
+        clauses.push(format!(
+            "EXISTS (SELECT 1 FROM work_character_attributes ay \
+             JOIN taxonomy_nodes aty ON aty.id = ay.attribute_node_id \
+             WHERE ay.work_id = wc.work_id AND ay.character_node_id = wc.character_node_id \
+               AND aty.norm IN ({list}))"
+        ));
+        binds.extend(a.attributes_any.iter().map(|v| v.to_lowercase()));
+    }
+
+    let sql = format!(
+        "(EXISTS (SELECT 1 FROM work_characters wc WHERE wc.work_id = works.id AND {}))",
+        clauses.join(" AND ")
+    );
+    Ok(SqlFragment { sql, binds })
+}
+
+/// Compile §15.3's `ExistsRelationship`.
+///
+/// ## Why the participant test is inside the relationship's `EXISTS`
+///
+/// "Any romantic pairing involving X" is an `EXISTS` over relationships whose
+/// participants include X. The correlation that matters is between the
+/// **relationship row** and the **participant**: `ship_participants` is joined on
+/// `ship_node_id` *inside* the same `EXISTS`, so a relationship counts only if
+/// that relationship's own participants include X.
+///
+/// `excluded_participants` compiles to a `NOT EXISTS` nested inside the same
+/// `EXISTS`, correlated on `wr.id`. Putting it at the top level instead — as
+/// `AND NOT EXISTS(...)` — would exclude every work that pairs X with *anyone*,
+/// which is the opposite of "X with anyone except Y".
+///
+/// `dynamics` is a comma-separated list, so membership is tested with a `LIKE`
+/// on a delimited pattern rather than `=`. The delimiters matter: `enemies_to_lovers`
+/// must not match a hypothetical `enemies_to_lovers_2`, and
+/// `',enemies_to_lovers,' LIKE '%,enemies_to_lovers,%'` is what prevents that.
+fn render_exists_relationship(a: &RelationshipAssertion) -> Result<SqlFragment, QueryError> {
+    if a.participant_any.is_empty() {
+        return Err(QueryError::new(
+            "a relationship query needs at least one participant: without one it \
+             matches every relationship in the instance",
+            0,
+        ));
+    }
+    let mut binds: Vec<String> = vec![];
+    let mut clauses: Vec<String> = vec![];
+
+    let list = placeholders(a.participant_any.len());
+    clauses.push(format!(
+        "EXISTS (SELECT 1 FROM ship_participants sp \
+         WHERE sp.ship_node_id = wr.ship_node_id AND sp.character_node_id IN ({list}))"
+    ));
+    binds.extend(a.participant_any.iter().cloned());
+
+    if !a.kind_any.is_empty() {
+        let list = placeholders(a.kind_any.len());
+        clauses.push(format!("wr.rel_type IN ({list})"));
+        binds.extend(a.kind_any.iter().cloned());
+    }
+    if !a.prominence.is_empty() {
+        let list = placeholders(a.prominence.len());
+        clauses.push(format!("wr.prominence IN ({list})"));
+        binds.extend(a.prominence.iter().cloned());
+    }
+    for dynamic in &a.dynamics {
+        clauses.push("(wr.dynamics IS NOT NULL AND ',' || wr.dynamics || ',' LIKE ?)".to_owned());
+        // The delimiters are part of the pattern, not decoration: without them
+        // `enemies` would match `enemies_to_lovers`.
+        binds.push(format!("%,{},%", dynamic));
+    }
+    if !a.excluded_participants.is_empty() {
+        let list = placeholders(a.excluded_participants.len());
+        clauses.push(format!(
+            "NOT EXISTS (SELECT 1 FROM ship_participants sx \
+             WHERE sx.ship_node_id = wr.ship_node_id AND sx.character_node_id IN ({list}))"
+        ));
+        binds.extend(a.excluded_participants.iter().cloned());
+    }
+
+    let sql = format!(
+        "(EXISTS (SELECT 1 FROM work_relationships wr WHERE wr.work_id = works.id AND {}))",
+        clauses.join(" AND ")
+    );
+    Ok(SqlFragment { sql, binds })
+}
+
+/// A comma-separated list of `n` placeholders.
+///
+/// Both engines accept `?`; `TestDb::sql` rewrites them for PostgreSQL. Written
+/// as a helper because five call sites each hand-rolling a `join(",")` is five
+/// chances to get the count subtly wrong, and a wrong count is a bind that does
+/// not match its placeholder — an error at execution, far from the compiler.
+fn placeholders(n: usize) -> String {
+    std::iter::repeat_n("?", n).collect::<Vec<_>>().join(",")
 }
 
 /// Whether a rendered predicate can evaluate to NULL rather than true/false.
