@@ -162,6 +162,14 @@ async fn arena_ballot_updates_elo() {
         worst_work_id: "work-a2".to_string(),
         reason_tags: vec!["prose".to_string()],
     };
+    // The reader ranked work-a1 above work-a2 on prose, so their vectors must
+    // say so: the ballot is scored against real dimension scores, not hashes.
+    let dimensions = vec![lorehaven_domain::taste_vector::TasteDimension {
+        key: "prose".to_string(),
+        label: "Prose".to_string(),
+        admin_target: 0.5,
+        weight: 1.0,
+    }];
     let round = lorehaven_domain::taste_vector::ArenaRound {
         cards: vec![
             lorehaven_domain::taste_vector::ArenaCard {
@@ -172,6 +180,7 @@ async fn arena_ballot_updates_elo() {
                 word_count: 5000,
                 excerpt: String::new(),
                 target_dimension: "prose".to_string(),
+                vector: vec![0.9],
             },
             lorehaven_domain::taste_vector::ArenaCard {
                 work_id: "work-a2".to_string(),
@@ -181,10 +190,12 @@ async fn arena_ballot_updates_elo() {
                 word_count: 5100,
                 excerpt: String::new(),
                 target_dimension: "prose".to_string(),
+                vector: vec![0.1],
             },
         ],
     };
-    let updated = lorehaven_domain::taste_vector::apply_arena_ballot(&elos, &round, &ballot);
+    let updated =
+        lorehaven_domain::taste_vector::apply_arena_ballot(&elos, &round, &ballot, &dimensions);
     assert_eq!(updated.len(), 1);
     assert_ne!(
         updated[0].elo_rating, 1000.0,
@@ -217,4 +228,40 @@ async fn arena_ballot_updates_elo() {
         "Elo should move off the 1000.0 default after a ballot"
     );
     assert_eq!(*matches, 1);
+}
+
+#[test]
+fn a_ballot_for_unknown_works_leaves_the_elos_alone() {
+    // A ballot naming works that are not in the round cannot be scored, and
+    // must not be recorded as a match played. This is the shape of the bug the
+    // route had: an empty round made every ballot a silent no-op, so a reader
+    // could vote forever and the profile never moved.
+    use lorehaven_domain::taste_vector::{
+        apply_arena_ballot, ArenaBallot, ArenaRound, DimensionElo, TasteDimension,
+    };
+
+    let dimensions = vec![TasteDimension {
+        key: "prose".to_string(),
+        label: "Prose".to_string(),
+        admin_target: 0.5,
+        weight: 1.0,
+    }];
+    let elos = vec![DimensionElo {
+        dimension_key: "prose".to_string(),
+        elo_rating: 1500.0,
+        matches_played: 3,
+    }];
+
+    let empty_round = ArenaRound { cards: vec![] };
+    let stray = ArenaBallot {
+        best_work_id: "not-in-the-round".to_string(),
+        worst_work_id: "also-absent".to_string(),
+        reason_tags: vec!["prose".to_string()],
+    };
+
+    let updated = apply_arena_ballot(&elos, &empty_round, &stray, &dimensions);
+    assert_eq!(
+        updated, elos,
+        "an unscorable ballot must leave every dimension untouched"
+    );
 }
