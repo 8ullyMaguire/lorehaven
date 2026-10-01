@@ -3,9 +3,25 @@
 Status: **live build plan for `docs/spec.md` §49's first three rows.** M45-16,
 M45-19, M45-20. Spec committed in `a2e80f7`.
 
-**Steps 1 and 2 are built and green on both engines.** M45-16 is
-`implemented-fully-tested`. Steps 3 (tasting menu) and 4 (history import) are
-next; the tables they need are in migration 0099 already.
+**Steps 1, 2 and 3 are built and green on both engines.** M45-16 is
+`implemented-fully-tested`; M45-19 is `implemented-locally-tested` (14 tests,
+SQLite and PostgreSQL 15, both exit 0 — see the 2026-10-01 section of
+`docs/verification.md` for the two bugs it turned up). **Step 4 (history import)
+is next**; the tables it needs are in migration 0099 already.
+
+### What step 3 actually found, in one paragraph
+
+The selector, the ordering and the session bound were already in
+`crates/db/src/tasting.rs` with 14 unit tests, and **nothing called them** — so
+"step 3" was the door, not the mechanism. Two defects fell out of building it:
+`uncertainty_for` divided by `10_000.0` while `weights_from_elos` normalises
+weights to sum 1.0, which made uncertainty constant across every library and
+collapsed the queue onto the `work_id` tie-break; and the first version of the
+weight update clamped at `0.0` on a **signed** column, so a cold-start decline
+computed `0.0 - 0.10` and changed nothing. Both are covered by tests that were
+verified red by reinstating the defect. Two further mutations survived the first
+version of the suite — a decline that raised the weight, and the partial unique
+index downgraded to a plain one — and each got the test written for it.
 
 Each step is: migration in **both** dialects → code → tests → two-backend gate.
 No step starts until the previous one is committed green.
@@ -250,11 +266,17 @@ either.
 
 `docs/requirements.csv` moves a row only when its test exists:
 
-| row | moves when |
-|---|---|
-| M45-16 | step 2's twin test is green on both engines |
-| M45-19 | step 3's four clauses are each asserted |
-| M45-20 | step 4's idempotency and origin tests are green |
+| row | moves when | state |
+|---|---|---|
+| M45-16 | step 2's twin test is green on both engines | `implemented-fully-tested` |
+| M45-19 | step 3's four clauses are each asserted | `implemented-locally-tested` — 14 tests, both engines, exit 0 |
+| M45-20 | step 4's idempotency and origin tests are green | `planned` — not started |
+
+M45-19 is graded `locally` rather than `fully` on purpose: the fourteen tests drive
+the real routes against both engines, but no e2e instance run has exercised the
+queue, and the third clause a mutation harness cannot reach is the 300-word
+passage itself, which is fetched client-side through the normal read path and so
+has no server-side test.
 
 Nothing moves on unit tests alone: `goal.md`'s "what complete means" is explicit
 that a unit test on a function nothing calls is not a requirement done. Step 2

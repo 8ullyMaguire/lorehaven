@@ -57,6 +57,7 @@ pub mod search;
 pub mod settings;
 pub mod spoilers;
 pub mod subscriptions;
+pub mod tasting;
 pub mod taxonomy;
 pub mod thread_modes;
 pub mod translation;
