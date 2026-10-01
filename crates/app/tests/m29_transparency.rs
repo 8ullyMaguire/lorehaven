@@ -1944,3 +1944,448 @@ async fn a_steward_cannot_approve_their_own_proposal_above_the_floor() {
     .await;
     let _ = reviewer;
 }
+
+// ---------------------------------------------------------------------------
+// M45 / §47 route-level helpers
+// ---------------------------------------------------------------------------
+
+/// The work ids the discovery response served, in the order it served them.
+fn served_ids(body: &Value) -> Vec<String> {
+    body["items"]
+        .as_array()
+        .expect("discovery returns an items array")
+        .iter()
+        .filter_map(|i| i["work_id"].as_str().map(str::to_string))
+        .collect()
+}
+
+fn now_rfc3339() -> String {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("rfc3339")
+}
+
+/// Give a work one tag, creating the taxonomy node.
+///
+/// `make_node` + `tag_work` above already do this in two steps and are what the
+/// merge tests use. The wrapper exists so the ranking tests read as
+/// `tag_work(db, work, "space")` — the shape of the thing under test — rather
+/// than making each test thread a node id through two calls it does not care
+/// about. It also pins *why* the tag has to be real: `tag_names_for_work` reads
+/// `canonical` through the `work_tags` join, so a tag that is not written here
+/// cannot influence the feed and the ordering tests would pass vacuously.
+async fn tag_with(db: &Database, work: &str, tag: &str) {
+    let node = make_node(db, tag).await;
+    tag_work(db, work, &node).await;
+}
+
+/// Set a reader's arena weight for one dimension, in basis points.
+///
+/// `id`, `created_at` and `updated_at` are all NOT NULL with no default
+/// (migrations/sqlite/0066_taste_arena.sql:19) — the trap a fixture in
+/// `m45_ranking.rs` fell into, supplied here from the start rather than
+/// rediscovered by a full-workspace run.
+async fn weight(db: &Database, account: &uuid::Uuid, dimension: &str, bp: i64) {
+    let sql = db.sql(
+        "INSERT INTO arena_weights (id, account_id, dimension_key, weight, elo_rating,
+            matches_played, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 0, 0, ?, ?)
+         ON CONFLICT DO NOTHING",
+        "INSERT INTO arena_weights (id, account_id, dimension_key, weight, elo_rating,
+            matches_played, created_at, updated_at)
+         VALUES (?::uuid, ?::uuid, ?, ?, 0, 0, ?::timestamptz, ?::timestamptz)
+         ON CONFLICT DO NOTHING",
+    );
+    let now = now_rfc3339();
+    match db.backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(uuid::Uuid::new_v4().to_string())
+                .bind(account.to_string())
+                .bind(dimension)
+                .bind(bp)
+                .bind(&now)
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await
+                .expect("arena weight");
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(uuid::Uuid::new_v4().to_string())
+                .bind(account.to_string())
+                .bind(dimension)
+                .bind(bp)
+                .bind(&now)
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await
+                .expect("arena weight");
+        }
+    }
+}
+
+/// Set a work's `updated_at`, which is the public engine's own ordering key.
+///
+/// Without this the two works share a timestamp and "newest first" is arbitrary,
+/// which would let the negative sibling below pass or fail for the wrong reason.
+async fn touch(db: &Database, work_id: &str, when: &str) {
+    let sql = db.sql(
+        "UPDATE works SET updated_at = ? WHERE id = ?",
+        "UPDATE works SET updated_at = ?::timestamptz WHERE id = ?::uuid",
+    );
+    match db.backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(when)
+                .bind(work_id)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await
+                .expect("touch");
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(when)
+                .bind(work_id)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await
+                .expect("touch");
+        }
+    }
+}
+
+/// A work's stored `updated_at`, so a test can check its own premise.
+async fn updated_at_of(db: &Database, work: &str) -> String {
+    let sql = db.sql(
+        "SELECT updated_at FROM works WHERE id = ?",
+        "SELECT updated_at::text FROM works WHERE id = ?::uuid",
+    );
+    match db.backend() {
+        lorehaven_db::Backend::Sqlite => sqlx::query_scalar(&sql)
+            .bind(work)
+            .fetch_one(db.sqlite_pool().expect("sqlite"))
+            .await
+            .expect("updated_at"),
+        lorehaven_db::Backend::Postgres => sqlx::query_scalar::<_, time::OffsetDateTime>(&sql)
+            .bind(work)
+            .fetch_one(db.postgres_pool().expect("postgres"))
+            .await
+            .expect("updated_at")
+            .to_string(),
+    }
+}
+
+/// The propensities recorded against a pseud's slots, as `(work_id, propensity)`.
+async fn logged_propensities(db: &Database, pseud: uuid::Uuid) -> Vec<(String, f64)> {
+    let sql = db.sql(
+        "SELECT work_id, propensity FROM recommendation_slots
+         WHERE pseud_id = ? AND propensity IS NOT NULL
+         ORDER BY position ASC",
+        "SELECT work_id, propensity FROM recommendation_slots
+         WHERE pseud_id = ?::uuid AND propensity IS NOT NULL
+         ORDER BY position ASC",
+    );
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        work_id: String,
+        propensity: f64,
+    }
+    match db.backend() {
+        lorehaven_db::Backend::Sqlite => sqlx::query_as::<_, Row>(&sql)
+            .bind(pseud.to_string())
+            .fetch_all(db.sqlite_pool().expect("sqlite"))
+            .await
+            .expect("propensities")
+            .into_iter()
+            .map(|r| (r.work_id, r.propensity))
+            .collect(),
+        lorehaven_db::Backend::Postgres => sqlx::query_as::<_, Row>(&sql)
+            .bind(pseud.to_string())
+            .fetch_all(db.postgres_pool().expect("postgres"))
+            .await
+            .expect("propensities")
+            .into_iter()
+            .map(|r| (r.work_id, r.propensity))
+            .collect(),
+    }
+}
+
+/// How many slots exist at all, for the anonymous case.
+async fn total_slots(db: &Database) -> i64 {
+    let sql = "SELECT COUNT(*) FROM recommendation_slots";
+    let row: (i64,) = match db.backend() {
+        lorehaven_db::Backend::Sqlite => sqlx::query_as(sql)
+            .fetch_one(db.sqlite_pool().expect("sqlite"))
+            .await
+            .expect("slot count"),
+        lorehaven_db::Backend::Postgres => sqlx::query_as(sql)
+            .fetch_one(db.postgres_pool().expect("postgres"))
+            .await
+            .expect("slot count"),
+    };
+    row.0
+}
+
+// ---------------------------------------------------------------------------
+// M45 / spec §47 — the route actually orders by taste, and logs the impressions
+// ---------------------------------------------------------------------------
+
+/// With **no** reader weights, taste ordering cannot favour either work.
+///
+/// This is the control for `a_signed_in_readers_feed_is_ordered_by_taste`.
+///
+/// `score_candidate` is `f64::max` over the reader's weights, so an unweighted
+/// reader scores every work at `0.0` and `rank_works` has no reason to move
+/// anything: the feed stays in the public engine's `updated_at DESC` order.
+///
+/// The first draft of this test asserted the engine order *with* weights seeded
+/// and the ranker live. That is the wrong question -- it asserted the behaviour
+/// under test rather than the absence of a signal, and it failed as soon as the
+/// ranker did its job. Same fixture, no weights, is the version that can tell
+/// the two implementations apart.
+#[tokio::test]
+async fn with_no_weights_the_feed_stays_in_engine_order() {
+    let harness = Harness::new("m47_fixture").await;
+    let mut reader = harness.reader("Fixture").await;
+    let account = account_of(&harness.db, "Fixture").await;
+    let pseud = pseud_of(&harness.db, &account.to_string()).await;
+
+    let alpha = make_published_work(&harness.db, &pseud.to_string(), "Alpha").await;
+    let beta = make_published_work(&harness.db, &pseud.to_string(), "Beta").await;
+    // `Beta` is newer, so `updated_at DESC` -- the engine's own order -- puts it
+    // first, and with no weights nothing should disturb that.
+    touch(&harness.db, &beta, "2026-02-01T00:00:00Z").await;
+    touch(&harness.db, &alpha, "2026-01-01T00:00:00Z").await;
+    tag_with(&harness.db, &alpha, "zebra").await;
+    tag_with(&harness.db, &beta, "aardvark").await;
+    // Deliberately NO `weight(...)` call -- that absence is the assertion.
+
+    // THE REAL PREMISE. `personalized_recommendations` is
+    // `SELECT DISTINCT w.id ... ORDER BY w.updated_at DESC`, and SQLite does not
+    // guarantee that ORDER BY survives DISTINCT -- so the engine's own order of
+    // the two same-timestamp-family works is not stable run to run. Everything
+    // downstream inherits that, and no assertion about the ROUTE can be
+    // deterministic until the engine's order is.
+    for attempt in 1..=3 {
+        let order = lorehaven_db::discovery::public_recommendations(&harness.db, None, 20)
+            .await
+            .expect("engine")
+            .iter()
+            .map(|w| w.to_string())
+            .collect::<Vec<String>>();
+        assert_eq!(
+            order.first().map(String::as_str),
+            Some(beta.as_str()),
+            "ENGINE ORDER NOT STABLE (attempt {attempt}): {order:?}"
+        );
+    }
+
+    let (a_at, b_at) = (
+        updated_at_of(&harness.db, &alpha).await,
+        updated_at_of(&harness.db, &beta).await,
+    );
+    assert_ne!(
+        a_at, b_at,
+        "PREMISE: the two works must have distinct updated_at or the engine has no order to give"
+    );
+    assert!(
+        b_at > a_at,
+        "PREMISE: beta must be the newer one, got alpha={a_at} beta={b_at}"
+    );
+
+    let engine_order = {
+        use lorehaven_db::discovery::public_recommendations;
+        public_recommendations(&harness.db, None, 20)
+            .await
+            .expect("engine")
+    };
+    let eo: Vec<String> = engine_order.iter().map(|w| w.to_string()).collect();
+    assert_eq!(
+        eo.first().map(String::as_str),
+        Some(beta.as_str()),
+        "ENGINE: newest-first puts beta first, got {eo:?}"
+    );
+
+    // `blend` collects into a HashMap and then `sort_by_key`s. `sort_by_key` is
+    // STABLE, so a tie keeps HashMap iteration order -- and HashMap iteration
+    // order is randomised per process by SipHash. §47.9 requires two calls on the
+    // same state to agree, so a blend whose ties are broken by hash order is
+    // wrong whether or not it happens to look right on any given run.
+    //
+    // 20 iterations inside ONE process share one hash seed, so this cannot see
+    // the per-process randomness; the property it can check is that a *tie* is
+    // broken by something other than iteration order. Asserting the winner
+    // changes across processes is what the repeated gate runs demonstrate.
+    {
+        use lorehaven_domain::discovery::{blend, Candidate};
+        let mk = |id: &str, score: i64, reason: &str| Candidate {
+            work_id: id.parse().expect("work id"),
+            score,
+            reason: reason.into(),
+            taste_signal: 0.0,
+            diversity_class: 0.5,
+        };
+        // The REAL shape the route builds: two engines, both listing the same
+        // two works, so every work's score is the SUM across engines.
+        let engines = vec![
+            vec![mk(&beta, 20, "tags"), mk(&alpha, 19, "tags")],
+            vec![mk(&beta, 20, "popular"), mk(&alpha, 19, "popular")],
+        ];
+        let blended = blend(&engines);
+        let order: Vec<String> = blended.iter().map(|c| c.work_id.to_string()).collect();
+        assert_eq!(
+            order.first().map(String::as_str),
+            Some(beta.as_str()),
+            "BLEND: beta scores 40 and alpha 38, so beta must win, got {order:?}"
+        );
+    }
+
+    let (status, body) = reader.get("/api/v1/discovery").await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let items = served_ids(&body);
+    assert!(
+        items.contains(&alpha) && items.contains(&beta),
+        "both served: {items:?}"
+    );
+    assert_eq!(
+        items.iter().position(|w| w == &beta),
+        Some(0),
+        "an unweighted reader keeps the engine's newest-first order: alpha={alpha} beta={beta} served={items:?}"
+    );
+}
+
+/// A signed-in reader's feed is ordered by their weights, not by engine position.
+///
+/// Two works, one tag each, the engine offering the one whose tag the reader
+/// does *not* like first. §47.2 requires taste to decide ordering, and this is
+/// the assertion that can fail: before the route called `rank_works`, both works
+/// arrived in `updated_at DESC` order regardless of any taste profile.
+#[tokio::test]
+async fn a_signed_in_readers_feed_is_ordered_by_taste() {
+    let harness = Harness::new("m47_taste").await;
+    let mut reader = harness.reader("Taster").await;
+    let account = account_of(&harness.db, "Taster").await;
+    let pseud = pseud_of(&harness.db, &account.to_string()).await;
+
+    let liked = make_published_work(&harness.db, &pseud.to_string(), "Liked").await;
+    let other = make_published_work(&harness.db, &pseud.to_string(), "Other").await;
+    // The engine's order is newest-first, and `other` is the newer one.
+    touch(&harness.db, &other, "2026-02-01T00:00:00Z").await;
+    touch(&harness.db, &liked, "2026-01-01T00:00:00Z").await;
+    tag_with(&harness.db, &liked, "space").await;
+    tag_with(&harness.db, &other, "knitting").await;
+
+    weight(&harness.db, &account, "space", 9000).await;
+    weight(&harness.db, &account, "knitting", 1000).await;
+
+    // Check the ranker's own view, not the route's output. `TagWeights` is
+    // `pub(crate)`-ish but the accessor is public, so the test can ask the same
+    // question the route asks and see whether the numbers are what it thinks.
+    {
+        let w = lorehaven_db::ranking::TagWeights::for_reader(&harness.db, &account.to_string())
+            .await
+            .expect("weights");
+        assert_eq!(
+            w.weight_of("space"),
+            9000.0,
+            "PREMISE: the reader weights `space`"
+        );
+        assert_eq!(
+            w.weight_of("knitting"),
+            1000.0,
+            "PREMISE: and `knitting` lower"
+        );
+        let liked_tags = lorehaven_db::taxonomy::tag_names_for_work(&harness.db, &liked)
+            .await
+            .expect("tags");
+        let other_tags = lorehaven_db::taxonomy::tag_names_for_work(&harness.db, &other)
+            .await
+            .expect("tags");
+        assert_eq!(
+            liked_tags,
+            vec!["space".to_string()],
+            "PREMISE: liked is tagged"
+        );
+        assert_eq!(
+            other_tags,
+            vec!["knitting".to_string()],
+            "PREMISE: other is tagged"
+        );
+    }
+
+    let (status, body) = reader.get("/api/v1/discovery").await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let items = served_ids(&body);
+    let liked_at = items.iter().position(|w| w == &liked);
+    let other_at = items.iter().position(|w| w == &other);
+    assert!(
+        liked_at.is_some() && other_at.is_some(),
+        "both served: {items:?}"
+    );
+    assert!(
+        liked_at < other_at,
+        "the reader weights `space` 9x `knitting`, so the liked work leads. \
+         liked={liked} other={other} liked_at={liked_at:?} other_at={other_at:?} served={items:?}"
+    );
+}
+
+/// Every served row is logged with a propensity — §47.8's invariant, at the route.
+///
+/// This is the assertion M45-49 could not make before: `log_impression` had no
+/// caller, so the whole file tested a function nothing reached. If the route
+/// stops logging, this goes red; if it is removed, the row is honest about why.
+#[tokio::test]
+async fn every_served_row_is_logged_with_a_propensity() {
+    let harness = Harness::new("m47_log").await;
+    let mut reader = harness.reader("Logger").await;
+    let account = account_of(&harness.db, "Logger").await;
+    let pseud = pseud_of(&harness.db, &account.to_string()).await;
+
+    let a = make_published_work(&harness.db, &pseud.to_string(), "A").await;
+    let b = make_published_work(&harness.db, &pseud.to_string(), "B").await;
+    tag_with(&harness.db, &a, "space").await;
+    tag_with(&harness.db, &b, "knitting").await;
+    weight(&harness.db, &account, "space", 9000).await;
+
+    let (status, body) = reader.get("/api/v1/discovery").await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let served = served_ids(&body);
+    assert!(!served.is_empty(), "something was served");
+
+    let logged = logged_propensities(&harness.db, pseud).await;
+    assert_eq!(
+        logged.len(),
+        served.len(),
+        "every served row has a slot: served {served:?}, logged {logged:?}"
+    );
+    for (work_id, propensity) in &logged {
+        assert!(
+            served.contains(work_id),
+            "a slot was logged for a work that was not served: {work_id}"
+        );
+        assert!(
+            propensity.is_finite() && *propensity > 0.0 && *propensity <= 1.0,
+            "§47.3: propensity in (0,1], got {propensity} for {work_id}"
+        );
+    }
+}
+
+/// An anonymous reader gets a feed and no slots — the taste ranker needs an account.
+///
+/// `rank_works` loads `TagWeights::for_reader`, which has no answer for a reader
+/// with no account. Serving them a "taste score of zero" would read as "nothing
+/// matches you" instead of "we do not know you", so the anonymous path is
+/// unchanged and logs nothing. Both halves matter: a feed of zero rows would be
+/// a worse bug than the one this guards.
+#[tokio::test]
+async fn an_anonymous_reader_gets_a_feed_and_no_slots() {
+    let harness = Harness::new("m47_anon").await;
+    // No registration: an anonymous client is the point, and looking up an
+    // account that was never created is how this first failed.
+    let mut anon = harness.client();
+
+    let (status, body) = anon.get("/api/v1/discovery").await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let slots = total_slots(&harness.db).await;
+    assert_eq!(slots, 0, "an anonymous feed has no reader to own a slot");
+}

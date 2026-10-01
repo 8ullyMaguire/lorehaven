@@ -111,6 +111,217 @@ pub struct DiscoveryQuery {
     sort: Option<String>,
 }
 
+// ---------------------------------------------------------------------------
+// M45 / spec §47 — taste-based ordering and impression logging.
+//
+// Before this, `get_discovery` ordered the blended candidates with
+// `sort_by_key(|c| -c.score)`, and every engine sets `score` to `(limit - idx)` —
+// so that sort restated each engine's own position and no taste signal reached
+// the reader's feed at all. Selecting by taste signal is not ordering by it.
+//
+// This does two things that had no caller before, and both are the point of §47
+// rather than an optimisation:
+//
+//   * reorders an already-selected candidate set by the reader's tag weights,
+//     with MMR for variety (`rank_works`); and
+//   * records the served rows, so every impression has a propensity and the
+//     attention report has something real to read.
+//
+// Deliberately NOT done here:
+//
+//   * **Candidate selection is untouched.** §47.2 splits eligibility (a trust
+//     question, §30.7) from ordering (a taste question). The engine blend above
+//     is the selector and it stays the selector.
+//   * **Half-life, operator affinity and theme gravity keep their place.** They
+//     run after the blend as silent nudges, and installing taste ordering before
+//     them means they still get to move a row. A taste-ordered feed that quietly
+//     stopped honouring an operator's affinity would be a regression reported as
+//     an improvement, so this is called at the end, not the middle.
+//   * **Anonymous readers are untouched.** `rank_works` loads
+//     `TagWeights::for_reader(db, account)`, which has no answer for someone with
+//     no account. They keep the existing path rather than getting a taste score
+//     of zero, which would read as "nothing matches you" instead of "we do not
+//     know you".
+//
+// Logging is best-effort by design and that is not a shrug. A failed insert means
+// the reader's feed was already computed and is about to be sent; refusing to
+// serve it would turn a transparency feature into an availability feature. The
+// failure is traced at `warn` so it is visible, and §47.3's guarantee — that a
+// logged impression and the row it justifies commit together — is honoured by
+// `record_response` returning ids only after the insert succeeded, so a slot id
+// in a response always names a row that exists.
+async fn apply_taste_ordering_and_log(
+    state: &AppState,
+    account_id: &str,
+    viewer_pseud: uuid::Uuid,
+    ranked: Vec<lorehaven_domain::discovery::Candidate>,
+) -> Vec<lorehaven_domain::discovery::Candidate> {
+    if ranked.is_empty() {
+        return ranked;
+    }
+    let db = state.db();
+
+    // Tags per work, for `dimensions_for`. `taxonomy::tag_names_for_work` is
+    // already called in this handler for theme gravity; a second fetch with a
+    // different name would be the same query written twice.
+    let mut tags_by_work: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for c in &ranked {
+        let key = c.work_id.to_string();
+        if tags_by_work.contains_key(&key) {
+            continue;
+        }
+        let tags = match lorehaven_db::taxonomy::tag_names_for_work(db, &key).await {
+            Ok(t) => t.into_iter().map(|t| t.to_lowercase()).collect(),
+            Err(error) => {
+                tracing::warn!(
+                    target: "ranking",
+                    %error,
+                    "tag lookup failed for a discovery candidate; it will rank with no dimensions"
+                );
+                Vec::new()
+            }
+        };
+        tags_by_work.insert(key, tags);
+    }
+
+    let ids: Vec<lorehaven_domain::ids::WorkId> = ranked.iter().map(|c| c.work_id).collect();
+    // `rank_works` takes `&dyn Fn + Send + Sync`. Held across the `.await`
+    // inside that call a bare `&dyn Fn` would make this future non-`Send`, and
+    // axum would reject the handler with an opaque `Handler` trait error naming
+    // neither the closure nor the reason.
+    let lookup = move |id: &lorehaven_domain::ids::WorkId| -> Vec<String> {
+        tags_by_work
+            .get(&id.to_string())
+            .cloned()
+            .unwrap_or_default()
+    };
+
+    // Exploration and the exposure floor are deliberately left at their defaults
+    // (off). Turning them on here would put rows in the feed that no engine
+    // selected and that no taste score explains, which is a product decision
+    // about instance policy, not a consequence of wiring a ranker up. §47.3 and
+    // §47.5 are satisfied for the rows that ARE served: every served row carries
+    // a propensity.
+    let options = lorehaven_db::ranking::RankOptions {
+        variety: true,
+        // §47.6's MMR. The default `lambda` is 1.0, and `mmr_rerank`
+        // short-circuits at `lambda >= 1.0`, so leaving it at the default would
+        // make `variety: true` a no-op and return the engine's order unchanged --
+        // taste would be computed, paid for, and discarded. 0.7 is relevance-led
+        // with enough diversity to break a run of same-tag works, which is the
+        // "three angst fics in a row" case §47.6 names.
+        lambda: 0.7,
+        ..Default::default()
+    };
+
+    let outcome =
+        match lorehaven_db::ranking::rank_works(db, account_id, ids, &lookup, &options).await {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                tracing::warn!(
+                    target: "ranking",
+                    %error,
+                    "taste ranking failed; the reader still receives the engine ordering"
+                );
+                return ranked;
+            }
+        };
+
+    // §47.8's invariant: every ordered row has a logged impression with a
+    // non-null propensity. `all_impressions` is the one call that gathers them
+    // without re-deriving which stage produced which row.
+    let impressions = outcome.all_impressions();
+    if !impressions.is_empty() {
+        let request_id = uuid::Uuid::new_v4();
+        let mut records: Vec<lorehaven_db::recommendation_slots::SlotRecord> =
+            Vec::with_capacity(outcome.ranked.len());
+        for (position, row) in outcome.ranked.iter().enumerate() {
+            records.push(lorehaven_db::recommendation_slots::SlotRecord {
+                pseud_id: viewer_pseud,
+                work_id: row.work_id.as_uuid(),
+                request_id,
+                position: position as i64,
+                reasons: vec![reason_for(&row.stage)],
+                taste_signal: None,
+                seeded_by: None,
+                recipe_stage: Some(row.stage.clone()),
+                instance_curation:
+                    lorehaven_domain::recommendation_transparency::InstanceCuration::NotInvolved,
+                blend_score: (row.score * 1000.0).round() as i64,
+            });
+        }
+
+        // `record_response` returns the slot ids in position order, so the ids
+        // and the impressions line up by construction rather than by a lookup
+        // that could silently pair the wrong row with the wrong propensity.
+        match lorehaven_db::recommendation_slots::record_response(
+            db,
+            viewer_pseud,
+            request_id,
+            &records,
+        )
+        .await
+        {
+            Ok(slot_ids) => {
+                // The propensity lives on the slot row, so it is written after
+                // the insert that produced the ids — `log_impression` updates by
+                // id, which is why it cannot be folded into the insert above.
+                for (id, impression) in slot_ids.iter().zip(impressions.iter()) {
+                    if let Err(error) =
+                        lorehaven_db::ranking::log_impression(db, id, impression).await
+                    {
+                        tracing::warn!(
+                            target: "ranking",
+                            %error,
+                            work_id = %impression.work_id,
+                            "propensity write failed; the slot is recorded without one"
+                        );
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    target: "ranking",
+                    %error,
+                    "slot logging failed; the reader still receives their feed"
+                );
+            }
+        }
+    }
+
+    // Re-order the route's own candidates by the ranker's order. The ranker may
+    // drop a row (an exploration draw consumed a candidate), and anything it
+    // returns that the route did not offer is dropped here rather than invented.
+    let mut by_id: std::collections::HashMap<
+        lorehaven_domain::ids::WorkId,
+        lorehaven_domain::discovery::Candidate,
+    > = ranked.into_iter().map(|c| (c.work_id, c)).collect();
+    let mut reordered: Vec<lorehaven_domain::discovery::Candidate> = Vec::new();
+    for row in &outcome.ranked {
+        if let Some(candidate) = by_id.remove(&row.work_id) {
+            reordered.push(candidate);
+        }
+    }
+    reordered
+}
+
+/// The §33.3 reason vocabulary entry for a ranking stage.
+///
+/// A stage the vocabulary does not name falls back to `TasteTags` rather than
+/// passing an invented string through: `SlotRow::into_explanation` drops
+/// unrecognised reasons, so a wrong string would silently erase the row's
+/// justification instead of recording a slightly wrong one.
+fn reason_for(stage: &str) -> lorehaven_domain::recommendation_transparency::SlotReason {
+    use lorehaven_domain::recommendation_transparency::SlotReason;
+    match stage {
+        "popular" => SlotReason::Popular,
+        "media_ref_collab" => SlotReason::MediaReferenceCollaborative,
+        "strategy" => SlotReason::Strategy,
+        _ => SlotReason::TasteTags,
+    }
+}
+
 async fn get_discovery(
     State(state): State<AppState>,
     MaybeSession(session): MaybeSession,
@@ -403,6 +614,17 @@ async fn get_discovery(
         &taste.signal_weight_mode,
         taste.admin_weight,
     );
+
+    // M45 / spec §47: taste-based ordering plus impression logging, for a
+    // signed-in reader only. Placed after every other reordering operator so
+    // half-life, operator affinity and theme gravity still get their say, and
+    // anonymous readers fall through unchanged.
+    let ranked = match (account_id.as_deref(), viewer_pseud) {
+        (Some(account_id), Some(pseud)) => {
+            apply_taste_ordering_and_log(&state, account_id, pseud, ranked).await
+        }
+        _ => ranked,
+    };
 
     let mut items: Vec<serde_json::Value> = ranked
         .into_iter()
