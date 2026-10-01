@@ -201,9 +201,18 @@ two or three concrete examples of what breaking it costs.
 
 *(Updated 2026-10-01: M57's rows are all `implemented-fully-tested`, M54-01/-02
 are `implemented-verified-e2e`, M53-03/-04 are `implemented-fully-tested`, and
-the M45 ranking substrate is wired end to end. What is left is the remaining 40
-planned M45 rows, then the browser extension — which now has spec §48 and a
-forked repo at `~/code-local/rust/lorehaven-companion`.*)
+the M45 ranking substrate is wired end to end through §47 and §48. What is left
+is the remaining 40 planned M45 rows and then the browser extension body.*
+
+**36 of those 40 rows had no spec section at all** — `docs/spec.md` had zero
+hits for `concierge`, `keystone`, `Fic Finder`, `view-as-persona`, `DSAR`, `DSA`
+and a dozen more. They existed as CSV rows whose entire specification was
+`Gaps review B1`, from `docs/spec-gaps-design-review-2026-09-22.md`, which is
+marked *review draft — proposed, not adopted*. So the next step is
+**specification, not code**, and `docs/plans/m45-gaps-adoption.md` is that plan:
+eight phases in dependency order, one spec section each, with the reasoning for
+why the groups are ordered that way. §49 (taste signal: M45-14, -16, -19, -20,
+-35) is the first and is committed.
 
 Each step's exit condition is in `docs/plans/remaining-work.md` and its row in
 `docs/requirements.csv`.
