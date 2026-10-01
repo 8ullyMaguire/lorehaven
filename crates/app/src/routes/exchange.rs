@@ -551,20 +551,17 @@ pub async fn curate_entity(
             "a curated entity needs a canonical form to display",
         )));
     }
-    let node_curated =
-        lorehaven_db::taxonomy::curate_node(state.db(), &body.kind, &norm, canonical)
+    // One call, one transaction, both vocabularies. This used to be two separate
+    // `UPDATE`s made here in the handler, which meant the pairing was a property of
+    // this route: a second caller would curate `taxonomy_nodes` or
+    // `canonical_entities` alone and no compiler would object, and a failure
+    // between the two writes left a name curated in one table and unverified in the
+    // other — the state migration 0082 says a join silently drops.
+    let curated =
+        lorehaven_db::taxonomy::curate_name(state.db(), &body.kind, &norm, canonical, &account_id)
             .await
             .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
-    let entity_curated = lorehaven_db::exchange::curate_entity(
-        state.db(),
-        &body.kind,
-        &norm,
-        canonical,
-        &account_id,
-    )
-    .await
-    .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
-    if !node_curated && !entity_curated {
+    if !curated {
         return Err(ApiError(lorehaven_domain::AppError::NotFound {
             resource: "entity",
         }));
