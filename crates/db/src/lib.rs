@@ -79,6 +79,7 @@ pub mod subscriptions;
 pub mod tag_confirmation;
 pub mod taste_health;
 pub mod taste_vectors;
+pub mod tasting;
 pub mod taxonomy;
 pub mod thread_modes;
 pub mod translation;
