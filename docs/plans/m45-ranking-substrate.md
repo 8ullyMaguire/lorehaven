@@ -569,6 +569,29 @@ regression, when the actual finding is that **the gate is only trustworthy at a
 bounded thread count**: `--test-threads=4` on SQLite, `2` on PostgreSQL. Check
 the error text before investigating the code.
 
+**One run also failed `repeated_maintenance_passes_on_one_day_queue_one_recheck`
+with `no such table: jobs`.** Investigated rather than dismissed, because that
+error means a SQLite file was deleted out from under a live connection.
+
+What that investigation established, and what it did not:
+
+- `scratch_dir` in `crates/app/tests/preservation_recheck_wiring.rs` is keyed by
+  `(tag, process::id, thread::id)` and its doc comment already names the exact
+  hazard: it is called twice per test, and a `remove_dir_all` on the second call
+  deletes the database the first call just migrated. The per-process `REMOVED`
+  guard is the fix, and it is sound.
+- The failing run predates the bounded-thread-count change above, when several
+  workspace runs overlapped. `std::process::id()` is reused after a process
+  exits, so two overlapping runs can land on the same path.
+- Re-verified since: 12/12 green serially, 4/4 green with four concurrent
+  instances of the same binary, and green in both full gates.
+
+So: **not a defect in the test, and not reproduced under any condition tried.**
+The honest claim is bounded — it needs overlapping workspace runs, which is why
+the fix was to bound the gate rather than to patch the fixture. If it ever
+recurs on a single clean run, that is new information and the `REMOVED` guard
+warrants a look.
+
 ## Not in this plan
 
 - M45-14 (work coordinates / stylometry), M45-16 (tag contribution cap),
