@@ -392,7 +392,7 @@ async fn load(state: &AppState, id: &str) -> ApiResult<store::RetentionProposal>
 async fn current_mode(state: &AppState, source_key: Option<&str>) -> Result<BodyMode, AppError> {
     let resolved = retention_store::resolve_for_source(state.db(), source_key, false, false)
         .await
-        .map_err(|error| AppError::Internal(error.into()))?;
+        .map_err(AppError::Internal)?;
     // `narrowest_mode` rather than reading `resolved.source` or
     // `resolved.instance` directly, because the precedence between them is
     // already written down once in the domain and re-deciding it here is how

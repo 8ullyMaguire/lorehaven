@@ -144,6 +144,21 @@ pub(super) fn internal(error: impl std::fmt::Display) -> Response {
 ///
 /// serde's message for an unknown field names the field, which is the property
 /// the plan's test requires: "refused by name", not merely "refused".
+// `axum::response::Response` is 128 bytes -- measured, not guessed, and exactly
+// at `clippy::result_large_err`'s threshold -- so a handler returning
+// `Result<_, Response>` trips the lint by construction.
+//
+// Boxing is not available. The obvious fix,
+// `Result<_, Box<Response>>`, does not compile: axum's handler bound is
+// `E: IntoResponse`, and `Box<Response>` does not implement `IntoResponse`
+// (verified by compiling exactly that bound). The framework therefore pins the
+// error type, and the honest response is to say so at the site rather than
+// restructure three handlers around a type the framework will not accept.
+//
+// The alternative -- routing these handlers through `ApiError`, which measured
+// 48 bytes -- would mean discarding the status a `JsonRejection` chose, which is
+// the entire point of the `json_body` helper above.
+#[allow(clippy::result_large_err)]
 fn json_body<T: serde::de::DeserializeOwned>(
     payload: Result<Json<T>, axum::extract::rejection::JsonRejection>,
 ) -> Result<T, Response> {
@@ -244,7 +259,9 @@ async fn as_json(state: &AppState, proposal: &store::RetentionProposal) -> ApiRe
         state.config().retention_governance.widen_quorum,
     )
     .await
-    .map_err(|error| ApiError(AppError::Internal(error.into())))?;
+    // No `.into()`: the store returns `anyhow::Error` and `AppError::Internal`
+    // holds one, so the conversion would be `anyhow::Error -> anyhow::Error`.
+    .map_err(|error| ApiError(AppError::Internal(error)))?;
 
     let (quorum, further_needed) = match tally.quorum {
         QuorumOutcome::Reached {
@@ -300,7 +317,10 @@ async fn list(
     }
     let proposals = store::list_proposals(state.db())
         .await
-        .map_err(|error| ApiError(AppError::Internal(error.into())))?;
+        // No `.into()`: the store returns `anyhow::Error` and `AppError::Internal`
+        // holds one, so the conversion would be `anyhow::Error -> anyhow::Error`.
+        // Clippy called that out as a useless conversion.
+        .map_err(|error| ApiError(AppError::Internal(error)))?;
     // Sequential, not `join_all`: a governance list is tens of rows at most
     // and one connection is simpler than a pool of futures whose error type has
     // to be reconciled anyway.
@@ -328,7 +348,9 @@ async fn one(
     }
     let proposal = store::proposal(state.db(), &id)
         .await
-        .map_err(|error| ApiError(AppError::Internal(error.into())))?
+        // No `.into()`: the store returns `anyhow::Error` and `AppError::Internal`
+        // holds one, so the conversion would be `anyhow::Error -> anyhow::Error`.
+        .map_err(|error| ApiError(AppError::Internal(error)))?
         .ok_or(ApiError(AppError::NotFound {
             resource: "retention proposal",
         }))?;
@@ -336,6 +358,9 @@ async fn one(
 }
 
 /// Open a proposal.
+// The 128-byte `Response` error type is axum's, and boxing it does not
+// compile. Full reasoning on `json_body` below.
+#[allow(clippy::result_large_err)]
 async fn create(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
@@ -346,9 +371,11 @@ async fn create(
     // error type *is* `Response`. Mapping it anywhere would only discard the
     // status the rejection chose.
     let body = json_body(payload)?;
+    // `internal` rather than `|error| internal(error)` -- clippy's
+    // `redundant_closure`. The function is named, so the closure added nothing.
     if let Some(message) = trust_refusal(&state, &user, "open a retention proposal")
         .await
-        .map_err(|error| internal(error))?
+        .map_err(internal)?
     {
         return Err(unprocessable(message));
     }
@@ -401,6 +428,9 @@ async fn create(
 /// upsert decides whether a ballot was created or replaced and the route does
 /// not report which, because "created" for a changed vote would make a client's
 /// idempotency bookkeeping lie about a thing that already existed.
+// The 128-byte `Response` error type is axum's, and boxing it does not
+// compile. Full reasoning on `json_body` below.
+#[allow(clippy::result_large_err)]
 async fn vote(
     State(state): State<AppState>,
     RequireSession(user): RequireSession,
@@ -412,9 +442,11 @@ async fn vote(
     // error type *is* `Response`. Mapping it anywhere would only discard the
     // status the rejection chose.
     let body = json_body(payload)?;
+    // `internal` rather than `|error| internal(error)` -- clippy's
+    // `redundant_closure`. The function is named, so the closure added nothing.
     if let Some(message) = trust_refusal(&state, &user, "vote on a retention proposal")
         .await
-        .map_err(|error| internal(error))?
+        .map_err(internal)?
     {
         return Err(unprocessable(message));
     }
