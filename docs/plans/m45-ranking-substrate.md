@@ -345,29 +345,68 @@ Then update `docs/requirements.csv`: M45-13, M45-11, M45-15, M45-49, M45-10 →
 `implemented-fully-tested`, with the test names in `evidence`, in the same commit
 as the code.
 
-## Gate results (2026-09-30)
+## Gate results (2026-09-30, re-verified after two test-isolation fixes)
 
 | Engine | Result |
 |---|---|
-| SQLite | **3415 passed, 0 failed** (11 binaries needed a serial re-run — see below) |
-| PostgreSQL | **3426 passed, 0 failed**, 159 test binaries, `--test-threads=2` |
+| SQLite | **3426 passed, 0 failed**, exit 0, `--test-threads=4` |
+| PostgreSQL | **3426 passed, 0 failed**, exit 0, `--test-threads=2` |
 | `cargo fmt --all --check` | clean |
 | `cargo clippy` | no new warnings in the changed files |
+| doctests | 0 in `lorehaven_app` (unchanged; the section reports `running 0 tests`) |
 
-**The 11 SQLite failures were pool exhaustion, not logic.** With
-`--test-threads=4` across the whole workspace, binaries competed for SQLite
-connections and 11 tests in `milestone_45_roadmap` failed with `pool timed out
-while waiting for an open connection`. Re-running that file serially: **55 passed,
-0 failed**. So a "database is locked" or "pool timed out" failure is a
-concurrency artefact until proven otherwise — check it in isolation before
-believing it.
+Three failure modes were separated out during verification, and none of them was
+a defect in the ranking code. All three name something other than their cause,
+which is what made them expensive.
 
-**Leaked `lh_test_*` PostgreSQL databases cascade.** An interrupted run leaves
-one database per unfinished test, and the sweeper skips any database with a live
-backend. After several interrupted runs there were **1928**, and every subsequent
-run failed with `duplicate key value violates unique constraint
-pg_database_datname_index` — 58 failures, all environmental. Sweep before a gate
-run, not after:
+**1. `arena_weights` NOT NULL — real, and only the full gate saw it.**
+`the_readers_weights_decide_the_order` passed alone and failed in the workspace
+run. The fixture omitted `id` and `updated_at`, which `0066_taste_arena.sql:19`
+declares NOT NULL with no default. The insert is guarded by `WHERE NOT EXISTS`, so
+an earlier test in the same file satisfied the guard and the malformed statement
+never ran. Fixed; 10/10 on both engines.
+
+**2. Two test-isolation bugs, each a different mechanism, both intermittent.**
+
+- `vote_decay_score.rs` built its scratch path from
+  `SystemTime::now().as_nanos()`. That is a clock *reading*: it does not advance
+  between two calls the scheduler runs back to back on one thread, so **eight
+  tests produced five directories** and four of them migrated the same file.
+  Symptom: `table accounts already exists`, which names a migration. Fix: a
+  monotonic `AtomicU64` counter plus `process::id()`.
+- `preservation_recheck_wiring.rs` called its scratch helper **twice** per test
+  with the same tag — once for `connect_with_dir`, once from `state_for` — and the
+  helper began with `remove_dir_all`, so the second call unlinked the live
+  database. Symptom: `no such table: jobs`. Fix: remove the directory at most once
+  per (process, tag).
+
+Both present in the tree while an earlier gate reported green. A gate result is
+true when measured; it does not certify the next run.
+
+**3. `E0463: can't find crate` from rustdoc — a rebuild race, not a missing
+crate.** A gate exited 101 with every test passing and 17+6 doctest link errors.
+All 43 `--extern` rlibs existed on disk with valid `!<arch>` headers, and the
+failing rlib's mtime fell *inside* the run. A concurrent `cargo build` was
+regenerating them. `cargo build -p lorehaven-app --lib` first, then the doctest,
+passes. Check the `--extern` paths before believing the message:
+
+```sh
+python3 - <<'PY'
+import re, os
+t = open("gate.log", errors="replace").read()
+paths = dict(re.findall(r'--extern (\w+)=(\S+)', t))
+print(len(paths), "externs,", [n for n,p in paths.items() if not os.path.isfile(p)], "missing")
+PY
+```
+
+**Pool exhaustion is still environmental.** At `--test-threads=4` across the
+workspace, binaries compete for SQLite connections and tests fail with
+`pool timed out while waiting for an open connection`. Those pass serially.
+
+**Leaked `lh_test_*` PostgreSQL databases still cascade.** An interrupted run
+leaves one per unfinished test and the sweeper skips any with a live backend. 1928
+of them once turned a gate into 58 `pg_database_datname_index` failures. Sweep
+before a gate:
 
 ```sh
 psql -h 127.0.0.1 -U postgres -tAc \
@@ -375,9 +414,8 @@ psql -h 127.0.0.1 -U postgres -tAc \
   | xargs -P 16 -n 1 dropdb -h 127.0.0.1 -U postgres --if-exists --force
 ```
 
-(`DROP DATABASE` cannot be executed from a PL/pgSQL function, so the `DO $$`
-batch form does not work — `dropdb` in parallel is the route that does. 1928
-databases took 6m20s.)
+(`DROP DATABASE` cannot run inside a PL/pgSQL function, so the `DO $$` batch form
+does not work — `dropdb` in parallel does. 1928 databases: 6m20s.)
 
 ## Definition of done
 
