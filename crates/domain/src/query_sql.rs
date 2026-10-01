@@ -562,13 +562,124 @@ fn render_fielded(field: &QueryField, value: &str) -> Result<SqlFragment, QueryE
             let sql = "(EXISTS (SELECT 1 FROM work_tags wt JOIN taxonomy_nodes tn ON tn.id = wt.node_id WHERE wt.work_id = works.id AND tn.kind = 'fandom' AND tn.norm = ?))";
             Ok(SqlFragment::new(sql).with_bind(value.to_lowercase().trim().to_owned()))
         }
+        // `character:` reads `work_characters`, NOT `work_tags` with
+        // `kind = 'character'`.
+        //
+        // The old rendering was a tag lookup, and nothing in the tree ever writes
+        // such a tag — verified by grep: 0103 is the only migration that names
+        // `kind = 'character'` at all. So `character:Alice` matched nothing, while
+        // reading the table that does hold characters costs the same and can
+        // express prominence and attributes (which a tag lookup cannot, being a
+        // flat equality).
+        //
+        // The reader types a *name*; the store keys on a *node id*. Resolving
+        // `norm = ?` against `taxonomy_nodes` inside the subquery keeps the parser
+        // pure — §15.4 requires "the same typed AST as the visual filter builder",
+        // and a parser that had to look ids up would need I/O.
         QueryField::Character => {
-            let sql = "(EXISTS (SELECT 1 FROM work_tags wt JOIN taxonomy_nodes tn ON tn.id = wt.node_id WHERE wt.work_id = works.id AND tn.kind = 'character' AND tn.norm = ?))";
+            let sql = "(EXISTS (SELECT 1 FROM work_characters wc \
+                       JOIN taxonomy_nodes tn ON tn.id = wc.character_node_id \
+                       WHERE wc.work_id = works.id AND tn.kind = 'character' \
+                         AND tn.norm = ?))";
             Ok(SqlFragment::new(sql).with_bind(value.to_lowercase().trim().to_owned()))
         }
+        // `relationship:` names a pairing, and a pairing IS its participant set
+        // (0103's `ship_participants`, ordered so A/B and B/A are one node). So the
+        // reader's `relationship:"Alice/Bob"` matches when some ship the work claims
+        // a relationship about has participant set exactly {alice, bob}.
+        //
+        // "Exactly" needs THREE clauses, and the third is the one that is easy to
+        // miss. Measured on real PostgreSQL 15 while writing this: with only the
+        // first two, asking for the poly {alice,bob,carol} ALSO matched the duo
+        // {alice,bob} — alice and bob are named (clause 1 holds) and the duo has no
+        // unnamed participant (clause 2 holds). Only clause 3 rejects it, because the
+        // duo has no carol:
+        //
+        //   (a) every participant of the ship is named in the value
+        //   (b) no participant of the ship is unnamed in the value
+        //   (c) every name in the value is a participant of the ship
+        //
+        // (c) is per-name, and the names are split in RUST rather than in SQL. That
+        // is deliberate: `string_to_array` does not exist in SQLite and `instr` does
+        // not exist in PostgreSQL, so any approach that splits the value inside the
+        // statement needs either a dialect arm or a string function the other engine
+        // lacks. One bind per name needs neither. Counting names with
+        // `length - length(replace(...))` was tried first and is worse: a
+        // participant whose name contains a space makes the count wrong.
+        //
+        // (a) and (b) still share one bind — the whole joined value — because they
+        // are both "is this participant named in the value", and the `//` separator
+        // is what lets `%/alice/%` avoid matching `alice_v2` while still matching a
+        // trailing participant (a single `/` separator leaves the last name followed
+        // by `%` instead of `/`, so a duo stops matching itself).
         QueryField::Relationship => {
-            let sql = "(EXISTS (SELECT 1 FROM work_tags wt JOIN taxonomy_nodes tn ON tn.id = wt.node_id WHERE wt.work_id = works.id AND tn.kind = 'ship' AND tn.norm = ?))";
-            Ok(SqlFragment::new(sql).with_bind(value.to_lowercase().trim().to_owned()))
+            let names: Vec<String> = value
+                .split('/')
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .map(str::to_lowercase)
+                .collect();
+
+            // An empty `relationship:` would otherwise match every work with any
+            // relationship at all: (a) and (b) are vacuously true for any ship, and
+            // (c) would have zero names to check. Refusing is the honest rendering.
+            if names.is_empty() {
+                return Err(QueryError::new(
+                    "relationship: needs at least one participant, as \
+                     relationship:\"Alice/Bob\"",
+                    0,
+                ));
+            }
+
+            // Every name must be a participant of the ship. One placeholder per
+            // name, generated here, so no engine has to split a string.
+            //
+            // Each arm is an `EXISTS`, not a bare `(SELECT 1 ...)`. Measured on real
+            // PostgreSQL 15: a bare `SELECT 1` subquery in an AND is an integer, and
+            // the engine rejects the whole statement with `argument of AND must be
+            // type boolean, not type integer`. `EXISTS` is what turns it into the
+            // boolean the surrounding WHERE needs.
+            //
+            // The placeholders are BARE `?`, not `?1`/`?3`. `Database::sql` rewrites
+            // bare `?` to `$n` positionally for PostgreSQL (`rewrite_placeholders`)
+            // and offers no back-reference form, so a numbered `?1` survives the
+            // rewrite as a literal `?1` and PostgreSQL rejects it. A value used twice
+            // therefore needs its bind twice -- which is why two names produce three
+            // binds, and why the bind count does not track the name count.
+            let all_named: String = names
+                .iter()
+                .map(|_| {
+                    "EXISTS (SELECT 1 FROM ship_participants sq \
+                       WHERE sq.ship_node_id = wr.ship_node_id \
+                         AND sq.character_node_id = ?)"
+                        .to_owned()
+                })
+                .collect::<Vec<_>>()
+                .join(" AND ");
+
+            let sql = format!(
+                "(EXISTS (SELECT 1 FROM work_relationships wr \
+                   WHERE wr.work_id = works.id \
+                     AND EXISTS (SELECT 1 FROM ship_participants sp \
+                                 WHERE sp.ship_node_id = wr.ship_node_id \
+                                   AND (? || '%') LIKE '%/' || sp.character_node_id || '/%') \
+                     AND NOT EXISTS (SELECT 1 FROM ship_participants sm \
+                                     WHERE sm.ship_node_id = wr.ship_node_id \
+                                       AND (? || '%') NOT LIKE '%/' || sm.character_node_id || '/%') \
+                     AND {all_named}))"
+            );
+
+            // Bind order must match placeholder order exactly: the joined value
+            // TWICE (clauses a and b both use it and the rewriter cannot share a
+            // bind), then one bind per name (clause c).
+            let joined = format!("/{}/", names.join("//"));
+            let mut fragment = SqlFragment::new(&sql)
+                .with_bind(joined.clone())
+                .with_bind(joined);
+            for name in &names {
+                fragment = fragment.with_bind(name.clone());
+            }
+            Ok(fragment)
         }
         QueryField::Tag => {
             let sql = "(EXISTS (SELECT 1 FROM work_tags wt JOIN taxonomy_nodes tn ON tn.id = wt.node_id WHERE wt.work_id = works.id AND tn.kind = 'tag' AND tn.norm = ?))";
