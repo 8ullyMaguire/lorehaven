@@ -48,8 +48,12 @@ Read `docs/spec.md` §47 first. It is the contract; this file is the sequence.
 >    and becomes **0.0, not 1.0** — under-crediting loses one payout, over-crediting
 >    mints credit the closed loop in §17 exists to prevent.
 >
-> Steps 1–3 and 5 are implemented and committed. Step 4 (`rank_works`) and step 6
-> (the suite) are not.
+> **All seven steps are implemented and committed** (through `586e7ad`). Step 7
+> was not a wiring exercise: it exposed three defects in `rank_works` that no test
+> in its own module could see, and the workspace gate then exposed a conflict
+> between two of the plan's own requirements. Both are written up under *What
+> wiring the route found* below — read that before changing anything in
+> `crates/db/src/ranking.rs`.
 
 ## Symbols this plan uses (verified against the tree)
 
@@ -495,6 +499,54 @@ A third, in the same class and found the same way: `RankOptions::default()` has
 `variety: true` with the default lambda is a **no-op** — taste computed, paid
 for, and discarded. The route now sets `lambda: 0.7` explicitly. A mechanism that
 looks configured and is not is its own failure mode, and there are now three.
+
+### The conflict: determinism versus the caller's ranking
+
+Fixing (1) turned `two_calls_on_the_same_state_agree_exactly` red, and that test
+was not merely asserting the bug — it was **passing because of** it. It asserts
+order-insensitivity (the same candidates reversed must rank identically), and
+sorting by id before scoring is exactly what delivers order-insensitivity.
+
+The two requirements are mutually exclusive:
+
+| ties resolved by | order-insensitive? | caller's ranking honoured? |
+|---|---|---|
+| `WorkId` | yes | **no** — replaced for anything taste cannot separate |
+| arrival position | no | yes, but the result depends on how the list was built |
+
+§47.2 decides it: *"given the same database state and the same reader, the
+ordered result is byte-identical except for the exploration slots."*
+Order-insensitivity is the requirement, so the caller's ranking has to survive
+*inside* it.
+
+**Resolution: sort by id LAST, not first.** Score descending, then `WorkId`
+ascending. Only candidates that are otherwise equal are reordered, so every
+score-resolved pair stays where the ranking put it — while the output remains
+independent of arrival order.
+
+That yields a matched pair of tests, each verified red against its own half:
+
+- tie-break removed → `two_calls_on_the_same_state_agree_exactly` fails
+- dedup reverted to `sort()+dedup()` → `with_no_weights_the_feed_stays_in_engine_order` fails
+
+Neither passes because of the other. That pairing is the deliverable: one test
+proves the property, the other proves the property did not cost the caller
+something it needed. A single test could not have caught this, because the bug
+and the requirement it was accidentally satisfying are the same code.
+
+### The flake had a second source
+
+`blend` collected a `HashMap` with `into_values()` and then `sort_by_key`. A
+stable sort resolves ties by **the order it inherited**, and HashMap iteration
+order is randomised per process by SipHash — so the route's ranker received a
+genuinely different list on every run. Fixed by sorting on
+first-appearance-across-engines before the score sort, so the tie order is a
+property of the input rather than of the hash seed. Every existing blend test
+passed with this in place, because each used candidates whose scores all differed.
+
+**The lesson worth keeping:** when auditing a "stable" sort, ask what the
+stability is relative to — and whether the input it inherited was itself
+deterministic.
 
 ## Not in this plan
 
