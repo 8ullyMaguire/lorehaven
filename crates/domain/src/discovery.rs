@@ -29,8 +29,38 @@ pub fn blend(engines: &[Vec<Candidate>]) -> Vec<Candidate> {
             entry.score += candidate.score;
         }
     }
+    // Collect from the map WITHOUT losing the order the engines produced.
+    //
+    // `merged.into_values()` is HashMap iteration order, which SipHash randomises
+    // per process. `sort_by_key` below is stable, so candidates with equal scores
+    // came out in that random order -- and the route's taste ranker received a
+    // genuinely different list on every run. That was the source of a 2-in-6
+    // flake, and it was invisible here because every test that exercised blend
+    // used candidates whose scores all differed.
+    //
+    // Order is reconstructed by recording each work's first appearance across
+    // the engines, then sorting on that. First-appearance order is a property of
+    // the input rather than of the hash seed, so two calls on the same engines
+    // agree -- which is what §47.2 asks for -- while `sort_by_key`'s stability
+    // makes the result a deterministic function of (scores, appearance order).
+    let mut first_seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (position, engine_results) in engines.iter().enumerate() {
+        for candidate in engine_results {
+            first_seen
+                .entry(candidate.work_id.to_canonical_string())
+                .or_insert(position);
+        }
+    }
     let mut results: Vec<Candidate> = merged.into_values().collect();
-    results.sort_by_key(|c| -c.score);
+    results.sort_by_key(|c| {
+        (
+            first_seen
+                .get(&c.work_id.to_canonical_string())
+                .copied()
+                .unwrap_or(usize::MAX),
+            -c.score,
+        )
+    });
     results
 }
 

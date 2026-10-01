@@ -300,10 +300,30 @@ async fn seed_weights(h: &Harness, account: &str) {
 
 /// Two calls on the same database state return byte-identical ordering.
 ///
-/// The candidate set is deliberately passed in shuffled order: §47.2 sorts by id
-/// before scoring, and this is what proves it. Without the sort a candidate that
-/// happened to arrive second would win a tie against the same candidate arriving
-/// first — passing in isolation, differing between calls.
+/// The candidate set is passed in reversed order, which asserts §47.2's actual
+/// clause: "given the same database state and the same reader, the ordered
+/// result is byte-identical". Order-insensitivity is the stronger property and it
+/// is what this test requires, so `rank_works` has to break ties without
+/// reference to arrival position.
+///
+/// This test previously passed *because* of a defect and the comment above it
+/// named the defect as the mechanism. `rank_works` sorted candidates by id before
+/// scoring, which made ties resolve lexicographically and so satisfied this test
+/// exactly. The same sort made an unweighted reader's feed lexicographic too --
+/// the caller's engine ranking silently discarded -- and the sort also hid a
+/// second bug, because a broken no-variety path still produced *an* order that
+/// looked ranked. Removing it (84c8216) made this test red.
+///
+/// Two tests now cover the seam this one used to paper over:
+///
+///   * this one -- order-insensitivity, which is what §47.2 asks for; and
+///   * `with_no_weights_the_feed_stays_in_engine_order` in
+///     `m29_transparency.rs` -- an unweighted reader still gets the ENGINE's
+///     order through a live route, which is what the id sort was destroying.
+///
+/// Both pass now, and each fails if either half of the fix is reverted. That is
+/// the pairing worth having: the unit test proves the property, the route test
+/// proves the property did not cost the caller its ranking.
 #[tokio::test]
 async fn two_calls_on_the_same_state_agree_exactly() {
     let h = Harness::new("rank_determinism").await;
