@@ -1,0 +1,30 @@
+# A target directory of this project's own.
+#
+# The global ~/.cargo/config.toml sets `target-dir =
+# "/home/alvaro/.cache/cargo-target"` for the whole host. Two cargo processes for
+# two projects therefore compile into the SAME deps/ directory, and when they
+# overlap, cargo's rustdoc invocation for a doctest target ends up naming one
+# crate twice:
+#
+#   error: found crates (`anyhow` and `anyhow`) with colliding StableCrateId values
+#     --> crates/app/src/crypto.rs:15:5
+#   error: doctest failed, to rerun pass `-p lorehaven-app --doc`
+#
+# `anyhow` is one version in this tree (`cargo tree -i anyhow` shows a single
+# node), so two StableCrateIds for it can only mean two builds of it. The tell is
+# mtime: on 2026-10-01 `libanyhow-cfa1b684b6749905.rlib` (02:12) and
+# `libanyhow-d873d933c572a3f2.rlib` (11:33) were byte-identical in size and the
+# second appeared DURING a gate run, written by a concurrent build of another
+# project on this host.
+#
+# The same contention shows up as `pool timed out while waiting for an open
+# connection` in unrelated suites, because the competing build saturates the CPU
+# and the same Postgres.
+#
+# The duplicates are harmless on their own -- the failure needs the overlap, which
+# is why the doctest passes with no concurrent build and fails with one. A
+# per-project target directory removes the sharing, at the cost of one full
+# rebuild the first time this is used.
+[build]
+target-dir = "target"
+warnings = "deny"

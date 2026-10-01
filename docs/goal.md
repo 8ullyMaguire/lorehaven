@@ -86,10 +86,15 @@ cost real time to diagnose:
 > whatever line of yours happens to use it.
 
 Tells: `cargo tree -i <crate>` shows one version; the rlibs have different md5s at
-the same size; and their mtimes fall inside your run. Fix the contention, not the
-dependency — and gate at `--test-threads=2` on SQLite when another agent session is
-compiling, or the same contention shows up as
-`pool timed out while waiting for an open connection`.
+the same size; and their mtimes fall inside your run. The duplicates are harmless
+alone — the failure needs the *overlap*, which is why the same doctest passes with
+no concurrent build and fails with one.
+
+**Fixed, not just documented:** `.cargo/config.toml` in this repo now sets
+`[build] target-dir = "target"`, so Lorehaven no longer compiles into the shared
+directory at all. Sibling projects (`aria`, `ficnexus`, `zeph`) already had their
+own `.cargo/config.toml`; this repo was inheriting the global one and was the only
+one sharing it. Costs one full rebuild; removes the whole failure class.
 
 Full-workspace runs on both backends before a milestone is called done, and before
 a deploy. If a gate is red, clear it — including issues that predate the change.

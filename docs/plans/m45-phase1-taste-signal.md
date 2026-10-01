@@ -169,6 +169,19 @@ The second row is the one that settles it: the duplicates are harmless on their
 own, and the failure needs the *overlap*. An artefact newer than your own run
 means someone else is writing to your target directory.
 
+**Then the same collision recurred on `anyhow`** in the next SQLite run, again at
+exit 101 with 2912 passed and 0 failures —
+`libanyhow-cfa1b684b6749905.rlib` (02:12) and `libanyhow-d873d933c572a3f2.rlib`
+(11:33), byte-identical size, the second written inside the run. Not another
+session's fault that time: my own isolated-doctest experiment had left a second
+build in the shared dir.
+
+**Fixed at the root rather than diagnosed a third time.**
+`.cargo/config.toml` now sets `[build] target-dir = "target"`. `aria`, `ficnexus`
+and `zeph` already had their own; this repo was the one inheriting the global
+setting and sharing `deps/` with every other project on the host. One full rebuild
+cost, one failure class removed.
+
 ## Step 3 — the tasting menu (M45-19)
 
 Migration 0099 also gets `tasting_samples` and `tasting_responses`. §49.5's four
