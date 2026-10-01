@@ -545,8 +545,29 @@ property of the input rather than of the hash seed. Every existing blend test
 passed with this in place, because each used candidates whose scores all differed.
 
 **The lesson worth keeping:** when auditing a "stable" sort, ask what the
-stability is relative to — and whether the input it inherited was itself
+stability is relative to, and whether the input it inherited was itself
 deterministic.
+
+### Gate at `e9ea490`
+
+| backend | passed | failed | suites |
+|---|---|---|---|
+| SQLite | 3432 | 0 | 159 |
+| PostgreSQL | 3432 | 0 | 159 |
+
+Up from 3425 before step 7. Zero compiler warnings. `m29_transparency` was also
+run six consecutive times green to confirm the per-process tie-break is gone: one
+green run is not evidence of determinism.
+
+**On the gate's own reliability.** A run at the default thread count failed three
+unrelated suites (`crowdfunded_bounty_contribution_activates`,
+`standard_bounty_creation_succeeds`, `an_absent_audience_leaves_a_work_readable`)
+with `pool timed out while waiting for an open connection`. That is
+connection-pool exhaustion from running every test binary at full parallelism,
+not a product defect. It is worth naming because "three tests failed" reads as a
+regression, when the actual finding is that **the gate is only trustworthy at a
+bounded thread count**: `--test-threads=4` on SQLite, `2` on PostgreSQL. Check
+the error text before investigating the code.
 
 ## Not in this plan
 
