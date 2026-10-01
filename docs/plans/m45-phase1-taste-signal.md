@@ -126,21 +126,48 @@ even with the confirmation filter deleted. Renamed to `a-filler*` / `z-real*` so
 the padding sorts first, which is the situation the test is about. It now fails
 with the filter removed, alongside two others.
 
-### Gate at `f2891ed`
+### Gate at `f90fc9e`
 
-| backend | passed | failed |
-|---|---|---|
-| PostgreSQL | 2900 | 0 (exit 0) |
-| SQLite | 2850 | 11, all `pool timed out while waiting for an open connection` |
+| backend | passed | failed | exit |
+|---|---|---|---|
+| PostgreSQL | 2900 | 0 | 0 |
+| SQLite | 2900 | 0 | 0 |
 
-The SQLite failures are the gate's own resource story, not a defect: `milestone_25`
-passes 11/11 in isolation, and every one of the 11 panics comes from
-`test-support/src/lib.rs:319` — the connect helper — with no assertion failure
-behind it. They appeared while a *second* project (`tessera-db`, another agent
-session) was running concurrent cargo tests against the same Postgres and CPU;
-load average was 19–41 at the time. So `--test-threads=2` is confirmed as the
-right SQLite setting on a busy machine, which is the plan's own advice from the
-§47 gate, now with the evidence attached.
+Both green, at `--test-threads=2`.
+
+Getting there took two runs that were **not** red for a code reason, and both are
+worth recording because each presented as a defect:
+
+**11 pool timeouts.** All 11 panicked in `test-support/src/lib.rs:319` — the
+connect helper — with no assertion behind them, while `milestone_25` passed 11/11
+in isolation. Cause: `tessera-db` (another agent session) running concurrent cargo
+tests against the same Postgres and CPU; load average 19–41. Re-run at
+`--test-threads=2` with the contention gone: 0.
+
+**A doctest target that would not compile** — goal.md's named blind spot #2:
+
+```
+error: found crates (`hex` and `hex`) with colliding StableCrateId values
+  --> crates/app/src/crypto.rs:60:5
+error: doctest failed, to rerun pass `-p lorehaven-app --doc`
+```
+
+`cargo tree -i hex` shows **one** `hex 0.4.3`, so two StableCrateIds for one crate
+at one version can only mean two builds. `~/.cargo/config.toml` sets a **global**
+`target-dir`, and the shared `deps/` held four `libhex` rlibs — two of them
+written *at 10:10 and 10:12, during the gate run*, by the other session.
+
+Proved three ways rather than asserted:
+
+| check | result |
+|---|---|
+| `CARGO_TARGET_DIR=/tmp/lh-iso cargo test -p lorehaven-app --doc` | **exit 0**, and `/tmp/lh-iso` holds exactly **1** `libhex` vs 4 in the shared dir |
+| same command in the shared dir, no concurrent build | **exit 0** — with all 4 rlibs still present |
+| gate at exit 101, concurrent build running | exit 101 |
+
+The second row is the one that settles it: the duplicates are harmless on their
+own, and the failure needs the *overlap*. An artefact newer than your own run
+means someone else is writing to your target directory.
 
 ## Step 3 — the tasting menu (M45-19)
 
