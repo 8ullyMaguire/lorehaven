@@ -1079,12 +1079,12 @@
     },
     "tasting_responses.session_id": {
       "treatment": "keep_gated",
-      "why": "Not a foreign key and not an identity: an opaque per-calibration-session label this instance minted, so it identifies nobody outside the snapshot and no row can be joined to an account through it. §49.5 bounds a session's sample count, which is the only thing it is used for, and dropping it would make the per-session bound unverifiable from a snapshot. keep_gated rather than keep: a session id is low-risk on its own but is a join key, so it is exported only with the de-identified dataset and not with the smaller ones.",
+      "why": "Not a foreign key and not an identity: an opaque per-calibration-session label this instance minted, so it identifies nobody outside the snapshot and no row can be joined to an account through it. \u00a749.5 bounds a session's sample count, which is the only thing it is used for, and dropping it would make the per-session bound unverifiable from a snapshot. keep_gated rather than keep: a session id is low-risk on its own but is a join key, so it is exported only with the de-identified dataset and not with the smaller ones.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16.3b, for migration 0099 (spec 49.5)"
     },
     "work_tags.confirmation": {
       "treatment": "keep",
-      "why": "An enum the author or a reader applied to a tag, with no identity in it: 'unconfirmed', 'reader', 'wrangler' or 'inaccurate'. It records WHO confirmed in the coarse sense of which class of actor, and never WHICH one -- flagged_by holds the identity, and that is the column that needs re-keying, not this. Keeping it is what makes §49.2 auditable in a snapshot: without it, a de-identified dataset cannot distinguish a counted tag from an uncounted one and the gravity contribution cannot be reproduced.",
+      "why": "An enum the author or a reader applied to a tag, with no identity in it: 'unconfirmed', 'reader', 'wrangler' or 'inaccurate'. It records WHO confirmed in the coarse sense of which class of actor, and never WHICH one -- flagged_by holds the identity, and that is the column that needs re-keying, not this. Keeping it is what makes \u00a749.2 auditable in a snapshot: without it, a de-identified dataset cannot distinguish a counted tag from an uncounted one and the gravity contribution cannot be reproduced.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16.3b, for migration 0099 (spec 49.2)"
     },
     "work_tags.flagged_by": {
@@ -1094,32 +1094,32 @@
     },
     "work_tags.flagged_at": {
       "treatment": "offset_timestamps",
-      "why": "When a tag was flagged. Timestamps are offset on the instance-wide shift so relative order survives and the absolute instant does not, matching every other created_at/updated_at in the policy. §49.2's value is in the ordering -- an inaccurate flag's effect has to be visible as preceding later re-confirmations -- which an offset preserves.",
+      "why": "When a tag was flagged. Timestamps are offset on the instance-wide shift so relative order survives and the absolute instant does not, matching every other created_at/updated_at in the policy. \u00a749.2's value is in the ordering -- an inaccurate flag's effect has to be visible as preceding later re-confirmations -- which an offset preserves.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16.3b, for migration 0099 (spec 49.2)"
     },
     "tasting_samples.sample_offset": {
       "treatment": "keep",
-      "why": "A character offset into the work's text, so the 300-word window §49.5 shows can be reproduced. It is a position in a public document, not a fact about a person, and the offset is what stops the sample from being unreproducible. Dropping it would make every sampling decision in the published dataset unverifiable.",
+      "why": "A character offset into the work's text, so the 300-word window \u00a749.5 shows can be reproduced. It is a position in a public document, not a fact about a person, and the offset is what stops the sample from being unreproducible. Dropping it would make every sampling decision in the published dataset unverifiable.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16.3b, for migration 0099 (spec 49.5)"
     },
     "tasting_responses.uncertainty_at_draw": {
       "treatment": "keep",
-      "why": "The confidence the active-learning selector had in its own pick, recorded at draw time so §49.5's 'picked by uncertainty' is a checkable claim rather than an assertion. No identity in it, and it is exactly the number an offline evaluation of the selector needs.",
+      "why": "The confidence the active-learning selector had in its own pick, recorded at draw time so \u00a749.5's 'picked by uncertainty' is a checkable claim rather than an assertion. No identity in it, and it is exactly the number an offline evaluation of the selector needs.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16.3b, for migration 0099 (spec 49.5)"
     },
     "tasting_responses.verdict": {
       "treatment": "keep",
-      "why": "'like' or 'dislike'. The signal itself; §49.5 requires it non-null.",
+      "why": "'like' or 'dislike'. The signal itself; \u00a749.5 requires it non-null.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16.3b, for migration 0099 (spec 49.5)"
     },
     "tasting_responses.reason": {
       "treatment": "keep",
-      "why": "The required reason tag. §49.5 makes the reason the labelled signal, so a snapshot without it cannot train or audit anything.",
+      "why": "The required reason tag. \u00a749.5 makes the reason the labelled signal, so a snapshot without it cannot train or audit anything.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16.3b, for migration 0099 (spec 49.5)"
     },
     "tasting_responses.free_text": {
       "treatment": "drop_column",
-      "why": "The reader's own free-text 'not for me: ___'. Free text is the one column in this migration where a person may have written anything at all, including their own name or someone else's, and it is the only one no reviewer can screen in advance. §49.5 keeps the reason TAGS as the signal precisely because free text is not reviewable, so dropping this loses nothing the mechanism relies on. The enumerated reason survives; the sentence a reader typed does not.",
+      "why": "The reader's own free-text 'not for me: ___'. Free text is the one column in this migration where a person may have written anything at all, including their own name or someone else's, and it is the only one no reviewer can screen in advance. \u00a749.5 keeps the reason TAGS as the signal precisely because free text is not reviewable, so dropping this loses nothing the mechanism relies on. The enumerated reason survives; the sentence a reader typed does not.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16.3b, for migration 0099 (spec 49.5)"
     },
     "tasting_samples.id": {
@@ -1151,6 +1151,16 @@
       "treatment": "keep",
       "why": "Migration 0099 primary/foreign key or creation timestamp, with no personal data in it; matches the treatment every other id and created_at column carries.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16.3b, for migration 0099 (spec 49.5)"
+    },
+    "taste_signals.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural test still passes. taste_signals.account_id in particular is the join that makes 49.6's import analysable at all -- per-account weights are meaningless once you cannot tell whose they are -- so breaking it silently turns the import into unattributable aggregate.",
+      "reviewed_by": "alvaro, 2026-10-01, against spec 11.16"
+    },
+    "taste_signal_imports.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural test still passes. taste_signals.account_id in particular is the join that makes 49.6's import analysable at all -- per-account weights are meaningless once you cannot tell whose they are -- so breaking it silently turns the import into unattributable aggregate. taste_signal_imports.account_id additionally anchors the import's provenance to the reader who asked for it, so the re-key must be identical across both tables or the import cannot be traced to a snapshot account.",
+      "reviewed_by": "alvaro, 2026-10-01, against spec 11.16"
     }
   }
 }
