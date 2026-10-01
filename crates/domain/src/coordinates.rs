@@ -374,12 +374,6 @@ fn sentences(text: &str) -> Vec<usize> {
             }
             continue;
         }
-        if ch == ' ' {
-            if current > 0 {
-                lengths.push(std::mem::take(&mut current));
-            }
-            continue;
-        }
         current += 1;
         if matches!(ch, '.' | '!' | '?') {
             lengths.push(std::mem::take(&mut current));
