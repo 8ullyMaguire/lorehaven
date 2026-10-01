@@ -63,6 +63,27 @@ taxonomy_closure(ancestor_id, descendant_id, rel, depth,
                  PRIMARY KEY(ancestor_id, descendant_id, rel))
 ```
 
+> **As built (M46-03).** Two corrections, both verified against real engines rather
+> than reasoned about:
+>
+> * `merged_into INTEGER` → **TEXT**. `taxonomy_nodes.id` is TEXT on both dialects,
+>   and PostgreSQL 15 refuses the plan's DDL outright: *"foreign key constraint
+>   cannot be implemented / Key columns are of incompatible types: integer and
+>   text"*.
+> * `status` is **separate from** `review_status` (0082's `'unverified' | 'curated'`).
+>   They are different axes — curation versus lifecycle — and overloading one column
+>   makes "curated but merged" inexpressible. `status` is `'active' | 'pending' |
+>   'merged' | 'deprecated'`, with `merged_into` set if and only if `status =
+>   'merged'`.
+>
+> The SQLite half enforces the two ALTER-able constraints with **triggers**, not
+> `ADD CONSTRAINT`: the SQLite the application links is 3.46.0 (bundled by
+> `libsqlite3-sys 0.30.1`) and `ADD CONSTRAINT` arrived in 3.50.0. The system
+> `sqlite3` CLI here is 3.53.4 and *does* accept it, so a CLI-only check passes
+> against a migration the default engine cannot apply — that is how this was caught.
+> PostgreSQL keeps real CHECKs. See `migrations/sqlite/0103_character_relationships.sql`
+> for the same idiom and the same reasoning.
+
 - **Scoping** is what lets "Spike (Buffy)" and "Spike (Cowboy Bebop)" coexist, and it makes the omnibox disambiguation real.
 - **Closure** keeps `tag:"Fake Dating"+children` as `descendant_id IN (SELECT ... FROM taxonomy_closure WHERE ancestor_id=?)`. This works identically in SQLite and Postgres and avoids huge `IN` lists.
 - **Implications** are off by default in search and only apply when the user toggles them, because bad curator edges would otherwise silently distort every query.
