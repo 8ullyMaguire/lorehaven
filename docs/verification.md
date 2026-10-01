@@ -1,3 +1,116 @@
+## 2026-10-01 — M45-20: history import, and a test that passed for the wrong reason
+
+**Plan:** `docs/plans/m45-phase1-taste-signal.md` step 4 · **Requirement:** `M45-20`
+
+Step 4 of the taste-signal phase: history import as a cold start. §49.8 gives two
+clauses testable without a network, and the phase plan adds the one that is
+easiest to fake — *"a `signal_origin` on the rows that write weights, not a
+convention."*
+
+### The rows that write weights cannot carry an origin
+
+`arena_weights` (0066) is `UNIQUE (account_id, dimension_key)`: one row per reader
+per dimension, holding the **aggregate**. Twenty imported bookmarks and twenty
+ratings given today land on that same row. An origin column there is one value
+for a mixed history — a lie — or a delimited list, which is a convention wearing
+a column's clothes.
+
+So migration 0101 adds `taste_signals`: **one row per individual signal**, which
+is the unit §49.6 actually talks about ("an imported bookmark from 2019 is
+weaker evidence than a rating given today"). `origin` lives there, and the read
+path (`signals_by_origin`, `origin_split`) joins to report the split — which is
+what makes §49.7's "distinguishable everywhere, including in exports" reachable
+rather than merely written down.
+
+`import_signals` takes **no `origin` parameter**. An import writes `'imported'`
+and nothing else, so the failure §49.7 forbids is not expressible at that call
+site rather than discouraged by a doc comment.
+
+**`IMPORTED_SIGNAL_DISCOUNT = 0.5` is a decision, not a specified value.** §49.6
+fixes the direction and not the magnitude. It is a single named constant with the
+spec's sentence as its documentation, so retuning it is a one-line reviewable
+act. Nothing decays by age: §49.7 requires reproducible coordinates, and a
+current-time term is precisely what makes two runs differ.
+
+### The schema rule, learned by a migration that would not apply
+
+**An `account_id`'s type follows its foreign key, not the neighbouring table.**
+0101's first draft declared it TEXT, copied from `tasting_samples.account_id`
+(0099), and PostgreSQL refused to apply it at all:
+
+    foreign key constraint "taste_signals_account_id_fkey" cannot be implemented
+
+A TEXT column cannot reference a UUID column. Checked against the precedents
+rather than guessed: every `account_id` carrying `REFERENCES accounts(id)` is
+UUID on PostgreSQL — `library_items` (0006), `reader_body_copies` (0095) — and
+the TEXT ones (0099's tasting tables) carry **no** foreign key. So this feature
+and the tasting menu need *opposite* casts for the same column name.
+
+Three more dialect traps, each its own failing run:
+
+- `row.get::<String, _>("account_id")` on a UUID column is a **decode** error
+  even when the bind was right, so the *projection* needs `account_id::text` too.
+  `test_support::sql` rewrites placeholders and never a projection.
+- `signals_seen INTEGER` is INT4 on PostgreSQL while `get::<i64, _>` wants INT8.
+  The migration's own note predicted this and it bit anyway.
+- `test_support::count_by` binds a plain string, so test-side counts over a UUID
+  column need `?::uuid`. A test assertion is as engine-dependent as the code it
+  checks.
+
+### The mutation harness caught a test that proved nothing
+
+Ten mutations. Seven killed immediately. Two produced no evidence at all — one
+broke the build (an unused `parse`), one hit a bad anchor — and were rewritten.
+
+The third is the one worth recording. "Drop the `origin` CHECK" first reported
+**KILLED, all 12 tests failing**, which looked like a strong result. It was an
+artefact: deleting the CHECK left `origin TEXT NOT NULL` with no trailing comma,
+so the *migration* failed to apply and every test in the file died at setup.
+
+Re-run properly — replacing the CHECK with a valid permissive one, `CHECK (origin
+<> '')` — the suite was **still green**. So the CHECK was genuinely unpinned, and
+the first version of the new test passed for the wrong reason: its probe insert
+bound a signal id where the *account* goes, so every insert failed on
+`taste_signals_account_id_fkey` and "the insert was refused" was true regardless
+of what the CHECK said. A probe printing the real error found it:
+
+    PROBE sqlite err = Some("... (code: 787) FOREIGN KEY constraint failed")
+
+Fixed by binding the account, and — the part that makes it stick — by adding
+`a_signal_with_a_valid_origin_is_accepted` as a **positive control**. Without it,
+"refused" proves nothing: the helper could be refusing everything, including rows
+that deserve to land.
+
+After the fix: 13 tests green on both engines, and the permissive-CHECK mutation
+fails **exactly one** test. A kill that takes down everything is a broken artefact;
+a kill that takes down one thing is a pinned property.
+
+| mutation | verdict |
+|---|---|
+| uniqueness dropped → re-import doubles | killed |
+| discount removed → imported is not weaker | killed |
+| read path reports every signal as organic | killed |
+| audit reports a re-import as productive | killed |
+| empty external id accepted | killed |
+| key drops `account_id` → two readers collide | killed |
+| key drops `source_key` → two sources collide | killed |
+| `origin` CHECK replaced by a permissive one | killed, by the new test |
+
+### Gates
+
+| gate | result |
+|---|---|
+| `cargo test -p lorehaven-app --test taste_import` (SQLite) | **13 passed, 0 failed, exit 0** |
+| `cargo test -p lorehaven-app --test taste_import` (PostgreSQL 15) | **13 passed, 0 failed, exit 0** |
+| `cargo test -p lorehaven-db --test migration_catalogue` | 6 passed — 0101 in both dialects |
+| `cargo test -p lorehaven-db --lib migrate` | 9 passed — dialect parity incl. 0101 |
+
+Graded `implemented-locally-tested` when the workspace gate below passes. Not
+`fully`: the import path is exercised through the store API, not through M53's
+HTTP routes, and no adapter for AO3/FFN/Goodreads is written yet — 0101 is the
+provenance and idempotency substrate those adapters will land on, and the spec
+names the sources but the repo has no fetcher for any of them.
+
 ## 2026-10-01 — M45-19: the tasting menu's selector was tested and unreachable
 
 **Plan:** `docs/plans/m45-phase1-taste-signal.md` step 3 · **Requirement:** `M45-19`

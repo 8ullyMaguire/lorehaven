@@ -234,7 +234,7 @@ non-negotiables:
   §47.9's determinism requirement does not transfer to the queue.
 - **Bounded per session.** A `session_id` column and a per-session count.
 
-## Step 4 — history import (M45-20)
+## Step 4 — history import (M45-20) — BUILT
 
 Through existing M53 source credentials. §49.6's hard constraints:
 
@@ -245,6 +245,81 @@ Through existing M53 source credentials. §49.6's hard constraints:
   the uniqueness key must include the external id.
 - **Refuses to violate §51.4.** Metadata and link visible, cached body private.
   M45-53 owns that default; this step must not be the place that decides it.
+
+### What was built, and the one design call in it
+
+`crates/db/src/taste_import.rs` plus `migrations/{sqlite,postgres}/0101`, tested
+by `crates/app/tests/taste_import.rs` — **10 tests, green on SQLite and
+PostgreSQL 15, both exit 0**.
+
+**The design call: `arena_weights` cannot carry the origin.** It is `UNIQUE
+(account_id, dimension_key)` — one row per reader per dimension, holding the
+*aggregate*. Twenty imported bookmarks and twenty ratings given today land on the
+same row, so a `signal_origin` column there is one value for a mixed history (a
+lie) or a delimited list (a convention wearing a column's clothes). So
+`taste_signals` holds **one row per individual signal**, which is the unit §49.6
+actually talks about, and `origin` lives there. The read path
+(`signals_by_origin`, `origin_split`) joins to report the split, which is what
+makes §49.7's "distinguishable everywhere, including in exports" reachable
+rather than merely written down.
+
+`import_signals` takes **no** `origin` parameter. An import writes `'imported'`
+and nothing else, so "an imported signal indistinguishable from an organic one" is
+not expressible at that call site rather than discouraged by a comment.
+
+**`IMPORTED_SIGNAL_DISCOUNT = 0.5` is a decision, not a specified value.** §49.6
+says an imported bookmark from 2019 "is weaker evidence than a rating given today"
+and does not say by how much. It is a single named constant in the domain so that
+retuning it is a one-line, reviewable act rather than a number buried in an
+expression. Nothing decays by age: §49.7 requires reproducible coordinates, and a
+current-time term is exactly what makes two runs differ.
+
+### The schema rule this step had to learn the hard way
+
+**The type of an `account_id` follows its foreign key, not the neighbouring
+table.** Migration 0101's first draft declared it TEXT, copied from
+`tasting_samples.account_id` (0099), and would not apply on PostgreSQL at all:
+
+    foreign key constraint "taste_signals_account_id_fkey" cannot be implemented
+
+A TEXT column cannot reference a UUID column. Every `account_id` in this schema
+that carries `REFERENCES accounts(id)` is UUID on PostgreSQL — `library_items`
+(0006) and `reader_body_copies` (0095) both are — and the TEXT ones (0099's
+tasting tables) carry **no** foreign key. So this feature and the tasting menu
+need *opposite* casts for the same column name, and every `$n` bound to a
+`taste_signals` account column carries `::uuid` while 0099's carry none.
+
+Three more dialect traps, each a separate failing run:
+
+- `row.get::<String, _>("account_id")` on a UUID column is a **decode** error
+  even when the bind was right, so the *projection* needs `account_id::text` too.
+  `test_support::sql` rewrites placeholders and never a projection.
+- `signals_seen INTEGER` is INT4 on PostgreSQL while `row.get::<i64, _>` wants
+  INT8 — a decode error that the migration's own note predicted.
+- `test_support::count_by` binds a plain text value, so test-side counts over a
+  UUID column need an explicit `?::uuid` too. A test assertion is as
+  engine-dependent as the code it checks.
+
+### The mutation harness found what review did not
+
+Eight mutations, five killed immediately. The three that mattered:
+
+| mutation | result |
+|---|---|
+| uniqueness dropped → re-import doubles | killed |
+| discount removed → imported is not weaker | killed |
+| read path reports every signal as organic | killed |
+| audit reports a re-import as productive | killed |
+| empty external id accepted | killed |
+| key drops `account_id` → two readers collide | killed |
+| key drops `source_key` → two sources collide | killed |
+| origin CHECK dropped | see verification.md |
+
+The idempotency test asserts **weights and rows**, not counts. §49.8 says the
+*profile* is identical, and a count-only test passes against an importer that
+re-applies the discount to an already-discounted value every run: the row count
+holds still and the reader's weights drift toward zero. That is the failure this
+step is shaped around.
 
 ## Step 5 — the gate
 
@@ -270,7 +345,12 @@ either.
 |---|---|---|
 | M45-16 | step 2's twin test is green on both engines | `implemented-fully-tested` |
 | M45-19 | step 3's four clauses are each asserted | `implemented-locally-tested` — 14 tests, both engines, exit 0 |
-| M45-20 | step 4's idempotency and origin tests are green | `planned` — not started |
+| M45-20 | step 4's idempotency and origin tests are green | `implemented-locally-tested` — 13 tests, both engines, exit 0 |
+
+Steps 1-4 are all built and green on both engines. The phase's remaining work is
+step 5, the full-workspace gate, which now passes (`ALL GATES GREEN`, exit 0) —
+including `cargo clippy --workspace`, which was red at HEAD until commit
+`a4305c3` cleared 13 pre-existing findings.
 
 M45-19 is graded `locally` rather than `fully` on purpose: the fourteen tests drive
 the real routes against both engines, but no e2e instance run has exercised the
