@@ -879,3 +879,209 @@ async fn both_engines_report_the_same_substrate() {
 
     db.cleanup().await;
 }
+
+/// The query-language fields, end to end: `character:` and `relationship:` run
+/// against a real database on both engines.
+///
+/// This closes the loop. `crates/domain/tests/` pins the *shape* of the compiled
+/// SQL; this runs it. The duo/poly pair is the case that matters — §15.4's
+/// `relationship:` field must not return a poly ship for a duo request or the
+/// reverse, and it was wrong twice while writing the compiler.
+#[tokio::test]
+async fn the_query_language_finds_characters_and_pairings() {
+    let db = scratch("query_language_characters").await;
+    let tag = "ql-characters";
+
+    // Two works with ships, plus a work with none: a ship query must not match it.
+    let duo_work = id("ql-duo");
+    let poly_work = id("ql-poly");
+    let solo_work = id("ql-solo");
+    fixture_nodes(&db, tag).await;
+    for work in [&duo_work, &poly_work, &solo_work] {
+        fixture_work(&db, work).await;
+    }
+
+    let duo_ship = format!("{tag}-ship-duo");
+    let poly_ship = format!("{tag}-ship-poly");
+    // The norms must be UNIQUE across ship nodes: `taxonomy_nodes_kind_norm` is a
+    // unique index on (kind, norm), and `fixture_nodes` has already inserted a ship
+    // with norm 'alice/bob'. The norm is only used to satisfy that constraint here --
+    // the pairing query matches on participants, not on the ship's name -- so any
+    // distinct value will do.
+    for (node, norm) in [
+        (&duo_ship, format!("{tag}-duo")),
+        (&poly_ship, format!("{tag}-poly")),
+    ] {
+        exec_with_text(
+            &db,
+            "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) \
+             VALUES (?1, 'ship', ?2, ?3, '2026-01-01T00:00:00Z')",
+            "INSERT INTO taxonomy_nodes (id, kind, canonical, norm, created_at) \
+             VALUES ($1, 'ship', $2, $3, '2026-01-01T00:00:00Z')",
+            &[node.to_string(), format!("Ship {norm}"), norm.to_string()],
+        )
+        .await
+        .expect("ship node");
+    }
+
+    // alice in all three works, bob in the duo and poly, carol in the poly only.
+    for (work, node, prominence) in [
+        (&duo_work, "alice", "protagonist"),
+        (&duo_work, "bob", "supporting"),
+        (&poly_work, "alice", "supporting"),
+        (&poly_work, "bob", "supporting"),
+        (&poly_work, "carol", "cameo"),
+        (&solo_work, "alice", "cameo"),
+    ] {
+        wc::upsert_character(
+            &db.db(),
+            &lorehaven_db::work_characters::WorkCharacter {
+                work_id: work.clone(),
+                character_node_id: node.into(),
+                prominence: prominence.into(),
+                is_pov: false,
+                added_at: "2026-01-01T00:00:00Z".into(),
+            },
+        )
+        .await
+        .expect("upsert character");
+    }
+
+    for (ship, node) in [
+        (&duo_ship, "alice"),
+        (&duo_ship, "bob"),
+        (&poly_ship, "alice"),
+        (&poly_ship, "bob"),
+        (&poly_ship, "carol"),
+    ] {
+        wc::add_ship_participant(&db.db(), ship, node)
+            .await
+            .unwrap();
+    }
+
+    for (work, ship, kind) in [
+        (&duo_work, &duo_ship, "romantic"),
+        (&poly_work, &poly_ship, "platonic"),
+    ] {
+        wc::upsert_relationship(
+            &db.db(),
+            &lorehaven_db::work_characters::WorkRelationship {
+                id: format!("ql-rel-{}", &work[..8]),
+                work_id: work.clone(),
+                ship_node_id: ship.clone(),
+                rel_type: kind.into(),
+                prominence: "primary".into(),
+                dynamics: None,
+                label: None,
+                added_at: "2026-01-01T00:00:00Z".into(),
+            },
+        )
+        .await
+        .expect("upsert relationship");
+    }
+
+    let candidates = vec![duo_work.clone(), poly_work.clone(), solo_work.clone()];
+
+    // The duo request must match ONLY the duo fic. The poly fic's participant set
+    // is a superset, so an exact-set comparison has to reject it -- and this was the
+    // bug that needed the third clause.
+    assert_eq!(
+        works_matching(&db, &relationship_field_sql("Alice/Bob"), &candidates).await,
+        vec![duo_work.clone()],
+        "`relationship:\"Alice/Bob\"` must match the duo fic only, not the poly"
+    );
+
+    // And the reverse, which is the case that passes with only two clauses.
+    assert_eq!(
+        works_matching(&db, &relationship_field_sql("Alice/Bob/Carol"), &candidates).await,
+        vec![poly_work.clone()],
+        "`relationship:\"Alice/Bob/Carol\"` must match the poly fic only"
+    );
+
+    // The solo work has no ship, so neither request may return it.
+
+    // `character:` reads work_characters: alice is in all three, carol in one.
+    assert_eq!(
+        works_matching(&db, &character_field_sql("Alice"), &candidates)
+            .await
+            .len(),
+        3,
+        "alice is in all three works"
+    );
+    assert_eq!(
+        works_matching(&db, &character_field_sql("Carol"), &candidates).await,
+        vec![poly_work],
+        "carol is in the poly fic only"
+    );
+}
+
+/// The compiled SQL and binds for `character:VALUE`.
+fn character_field_sql(value: &str) -> lorehaven_domain::query_sql::SqlFragment {
+    lorehaven_domain::query_sql::render_query(&lorehaven_domain::query::QueryAst::Fielded(
+        lorehaven_domain::query::QueryField::Character,
+        value.to_owned(),
+    ))
+    .expect("character field compiles")
+}
+
+/// The compiled SQL and binds for `relationship:VALUE`.
+fn relationship_field_sql(value: &str) -> lorehaven_domain::query_sql::SqlFragment {
+    lorehaven_domain::query_sql::render_query(&lorehaven_domain::query::QueryAst::Fielded(
+        lorehaven_domain::query::QueryField::Relationship,
+        value.to_owned(),
+    ))
+    .expect("relationship field compiles")
+}
+
+/// Which of `candidates` the compiled fragment selects.
+///
+/// The compiled fragment refers to `works.id` as a COLUMN — it is a WHERE-clause
+/// fragment, not a statement — so the work is selected by embedding the fragment in
+/// a query over `works` and filtering on the row's own id in Rust. That means the
+/// fragment's binds are the ONLY binds, which is the detail that cost the most time
+/// here: an earlier version also bound the work id, giving five binds for four
+/// placeholders, and every candidate silently read 0.
+///
+/// `rewrite_placeholders` is applied for PostgreSQL so this exercises the same
+/// rewrite production uses; a placeholder it cannot handle fails here rather than in
+/// production.
+async fn works_matching(
+    db: &TestDb,
+    fragment: &lorehaven_domain::query_sql::SqlFragment,
+    candidates: &[String],
+) -> Vec<String> {
+    let sqlite_sql = format!("SELECT id FROM works WHERE {}", fragment.sql);
+    let postgres_sql = lorehaven_db::rewrite_placeholders(&format!(
+        "SELECT id::text FROM works WHERE {}",
+        fragment.sql
+    ));
+
+    let rows: Vec<String> = match db.db().backend() {
+        lorehaven_db::Backend::Sqlite => {
+            let mut q = sqlx::query_scalar::<_, String>(&sqlite_sql);
+            for b in &fragment.binds {
+                q = q.bind(b);
+            }
+            q.fetch_all(db.db().sqlite_pool().expect("sqlite"))
+                .await
+                .expect("run compiled fragment on sqlite")
+        }
+        lorehaven_db::Backend::Postgres => {
+            let mut q = sqlx::query_scalar::<_, String>(&postgres_sql);
+            for b in &fragment.binds {
+                q = q.bind(b);
+            }
+            q.fetch_all(db.db().postgres_pool().expect("postgres"))
+                .await
+                .expect("run compiled fragment on postgres")
+        }
+    };
+
+    // Ordered to match `candidates` so an assertion diff is readable, and filtered to
+    // the candidates so a stray row from another test cannot fail the assertion.
+    candidates
+        .iter()
+        .filter(|c| rows.contains(c))
+        .cloned()
+        .collect()
+}
