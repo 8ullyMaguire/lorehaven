@@ -182,6 +182,27 @@ and `zeph` already had their own; this repo was the one inheriting the global
 setting and sharing `deps/` with every other project on the host. One full rebuild
 cost, one failure class removed.
 
+### Gate at `1f2630d` — with the fix in place
+
+| check | result |
+|---|---|
+| `colliding StableCrateId` occurrences | **0** (was 1–2 per run before) |
+| doctest target | **exit 0** with another build running concurrently |
+| SQLite | 2875 passed, 3 failed, all `pool timed out` |
+| the 3 failing suites | `revision_cache` 11/11 green in isolation |
+| PostgreSQL | exit 0, 2900 passed, 0 failed |
+
+The StableCrateId collision is gone across a full run that *had* concurrent
+competes — which is the condition that produced it every time before. That is the
+evidence that the fix addresses the cause rather than the symptom.
+
+The 3 remaining SQLite failures are the load, not the code: all three panicked in
+`test-support/src/lib.rs:319` with no assertion behind them, at load average 24–40
+with another agent session building. `revision_cache` passes 11/11 in isolation and
+the doctest passes while that same load is present. Nothing here claims a fully
+green SQLite run at high load; the claim is narrower and checkable — the failures
+are not reproducible in isolation and are not the collision.
+
 ## Step 3 — the tasting menu (M45-19)
 
 Migration 0099 also gets `tasting_samples` and `tasting_responses`. §49.5's four
