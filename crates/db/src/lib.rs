@@ -59,6 +59,7 @@ pub mod outbox;
 pub mod payout_store;
 pub mod permission;
 pub mod positivity;
+pub mod preread_store;
 pub mod preservation;
 pub mod ranking;
 pub mod rating_integrity;
