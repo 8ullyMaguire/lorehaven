@@ -267,6 +267,41 @@ Notably the load was 21 during this run, well above the 6–7 that had produced 
 pool timeouts, and there were **none** — `--test-threads=2` plus no concurrent build
 in the target dir is the working combination.
 
+### Final gate at `2e617e1` — both engines, same commit
+
+| check | SQLite | PostgreSQL |
+|---|---|---|
+| exit | **0** | **0** |
+| passed | **3027** | **3027** |
+| failed | **0** | **0** |
+| pool timeouts | 0 | 0 |
+| `colliding StableCrateId` | 0 | 0 |
+
+`cargo clippy --workspace --all-targets`: **0 warnings, 0 errors** — down from four
+denied failures that `warnings = "deny"` (added in `1f2630d`, copied from a sibling
+project) turned fatal. A deny setting nobody can satisfy is a setting that gets
+deleted, so the warnings were fixed rather than the setting:
+
+* `walk()` threaded a `depth` parameter through its recursion and never read it —
+  `check()` already refuses an over-deep AST at the entry point.
+* three `format!` calls with no interpolation, two of which form the `(a)`/`(b)`
+  pair that stops a ship value naming a subset of its participants.
+* 63 sites of `&db.db()` where `db()` already returns `&Database`, in two files that
+  share the pattern.
+* 3 sites in `migrate_through_0104.rs` edited **by line, not swept** — `&db` is
+  legitimate for that file's helpers taking `&TestDb`, and a blanket replace would
+  have broken them.
+
+The two assert failures that fired before any write are the interesting part. One
+was my own arithmetic (`count("db.db()") == 25` when the file already held 6 bare
+calls, so 31) — the edit was right and the check was wrong, but a script that had
+trusted its count and written would have been correct by luck rather than by proof.
+
+**What this plan still does not claim.** M45-19 is code-only: the tasting queue's
+`record_response` and ordering are unit-tested, but a unit test on a function
+nothing calls is not a requirement done, so M45-19 stays `planned` until the route
+lands and §49.5's acceptance clauses are asserted end to end.
+
 ## Step 3 — the tasting menu (M45-19)
 
 Migration 0099 also gets `tasting_samples` and `tasting_responses`. §49.5's four
