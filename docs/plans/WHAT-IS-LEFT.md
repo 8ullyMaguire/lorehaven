@@ -45,13 +45,16 @@ Full suite gate running on both engines.
 ## Immediate next steps
 
 1. Confirm the full-suite gate on SQLite and PostgreSQL (in flight).
-2. **Gap C step 3: the adapters in `crates/app/src/ai/`.** Ollama and
+2. **`frontend/src/routes/BlindDate.svelte`.** `spec.md:5050` lists `/blind-date` as a
+   Discovery-surface route; the API endpoint exists (`0c3d63f`) but no page consumes it.
+   The frontend has a `*.test.ts` per component, so a route needs both.
+3. **Gap C step 3: the adapters in `crates/app/src/ai/`.** Ollama and
    OpenAI-compatible, per §23.7. These are the one part of gap C that *cannot* be
    verified without a live provider — so either run Ollama locally and verify against
    it, or stop here and leave step 3 for when a provider exists. That is a judgement call
    about how much scaffolding to add blind.
-3. Persist pre-read reports (needs a migration for `preread_reports`).
-4. Author-facing route to display a report. §32.6: never on the public work page.
+4. Persist pre-read reports (needs a migration for `preread_reports`).
+5. Author-facing route to display a report. §32.6: never on the public work page.
 
 `crates/domain/src/ai.rs` is **done**: `AiTask`, `CostQuote`, `PreReadVerdict` (with
 range validation), `AiAbstain` (retryable vs terminal), the `AiProvider` trait, and
@@ -63,6 +66,10 @@ be awaited in a spawned worker task, which is where every caller belongs.
 Gap C's design is settled in `docs/plans/gap-c-ai-pre-read-scoring.md` — six decisions
 recorded, and the two spec prohibitions (§32.6 no public composite scores, §0.3 no
 payment moving a ranking signal) that shape all of them.
+
+**Also worth checking before building the frontend route:** whether `/discover` already
+has a slot for it. §16.1a lists Blind Date as one of the discovery *surfaces*, so it may
+belong inside `/discover` rather than at its own URL — the spec lists both.
 
 **Re-read §20.10.4 before writing step 3.** The spec already has a composite
 `quality_score`, and the audit's framing of gap C as "the cold-start answer" is exactly
