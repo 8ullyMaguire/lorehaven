@@ -2498,6 +2498,17 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/admin/discovery/leakage",
         audience: Audience::Operator,
     },
+    // §53's faucet/sink view. `Operator`, like the leakage view beside it, and for the
+    // same reason: the route itself is `RequireSession` and calls `require_operator`
+    // inside, so a non-operator gets 404 rather than a 403 that would confirm the
+    // dashboard exists.
+    RouteEntry {
+        file: "flows.rs",
+        handler: "get_flows",
+        method: "GET",
+        path: "/admin/economy/flows",
+        audience: Audience::Operator,
+    },
     RouteEntry {
         file: "admin.rs",
         handler: "record_admin_action",
