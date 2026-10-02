@@ -255,6 +255,29 @@ struct PublicWorkView {
     metrics: Option<PublicWorkMetricsView>,
     authors: Vec<PublicAuthor>,
     chapters: Vec<ChapterView>,
+    /// §49.4: the top-rated rec note, as a SECOND summary. `None` when there is
+    /// no quotable note -- which is the common case, because `review.allow_quote`
+    /// defaults to false.
+    ///
+    /// It is a separate field beside `summary`, never a replacement for it. That
+    /// is the clause, and making it structural is the point: a reader who wrote a
+    /// note cannot delete the author's words by being quotable.
+    rec_blurb: Option<RecBlurbView>,
+}
+
+/// §49.4's rec blurb, always attributed and always quotable.
+#[derive(Debug, Serialize)]
+struct RecBlurbView {
+    review_id: String,
+    /// The pseudonym the note is attributed to, never the account id (§12).
+    pseud_handle: String,
+    /// The bounded pull-quote. Never the whole note.
+    excerpt: String,
+    /// Whether the note was cut at [`EXCERPT_CHARS`], so a renderer can show an
+    /// ellipsis affordance rather than implying the note ends there.
+    truncated: bool,
+    /// The writer's own stars, or null when they wrote a note without rating.
+    stars: Option<i64>,
 }
 
 /// Public engagement counts for a work card. Counts, never averages: each
@@ -1383,6 +1406,23 @@ async fn public_view(state: &AppState, work: &Work) -> ApiResult<PublicWorkView>
         None
     };
 
+    // §49.4: fetched independently of the metrics block, because rec blurbs are
+    // NOT a ranking input (§47.7's separation) and must not be gated on the
+    // owner's `show_public_ratings` -- a note is a reader's sentence, not a
+    // rating aggregate. Gating it on that flag would make an author's rating
+    // privacy setting silently suppress other people's consent.
+    let rec_blurb = lorehaven_db::rec_blurbs::top_rec_blurb(state.db(), &work.id.to_string())
+        .await
+        .ok()
+        .flatten()
+        .map(|b| RecBlurbView {
+            review_id: b.review_id,
+            pseud_handle: b.pseud_handle,
+            excerpt: b.excerpt,
+            truncated: b.truncated,
+            stars: b.stars,
+        });
+
     Ok(PublicWorkView {
         id: work.id,
         title: work.title.clone(),
@@ -1402,6 +1442,7 @@ async fn public_view(state: &AppState, work: &Work) -> ApiResult<PublicWorkView>
         metrics,
         authors,
         chapters: chapters.into_iter().map(ChapterView::from).collect(),
+        rec_blurb,
     })
 }
 
