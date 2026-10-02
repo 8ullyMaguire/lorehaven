@@ -95,7 +95,7 @@ pub async fn blind_date_work(db: &Database, account: &str, today: &str) -> Resul
         SELECT w.id{id_cast} AS id
         FROM works w
         WHERE w.lifecycle = 'published'
-          AND w.visibility IS NOT NULL
+          AND w.visibility = 'public'
           AND w.deleted_at IS NULL
           -- A scheduled work is eligible from the day it was scheduled to appear, so
           -- COALESCE treats a missing `published_at` as the creation date rather than

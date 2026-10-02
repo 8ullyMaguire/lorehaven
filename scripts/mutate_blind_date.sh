@@ -104,12 +104,15 @@ run_mutation "B8 deleted_at filter dropped" \
 # Two earlier attempts were invalid, both because warnings are denied in this repo and
 # the build failed before any test ran: `min_by_key(|id| id.clone())` leaves
 # `blind_date_order_key` uncalled (dead_code), and `.chain(b"")` leaves `seed` unused.
-# `.chain([seed.len()])` keeps both variables live while making the hash independent of
-# the account and date -- so the order stops varying per reader and per day, which is
-# exactly what B1/B2 and `the_pick_is_the_one_the_seed_dictates` assert against.
+# `.chain(&seed.as_bytes()[..seed.len().min(1)])` keeps both variables live while making
+# the hash independent of the account and date -- so the order stops varying per reader
+# and per day, which is what B1/B2 and `the_pick_is_the_one_the_seed_dictates` assert
+# against. Three tests go red. Note the byte slice, not `[seed.len()]`: the chain yields
+# `&u8` and a `[usize; 1]` is a type error, which is the same compile-error trap as above
+# wearing a different hat.
 run_mutation "B9 seed dropped from order key" \
   ".chain(seed.as_bytes())" \
-  ".chain([seed.len()])"
+  ".chain(&seed.as_bytes()[..seed.len().min(1)])"
 
 # B10 the ordering becomes reverse-sorted, which still returns a work but not the one
 # the seed dictates.
