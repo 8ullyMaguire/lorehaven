@@ -1,6 +1,6 @@
 # Lorehaven — what's left
 
-Updated at the start of each turn. Last commit: `9d0e0cd`.
+Updated at the start of each turn. Last commit: `430ceaf`.
 
 ## Done this project
 
@@ -64,7 +64,8 @@ Plan: `docs/plans/m45-18-faucet-sink-dashboard.md`.
 | 1. Registry, migration 0112 | **done** (`bca9055`) — 112/112 migrations apply on both engines, four seed rows verified identical on SQLite and PostgreSQL |
 | 2. `crates/db/src/flow_store.rs` | **done** (`23546d0`) — compiles clean, clippy clean |
 | 2a. `Flow::Undeclared` in the domain | **done** (`23546d0`) — see below |
-| 3. `crates/app/src/routes/flows.rs` | next |
+| 3. `crates/app/src/routes/flows.rs` | **done** (`430ceaf`) — `GET /admin/economy/flows`, operator-only, 404-not-403 |
+| 4. `crates/app/tests/flow_dashboard.rs` | **done** (`430ceaf`) — 6 cases green on both engines |
 
 Two stale-batch items turned out to be real and are now fixed:
 
@@ -79,7 +80,6 @@ Two stale-batch items turned out to be real and are now fixed:
   variables in the strategy, which is what sent me looking for a code bug that was not there.
   A `\`\`text\`\`` fence fixes it. `cargo test --workspace --doc` is now clean — and it is
   a separate target a plain `cargo test -p <crate>` never runs.
-| 4. `crates/app/tests/flow_dashboard.rs` | not started |
 | 5. Frontend | optional, last |
 
 **`Flow` gained a fourth variant, `Undeclared`,** and this was not in the plan. The plan
