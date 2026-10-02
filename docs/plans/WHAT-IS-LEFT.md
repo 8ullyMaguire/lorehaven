@@ -149,6 +149,11 @@ result (an empty list reads downstream as "the work was assessed and scored noth
   investigation at migration 0111 rather than at the accessor. `--nocapture` printing the
   count distinguished them immediately. A count of 0 means the accessor is broken; a count of
   N with one entry missing means the migration is.
+- **Never `git add -A <dir>` while a mutation gate is running.** The gate's mutations sit in
+  the working tree between its edit and its restore, so a broad add stages whichever one is
+  applied at that instant. This contaminated a commit: "Close the H9 GREEN(BAD)" also carried
+  `blind_date_seed(account, today)` → `blind_date_seed(account, "")`, making every day return
+  the same work. Stage explicit paths, and read `git show --stat HEAD` after committing.
 - **Never run a test binary while a mutation gate is running.** The gate edits the file
   under test, so a concurrent `cargo test` compiles mutated source and reports the gate's
   intended RED as a failure. Check `git status --short <file>` before believing any failure;
