@@ -31,6 +31,7 @@ pub mod governance;
 pub mod ids;
 pub mod imports;
 pub mod jobs;
+pub mod leakage;
 pub mod lending;
 pub mod library;
 pub mod longevity;
