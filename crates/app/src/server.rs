@@ -636,6 +636,11 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        .merge(classified(
+            routes::admin_discovery::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // M21 skeleton — spec revision 2026-09-14: monetization, gifts,
         // content subscriptions, saved-search alerts, ai_training assertion.
         .merge(classified(
