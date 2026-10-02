@@ -197,6 +197,34 @@ because the name is `split_whitespace().last()` after ` ON `.
 distinct-reader count into a highlight count — the influence purchase §33.2 forbids,
 with nothing failing.
 
+### Gate at `9668c02`
+
+| backend | passed | failed | exit |
+|---|---|---|---|
+| SQLite | **3040** | 0 | **0** |
+| PostgreSQL | **3040** | 0 | **0** |
+
++13 over `2e617e1`'s 3027: the 15 `reasons` unit tests minus 2 that the doctor
+suite already counted. Migration 0106 applies cleanly on both engines and the
+parity test passes on it.
+
+One caveat worth recording from the run *before* this one, because it is a class of
+failure that looks like a regression and is not. PostgreSQL failed
+`a_reader_below_the_trust_floor_cannot_propose_a_merge` with:
+
+```
+panicked at crates/app/tests/m29_transparency.rs:210:22:
+register Newcomer: 408 Request Timeout null
+```
+
+A **server-side request timeout on a registration endpoint**, in consensus code this
+plan does not touch. The suite passes 39/39 on PG in isolation and in a full
+re-run at the same `--test-threads=2`. The gate before it ran at load 19–41 with
+other agent sessions building. So: a `408` in a gate log is the *server* reporting
+it could not answer in time, which is a statement about the machine, not an
+assertion about the code — and unlike a pool timeout it has no assertion behind it
+to check.
+
 ## Standing decisions made here
 
 Recorded because `goal.md` asks for genuinely open decisions to be written down
