@@ -74,7 +74,7 @@ Every MISS below was confirmed by reading the spec section the list itself cites
 | 31 | Filter by AI declarations | **EXISTS** — 5 files |
 | 32 | Hidden-classics engine | **GAP** — `hidden_classic`/`backlist` zero |
 | 33 | Quality-gated under-read gems | **GAP** — `quality_floor`/`min_bookmark` zero |
-| 34 | Bookmark-to-hit ratio | **GAP** — nothing computes it. See gap E. |
+| 34 | Bookmark-to-hit ratio | **BUILT** — §53.6 defines it; `crates/domain/src/earned_bookmark.rs`, 13 tests. Closes gap E. |
 | 35 | Ending-type filter | **EXISTS** — 182 files |
 
 **Tier 2 verdict: 8 gaps, of which #18 is on the list's "do five" and is named in
@@ -149,32 +149,36 @@ window; both are now covered.
 forward suggestion for the same feed slot, and choosing between them is a product
 decision rather than a database one.
 
-### E. Bookmark-to-hit ratio (#34)
-Nothing computes it. The list's own argument for it is good and worth preserving
-verbatim in the spec: it is cheap to compute and hard to fake, because faking a
-bookmark costs one click and faking a completion costs a reader's time. That
-argument is better than the feature's priority suggests — it is a *quality
-signal* argument, and §20.3's author multipliers are where it would pay.
+### E. Bookmark-to-hit ratio (#34) — CLOSED
 
-**But the term is undefined, and that is the actual finding.** Searching the spec
-for "hit" returns only pinch-hitters (§, a volunteer-review programme) and §53.5's
-hit *rate* — which this session introduced, and which is defined over impressions,
-not over any table. So the ratio is not a missing query over existing data; it
-needs a definition first, and the definition is a design decision with a real
-choice inside it:
+Spec §53.6 first, then `crates/domain/src/earned_bookmark.rs`. 13 tests, no SQL.
 
-- **A hit as a chapter view** (`work_view_log`, 0068) is the most plentiful signal
-  and the easiest to inflate — a refresh is free.
-- **A hit as a `reading_status` transition to `finished`** is the hardest to fake
-  and the sparsest, and it is already the other half of §53.5's hit rate.
+The audit said this was "not a missing query over existing data" and that was right
+about *why* — the term was undefined — while missing the consequence. `ReaderSignals`
+already carried both `bookmarkers` and `finishers` from §20.3's query, so once the
+word was settled this is a definition and a division, not a build.
 
-The list argues for the ratio's *falsifiability*, which is the argument for the
-second definition: a bookmark is one click and a completion is a reader's time, so
-a ratio whose numerator is the cheap signal measures nothing. **Recommend: define
-"hit" as a completion, and say so in the spec** — otherwise two engineers will
-build two different ratios and both will be defensible.
+**The definition turned out to have three options, not two.** The audit compared a
+chapter view against a `finished` transition. It missed that §53.5 already defines
+"hit" as *finished or rated ≥4*, so the real choice was view / §53.5's sense /
+completion alone. §53.6 takes the third, for a reason specific to this ratio rather
+than inherited: §53.5 asks whether a feed is working, where a four-star rating is real
+evidence a reader engaged; §53.6 asks whether a work earns a reader's time, and a
+rating costs one click — exactly what the ratio is measured against. `HitBasis` names
+all three, and `ratings_do_not_change_the_ratio_at_all` asserts it with a number.
 
-Cheap either way, but only after that sentence exists.
+Also decided there rather than assumed: windowed numerator *and* denominator; a work
+with no bookmarks excluded rather than zero; and it feeds §20.3's multipliers and
+nothing else, never reaching a reader.
+
+**One mutation survived and the survivor was better than the code.** `usable()` was
+`is_some_and(f64::is_finite)`; mutating it to `is_some()` left all 13 green. It could
+not fail — `compute` already refuses a zero denominator and `ratio` is private, so
+nothing outside the module can build a non-finite one. Defensive code defending an
+unreachable state, which rots silently and then misleads the next reader into thinking
+the type is looser than it is. Reduced to `is_some()` with a doc comment saying exactly
+that, and moved the real finiteness assertion to where it belongs: a property of
+`compute`'s output.
 
 ### F. Hidden classics (#32) and quality-gated gems (#33)
 Adjacent: both are "the ranking engines over-reward the already-popular". They
