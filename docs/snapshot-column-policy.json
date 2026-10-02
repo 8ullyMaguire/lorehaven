@@ -1161,6 +1161,11 @@
       "treatment": "rekey_account",
       "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural test still passes. taste_signals.account_id in particular is the join that makes 49.6's import analysable at all -- per-account weights are meaningless once you cannot tell whose they are -- so breaking it silently turns the import into unattributable aggregate. taste_signal_imports.account_id additionally anchors the import's provenance to the reader who asked for it, so the re-key must be identical across both tables or the import cannot be traced to a snapshot account.",
       "reviewed_by": "alvaro, 2026-10-01, against spec 11.16"
+    },
+    "work_highlights.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b, and this is the failure the requirement is 'most likely to be implemented backwards': rekey_text emits a `snp_` TEXT hash, which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural test still passes. 50.1 needs the join for a specific reason: a highlight counts ONCE toward a work's gravity, and 'once' is per READER. Break this key and the distinct-reader count becomes a highlight count, which is exactly the influence purchase 33.2 forbids -- with nothing failing.",
+      "reviewed_by": "alvaro, 2026-10-02, against spec 11.16"
     }
   }
 }
