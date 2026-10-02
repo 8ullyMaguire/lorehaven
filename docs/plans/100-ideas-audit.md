@@ -61,7 +61,7 @@ Every MISS below was confirmed by reading the spec section the list itself cites
 | 18 | AI pre-read scoring | **GAP** — `pre_read`/`preread`/`prefetch_score` all zero. §23.7 specifies AI adapter work. See gap C. |
 | 19 | Triage inbox | **EXISTS** — 2 files |
 | 20 | Author-affinity engine | **GAP** — `author_affinity` zero, `affinity` 16. Likely under another name; needs reading. |
-| 21 | Series-aware recs | **GAP** — `series` 18 files, `next_entry` zero. See gap D. |
+| 21 | Series-aware recs | **BUILT** — `crates/db/src/series_recs.rs`, 17 tests on both engines, 5 mutations red. Closes gap D. |
 | 22 | Re-reads as strongest signal | **EXISTS** — 16 files |
 | 23 | Anti-example neighbor penalty | **EXISTS** — 1 file |
 | 24 | Embedding-similarity from exemplars | **EXISTS** — 9 files; §16.1 |
@@ -113,10 +113,41 @@ of the four things that matter *more* than ranking tweaks, because it is the
 cold-start answer. §23.7 specifies the AI adapter; nothing scores imports against
 the operator's dimensions. **Highest value of the six.**
 
-### D. Series-aware recommendation (#21)
-`series` appears in 18 files, so series *data* exists; nothing suggests "the next
-unread entry in a series you finished". This is the cheapest real engine gap —
-the data is already there and the recommendation is a query over it.
+### D. Series-aware recommendation (#21) — CLOSED
+
+`crates/db/src/series_recs.rs`. 17 tests green on SQLite and PostgreSQL, 5 mutations
+red, clippy clean.
+
+The audit was right that the data exists and wrong that the recommendation was
+therefore a query over it. `media_collections` with `collection_kind = 'series'` and
+`media_collection_items.position` do exist, and they were unreachable:
+`media::collection_media` returns *media* records, not the works in a collection, so
+nothing could walk a series in order. The schema needed nothing.
+
+**The rule that mattered, and which I got wrong first.** The suggestion is the first
+*unfinished* entry, not the one after the furthest finished entry. Those differ the
+moment a reader skips, which is most readers: having read entries 1, 2 and 4 of a
+five-part series, the "furthest + 1" rule suggests 5 and never mentions 3 — abandoning
+the gap silently, which is the entire reason the feature exists. The rule is now an
+anti-join: the series order says what comes next, the reader's history says what is
+done.
+
+Three bugs only PostgreSQL could see, all from editing two dialect arms independently:
+
+* a placeholder hole — the PG arm numbered from `$2` and never used `$1`, so sqlx's
+  positional binding fed `since` into `$1` and compared text to bigint;
+* half a window — the cast was on the lower bound only, so the upper bound compared
+  unix seconds to RFC 3339 text, which is false for every row in SQLite;
+* a `LIMIT 1` that bounded the whole answer rather than each series.
+
+Both arms now come from one template differing only in marker, casts and window
+comparison. Two mutations survived the first pass — widening `collection_kind`, and
+dropping the window — because every fixture was a series that finished inside the
+window; both are now covered.
+
+`Direction::Backward` is declared and deliberately not wired: it competes with the
+forward suggestion for the same feed slot, and choosing between them is a product
+decision rather than a database one.
 
 ### E. Bookmark-to-hit ratio (#34)
 Nothing computes it. The list's own argument for it is good and worth preserving
