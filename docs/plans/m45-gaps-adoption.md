@@ -136,8 +136,31 @@ starts before the previous one is committed with a green two-backend gate.
 | 7 | M45-12, -53, -54 | policy knobs and the import default |
 | 8 | M45-51, -52, -55 | DSAR export, notice-and-action, SOR |
 
-**Phase 1 is next.** Its spec section is §49, and `docs/plans/m45-taste-signal.md`
-carries the per-step build.
+**Phase 1 is done.** §49 is committed; M45-16 and M45-19 are
+`implemented-fully-tested`, M45-20 `implemented-locally-tested`.
+
+**Phase 2 is next, and its spec is now written — §50.** Recording what the audit
+actually found, because it was not the shape the plan assumed:
+
+| row | spec | was the row `planned`? |
+|---|---|---|
+| M45-14 | §49.3 (four deterministic measures) | yes — **mislabelled** |
+| M45-35 | §49.4 (rec blurbs) | yes — **mislabelled** |
+| M45-24 | §50.1 (reason-tagged kudos, highlights) | yes — genuine gap |
+| M45-31 | §50.2 (canon-blind discovery) | yes — genuine gap |
+
+Two of Phase 2's four rows already had spec text and were still marked `planned`.
+§49 was written from gaps items A5 and C11, which are M45-14 and M45-35, so those
+two rows were specified the day §49 landed and the CSV was never updated to say
+so. Corrected to `specified`, which is the honest status: they have clauses an
+implementer could work from and no code.
+
+The genuine gaps were M45-24 and M45-31 — `canon-agnostic` and `fandom-blind` had
+**zero** hits in `docs/spec.md`, and the reason tags for kudos existed only as
+§49.5's *tasting* reasons with nothing saying kudos reuse them. §50.1 states that
+reuse explicitly and §50.2 writes the canon-blind clauses from scratch.
+
+Counts after this commit: **10 `specified`, 33 `planned`**.
 
 ## Standing decisions made here
 
