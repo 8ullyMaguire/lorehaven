@@ -1,6 +1,6 @@
 # Lorehaven — what's left
 
-Updated at the start of each turn. Last commit: `8b4e58e`.
+Updated at the start of each turn. Last commit: `bca9055`.
 
 ## Done this project
 
@@ -54,6 +54,24 @@ confirm the draft exists, which is exactly what the server's indistinguishable 4
 to prevent.
 
 **All six gaps (A–G) are now closed.**
+
+## M45-18 — faucet/sink dashboard (in progress)
+
+Plan: `docs/plans/m45-18-faucet-sink-dashboard.md`.
+
+| Step | State |
+|---|---|
+| 1. Registry, migration 0112 | **done** (`bca9055`) — 112/112 migrations apply on both engines, four seed rows verified identical on SQLite and PostgreSQL |
+| 2. `crates/db/src/flow_store.rs` | next |
+| 3. `crates/app/src/routes/flows.rs` | not started |
+| 4. `crates/app/tests/flow_dashboard.rs` | not started |
+| 5. Frontend | optional, last |
+
+Two facts that are now recorded in the plan and would have shipped bugs:
+`amount_bp` holds **whole credits**, not basis points; and `preservation_dues` /
+`preservation_reclaim` share the literal `reference` `{member_id}` on **opposite** sides,
+so the registry is keyed on a mechanism name derived from `TxnType`, not on the raw
+reference.
 
 ## In flight
 
