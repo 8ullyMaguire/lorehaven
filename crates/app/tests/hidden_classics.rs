@@ -130,6 +130,67 @@ impl Fixture {
     }
 }
 
+#[tokio::test]
+async fn a_completion_of_something_that_is_not_a_work_is_not_a_completion() {
+    // The completions subquery counts `reading_status` rows with
+    // `status = 'finished'`, keyed on `subject_id = w.id`. Dropping its
+    // `subject_type = 'work'` predicate therefore makes a *finished row of any other kind*
+    // count as a completion of this work -- and `reading_status` is polymorphic by design,
+    // so those rows exist and are legal.
+    //
+    // **The comparator was solved for.** The correct count and the wrong one have to land on
+    // opposite sides of it:
+    //
+    //   quiet  : 30 readers,  0 completions  -> (0/30) / (1 + log10(31))  = 0.000
+    //   decoy  : 30 readers, 30 completions  -> (30/30) / (1 + log10(31)) = 0.161
+    //   rival  : 30 readers, 29 completions  -> 0.156
+    //
+    // With the filter dropped, `quiet` gains 30 completions and its score becomes 0.161 --
+    // which puts it *above* the rival's correct 0.156, so `quiet` takes the top slot and the
+    // ordering assertion fails. The gap between `quiet`-wrong and `rival`-correct is 0.005,
+    // which is narrow, so the rival's completion count is set to 29 rather than 30 to widen
+    // it: 0.161 wrong against 0.156 correct is the tightest pair that still separates, and
+    // it separates because the decoy is 30/30 while the rival is 29/30.
+    let f = Fixture::build("hc_subject_type").await;
+    let quiet = f.work("quiet", 30, 0).await;
+    let rival = f.work("rival", 30, 29).await;
+
+    // 30 `finished` rows for `quiet`, but with subject_type naming a series rather than a
+    // work. Each is a legitimate row: some readers finished series, and those rows carry
+    // the same `subject_id` value by coincidence of the fixture's id space.
+    for n in 0..30 {
+        let who = account(
+            &f.tdb,
+            &format!("hc_st-decoy-{n}-{}@example.com", uuid::Uuid::new_v4().simple()),
+        )
+        .await;
+        exec_with(
+            &f.tdb,
+            "INSERT INTO reading_status (id, account_id, subject_type, subject_id, status, \
+                 started_at, finished_at, updated_at) \
+             VALUES (?1#u, ?2#u, 'series', ?3#u, 'finished', '2026-01-02T00:00:00Z', \
+                 '2026-01-05T00:00:00Z', '2026-01-05T00:00:00Z')",
+            &[&uuid::Uuid::new_v4().to_string(), &who, &quiet.clone()],
+        )
+        .await;
+    }
+
+    let ranked = f.ranked().await;
+    // The direct assertion: `quiet` scored nothing, so it must not appear at all.
+    assert!(
+        !ranked.contains(&quiet),
+        "a work with no completions must not rank above one that has 29"
+    );
+    // And the ordering assertion with a pair the two counts disagree on, so a linear
+    // denominator or an unfiltered subquery cannot produce the same answer.
+    let quiet_at = ranked.iter().position(|w| w == &quiet);
+    let rival_at = ranked.iter().position(|w| w == &rival);
+    assert!(
+        rival_at < quiet_at || quiet_at.is_none(),
+        "rival (29 real completions) must outrank quiet (0 real completions): {ranked:?}"
+    );
+}
+
 // ── the registration ────────────────────────────────────────────────────────
 
 #[test]
