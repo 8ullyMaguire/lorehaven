@@ -29,6 +29,24 @@ ALTER TABLE canon_agnostic_works ADD COLUMN unexplained_names INTEGER;
 ALTER TABLE canon_agnostic_works ADD COLUMN word_count        INTEGER;
 ALTER TABLE canon_agnostic_works ADD COLUMN density           REAL;
 
+-- ── Backfill, before the triggers ────────────────────────────────────────────
+--
+-- The UPDATE has to come FIRST. A legacy row -- one written before these columns
+-- existed -- carries no measures, and the triggers below reject exactly that
+-- shape, so an UPDATE issued after they exist would fail against its own table.
+--
+-- The value is the same as the PostgreSQL dialect's and for the same reason: a
+-- pre-0108 row says "this work was once called canon-agnostic" and nothing about
+-- the text that produced that verdict. §50.3 requires the class be recomputable
+-- from the text, and these rows are not, so the honest state is UNCLASSIFIED.
+-- Backfilling `canon_dependent = 0` would read as "measured, and canon-agnostic",
+-- which is a measurement nobody made. The work is re-measured on the next ingest.
+
+UPDATE canon_agnostic_works
+   SET unmeasurable_reason = 'unclassified: 0108 backfill, never measured'
+ WHERE unmeasurable_reason IS NULL
+   AND unexplained_names IS NULL;
+
 -- ── Multi-column invariants, as triggers ─────────────────────────────────────
 --
 -- SQLite cannot add a table-level CHECK to an existing table, and the ALTER form
