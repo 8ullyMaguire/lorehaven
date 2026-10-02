@@ -20,6 +20,7 @@ use std::str::FromStr;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/discovery", get(get_discovery))
+        .route("/discovery/blind-date", get(get_blind_date))
         .route("/discovery/taste-profile", get(get_taste_profile))
         .route("/discovery/taste-profile/me", get(get_my_taste_vector))
         .route(
@@ -857,6 +858,32 @@ fn default_for_surface(surface: &str) -> lorehaven_domain::browse::Sort {
         }
         _ => lorehaven_domain::browse::Sort::New,
     }
+}
+
+/// `GET /discovery/blind-date` — one work for this reader today.
+///
+/// The date is computed here, not taken from the request, so a client cannot ask for
+/// yesterday's pick or enumerate forward: the surface is one work per reader per day, and
+/// a `?date=` parameter would turn it into a catalogue browser and undo the whole design.
+///
+/// `work_id: null` with a 200 is the honest answer for "no eligible work today" — an
+/// empty catalogue is a quiet surface, not a broken one. A 404 would be wrong twice over:
+/// it conflates "nothing today" with "no such endpoint", and it is not the same thing as
+/// the work being absent.
+async fn get_blind_date(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<serde_json::Value>> {
+    let account_id = user.account_id.to_string();
+    let today = chrono::Utc::now().date_naive().to_string();
+    let work = lorehaven_db::discovery::blind_date_work(state.db(), &account_id, &today)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+    let body = match work {
+        Some(id) => serde_json::json!({ "date": today, "work_id": id }),
+        None => serde_json::json!({ "date": today, "work_id": serde_json::Value::Null }),
+    };
+    Ok(Json(body))
 }
 
 async fn get_taste_profile(
