@@ -9949,3 +9949,35 @@ whether a change helped by remembering.
 - **It reports its own missing inputs.** With no ratings and no completions the
   rate is undefined, not zero: reporting zero would read as total failure and
   invite a change to a recipe that has simply not been tested yet.
+
+### 53.6 Earned bookmark: the ratio that cannot be faked
+
+The ideas list asks for a bookmark-to-hit ratio, on the argument that it is cheap to
+compute and hard to fake: faking a bookmark costs one click and faking a completion
+costs a reader's time. The argument is better than the feature's priority suggests,
+because this is a **quality signal** rather than a ranking tweak, and §20.3's author
+multipliers are where it would pay.
+
+**The term needed defining first, and the definition has a real choice inside it.**
+A "hit" could be a chapter view (`work_view_log`) — plentiful and free to inflate, since
+a refresh costs nothing — or a `reading_status` transition to `finished` — sparse and
+expensive to fake. A ratio whose numerator is the cheap signal measures nothing: any
+ratio of bookmarks to views is a statement about how the reader browses.
+
+- **A "hit" here is a completion, and it is `finished` alone — not §53.5's
+  "finished or rated >=4".** The two definitions coexist deliberately. §53.5's hit
+  answers "is my feed working?", where a four-star rating is real evidence that a
+  reader engaged. This ratio answers "does this work earn the reader's time?", and a
+  four-star rating on chapter one is not that: it costs one click, exactly what the
+  ratio is meant to be measured against. Reusing §53.5's definition would put the cheap
+  signal inside the expensive one.
+- **It is per work, over a window, with the denominator reported.** Both counts are
+  scoped the same way, because a ratio whose numerator is windowed and whose
+  denominator is not measures a change in the denominator.
+- **A work with no bookmarks is excluded, not counted as a ratio of zero.** A zero
+  denominator is not a measurement; §53.5's "undefined, not zero" applies here for the
+  same reason.
+- **It is an input to §20.3's author multipliers and to nothing else.** It does not
+  become a ranking signal, and it is never surfaced to a reader — a work's ratio is a
+  statement about the people who read it, which is the same §0.3 reasoning that keeps
+  the leak rate in the operator's view.
