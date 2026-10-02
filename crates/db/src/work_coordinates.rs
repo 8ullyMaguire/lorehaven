@@ -126,6 +126,41 @@ type StoredRow = (
     String,
 );
 
+/// Measure a work from its own stored text and store the result.
+///
+/// This is the call an ingest or publish path makes, and it is the piece that was
+/// missing: [`corpus_for_work`] already read a work's chapters and
+/// `measure_and_store` already wrote the result, but nothing in the crate called
+/// either. The store and its tests were complete and correct, and every work's
+/// coordinates were permanently absent — which §49.3 forbids treating as a zero.
+///
+/// The dialogue count is derived here rather than passed in, because the platform
+/// has no stored dialogue tally to pass: the database holds prose and nothing
+/// else. [`lorehaven_domain::coordinates::dialogue_word_count`] is a pure function
+/// of the text, which is what §49.3's determinism requires and what makes
+/// recomputing it here safe.
+///
+/// A work with no chapters yields `Ok(None)` and writes nothing. That is the
+/// `Coordinates::Unmeasurable(NoText)` case arriving from the database side
+/// rather than the domain side, and it is the honest answer: a work whose text has
+/// not been written has nothing to measure, and must not acquire coordinates that
+/// look like measured zeroes.
+pub async fn measure_work_and_store(
+    db: &Database,
+    work_id: &str,
+    text_version: i64,
+    computed_at: &str,
+) -> Result<Option<StoredCoordinates>> {
+    let Some((mut corpus, _chapters)) = corpus_for_work(db, work_id, 0).await? else {
+        return Ok(None);
+    };
+    // `corpus_for_work` takes the dialogue count because its caller may have one.
+    // Here there is none, so it is counted from the same text the measures read.
+    corpus.dialogue_words = lorehaven_domain::coordinates::dialogue_word_count(&corpus.text());
+    let stored = measure_and_store(db, work_id, &corpus, text_version, computed_at).await?;
+    Ok(Some(stored))
+}
+
 /// Measure a work's text and store the result.
 ///
 /// The one write path that takes text, so the measurement and the write cannot

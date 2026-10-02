@@ -276,6 +276,94 @@ impl Corpus {
     }
 }
 
+/// Count the words inside quotation marks, for §49.3's dialogue ratio.
+///
+/// The count is deliberately a *caller-supplied* input to [`Corpus`] rather than
+/// something `coordinates` derives: the measures are order-independent and
+/// deterministic, and a dialogue heuristic is neither — it is a judgement about
+/// which marks mean speech. So the parser lives here, separately testable, and
+/// the caller decides whether to trust it. What matters for §49.3 is only that
+/// the same text always yields the same count, which this does.
+///
+/// A run of text between an opening curly quote (`\u{201C}`, `\u{201D}`) and its
+/// matching closer is one quoted span. Curly quotes rather than straight ones
+/// because straight quotes are also inches and feet, and a measurement that
+/// counts `6\"` as dialogue is worse than one that counts nothing.
+///
+/// Unclosed quotes are handled by closing at end-of-text rather than by
+/// discarding: text pasted from a word processor often has an unmatched quote,
+/// and dropping the rest of the chapter would under-report the ratio in a way
+/// that looks like a deliberate measurement.
+///
+/// Nested quotes are not tracked. Two levels of quotation inside a quotation are
+/// vanishingly rare in prose and the error is bounded by the inner run, so the
+/// extra state would not buy accuracy.
+#[must_use]
+pub fn dialogue_word_count(text: &str) -> usize {
+    let mut words = 0usize;
+    let mut in_quote = false;
+    let mut in_word = false;
+
+    for ch in text.chars() {
+        match ch {
+            // Entering or leaving a quoted run also ends the current word, so
+            // the text *between* two quotes is not counted as part of either.
+            // Without this, `in_word` is still true from the previous quote and
+            // the first word of the gap is swallowed rather than counted -- the
+            // count comes out one short, and only for multi-span dialogue.
+            '\u{201C}' => {
+                in_quote = true;
+                in_word = false;
+            }
+            '\u{201D}' => {
+                in_quote = false;
+                in_word = false;
+            }
+            // Inside a quoted run, a word is a maximal run of characters that
+            // are not whitespace and not punctuation -- so `don't` and
+            // `well-known` are one word each, and a lone `...` is none. Written
+            // as one explicit branch rather than a pair of guards so the word
+            // boundary is in one place: the earlier version reset `in_word` on
+            // any non-alphanumeric, which split `don't` into two words and
+            // silently over-reported the ratio for apostrophe-heavy prose.
+            c if in_quote => {
+                // What counts as part of a word, and what merely touches one.
+                //
+                // `is_alphanumeric` covers letters and digits, but NOT kana -- and
+                // kana are neither alphanumeric nor whitespace, so a
+                // whitespace-only rule counted every Japanese work as having a
+                // dialogue ratio of exactly 0.0. §49.3 names 0.0 as the value
+                // that must never be confused with "unmeasured", so that would
+                // have been the single most misleading number in the schema. The
+                // rule is therefore: any non-whitespace character is part of a
+                // word EXCEPT the two CJK punctuation marks that are visually
+                // word boundaries.
+                //
+                // A hyphen, an apostrophe and an underscore JOIN rather than
+                // split: `well-known` and `don't` are each one word, and prose
+                // that hyphenates heavily would otherwise read as very talkative
+                // purely because of its punctuation. A joiner only CONTINUES a
+                // run -- a leading one does not start it, so a stray quote mark
+                // or dash cannot invent a word.
+                let joiner = matches!(c, '-' | '\'' | '\u{2019}' | '_');
+                let cjk_boundary = matches!(c, '\u{3001}' | '\u{3002}');
+                let word_character =
+                    !c.is_whitespace() && !cjk_boundary && (c.is_alphanumeric() || !c.is_ascii());
+                let part_of_word = word_character || (joiner && in_word);
+
+                if part_of_word && !in_word {
+                    in_word = true;
+                    words += 1;
+                } else if !part_of_word {
+                    in_word = false;
+                }
+            }
+            _ => {}
+        }
+    }
+    words
+}
+
 /// Compute §49.3's four measures, or say why there are none.
 ///
 /// Deterministic: same [`Corpus`] in, same [`Coordinates`] out, on both engines.

@@ -385,6 +385,102 @@ async fn coordinates_can_be_measured_from_stored_chapters() {
 }
 
 #[tokio::test]
+async fn a_work_measures_itself_from_its_own_stored_chapters() {
+    // The gap this pins: `corpus_for_work` read a work's chapters and
+    // `measure_and_store` wrote the result, and NOTHING called either. The store
+    // and its tests were complete and correct, so the suite was green while every
+    // work's coordinates were permanently absent -- and §49.3 forbids treating an
+    // absent coordinate as a zero. This drives the one call an ingest path makes,
+    // so a regression that leaves the machinery unwired fails here.
+    let db = scratch("coord_measure_self").await;
+
+    let work = id("coord-measure-self");
+    let author = fixture_work(&db, &work).await;
+    fixture_chapters(&db, &work, &author, 3, 800).await;
+
+    let stored = wc::measure_work_and_store(db.db(), &work, 1, "2026-10-01T12:00:00Z")
+        .await
+        .expect("measure the work from its own text")
+        .expect("a work with three written chapters has text to measure");
+
+    assert!(
+        stored.coordinates.is_measured(),
+        "2400 words of prose must measure, got {:?}",
+        stored.coordinates
+    );
+    // And it is readable afterwards, which is what makes it usable as a
+    // dimension rather than a discarded computation.
+    let read = wc::measured_coordinates(db.db(), &work)
+        .await
+        .expect("read")
+        .expect("measured");
+    assert_eq!(read.word_count, 2400);
+    assert!(read.sentence_count > 0);
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_work_with_no_chapters_gets_no_coordinates_at_all() {
+    // §49.3: "A work too short to measure has no coordinates, and an absent
+    // coordinate is not a zero." A work with no text is the same case arriving
+    // from the database side, and writing zeroes for it would rank against it.
+    let db = scratch("coord_measure_empty").await;
+
+    let work = id("coord-measure-empty");
+    fixture_work(&db, &work).await;
+    // No chapters written.
+
+    let outcome = wc::measure_work_and_store(db.db(), &work, 1, "2026-10-01T12:00:00Z")
+        .await
+        .expect("measuring an empty work must not be an error");
+
+    assert!(
+        outcome.is_none(),
+        "a work with no chapters must produce no coordinates, got {outcome:?}"
+    );
+    assert!(
+        wc::measured_coordinates(db.db(), &work)
+            .await
+            .expect("read")
+            .is_none(),
+        "and nothing may be stored for it either"
+    );
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_work_measures_the_same_way_twice() {
+    // §49.3: "Deterministic and reproducible. Same text, same coordinates." A
+    // recompute is an auditable backfill rather than a side effect of a page
+    // view, so running it twice must be a fixed point rather than a drift.
+    let db = scratch("coord_measure_stable").await;
+
+    let work = id("coord-measure-stable");
+    let author = fixture_work(&db, &work).await;
+    fixture_chapters(&db, &work, &author, 3, 800).await;
+
+    let first = wc::measure_work_and_store(db.db(), &work, 1, "2026-10-01T12:00:00Z")
+        .await
+        .expect("first measure")
+        .expect("measured");
+    let second = wc::measure_work_and_store(db.db(), &work, 1, "2026-10-01T12:00:00Z")
+        .await
+        .expect("second measure")
+        .expect("measured");
+
+    assert_eq!(
+        first.coordinates.measured(),
+        second.coordinates.measured(),
+        "the same text must give the same coordinates; the measures are a pure \
+         function and any difference is a defect"
+    );
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
 async fn a_cleared_work_is_absent_rather_than_stale() {
     let db = scratch("coord_cleared").await;
 
