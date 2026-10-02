@@ -345,6 +345,14 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // Gap C step 5 — author-only pre-read reports. Write class because the router
+        // carries a DELETE (provider withdrawal); §32.6's "never on the public work page"
+        // is enforced inside the handlers, not by the route class.
+        .merge(classified(
+            routes::preread::router(),
+            RouteClass::Write,
+            &state,
+        ))
         .merge(routes::arena::router())
         .merge(classified(
             routes::quiz::router(),

@@ -42,6 +42,7 @@ pub mod moderation;
 pub mod monetization;
 pub mod narration;
 pub mod notifications;
+pub mod preread;
 pub mod pseuds;
 pub mod quiz;
 pub mod rating_integrity;
