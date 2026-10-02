@@ -125,6 +125,26 @@ bookmark costs one click and faking a completion costs a reader's time. That
 argument is better than the feature's priority suggests — it is a *quality
 signal* argument, and §20.3's author multipliers are where it would pay.
 
+**But the term is undefined, and that is the actual finding.** Searching the spec
+for "hit" returns only pinch-hitters (§, a volunteer-review programme) and §53.5's
+hit *rate* — which this session introduced, and which is defined over impressions,
+not over any table. So the ratio is not a missing query over existing data; it
+needs a definition first, and the definition is a design decision with a real
+choice inside it:
+
+- **A hit as a chapter view** (`work_view_log`, 0068) is the most plentiful signal
+  and the easiest to inflate — a refresh is free.
+- **A hit as a `reading_status` transition to `finished`** is the hardest to fake
+  and the sparsest, and it is already the other half of §53.5's hit rate.
+
+The list argues for the ratio's *falsifiability*, which is the argument for the
+second definition: a bookmark is one click and a completion is a reader's time, so
+a ratio whose numerator is the cheap signal measures nothing. **Recommend: define
+"hit" as a completion, and say so in the spec** — otherwise two engineers will
+build two different ratios and both will be defensible.
+
+Cheap either way, but only after that sentence exists.
+
 ### F. Hidden classics (#32) and quality-gated gems (#33)
 Adjacent: both are "the ranking engines over-reward the already-popular". They
 share one implementation if they share one idea — a popularity-debiasing term over
