@@ -216,11 +216,17 @@ mod tests {
     }
 
     #[test]
-    fn four_stars_is_a_hit_and_three_is_not() {
+    fn four_stars_is_the_threshold() {
         // A policy constant rather than a literal buried in the query, so that
-        // changing the query without changing this would be visible as a diff.
+        // changing one without the other is visible as a diff.
+        //
+        // Note what this does NOT assert: that `HIT_STARS > 3` is true, which is
+        // a tautology about a constant and clippy is right to flag it. The
+        // behaviour is checked where it lives, in
+        // `crates/db/tests/hit_rate.rs::three_stars_is_not_a_hit` and
+        // `::a_work_shown_and_rated_four_is_a_hit` -- a constant's value and its
+        // effect are different questions, and only the second is worth a test.
         assert_eq!(HIT_STARS, 4);
-        assert!(HIT_STARS > 3, "three stars is not a hit");
     }
 
     #[test]
