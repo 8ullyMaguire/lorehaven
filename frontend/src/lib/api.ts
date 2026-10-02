@@ -2570,6 +2570,127 @@ export async function fetchBlindDate(signal?: AbortSignal): Promise<BlindDateRes
   return { date: body.date, workId: body.work_id };
 }
 
+/**
+ * A pre-read report, as the author-facing endpoint returns it (gap C, §32.6).
+ *
+ * **There is deliberately no `score`, no `average`, and no way to compute one.** §32.6
+ * forbids displaying composite quality scores publicly and §0.3 forbids credit, payment
+ * or trust level moving any ranking signal, so a composite in this type would be one
+ * template expression away from being rendered. What exists is the per-dimension
+ * breakdown, worst-first, plus the dimensions that never came back and why.
+ *
+ * The same rule applies to `Dimension`: a `score` is fine there because it is one
+ * configured dimension's own value, not an average of several.
+ */
+export interface PreReadDimension {
+  dimension: string;
+  score: number;
+  note: string;
+}
+
+/**
+ * A configured dimension that has no score, and why.
+ *
+ * The `reason` is required rather than optional. A report where every dimension came back
+ * and one where half the provider's output was unparseable are the same shape without it,
+ * and that difference is exactly what tells an author whether to trust the numbers.
+ */
+export interface PreReadMissing {
+  dimension: string;
+  reason: string;
+}
+
+export interface PreReadReport {
+  workId: string;
+  /** Worst first. The author's question is "what is weakest". */
+  dimensions: PreReadDimension[];
+  missing: PreReadMissing[];
+  /** Whether every configured dimension came back. */
+  complete: boolean;
+}
+
+/**
+ * The report, or the reason there is not one.
+ *
+ * A discriminated union rather than `report: PreReadReport | null` so a caller cannot
+ * forget to branch: `status: 'assessed'` always carries a report and `status` of anything
+ * else always carries a readable reason. The server distinguishes "nothing has assessed
+ * this work" from "a provider is listed but its row is gone", and a UI that collapsed
+ * them would show an author an empty report for a work that was never assessed.
+ */
+export type PreReadResponse =
+  | { status: 'assessed'; report: PreReadReport; providers: string[] }
+  | {
+      status: 'not_assessed' | 'provider_absent';
+      providers: string[];
+      reason: string;
+    };
+
+/**
+ * Fetch the current pre-read report for a work the caller owns.
+ *
+ * The server returns 404 for both "no such work" and "not yours" — a pre-read report is an
+ * assessment of a draft, so any difference would confirm to an outsider that the draft
+ * exists and that its author ran an AI tool on it. That 404 arrives here as a thrown
+ * error, and the caller must treat it as "this panel is not for you" rather than as an
+ * error worth showing the user.
+ */
+export async function fetchPreread(
+  workId: string,
+  signal?: AbortSignal,
+): Promise<PreReadResponse> {
+  const body = await apiFetch<{
+    report: {
+      work_id: string;
+      dimensions: Array<{ dimension: string; score: number; note: string }>;
+      missing: Array<{ dimension: string; reason: string }>;
+      complete: boolean;
+    } | null;
+    providers: string[];
+    reason?: string;
+  }>(`/works/${encodeURIComponent(workId)}/preread`, { signal });
+
+  if (body.report === null) {
+    // `provider_listed_but_report_absent` is only reachable through a concurrent
+    // withdrawal, and it is kept distinct because it means something is wrong rather than
+    // merely un-assessed.
+    return {
+      status: body.reason === 'provider_listed_but_report_absent' ? 'provider_absent' : 'not_assessed',
+      providers: body.providers,
+      reason: body.reason ?? 'no_provider_has_assessed_this_work',
+    };
+  }
+  return {
+    status: 'assessed',
+    providers: body.providers,
+    report: {
+      workId: body.report.work_id,
+      dimensions: body.report.dimensions,
+      missing: body.report.missing,
+      complete: body.report.complete,
+    },
+  };
+}
+
+/**
+ * Withdraw one provider's output for this work (§23.7's opt-out of *specific* providers).
+ *
+ * Scoped to a single provider rather than the whole work, so this never discards another
+ * provider's report. The returned count is what lets the UI tell a withdrawal that happened
+ * from one that did not, instead of re-rendering the same screen twice and calling it
+ * success.
+ */
+export async function forgetPrereadProvider(
+  workId: string,
+  provider: string,
+): Promise<{ removed: number; providers: string[] }> {
+  const body = await apiFetch<{ removed: number; providers: string[] }>(
+    `/works/${encodeURIComponent(workId)}/preread/${encodeURIComponent(provider)}`,
+    { method: 'DELETE' },
+  );
+  return { removed: body.removed, providers: body.providers };
+}
+
 export async function recomputeTasteProfile(): Promise<void> {
   await apiFetch('/discovery/taste-profile/recompute', { method: 'POST' });
 }
