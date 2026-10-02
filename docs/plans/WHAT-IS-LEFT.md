@@ -1,6 +1,6 @@
 # Lorehaven — what's left
 
-Updated at the start of each turn. Last commit: `bca9055`.
+Updated at the start of each turn. Last commit: `1fc2a7d`.
 
 ## Done this project
 
@@ -62,10 +62,22 @@ Plan: `docs/plans/m45-18-faucet-sink-dashboard.md`.
 | Step | State |
 |---|---|
 | 1. Registry, migration 0112 | **done** (`bca9055`) — 112/112 migrations apply on both engines, four seed rows verified identical on SQLite and PostgreSQL |
-| 2. `crates/db/src/flow_store.rs` | next |
-| 3. `crates/app/src/routes/flows.rs` | not started |
+| 2. `crates/db/src/flow_store.rs` | **done** (`23546d0`) — compiles clean, clippy clean |
+| 2a. `Flow::Undeclared` in the domain | **done** (`23546d0`) — see below |
+| 3. `crates/app/src/routes/flows.rs` | next |
 | 4. `crates/app/tests/flow_dashboard.rs` | not started |
 | 5. Frontend | optional, last |
+
+**`Flow` gained a fourth variant, `Undeclared`,** and this was not in the plan. The plan
+said a registry miss becomes `MechanismDeclaration::invalid()`. That would have been wrong:
+`FlowSummary::compose` counts undeclared via `!declaration.is_valid()`, and
+`MechanismDeclaration::neutral()` is *valid* — so every unclassified mechanism would have
+rendered as a settled `neutral` with `undeclared == 0`. That is exactly the failure §53.1
+forbids: the dashboard reporting a smaller economy than exists while looking deliberate.
+`Flow::Undeclared` is the absence of a declaration, distinct from `Flow::Neutral`, which is a
+claim that there is no side. Three new domain tests cover it, and the load-bearing one is
+proven: reverting the `is_declared()` clause in `compose` turns
+`an_undeclared_mechanism_counts_without_being_netted_to_a_side` red.
 
 Two facts that are now recorded in the plan and would have shipped bugs:
 `amount_bp` holds **whole credits**, not basis points; and `preservation_dues` /
