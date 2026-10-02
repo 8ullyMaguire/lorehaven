@@ -28,6 +28,19 @@ pub enum Flow {
     /// hold-then-release moves an entry without changing any balance; classifying
     /// that as a faucet or a sink would put a phantom in the composition.
     Neutral,
+    /// Nobody has said which side this mechanism is on.
+    ///
+    /// Distinct from [`Flow::Neutral`], and the distinction is the whole point.
+    /// `Neutral` is a *claim* — somebody decided this mechanism has no side — and
+    /// `Undeclared` is the absence of a claim. Rendering an unclassified mechanism
+    /// as `Neutral` would put it in the composition looking settled, which is the
+    /// failure §53.1 exists to prevent: the dashboard would report a smaller economy
+    /// than exists, dressed as a considered answer.
+    ///
+    /// `sign` is `None` here too, and for a stronger reason than for `Neutral`: a
+    /// mechanism whose side is unknown cannot be netted, and asking it to be would
+    /// be asking the dashboard to guess.
+    Undeclared,
 }
 
 impl Flow {
@@ -36,6 +49,7 @@ impl Flow {
             Self::Faucet => "faucet",
             Self::Sink => "sink",
             Self::Neutral => "neutral",
+            Self::Undeclared => "undeclared",
         }
     }
 
@@ -44,21 +58,35 @@ impl Flow {
             "faucet" => Some(Self::Faucet),
             "sink" => Some(Self::Sink),
             "neutral" => Some(Self::Neutral),
+            "undeclared" => Some(Self::Undeclared),
             _ => None,
         }
     }
 
     /// The sign this flow's ledger entries carry, when it has any.
     ///
-    /// `None` for [`Flow::Neutral`], and the `None` is the point: a transfer has
-    /// no side, so asking it for one is a type error rather than a wrong answer.
+    /// `None` for [`Flow::Neutral`] and [`Flow::Undeclared`], and the `None` is the
+    /// point in both cases: a transfer has no side, and an unclassified mechanism has
+    /// no *known* side. Asking either for a sign is asking the dashboard to guess.
     #[must_use]
     pub fn sign(&self) -> Option<i64> {
         match self {
             Self::Faucet => Some(1),
             Self::Sink => Some(-1),
-            Self::Neutral => None,
+            Self::Neutral | Self::Undeclared => None,
         }
+    }
+
+    /// Whether this flow is an actual declaration rather than the absence of one.
+    ///
+    /// The predicate `FlowSummary::compose` counts on. It is a method on `Flow`
+    /// rather than a check on [`MechanismDeclaration::is_valid`] because an
+    /// undeclared mechanism is *not* an invalid declaration — it is a mechanism with
+    /// no declaration, and conflating the two would mean fixing the wrong thing when
+    /// either went wrong.
+    #[must_use]
+    pub const fn is_declared(&self) -> bool {
+        !matches!(self, Self::Undeclared)
     }
 }
 
@@ -138,6 +166,11 @@ impl MechanismDeclaration {
         match self.flow {
             Flow::Neutral => self.purpose.is_none(),
             Flow::Faucet | Flow::Sink => self.purpose.is_some(),
+            // An undeclared mechanism carries no purpose because nobody has said what it
+            // is for, and it is *correct* for it to carry none. This is not the invalid
+            // case `is_valid` exists to reject; it is the missing one. Counting it as
+            // invalid would make `is_valid` lie about a declaration nobody made.
+            Flow::Undeclared => self.purpose.is_none(),
         }
     }
 }
@@ -213,9 +246,12 @@ impl FlowSummary {
             match m.declaration.flow {
                 Flow::Faucet => faucet_credits += m.net_credits,
                 Flow::Sink => sink_credits += m.net_credits,
-                Flow::Neutral => {}
+                // An undeclared mechanism still lands in `net_credits` above, and must
+                // land in neither side: putting it on a side would be the guess this
+                // whole type exists to refuse.
+                Flow::Neutral | Flow::Undeclared => {}
             }
-            if !m.declaration.is_valid() {
+            if !m.declaration.flow.is_declared() || !m.declaration.is_valid() {
                 undeclared += 1;
             }
         }
@@ -367,5 +403,79 @@ mod tests {
     #[test]
     fn the_economy_view_carries_no_account_detail() {
         assert!(!FlowSummary::compose(&[]).carries_account_detail());
+    }
+
+    #[test]
+    fn an_undeclared_mechanism_is_distinct_from_a_neutral_one() {
+        // §53.1's distinction, and the reason `Flow` has four variants rather than three.
+        // A neutral mechanism is one somebody *decided* has no side; an undeclared one is
+        // a mechanism nobody has classified. Collapsing them would render a missing
+        // declaration as a considered answer, and the dashboard would report a smaller
+        // economy than exists while looking settled.
+        assert!(Flow::Neutral.is_declared(), "neutral is a claim");
+        assert!(
+            !Flow::Undeclared.is_declared(),
+            "undeclared is the absence of one"
+        );
+        assert!(Flow::Faucet.is_declared());
+        assert!(Flow::Sink.is_declared());
+
+        // And neither may carry a purpose, which is what makes `is_valid` agree with
+        // `is_declared` for them: an undeclared mechanism has no purpose because nobody
+        // has said what it is *for*.
+        assert!(MechanismDeclaration::neutral().is_valid());
+        assert!(MechanismDeclaration {
+            flow: Flow::Undeclared,
+            purpose: None,
+        }
+        .is_valid());
+        assert!(
+            !MechanismDeclaration {
+                flow: Flow::Undeclared,
+                purpose: Some(Purpose::Supply),
+            }
+            .is_valid(),
+            "an undeclared mechanism cannot claim a purpose"
+        );
+
+        // Round trip, because the registry stores the string and the store reads it back.
+        assert_eq!(Flow::parse("undeclared"), Some(Flow::Undeclared));
+        assert_eq!(Flow::Undeclared.as_str(), "undeclared");
+    }
+
+    #[test]
+    fn an_undeclared_mechanism_counts_without_being_netted_to_a_side() {
+        // The load-bearing case for the new variant. A mechanism with no declaration still
+        // moved credits, so its net is in the total — but it lands on neither the faucet nor
+        // the sink side, because putting it on one is the guess this whole type refuses to
+        // make. The old behaviour (rendering it `Neutral`) produced *identical* numbers here,
+        // which is exactly why this test exists: `undeclared` was the only thing that
+        // distinguished them, and it was silently zero.
+        let summary = FlowSummary::compose(&[
+            m(
+                "author_earnings",
+                Flow::Faucet,
+                Some(Purpose::Supply),
+                1_000,
+            ),
+            m("undeclared:grant:someone", Flow::Undeclared, None, 7_500),
+        ]);
+        assert_eq!(summary.undeclared, 1, "it is counted, not dropped");
+        assert_eq!(summary.net_credits, 8_500, "and its credits are still real");
+        assert_eq!(summary.faucet_credits, 1_000, "but it is on neither side");
+        assert_eq!(summary.sink_credits, 0);
+    }
+
+    #[test]
+    fn a_mechanism_with_an_invalid_declaration_is_also_counted_as_undeclared() {
+        // The other half of the compose predicate: `!is_declared() || !is_valid()`. A
+        // declaration that *was* made and is internally inconsistent (a faucet claiming no
+        // purpose) is as unreportable as one that was never made, so both increment.
+        let summary = FlowSummary::compose(&[
+            m("forgotten_faucet", Flow::Faucet, None, 100),
+            m("declared", Flow::Sink, Some(Purpose::Supply), -50),
+        ]);
+        assert_eq!(summary.undeclared, 1);
+        assert_eq!(summary.net_credits, 50);
     }
 }
