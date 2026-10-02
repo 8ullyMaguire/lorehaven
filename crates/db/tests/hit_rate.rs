@@ -126,7 +126,7 @@ impl Fixture {
             "INSERT INTO rating (id, account_id, pseud_id, work_id, stars, is_public, \
                  created_at, updated_at) \
              VALUES (?1#u, ?2#u, ?3#u, ?4#u, ?5#i, false, '2026-01-05T00:00:00Z'::timestamptz, '2026-01-05T00:00:00Z')",
-            &[&id, &self.account, &self.pseud, &work.to_string(), &stars.to_string()]).await;
+            &[&id, &self.account, &self.pseud, work, &stars.to_string()]).await;
     }
 
     async fn finish(&self, work: &str) {
@@ -136,7 +136,7 @@ impl Fixture {
             "INSERT INTO reading_status (id, account_id, subject_type, subject_id, \
                  status, updated_at) \
              VALUES (?1#u, ?2#u, 'work', ?3#u, 'finished', '2026-01-05T00:00:00Z')",
-            &[&id, &self.account, &work.to_string()],
+            &[&id, &self.account, work],
         )
         .await;
     }
