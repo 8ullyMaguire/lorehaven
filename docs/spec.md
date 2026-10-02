@@ -9917,3 +9917,35 @@ operator can check without reading every row.
 - **It does not predict inflation.** The dashboard reports what happened in a
   window. Attributing a ratio to a mechanism would be the same error §52.2
   refuses — a payment standing in for a cause.
+
+### 53.5 Hit rate: the operator's one number
+
+The list this section answers asks for a north-star metric — "the share of feed
+items you finish or rate ≥4" — and every other lever judged against it. The number
+does not exist, and it is the cheapest thing here with the largest effect on every
+other decision, because without it the operator is tuning blind and can only tell
+whether a change helped by remembering.
+
+- **Hit rate is defined over the operator's own signals, and over nothing else.**
+  Of the works the operator was *shown*, the share they went on to finish or rate
+  four stars or better. Two clauses, both deliberate: a work never shown cannot be a
+  miss, and a work shown and never acted on counts as a miss rather than as
+  absent — otherwise the metric rewards showing less.
+- **It is a ratio with a denominator, never a bare count.** "Twelve hits" is
+  indistinguishable between a feed of twelve and a feed of two hundred, and an
+  operator comparing two weeks needs the rate.
+- **It is scoped to a window and reports the window's own denominator.** A lifetime
+  rate on a feed whose character changed three months ago is an average of two
+  different questions.
+- **It is operator-only, for §0.3's reason and not merely as convention.** On a
+  single-reader instance a hit rate *is* a description of that reader's taste. It
+  belongs in the operator view beside §52's leakage view and nowhere else, and it
+  is never aggregated into anything a reader can see.
+- **It is a diagnostic, not a target.** §53.2's refusal of automatic throttles
+  applies here with more force: an instance that optimised for hit rate would
+  surface only safe picks, which is the same narrowing §52.2 refuses. The number is
+  read, not chased. A window with a very low rate is a statement about the recipe or
+  the import mix, and the response is to change one of those deliberately.
+- **It reports its own missing inputs.** With no ratings and no completions the
+  rate is undefined, not zero: reporting zero would read as total failure and
+  invite a change to a recipe that has simply not been tested yet.
