@@ -46,10 +46,20 @@ CREATE TABLE IF NOT EXISTS generated_content_policy (
 --
 -- The column is the WORK's own posture, and it is NOT NULL for the same reason as
 -- the policy's: a work with no posture recorded is a work whose posture nobody
--- decided. Backfilled below rather than defaulted per row, because the backfill is
--- the value that was actually in force.
+-- decided. Backfilled below, and ALSO carries a DEFAULT of 'forbid'.
+--
+-- The DEFAULT used to be omitted on purpose, on the reasoning that it "would write
+-- the literal into every row and lose the distinction between 'the policy said
+-- forbid' and 'nobody has ever set a policy'". That was wrong about what it
+-- protected: the policy table's own default is already 'forbid', so the DEFAULT and
+-- the backfill agree for any row with no policy -- there was no distinction to lose.
+-- The cost of omitting it was that PostgreSQL rejected with 23502 every INSERT that
+-- did not name the column, while SQLite's affinity stored the NULL and carried on.
+--
+-- A NOT NULL column with no DEFAULT is a per-dialect trap. Either every writer names
+-- the column or the DEFAULT carries the answer; this now does both.
 
-ALTER TABLE works ADD COLUMN generated_content_posture TEXT
+ALTER TABLE works ADD COLUMN generated_content_posture TEXT DEFAULT 'forbid'
     CHECK (generated_content_posture IN ('forbid', 'disclose', 'allow'));
 
 -- Backfill from the policy in force at migration time, then make it NOT NULL.
