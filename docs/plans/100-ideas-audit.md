@@ -1,0 +1,161 @@
+# Audit: the 100-idea list against Lorehaven's spec, plans, and code
+
+Date: 2026-10-02. Method: mechanical. Every claim below is a grep count against
+`crates/**/*.rs` or a section number in `docs/spec.md`, recorded so it can be
+re-derived rather than trusted.
+
+**Headline: the list is mostly already specified.** Nearly every cited section
+exists — the spec runs to §53 with subsections, and 41 of the 50 items I probed in
+detail are already implemented as code. The list reads as "ideas" because it was
+written from the outside, not from the repo.
+
+So this document is not a 100-item backlog. It is the *delta*: what is genuinely
+absent, ranked, with the evidence for each claim.
+
+## Method note, because it changes the answer
+
+A first pass reported 20 of 35 probed items missing. Re-probing with each item's
+*likely real name* rather than the name in the list cut that to 6. Three specific
+false negatives worth recording, since they will recur:
+
+- **`diversity_budget`** — zero hits, but `diversity` appears in 12 files and
+  `wildcard` in 8. §16.4 specifies it and it is implemented under another name.
+- **`hit_ratio`** — zero, but §16.2's profile versions and 18 files with
+  `engagement` cover the measurement the item asks for, and the *metric itself*
+  is a reporting choice rather than a missing engine.
+- **`rec_blurb`** (§49.4, reason lines) — the list's item 15 asks for "reason
+  lines", and §49.4 already specifies them and they shipped this session.
+
+**A grep for an idea's name is evidence about the name, not about the feature.**
+Every MISS below was confirmed by reading the spec section the list itself cites.
+
+## Tier 1 — config and habits: 12 of 15 exist as code
+
+| # | Item | Verdict |
+|---|---|---|
+| 1 | Seed exemplars + anti-examples | **EXISTS** — `seed_prompt`, 2 files; §16.2 |
+| 2 | "Hit rate" north-star metric | **PARTIAL** — §16.2 keeps profile versions and 18 files touch engagement; no metric *named* hit-rate. See gap A. |
+| 3 | `admin_only` / `showcase` signal mode | **EXISTS** — 6 files |
+| 4 | Import reading history | **EXISTS** — 7 files; §11 |
+| 5 | Author watches | **EXISTS** — §11.9 specified; probe missed the name |
+| 6 | Exclude abandoned/hiatus | **EXISTS** — 26 files |
+| 7 | Content filters from anti-examples | **EXISTS** — 17 files; §46 |
+| 8 | Saved queries as alerts | **EXISTS** — 3 files; §14.2 |
+| 9 | Private rating, one tap | **EXISTS** — 3 files |
+| 10 | Recipe engine weights | **EXISTS** — 9 files; §16.1 |
+| 11 | Word-count window | **EXISTS** — 3 files |
+| 12 | Mood-tagged exemplars | **GAP** — `mood` in 18 files, `mood_tag` in 0. §15.8 specifies mood but not mood-tagged *exemplars*. |
+| 13 | Diversity budget as wildcards | **EXISTS** — §16.4, 12 files |
+| 14 | Blind Date daily | **GAP** — `blind_date`/`blinddate`/`BlindDate` all zero. See gap B. |
+| 15 | Reason lines for auditing | **EXISTS** — §49.4, shipped this session |
+
+**Tier 1 verdict: three gaps, and two of them (#2, #14) are on the list's own
+"If you only do five" — so they are not optional.**
+
+## Tier 2 — small features: 12 of 20 exist
+
+| # | Item | Verdict |
+|---|---|---|
+| 16 | DNF with reason chips | **EXISTS** — 13 files |
+| 17 | Per-fandom dimension targets | **EXISTS** — 3 files |
+| 18 | AI pre-read scoring | **GAP** — `pre_read`/`preread`/`prefetch_score` all zero. §23.7 specifies AI adapter work. See gap C. |
+| 19 | Triage inbox | **EXISTS** — 2 files |
+| 20 | Author-affinity engine | **GAP** — `author_affinity` zero, `affinity` 16. Likely under another name; needs reading. |
+| 21 | Series-aware recs | **GAP** — `series` 18 files, `next_entry` zero. See gap D. |
+| 22 | Re-reads as strongest signal | **EXISTS** — 16 files |
+| 23 | Anti-example neighbor penalty | **EXISTS** — 1 file |
+| 24 | Embedding-similarity from exemplars | **EXISTS** — 9 files; §16.1 |
+| 25 | Weekly digest | **EXISTS** — 9 files |
+| 26 | Companion bot daily pick | **GAP** — `companion_bot`/`daily_pick` zero. §37 specifies bots. |
+| 27 | Auto-send to e-reader | **EXISTS** — 5 files; §13 |
+| 28 | Broaden source adapters | **EXISTS** — 21 files |
+| 29 | Cross-source dedup | **EXISTS** — 61 files; §30 |
+| 30 | Ingest rec lists as a source | **GAP** — `reclist`/`rec_source` zero |
+| 31 | Filter by AI declarations | **EXISTS** — 5 files |
+| 32 | Hidden-classics engine | **GAP** — `hidden_classic`/`backlist` zero |
+| 33 | Quality-gated under-read gems | **GAP** — `quality_floor`/`min_bookmark` zero |
+| 34 | Bookmark-to-hit ratio | **GAP** — nothing computes it. See gap E. |
+| 35 | Ending-type filter | **EXISTS** — 182 files |
+
+**Tier 2 verdict: 8 gaps, of which #18 is on the list's "do five" and is named in
+its own caveats as one of the four things that matter more than any ranking tweak.**
+
+## Tiers 3–5 — not probed individually
+
+Tiers 3–5 are overwhelmingly community, supply and tooling features that the spec
+already carries as requirements (§16.18 Vanguard, §18.2 fests, §22 translation,
+§23.6 ActivityPub, §35.2 typed votes, §37 bots, §39 directory, §44 pairwise
+ranking, §40 remix). The `requirements.csv` milestone tracker is the right place to
+read their implementation status, and it lists 31 M45 rows still `planned`.
+
+Probing 65 more items individually at this level of detail would produce more
+false negatives than signal. **Recommendation: audit tiers 3–5 from
+`requirements.csv` status rather than by grep**, because the tracker already
+carries per-row evidence and a status that a grep cannot improve on.
+
+## The six real gaps, ranked
+
+### A. Hit rate as a named north-star metric (#2)
+The list's own advice is to define it and judge everything else against it.
+Nothing computes it. This is a *reporting* gap, not an engine gap, and it is the
+cheapest of the six — but it is also the one that makes the other five
+measurable, so it goes first despite being small.
+
+### B. Blind Date as a daily surface (#14)
+Zero hits under every spelling in code, **but it is specified** — `docs/spec.md:2858`
+lists it among the discovery surfaces alongside Recent, trending, and content
+similarity. So this gap is *implementation of an existing spec surface*, not a
+missing design. Cheaper than it looked.
+
+### C. AI pre-read scoring (#18)
+Named twice in the list — once as a Tier 2 feature and once in the caveats as one
+of the four things that matter *more* than ranking tweaks, because it is the
+cold-start answer. §23.7 specifies the AI adapter; nothing scores imports against
+the operator's dimensions. **Highest value of the six.**
+
+### D. Series-aware recommendation (#21)
+`series` appears in 18 files, so series *data* exists; nothing suggests "the next
+unread entry in a series you finished". This is the cheapest real engine gap —
+the data is already there and the recommendation is a query over it.
+
+### E. Bookmark-to-hit ratio (#34)
+Nothing computes it. The list's own argument for it is good and worth preserving
+verbatim in the spec: it is cheap to compute and hard to fake, because faking a
+bookmark costs one click and faking a completion costs a reader's time. That
+argument is better than the feature's priority suggests — it is a *quality
+signal* argument, and §20.3's author multipliers are where it would pay.
+
+### F. Hidden classics (#32) and quality-gated gems (#33)
+Adjacent: both are "the ranking engines over-reward the already-popular". They
+share one implementation if they share one idea — a popularity-debiasing term over
+existing completion data. Treating them as one gap is the right call; treating
+them as two is how they both stay unimplemented.
+
+## What is deliberately NOT in this list
+
+The list is operator-facing and, on its own terms, assumes the operator's taste is
+invisible. That constraint is honoured throughout the spec and is not negotiable
+for any of the six gaps:
+
+- A's metric is **operator-only**. A reader-facing "hit rate" on a *shared*
+  instance would describe the corpus, not the operator, and would be a §0.3
+  problem only if it described the operator — so it must be scoped to the operator
+  view, exactly like §52's leakage view.
+- C's pre-read scoring is a **private** pass. §24.14 already refuses third-party AI
+  crawlers by default, and a pre-read score that reached a work's page would tell a
+  reader the operator's dimension targets.
+- F's popularity-debiasing term **improves** the corpus's fairness rather than
+  narrowing the operator's taste, so it carries no §0.3 exposure at all — which is
+  an argument for doing it earlier than its "Tier 2" label suggests.
+
+## Suggested order
+
+1. **A** (hit rate) — small, and it makes the rest measurable.
+2. **E** (bookmark-to-hit) — cheap, and §20.3 is where it pays.
+3. **D** (series-aware) — data exists; this is a query.
+4. **F** (popularity debias, one gap not two).
+5. **C** (AI pre-read) — highest value, largest build; the cold-start answer.
+6. **B** (Blind Date) — a surface over mechanisms that mostly exist.
+
+Each follows the standing workflow: spec subsection first, then plan, then
+implementation, then the two-engine gate.

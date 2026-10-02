@@ -38,6 +38,7 @@ pub mod external;
 pub mod federation;
 pub mod generated_content;
 pub mod governance;
+pub mod hit_rate;
 pub mod identity;
 pub mod imports;
 pub mod instance_taste_settings;
