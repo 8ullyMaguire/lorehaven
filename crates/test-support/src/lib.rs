@@ -263,6 +263,186 @@ async fn sweep_idle_scratch_databases(admin: &Database) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The migrated-schema cache (test wall-clock).
+//
+// 2026-10-02. Measured, not guessed: a full two-engine gate spent 2113s of test
+// time, and one suite -- `bounties.rs`, FIVE tests -- took 349s. The tests are not
+// slow. Every `TestDb` runs all 107 migrations from scratch, so the cost is
+// per-TEST rather than per-suite, and it is paid twice (once per engine).
+//
+// Migrations do not depend on the test. The schema is a function of the migration
+// catalogue alone, so it is built ONCE per process and copied.
+//
+// Two backends, two copy strategies, for the same reason they differ in production:
+//
+//   * SQLite: `VACUUM INTO` writes a complete second database file, indexes and
+//     all. Copying a file costs milliseconds; 107 sequential DDL statements do not.
+//   * PostgreSQL: `CREATE DATABASE ... TEMPLATE <name>` clones at the filesystem
+//     level. It refuses while connections are open on the template, which is why
+//     the template database is dropped again once built -- it has served its
+//     purpose and cannot be a template twice.
+//
+// ── The key, and why it is the whole safety story ───────────────────────────
+//
+// The cache is keyed on `version:name:sha256(sql)` for every migration, read from
+// `migrate::catalogue`. That is deliberately better than a file mtime or length:
+//
+//   * It needs no filesystem probing, so it cannot disagree with the catalogue the
+//     code actually applies -- there is one source of truth.
+//   * It is content-addressed. Editing a migration, reverting it, or touching it
+//     without changing it all change or preserve the key *correctly*, because the
+//     key is the thing that will be applied.
+//
+// If this key were wrong the failure mode is nasty and silent: a developer who
+// edits a migration and runs one suite gets the OLD schema, and debugs a problem
+// that no longer exists. That is strictly worse than the slowness, so when in doubt
+// the key is over-specified rather than under-specified.
+//
+// Any failure falls back to migrating in full. A cache that is usually fast and
+// occasionally absent is a good trade; one that can fail a run is not.
+
+/// A content fingerprint of one dialect's migration catalogue.
+fn migration_key(backend: lorehaven_db::Backend) -> String {
+    lorehaven_db::migrate::catalogue(backend)
+        .iter()
+        .map(|m| format!("{}:{}", m.id(), m.checksum()))
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+/// The SQLite template, and the key it was built from.
+///
+/// `OnceLock` rather than a mutex because the work is idempotent and expensive:
+/// the loser of a construction race simply reads the winner's value. A mutex would
+/// serialise every test behind the builder; this lets them wait on the same build
+/// without a lock round-trip per test.
+static SQLITE_TEMPLATE: std::sync::OnceLock<(String, std::path::PathBuf)> =
+    std::sync::OnceLock::new();
+static PG_TEMPLATE: std::sync::OnceLock<(String, String)> = std::sync::OnceLock::new();
+
+/// The once-per-process template root, so two `TestDb`s in different scratch
+/// directories share one built schema.
+fn template_root() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("lorehaven-migrations-{}", std::process::id()))
+}
+
+/// The SQLite template path, building it on first use.
+///
+/// Returns `None` when the template cannot be built, and every caller then falls
+/// back to a plain `db.migrate()` -- which is slower and always correct.
+async fn sqlite_template() -> Option<std::path::PathBuf> {
+    let key = migration_key(lorehaven_db::Backend::Sqlite);
+    if let Some((k, path)) = SQLITE_TEMPLATE.get() {
+        if *k == key {
+            return Some(path.clone());
+        }
+        return None;
+    }
+
+    let root = template_root();
+    std::fs::create_dir_all(&root).ok()?;
+    let build = root.join("build.sqlite");
+    let template = root.join("template.sqlite");
+    let _ = std::fs::remove_file(&build);
+    let _ = std::fs::remove_file(&template);
+
+    let db = Database::connect(&DatabaseConfig::new(format!(
+        "sqlite://{}/build.sqlite?mode=rwc",
+        build.display()
+    )))
+    .await
+    .ok()?;
+    let report = db.migrate().await.ok()?;
+
+    // VACUUM INTO is the copy: it writes a fresh, complete database file and does
+    // not disturb the source. `sqlx` does not VACUUM; `Database` does not expose
+    // raw statements either, so the pool is used directly -- the same escape hatch
+    // the production stores use.
+    sqlx::query(&format!("VACUUM INTO '{}'", template.display()))
+        .execute(db.sqlite_pool()?)
+        .await
+        .ok()?;
+    db.close().await;
+    let _ = report;
+
+    // Ignore a lost race: the winner's path is equally valid.
+    let _ = SQLITE_TEMPLATE.set((key, template.clone()));
+    SQLITE_TEMPLATE.get().map(|(_, p)| p.clone())
+}
+
+/// A SQLite database file at `dst` with every migration applied, from the cache.
+///
+/// This is the whole optimisation on the SQLite side: one `copy` syscall pair
+/// instead of 107 migrations.
+pub async fn cached_sqlite_file(dst: &Path) -> bool {
+    match sqlite_template().await {
+        Some(template) => std::fs::copy(&template, dst).is_ok(),
+        None => false,
+    }
+}
+
+/// A migrated PostgreSQL database named `name`, cloned from the template.
+///
+/// Returns `None` when no template exists yet, when the catalogue has moved, or
+/// when PostgreSQL refuses the clone for any reason. All three fall back.
+pub async fn cached_postgres(admin_url: &str, name: &str) -> Option<Database> {
+    let key = migration_key(lorehaven_db::Backend::Postgres);
+    let template = PG_TEMPLATE
+        .get()
+        .and_then(|(k, t)| (k == &key).then(|| t.clone()))?;
+
+    let admin = Database::connect(&DatabaseConfig::new(admin_url.to_owned()))
+        .await
+        .ok()?;
+    sqlx::query(&format!("CREATE DATABASE {name} TEMPLATE {template}"))
+        .execute(admin.postgres_pool()?)
+        .await
+        .ok()?;
+    let url = admin_url
+        .rsplit_once('/')
+        .map(|(prefix, _)| format!("{prefix}/{name}"))
+        .unwrap_or_else(|| admin_url.to_owned());
+    Database::connect(&DatabaseConfig::new(url)).await.ok()
+}
+
+/// Build the PostgreSQL template once, from the given admin URL.
+///
+/// Separate from [`cached_postgres`] so the first caller pays the build and later
+/// ones pay only the clone. The template is dropped immediately after: PostgreSQL
+/// will not let a database with live connections serve as a template, and a
+/// database that cannot be re-cloned is a trap for the next process.
+pub async fn ensure_postgres_template(admin_url: &str) -> Option<String> {
+    let key = migration_key(lorehaven_db::Backend::Postgres);
+    if let Some((k, _)) = PG_TEMPLATE.get() {
+        return (k == &key).then(|| String::new()).filter(|s| !s.is_empty());
+    }
+    let admin = Database::connect(&DatabaseConfig::new(admin_url.to_owned()))
+        .await
+        .ok()?;
+    let name = format!("lh_tmpl_{}", std::process::id());
+    let _ = sqlx::query(&format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
+        .execute(admin.postgres_pool()?)
+        .await;
+    sqlx::query(&format!("CREATE DATABASE {name}"))
+        .execute(admin.postgres_pool()?)
+        .await
+        .ok()?;
+    let url = admin_url
+        .rsplit_once('/')
+        .map(|(prefix, _)| format!("{prefix}/{name}"))
+        .unwrap_or_else(|| admin_url.to_owned());
+    let db = Database::connect(&DatabaseConfig::new(url)).await.ok()?;
+    db.migrate().await.ok()?;
+    // Release every connection so the database can serve as a template.
+    db.close().await;
+    let _ = sqlx::query(&format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
+        .execute(admin.postgres_pool()?)
+        .await;
+    let _ = PG_TEMPLATE.set((key, name.clone()));
+    Some(name)
+}
+
 impl TestDb {
     /// Connect (and create) the scratch database for one test. SQLite writes
     /// `lorehaven.sqlite` inside `dir`; PostgreSQL creates and migrates a
@@ -299,6 +479,19 @@ impl TestDb {
                     .rsplit_once('/')
                     .map(|(prefix, _)| format!("{prefix}/{name}"))
                     .unwrap_or_else(|| admin_url.clone());
+
+                // The clone path. `CREATE DATABASE ... TEMPLATE` is one statement
+                // against an already-migrated database, instead of 107 migrations
+                // replayed per test.
+                if let Some(db) = cached_postgres(&admin_url, &name).await {
+                    return Self {
+                        applied: Vec::new(),
+                        db,
+                        pg_admin: Some(admin),
+                        pg_name: Some(name),
+                    };
+                }
+
                 let db = Database::connect(&DatabaseConfig::new(url))
                     .await
                     .expect("connect to the scratch test database");
@@ -311,6 +504,15 @@ impl TestDb {
                 }
             }
             _ => {
+                // The copy path: a migrated file is placed at the path the pool is
+                // about to open, so `migrate()` then finds every migration already
+                // recorded as applied and does nothing. Same observable result --
+                // a fully-migrated database -- for one file copy instead of 107 DDL
+                // statements.
+                let file = dir.join("lorehaven.sqlite");
+                let _ = std::fs::remove_file(&file);
+                let cloned = cached_sqlite_file(&file).await;
+
                 let db = Database::connect(&DatabaseConfig::new(format!(
                     "sqlite://{}/lorehaven.sqlite?mode=rwc",
                     dir.display()
@@ -318,6 +520,19 @@ impl TestDb {
                 .await
                 .expect("connect");
                 let report = db.migrate().await.expect("migrate");
+                if cloned {
+                    // A clone has no pending work, so an empty report is expected
+                    // rather than suspicious. Asserted rather than assumed: a cache
+                    // that quietly stopped applying migrations would otherwise look
+                    // exactly like a success.
+                    assert!(
+                        report.applied.is_empty(),
+                        "the schema cache produced a database with {} pending migrations \
+                         ({}); the cache key no longer matches the catalogue",
+                        report.applied.len(),
+                        report.applied.join(", ")
+                    );
+                }
                 Self {
                     applied: report.applied,
                     db,
