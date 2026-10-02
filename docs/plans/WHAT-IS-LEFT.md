@@ -139,6 +139,13 @@ result (an empty list reads downstream as "the work was assessed and scored noth
   half-written source file (`.then_with(...)//! Recommendation strategies...` prepended to
   line 1 of `rec_strategy.rs`). Use `process(action='kill')`, which kills the shell rather
   than its children mid-write.
+- **A SKIP from every mutation in a run means the file is broken, not the patterns.** The
+  blind-date harness had `B1 date removed from seed` targeting `blind_date_seed(account,
+  today)` and reported SKIP — correctly, because a contaminated commit had changed that
+  exact line to `blind_date_seed(account, "")`. The harness caught a bug I had shipped.
+- **Do not explain away a failure that matches what you expected.** A 5-second suite taking
+  128 s was the same signal that had just correctly flagged a mutated file, and I attributed
+  it to a race instead. Check the runtime before explaining a red test.
 - **A stale GREEN(BAD) is worse than no result.** A batch of mutation-gate output arrived
   from harness revisions that had since been rewritten; several mutations were reported
   GREEN(BAD) that were in fact RED. Re-run the single mutation by hand before believing it —
