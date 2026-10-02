@@ -92,7 +92,8 @@ ALTER TABLE works ADD COLUMN generated_declared_at TEXT;
 --
 -- A work the author declared generated carries a declaration time, under `disclose`
 -- AND under `allow`. What differs between those two postures is only whether the
--- marker is SHOWN; the author's statement is recorded either way. A work the author
+-- marker is SHOWN, and the author's statement is recorded either way. A work the
+-- author
 -- declared nothing about carries no timestamp under any posture.
 --
 -- So the rule is one-directional: a declaration time may not coexist with `forbid`.
@@ -113,23 +114,34 @@ ALTER TABLE works ADD COLUMN generated_declared_at TEXT;
 --
 -- ── Why a trigger and not ALTER TABLE ... ADD CONSTRAINT ───────────────────────
 --
--- SQLite DOES support ADD CONSTRAINT and enforces the result: verified on 3.53 --
--- `ALTER TABLE t ADD CONSTRAINT ck CHECK (...)` succeeds and a row violating `ck`
--- is refused afterwards. So this is not a SQLite limitation.
+-- NOT because SQLite lacks the feature. SQLite added `ALTER TABLE ... ADD
+-- CONSTRAINT` in 3.47.0, and a modern build enforces the result: verified on 3.53,
+-- where the statement succeeds and a row violating `ck` is refused afterwards.
 --
--- It is a `sqlx::raw_sql` one. Verified directly against sqlx 0.8 with a two-line
--- probe: `raw_sql` refuses the statement with `near "CONSTRAINT": syntax error`,
--- while the same SQL applied through `sqlite3_exec` succeeds. The migration runner
--- (crates/db/src/migrate.rs) uses `raw_sql`, so a migration using ADD CONSTRAINT
--- fails there and nowhere else -- which is exactly the shape of failure that reads
--- as a product bug: the SQL is valid, the manual probe works, and every test in the
--- suite fails at `applying migration`.
+-- Because THIS project links SQLite 3.46.0, one release too old. Verified by
+-- asking the linked engine itself rather than inferring it from a Cargo.lock:
+-- through sqlx 0.8, `SELECT sqlite_version()` returns 3.46.0, and both
+-- `raw_sql("ALTER TABLE ... ADD CONSTRAINT")` and `query("ALTER TABLE ... ADD
+-- CONSTRAINT")` fail with `near "CONSTRAINT": syntax error`. The bundled source in
+-- `libsqlite3-sys-0.30.1/sqlite3/sqlite3.h` confirms it: `#define SQLITE_VERSION
+-- "3.46.0"`, from the `bundled` feature `sqlx-sqlite` turns on.
 --
--- 0108 hit the same wall and resolved it the same way, with the
--- `WHEN (A) <> (B)` + `RAISE(ABORT, 'literal')` idiom. Note RAISE takes ONE
--- expression: no `||` for building the message, which is the other half of that
--- idiom and the reason a probe with short literal messages can pass while the real
--- migration fails.
+-- So the system `sqlite3` binary and the engine the tests run are different
+-- builds, and the difference is exactly one feature version. This is the same trap
+-- as FLOAT4/FLOAT8 elsewhere in this file family: green on the path you tested,
+-- broken on the path that runs. 0108 hit the same wall and used the same
+-- `WHEN (A) <> (B)` + `RAISE(ABORT, 'literal')` idiom, as 0104 also used.
+--
+-- The `WHEN (A) <> (B)` + `RAISE(ABORT, 'literal')` idiom, as 0108 used for the same
+-- reason. RAISE takes ONE expression, so a message cannot be built with `||` -- and a
+-- probe using short literal messages will NOT catch that, while the real migration
+-- fails at once.
+--
+-- Note that 0108 and 0109 declare the same rule on `works`, and that is not
+-- redundancy: 0108 guards the canon class, 0109 the generated declaration, and a
+-- later migration rewriting 0108's trigger to fold both into one would mean one
+-- bad edit silently removed an unrelated guarantee. Two triggers, two names, two
+-- failure messages.
 CREATE TRIGGER works_generated_declaration_pair_insert
     BEFORE INSERT ON works
     FOR EACH ROW
