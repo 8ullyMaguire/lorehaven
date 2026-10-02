@@ -15,6 +15,7 @@
   import ForumCategory from './routes/ForumCategory.svelte';
   import ForumSearch from './routes/ForumSearch.svelte';
   import ForumTopic from './routes/ForumTopic.svelte';
+  import BlindDate from './routes/BlindDate.svelte';
   import Discover from './routes/Discover.svelte';
   import Exports from './routes/Exports.svelte';
   import History from './routes/History.svelte';
@@ -58,6 +59,7 @@
   /** Navigation (Milestone 1). Labels stay plain words, per the theme. */
   const NAV = [
     { href: '/discover', label: 'Discover', primary: true },
+    { href: '/blind-date', label: 'Blind Date' },
     { href: '/arena', label: 'Arena' },
     { href: '/search', label: 'Search', primary: true },
     { href: '/media', label: 'Media', primary: false },
@@ -319,6 +321,8 @@
     <AuthorMedia />
   {:else if route.id === 'discover'}
     <Discover />
+  {:else if route.id === 'blind-date'}
+    <BlindDate />
   {:else if route.id === 'arena'}
     <Arena />
   {:else if route.id === 'community'}

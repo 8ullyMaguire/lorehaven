@@ -2544,6 +2544,32 @@ export async function fetchDiscoveryFeed(
   return apiFetch<DiscoveryFeed>(`/discovery${query}`, { signal });
 }
 
+/**
+ * Blind Date: one work for this reader today (gap B, spec §16.1a).
+ *
+ * `workId` is `null` rather than absent when there is nothing to offer — the endpoint
+ * returns 200 for an empty catalogue, and an empty catalogue is a quiet surface rather
+ * than an error. Modelling that as `null` instead of throwing is what lets the page
+ * render an empty state instead of a failure.
+ *
+ * There is deliberately no `date` parameter. The server derives the day itself, so a
+ * client cannot enumerate forward and turn a once-a-day surface into a catalogue
+ * browser — which is the entire reason the pick is deterministic in (account, day).
+ */
+export interface BlindDateResponse {
+  /** YYYY-MM-DD, the server's own date for this pick. */
+  date: string;
+  workId: string | null;
+}
+
+export async function fetchBlindDate(signal?: AbortSignal): Promise<BlindDateResponse> {
+  const body = await apiFetch<{ date: string; work_id: string | null }>(
+    '/discovery/blind-date',
+    { signal },
+  );
+  return { date: body.date, workId: body.work_id };
+}
+
 export async function recomputeTasteProfile(): Promise<void> {
   await apiFetch('/discovery/taste-profile/recompute', { method: 'POST' });
 }
