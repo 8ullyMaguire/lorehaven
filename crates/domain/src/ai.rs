@@ -91,28 +91,49 @@ impl AiTask {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CostQuote {
     /// Provider-estimated cost in the operator's configured unit (credits, or whatever
-    /// §22.11 settled on). Kept as a string-free `i64` of micros to avoid float drift
-    /// in a value that gates spending.
+    /// §22.11 settled on). An `i64` of micros rather than a float, to avoid drift in a
+    /// value that gates spending.
     pub micros: i64,
-    /// What the unit is, for display and for the operator's budget configuration.
+    /// What the unit is, for display and for the operator's budget configuration. This
+    /// describes `micros`; it does NOT say whether there is a price. A local model has a
+    /// unit ("tokens") and no price, so the two are independent.
     pub unit: String,
+    /// Whether this is a real price.
+    ///
+    /// An explicit field rather than something inferred from `unit`. The first version
+    /// inferred it from a non-empty `unit`, which meant `unpriced("tokens")` — the exact
+    /// case a local Ollama instance produces — reported itself as *priced*, and a caller
+    /// gating on §22.11's guardrail let the call through. "I could not price it" has to be
+    /// representable without lying about it.
+    pub priced: bool,
 }
 
 impl CostQuote {
-    /// A quote for a task the provider does not price — a local model, typically.
+    /// A real quote: `micros` in the given `unit`.
+    pub fn priced(micros: i64, unit: &str) -> Self {
+        CostQuote {
+            micros,
+            unit: unit.to_string(),
+            priced: true,
+        }
+    }
+
+    /// A quote for a task nobody prices — a local model, typically. Carries the unit so a
+    /// UI can still say "42 tokens", and `priced: false` so a budget check stops the call.
     pub fn unpriced(unit: &str) -> Self {
         CostQuote {
             micros: 0,
             unit: unit.to_string(),
+            priced: false,
         }
     }
 
     /// Whether this quote can be trusted as a ceiling for budgeting.
     ///
-    /// A `None` here must stop the call, not be treated as free: §22.11 is a guardrail
+    /// A `false` here must stop the call, not be treated as free: §22.11 is a guardrail
     /// against unbounded spend, and "I could not price it" is not permission to guess.
     pub fn is_priced(&self) -> bool {
-        !self.unit.is_empty()
+        self.priced
     }
 }
 
@@ -403,12 +424,12 @@ mod tests {
     fn an_unpriced_quote_is_not_a_free_quote() {
         // A local Ollama instance legitimately cannot price a task, but §22.11's guardrail
         // needs to distinguish "costs nothing" from "unknown".
-        let quote = CostQuote::unpriced("");
-        assert!(!quote.is_priced());
-        assert!(CostQuote {
-            micros: 0,
-            unit: "credits".into()
-        }
-        .is_priced());
+        // The regression this field exists for: a local model has a unit and no price, and
+        // the first version inferred "priced" from a non-empty unit, so this exact case
+        // reported itself as priced and let the call through.
+        assert!(!CostQuote::unpriced("tokens").is_priced());
+        assert!(!CostQuote::unpriced("").is_priced());
+        assert!(CostQuote::priced(0, "credits").is_priced());
+        assert_eq!(CostQuote::priced(1_500, "credits").micros, 1_500);
     }
 }

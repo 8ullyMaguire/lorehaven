@@ -9,6 +9,7 @@
 //! matters far more on a single self-hosted machine than the theoretical
 //! elasticity of separate services.
 
+pub mod ai;
 pub mod assets;
 pub mod auth;
 pub mod bulk_export;
