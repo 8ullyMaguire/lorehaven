@@ -116,7 +116,7 @@ pub async fn report_for(
             .await?
         }
         Backend::Postgres => sqlx::query_as::<_, (String, serde_json::Value, serde_json::Value)>(
-            "SELECT work_id::text, dimensions::text, missing::text \
+            "SELECT work_id::text, dimensions, missing \
                      FROM preread_reports \
                      WHERE work_id = $1 AND provider = $2 \
                      ORDER BY scored_at DESC LIMIT 1",
