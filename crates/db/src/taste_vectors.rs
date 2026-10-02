@@ -207,8 +207,18 @@ pub async fn update_taste_vector_incremental(
         .unwrap_or_else(|| vec![0.5, 0.5, 0.5, 0.5, 0.5]);
 
     let current = get_taste_vector(db, account_id).await?;
-    let (mut current_vec, _, _) =
-        current.unwrap_or_else(|| (vec![0.0; admin_centroid.len()], 0.0, String::new()));
+    // `Some((vec![], ..))` is the case a `None` default does not cover: the
+    // account row exists, so `get_taste_vector` returns `Some`, and its read of a
+    // NULL `taste_vector` yields an EMPTY vector rather than `None`. Without this
+    // arm the "no vector yet" path produced a zero-width vector, the width check
+    // against the centroid failed, and the update silently reported
+    // `distance = 1.0` (maximally distant) for a reader who had simply never been
+    // scored. An empty vector is therefore treated as absent, which is what it
+    // means.
+    let (mut current_vec, _, _) = match current {
+        Some((vec, dist, at)) if !vec.is_empty() => (vec, dist, at),
+        _ => (vec![0.0; admin_centroid.len()], 0.0, String::new()),
+    };
 
     // Compute old weight sum from stored data (simplified: use count of ratings)
     let old_weight_sum = fetch_user_rating_count(db, account_id).await? as f64;
@@ -614,21 +624,41 @@ async fn fetch_user_rated_work_vectors(
     Ok((vec![], vec![]))
 }
 
+/// How many live ratings this account has, which is the `old_weight_sum` the
+/// incremental update needs.
+///
+/// The table is `rating`, not `work_ratings`. Nothing named `work_ratings` has
+/// ever existed in any migration on either dialect, so this query could only ever
+/// have returned `relation "work_ratings" does not exist` -- every call site of
+/// this function raised that, and the `?` at the call site propagated it into
+/// whatever asked for a taste update. Counting `rating` is the same question
+/// asked of the table that holds the answers.
+///
+/// Only rows with `deleted_at IS NULL` are counted, because a soft-deleted
+/// rating no longer contributes weight: the incremental update divides by
+/// `old_weight_sum + work_weight`, so counting a withdrawn rating would
+/// silently shrink every subsequent step rather than fail.
 async fn fetch_user_rating_count(db: &Database, account_id: &str) -> Result<i64, sqlx::Error> {
     let count: i64 = match db.backend() {
         Backend::Sqlite => {
-            let row = sqlx::query("SELECT COUNT(*) as cnt FROM work_ratings WHERE account_id = ?")
-                .bind(account_id)
-                .fetch_one(db.sqlite_pool().ok_or(pool_err())?)
-                .await?;
+            let row = sqlx::query(
+                "SELECT COUNT(*) as cnt FROM rating
+                 WHERE account_id = ? AND deleted_at IS NULL",
+            )
+            .bind(account_id)
+            .fetch_one(db.sqlite_pool().ok_or(pool_err())?)
+            .await?;
             row.get("cnt")
         }
         Backend::Postgres => {
-            let row =
-                sqlx::query("SELECT COUNT(*) as cnt FROM work_ratings WHERE account_id = $1::uuid")
-                    .bind(account_id)
-                    .fetch_one(db.postgres_pool().ok_or(pool_err())?)
-                    .await?;
+            // `COUNT(*)` is INT8 on both engines, so `i64` decodes without a cast.
+            let row = sqlx::query(
+                "SELECT COUNT(*) as cnt FROM rating
+                 WHERE account_id = $1::uuid AND deleted_at IS NULL",
+            )
+            .bind(account_id)
+            .fetch_one(db.postgres_pool().ok_or(pool_err())?)
+            .await?;
             row.get("cnt")
         }
     };
