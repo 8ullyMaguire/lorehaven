@@ -223,11 +223,11 @@ async fn an_unlistable_work_is_never_the_pick_even_when_it_is_the_only_one() {
     // The reliable shape is to leave the ineligible work as the ONLY candidate. Then
     // any leak is a guaranteed pick on every single day, and the assertion cannot pass
     // by chance.
+    let f = Fixture::build("bd_only_unlisted").await;
     for (lifecycle, visibility, title) in [
         ("published", "unlisted", "Unlisted"),
         ("published", "private", "Private"),
     ] {
-        let f = Fixture::build(&format!("bd_only_{title}")).await;
         let author = account(&f.tdb, &format!("bd_only_{title}@example.com")).await;
         let id = uuid::Uuid::new_v4().to_string();
         exec_with(
