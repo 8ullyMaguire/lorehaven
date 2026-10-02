@@ -25,7 +25,165 @@ pub struct Candidate {
     pub reason: String,
 }
 
+/// Blind Date: one work per reader per day, chosen without looking at their profile.
+///
+/// Closes gap B on the ideas list (#14). The audit's finding was that this is
+/// *implementation of an existing spec surface*, not missing design — `spec.md:2858`
+/// lists Blind Date among the discovery surfaces beside Recent and trending, and
+/// `spec.md:7462` gives the bot a `/blind-date` command. Nothing existed under any
+/// spelling, so the surface had never been built.
+///
+/// **The selection is deterministic in (account, day), which is the whole design.** A
+/// reader who reloads gets the same work; a reader who tells a friend gets a different
+/// one; and tomorrow's pick differs from today's. Three consequences follow, and each
+/// is why this is not `ORDER BY random()`:
+///
+/// 1. **Reload-stability.** A random pick changes on every refresh, which makes the
+///    work impossible to bookmark, rate, or discuss with anyone — the reader has no
+///    stable referent. Deriving the pick from a hash of (account, date) means the page
+///    can be reloaded, shared as a link, and closed and reopened tomorrow morning.
+///
+/// 2. **A reader cannot reroll.** The obvious way to implement this is "pick a random
+///    work, and if the reader has seen it, pick another" — but that leaks the pool.
+///    Refreshing until the work changes is a legitimate reader behaviour and the
+///    surface has to survive it, so the pick cannot depend on how many times the reader
+///    has asked.
+///
+/// 3. **Different readers see different works**, because the account id is in the hash.
+///    A single daily "work of the day" for everyone would be a trending slot, which
+///    §16.1a already has; Blind Date exists to get *outside* the profile.
+///
+/// Eligibility is deliberately narrow, and each clause is a decision:
+///
+/// * **published, public, not deleted.** A work nobody can read cannot be the answer.
+/// * **not bookmarked by this reader.** Showing someone a thing they saved is the same
+///   mistake every other strategy avoids.
+/// * **not by a pseud the reader has already read.** Blind Date is meant to surface an
+///   unknown *author* as often as an unknown work, and an author the reader follows is
+///   neither blind nor unknown.
+/// * **`visibility = 'public'`** explicitly, not via lifecycle alone: `lifecycle` says
+///   whether a work is published, `visibility` says whether it is listable, and a work
+///   can be published-but-unlisted (a direct-link-only work). Blind Date is a discovery
+///   surface, so unlisted stays out.
+///
+/// **Ordering is by a hash-derived key, not by a computed score.** There is no score
+/// here on purpose: a score would reintroduce exactly the popularity weighting that makes
+/// the other strategies blind, and "random but weighted" is just trending with extra
+/// steps. Within the eligible set the ordering is arbitrary by design, and the
+/// eligibility clauses are the only thing that shapes it.
+///
+/// **Backdated dates are treated as published on their schedule.** A work scheduled for
+/// last week has been eligible since last week; treating `published_at > today` as
+/// future would hide it for as long as the schedule was wrong.
 /// Read a taste profile (owner only).
+pub async fn blind_date_work(db: &Database, account: &str, today: &str) -> Result<Option<String>> {
+    // One seed per (account, day). Hashing rather than randomising is what makes the
+    // pick stable across reloads -- see the doc comment.
+    // `works.id` is uuid on PostgreSQL and TEXT on SQLite, and `subject_id` /
+    // `owner_pseud_id` are TEXT on both -- so the comparisons need `::text` on the uuid
+    // side and the returned column needs it too for sqlx to decode a `String`. Both are
+    // PostgreSQL-only syntax, so they come from one fragment rather than being written
+    // into the literal. This is the fourth appearance of this split in the codebase
+    // (see `rec_strategy.rs`, `payout_store.rs`, `series_recs.rs`).
+    let seed = blind_date_seed(account, today);
+    let id_cast = match db.backend() {
+        crate::Backend::Postgres => "::text",
+        crate::Backend::Sqlite => "",
+    };
+    let sql = format!(
+        r#"
+        SELECT w.id{id_cast} AS id
+        FROM works w
+        WHERE w.lifecycle = 'published'
+          AND w.visibility IS NOT NULL
+          AND w.deleted_at IS NULL
+          -- A scheduled work is eligible from the day it was scheduled to appear, so
+          -- COALESCE treats a missing `published_at` as the creation date rather than
+          -- excluding the work outright.
+          AND date(COALESCE(w.published_at, w.created_at)) <= date('{today}')
+          AND w.id NOT IN (
+              SELECT subject_id FROM bookmarks
+              WHERE account_id = '{account}' AND subject_type = 'work'
+          )
+          AND w.owner_pseud_id NOT IN (
+              -- Any pseud this reader has already read something by. Read, not
+              -- bookmarked: a reader who finished one book by an author has met them.
+              SELECT rp.id
+              FROM pseuds rp
+              JOIN works rw ON rw.owner_pseud_id = rp.id
+              JOIN reading_status rs ON rs.subject_id = rw.id
+              WHERE rs.account_id = '{account}'
+                AND rs.subject_type = 'work'
+                AND rs.status = 'finished'
+                
+          )
+        "#,
+    );
+    let ids: Vec<String> = match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query_scalar(&sql)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        crate::Backend::Postgres => {
+            sqlx::query_scalar(&sql)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    // Ordered in Rust, not SQL, because neither engine has a portable hash function:
+    // PostgreSQL has `md5`, SQLite has none of `md5`/`sha*` without an extension, and
+    // `random()` differs per engine and per call. Fetching every eligible id and sorting
+    // on an FNV-1a of (id, seed) is the portable version of the same idea, and it keeps
+    // the ordering logic next to `blind_date_seed`, which is where a reader would look
+    // for it.
+    //
+    // The cost is bounded by the eligible set. On a catalogue of a few hundred thousand
+    // works this would need the ordering pushed back into SQL with an indexed hash
+    // column -- at which point this becomes a `blind_date_assignments` table, and the
+    // pick is stored per (account, day) rather than derived. Not yet; the derivation is
+    // what makes the surface stateless today.
+    Ok(ids
+        .into_iter()
+        .min_by_key(|id| blind_date_order_key(id, &seed))
+        .map(|id| id.to_string()))
+}
+
+/// FNV-1a over (work id, seed), as the ordering key.
+///
+/// Separate from `blind_date_seed` on purpose: the seed is per (account, day) and is the
+/// same for every candidate, so it cannot order anything on its own. This mixes the
+/// candidate's id back in, which is what makes the order differ between candidates.
+fn blind_date_order_key(work_id: &str, seed: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in work_id.as_bytes().iter().chain(b"|").chain(seed.as_bytes()) {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// The per-(account, day) ordering seed.
+///
+/// FNV-1a over the two inputs rather than a cryptographic hash: this needs to spread
+/// work ids evenly across a sort order, not resist an attacker. `DefaultHasher` is not
+/// usable because its output is not guaranteed stable across Rust releases, and a seed
+/// that changes between compiler versions would silently reshuffle every reader's
+/// Blind Date on the next toolchain bump.
+fn blind_date_seed(account: &str, today: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in account
+        .as_bytes()
+        .iter()
+        .chain(b"|")
+        .chain(today.as_bytes())
+    {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
 pub async fn taste_profile_for(db: &Database, account: &str) -> Result<Option<TasteProfile>> {
     let row: Option<(String, String, String)> = match db.backend() {
         crate::Backend::Sqlite => {
