@@ -5,6 +5,7 @@
   import Select from './lib/components/Select.svelte';
   import Account from './routes/Account.svelte';
   import AdminJobs from './routes/AdminJobs.svelte';
+  import AdminEconomyFlows from './routes/AdminEconomyFlows.svelte';
   import AdminMediaHealth from './routes/AdminMediaHealth.svelte';
   import AdminMirror from './routes/AdminMirror.svelte';
   import Analytics from './routes/AnalyticsDashboard.svelte';
@@ -313,6 +314,8 @@
     <Jobs />
   {:else if route.id === 'admin-jobs'}
     <AdminJobs />
+  {:else if route.id === 'admin-economy-flows'}
+    <AdminEconomyFlows />
   {:else if route.id === 'admin-media-health'}
     <AdminMediaHealth />
   {:else if route.id === 'admin-mirror'}
