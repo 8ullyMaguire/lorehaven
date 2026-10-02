@@ -480,3 +480,49 @@ async fn a_fingerprint_from_the_fetch_matches_the_one_stored() {
     assert_eq!(bridged.width, None, "an unknown width is None, not 0");
     assert_eq!(bridged.height, None);
 }
+
+/// `kind_index` must be unique across EVERY kind.
+///
+/// This was previously an assertion inside `the_job_kind_exists_and_is_interactive`,
+/// so it only ran in the context of a media-fetch test. That is the wrong home for a
+/// whole-enum invariant: adding a job kind does not make anyone read a media test.
+///
+/// It matters because the failure is invisible locally. `PayoutRecalc` was given
+/// index 13 while `BodyFetch` already had it — the compiler accepts two valid `usize`
+/// expressions, and every test of the *new* kind passes, because nothing about
+/// `payout_recalc` depends on its index being distinct. Only a check across the whole
+/// enum sees it, and `kind_index` places a kind in a fixed array, so a collision means
+/// two kinds sharing a slot.
+#[test]
+fn every_job_kind_has_its_own_index() {
+    use lorehaven_domain::jobs::ALL_KINDS;
+    let mut by_index: std::collections::BTreeMap<usize, Vec<&str>> = Default::default();
+    for kind in ALL_KINDS {
+        by_index
+            .entry(kind.kind_index())
+            .or_default()
+            .push(kind.as_str());
+    }
+    let shared: Vec<(usize, Vec<&str>)> = by_index
+        .into_iter()
+        .filter(|(_, names)| names.len() > 1)
+        .collect();
+    assert!(
+        shared.is_empty(),
+        "two kinds sharing a kind_index means one slot in the array holds two jobs: \
+         {shared:?}"
+    );
+
+    // Indices must also be DENSE from zero. A gap means an array is sized for a kind
+    // that does not exist, or a kind was renumbered -- and these are persisted in
+    // `jobs` rows, so renumbering corrupts every existing row.
+    let mut sorted: Vec<usize> = ALL_KINDS.iter().map(|k| k.kind_index()).collect();
+    sorted.sort_unstable();
+    for (expected, actual) in sorted.iter().enumerate() {
+        assert_eq!(
+            *actual, expected,
+            "kind_index must be dense from 0; {actual} at position {expected} means \
+             either a gap or a renumbering, and these are persisted"
+        );
+    }
+}

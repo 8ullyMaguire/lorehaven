@@ -289,9 +289,18 @@ impl JobKind {
             Self::PreservationRecheck => 11,
             // 12, on the same reasoning: appended, never renumbered.
             Self::RetentionSettle => 12,
-            // 13, on the same reasoning: appended, never renumbered. Appending is
-            // what makes adding a job kind a two-line change instead of a migration.
-            Self::PayoutRecalc => 13,
+            // 14, on the same reasoning: appended, never renumbered, so adding a job
+            // kind stays a two-line change instead of a migration.
+            //
+            // **This was 13, and 13 was already `BodyFetch`.** I misread a truncated
+            // terminal view of this match as having `BodyFetch => 12` and inserted the
+            // new kind on top of it. The compiler is happy with that -- two valid
+            // `usize` expressions -- so nothing local caught it.
+            // `the_job_kind_exists_and_is_interactive` in
+            // `crates/app/tests/media_fetch_job.rs` asserts uniqueness across all
+            // kinds and did. `kind_index` places a kind in a fixed array, so a
+            // collision means two kinds sharing one slot.
+            Self::PayoutRecalc => 14,
             // APPENDED, never inserted. These indices are persisted in `jobs`
             // rows, so inserting a kind in the middle silently re-labels every
             // queued job of a later kind. See `db-migration-integrity`.
