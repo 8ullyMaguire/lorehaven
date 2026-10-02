@@ -547,7 +547,16 @@ pub fn bandit_strategy() -> RecStrategyFn {
 /// that is *good* from one that is *seen*: both have high numbers and the numbers mean
 /// different things. So this one ranks by completion quality per unit of reach:
 ///
-///     score = completion_rate / (1 + log10(1 + distinct_readers))
+/// ```text
+/// score = completion_rate / (1 + log10(1 + distinct_readers))
+/// ```
+///
+/// The fence is tagged `text` and this is not cosmetic. Rustdoc treats a four-space
+/// indented block in a doc comment as a Rust doctest, so this formula was being compiled
+/// as code — and failing, with `cannot find value completion_rate` and `cannot find
+/// function log10`, which reads like the strategy had undefined variables rather than
+/// like a doc comment needed a language tag. The tag is the whole fix; the formula itself
+/// was always right.
 ///
 /// Four decisions, each of which produces a defensible-looking ranking that is quietly
 /// wrong.
