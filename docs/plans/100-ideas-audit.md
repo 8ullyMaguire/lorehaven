@@ -101,17 +101,99 @@ Nothing computes it. This is a *reporting* gap, not an engine gap, and it is the
 cheapest of the six — but it is also the one that makes the other five
 measurable, so it goes first despite being small.
 
-### B. Blind Date as a daily surface (#14)
-Zero hits under every spelling in code, **but it is specified** — `docs/spec.md:2858`
-lists it among the discovery surfaces alongside Recent, trending, and content
-similarity. So this gap is *implementation of an existing spec surface*, not a
-missing design. Cheaper than it looked.
+### B. Blind Date as a daily surface (#14) — CLOSED
 
-### C. AI pre-read scoring (#18)
-Named twice in the list — once as a Tier 2 feature and once in the caveats as one
-of the four things that matter *more* than ranking tweaks, because it is the
-cold-start answer. §23.7 specifies the AI adapter; nothing scores imports against
-the operator's dimensions. **Highest value of the six.**
+`crates/db/src/discovery.rs::blind_date_work`. 11 tests green on SQLite and PostgreSQL,
+9 mutations red, clippy clean.
+
+The audit's read was right: this was implementation of an existing spec surface
+(`spec.md:2858`, and a `/blind-date` bot command at `spec.md:7462`), so no schema and
+no design decision were needed — only the code.
+
+**The decision that defines it: the pick is deterministic in (account, day).** Not
+`ORDER BY random()`. Three properties fall out, and each is why:
+
+- *Reload-stability.* A random pick changes every refresh, so the work cannot be
+  bookmarked, rated, or discussed — the reader has no stable referent.
+- *No rerolling.* Refreshing until the pick changes is legitimate reader behaviour, so
+  the pick cannot depend on how many times the reader has asked.
+- *Per-reader.* A single work-of-the-day for everyone is a trending slot, and §16.1a
+  already has one.
+
+Eligibility excludes bookmarked works, works by any pseud the reader has finished
+something by (Blind Date surfaces unknown *authors* as much as unknown works), drafts,
+unlisted works, and works scheduled into the future. The last clause is a gate rather
+than a permanent exclusion, and both directions are tested — the backwards direction is
+the easy mistake.
+
+Two implementation notes that cost time and are worth keeping:
+
+- **No portable SQL hash.** SQLite has no `md5`; PostgreSQL does. The ordering is done in
+  Rust on an FNV-1a of (work id, seed), which is the portable version of the same idea
+  and keeps the ordering next to the seed. Bounded by the eligible set; at catalogue
+  scale this becomes a stored `blind_date_assignments` table, noted in the doc comment.
+- **The `::text` split is now the sixth site.** `works.id` is uuid on PostgreSQL and
+  TEXT on SQLite, while `bookmarks.subject_id` is TEXT on both.
+
+### F. Hidden classics (#32, #33) — CLOSED
+
+`crates/db/src/rec_strategy.rs::hidden_classics_strategy`, registered as
+`hidden_classics`. 11 tests green on SQLite and PostgreSQL, 9 mutations red.
+
+The audit argued #32 and #33 are one gap, and that was right: both are "the ranking
+engines over-reward the already-popular", and both are answered by ranking quality
+*relative to* reach instead of absolutely.
+
+    score = completion_rate / (1 + log10(1 + distinct_readers))
+
+Every sibling strategy ranks by an absolute quantity — bookmark counts, graph degree,
+curation — so on a catalogue where attention is already uneven an absolute score cannot
+tell a work that is *good* from one that is *seen*: both have high numbers and the
+numbers mean different things. The `1 +` in the denominator is what makes it work —
+without it an unviewed work divides by zero, and with it an unviewed work scores on its
+completion rate alone and lands near the top, which is the entire point.
+
+Four decisions, each of which produces a defensible-looking ranking that is quietly wrong:
+
+1. Quality is completions over **distinct** readers, not views. `work_view_log` has no
+   uniqueness on the reader, so a chapter opened four times is one reader; counting rows
+   inflates the denominator and pushes genuinely well-read works down.
+2. The denominator is **log-scaled**. Linear division would rank every moderately popular
+   work below a mildly popular one by a large margin, so the strategy would return only
+   works nobody has seen — a random assortment, not a ranking.
+3. Works below §20.3's **10-reader floor** are excluded rather than divided. A two-of-two
+   work has a perfect 1.0 rate and would otherwise top the feed.
+4. **Automated views are not reach.** Counting crawler views inflates only the denominator
+   of works a crawler walked and no person read, pushing exactly the works most likely to
+   be genuinely undiscovered furthest down. The failure looks like "the strategy does not
+   work" rather than like a crawler problem.
+
+**The score is composed in Rust, not SQL**, because SQLite has neither `LOG10` nor `LN`
+(both need SQLITE_ENABLE_MATH_FUNCTIONS). See the mutation notes below — this is now a
+standing rule for every store in the codebase, not a one-off.
+
+### C. AI pre-read scoring (#18) — DESIGNED, not built
+
+`docs/plans/gap-c-ai-pre-read-scoring.md`. The audit's framing was right and is now
+written up in full, but this is the one gap of the six that needs new infrastructure
+rather than a store: **zero AI-provider code exists in this codebase** (no `Ollama`, no
+`OpenAI`, no `AiProvider` trait). §23.7 specifies the interface in prose.
+
+Two spec constraints shape the design and are the reason it is not simply "call an LLM":
+
+- **§32.6** forbids displaying composite quality scores publicly, so a score is per-work
+  and per-dimension and private.
+- **§0.3** forbids credit, payment, or trust level moving any ranking signal. A pre-read
+  score therefore has *no path into any ranking query* — the cold-start problem it solves
+  is the author's own (learning before publication that a work is 40k words when this
+  fandom's median is 8k), not a discovery one.
+
+Embarrassingly, the spec already has a working composite: §20.10.4's `quality_score`, a
+weighted blend of completion rate, reread rate, feedback density, bookmark rate, long-tail
+engagement and reader diversity. That is a *payout* signal over readers who already
+exist; the cold-start case is precisely where it has nothing to work with. Worth
+re-reading before building — a pre-read score may be the honest subset rather than a
+new concept.
 
 ### D. Series-aware recommendation (#21) — CLOSED
 
@@ -264,3 +346,39 @@ neither — it was in the spec alone, invisible to both methods.
 Revised rule: `requirements.csv` tells you what is *tracked*; only reading the spec
 tells you what *exists*. Cross-check both, and treat a spec formula with no
 tracker row as the highest-risk category of all.
+
+## Mutation gates: what a GREEN(BAD) actually means
+
+Gaps B and F were both closed with a mutation harness
+(`scripts/mutate_hidden_classics.sh`, `scripts/mutate_blind_date.sh`). Each breaks one
+rule and requires the corresponding test to go red. Both runs produced survivors, and
+every survivor was a defect in the *test*, not the code. The four recurring causes:
+
+- **A fixture that passes for the wrong reason.** `an_unpublished_work_is_never_offered`
+  seeded a draft with no completions, so `completions > 0` excluded it and the lifecycle
+  clause was never exercised — deleting that clause left the suite green. A fixture must
+  clear every *other* gate, or the gate under test is untested. The blind-date version of
+  this was subtler: with five eligible works also present, an ineligible one merely has
+  to lose the hash ordering, and it usually does — by luck. The fix is to leave the
+  ineligible work as the *only* candidate, so any leak is a guaranteed pick.
+- **Presence assertions don't kill ordering mutations.** The log-vs-linear mutation
+  survived because the test only asserted both works appear; a linear denominator also
+  returns both. Assert the *order*, with a pair the two implementations disagree on.
+- **Guessed comparators hold under both behaviours.** When two works must be ordered
+  relative to a third, solve for the third — the correct and mutated results have to land
+  on opposite sides of it. Search for the pair, do not pick it by eye.
+- **A compile error is only a valid RED if the mutation was meant to compile.** Deleting
+  a `format!` placeholder makes the build fail and the tests never run, which is a RED
+  that proves nothing. Keep such mutations balanced.
+
+And one harness bug worth recording, because it produced a *false survivor* rather than a
+false RED: disabling `AND x NOT IN (SELECT … WHERE <pred>)` with `AND (x NOT IN (…) OR
+1 = 0)` does nothing at all — `X OR false` is `X`, so the exclusion stays active. The only
+form that works is `AND 1 = 0` on the subquery predicate, which makes the subquery return
+the empty set while keeping every `format!` placeholder consumed.
+
+## Closing note
+
+Six gaps were open. Five are closed (B, D, E, F, G) and A was effectively already done.
+The sixth (C) is designed and written up but not built, because it needs an AI provider
+trait that does not exist yet in any form.
