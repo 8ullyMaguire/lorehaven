@@ -85,7 +85,7 @@ pub async fn blind_date_work(db: &Database, account: &str, today: &str) -> Resul
     // PostgreSQL-only syntax, so they come from one fragment rather than being written
     // into the literal. This is the fourth appearance of this split in the codebase
     // (see `rec_strategy.rs`, `payout_store.rs`, `series_recs.rs`).
-    let seed = blind_date_seed(account, "");
+    let seed = blind_date_seed(account, today);
     let id_cast = match db.backend() {
         crate::Backend::Postgres => "::text",
         crate::Backend::Sqlite => "",
