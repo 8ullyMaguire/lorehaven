@@ -43,13 +43,27 @@ CREATE TABLE IF NOT EXISTS generated_content_policy (
 -- every work already in the corpus, which changes terms the author agreed to under
 -- a different policy.
 --
--- The column stays NULLABLE here even though SQLite's ends up effectively NOT NULL,
--- and the difference is deliberate: PostgreSQL can add a NOT NULL column with a
--- default in one statement, but this one has to be backfilled from the policy row
--- in force, which is a subquery and so cannot be a DEFAULT. It is narrowed after
--- the UPDATE, same as SQLite.
+-- The column is added NULLABLE, backfilled from the policy in force, then narrowed --
+-- and it carries a DEFAULT of 'forbid' the whole way.
+--
+-- CORRECTION (2026-10-02). The first version of this migration deliberately set no
+-- DEFAULT, on the reasoning that "a DEFAULT would write the literal into every row
+-- and lose the distinction between 'the policy said forbid' and 'nobody has ever
+-- set a policy'". That reasoning was wrong about what it protected: the policy
+-- TABLE's own default is already 'forbid', so the DEFAULT and the backfill agree for
+-- every row that has no policy -- there was no distinction to lose.
+--
+-- The real cost was this. `generated_content_posture` became NOT NULL with nothing to
+-- supply it, so every INSERT that omitted the column failed on PostgreSQL with 23502
+-- while SQLite stored NULL and carried on. 39 app tests passed on one engine and
+-- failed on the other, across 74 test fixtures plus the production INSERT in
+-- content.rs. Neither engine was wrong; only one of them enforced the constraint.
+--
+-- The lesson is worth more than the fix: a NOT NULL column with no DEFAULT is a
+-- per-dialect trap, because SQLite's affinity accepts the NULL that PostgreSQL
+-- rejects. Either every writer names the column, or the DEFAULT carries the answer.
 
-ALTER TABLE works ADD COLUMN generated_content_posture TEXT;
+ALTER TABLE works ADD COLUMN generated_content_posture TEXT DEFAULT 'forbid';
 
 ALTER TABLE works
     ADD CONSTRAINT works_generated_content_posture_ck

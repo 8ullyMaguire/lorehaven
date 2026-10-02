@@ -477,13 +477,27 @@ pub async fn create_work(
     let now = now_rfc3339();
     let visibility = visibility.unwrap_or("public");
 
+    // `generated_content_posture` is named explicitly, and NOT defaulted in the
+    // migration on purpose (0109's note: a DEFAULT would erase the difference
+    // between "the policy said forbid" and "nobody set a policy"). The consequence is
+    // that every INSERT must supply it, and omitting it here fails on PostgreSQL
+    // with a NOT NULL violation while SQLite quietly stores NULL -- which is how 39
+    // app tests failed on one engine and passed on the other.
+    //
+    // The value is read from the policy in force rather than hardcoded, so an
+    // instance whose default is 'allow' gets 'allow'. §51.1 records the posture
+    // WITH the work precisely so the answer survives a later policy change.
     let insert_work = db.sql(
         "INSERT INTO works (id, owner_pseud_id, title, summary, language, rating, visibility,
-                            lifecycle, completion, show_public_ratings, created_at, updated_at, version)
-         VALUES (?, ?, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, ?, ?, 1)",
+                            lifecycle, completion, show_public_ratings, created_at, updated_at, version,
+                            generated_content_posture)
+         VALUES (?, ?, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, ?, ?, 1,
+                 COALESCE((SELECT posture FROM generated_content_policy WHERE id = 'default'), 'forbid'))",
         "INSERT INTO works (id, owner_pseud_id, title, summary, language, rating, visibility,
-                            lifecycle, completion, show_public_ratings, created_at, updated_at, version)
-         VALUES (?::uuid, ?::uuid, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, ?, ?, 1)",
+                            lifecycle, completion, show_public_ratings, created_at, updated_at, version,
+                            generated_content_posture)
+         VALUES (?::uuid, ?::uuid, ?, '', 'en', 'general', ?, 'draft', 'in_progress', 1, ?, ?, 1,
+                 COALESCE((SELECT posture FROM generated_content_policy WHERE id = 'default'), 'forbid'))",
     );
 
     let insert_owner = db.sql(
