@@ -47,6 +47,34 @@ ALTER TABLE canon_agnostic_works ADD COLUMN unexplained_names INTEGER;
 ALTER TABLE canon_agnostic_works ADD COLUMN word_count        INTEGER;
 ALTER TABLE canon_agnostic_works ADD COLUMN density           DOUBLE PRECISION;
 
+-- ── Backfill, and why this value ─────────────────────────────────────────────
+--
+-- `ADD CONSTRAINT` validates against existing rows, so a deployment that already
+-- flagged works under 0106 cannot apply this migration without a backfill --
+-- verified on 15.5: adding these two CHECKs to a table holding two pre-0108 rows
+-- fails outright.
+--
+-- A legacy row says only "this work was once called canon-agnostic". It does not
+-- carry the measures that produced that verdict, and §50.3 requires the class be
+-- recomputable from the text -- so the only honest state for it is
+-- UNCLASSIFIED, not a class. Backfilling `canon_dependent = false` would read as
+-- "measured, and canon-agnostic", which is a measurement nobody made.
+--
+-- So: a reason, no measures. `too_short` is the reason work_coordinates already
+-- uses for "there was not enough text", which is close enough to be accurate
+-- here -- these rows predate the measurement, so there is nothing to audit --
+-- and the alternative is inventing a reason string for a state the schema does
+-- not otherwise name. What matters to a reader is that the row says
+-- "unclassified" rather than asserting a class.
+--
+-- The work is re-measured on the next ingest, which is what makes this safe: the
+-- flag is a cache of a deterministic computation, not a source of truth.
+
+UPDATE canon_agnostic_works
+   SET unmeasurable_reason = 'unclassified: 0108 backfill, never measured'
+ WHERE unmeasurable_reason IS NULL
+   AND unexplained_names IS NULL;
+
 ALTER TABLE canon_agnostic_works
     ADD CONSTRAINT canon_class_reason_ck CHECK (
         -- Neither `=` nor a bare `IS DISTINCT FROM`. In three-valued logic
