@@ -36,6 +36,7 @@ pub mod exchange;
 pub mod exports;
 pub mod external;
 pub mod federation;
+pub mod generated_content;
 pub mod governance;
 pub mod identity;
 pub mod imports;

@@ -11,7 +11,7 @@
 -- `forbid` is the DEFAULT, and that is the load-bearing default. `allow` is the
 -- only value that changes what the corpus *is*, so §51.1 makes an instance say so
 -- out loud rather than arriving there by omission. An operator who wants
--- `disclose` has to choose it; an operator who wants nothing generated has to do
+-- `disclose` has to choose it -- an operator who wants nothing generated has to do
 -- nothing, which is the safe direction for a default to point.
 --
 -- NOT NULL with a CHECK rather than a nullable column: there is no state in which
@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS generated_content_policy (
 -- §51.1: "The posture is recorded with the work, not looked up at read time." So
 -- this is a column on `works`, not a join to the policy row, and the reason is
 -- retroactive labelling. An operator who tightens `allow` -> `disclose` is making a
--- change about FUTURE writes; joining to the policy at read time would relabel
+-- change about FUTURE writes, and joining to the policy at read time would relabel
 -- every work already in the corpus, which changes terms the author agreed to under
 -- a different policy.
 --
@@ -88,11 +88,62 @@ UPDATE works
 -- absence is the rule, not an oversight.
 ALTER TABLE works ADD COLUMN generated_declared_at TEXT;
 
--- Exactly one of the two: a declared generated work has a declaration time, and an
--- undeclared one does not. Enforced here because the pair is the whole disclosure
--- record, and a work carrying a declaration time with nothing declared reads as
--- "disclosed" to a query that filters on the timestamp alone.
-ALTER TABLE works
-    ADD CONSTRAINT works_generated_declaration_pair_ck CHECK (
-        (generated_content_posture = 'disclose') = (generated_declared_at IS NOT NULL)
-    );
+-- ── The pair rule ────────────────────────────────────────────────────────────
+--
+-- A work the author declared generated carries a declaration time, under `disclose`
+-- AND under `allow`. What differs between those two postures is only whether the
+-- marker is SHOWN; the author's statement is recorded either way. A work the author
+-- declared nothing about carries no timestamp under any posture.
+--
+-- So the rule is one-directional: a declaration time may not coexist with `forbid`.
+-- The three earlier versions of this constraint were all wrong, and each was caught
+-- by the store rather than by the schema:
+--
+--   * `(posture = 'disclose') = (declared_at IS NOT NULL)` refused every legal row
+--     under `forbid` and `allow`, because those postures accept an undeclared work
+--     with no timestamp.
+--   * widening it to `IN ('disclose','allow')` then demanded a timestamp for an
+--     UNDECLARED work under `allow`.
+--   * the symmetric pairing cannot work at all: the declaration is the author's, not
+--     the posture's, so there is no posture value that means "declared".
+--
+-- Under `allow` a declared work with no timestamp would also be rendered wrong: a
+-- disclosure marker computed from `generated_declared_at IS NOT NULL` would then
+-- appear on an `allow` work, breaking §51.1's "allow accepts and does not label".
+--
+-- ── Why a trigger and not ALTER TABLE ... ADD CONSTRAINT ───────────────────────
+--
+-- SQLite DOES support ADD CONSTRAINT and enforces the result: verified on 3.53 --
+-- `ALTER TABLE t ADD CONSTRAINT ck CHECK (...)` succeeds and a row violating `ck`
+-- is refused afterwards. So this is not a SQLite limitation.
+--
+-- It is a `sqlx::raw_sql` one. Verified directly against sqlx 0.8 with a two-line
+-- probe: `raw_sql` refuses the statement with `near "CONSTRAINT": syntax error`,
+-- while the same SQL applied through `sqlite3_exec` succeeds. The migration runner
+-- (crates/db/src/migrate.rs) uses `raw_sql`, so a migration using ADD CONSTRAINT
+-- fails there and nowhere else -- which is exactly the shape of failure that reads
+-- as a product bug: the SQL is valid, the manual probe works, and every test in the
+-- suite fails at `applying migration`.
+--
+-- 0108 hit the same wall and resolved it the same way, with the
+-- `WHEN (A) <> (B)` + `RAISE(ABORT, 'literal')` idiom. Note RAISE takes ONE
+-- expression: no `||` for building the message, which is the other half of that
+-- idiom and the reason a probe with short literal messages can pass while the real
+-- migration fails.
+CREATE TRIGGER works_generated_declaration_pair_insert
+    BEFORE INSERT ON works
+    FOR EACH ROW
+    WHEN (NEW.generated_declared_at IS NOT NULL)
+         AND NEW.generated_content_posture = 'forbid'
+    BEGIN
+        SELECT RAISE(ABORT, 'works: forbid accepts no declared generated work, so it carries no generated_declared_at');
+    END;
+
+CREATE TRIGGER works_generated_declaration_pair_update
+    BEFORE UPDATE ON works
+    FOR EACH ROW
+    WHEN (NEW.generated_declared_at IS NOT NULL)
+         AND NEW.generated_content_posture = 'forbid'
+    BEGIN
+        SELECT RAISE(ABORT, 'works: forbid accepts no declared generated work, so it carries no generated_declared_at');
+    END;

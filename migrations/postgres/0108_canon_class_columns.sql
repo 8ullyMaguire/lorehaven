@@ -23,7 +23,7 @@
 -- ── Where this differs from the SQLite dialect, and why ───────────────────────
 --
 -- Four invariants. SQLite needs ten triggers because it cannot add a table-level
--- CHECK to an existing table; PostgreSQL states each one as an ordinary CHECK in
+-- CHECK to an existing table, and PostgreSQL states each one as an ordinary CHECK in
 -- the same `ALTER`. The rules are identical, which is what makes the two engines
 -- agree about which rows are legal.
 --
@@ -33,7 +33,7 @@
 --      unverifiable flag is worse than an absent one, because it looks answered.
 --   3. `density` is a share, so not negative and not above one. The domain layer
 --      clamps and 0102 notes that SQLite's dynamic typing makes the domain clamp
---      the only protection the default test engine has; here the range is a
+--      the only protection the default test engine has. Here the range is a
 --      constraint on both engines rather than a habit in one.
 --   4. `unexplained_names` lies within `0..=word_count`. The upper bound is not
 --      paranoia: it is exactly the corruption a bad fixture produces, and a
