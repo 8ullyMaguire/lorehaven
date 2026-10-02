@@ -68,9 +68,7 @@ CREATE TRIGGER canon_class_reason_ck_insert
     WHEN (NEW.unmeasurable_reason IS NOT NULL)
       <> (NEW.unexplained_names IS NULL)
     BEGIN
-        SELECT RAISE(ABORT,
-            'canon_agnostic_works: unmeasurable_reason and the measures are set '
-            || 'together or not at all');
+    SELECT RAISE(ABORT, 'canon_agnostic_works: unmeasurable_reason and the measures are set together or not at all');
     END;
 
 CREATE TRIGGER canon_class_reason_ck_update
@@ -79,9 +77,7 @@ CREATE TRIGGER canon_class_reason_ck_update
     WHEN (NEW.unmeasurable_reason IS NOT NULL)
       <> (NEW.unexplained_names IS NULL)
     BEGIN
-        SELECT RAISE(ABORT,
-            'canon_agnostic_works: unmeasurable_reason and the measures are set '
-            || 'together or not at all');
+    SELECT RAISE(ABORT, 'canon_agnostic_works: unmeasurable_reason and the measures are set together or not at all');
     END;
 
 -- 2. A class is never stored without the measures that produced it. An
@@ -96,9 +92,7 @@ CREATE TRIGGER canon_class_needs_measures_insert
       AND (NEW.unexplained_names IS NULL OR NEW.word_count IS NULL
            OR NEW.density IS NULL)
     BEGIN
-        SELECT RAISE(ABORT,
-            'canon_agnostic_works: a classified row carries the measures that '
-            || 'produced it');
+    SELECT RAISE(ABORT, 'canon_agnostic_works: a classified row carries the measures that produced it');
     END;
 
 CREATE TRIGGER canon_class_needs_measures_update
@@ -108,9 +102,7 @@ CREATE TRIGGER canon_class_needs_measures_update
       AND (NEW.unexplained_names IS NULL OR NEW.word_count IS NULL
            OR NEW.density IS NULL)
     BEGIN
-        SELECT RAISE(ABORT,
-            'canon_agnostic_works: a classified row carries the measures that '
-            || 'produced it');
+    SELECT RAISE(ABORT, 'canon_agnostic_works: a classified row carries the measures that produced it');
     END;
 
 -- 3. `density` is a share, so it is a share: not negative, not above one. The
@@ -123,7 +115,7 @@ CREATE TRIGGER canon_class_density_range_insert
     FOR EACH ROW
     WHEN NEW.density IS NOT NULL AND (NEW.density < 0.0 OR NEW.density > 1.0)
     BEGIN
-        SELECT RAISE(ABORT, 'canon_agnostic_works.density must be within 0.0..=1.0');
+    SELECT RAISE(ABORT, 'canon_agnostic_works.density must be within 0.0..=1.0');
     END;
 
 CREATE TRIGGER canon_class_density_range_update
@@ -131,7 +123,7 @@ CREATE TRIGGER canon_class_density_range_update
     FOR EACH ROW
     WHEN NEW.density IS NOT NULL AND (NEW.density < 0.0 OR NEW.density > 1.0)
     BEGIN
-        SELECT RAISE(ABORT, 'canon_agnostic_works.density must be within 0.0..=1.0');
+    SELECT RAISE(ABORT, 'canon_agnostic_works.density must be within 0.0..=1.0');
     END;
 
 -- 4. The counts must be counts. A negative name count or word count is not a
@@ -146,8 +138,7 @@ CREATE TRIGGER canon_class_counts_sane_insert
      AND (NEW.unexplained_names < 0 OR NEW.word_count <= 0
           OR NEW.unexplained_names > NEW.word_count)
     BEGIN
-        SELECT RAISE(ABORT,
-            'canon_agnostic_works: unexplained_names must be within 0..word_count');
+    SELECT RAISE(ABORT, 'canon_agnostic_works: unexplained_names must be within 0..word_count');
     END;
 
 CREATE TRIGGER canon_class_counts_sane_update
@@ -157,6 +148,5 @@ CREATE TRIGGER canon_class_counts_sane_update
      AND (NEW.unexplained_names < 0 OR NEW.word_count <= 0
           OR NEW.unexplained_names > NEW.word_count)
     BEGIN
-        SELECT RAISE(ABORT,
-            'canon_agnostic_works: unexplained_names must be within 0..word_count');
+    SELECT RAISE(ABORT, 'canon_agnostic_works: unexplained_names must be within 0..word_count');
     END;
