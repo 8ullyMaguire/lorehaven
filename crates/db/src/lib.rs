@@ -56,6 +56,7 @@ pub mod monetization;
 pub mod narration;
 pub mod notifications;
 pub mod outbox;
+pub mod payout_store;
 pub mod permission;
 pub mod positivity;
 pub mod preservation;
