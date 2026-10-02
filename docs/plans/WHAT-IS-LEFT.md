@@ -55,10 +55,13 @@ to prevent.
 
 ## Also outstanding
 
-- 31 rows in the M45 tracker still marked `planned`.
-- `docs/plans/100-ideas-audit.md` needs its gap F section marked CLOSED.
-- The §0.3 "three TEXT/uuid columns" note should become six now: `rec_strategy.rs` and
-  `discovery.rs` added two, `preread_reports.work_id` is the sixth.
+- 31 rows in the M45 tracker still marked `planned`. This is the largest remaining pool of
+  named work in the repo.
+- The §0.3 "three TEXT/uuid columns" note should become six: `rec_strategy.rs` and
+  `discovery.rs` added two, `preread_reports.work_id` is the sixth site. Each needs its own
+  dialect arm and its own `work_uuid()` helper.
+- `docs/plans/100-ideas-audit.md`'s gap F section is already marked CLOSED — the note
+  saying otherwise was stale and has been removed.
 
 ## Decisions worth keeping
 
