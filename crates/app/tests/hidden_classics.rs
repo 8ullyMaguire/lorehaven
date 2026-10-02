@@ -161,7 +161,10 @@ async fn a_completion_of_something_that_is_not_a_work_is_not_a_completion() {
     for n in 0..30 {
         let who = account(
             &f.tdb,
-            &format!("hc_st-decoy-{n}-{}@example.com", uuid::Uuid::new_v4().simple()),
+            &format!(
+                "hc_st-decoy-{n}-{}@example.com",
+                uuid::Uuid::new_v4().simple()
+            ),
         )
         .await;
         exec_with(
