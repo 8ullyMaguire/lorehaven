@@ -1448,6 +1448,39 @@ const ROUTE_TABLE: &[RouteEntry] = &[
     },
     RouteEntry {
         file: "discovery.rs",
+        handler: "get_blind_date",
+        method: "GET",
+        path: "/discovery/blind-date",
+        audience: Audience::Authenticated,
+    },
+    // ------------------------------------------------------------------
+    // Pre-read reports — author-only. §23.7: a report is provider-specific and
+    // the author is the only person who may see which provider produced it, or
+    // withdraw consent from one without discarding another's output.
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "preread.rs",
+        handler: "get_preread",
+        method: "GET",
+        path: "/works/{work_id}/preread",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "preread.rs",
+        handler: "get_preread_providers",
+        method: "GET",
+        path: "/works/{work_id}/preread/providers",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "preread.rs",
+        handler: "forget_preread_provider",
+        method: "DELETE",
+        path: "/works/{work_id}/preread/{provider}",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "discovery.rs",
         handler: "set_operator_affinity",
         method: "POST",
         path: "/operator/affinities",
