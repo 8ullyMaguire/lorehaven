@@ -162,6 +162,41 @@ reuse explicitly and §50.2 writes the canon-blind clauses from scratch.
 
 Counts after this commit: **10 `specified`, 33 `planned`**.
 
+### Phase 2 build — migration 0106 and the shared reason vocabulary
+
+Landed for M45-24 and M45-31: migration `0106_reasons_highlights_canon` on both
+dialects, and `crates/domain/src/reasons.rs`.
+
+**The reason vocabulary is one set, not two.** §49.5's tasting reasons and §50.1's
+kudos reasons describe the same reader statement about the same dimension, so the
+enum lives in `domain` and both surfaces import it. Declared separately they would
+compile, pass their own tests, and produce a profile where `tasting.prose` and
+`kudos.prose` never meet.
+
+The set is the **union**, and `worldbuilding` is the member that exists only for
+kudos: a 300-word passage shows no world, so offering the reason on a tasting sample
+invites a judgement the reader could not have made. `Reason::TASTING` is the subset
+a sample may be rated with; `Reason::ALL` is everything.
+
+**"Fifty highlights count once" lives in `HighlightSignal::gravity_weight`**, counting
+*readers* and saturating at 1.0 — not in a `COUNT(*)` in SQL, because a `COUNT(*)`
+is exactly how the next query that wants a number reintroduces the clause.
+Mutation-checked: scaling on `highlights` fails exactly one test and leaves the
+other 14 green.
+
+**The parity test's parser is line-scoped.** `CREATE INDEX` needs `" ON "` and `(`
+on the *same physical line* (`head.find(" ON ")` over one line), so a wrapped index
+contributes nothing to the dialect being checked. I wrapped them for readability
+and then reformatted the **wrong dialect** twice. One statement per physical line in
+a migration; the error names the *other* dialect from the one you edited. Dropped
+`IF NOT EXISTS` from `CREATE INDEX` too — the parser reads the index name as `NOT`,
+because the name is `split_whitespace().last()` after ` ON `.
+
+`work_highlights.account_id` is `rekey_account` for a specific reason: §50.1's
+"counts once" is per *reader*, so `rekey_text` would silently turn a
+distinct-reader count into a highlight count — the influence purchase §33.2 forbids,
+with nothing failing.
+
 ## Standing decisions made here
 
 Recorded because `goal.md` asks for genuinely open decisions to be written down
