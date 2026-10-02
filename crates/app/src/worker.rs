@@ -345,6 +345,38 @@ impl Worker {
         )
         .await?;
         tracing::debug!(%recheck, "queued the daily preservation recheck");
+
+        // §20.3: recalculate author payouts for the last closed week.
+        //
+        // **Enqueued, keyed on the closed week, for the same two reasons as the
+        // recheck above.** This pass runs every 30 cycles, so an unkeyed payout
+        // pass would pay the same week dozens of times -- and unlike the recheck,
+        // double-paying is visible to every author in the ledger. The key is
+        // `payout:{monday}` where monday is the window's exclusive upper bound, so
+        // "has this week been paid?" is a row in `jobs` rather than a log line.
+        //
+        // The week, not the date: the window is 30 days wide, so a date-keyed job
+        // would enqueue seven times per window and pay all seven against the same
+        // 30 days. The store's per-window idempotency key would swallow the
+        // duplicates -- but then "one row per day" would read as "paid every day"
+        // when in fact it paid once and did nothing six times.
+        // Only the upper bound is needed: it identifies the week, and the handler
+        // recomputes the same closed window from the clock rather than trusting a
+        // date embedded in a job row to still mean this week.
+        let (_, payout_to) = crate::payout_recalc::closed_window(now);
+        let payout_key = format!("payout:{payout_to}");
+        let payout = jobs::enqueue(
+            state.db(),
+            JobKind::PayoutRecalc,
+            "{}",
+            Some(&payout_key),
+            None,
+            0,
+            &RetryPolicy::default(),
+        )
+        .await?;
+        tracing::debug!(%payout, key = %payout_key, "queued the weekly payout recalculation");
+
         Ok(())
     }
 
@@ -585,6 +617,15 @@ impl Worker {
             }
             JobKind::PreservationRecheck => {
                 crate::preservation_recheck::handle_recheck(state).await
+            }
+            JobKind::PayoutRecalc => {
+                // Transient, like `RetentionSettle`: the store's idempotency key
+                // includes the window, so a retried pass resumes and the works
+                // already paid are no-ops. Fatal would strand a week's earnings
+                // on the first database hiccup.
+                crate::payout_recalc::handle_recalc(state)
+                    .await
+                    .map_err(|error| HandlerError::Transient(error.to_string()))
             }
             JobKind::RetentionSettle => {
                 // A settlement failure is transient, not fatal: the pass is

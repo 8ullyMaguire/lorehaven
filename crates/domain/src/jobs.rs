@@ -179,6 +179,22 @@ job_kinds! {
     #[doc = "An interactive class would let a hundred re-verifications delay the"]
     #[doc = "import a reader just submitted."]
     PreservationRecheck => "preservation_recheck",
+    /// Recalculates author payouts for a closed week (spec §20.3).
+    ///
+    /// **Bulk, and for a fifth reason.** The other four are bulk because of
+    /// outbound network work, instance policy, or an unbounded third-party
+    /// response time. This one is bulk because it walks *every work with
+    /// earnings* and computes six counts from five tables for each: on a mature
+    /// instance that is the single longest read in the database, and it competes
+    /// with nothing a reader is waiting for. A reader's import must not queue
+    /// behind an economics pass over the whole catalogue.
+    ///
+    /// **Keyed on the ISO week, not run per pass.** The same reason
+    /// `PreservationRecheck` keys on the date: the maintenance pass runs every
+    /// 30 cycles, so an unkeyed recalculation would pay the same week up to
+    /// dozens of times. It is keyed rather than guarded because the key is also
+    /// the audit answer to "has this week been paid yet?" -- a row in `jobs`.
+    PayoutRecalc => "payout_recalc",
     /// Settles retention proposals whose ballot window has closed (plan E.2).
     ///
     /// **Bulk**, and for a different reason than `PreservationRecheck`. That one
@@ -241,6 +257,9 @@ impl JobKind {
             // See the variant's doc comment: bulk so a governance pass cannot
             // delay a reader's import.
             Self::RetentionSettle => ResourceClass::Bulk,
+            // Bulk so a whole-catalogue economics pass cannot delay a reader's
+            // import. See the variant's doc comment.
+            Self::PayoutRecalc => ResourceClass::Bulk,
             Self::BodyFetch => ResourceClass::Bulk,
         }
     }
@@ -270,6 +289,9 @@ impl JobKind {
             Self::PreservationRecheck => 11,
             // 12, on the same reasoning: appended, never renumbered.
             Self::RetentionSettle => 12,
+            // 13, on the same reasoning: appended, never renumbered. Appending is
+            // what makes adding a job kind a two-line change instead of a migration.
+            Self::PayoutRecalc => 13,
             // APPENDED, never inserted. These indices are persisted in `jobs`
             // rows, so inserting a kind in the middle silently re-labels every
             // queued job of a later kind. See `db-migration-integrity`.
