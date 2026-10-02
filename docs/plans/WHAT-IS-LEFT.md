@@ -17,6 +17,8 @@ Updated at the start of each turn. Last commit: `51b0295` (gap C step 4).
 | C | Per-dimension pre-read report | `crates/domain/src/preread.rs` | 8 |
 | C | OpenAI-compatible adapter | `crates/app/src/ai/` | 18 |
 | C | Report persistence (migration 0111) | `crates/db/src/preread_store.rs` | 12 |
+| C | Author-only pre-read route (§32.6) | `crates/app/src/routes/preread.rs` | 10 |
+| C | Author-only panel, editor-only | `frontend/src/lib/components/PreReadPanel.svelte` | 6 |
 
 Plus, as incidental fixes found by the above: migration 0110 FK divergence,
 `hit_rate.rs` migrating the shared postgres database, a `kind_index` collision,
@@ -25,28 +27,31 @@ reported an unpriced local-model quote as priced.
 
 ## Remaining ranked gaps (from docs/plans/100-ideas-audit.md)
 
-All six of the audit's "real gaps" are now closed. Gaps A, B, D, E, F, G are
-complete, and **gap C is complete except for one route** — see below.
+All six of the audit's "real gaps" are now closed — A, B, C, D, E, F, G. Gap C took the
+longest and is described below.
 
-### Gap C step 5 — the author-facing route (the last piece)
+## Gap C is closed
 
-§32.6: a pre-read report is shown to the *author*, never on the public work page, and
-never as a composite number. `PreReadReport` has no `score()` and the `preread_reports`
-table has no `score` column, so a composite would require adding one — a visible change
-rather than an accidental one. A test asserts the column does not exist on either engine.
+All six steps are done and tested on both engines. What it consists of:
 
-What is left:
+| Step | What |
+|---|---|
+| 1 | `AiProvider` trait, `AiAbstain`, `CostQuote`, `AiConsent` |
+| 2 | `PreReadReport` — per-dimension, with the abstain path |
+| 3 | The OpenAI-compatible adapter (also covers Ollama) |
+| 4 | Persistence, migration 0111 |
+| 5 | Three author-only routes |
+| 6 | The editor panel — **a component, not a route** |
 
-1. `GET /works/:id/preread` in `crates/app/src/routes/` — author-only. A reader gets 404
-   or 403, not an empty report, because a 404 that meant "no report" and a 404 that meant
-   "not yours" are the same response and would leak the existence of the report.
-2. The per-dimension breakdown, plus the `missing` dimensions with their reasons. A report
-   where everything came back and one where half the provider's output was unparseable look
-   identical without the `missing` list, and the difference is what tells an author whether
-   to trust the score.
-3. A `DELETE /works/:id/preread/:provider` withdrawal route, calling `forget_provider` —
-   per provider, not per work, per §23.7.
-4. Frontend: an author-only panel on the *editor* route. Never the public work page.
+The step 6 decision worth keeping: there is no `/preread` path and no route id, so there
+is nothing to link to or share. §32.6 says the report is never on the public work page, and
+the cheapest way to guarantee that is for the surface not to exist as an address. The panel
+renders inside `WorkEditor`, which already branches on ownership, and a 404 makes it render
+nothing at all rather than an error message — a "not found" on somebody else's work would
+confirm the draft exists, which is exactly what the server's indistinguishable 404 exists
+to prevent.
+
+**All six gaps (A–G) are now closed.**
 
 ## Also outstanding
 
