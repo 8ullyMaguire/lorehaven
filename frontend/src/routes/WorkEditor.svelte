@@ -42,6 +42,7 @@
   import { handleLinkClick } from '../lib/router';
   import Button from '../lib/components/Button.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
+  import PreReadPanel from '../lib/components/PreReadPanel.svelte';
   import Select from '../lib/components/Select.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
   import TextField from '../lib/components/TextField.svelte';
@@ -411,6 +412,16 @@
     <span>{describeRating(work.rating)}</span>
     <span>your role: {describeRole(work.role)}</span>
   </p>
+
+  <!--
+    §32.6: a pre-read assessment belongs to the author, on the editor. There is deliberately
+    no equivalent block in WorkPage.svelte, and the panel itself renders nothing on a 404,
+    so a reader who reaches this route without owning the work gets no report and no
+    message about one.
+  -->
+  {#if PreReadPanel}
+    <PreReadPanel workId={work.id} />
+  {/if}
 
   {#if work.lifecycle === 'published'}
     {@const publishedHref = `/works/${work.id}`}
