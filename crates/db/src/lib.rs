@@ -75,6 +75,7 @@ pub mod roadmap;
 pub mod roles;
 pub mod search;
 pub mod secrets;
+pub mod series_recs;
 pub mod sessions;
 pub mod settings;
 pub mod spoilers;
