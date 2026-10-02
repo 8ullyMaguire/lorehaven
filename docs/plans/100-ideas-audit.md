@@ -179,3 +179,53 @@ for any of the six gaps:
 
 Each follows the standing workflow: spec subsection first, then plan, then
 implementation, then the two-engine gate.
+
+
+## G. The author payout formula is entirely unimplemented — and untracked
+
+Found while investigating gap E, and it is larger than anything on the 100-item
+list. §20.3 specifies **two** multipliers in full, as code blocks:
+
+```text
+quality_multiplier = 1.0 + 0.3×completion + 0.2×feedback + 0.2×reread + 0.1×bookmark_rate
+demand_multiplier  = 1.0 + 0.25×admin_taste + 0.15×wishlist + 0.10×search
+```
+
+grep across `crates/**/*.rs` for `quality_multiplier`, `demand_multiplier`,
+`completion_rate`, `reread_bonus`, `positive_feedback_bonus`: **0 files, all five.**
+
+`credit_entries` exists (0017) with signed `amount_bp` and the `earned|granted|
+purchased|held` buckets, and `economy.rs` has `post_transaction`, `balances`,
+`reserve_hold`, `release_hold`, `capture_hold` — so the ledger is real and the
+*payout* is the missing half. Nothing derives one from reader behaviour.
+
+Two things make this worse than an ordinary gap:
+
+- **It is absent from `requirements.csv`.** No M-row covers it, so a tracker-based
+  audit — which is what I recommended for tiers 3–5 — would never surface it. The
+  tracker is not a substitute for reading the spec; it is a supplement.
+- **Item #49 on the list ("tune the author quality multiplier") reads as a config
+  knob.** It is not: there is nothing to tune. The list assumes the formula ships
+  and only the weights are open, which is the opposite of the state.
+
+This also settles where gap E pays. §20.3's `bookmark_rate_bonus` is *"if >15% of
+readers bookmark"* — a **ratio of readers**, not a bookmark-to-hit ratio. So the
+list's item #34 and §20.3's bonus are different metrics with similar names, and
+building #34 without noticing would produce a number nothing consumes.
+
+**Recommendation: promote this above all six lettered gaps.** A credit economy
+whose central formula does not exist is a bigger hole than a missing recommendation
+engine, and it gates item #49, #50 (Pool B by quality) and the §20.3 payouts the
+spec's own economy narrative rests on.
+
+## What this says about the audit method
+
+I recommended auditing tiers 3–5 from `requirements.csv` rather than by grep, on
+the grounds that the tracker carries per-row evidence a grep cannot improve on.
+**That recommendation was wrong**, and this is the counterexample: the tracker's
+gap and the spec's gap are different sets, and the most expensive omission was in
+neither — it was in the spec alone, invisible to both methods.
+
+Revised rule: `requirements.csv` tells you what is *tracked*; only reading the spec
+tells you what *exists*. Cross-check both, and treat a spec formula with no
+tracker row as the highest-risk category of all.
