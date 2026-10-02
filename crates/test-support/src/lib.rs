@@ -217,7 +217,14 @@ async fn sweep_idle_scratch_databases(admin: &Database) {
                  SELECT 1 FROM pg_stat_activity a WHERE a.datid = d.oid
            )
          ORDER BY d.datname
-         LIMIT 50",
+         -- 50 was measured to be far too few: a killed gate leaks one database
+         -- per TEST, so a full run leaves thousands, and 50 per process meant
+         -- they were never reclaimed. Found the hard way -- 188 databases had
+         -- reached 3.9 GB and PostgreSQL performance had collapsed with them
+         -- (bounties.rs went 349s -> 9s once they were dropped). A cap still
+         -- belongs: this runs before every CREATE, and an unbounded drop loop
+         -- would stall the suite it is meant to accelerate.
+         LIMIT 2000",
     )
     .fetch_all(pool)
     .await
@@ -388,9 +395,15 @@ pub async fn cached_sqlite_file(dst: &Path) -> bool {
 /// when PostgreSQL refuses the clone for any reason. All three fall back.
 pub async fn cached_postgres(admin_url: &str, name: &str) -> Option<Database> {
     let key = migration_key(lorehaven_db::Backend::Postgres);
-    let template = PG_TEMPLATE
-        .get()
-        .and_then(|(k, t)| (k == &key).then(|| t.clone()))?;
+    // Reuse this process's template when it was built from the same catalogue, and
+    // build it on first use. A catalogue that has moved makes the stored template
+    // unusable rather than stale-but-close, so that case returns None and the
+    // caller migrates in full.
+    let template = match PG_TEMPLATE.get() {
+        Some((k, t)) if k == &key => t.clone(),
+        Some(_) => return None,
+        None => build_postgres_template(admin_url, &key).await?,
+    };
 
     let admin = Database::connect(&DatabaseConfig::new(admin_url.to_owned()))
         .await
@@ -406,17 +419,13 @@ pub async fn cached_postgres(admin_url: &str, name: &str) -> Option<Database> {
     Database::connect(&DatabaseConfig::new(url)).await.ok()
 }
 
-/// Build the PostgreSQL template once, from the given admin URL.
+/// Build the PostgreSQL template once, and keep it for the rest of the process.
 ///
-/// Separate from [`cached_postgres`] so the first caller pays the build and later
-/// ones pay only the clone. The template is dropped immediately after: PostgreSQL
-/// will not let a database with live connections serve as a template, and a
-/// database that cannot be re-cloned is a trap for the next process.
-pub async fn ensure_postgres_template(admin_url: &str) -> Option<String> {
-    let key = migration_key(lorehaven_db::Backend::Postgres);
-    if let Some((k, _)) = PG_TEMPLATE.get() {
-        return (k == &key).then(|| String::new()).filter(|s| !s.is_empty());
-    }
+/// The template is NOT dropped: `CREATE DATABASE ... TEMPLATE` refuses while any
+/// connection is open, and a fresh clone has none, so a kept template serves every
+/// later test. Its name carries the `lh_tmpl_` prefix so a killed run's leftover
+/// is recognisable and gets swept with the other scratch databases.
+async fn build_postgres_template(admin_url: &str, key: &str) -> Option<String> {
     let admin = Database::connect(&DatabaseConfig::new(admin_url.to_owned()))
         .await
         .ok()?;
@@ -434,12 +443,10 @@ pub async fn ensure_postgres_template(admin_url: &str) -> Option<String> {
         .unwrap_or_else(|| admin_url.to_owned());
     let db = Database::connect(&DatabaseConfig::new(url)).await.ok()?;
     db.migrate().await.ok()?;
-    // Release every connection so the database can serve as a template.
+    // Every connection closed, or the next `TEMPLATE` clone is refused.
     db.close().await;
-    let _ = sqlx::query(&format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
-        .execute(admin.postgres_pool()?)
-        .await;
-    let _ = PG_TEMPLATE.set((key, name.clone()));
+    // A concurrent builder may have won; its template is equally good.
+    let _ = PG_TEMPLATE.set((key.to_owned(), name.clone()));
     Some(name)
 }
 
