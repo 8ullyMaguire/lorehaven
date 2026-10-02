@@ -53,6 +53,8 @@ fn install_diagnostic_reporter() {
 pub struct TestDb {
     db: Database,
     applied: Vec<String>,
+    /// `applied` + `already_applied`: the full set. See [`Self::applied_migrations`].
+    applied_all: Vec<String>,
     pg_admin: Option<Database>,
     pg_name: Option<String>,
 }
@@ -525,8 +527,18 @@ impl TestDb {
                 // against an already-migrated database, instead of 107 migrations
                 // replayed per test.
                 if let Some(db) = cached_postgres(&admin_url, &name).await {
+                    // The clone is already fully migrated, so `migrate()` has nothing to do
+                    // and reports everything under `already_applied`. That call is also what
+                    // makes this path honest: if the cache were stale, `applied` would be
+                    // non-empty and the assert further down would catch it.
+                    let report = db.migrate().await.expect("migrate the clone");
                     return Self {
-                        applied: Vec::new(),
+                        applied: report.applied.clone(),
+                        applied_all: report
+                            .applied
+                            .into_iter()
+                            .chain(report.already_applied)
+                            .collect(),
                         db,
                         pg_admin: Some(admin),
                         pg_name: Some(name),
@@ -538,6 +550,7 @@ impl TestDb {
                     .expect("connect to the scratch test database");
                 let report = db.migrate().await.expect("migrate");
                 Self {
+                    applied_all: full_migration_set(&report),
                     applied: report.applied,
                     db,
                     pg_admin: Some(admin),
@@ -575,6 +588,7 @@ impl TestDb {
                     );
                 }
                 Self {
+                    applied_all: full_migration_set(&report),
                     applied: report.applied,
                     db,
                     pg_admin: None,
@@ -584,9 +598,36 @@ impl TestDb {
         }
     }
 
-    /// The migrations this fresh database had applied at connect time —
-    /// everything, on both backends, since the database is brand new.
-    pub fn applied_migrations(&self) -> &[String] {
+    /// The migrations recorded as applied in this database.
+    ///
+    /// This used to return `self.applied`, which was `report.applied` from the
+    /// `migrate()` call during `connect`. That was "everything" only while every database
+    /// was built from scratch, and stopped being true when the template-database cache
+    /// landed: both clone paths (`CREATE DATABASE ... TEMPLATE` on PostgreSQL, a copied
+    /// file on SQLite) construct a `TestDb` with `applied: Vec::new()` because there is no
+    /// pending work, so the method returned an empty list for a fully-migrated database.
+    ///
+    /// The failure was invisible in aggregate -- eight suites assert a specific migration is
+    /// present, and they all failed together with a message that reads like a broken
+    /// migration rather than a broken accessor. `applied_migrations` now reads the ledger.
+    ///
+    /// Every migration recorded as applied to this database, whether this run applied it or
+    /// a previous one did.
+    ///
+    /// Sourced from the store field rather than a database query: lorehaven does not use
+    /// sqlx's `_sqlx_migrations` ledger (it has its own migration runner, and the table does
+    /// not exist), so `MigrationReport::already_applied` is the authoritative record and is
+    /// captured during `connect`.
+    pub fn applied_migrations(&self) -> Vec<String> {
+        self.applied_all.clone()
+    }
+
+    /// The migrations `migrate()` applied during `connect_with_dir` — *this call only*.
+    ///
+    /// Empty whenever the clone path was taken, which is most runs once the cache is warm.
+    /// Prefer [`Self::applied_migrations`] unless the question really is "did this connect
+    /// have work to do", which is how the cache's own correctness assertion uses it.
+    pub fn migrations_applied_at_connect(&self) -> &[String] {
         &self.applied
     }
 
@@ -1176,9 +1217,52 @@ pub async fn sign_in_as(client: &mut TestClient, db: &TestDb, email: &str, handl
         .to_owned()
 }
 
+/// Every migration recorded against a freshly migrated database.
+///
+/// `MigrationReport` splits what this run did from what was already there, and callers of
+/// [`TestDb::applied_migrations`] mean the union. `already_applied` being empty is normal on
+/// the non-clone path (a brand-new database has had nothing applied), and non-empty on the
+/// clone paths.
+fn full_migration_set(report: &lorehaven_db::migrate::MigrationReport) -> Vec<String> {
+    let mut all = report.applied.clone();
+    all.extend(report.already_applied.iter().cloned());
+    all
+}
+
 #[cfg(test)]
 mod tests {
     use super::scratch_dir;
+
+    /// A `TestDb` reports every migration applied to it, not only the ones this connect
+    /// performed.
+    ///
+    /// The defect this pins: `applied_migrations()` returned `report.applied`, which is
+    /// "what this run did". That was equal to the full set only while every database was
+    /// built from scratch, and stopped being true when the template-database cache landed —
+    /// both clone paths construct a `TestDb` with an empty `applied`, so a fully-migrated
+    /// database reported zero migrations.
+    ///
+    /// Eight suites assert a specific migration is present, and they all failed together
+    /// with "taxonomy migration must apply: []" — a message that reads like a broken
+    /// migration, so the failure was investigated in the wrong place for a while.
+    ///
+    /// The test asserts a migration known to exist and one known to be recent, so it fails
+    /// both when the accessor returns nothing at all and when it returns a truncated set.
+    #[tokio::test]
+    async fn applied_migrations_reports_the_whole_ledger() {
+        let dir = scratch_dir("ts_applied_ledger");
+        let tdb = super::TestDb::connect_with_dir("ts-applied-ledger", &dir).await;
+        let applied = tdb.applied_migrations();
+        assert!(
+            applied.iter().any(|m| m.contains("0011")),
+            "an early migration must be in the reported set: {applied:?}"
+        );
+        assert!(
+            !applied.is_empty(),
+            "a migrated database reports an empty migration set"
+        );
+        tdb.cleanup().await;
+    }
 
     /// Two calls with the same tag must be two directories.
     ///
