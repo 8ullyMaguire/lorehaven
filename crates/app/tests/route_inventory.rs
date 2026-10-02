@@ -512,6 +512,27 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/works/{id}/kudos",
         audience: Audience::Scoped,
     },
+    // §50.1's highlight. `Authenticated`, NOT `Scoped`, and the distinction is the
+    // point rather than a detail:
+    //
+    //   * `Scoped` means `RequireActorScoped`, which exists for §23.2's bot actions
+    //     -- a token that carries an explicit scope set and an acting pseud. It
+    //     answers a token lacking the scope with 403 and never reveals the resource.
+    //   * a highlight is a signed-in reader's own note about a span. There is no
+    //     token scope that ought to authorise it, and giving one would let a bot
+    //     fabricate reader highlights -- which is exactly the influence-purchase
+    //     §50.5 rules out.
+    //
+    // So the handler takes `RequireSession`, then runs `reading_decision` to decide
+    // this reader's access to THIS work, and a highlight counts once toward the
+    // work: a stranger cannot buy gravity with quote volume (§50.3).
+    RouteEntry {
+        file: "works.rs",
+        handler: "create_highlight",
+        method: "POST",
+        path: "/works/{id}/highlights",
+        audience: Audience::Authenticated,
+    },
     // ------------------------------------------------------------------
     // Reading progress, ratings, reviews, history, notes — session-scoped
     // ------------------------------------------------------------------
