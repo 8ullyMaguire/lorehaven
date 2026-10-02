@@ -139,7 +139,16 @@ CREATE TABLE IF NOT EXISTS taste_leakage_reviews (
     ease          TEXT NOT NULL CHECK (ease IN ('plain', 'derived', 'measured')),
     disposition   TEXT NOT NULL DEFAULT 'keep'
                     CHECK (disposition IN ('keep', 'coarsen', 'remove')),
-    reviewed_by   TEXT NOT NULL,
+    -- FK present on both dialects. Found by `the_two_dialects_declare_the_same_
+    -- columns_and_indexes`: PostgreSQL declared this reference and SQLite did not,
+    -- so a review naming a pseud that does not exist was insertable on one engine
+    -- and impossible on the other -- and the comment above ("a review with no
+    -- reviewer is nobody's decision") was only half true on SQLite, where the
+    -- reviewer column accepted any text at all.
+    --
+    -- ON DELETE RESTRICT to match PostgreSQL: deleting an operator must not
+    -- silently delete their review history, which is §52.1's audit trail.
+    reviewed_by   TEXT NOT NULL REFERENCES pseuds (id) ON DELETE RESTRICT,
     reviewed_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_taste_leakage_reviews_disposition
