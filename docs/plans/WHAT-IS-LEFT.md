@@ -36,13 +36,22 @@ remaining Tier 2 rows that were never gaps (EXISTS) need nothing.
 - The §0.3 "three TEXT/uuid columns" note should become four now
   (`work_view_log.work_id` in `rec_strategy.rs` is the fourth site).
 
+## Status as of the last commit (`c0b41b3`)
+
+**Closed and committed:** F (`dc0a8e9`), B (`8d5040b`), C steps 1-2 (`c8b1e72`).
+Both mutation harnesses fully red — F 9/9, B 10/10. clippy clean, fmt clean.
+Full suite gate running on both engines.
+
 ## Immediate next steps
 
-1. Both mutation gates green (F and B) — in flight.
-2. clippy + fmt, commit F, B and `crates/domain/src/ai.rs` together.
-3. Gap C step 2: `crates/domain/src/preread.rs` — aggregate per-dimension verdicts into a
-   per-work report, with the abstain path. Still pure domain.
-4. Then the adapters in `crates/app/src/ai/`, which need a live provider to verify.
+1. Confirm the full-suite gate on SQLite and PostgreSQL (in flight).
+2. **Gap C step 3: the adapters in `crates/app/src/ai/`.** Ollama and
+   OpenAI-compatible, per §23.7. These are the one part of gap C that *cannot* be
+   verified without a live provider — so either run Ollama locally and verify against
+   it, or stop here and leave step 3 for when a provider exists. That is a judgement call
+   about how much scaffolding to add blind.
+3. Persist pre-read reports (needs a migration for `preread_reports`).
+4. Author-facing route to display a report. §32.6: never on the public work page.
 
 `crates/domain/src/ai.rs` is **done**: `AiTask`, `CostQuote`, `PreReadVerdict` (with
 range validation), `AiAbstain` (retryable vs terminal), the `AiProvider` trait, and
@@ -54,6 +63,12 @@ be awaited in a spawned worker task, which is where every caller belongs.
 Gap C's design is settled in `docs/plans/gap-c-ai-pre-read-scoring.md` — six decisions
 recorded, and the two spec prohibitions (§32.6 no public composite scores, §0.3 no
 payment moving a ranking signal) that shape all of them.
+
+**Re-read §20.10.4 before writing step 3.** The spec already has a composite
+`quality_score`, and the audit's framing of gap C as "the cold-start answer" is exactly
+right — but that composite is a *payout* signal over readers who already exist, which is
+precisely where cold start has nothing to work with. A pre-read score may be the honest
+subset of an existing idea rather than a new concept.
 
 ## Lessons from the mutation gates (cost real time, keep these)
 
