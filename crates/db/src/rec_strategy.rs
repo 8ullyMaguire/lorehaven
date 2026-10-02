@@ -534,6 +534,158 @@ pub fn bandit_strategy() -> RecStrategyFn {
     })
 }
 
+/// Hidden-classics strategy: works whose quality is high relative to their reach.
+///
+/// Closes gap F on the ideas list (#32 "hidden classics" and #33 "quality-gated
+/// under-read gems"), which the audit argued are one gap rather than two: both are
+/// "the ranking engines over-reward the already-popular", and both are answered by
+/// ranking quality *relative to* reach rather than absolutely.
+///
+/// **The score is a ratio, and that is the whole design.** Every sibling strategy
+/// ranks by an absolute quantity — bookmark counts, graph degree, curation. On a
+/// catalogue where attention is already uneven an absolute score cannot tell a work
+/// that is *good* from one that is *seen*: both have high numbers and the numbers mean
+/// different things. So this one ranks by completion quality per unit of reach:
+///
+///     score = completion_rate / (1 + log10(1 + distinct_readers))
+///
+/// Four decisions, each of which produces a defensible-looking ranking that is quietly
+/// wrong.
+///
+/// 1. **Quality is completions over DISTINCT readers.** A completion costs a reader's
+///    time, so it is the only numerator here that cannot be inflated by a refresh
+///    (§53.6's argument). `work_view_log` has no uniqueness on the reader, so
+///    `COUNT(*)` would count a chapter opened four times four times and make a work
+///    look better-read than it is. Views appear in the denominator precisely because
+///    they are cheap — they measure reach, which is the thing being divided out.
+///
+/// 2. **The denominator is log-scaled, so reach costs less and less.** Linear division
+///    would rank a moderately popular work below a mildly popular one by a large
+///    margin, so the strategy would return only works nobody has seen — a random
+///    assortment rather than a ranking. The log means each order of magnitude of reach
+///    costs the same, which is what "hidden but good" means.
+///
+/// 3. **Works below §20.3's 10-reader minimum are excluded, not divided.** A completion
+///    rate over two readers is not a rate, and a two-of-two work would score a perfect
+///    1.0 and outrank everything — the failure that makes such a strategy look broken
+///    rather than wrong. §20.3 refuses to compute a multiplier below the same floor.
+///
+/// 4. **Automated views are not reach.** `work_view_log.is_automated` marks a crawler,
+///    and counting one would inflate the denominator of exactly the works least likely
+///    to have been read by a person, pushing hidden classics further down.
+///
+/// The SQL returns the two raw terms and the score is composed in Rust, because SQLite
+/// has neither `LOG10` nor `LN` — both require SQLITE_ENABLE_MATH_FUNCTIONS, which this
+/// build does not have. Spelling a log in portable SQL would mean a `CASE` ladder over
+/// integer ranges, which is a worse version of one `f64::log10` call.
+pub fn hidden_classics_strategy() -> RecStrategyFn {
+    Arc::new(|db, ctx| {
+        let db = db.clone();
+        let account_id = ctx.account_id.clone();
+        let cap = ctx.cap;
+        Box::pin(async move {
+            // On PostgreSQL, `work_view_log.work_id` is TEXT where `works.id` and
+            // `reading_status.subject_id` are uuid -- the fourth appearance of this
+            // split in this codebase (see `payout_store.rs` and `series_recs.rs`).
+            //
+            // Two fragments, not one: the JOIN needs `::text` on the uuid side, and the
+            // SELECT needs it on the way out so the row decodes as `String` (sqlx will
+            // not coerce a uuid column into one). The sibling strategies above need
+            // neither, because they select `subject_id` out of TEXT columns.
+            let (view_join, id_cast) = match db.backend() {
+                crate::Backend::Postgres => ("v.work_id = w.id::text", "::text"),
+                crate::Backend::Sqlite => ("v.work_id = w.id", ""),
+            };
+            // Named format arguments throughout. An earlier version used positional
+            // `{}` and I got the order wrong three times in one function, each time
+            // producing a syntactically valid query with the wrong value in the wrong
+            // hole -- which reads as a mysterious SQL syntax error rather than a
+            // mistyped argument.
+            let sql = format!(
+                r#"
+                WITH engagement AS (
+                    SELECT w.id AS work_id,
+                           (SELECT COUNT(DISTINCT v.viewer_hash)
+                            FROM work_view_log v
+                            WHERE {view_join} AND v.is_automated = 0) AS readers,
+                           (SELECT COUNT(*)
+                            FROM reading_status rs
+                            WHERE rs.subject_type = 'work'
+                              AND rs.subject_id = w.id
+                              AND rs.status = 'finished') AS completions
+                    FROM works w
+                    WHERE w.lifecycle = 'published'
+                      AND w.id NOT IN (
+                          SELECT subject_id FROM bookmarks
+                          WHERE account_id = '{account}' AND subject_type = 'work'
+                      )
+                )
+                SELECT work_id{id_cast} AS work_id, readers, completions
+                FROM engagement
+                WHERE readers >= {min_readers}
+                  AND completions > 0
+                ORDER BY completions DESC, work_id
+                LIMIT {fetch_cap}
+                "#,
+                account = account_id,
+                view_join = view_join,
+                id_cast = id_cast,
+                min_readers = MIN_READERS_FOR_A_RATE,
+                // Wider than `cap` on purpose: the log ranking happens in Rust, so the
+                // SQL cannot know which rows win. Truncating to the most-completed
+                // works here and then ranking them would re-introduce the absolute
+                // count bias this strategy exists to remove.
+                fetch_cap = cap.saturating_mul(4),
+            );
+            let rows = query_int_triples(&db, &sql).await?;
+            let mut scored: Vec<(String, f64)> = rows
+                .into_iter()
+                .map(|(id, readers, completions)| {
+                    let rate = completions as f64 / readers as f64;
+                    (id, rate / (1.0 + (1.0 + readers as f64).log10()))
+                })
+                .collect();
+            // Ties break on work id rather than on whatever order the database
+            // returned, so the same catalogue produces the same feed twice.
+            scored.sort_by(|a, b| {
+                b.1.partial_cmp(&a.1)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.0.cmp(&b.0))
+            });
+            scored.truncate(cap);
+            Ok(scored.into_iter().map(|(id, _)| id).collect())
+        })
+    })
+}
+
+/// §20.3's minimum readers for a quality rate to mean anything.
+///
+/// Spelled as a literal rather than imported, deliberately: this module should not take
+/// a dependency to share one number, and a comment pointing at the spec is a weaker
+/// guarantee than the number being right here.
+const MIN_READERS_FOR_A_RATE: i64 = 10;
+
+/// Run a query returning `(String, i64, i64)` on either backend.
+///
+/// Its own helper because `hidden_classics_strategy` needs three columns. `query_pairs`
+/// returns two, and widening it would change every caller's type for one caller.
+async fn query_int_triples(db: &Database, sql: &str) -> Result<Vec<(String, i64, i64)>> {
+    match db.backend() {
+        crate::Backend::Sqlite => {
+            let rows = sqlx::query_as(sql)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?;
+            Ok(rows)
+        }
+        crate::Backend::Postgres => {
+            let rows = sqlx::query_as(sql)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?;
+            Ok(rows)
+        }
+    }
+}
+
 /// Build the default strategy factories map (spec §16.1a).
 pub fn default_strategies() -> HashMap<String, StrategyFactory> {
     let mut map: HashMap<String, StrategyFactory> = HashMap::new();
@@ -557,6 +709,10 @@ pub fn default_strategies() -> HashMap<String, StrategyFactory> {
         Arc::new(|| curator_prior_strategy()),
     );
     map.insert("bandit".to_string(), Arc::new(|| bandit_strategy()));
+    map.insert(
+        "hidden_classics".to_string(),
+        Arc::new(|| hidden_classics_strategy()),
+    );
     map
 }
 
