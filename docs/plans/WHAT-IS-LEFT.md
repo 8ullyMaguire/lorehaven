@@ -1,6 +1,16 @@
 # Lorehaven — what's left
 
-Updated at the start of each turn. Last commit: `430ceaf`.
+Updated at the start of each turn. Last commit: `430ceaf`; tagged `m45-18-faucet-sink-dashboard`.
+
+**Delegation is unavailable in this profile.** A subagent dispatched for step 3 died in
+0.59 s with `HTTP 400: Unable to determine provider for model 'qwen2.5-coder:3b-64k'`. Build
+in the main session.
+
+**lorehaven is gaming-pc only** — it is not cloned on thinkcentre, so the half-and-half host
+split cannot apply to this repo.
+
+**`git diff` is intercepted here.** Two invocations returned `No syntactic changes` instead of
+a diff for a file that genuinely had one. Use `diff <(git show HEAD:f) f` to see a real diff.
 
 ## Done this project
 
@@ -80,7 +90,7 @@ Two stale-batch items turned out to be real and are now fixed:
   variables in the strategy, which is what sent me looking for a code bug that was not there.
   A `\`\`text\`\`` fence fixes it. `cargo test --workspace --doc` is now clean — and it is
   a separate target a plain `cargo test -p <crate>` never runs.
-| 5. Frontend | optional, last |
+| 5. Frontend | **done** — `AdminEconomyFlows.svelte` + 7 tests, `fetchEconomyFlows` in `api.ts` |
 
 **`Flow` gained a fourth variant, `Undeclared`,** and this was not in the plan. The plan
 said a registry miss becomes `MechanismDeclaration::invalid()`. That would have been wrong:

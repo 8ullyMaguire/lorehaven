@@ -4290,3 +4290,51 @@ export async function createToken(
 export async function revokeToken(id: string): Promise<void> {
   await apiFetch(`/me/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
+
+// ---------------------------------------------------------------------------
+// §53 — the operator's faucet/sink view.
+// ---------------------------------------------------------------------------
+
+/** One mechanism as the dashboard renders it. */
+export interface FlowMechanism {
+  key: string;
+  /** 'faucet' | 'sink' | 'neutral' | 'undeclared' -- `Flow` in the domain. */
+  flow: string;
+  net_credits: number;
+  /**
+   * False when nobody has declared which side this mechanism is on.
+   *
+   * The field exists so the component can warn rather than silently render. An
+   * undeclared mechanism's credits are still in `net_credits`; dropping the row
+   * would understate the economy, which is the failure §53.1 forbids.
+   */
+  declared: boolean;
+}
+
+export interface EconomyFlows {
+  since: string;
+  until: string;
+  faucet_credits: number;
+  sink_credits: number;
+  net_credits: number;
+  undeclared: number;
+  threshold: number;
+  over_threshold: boolean;
+  mechanisms: FlowMechanism[];
+  note: string;
+}
+
+/**
+ * Read the economy as faucets and sinks.
+ *
+ * The window is optional: the server defaults to the last 30 days rather than all
+ * time, so an operator asking for "now" gets a figure that means the same thing on
+ * every day.
+ */
+export function fetchEconomyFlows(params: { since?: string; until?: string } = {}): Promise<EconomyFlows> {
+  const qs = new URLSearchParams();
+  if (params.since) qs.set('since', params.since);
+  if (params.until) qs.set('until', params.until);
+  const suffix = qs.toString() ? `?${qs}` : '';
+  return apiFetch<EconomyFlows>(`/admin/economy/flows${suffix}`);
+}

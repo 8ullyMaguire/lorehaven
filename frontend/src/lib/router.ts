@@ -35,6 +35,7 @@ export type RouteId =
   | 'media'
   | 'media-search'
   | 'admin-jobs'
+  | 'admin-economy-flows'
   | 'admin-media-health'
   | 'admin-mirror'
   | 'discover'
@@ -100,6 +101,7 @@ const FIXED_ROUTES: Record<string, RouteId> = {
   '/media': 'media',
   '/media/search': 'media-search',
   '/admin/jobs': 'admin-jobs',
+  '/admin/economy/flows': 'admin-economy-flows',
   '/admin/media-health': 'admin-media-health',
   '/admin/mirror': 'admin-mirror',
   '/discover': 'discover',
