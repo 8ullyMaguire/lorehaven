@@ -57,6 +57,10 @@ to prevent.
 
 - 31 rows in the M45 tracker still marked `planned`. This is the largest remaining pool of
   named work in the repo.
+- `preread_reports` exists and is tested, but **no provider is configured**, so nothing
+  writes a row in practice. Running an Ollama instance and pointing the adapter at it is the
+  last manual step; §23.7's "AI features disabled without configuration" is why that is a
+  valid state rather than a gap.
 - The §0.3 "three TEXT/uuid columns" note should become six: `rec_strategy.rs` and
   `discovery.rs` added two, `preread_reports.work_id` is the sixth site. Each needs its own
   dialect arm and its own `work_uuid()` helper.
@@ -131,3 +135,20 @@ result (an empty list reads downstream as "the work was assessed and scored noth
 - **A test file that is uncommitted is one bad `open(p, "w")` from gone.** Two files were
   zeroed this way before being caught. The `write_file` tool refuses to overwrite a file
   changed since the last read, which is the only reason one was recoverable.
+- **Never `pkill -f 'cargo test'`.** It kills the mutation harness mid-write and leaves a
+  half-written source file (`.then_with(...)//! Recommendation strategies...` prepended to
+  line 1 of `rec_strategy.rs`). Use `process(action='kill')`, which kills the shell rather
+  than its children mid-write.
+- **A stale GREEN(BAD) is worse than no result.** A batch of mutation-gate output arrived
+  from harness revisions that had since been rewritten; several mutations were reported
+  GREEN(BAD) that were in fact RED. Re-run the single mutation by hand before believing it —
+  and restore the source afterwards, since the harness restores by string-replace and a
+  concurrent edit breaks the match.
+- **An empty result and a missing entry look the same in the message.** `TestDb::
+  applied_migrations()` returned `[]`, which reads like "migration 0104 missing" and sent the
+  investigation at migration 0111 rather than at the accessor. `--nocapture` printing the
+  count distinguished them immediately. A count of 0 means the accessor is broken; a count of
+  N with one entry missing means the migration is.
+- **This project has no `_sqlx_migrations` table.** It has its own migration runner, so
+  `MigrationReport::already_applied` is the authoritative record of what is applied. Reaching
+  for sqlx's ledger is a dead end that compiles and fails at runtime.
