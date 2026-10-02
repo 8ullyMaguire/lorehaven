@@ -328,6 +328,28 @@ static SQLITE_TEMPLATE: std::sync::OnceLock<(String, std::path::PathBuf)> =
     std::sync::OnceLock::new();
 static PG_TEMPLATE: std::sync::OnceLock<(String, String)> = std::sync::OnceLock::new();
 
+/// Serialises the template BUILD, not the read.
+///
+/// `OnceLock::get` + `set` is not enough: two threads can both see `None` and both
+/// proceed to build, and the build deletes `build.sqlite` and `template.sqlite`
+/// first. One thread's `VACUUM INTO` then lands while the other is mid-`copy`, and
+/// the caller gets `(code: 26) file is not a database` -- the symptom of a half-
+/// written template, not of anything wrong with the test's own database.
+///
+/// The old comment here claimed the race was handled ("Ignore a lost race: the
+/// winner's path is equally valid"). It was not: the losing thread had already
+/// deleted the file the winner was writing. Holding this across the build costs one
+/// lock acquisition on the very first test and nothing on every later one, because
+/// the early `SQLITE_TEMPLATE.get()` returns before the lock is taken.
+///
+/// **A `tokio::sync::Mutex`, not `std::sync::Mutex`.** The guard is held across
+/// `.await` points -- the whole build migrates 107 statements -- and clippy is right
+/// to object to that with a std guard: a task holding one across a suspension can
+/// block the whole runtime's executor thread and deadlock a single-threaded runtime
+/// against itself. The tokio guard releases the thread while it waits.
+static TEMPLATE_BUILD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static PG_TEMPLATE_BUILD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// The once-per-process template root, so two `TestDb`s in different scratch
 /// directories share one built schema.
 fn template_root() -> std::path::PathBuf {
@@ -340,6 +362,16 @@ fn template_root() -> std::path::PathBuf {
 /// back to a plain `db.migrate()` -- which is slower and always correct.
 async fn sqlite_template() -> Option<std::path::PathBuf> {
     let key = migration_key(lorehaven_db::Backend::Sqlite);
+    if let Some((k, path)) = SQLITE_TEMPLATE.get() {
+        if *k == key {
+            return Some(path.clone());
+        }
+        return None;
+    }
+
+    // Held across the entire build, including the deletes below.
+    let _guard = TEMPLATE_BUILD.lock().await;
+    // Re-check: another thread may have finished the build while this one waited.
     if let Some((k, path)) = SQLITE_TEMPLATE.get() {
         if *k == key {
             return Some(path.clone());
@@ -373,7 +405,6 @@ async fn sqlite_template() -> Option<std::path::PathBuf> {
     db.close().await;
     let _ = report;
 
-    // Ignore a lost race: the winner's path is equally valid.
     let _ = SQLITE_TEMPLATE.set((key, template.clone()));
     SQLITE_TEMPLATE.get().map(|(_, p)| p.clone())
 }
@@ -402,7 +433,10 @@ pub async fn cached_postgres(admin_url: &str, name: &str) -> Option<Database> {
     let template = match PG_TEMPLATE.get() {
         Some((k, t)) if k == &key => t.clone(),
         Some(_) => return None,
-        None => build_postgres_template(admin_url, &key).await?,
+        None => {
+            let _guard = PG_TEMPLATE_BUILD.lock().await;
+            build_postgres_template(admin_url, &key).await?
+        }
     };
 
     let admin = Database::connect(&DatabaseConfig::new(admin_url.to_owned()))
