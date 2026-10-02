@@ -149,6 +149,11 @@ result (an empty list reads downstream as "the work was assessed and scored noth
   investigation at migration 0111 rather than at the accessor. `--nocapture` printing the
   count distinguished them immediately. A count of 0 means the accessor is broken; a count of
   N with one entry missing means the migration is.
+- **Never run a test binary while a mutation gate is running.** The gate edits the file
+  under test, so a concurrent `cargo test` compiles mutated source and reports the gate's
+  intended RED as a failure. Check `git status --short <file>` before believing any failure;
+  a modified source plus a red test says nothing about your code. (Observed as a clean-tree
+  `1 failed` on `HEAD`; an 8-second suite taking 259 s was the tell.)
 - **This project has no `_sqlx_migrations` table.** It has its own migration runner, so
   `MigrationReport::already_applied` is the authoritative record of what is applied. Reaching
   for sqlx's ledger is a dead end that compiles and fails at runtime.
