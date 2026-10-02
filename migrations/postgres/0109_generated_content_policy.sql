@@ -1,7 +1,7 @@
 -- §51: generated-content posture, and author credits that vest on reader
 -- completion. M45-12, from gaps review A3.
 --
--- Dialect: PostgreSQL. The rules are identical to the SQLite dialect's; only the
+-- Dialect: PostgreSQL. The rules are identical to the SQLite dialect's, and only the
 -- mechanics of `works.updated_by`'s reference type and the CHECK forms differ, and
 -- both dialects are verified to accept and reject the same six row shapes.
 --
@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS generated_content_policy (
 -- §51.1: "The posture is recorded with the work, not looked up at read time." So
 -- this is a column on `works`, not a join to the policy row, and the reason is
 -- retroactive labelling. An operator who tightens `allow` -> `disclose` is making a
--- change about FUTURE writes; joining to the policy at read time would relabel
+-- change about FUTURE writes, and joining to the policy at read time would relabel
 -- every work already in the corpus, which changes terms the author agreed to under
 -- a different policy.
 --
@@ -76,10 +76,28 @@ UPDATE works
 ALTER TABLE works
     ALTER COLUMN generated_content_posture SET NOT NULL;
 
--- Exactly one of the two: a declared generated work has a declaration time, and an
--- undeclared one does not. A work carrying a declaration time with nothing declared
--- reads as "disclosed" to a query that filters on the timestamp alone.
+-- ── The pair rule, and why it covers BOTH accepting postures ──────────────────
+--
+-- A work the author declared generated carries a declaration time; a work the
+-- author declared nothing about does not. The rule spans `disclose` and `allow`,
+-- because the DECLARATION is the author's statement and is recorded either way --
+-- what differs between those two postures is only whether the marker is SHOWN.
+--
+-- The first version of this constraint tested
+-- `(posture = 'disclose') = (declared_at IS NOT NULL)`, which is wrong, and the
+-- store caught it: under `allow` a declared work is accepted with no declaration
+-- time, so the author's statement was silently discarded. §51.1's "recorded with
+-- the work" is about the posture AND the declaration -- storing the posture while
+-- dropping what the author said about it would make `allow` a way to erase a
+-- declaration rather than a way not to display one.
+--
+-- The error this prevents on the read side is specific too: a disclosure marker
+-- rendered from `generated_declared_at IS NOT NULL` would then show on an
+-- `allow` work, which is §51.1's "allow accepts and does not label" broken.
+-- Same rule as the SQLite dialect's triggers: a declaration time may not coexist
+-- with `forbid`, and nothing else is constrained -- see that file for the three
+-- wrong pairings this replaced and what each one refused.
 ALTER TABLE works
     ADD CONSTRAINT works_generated_declaration_pair_ck CHECK (
-        (generated_content_posture = 'disclose') = (generated_declared_at IS NOT NULL)
+        generated_declared_at IS NULL OR generated_content_posture <> 'forbid'
     );
