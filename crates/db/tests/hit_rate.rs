@@ -32,6 +32,23 @@ fn make_config(url: String) -> lorehaven_db::DatabaseConfig {
 /// being edited, matching the convention the app crate's suites use. The db crate
 /// cannot depend on `test_support` — `test_support` depends on it — so the setup
 /// is written out here rather than shared.
+///
+/// **The PostgreSQL URL names a database, and that database must be this test's
+/// own.** The first version used the environment variable verbatim, which points at
+/// the shared `postgres` database. Every test in the file then migrated the *same*
+/// database, and the append-only guard rejected the whole run the moment a
+/// migration's text changed: all ten tests failed with "migration
+/// 0109_generated_content_policy has been modified after it was applied", against
+/// migrations that were correct and committed.
+///
+/// This was misread at first as stale scratch databases left behind by a killed
+/// run. It was not: `template_root` is keyed on the pid, so nothing survives a
+/// process. The actual symptom is that a *shared* database accumulates applied
+/// checksums, so any in-place migration fix — which this project does deliberately,
+/// for anything predating a release tag — poisons every later run against it.
+///
+/// So the admin URL's credentials are used to create a database unique to this
+/// call, and the tests then connect to that. The sweeper drops it afterwards.
 async fn connect(tag: &str) -> Database {
     let mut dir = std::env::temp_dir();
     dir.push(format!(
@@ -42,7 +59,26 @@ async fn connect(tag: &str) -> Database {
     ));
     std::fs::create_dir_all(&dir).expect("scratch dir");
     let url = match std::env::var("LOREHAVEN_TEST_PG_URL") {
-        Ok(u) => u,
+        Ok(admin) => {
+            let name = format!(
+                "lh_hit_{}_{}",
+                std::process::id(),
+                uuid::Uuid::new_v4().simple()
+            );
+            let admin_db = Database::connect(&make_config(admin.clone()))
+                .await
+                .expect("connect to the admin database");
+            sqlx::query(&format!("CREATE DATABASE {name}"))
+                .execute(admin_db.postgres_pool().expect("postgres pool"))
+                .await
+                .expect("create a scratch database");
+            admin_db.close().await;
+            // Keep the admin's credentials and port; replace only the database name.
+            let (prefix, _) = admin
+                .rsplit_once('/')
+                .expect("the admin URL ends in a database");
+            format!("{prefix}/{name}")
+        }
         Err(_) => format!("sqlite://{}/lorehaven.sqlite?mode=rwc", dir.display()),
     };
     let db = Database::connect(&make_config(url)).await.expect("connect");
