@@ -1,6 +1,6 @@
 # Lorehaven — what's left
 
-Updated at the start of each turn. Last commit: `51b0295` (gap C step 4).
+Updated at the start of each turn. Last commit: `8b4e58e`.
 
 ## Done this project
 
@@ -11,8 +11,8 @@ Updated at the start of each turn. Last commit: `51b0295` (gap C step 4).
 | G | §20.3 weekly recalculation job | `crates/app/src/payout_recalc.rs` | 12 |
 | D | Series-aware recs (first *unfinished* entry) | `crates/db/src/series_recs.rs` | 17 |
 | E | Earned-bookmark ratio + §53.6 definition | `crates/domain/src/earned_bookmark.rs` | 13 |
-| F | Hidden-classics rec strategy | `crates/db/src/rec_strategy.rs` | 11 |
-| B | Blind Date daily surface | `crates/db/src/discovery.rs` | 8 |
+| F | Hidden-classics rec strategy | `crates/db/src/rec_strategy.rs` | 12 |
+| B | Blind Date daily surface | `crates/db/src/discovery.rs` | 12 |
 | C | §23.7 provider interface | `crates/domain/src/ai.rs` | 7 |
 | C | Per-dimension pre-read report | `crates/domain/src/preread.rs` | 8 |
 | C | OpenAI-compatible adapter | `crates/app/src/ai/` | 18 |
@@ -22,8 +22,10 @@ Updated at the start of each turn. Last commit: `51b0295` (gap C step 4).
 
 Plus, as incidental fixes found by the above: migration 0110 FK divergence,
 `hit_rate.rs` migrating the shared postgres database, a `kind_index` collision,
-a race in the test-support schema cache, and a `CostQuote::is_priced()` that
-reported an unpriced local-model quote as priced.
+a race in the test-support schema cache, a `CostQuote::is_priced()` that reported an
+unpriced local-model quote as priced, a `TestDb::applied_migrations()` that returned an
+empty set for a fully-migrated database (8 suites), and a Blind Date seed that ignored the
+day so every reader got the same work forever.
 
 ## Remaining ranked gaps (from docs/plans/100-ideas-audit.md)
 
@@ -52,6 +54,16 @@ confirm the draft exists, which is exactly what the server's indistinguishable 4
 to prevent.
 
 **All six gaps (A–G) are now closed.**
+
+## In flight
+
+- Full SQLite suite on a verified-clean tree (`proc_6ab45cebe2c5`).
+- Both mutation gates on a clean tree, **after** the suite finishes — they edit the source
+  under test, so running them concurrently is what produced the false results this session.
+- Full PostgreSQL suite, last.
+
+**Do not run any of these concurrently, and do not touch the tree while they run.** Four of
+this session's bad results came from doing so.
 
 ## Also outstanding
 
