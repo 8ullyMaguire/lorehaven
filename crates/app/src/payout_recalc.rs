@@ -217,7 +217,7 @@ async fn works_with_earnings(state: &AppState, from: i64, to: i64) -> Result<Vec
             )
             .bind(rfc3339(from))
             .bind(rfc3339(to))
-            .bind(i64::from(BATCH_LIMIT))
+            .bind(BATCH_LIMIT)
             .fetch_all(db.postgres_pool().expect("postgres pool"))
             .await?
         }
