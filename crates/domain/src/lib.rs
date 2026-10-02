@@ -1,5 +1,6 @@
 //! Lorehaven domain primitives.
 
+pub mod ai;
 pub mod analytics;
 pub mod anchor;
 pub mod api_scopes;
@@ -48,6 +49,7 @@ pub mod payouts;
 pub mod permission;
 pub mod policy;
 pub mod positivity;
+pub mod preread;
 pub mod preservation;
 pub mod query;
 pub mod query_sql;
