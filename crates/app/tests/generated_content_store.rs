@@ -44,8 +44,6 @@ async fn scratch(tag: &str) -> TestDb {
     TestDb::connect_with_dir(tag, &dir).await
 }
 
-/// One bound parameter, in the position the statement expects it.
-///
 /// Run a statement with binds, on whichever backend is active.
 ///
 /// Takes **two** templates rather than one. The reason is the trap this suite
