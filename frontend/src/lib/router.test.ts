@@ -14,6 +14,10 @@ describe('routing', () => {
     // These were linked-but-unbuilt placeholders once; a stale placeholder
     // would hide a working surface, exactly as `/library` did before M6.
     expect(matchRoute('/discover').id).toBe('discover');
+    // Gap B. Blind Date is its own surface, not a `/discover` slot: spec §5050 lists
+    // `/blind-date` alongside `/discover` and `/surprise`, so it needs its own route id
+    // or the path falls through to NotFound.
+    expect(matchRoute('/blind-date').id).toBe('blind-date');
     expect(matchRoute('/community').id).toBe('community');
     expect(matchRoute('/notifications').id).toBe('notifications');
   });
