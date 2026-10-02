@@ -76,6 +76,11 @@ pub fn router() -> Router<AppState> {
         .route("/works", get(list_works).post(create_work))
         .route("/works/{id}", patch(update_work))
         .route("/works/{id}/kudos", post(toggle_kudos))
+        // §50.1: the reason is a body field on the kudos itself, not a second
+        // endpoint, because re-kudosing *updates* the reason (see
+        // `reasons_store::give_kudos`). A separate /reason endpoint would let the
+        // two disagree, with the count reflecting one and the reason the other.
+        .route("/works/{id}/highlights", post(create_highlight))
         .route(
             "/works/{id}/reading-status",
             get(read_work_status)
@@ -1437,10 +1442,23 @@ async fn record_view_for_work(
 }
 
 /// Toggle kudos for the signed-in account on a work. Returns the new state.
+/// §50.1: the optional reason on a kudos.
+///
+/// `#[serde(default)]` so an existing client that posts an empty body keeps
+/// working — §50.1 says a bare kudos is valid, and that has to include "bare
+/// kudos from a client written before the reason existed".
+#[derive(Deserialize, Default)]
+struct KudosBody {
+    reason: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
 async fn toggle_kudos(
     State(state): State<AppState>,
     RequireActorScoped { actor }: RequireActorScoped,
     Path(id): Path<String>,
+    body: Option<Json<KudosBody>>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // `content.read`, not `content.write`, and the handler's own comment says
     // why: kudos are "a statement about themselves" — a reader saying they
@@ -1456,7 +1474,193 @@ async fn toggle_kudos(
     )
     .await
     .map_err(|e| ApiError(AppError::Internal(e)))?;
-    Ok(Json(serde_json::json!({ "kudoed": kudoed })))
+
+    // §50.1: the reason rides along with the kudos rather than on its own
+    // endpoint. Only stored when the kudos actually landed — toggling OFF removes
+    // the row, and a reason written against a kudos that no longer exists would be
+    // a reason attached to nothing.
+    let annotated = if kudoed {
+        let annotated = parse_kudos_body(body.as_ref().map(|Json(b)| b))?;
+        lorehaven_db::reasons_store::give_kudos(
+            state.db(),
+            &work_id.to_string(),
+            &actor.account_id.to_string(),
+            &annotated,
+        )
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+        lorehaven_db::reasons_store::kudos_reason(
+            state.db(),
+            &work_id.to_string(),
+            &actor.account_id.to_string(),
+        )
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?
+    } else {
+        None
+    };
+
+    Ok(Json(serde_json::json!({
+        "kudoed": kudoed,
+        "reason": annotated.map(|r| r.as_str()),
+    })))
+}
+
+// ---------------------------------------------------------------------------
+// Reason-tagged kudos and highlights (spec §50.1, M45-24)
+// ---------------------------------------------------------------------------
+//
+// The kudos *count* is unchanged and still lives in `work_metrics`. What is new is
+// that a kudos may carry a reason, and that a reader may highlight a span.
+//
+// The asymmetry between the two endpoints is deliberate and is the mechanism:
+// §50.1 makes the reason OPTIONAL on the write (a bare kudos is a valid kudos, and
+// requiring one would push readers toward a rate-limit rather than toward a
+// reason) and REQUIRED by the training path (a kudos with no reason trains
+// nothing). So `toggle_kudos` accepts an absent reason, stores it as absent, and
+// `reason_bearing_kudos` counts only the ones that carry one.
+//
+// A highlight requires a reason outright. §50.1 makes it a reason *about a span* —
+// a reader who has picked out one sentence has something to say about it, and a
+// bare span highlight would be a bookmark with extra steps.
+
+/// `content.read`, not `content.write`, and for a stronger reason than kudos'
+/// own comment gives. A highlight is a statement about someone else's text: it is
+/// a critic's note on a work they did not write. Granting a bot `content.write` to
+/// let it mark up a story would hand it authority over the work itself, which this
+/// action never touches.
+#[derive(Deserialize)]
+struct HighlightBody {
+    start_offset: i64,
+    end_offset: i64,
+    reason: String,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+/// §50.3: a reason is never invented, so an unrecognised string is a validation
+/// error naming the set, and an ABSENT reason is absent rather than defaulted.
+/// Parsing here rather than in the store keeps the route's error shape
+/// (`AppError::Validation` with a field error) consistent with every other
+/// enumerated body field in this file.
+fn parse_kudos_body(
+    body: Option<&KudosBody>,
+) -> ApiResult<lorehaven_db::reasons_store::AnnotatedReason> {
+    let reason = match body {
+        None => None,
+        Some(b) => match lorehaven_db::reasons_store::parse_reason(b.reason.as_deref()) {
+            Ok(reason) => reason,
+            Err(error) => {
+                return Err(ApiError(AppError::Validation {
+                    message: error.to_string(),
+                    field_errors: Default::default(),
+                }))
+            }
+        },
+    };
+    Ok(lorehaven_db::reasons_store::AnnotatedReason {
+        reason,
+        note: body.and_then(|b| b.note.clone()),
+    })
+}
+
+#[derive(Serialize)]
+struct HighlightOut {
+    work_id: String,
+    start_offset: i64,
+    end_offset: i64,
+    reason: String,
+    /// The signal this work's highlights currently carry, per §50.1: at most one
+    /// unit regardless of how many exist, and `trains` false while no highlight
+    /// has carried a reason.
+    gravity_weight: f64,
+    reason_bearing_readers: i64,
+}
+
+async fn create_highlight(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+    Path(id): Path<String>,
+    Json(body): Json<HighlightBody>,
+) -> ApiResult<(StatusCode, Json<HighlightOut>)> {
+    let work_id = parse_work_id(&id)?;
+
+    // Visibility is decided by the same `reading_decision` every other read in this
+    // file uses, not by "does the row exist". Without it a reader who learned the
+    // id of an unlisted work could write a highlight against it and confirm the
+    // work's existence by the difference between 404 and 403.
+    let work = content::find_work(state.db(), work_id)
+        .await?
+        .ok_or_else(|| ApiError(AppError::NotFound { resource: "work" }))?;
+    let contributors = collaboration::contributors_for_work(state.db(), work_id).await?;
+    // `actor_for`, because that is what resolves the acting pseud and answers
+    // honestly when the session has none selected: a reader with no active pseud
+    // is the public reader here, and gets the public answer.
+    if let Reading::Denied(error) = reading_decision(
+        &state,
+        actor_for(Some(&user)).as_ref(),
+        &work,
+        &contributors,
+    )
+    .await
+    {
+        return Err(ApiError(error));
+    }
+
+    let Some(reason) = lorehaven_domain::reasons::Reason::parse(&body.reason) else {
+        return Err(ApiError(AppError::Validation {
+            message: format!(
+                "`{}` is not a reason this build knows; expected one of {}",
+                body.reason,
+                lorehaven_domain::reasons::Reason::ALL
+                    .iter()
+                    .map(|r| r.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            field_errors: Default::default(),
+        }));
+    };
+    // §50.1's span is a reason about a *span*, and `Span::new` refuses an empty
+    // one. A zero-length highlight would be a bookmark that claims to be about
+    // something, which is precisely the confusion the span type exists to prevent.
+    let Some(span) = lorehaven_domain::reasons::Span::new(body.start_offset, body.end_offset)
+    else {
+        return Err(ApiError(AppError::Validation {
+            message: format!(
+                "a highlight must span at least one character, got [{}, {})",
+                body.start_offset, body.end_offset
+            ),
+            field_errors: Default::default(),
+        }));
+    };
+
+    lorehaven_db::reasons_store::add_highlight(
+        state.db(),
+        &work_id.to_string(),
+        &user.account_id.to_string(),
+        span,
+        reason,
+        body.note.as_deref(),
+    )
+    .await
+    .map_err(|e| ApiError(AppError::Internal(e)))?;
+
+    let signal = lorehaven_db::reasons_store::highlight_signal(state.db(), &work_id.to_string())
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(HighlightOut {
+            work_id: work_id.to_string(),
+            start_offset: span.start,
+            end_offset: span.end,
+            reason: reason.as_str().to_owned(),
+            gravity_weight: signal.gravity_weight(),
+            reason_bearing_readers: signal.reason_bearing_readers,
+        }),
+    ))
 }
 
 // ---------------------------------------------------------------------------
