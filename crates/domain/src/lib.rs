@@ -43,6 +43,7 @@ pub mod meta_ranker;
 pub mod moderation;
 pub mod monetization;
 pub mod orphaning;
+pub mod payouts;
 pub mod permission;
 pub mod policy;
 pub mod positivity;
