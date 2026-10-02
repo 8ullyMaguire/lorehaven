@@ -1,6 +1,6 @@
 # Lorehaven — what's left
 
-Updated at the start of each turn. Last commit: `1fc2a7d`.
+Updated at the start of each turn. Last commit: `9d0e0cd`.
 
 ## Done this project
 
@@ -65,6 +65,20 @@ Plan: `docs/plans/m45-18-faucet-sink-dashboard.md`.
 | 2. `crates/db/src/flow_store.rs` | **done** (`23546d0`) — compiles clean, clippy clean |
 | 2a. `Flow::Undeclared` in the domain | **done** (`23546d0`) — see below |
 | 3. `crates/app/src/routes/flows.rs` | next |
+
+Two stale-batch items turned out to be real and are now fixed:
+
+- **`registered_routes_are_tabled` failed on a clean tree** (`ee4b78b`). Four routes were
+  registered but absent from `ROUTE_TABLE`: `discovery.rs:/discovery/blind-date`
+  (Authenticated) and all three of `preread.rs`'s routes (Pseudonymous). The test stops at the
+  first unregistered route, so the error named one and hid three more — searching the table
+  for `preread.rs` directly is what found them. Proven: deleting an entry turns it red.
+- **A `rec_strategy.rs` doctest had been failing for some time** (`9d0e0cd`). The score
+  formula was a four-space-indented doc block, which rustdoc compiles as Rust. The errors
+  (`cannot find value completion_rate`, `cannot find function log10`) read like undefined
+  variables in the strategy, which is what sent me looking for a code bug that was not there.
+  A `\`\`text\`\`` fence fixes it. `cargo test --workspace --doc` is now clean — and it is
+  a separate target a plain `cargo test -p <crate>` never runs.
 | 4. `crates/app/tests/flow_dashboard.rs` | not started |
 | 5. Frontend | optional, last |
 
