@@ -117,6 +117,34 @@ BEGIN
     SELECT RAISE(ABORT, 'at most one batch window may be open');
 END;
 
+-- ── §52.1 The reviewed rows themselves ─────────────────────────────────────
+
+-- What an operator reviewed, and what they decided.
+--
+-- `inferable` is TEXT and holds prose, and `reviewed_by` names the operator
+-- because a review with no reviewer is nobody's decision. There is no
+-- confidence column, no score, and no dimension: §52.1's row is an artifact plus
+-- an inference a person could state out loud, and a column for "how sure" would
+-- be the first step back toward the measurement §0.3 forbids.
+--
+-- `disposition` defaults to `keep` because §52.1's default is to keep, and a
+-- review inserted without saying what to do is a review that found nothing wrong.
+CREATE TABLE IF NOT EXISTS taste_leakage_reviews (
+    id            TEXT PRIMARY KEY,
+    artifact      TEXT NOT NULL,
+    inferable     TEXT NOT NULL,
+    -- plain | derived | measured. §52.1's ease ladder: what an observant reader
+    -- could put together without help, what needs a comparison across artifacts,
+    -- and what needs measuring (where coarsening is the only real remedy).
+    ease          TEXT NOT NULL CHECK (ease IN ('plain', 'derived', 'measured')),
+    disposition   TEXT NOT NULL DEFAULT 'keep'
+                    CHECK (disposition IN ('keep', 'coarsen', 'remove')),
+    reviewed_by   TEXT NOT NULL,
+    reviewed_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_taste_leakage_reviews_disposition
+    ON taste_leakage_reviews (disposition);
+
 -- ── §52.3 The owner-visible resonance label ─────────────────────────────────
 
 -- §52.3: the label updates from a weekly batch, never on read or on the

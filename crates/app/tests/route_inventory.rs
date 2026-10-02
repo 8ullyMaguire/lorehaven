@@ -2452,6 +2452,19 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/admin/stats",
         audience: Audience::Public,
     },
+    // §52.1's leakage view. `Operator` because the handler takes `RequireSession`
+    // and then `require_operator` -- and that second check is the load-bearing
+    // part: it answers 404 rather than 403 to a non-operator, since for this view
+    // the endpoint's EXISTENCE is a disclosure (a reader probing
+    // /admin/discovery learns the operator runs a leakage review, which is one of
+    // the things the review is about).
+    RouteEntry {
+        file: "admin_discovery.rs",
+        handler: "get_leakage",
+        method: "GET",
+        path: "/admin/discovery/leakage",
+        audience: Audience::Operator,
+    },
     RouteEntry {
         file: "admin.rs",
         handler: "record_admin_action",

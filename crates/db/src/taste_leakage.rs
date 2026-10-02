@@ -16,7 +16,7 @@
 //! same reason the two templates cannot be one.
 
 use lorehaven_domain::ids::{PseudId, WorkId};
-use lorehaven_domain::leakage::{BatchWindow, BatchedPayout, OwnerResonance};
+use lorehaven_domain::leakage::{BatchWindow, BatchedPayout, Disposition, OwnerResonance};
 use uuid::Uuid;
 
 use crate::{Backend, Database, Result};
@@ -380,4 +380,145 @@ pub async fn get_resonance_label(
             Uuid::parse_str(&window_id).expect("a stored window id is a uuid"),
         )
     }))
+}
+
+/// Record a reviewed leakage row.
+///
+/// §52.1's default disposition is `keep`, applied as the column's DEFAULT rather
+/// than here: a review inserted without saying what to do is a review that found
+/// nothing wrong, and the store must not be the place that guesses otherwise.
+pub async fn record_review(
+    db: &Database,
+    artifact: &str,
+    inferable: &str,
+    ease: &str,
+    disposition: Disposition,
+    reviewed_by: PseudId,
+    reviewed_at: i64,
+) -> Result<Uuid> {
+    let id = Uuid::new_v4();
+    let sql = db.sql(
+        "INSERT INTO taste_leakage_reviews
+            (id, artifact, inferable, ease, disposition, reviewed_by, reviewed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO taste_leakage_reviews
+            (id, artifact, inferable, ease, disposition, reviewed_by, reviewed_at)
+         VALUES ($1::uuid, $2, $3, $4, $5, $6::uuid, $7)",
+    );
+    match db.backend() {
+        Backend::Sqlite => {
+            let _ = sqlx::query(&sql)
+                .bind(id.to_string())
+                .bind(artifact)
+                .bind(inferable)
+                .bind(ease)
+                .bind(disposition.as_str())
+                .bind(reviewed_by.to_canonical_string())
+                .bind(fmt_ts(reviewed_at))
+                .execute(db.sqlite_pool().expect("sqlite pool"))
+                .await?;
+        }
+        Backend::Postgres => {
+            let _ = sqlx::query(&sql)
+                .bind(id)
+                .bind(artifact)
+                .bind(inferable)
+                .bind(ease)
+                .bind(disposition.as_str())
+                .bind(reviewed_by.as_uuid())
+                .bind(fmt_ts(reviewed_at))
+                .execute(db.postgres_pool().expect("postgres pool"))
+                .await?;
+        }
+    }
+    Ok(id)
+}
+
+/// Read reviewed rows, optionally narrowed to one disposition.
+///
+/// No LIMIT and no COUNT. §52.1: a view that reports how many artifacts it
+/// reviewed is itself a probe, because the difference between the count now and
+/// after a configuration change is a measurement of the operator's taste. The
+/// `Disposition` filter exists for the operator's own convenience and carries the
+/// same risk as the count, so it is opt-in per request rather than a default the
+/// caller has to remember to suppress.
+pub async fn review_rows(
+    db: &Database,
+    disposition: Option<Disposition>,
+) -> Result<Vec<(String, String, String, Disposition, PseudId, i64)>> {
+    // Two statements rather than one with a nullable predicate: a shared template
+    // cannot both filter and not filter, and `($5 IS NULL OR disposition = $5)`
+    // is the kind of cleverness that reads fine and plans badly.
+    // `reviewed_by::text` on PostgreSQL. `pseuds.id` is TEXT on SQLite and native
+    // UUID there, and the returned rows decode into `String`, so without the cast
+    // every PostgreSQL request 500s on "Rust type String (as SQL type TEXT) is not
+    // compatible with SQL type UUID" -- while every SQLite test passes. The cast is
+    // in the SQL rather than in a second set of Rust types so the mapping below is
+    // written once.
+    let base = match db.backend() {
+        Backend::Sqlite => {
+            "SELECT artifact, inferable, ease, disposition, reviewed_by, reviewed_at \
+             FROM taste_leakage_reviews"
+        }
+        Backend::Postgres => {
+            "SELECT artifact, inferable, ease, disposition, reviewed_by::text, reviewed_at \
+             FROM taste_leakage_reviews"
+        }
+    };
+    // Bound to locals first: `db.sql` returns a borrow, and a `format!` temporary
+    // passed straight into it is dropped at the end of the statement.
+    let all_sql = format!("{base} ORDER BY reviewed_at DESC");
+    let filtered_sql = format!("{base} WHERE disposition = {{}} ORDER BY reviewed_at DESC");
+    let filtered_sqlite = filtered_sql.replace("{}", "?");
+    let filtered_postgres = filtered_sql.replace("{}", "$1");
+    let sql = match disposition {
+        None => db.sql(&all_sql, &all_sql),
+        Some(_) => db.sql(&filtered_sqlite, &filtered_postgres),
+    };
+    #[allow(clippy::type_complexity)]
+    let rows: Vec<(String, String, String, String, String, String)> =
+        match (db.backend(), disposition) {
+            (Backend::Sqlite, None) => {
+                sqlx::query_as(&sql)
+                    .fetch_all(db.sqlite_pool().expect("sqlite pool"))
+                    .await?
+            }
+            (Backend::Sqlite, Some(d)) => {
+                sqlx::query_as(&sql)
+                    .bind(d.as_str())
+                    .fetch_all(db.sqlite_pool().expect("sqlite pool"))
+                    .await?
+            }
+            (Backend::Postgres, None) => {
+                sqlx::query_as(&sql)
+                    .fetch_all(db.postgres_pool().expect("postgres pool"))
+                    .await?
+            }
+            (Backend::Postgres, Some(d)) => {
+                sqlx::query_as(&sql)
+                    .bind(d.as_str())
+                    .fetch_all(db.postgres_pool().expect("postgres pool"))
+                    .await?
+            }
+        };
+    Ok(rows
+        .into_iter()
+        .map(
+            |(artifact, inferable, ease, disposition, reviewed_by, reviewed_at)| {
+                (
+                    artifact,
+                    inferable,
+                    ease,
+                    Disposition::parse(&disposition).unwrap_or_else(|| {
+                        panic!(
+                            "a stored disposition is one of the three, enforced by CHECK: \
+                         {disposition}"
+                        )
+                    }),
+                    PseudId::from_uuid(Uuid::parse_str(&reviewed_by).expect("a stored uuid")),
+                    parse_ts(&reviewed_at),
+                )
+            },
+        )
+        .collect())
 }
