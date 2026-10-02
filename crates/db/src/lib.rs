@@ -61,6 +61,7 @@ pub mod rating_integrity;
 pub mod reader_body_copies;
 pub mod reading;
 pub mod reasons_store;
+pub mod rec_blurbs;
 pub mod rec_strategy;
 pub mod recommendation_slots;
 pub mod retention;
