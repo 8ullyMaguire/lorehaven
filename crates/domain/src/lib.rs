@@ -26,6 +26,7 @@ pub mod exports;
 pub mod extension;
 pub mod fairqueue;
 pub mod feeds;
+pub mod generated_content;
 pub mod governance;
 pub mod ids;
 pub mod imports;
