@@ -62,6 +62,9 @@ rust-embed = { version = "8", features = ["include-exclude", "interpolate-folder
 scraper = "0.27"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# M45-23 (§55.3): curator-submitted adapter manifests are YAML, because the
+# review argument for the declarative path is that a steward can read one.
+serde_yaml = "0.9"
 sha2 = "0.10"
 hmac = "0.12"
 sqlx = { version = "0.8", default-features = false, features = [

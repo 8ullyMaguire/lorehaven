@@ -10309,7 +10309,22 @@ pacing in §11.5 has to apply to the module's own pacing requests.
 
 A module that can reach `169.254.169.254` reads cloud credentials; one that can
 reach `127.0.0.1:5432` reads this instance's database. §11.5 rejects these
-addresses for adapters, and the same refusal applies to the WASM host API:
+addresses for adapters, and the same refusal applies to the WASM host API.
+
+**§11.5's guards are two functions, and using only one of them is a silent
+hole.** `safety::validate_url` checks the *syntactic* shape — scheme, length,
+port — and resolves nothing, so it accepts `http://169.254.169.254` without
+complaint. `safety::resolve_public` holds the address rules and is `async`
+because it resolves. So:
+
+- **At submission**, everything checkable without a request: scheme, literal
+  addresses against `is_forbidden_ip`, local hostnames against
+  `is_local_hostname`, and the allowlist shape. This is what §55.3's `compile`
+  does, and a manifest pointing at the metadata service is refused there.
+- **At fetch**, the resolved case: `SafeFetcher` calls `resolve_public` before
+  every connection and re-checks every redirect.
+
+The remaining rules apply to both paths:
 
 - **The allowlist is declared at submission and enforced at the socket.** The
   check is in the host's fetch path, not in the sandbox and not in the module. A
