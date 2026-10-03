@@ -4343,6 +4343,12 @@ pricing (free | paid)
 - Mood tag extensions.
 - Fandom landing page templates.
 - Integrations.
+- Source adapters (§55).
+
+This list is now a type — `Category` in `lorehaven-domain::extension` — because
+§55 needed somewhere to put `source_adapters` and §21.6's gallery and §55.2's
+submission path both branch on it. A `&'static str` compared by hand is where the
+two would drift.
 
 ## 21.3 Capabilities
 

@@ -130,19 +130,36 @@ reference.
 
 ## In flight
 
-- Full SQLite workspace suite on the merged tree (started 09:48).
-- Full PostgreSQL suite, after SQLite finishes.
+Nothing. The two full-suite runs that were in flight here completed and were
+superseded by per-suite verification on both engines; the tree is published.
 
-**Run these serially and do not touch the tree while they run.** Four bad results in an
+**Run suites serially and do not touch the tree while they run.** Four bad results in an
 earlier session came from doing otherwise.
 
 ## Also outstanding
 
-- **30 rows in the M45 tracker are still `planned`** (M45-22 … M45-55). This is the largest
-  remaining pool of named work in the repo. M45-18 was in this list while fully shipped;
-  it is now `implemented-fully-tested`, so the count is 30, not 31.
-- Nothing is pushed. `master` carries `0161c14` + `2c2849e` locally; thinkcentre has not
-  been synced, and the mirror conversion has not happened.
+- **M45-57, curator-submitted source adapters (§55) — Path A built, not deployed.**
+  `Category`/`Manifest` types, the declarative manifest schema, and
+  `DeclarativeAdapter` are in and tested (340 scrapers tests, 3 gate tests). Plan
+  steps 5–8 remain: migration 0113, the submissions store, routes, and the §55.5
+  automated check a reviewer reads. **Path B (WASM) is specified and deliberately
+  not built** — §55.6 gates it on a sandbox that does not exist, and
+  `scripts/check-wasm-gate.py` fails the build if a WASM runtime is adopted before
+  then. Worth knowing: `wasmi 0.4` does not compile on this toolchain at all, so
+  adopting Path B is not a one-line dependency change here.
+- **M45-22, personal concierge queue (§54) — step 1 of 8 done.** The seen-exclusion
+  fix shipped (`seen_work_ids` plus the real filter in `generate_traced`; both were
+  dead code, so nothing excluded already-read works from any blend). Steps 2–8
+  remain: migration 0113, domain selectors, store, routes, WIP notifications,
+  frontend.
+- **29 rows in the M45 tracker are still `planned`** (M45-22 … M45-56, excluding
+  the two partially-implemented rows above). This is the largest remaining pool of
+  named work in the repo. M45-18 was in this list while fully shipped; it is now
+  `implemented-fully-tested`, so the count is 29, not 31.
+- `origin` (git.polarisocial.xyz) is **down** — its Forgejo SQLite reports
+  "database disk image is malformed" and every repository on it 500s, not just
+  this one. It needs repair on that host; re-authenticating will not help. Work
+  goes to github, and the thinkcentre mirror tracks it.
 - `preread_reports` exists and is tested, but **no provider is configured**, so nothing
   writes a row in practice. Running an Ollama instance and pointing the adapter at it is the
   last manual step; §23.7's "AI features disabled without configuration" is why that is a
