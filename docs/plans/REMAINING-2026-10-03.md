@@ -59,20 +59,72 @@ what is *still* to do, in the order it will be done.
 |---|---|---|
 | 1 | M45-22 tracker row | The M45-22 row says "shipped at `baf297d`", with the PG-only 500 named — not "done". |
 | 2 | M45-57 tracker row | Says "Path A shipped, Path B gated by §55.6". |
-| 3 | Wire `Concierge.svelte` into the router | The page exists and is tested but **no route renders it**. Find how `Discover.svelte` is registered and do the same. |
-| 4 | `spec.md` §54 → implementation note | The spec claims the concierge exists; a reader should be able to check that in one grep. |
-| 5 | The pre-existing CI reds | `scripts/check-sqlite-migration-syntax.py --self-test` (5 cases) and `scripts/check-pg-uuid-casts.py` both reproduce on a clean stash. Named in the final report rather than quietly fixed. |
-| 6 | The 27 `planned` + 6 `specified` tracker rows | M45-23 north-star, M45-25 … M45-55, M46-05 search. Each is a multi-week spec of its own. Listed so the number is honest rather than implied. |
-| 7 | Path B (WASM), §55.4 | Gated by §55.6. `scripts/check-wasm-gate.py` fails the build if a WASM runtime is adopted; `wasmi 0.4` does not compile on this toolchain. |
+| 3 | `spec.md` §54 → implementation note | The spec claims the concierge exists; a reader should be able to check that in one grep. |
+| 4 | The pre-existing CI reds | Three remain, all reproduced on a clean stash and named rather than quietly fixed. See the table below. |
+| 5 | The 27 `planned` + 6 `specified` tracker rows | M45-23 north-star, M45-25 … M45-55, M46-05 search. Each is a multi-week spec of its own. Listed so the number is honest rather than implied. |
+| 6 | Path B (WASM), §55.4 | Gated by §55.6. `scripts/check-wasm-gate.py` fails the build if a WASM runtime is adopted; `wasmi 0.4` does not compile on this toolchain. |
 
-### Step 3 detail — routing the page
+### The static CI gates, run 2026-10-03
 
-`Concierge.svelte` and its test are in `frontend/src/routes/`. Nothing imports it.
-That is deliberate for the test — it renders the component directly — and it means the
-page is **not reachable by a user yet**. Whoever does this should look at how
-`Discover.svelte` is registered and follow it exactly, then add a test that the route
-renders the component, because "the component's tests pass" and "the page loads" are
-different claims and only the second is about the product.
+None of the eight `scripts/check-*.py` gates had been run this session. Six were red.
+Four were fixed; one was a checker giving advice that made things worse; the rest is
+old debt, named rather than absorbed.
+
+| Gate | Was | Now | What it found |
+|---|---|---|---|
+| `check-snapshot-pii.py` | red | **green** | My two `account_id` columns. 14 policy decisions added; both `rekey_account`. |
+| `check-pg-arm-uses-sqlite-pool.py` | 23 | 22 | My `exec()` branched on a `pg` bool; now matches `Backend::`. |
+| `check-uncast-pg-placeholders.py` | 17 | 15 | **Mine, and the checker's fix was wrong** — see below. |
+| `check-snapshot-channel.py` | "red" | **green** | Not a failure: it needs `--target`/`--file`, or `--self-test`. Passes. |
+| `check-pg-backend-arm-placeholders.py` | green | green | — |
+| `check-wasm-gate.py` | green | green | — |
+| `check-pg-uuid-casts.py` | red | red | Pre-existing, `snapshot_anonymisation.rs:1023`, untouched since `f4cbbda` (2026-09-30). |
+| `find-single-backend-suites.py` | 3 files | 3 files | Pre-existing: `m53_source_credentials.rs`, `canon_class.rs`, `query_fields_characters.rs`. |
+| `check-sqlite-migration-syntax.py --self-test` | 5 cases | 5 cases | Pre-existing, untouched since `b1d1ce8` (2026-09-29). |
+
+**The false lead, in full, because it is the kind of thing that gets repeated.**
+`check-uncast-pg-placeholders.py` reports `INT4 column into i64` on both
+`concierge_store.rs` SELECTs and tells you to widen to `::int8`. Doing exactly that took
+PostgreSQL from **13/13 to 11/13**, with the mirror-image error:
+
+```
+Rust type `core::option::Option<i32>` (as SQL type `INT4`) is not compatible with
+SQL type `INT8`
+```
+
+`SessionRow` declares `Option<i32>`, so the uncast INT4 was already correct — it is the
+one narrowing the checker is willing to call right. The checker infers the Rust type
+from the SELECT list and cannot see the `FromRow` struct. **Its read of the fault was
+right; its advice about the fix was backwards.** Reverted, with a comment on the SELECT
+so the next person does not "fix" it again.
+
+### A stale token the E2E suite had been red on
+
+`analytics.spec.ts` asserts `scroll-padding-top >= .site-header` height. It failed by
+**3.59px**: the token said `4.0625rem` (65px) and the header measures **68.59375px**.
+
+Not caused by the new nav entry, and this was measured rather than argued: `dist` built
+from `a6d62a9`'s `App.svelte` (17 nav items) and from HEAD (18) both report
+`header: 68.59375`, byte-identical, with `navItems: 18` in both because the probe counts
+rendered `.desktop a` and the overflow container still lays them all out. `.bar` is
+`min-height: 4rem` and the content decides the rest.
+
+Fixed the token (`4.2875rem`) rather than the test. The shape of the bug is worth
+naming: a fixed token compared against a **content-sized** element is a standing
+invitation to drift, and it presents as an analytics bug because analytics is where the
+test lives. The token's own comment already said to revisit it when the header grows.
+
+### E2E coverage now includes the concierge
+
+`coverage.spec.ts` gains a live test: register, publish three works, load `/concierge`,
+and require the page to resolve to a real queue or a §54.6 explained-empty — never an
+error summary, never a skeleton that never settles. This is the only test in the file
+that would notice **the route existing while the endpoint behind it 404s**, which is
+the exact shape of bug the page shipped with.
+
+Selector note worth keeping: `ErrorSummary` renders `role="alert"` on `.summary` and has
+no `.error-summary` class. A guard selector written from the component's *filename*
+matches nothing and silently never fires.
 
 ## Out of scope here, on purpose
 
