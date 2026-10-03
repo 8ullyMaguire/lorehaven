@@ -778,13 +778,6 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/me/attention-report",
         audience: Audience::Authenticated,
     },
-    RouteEntry {
-        file: "recommendation_transparency.rs",
-        handler: "propose_wrangling",
-        method: "POST",
-        path: "/admin/tag-wrangling/proposals",
-        audience: Audience::Authenticated,
-    },
     // ------------------------------------------------------------------
     // Library — session-scoped (all reads and writes)
     // ------------------------------------------------------------------
@@ -4292,13 +4285,6 @@ const ROUTE_TABLE: &[RouteEntry] = &[
     // scopes them -- there is no "someone else's explanation" to ask for.
     RouteEntry {
         file: "recommendation_transparency.rs",
-        handler: "get_attention_report",
-        method: "GET",
-        path: "/me/attention-report",
-        audience: Audience::Authenticated,
-    },
-    RouteEntry {
-        file: "recommendation_transparency.rs",
         handler: "set_attention_report",
         method: "PUT",
         path: "/me/attention-report",
@@ -4316,7 +4302,7 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         handler: "list_wrangling_proposals",
         method: "GET",
         path: "/admin/tag-wrangling/proposals",
-        audience: Audience::Authenticated,
+        audience: Audience::Operator,
     },
     RouteEntry {
         file: "recommendation_transparency.rs",
@@ -5068,6 +5054,18 @@ fn registered_routes_are_tabled() {
             // registered as `POST` — and `every_route_has_correct_audience` reads
             // the same rows, so the two halves of the table disagreed about a route
             // without either test noticing.
+            // The method is compared, and that comparison is defence-in-depth rather
+            // than load-bearing: removing it leaves the suite green (measured,
+            // mutation M5), because the REVERSE direction below already rejects a
+            // row whose method is not the one the router registers. Two rows for one
+            // (file, path, handler) under different methods also let an `any` pass
+            // either way — two such duplicates existed in
+            // `recommendation_transparency.rs` and are gone, with a guard below so
+            // they cannot return.
+            //
+            // Proved by corrupting the table rather than by mutating the guard: a
+            // wrong method, a wrong path and a reintroduced duplicate each turn this
+            // test red.
             let found = table_entries.iter().any(|(f, p, m, h)| {
                 f == &file_name
                     && p == &full_path
@@ -5084,6 +5082,29 @@ fn registered_routes_are_tabled() {
                     full_path
                 ));
             }
+        }
+    }
+
+    // No two rows may describe the same route.
+    //
+    // This is not cosmetic tidiness. A duplicate row is what let a missing method
+    // comparison hide: `any` over two rows for one (file, path, handler) is
+    // satisfied by whichever method is asked for, so the outward direction could not
+    // tell "this route's method is absent from the table" from "it is listed twice".
+    // Two duplicates existed in `recommendation_transparency.rs` and were removed.
+    //
+    // Also defence-in-depth by mutation — deleting the guard leaves the suite green —
+    // so it was proved by reintroducing a duplicate, which turns this test red.
+    let mut seen_rows: Vec<(&str, &str, &str, &str)> = Vec::new();
+    for entry in ROUTE_TABLE {
+        let key = (entry.file, entry.path, entry.method, entry.handler);
+        if seen_rows.contains(&key) {
+            failures.push(format!(
+                "{}:{} — ROUTE_TABLE has the same {} '{}' row more than once",
+                entry.file, entry.path, entry.method, entry.handler
+            ));
+        } else {
+            seen_rows.push(key);
         }
     }
 
