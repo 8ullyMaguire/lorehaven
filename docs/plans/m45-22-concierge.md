@@ -167,9 +167,14 @@ cargo test -p lorehaven-app --lib discovery 2>&1 | tail -3
 
 ---
 
-## Step 2 — Migration 0113: sessions and watches
+## Step 2 — Migration 0114: sessions and watches
 
-**Files:** `migrations/sqlite/0113_concierge.sql`, `migrations/postgres/0113_concierge.sql`
+> **This is 0114, not 0113.** `0113_source_adapters` is taken by M45-57
+> (§55, curator-submitted adapters), which landed its migration first. Two plans
+> both numbered their first migration 0113 because each was written without the
+> other in view; the numbering is global and only one can win.
+
+**Files:** `migrations/sqlite/0114_concierge.sql`, `migrations/postgres/0114_concierge.sql`
 
 SQLite:
 
@@ -229,11 +234,11 @@ each convention is for.
 **Verify**
 
 ```sh
-cargo test -p lorehaven-db --lib migration 2>&1 | grep -E '0113|test result'
+cargo test -p lorehaven-db --lib migration 2>&1 | grep -E '0114|test result'
 cargo run --bin lorehaven -- migrate 2>&1 | tail -5
 ```
 
-Expect **113/113** migrations applied, on SQLite and again on PostgreSQL. Then:
+Expect **114/114** migrations applied, on SQLite and again on PostgreSQL. Then:
 
 ```sh
 sqlite3 data/lorehaven.sqlite "select count(*) from concierge_sessions;"   # 0
