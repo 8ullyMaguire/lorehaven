@@ -752,8 +752,11 @@ async fn fetch_user_rated_work_vectors(
         Backend::Postgres => {
             let pool = db.postgres_pool().ok_or(pool_err())?;
             let rated = sqlx::query_as::<_, (String, i64)>(
+                // `rating.account_id` is UUID on PostgreSQL and the caller holds
+                // a `&str`, so the placeholder needs a cast — same 42883
+                // (`uuid = text`) as `fetch_work_tag_weights_postgres`.
                 "SELECT r.work_id, r.stars FROM rating r
-                 WHERE r.account_id = $1 AND r.deleted_at IS NULL",
+                 WHERE r.account_id = $1::uuid AND r.deleted_at IS NULL",
             )
             .bind(account_id)
             .fetch_all(pool)
@@ -800,10 +803,15 @@ async fn fetch_work_tag_weights_postgres(
     work_id: &str,
 ) -> Result<Vec<(String, i64)>, sqlx::Error> {
     sqlx::query_as::<_, (String, i64)>(
+        // `work_tags.work_id` is UUID on PostgreSQL and the caller holds a
+        // `&str`, so the placeholder needs a cast. Without it the driver sends
+        // the parameter as text and the comparison fails 42883
+        // ("operator does not exist: uuid = text") — SQLite has no such
+        // mismatch, so this only ever surfaces on the PostgreSQL leg.
         "SELECT tn.canonical, COALESCE(wt.weight, 0)
          FROM work_tags wt
          JOIN taxonomy_nodes tn ON tn.id = wt.node_id
-         WHERE wt.work_id = $1",
+         WHERE wt.work_id = $1::uuid",
     )
     .bind(work_id)
     .fetch_all(pool)
