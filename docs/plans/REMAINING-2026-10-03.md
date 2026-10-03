@@ -120,13 +120,18 @@ release binary with the embedded frontend.
 | Run | Result |
 |---|---|
 | First full run (before the token fix) | **82 passed, 1 failed** — `analytics.spec.ts:307`, the `scroll-padding-top` comparison |
-| `analytics.spec.ts:307` alone, after the token fix + binary rebuild | 1 passed |
+| Second full run, after the token fix + binary rebuild | **84 passed, 0 failed** (13.5m) — includes the new concierge journey |
+| `analytics.spec.ts:307` alone, before the whole-suite re-run | 1 passed |
 | `coverage.spec.ts` concierge test, alone | 1 passed (11.9s) |
 | Same test with `/me/concierge` forced to 404 | **1 failed** — the mutation it exists to catch |
 
-Whole-suite green has **not** been re-run since the token fix, so the honest statement is
-83/83 with the one previously-failing test verified green in isolation. Re-running costs
-~13 minutes and shares nothing with the fix.
+84 rather than 83 because the concierge journey was added between the runs.
+
+**The token fix was invisible until the binary was rebuilt.** `rust-embed` bakes
+`frontend/dist` into the binary at compile time, so a CSS-only change leaves the served
+page stale: after editing the token, a fresh measurement still read `pad: 65px`. Only
+`cargo build --release --bin lorehaven` made it real. Worth remembering as a class of
+false negative — a correct fix that measures as a failed one.
 
 ### E2E coverage now includes the concierge
 
