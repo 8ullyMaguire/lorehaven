@@ -9994,6 +9994,31 @@ ratio of bookmarks to views is a statement about how the reader browses.
 
 Gaps review B4, tracked as M45-22.
 
+> **Implementation note (2026-10-03).** Shipped at `baf297d`, tag
+> `v0.56-concierge`; the page wired into the router at `08f7ac5`. Plan:
+> `docs/plans/m45-22-concierge.md`. Where each piece lives:
+>
+> | Concern | Where |
+> |---|---|
+> | Migration | `migrations/*/0114_concierge.sql` — `concierge_sessions`, `wip_watches` |
+> | Selector, budget cut, mood vocabulary | `crates/domain/src/concierge.rs` |
+> | Persistence | `crates/db/src/concierge_store.rs` |
+> | HTTP surface (5 routes, all behind `RequireSession`) | `crates/app/src/routes/concierge.rs` |
+> | Candidate generation, shared with discovery | `crates/app/src/routes/discovery.rs::build_candidate_engines` |
+> | The page | `frontend/src/routes/Concierge.svelte`, routed at `/concierge` |
+>
+> Two implementation facts a reader of this section would otherwise have to
+> rediscover. **§54.7's parity** holds because both routes call
+> `build_candidate_engines` — they did not at first, and the concierge served the
+> discovery feed exactly reversed, because `render_queue` used the pluggable
+> registry path while the default `rec_mode` is `legacy` and takes `blend()`.
+> **§54.6's explained-empty** is the server's own wording, returned verbatim; the
+> client has no paraphrase of it.
+>
+> Not implemented, deliberately: operator affinity and theme gravity, which
+> discovery applies and §54 gives the concierge no `sort` parameter to expose them
+> through. On an instance with affinities set, the two feeds may legitimately differ.
+
 ### 54.1 What this is, and what it is not
 
 A private queue per reader, ranked by predicted enjoyment, with a **session
@@ -10159,6 +10184,22 @@ is notified once, through §14's existing notification door.
 ---
 
 ## 55 Curator-submitted source adapters
+
+> **Implementation note (2026-10-03).** **Path A (declarative YAML) shipped**, tag
+> `v0.55-source-adapters`; **Path B (WASM) is specified and not built**, gated by
+> §55.6. Plan: `docs/plans/m45-23-curator-adapters.md`.
+>
+> | Concern | Where |
+> |---|---|
+> | Migration | `migrations/*/0113_*` — `extension_submissions`, `adapter_reviews` |
+> | TL3 gate (§55.2), 3-reviewer threshold (§19.4) | `crates/db/src/source_adapters.rs` |
+> | Manifest + category types, DeclarativeAdapter | `crates/scrapers/src/source_manifest.rs`, `declarative.rs` |
+> | HTTP surface | `crates/app/src/routes/source_adapters.rs` |
+> | §55.5 automated check | `crates/app/tests/declarative_check.rs` |
+> | §55.6 gate enforcement | `crates/app/tests/wasm_gate.rs` + `scripts/check-wasm-gate.py` |
+>
+> Migration `0113` was renumbered once during planning: M45-22's plan claimed it too,
+> and M45-22 took `0114`.
 
 Gaps review, tracked as M45-23.
 
