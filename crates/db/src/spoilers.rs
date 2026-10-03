@@ -315,6 +315,8 @@ pub async fn list_warning_prefs(
     Ok(rows
         .into_iter()
         .filter_map(|(t, a)| {
+            // A stored preference naming a warning type that no longer exists
+            // is skipped rather than failing the reader's whole list.
             Some((
                 WarningType::from_str(&t).ok()?,
                 WarningAction::from_str(&a).ok()?,

@@ -176,7 +176,27 @@ impl Bucket {
     }
 
     /// Take a token if one is available. Returns the wait time when refused.
+    ///
+    /// Every production path goes through `take_cost`; this is the
+    /// one-token spelling, kept for the tests that exercise plain bucket
+    /// arithmetic without a failing-sign-in surcharge.
+    #[cfg(test)]
     fn take(&mut self, quota: Quota, now: Instant) -> Result<(), Duration> {
+        self.take_cost(quota, now, 1.0)
+    }
+
+    /// Take `cost` tokens if the bucket can pay for them.
+    ///
+    /// A cost above 1 is how a *failed* sign-in is made to hurt more than a
+    /// successful one. Sign-in is deliberately slow — a wrong password takes
+    /// as long as a right one, so the handler pays a real Argon2 verification
+    /// every time. That honesty is non-negotiable, but it means a sequential
+    /// guesser spends its time more slowly than the bucket refills, so a
+    /// one-token cost would never refuse them. Charging a failure several
+    /// tokens makes the spend outrun the refill, and the property the rate
+    /// limit is supposed to have is restored.
+    fn take_cost(&mut self, quota: Quota, now: Instant, cost: f64) -> Result<(), Duration> {
+        let cost = cost.max(1.0);
         let elapsed = now
             .saturating_duration_since(self.last_refill)
             .as_secs_f64();
@@ -192,12 +212,15 @@ impl Bucket {
             self.tokens = (self.tokens + elapsed * refill).min(f64::from(quota.burst));
         }
 
-        if self.tokens >= 1.0 {
-            self.tokens -= 1.0;
+        if self.tokens >= cost {
+            self.tokens -= cost;
             Ok(())
         } else {
+            // The honest wait is for enough tokens to cover the whole cost, not
+            // just one: telling a client to retry after a single token invites
+            // an immediate second failure.
             let wait = if refill > 0.0 {
-                let deficit = 1.0 - self.tokens;
+                let deficit = cost - self.tokens;
                 let seconds = deficit / refill;
                 // At least a second: telling a client "retry in 0s" invites a
                 // loop. At most a day: a longer hint is not more useful.
@@ -248,7 +271,11 @@ impl RateLimiter {
     }
 
     /// Check a request cost against a bucket, returning a retry delay on refusal.
-    fn check(&self, key: &str, quota: Quota) -> Result<(), Duration> {
+    ///
+    /// `cost` is how many tokens this request spends. A refused request spends
+    /// nothing, so a client that ignores `Retry-After` does not deepen its own
+    /// hole.
+    fn check_cost(&self, key: &str, quota: Quota, cost: f64) -> Result<(), Duration> {
         let now = Instant::now();
         let mut buckets = GLOBAL_BUCKETS
             .lock()
@@ -260,7 +287,12 @@ impl RateLimiter {
             .entry(key.to_owned())
             .or_insert_with(|| Bucket::new(f64::from(quota.burst)));
 
-        bucket.take(quota, now)
+        bucket.take_cost(quota, now, cost)
+    }
+
+    /// Check a request cost against a bucket, returning a retry delay on refusal.
+    fn check(&self, key: &str, quota: Quota) -> Result<(), Duration> {
+        self.check_cost(key, quota, 1.0)
     }
 
     /// Drop buckets that have refilled and gone quiet.
@@ -362,8 +394,40 @@ pub async fn enforce(State(state): State<AppState>, request: Request, next: Next
         }
     }
 
-    next.run(request).await
+    let response = next.run(request).await;
+
+    // Charge a rejected sign-in more than one token. Sign-in is deliberately
+    // slow — a wrong password takes as long as a right one, so the handler
+    // runs a real Argon2 verification every time. That honesty is
+    // non-negotiable, but it means a *sequential* guesser spends tokens more
+    // slowly than the bucket refills, and would never be refused. Charging a
+    // failure several tokens makes the spend outrun the refill, restoring the
+    // property the rate limit is supposed to have.
+    //
+    // No handler cooperation is needed: on the auth class a 401 is exactly a
+    // rejected credential, which is the signal we want and cannot be forged
+    // by a handler that does not know it is being metered.
+    if class == RouteClass::Auth && response.status() == axum::http::StatusCode::UNAUTHORIZED {
+        // A refusal here is not itself an error: the request already ran and
+        // produced its answer. The next attempt will be turned away.
+        if let Err(retry_after) =
+            limiter.check_cost(&address_key, address_quota, 1.0 + FAILED_SIGN_IN_COST)
+        {
+            tracing::debug!(%address_key, ?retry_after, "failed sign-in exhausted the address bucket");
+        }
+    }
+
+    response
 }
+
+/// The extra tokens, above the base one, charged for a rejected sign-in.
+///
+/// Chosen so the spend outruns the refill by a wide margin even on fast
+/// hardware: the auth class refills at a few tokens per second, while a
+/// sequential attacker can complete far fewer password hashes per second than
+/// that. A short run of wrong passwords therefore exhausts the burst, and the
+/// next attempt is refused before any hash is run.
+const FAILED_SIGN_IN_COST: f64 = 5.0;
 
 /// Announce once, and only once, that requests are sharing a bucket because no
 /// client address is available.
@@ -539,6 +603,43 @@ mod tests {
         let limits = Limits::default();
         assert!(limits.quota(RouteClass::Auth).burst < limits.quota(RouteClass::Default).burst);
         assert!(limits.quota(RouteClass::Write).burst < limits.quota(RouteClass::Search).burst);
+    }
+
+    #[test]
+    fn a_sequential_guesser_is_eventually_refused() {
+        // The property the sign-in limit must have, stated without a server:
+        // however slowly a client guesses, the cost of a wrong password must
+        // outrun the refill. A real handler spends ~0.5s per Argon2 hash, so
+        // model a guesser far *slower* than that and require the bucket to run
+        // dry anyway. If this passes, how concurrent the guesser is becomes
+        // irrelevant to whether it is stopped.
+        let auth = Limits::default().quota(RouteClass::Auth);
+        let address_quota = Quota {
+            burst: auth.burst.saturating_mul(4),
+            per_minute: auth.per_minute.saturating_mul(4),
+        };
+        let mut bucket = Bucket::new(f64::from(address_quota.burst));
+        let start = Instant::now();
+
+        // A guesser spending two seconds on each attempt, which is slower than
+        // any real password hash and therefore the conservative case.
+        let per_guess = Duration::from_secs(2);
+        let cost = 1.0 + FAILED_SIGN_IN_COST;
+
+        let mut refused_at = None;
+        for attempt in 1..=1_000_u32 {
+            let now = start + per_guess * (attempt - 1);
+            if bucket.take_cost(address_quota, now, cost).is_err() {
+                refused_at = Some(attempt);
+                break;
+            }
+        }
+
+        let attempt = refused_at.expect("a sequential guesser must eventually be refused");
+        assert!(
+            attempt <= 10,
+            "refused only after {attempt} wrong passwords; the limit is not binding"
+        );
     }
 
     #[test]
