@@ -126,6 +126,86 @@ describe('application shell', () => {
     }
   });
 
+  it('offers the concierge queue in the navigation', async () => {
+    // Mutation M3 in the wiring proof: removing the nav entry left all 45 tests
+    // green, because a page can be reachable by URL and still be unreachable by a
+    // reader — the resolver test passes, the render test passes, and nobody is
+    // told the queue exists. `NAV` is a plain array in this file, so the check has
+    // to be that the link is actually rendered.
+    mockShell(false);
+    render(App);
+
+    const link = screen.getAllByRole('link', { name: /your queue/i });
+    expect(link.length).toBeGreaterThan(0);
+    expect(link[0].getAttribute('href')).toBe('/concierge');
+  });
+
+  it('routes /concierge to the concierge page, not the 404 (spec §54)', async () => {
+    // The gap this closes. `Concierge.svelte` shipped with 11 passing component
+    // tests and no route, and every one of them stayed green — a component test
+    // renders the component directly, so none of them ever asks whether
+    // `/concierge` resolves or what the shell does with it. "The component works"
+    // and "a reader can reach it" are different claims and only this is the second.
+    //
+    // So this renders the SHELL at that path, with the concierge's own API
+    // answered. Two things can go wrong and this catches both: the resolver falls
+    // through to not-found (no entry in `ROUTES`), or it matches but no
+    // `{:else if route.id === 'concierge'}` branch exists so the shell renders
+    // nothing. `router.test.ts` checks the first; only this checks the second.
+    mockShell(true);
+    const seen: string[] = [];
+    const base = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(typeof input === 'string' ? input : (input as Request).url);
+      seen.push(url);
+      if (url.includes('/health/ready')) return Promise.resolve(json(READY));
+      if (url.includes('/auth/me')) return Promise.resolve(json(ME));
+      if (url.includes('/me/concierge')) {
+        return Promise.resolve(
+          json({
+            session_id: 'sess-1',
+            items: [
+              {
+                work_id: 'work-1',
+                title: 'A Work In The Queue',
+                estimated_minutes: 20,
+                reason: { kind: 'blend' },
+              },
+            ],
+            estimated_minutes: 20,
+            truncated_at: null,
+            rate_source: 'default',
+            explained_empty: null,
+          }),
+        );
+      }
+      return Promise.resolve(json(META));
+    });
+
+    window.history.pushState({}, '', '/concierge');
+    render(App);
+
+    // The page's own heading, which only `Concierge.svelte` renders. NotFound has
+    // no such heading, so this is the assertion that the shell dispatched.
+    await waitFor(() =>
+      expect(screen.getAllByText('Your queue').length).toBeGreaterThan(0),
+    );
+    await waitFor(() =>
+      expect(screen.getAllByText('A Work In The Queue').length).toBeGreaterThan(0),
+    );
+
+    // And it actually asked the concierge endpoint — a shell that rendered the
+    // page with no data would still show the heading.
+    expect(seen.some((u) => u.includes('/me/concierge'))).toBe(true);
+    // §54.7's no-selector case: the first render must send NO mood and NO budget,
+    // so a reader who has chosen nothing still sees their discovery feed.
+    const call = seen.find((u) => u.includes('/me/concierge'));
+    expect(call).toBeDefined();
+    expect(call).not.toContain('mood=');
+    expect(call).not.toContain('minutes=');
+
+    base.mockRestore();
+  });
+
   it('shows real instance values fetched from the API, not placeholders', async () => {
     mockShell(false);
     render(App);
