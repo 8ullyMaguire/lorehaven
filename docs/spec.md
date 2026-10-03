@@ -10195,7 +10195,7 @@ is notified once, through §14's existing notification door.
 > | TL3 gate (§55.2), 3-reviewer threshold (§19.4) | `crates/db/src/source_adapters.rs` |
 > | Manifest + category types, DeclarativeAdapter | `crates/scrapers/src/source_manifest.rs`, `declarative.rs` |
 > | HTTP surface | `crates/app/src/routes/source_adapters.rs` |
-> | §55.5 automated check | `crates/app/tests/declarative_check.rs` |
+> | §55.5 automated check | `crates/scrapers/src/declarative_check.rs` |
 > | §55.6 gate enforcement | `crates/app/tests/wasm_gate.rs` + `scripts/check-wasm-gate.py` |
 >
 > Migration `0113` was renumbered once during planning: M45-22's plan claimed it too,

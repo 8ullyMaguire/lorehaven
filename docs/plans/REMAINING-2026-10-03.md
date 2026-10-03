@@ -19,7 +19,7 @@ what is *still* to do, in the order it will be done.
 
 | # | Work | Step | Evidence |
 |---|---|---|---|
-| 1 | M45-57 HTTP routes + §55.5 check | 7–8 | `source_adapter_routes.rs` 9/9, `declarative_check.rs` 24/24 |
+| 1 | M45-57 HTTP routes + §55.5 check | 7–8 | `source_adapter_routes.rs` 9/9, `curator.rs` 5/5, `lorehaven-scrapers` 364/364 |
 | 2 | M45-22 migration 0114 | 2 | 114/114 apply on both engines |
 | 3 | M45-22 domain + store | 3–4 | `concierge_store.rs` 13/13 both engines |
 | 4 | M45-22 routes + WIP notify | 5–6 | `concierge_routes.rs` 11/11 **both engines** |
