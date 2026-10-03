@@ -339,35 +339,33 @@ fn reason_for(stage: &str) -> lorehaven_domain::recommendation_transparency::Slo
     }
 }
 
-async fn get_discovery(
-    State(state): State<AppState>,
-    MaybeSession(session): MaybeSession,
-    Query(params): Query<DiscoveryQuery>,
-) -> ApiResult<Json<serde_json::Value>> {
-    let limit = 20;
-    let account_id: Option<String> = session.as_ref().map(|s| s.account_id.to_string());
-    // Content filters belong to the pseud the session is acting as, and which
-    // pseud that is a session property (`sessions.active_pseud_id`), not an
-    // account one. Passing the account here would pick an arbitrary pseud out of
-    // the account's several, or none at all -- and a filter that applies to
-    // search but not to recommendations is exactly the bug this closes. The
-    // fallback to the account id mirrors `routes/settings.rs`, so the two agree
-    // on what a filter without a pseud means.
-    let viewer_pseud: Option<uuid::Uuid> = session.as_ref().map(|s| {
-        s.pseud_id
-            .as_ref()
-            .map(|p| p.as_uuid())
-            .unwrap_or_else(|| s.account_id.as_uuid())
-    });
-
-    // Resolve the effective sort (spec §43.4): query param > stored preference > default.
-    let effective_sort =
-        resolve_sort(&state, session.as_ref(), params.sort.as_deref(), "discover").await;
-
-    // Build candidate lists from each recommendation engine, then blend.
+/// Build the per-engine candidate lists that `blend()` merges (spec §16.1a).
+///
+/// SHARED with `routes::concierge::render_queue`, and that sharing is the point:
+/// §54.7 requires a reader with no selector to see the same works as discovery in
+/// the same order, and the first implementation of the concierge did not — it
+/// called `rec_engine::generate_with_registry`, which is the PLUGGABLE path, while
+/// the default `rec_mode` is `legacy` and takes the `blend()` path below. So the
+/// concierge returned the discovery feed exactly reversed, with the same five
+/// works in the opposite order.
+///
+/// Duplicating this list is how that happened: two copies of "which engines run",
+/// one of which nobody remembered to update. `no_selector_returns_the_same_works_as_discovery`
+/// compares the two routes' id lists directly and is the only test in the suite
+/// that can see the difference, because no store or domain test calls both routes.
+pub(crate) async fn build_candidate_engines(
+    state: &AppState,
+    account_id: Option<&str>,
+    viewer_pseud: Option<uuid::Uuid>,
+    // i64, not usize: each engine takes `limit: i64` and every engine's
+    // `score` is `(limit - idx as i64)`. A usize here would have meant an
+    // `as i64` at the call site, which is exactly the kind of conversion that
+    // makes two call sites disagree about what a limit is.
+    limit: i64,
+) -> ApiResult<Vec<Vec<lorehaven_domain::discovery::Candidate>>> {
     let mut engines: Vec<Vec<lorehaven_domain::discovery::Candidate>> = Vec::new();
 
-    if let Some(ref account_id) = account_id {
+    if let Some(account_id) = account_id {
         // Engine 1: tag-based personalization (from taste profile).
         let personalized = lorehaven_db::discovery::personalized_recommendations(
             state.db(),
@@ -413,7 +411,7 @@ async fn get_discovery(
     // Engine 3: media-reference collaborative (signed-in users only).
     // Finds works sharing media references (faceclaims, moodboards, playlists)
     // with the user's bookmarked works. Spec §32.7.3, §9.10.
-    if let Some(ref account_id) = account_id {
+    if let Some(account_id) = account_id {
         let media_collab = lorehaven_db::discovery::media_reference_collaborative_recommendations(
             state.db(),
             account_id,
@@ -436,6 +434,37 @@ async fn get_discovery(
                 .collect(),
         );
     }
+
+    Ok(engines)
+}
+
+async fn get_discovery(
+    State(state): State<AppState>,
+    MaybeSession(session): MaybeSession,
+    Query(params): Query<DiscoveryQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let limit = 20;
+    let account_id: Option<String> = session.as_ref().map(|s| s.account_id.to_string());
+    // Content filters belong to the pseud the session is acting as, and which
+    // pseud that is a session property (`sessions.active_pseud_id`), not an
+    // account one. Passing the account here would pick an arbitrary pseud out of
+    // the account's several, or none at all -- and a filter that applies to
+    // search but not to recommendations is exactly the bug this closes. The
+    // fallback to the account id mirrors `routes/settings.rs`, so the two agree
+    // on what a filter without a pseud means.
+    let viewer_pseud: Option<uuid::Uuid> = session.as_ref().map(|s| {
+        s.pseud_id
+            .as_ref()
+            .map(|p| p.as_uuid())
+            .unwrap_or_else(|| s.account_id.as_uuid())
+    });
+
+    // Resolve the effective sort (spec §43.4): query param > stored preference > default.
+    let effective_sort =
+        resolve_sort(&state, session.as_ref(), params.sort.as_deref(), "discover").await;
+
+    let engines =
+        build_candidate_engines(&state, account_id.as_deref(), viewer_pseud, limit).await?;
 
     // Merge candidates. Branch on rec_mode (spec §16.1a, M52-07):
     // - legacy: blend multi-engine candidates (current behavior)

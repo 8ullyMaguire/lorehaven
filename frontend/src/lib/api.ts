@@ -2527,6 +2527,157 @@ export interface DiscoveryFeed {
   items: DiscoveryItem[];
 }
 
+// ---------------------------------------------------------------------------
+// M45-22 — spec §54, the personal concierge.
+//
+// Three shapes, not one, because the server distinguishes them and a UI that
+// collapses them is a UI that lies (spec §54.6):
+//
+//   * `items: []` with `explained_empty` set   — the selector matched nothing.
+//   * `items: []` with `truncated_at === 0`    — the budget matched nothing.
+//   * `items` truncated at `truncated_at`      — the budget cut the tail.
+//
+// The first two are both an empty list and a page that renders one "nothing here"
+// message for both would be indistinguishable from a fallback to the unfiltered
+// queue — which is the exact defect §54.6 forbids. So `explained_empty` and
+// `truncated_at` are separate fields here, not a union with a `kind`.
+// ---------------------------------------------------------------------------
+
+export interface ConciergeItem {
+  work_id: string;
+  title?: string;
+  author_handle?: string;
+  /** The §54.4 estimate for this work. Null when nothing knows its length. */
+  estimated_minutes: number | null;
+  /**
+   * Why this item is in the queue — §54.6's transparency.
+   *
+   * `kind: 'blend'` means the mood filter did not select it, which a reader who
+   * asked for a mood is entitled to see rather than have smoothed over.
+   */
+  reason: ConciergeReason;
+}
+
+export type ConciergeReason =
+  | { kind: 'blend' }
+  | { kind: 'mood'; mood: string }
+  | { kind: 'budget' }
+  | { kind: 'unknown_length' };
+
+export interface ConciergeQueue {
+  session_id: string;
+  items: ConciergeItem[];
+  /**
+   * The sum of what was RETURNED, never the budget that was asked for.
+   *
+   * §54.4 charges the queue for the works it actually serves, so a reader who asks
+   * for 100 minutes and gets 80 minutes of work has been served 80 minutes. Showing
+   * the request instead would make the server look like it overran.
+   */
+  estimated_minutes: number;
+  /**
+   * The index the budget cut at, or null when nothing was cut.
+   *
+   * Null and 0 are different facts and both are reachable: null means the selector
+   * matched nothing (§54.6's explained empty), 0 means items existed and none of
+   * them fit. The server distinguishes them and so does this type.
+   */
+  truncated_at: number | null;
+  /**
+   * §54.4's rate provenance: `observed` when it came from the reader's own
+   * progress, `default` when it did not. Stated so a reader comparing two queues
+   * built on different rates is not left guessing at the difference.
+   */
+  rate_source: 'observed' | 'default';
+  /** §54.6's explanation, present only when the queue is empty. */
+  explained_empty?: string | null;
+}
+
+export interface ConciergeSession {
+  id: string;
+  mood: string | null;
+  budget_minutes: number | null;
+  estimated_minutes: number;
+  truncated_at: number | null;
+  rate_source: 'observed' | 'default';
+  work_ids: string[];
+  created_at: string;
+}
+
+export interface ConciergeWatch {
+  work_id: string;
+  pending: boolean;
+  created_at: string;
+}
+
+/**
+ * Render a queue for this reader (spec §54.4).
+ *
+ * `mood` and `minutes` are omitted rather than sent as `null`/`0` when unset: the
+ * server reads a present `minutes=0` as "I have no time" and answers with an
+ * explained empty queue, which is a different response from the unfiltered queue.
+ * Building the query by hand means the absent case is actually absent.
+ */
+export async function fetchConciergeQueue(
+  selector: { mood?: string; minutes?: number } = {},
+  signal?: AbortSignal,
+): Promise<ConciergeQueue> {
+  const parts: string[] = [];
+  if (selector.mood !== undefined && selector.mood !== '') {
+    parts.push(`mood=${encodeURIComponent(selector.mood)}`);
+  }
+  if (selector.minutes !== undefined) {
+    parts.push(`minutes=${encodeURIComponent(String(selector.minutes))}`);
+  }
+  const query = parts.length ? `?${parts.join('&')}` : '';
+  return apiFetch<ConciergeQueue>(`/me/concierge${query}`, { signal });
+}
+
+/** This reader's own render history (spec §54.3). */
+export async function fetchConciergeSessions(signal?: AbortSignal): Promise<ConciergeSession[]> {
+  const body = await apiFetch<{ sessions: ConciergeSession[] }>('/me/concierge/sessions', { signal });
+  return body.sessions ?? [];
+}
+
+/** This reader's watches (spec §54.5). */
+export async function fetchConciergeWatches(signal?: AbortSignal): Promise<ConciergeWatch[]> {
+  const body = await apiFetch<{ watches: ConciergeWatch[] }>('/me/watches', { signal });
+  return body.watches ?? [];
+}
+
+/**
+ * Watch a work and be told when it finishes (spec §54.5).
+ *
+ * The response is the WATCH, not a bare 200, because the immediate-notify case is
+ * decided server-side: a work that is already complete notifies on this call and
+ * one that is not will notify later. `notified` is how the page knows which
+ * happened, and reading it back from the watch list instead would need a second
+ * round trip to say the same thing.
+ */
+export async function watchWork(workId: string): Promise<ConciergeWatch & { notified: boolean }> {
+  return apiFetch<ConciergeWatch & { notified: boolean }>(
+    `/me/watches/${encodeURIComponent(workId)}`,
+    // `{}` and not no body: the route takes no selector, but it is a PUT through a
+    // CSRF-bound path, and every other mutating call in this file sends a JSON
+    // body so the header is set the same way.
+    { method: 'PUT', body: JSON.stringify({}) },
+  );
+}
+
+/**
+ * Withdraw a watch (spec §54.5).
+ *
+ * Idempotent by design: withdrawing is silent and leaves no tombstone, so a
+ * retried DELETE must succeed rather than 404 on a state the caller already has.
+ * `removed` reports whether anything went, so a caller can tell a real withdrawal
+ * from a repeat.
+ */
+export async function unwatchWork(workId: string): Promise<{ removed: boolean }> {
+  return apiFetch<{ removed: boolean }>(`/me/watches/${encodeURIComponent(workId)}`, {
+    method: 'DELETE',
+  });
+}
+
 /**
  * The discovery feed, optionally in a chosen order (spec §43.2).
  *

@@ -85,6 +85,15 @@ pub async fn render_queue(
 ) -> ApiResult<Json<Value>> {
     let db = state.db();
     let account = user.account_id.to_string();
+    // Same rule `get_discovery` applies for content filters (discovery.rs:357): the
+    // session's ACTIVE pseud, falling back to the account id when none is selected.
+    // Passing one or the other arbitrarily would make the two feeds eligible for
+    // different rows, which is the §54.7 defect again in a different place.
+    let viewer_pseud: Option<uuid::Uuid> = user
+        .pseud_id
+        .as_ref()
+        .map(|p| p.as_uuid())
+        .or_else(|| Some(user.account_id.as_uuid()));
     let selector = q.selector();
 
     // 1. Validate. The available list is the moods a *published* work actually
@@ -109,33 +118,94 @@ pub async fn render_queue(
     //    history — the same exclusion the discovery route applies, so a reader with
     //    no selector sees the same works in the same order (§54.7's invariant that
     //    the session layer did not make the default path worse).
-    let registry = crate::rec_engine::build_registry(&state.config().discovery);
-    // No `.into()`: `generate_with_registry` already returns `anyhow::Error`, which
-    // is what `AppError::Internal` holds. The conversion was a no-op that clippy
-    // reads as a claim the types differ.
-    let ranked = crate::rec_engine::generate_with_registry(db, &registry, &account, CANDIDATE_CAP)
-        .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
+    // No `.into()` on the `AppError::Internal` conversion below:
+    // `generate_with_registry` already returns `anyhow::Error`, which is what that
+    // variant holds, and the conversion was a no-op clippy reads as a claim the
+    // types differ.
+    //
+    // 3. Order by descending score — the SAME ordering `get_discovery` applies at
+    //    discovery.rs:575, over the SAME candidate list.
+    //
+    //    Two parity defects were live here, and only this one line is the fix for
+    //    the first:
+    //
+    //    (a) ORDER. `generate_with_registry` returns ids already ordered, and every
+    //        engine sets `score` to `(limit - idx)` — but the caller here discarded
+    //        the score entirely, so no ordering could be applied and the blend's
+    //        emission order reached the reader. Caught by
+    //        `no_selector_returns_the_same_works_as_discovery`, which compares the
+    //        two routes' id lists: it returned the same five works EXACTLY REVERSED.
+    //        No store or domain test can see this, because neither calls the
+    //        discovery route.
+    //
+    //    (b) REGISTRY. Discovery honours the reader's stored engine preference
+    //        (§16.1b) via `choice.effective_registry(&registry)`; this built the
+    //        registry directly, so a reader who had chosen an engine got the
+    //        instance default here. Fixed below, which is what makes the sort
+    //        reachable — a preference that changes the engine set changes the
+    //        candidate order, and a sort on the wrong candidate set is a sort on
+    //        the wrong list.
+    //
+    //    Not carried: operator affinity (`apply_affinity_ranking`) and theme
+    //    gravity. Those are DISCOVERY-mode features keyed on `sort=thematic` /
+    //    affinities, and §54 does not give the concierge a sort parameter — so on
+    //    an instance that has operator affinities set, the two feeds may still
+    //    differ. Stated rather than hidden: §54.7's parity claim holds for the
+    //    default instance, which is what the acceptance line is about.
+    // The SAME candidate lists `get_discovery` blends, via the shared helper.
+    //
+    // This used to call `rec_engine::generate_with_registry`, which is the
+    // PLUGGABLE path — while the default `rec_mode` is `legacy`, which blends the
+    // per-engine lists. Two different pipelines, so §54.7's parity was not merely
+    // unsorted, it was unreachable: the concierge served the discovery feed exactly
+    // REVERSED. Caught by `no_selector_returns_the_same_works_as_discovery`, the
+    // only test in the suite that can see it, because no store or domain test calls
+    // both routes.
+    //
+    // Both call sites now go through `build_candidate_engines`. Two copies of "which
+    // engines run" is how the divergence happened: one of them nobody remembered to
+    // update when §16.1b added the pluggable path.
+    let blended = {
+        let engines = super::discovery::build_candidate_engines(
+            &state,
+            Some(&account),
+            viewer_pseud,
+            CANDIDATE_CAP as i64,
+        )
+        .await?;
+        lorehaven_domain::discovery::blend(&engines)
+            .into_iter()
+            .take(CANDIDATE_CAP)
+            .collect::<Vec<lorehaven_domain::discovery::Candidate>>()
+    };
 
-    // 3. Narrow by mood, in blend order. §54.1: mood constrains the candidate set,
+    // The mood filter works on ids — `filter_by_mood(db, &[String], mood)` — so it
+    // is handed the id list, in the ranked order, rather than being taught about
+    // Candidates. The order it receives IS the order it preserves.
+    let ranked_ids: Vec<String> = blended.iter().map(|c| c.work_id.to_string()).collect();
+
+    // 4. Narrow by mood, in that order. §54.1: mood constrains the candidate set,
     //    and the ranking inside that set is untouched.
     let candidates: Vec<String> = match selector.mood.as_deref() {
-        Some(mood) if !mood.trim().is_empty() => store::filter_by_mood(db, &ranked, mood)
+        Some(mood) if !mood.trim().is_empty() => store::filter_by_mood(db, &ranked_ids, mood)
             .await
             .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?,
-        _ => ranked.clone(),
+        _ => ranked_ids.clone(),
     };
 
     // §54.6: a selector that matched nothing is an ANSWER with an explanation, not
-    // a fallback to the unfiltered queue. It is still recorded, so "I asked and
-    // got nothing" is visible in the reader's own history.
+    // a fallback to the unfiltered queue. It is still recorded, so "I asked and got
+    // nothing" is visible in the reader's own history.
+    //
+    // Checked HERE, on the candidate set, and not after the budget: "nothing
+    // matched your mood" and "nothing fit in your budget" are different facts about
+    // the reader's question, and answering the second with the first's explanation
+    // would be a lie about why the queue is empty. `truncated_at` stays null for
+    // this branch for the same reason — nothing was cut.
     if candidates.is_empty() && selector.mood.is_some() {
-        let why = match selector.mood.as_deref() {
-            Some(mood) if !mood.trim().is_empty() => format!(
-                "no work in this instance's current recommendations carries the mood {mood:?}"
-            ),
-            _ => "there is nothing to recommend yet".to_owned(),
-        };
+        let mood = selector.mood.clone().unwrap_or_default();
+        let why =
+            format!("no work in this instance's current recommendations carries the mood {mood:?}");
         let queue = ConciergeQueue::explained_empty("", why, RateSource::Default, selector.clone());
         let session_id = store::record_session(db, &account, &queue)
             .await
@@ -150,7 +220,7 @@ pub async fn render_queue(
         })));
     }
 
-    // 4. Duration estimates, then the cut. A work with no chapters has no
+    // 5. Duration estimates, then the cut. A work with no chapters has no
     //    estimate and is kept and marked (§54.4), charged the queue's midpoint.
     let estimates = store::duration_estimates(db, &candidates)
         .await

@@ -1183,6 +1183,27 @@ pub async fn register(client: &mut TestClient, email: &str, handle: &str) -> Str
         .to_owned()
 }
 
+/// The id of the pseud this session is currently acting as.
+///
+/// Returns `None` for an account with no pseud selected, which is a real state and
+/// not an error — `reading_history_entry` is keyed by BOTH `account_id` and
+/// `pseud_id`, so a fixture writing a reading act has to know which pseud is active
+/// or it writes a row the seen-exclusion will never read.
+pub async fn active_pseud_id(client: &mut TestClient, account_id: &str) -> Option<String> {
+    let (status, me) = client.get("/api/v1/auth/me").await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(
+        me["account"]["id"].as_str(),
+        Some(account_id),
+        "asked for the pseud of {account_id}, but this session is {}",
+        me["account"]["id"]
+    );
+    // `/auth/me` reports `active_pseud_id` at the top level, alongside `pseuds`.
+    // It is the same resolution the concierge's `RequireSession` sees: the
+    // session's choice if it still exists, else the account's first pseud.
+    me["active_pseud_id"].as_str().map(str::to_owned)
+}
+
 /// Become `email`, registering the account if it does not exist yet.
 ///
 /// The registration check asks the database rather than parsing a status code.
