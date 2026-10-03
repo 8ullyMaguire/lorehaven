@@ -460,6 +460,62 @@ pub async fn delete_history_entry(
     Ok(affected > 0)
 }
 
+/// Every work this account has any reading signal for.
+///
+/// Deliberately broad: a read, a started read and a rating all mean "this reader
+/// has already been offered this and did not need it again". A narrow definition
+/// would let a recommendation surface re-serve a work the reader gave up on three
+/// weeks ago.
+///
+/// **The shape is not three `work_id` columns.** `reading_history_entry` and
+/// `reading_progress` are polymorphic — `subject_type` + `subject_id` — so a work
+/// is `subject_type = 'work'`. Only `rating` carries a real `work_id`. Querying the
+/// three as if they shared a shape returns nothing from the two tables that hold
+/// most of a reader's history, which is exactly the bug this function's absence
+/// allowed: nothing excluded already-seen works at all.
+///
+/// `subject_id` is TEXT on SQLite and UUID on PostgreSQL, hence the `::text` in the
+/// PG branch. `rating.deleted_at` is filtered because a withdrawn rating is not a
+/// thing the reader still has a relationship with, and the spec treats withdrawal
+/// as taking it back.
+pub async fn seen_work_ids(db: &Database, account_id: &str) -> Result<Vec<String>> {
+    let sql = db.sql(
+        // `?1`, not `?`, in all three branches. Three separate `?` would be
+        // `$1`, `$2`, `$3` after `Database::sql`'s rewrite, and one bind fills only
+        // the first — so the progress and rating branches would compare
+        // `account_id` against NULL and silently contribute nothing. SQLite does
+        // not raise here (only the Python binding-count check does); it just
+        // returns fewer rows, which is why this failed as "exclusion does not
+        // work" rather than as an error. `?1` is the same slot three times.
+        "SELECT subject_id FROM reading_history_entry
+          WHERE account_id = ?1 AND subject_type = 'work'
+         UNION
+         SELECT subject_id FROM reading_progress
+          WHERE account_id = ?1 AND subject_type = 'work'
+         UNION
+         SELECT work_id FROM rating
+          WHERE account_id = ?1 AND deleted_at IS NULL",
+        "SELECT subject_id::text FROM reading_history_entry
+          WHERE account_id = $1::uuid AND subject_type = 'work'
+         UNION
+         SELECT subject_id::text FROM reading_progress
+          WHERE account_id = $1::uuid AND subject_type = 'work'
+         UNION
+         SELECT work_id::text FROM rating
+          WHERE account_id = $1::uuid AND deleted_at IS NULL",
+    );
+    match db.backend() {
+        Backend::Sqlite => Ok(sqlx::query_scalar(&sql)
+            .bind(account_id)
+            .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+            .await?),
+        Backend::Postgres => Ok(sqlx::query_scalar(&sql)
+            .bind(account_id)
+            .fetch_all(db.postgres_pool().expect("postgres handle"))
+            .await?),
+    }
+}
+
 /// Clear the whole reading history for an account.
 pub async fn clear_history(db: &Database, account: AccountId) -> Result<u64> {
     let sql = db.sql(

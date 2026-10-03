@@ -51,9 +51,21 @@ pub async fn generate_with_registry(
     account_id: &str,
     limit: usize,
 ) -> Result<Vec<String>> {
+    // The reader's already-seen works. This was `vec![]`, which combined with the
+    // unused `_seen_set` in `generate_traced` to mean no work the reader had read
+    // was ever excluded from a blend.
+    //
+    // `unwrap_or_default()` is the right failure here and not a swallow: a reader
+    // with no history has seen nothing, so an empty set is the correct answer, and a
+    // transient failure to read the history should degrade the feed rather than fail
+    // it. An account with genuinely unread history is served already-seen works,
+    // which is a worse feed — not a wrong one.
+    let seen = lorehaven_db::reading::seen_work_ids(db, account_id)
+        .await
+        .unwrap_or_default();
     let ctx = RecContext {
         account_id: account_id.to_string(),
-        seen: vec![],
+        seen,
         cap: limit,
     };
     registry.generate(db, ctx).await

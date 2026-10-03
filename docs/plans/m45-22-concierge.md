@@ -46,18 +46,34 @@ Add to `crates/db/src/reading.rs`:
 ```rust
 /// Every work this account has any reading signal for.
 ///
-/// Deliberately broad: a saved WIP, a started read, a finished read and a rating
-/// all mean "this reader has already been offered this and did not need it
-/// again". A narrow definition would let the queue re-serve a work the reader
-/// DNF'd three weeks ago.
+/// Deliberately broad: a read, a started read and a rating all mean "this
+/// reader has already been offered this and did not need it again". A narrow
+/// definition would let the queue re-serve a work the reader DNF'd three weeks
+/// ago.
+///
+/// **The shape is not three `work_id` columns.** `reading_history_entry` and
+/// `reading_progress` are polymorphic — `subject_type` + `subject_id` — so a
+/// work is `subject_type = 'work'`. Only `rating` has a real `work_id`. Querying
+/// them as if they were all the same shape returns nothing for the two tables
+/// that hold most of a reader's history.
 pub async fn seen_work_ids(db: &Database, account_id: &str) -> Result<Vec<String>, sqlx::Error> {
     let sql = db.sql(
-        "SELECT DISTINCT work_id FROM reading_history WHERE account_id = ?
-         UNION SELECT DISTINCT work_id FROM reading_progress WHERE account_id = ?
-         UNION SELECT DISTINCT work_id FROM rating WHERE account_id = ? AND deleted_at IS NULL",
-        "SELECT DISTINCT work_id::text FROM reading_history WHERE account_id = $1::uuid
-         UNION SELECT DISTINCT work_id::text FROM reading_progress WHERE account_id = $1::uuid
-         UNION SELECT DISTINCT work_id::text FROM rating WHERE account_id = $1::uuid AND deleted_at IS NULL",
+        "SELECT subject_id FROM reading_history_entry
+          WHERE account_id = ? AND subject_type = 'work'
+         UNION
+         SELECT subject_id FROM reading_progress
+          WHERE account_id = ? AND subject_type = 'work'
+         UNION
+         SELECT work_id FROM rating
+          WHERE account_id = ? AND deleted_at IS NULL",
+        "SELECT subject_id::text FROM reading_history_entry
+          WHERE account_id = $1::uuid AND subject_type = 'work'
+         UNION
+         SELECT subject_id::text FROM reading_progress
+          WHERE account_id = $1::uuid AND subject_type = 'work'
+         UNION
+         SELECT work_id::text FROM rating
+          WHERE account_id = $1::uuid AND deleted_at IS NULL",
     );
     match db.backend() {
         Backend::Sqlite => Ok(sqlx::query_scalar(&sql)
@@ -68,10 +84,13 @@ pub async fn seen_work_ids(db: &Database, account_id: &str) -> Result<Vec<String
 }
 ```
 
-> **The three tables are real and named as written above** — `reading_history`,
-> `reading_progress` and `rating` all come from `migrations/sqlite/0004_reading.sql`.
-> A uuid column bound from `&str` needs `::uuid` on PostgreSQL or it fails
-> `42883`; this has already bitten this file once, in `6160a4f`.
+> **Verified against the schema, not assumed.** `reading_history_entry` and
+> `reading_progress` both carry `subject_type`/`subject_id`, not `work_id`; the
+> only `work_id` is on `rating`. Both tables and all three columns come from
+> `migrations/sqlite/0004_reading.sql`. `subject_id` is TEXT on SQLite and UUID on
+> PostgreSQL, hence the `::text` in the PG branch — without it the driver cannot
+> decode into `String`. `rating` carries `deleted_at`, so a withdrawn rating must
+> not count as seen.
 
 Then in `rec_engine.rs`, populate it:
 
