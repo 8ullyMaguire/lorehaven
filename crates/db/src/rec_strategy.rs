@@ -186,12 +186,27 @@ impl RecRegistry {
     /// reporting a green comparison of two things where one never ran.
     pub async fn generate_traced(&self, db: &Database, ctx: RecContext) -> Result<RecRunReport> {
         let mut scores: HashMap<String, f64> = HashMap::new();
-        let mut _seen_set: HashSet<String> = ctx.seen.iter().cloned().collect();
+        // The reader's already-seen works, excluded from the blend.
+        //
+        // This set was previously built and then never read: the exclusion filter
+        // existed as a `HashSet` that was inserted into and dropped. Combined with
+        // `rec_engine` passing `seen: vec![]`, nothing anywhere excluded a work the
+        // reader had already read — so a recommendation surface could serve a work
+        // they finished last week and present it as new.
+        let seen_set: HashSet<String> = ctx.seen.iter().cloned().collect();
         let mut per_strategy: Vec<StrategyContribution> = Vec::new();
 
         for (name, strategy) in &self.strategies {
             let ranked = strategy(db, ctx.clone()).await?;
             for (rank, work_id) in ranked.iter().enumerate() {
+                // Skipped, not renumbered: `rank` stays the strategy's own position.
+                // Dropping a seen work must not change how this strategy ranked the
+                // works after it, because its RRF contribution is compared against
+                // other strategies' contributions. Renumbering here would inflate a
+                // work simply because the reader had seen a different one first.
+                if seen_set.contains(work_id) {
+                    continue;
+                }
                 let entry = scores.entry(work_id.clone()).or_insert(0.0);
                 *entry += 1.0 / (self.k + (rank + 1) as f64);
             }
@@ -210,9 +225,10 @@ impl RecRegistry {
                 produced,
                 ranked: scored,
             });
-            for work_id in ranked {
-                _seen_set.insert(work_id);
-            }
+            // The old `_seen_set.insert` loop is gone with it: it accumulated every
+            // work any strategy produced, which is the *opposite* of "already read"
+            // — it would have made the second strategy's works look like the reader's
+            // history to the third.
         }
 
         let mut ranked: Vec<(String, f64)> = scores.into_iter().collect();
