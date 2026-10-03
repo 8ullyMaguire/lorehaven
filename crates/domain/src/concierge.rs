@@ -173,6 +173,13 @@ pub struct ConciergeQueue {
     pub truncated_at: Option<usize>,
     /// Which rate the estimate used.
     pub rate_source: RateSource,
+    /// The selector that produced this queue, for the session record (§54.3).
+    ///
+    /// Carried on the queue rather than passed beside it so the queue and the row
+    /// that describes it cannot disagree: a store function taking the selector
+    /// separately would accept `(queue_with_mood_a, selector_b)` and record a
+    /// session that never happened.
+    pub selector: SessionSelector,
     /// Whether the queue is empty because a selector matched nothing, rather than
     /// because there is nothing to show (§54.6's explained empty queue).
     ///
@@ -182,16 +189,39 @@ pub struct ConciergeQueue {
 }
 
 impl ConciergeQueue {
+    /// The mood the reader named, if any. `None` also covers "no selector", which
+    /// §54.6 makes the plain blend rather than an error — so the column is NULL
+    /// for both, and the two are not distinguishable in the record.
+    #[must_use]
+    pub fn session_mood(&self) -> Option<&str> {
+        self.selector
+            .mood
+            .as_deref()
+            .filter(|m| !m.trim().is_empty())
+    }
+
+    /// The budget the reader stated, if any.
+    #[must_use]
+    pub fn session_budget_minutes(&self) -> Option<u32> {
+        self.selector.budget_minutes
+    }
+
     /// An empty queue carrying an explanation, for §54.6's "matches nothing is
     /// not a fallback".
     #[must_use]
-    pub fn explained_empty(session_id: &str, why: impl Into<String>, rate: RateSource) -> Self {
+    pub fn explained_empty(
+        session_id: &str,
+        why: impl Into<String>,
+        rate: RateSource,
+        selector: SessionSelector,
+    ) -> Self {
         Self {
             session_id: session_id.to_owned(),
             items: Vec::new(),
             estimated_minutes: 0.0,
             truncated_at: None,
             rate_source: rate,
+            selector,
             explained_empty: Some(why.into()),
         }
     }
@@ -517,6 +547,10 @@ mod tests {
             "s1",
             "no work on this instance carries the mood \"catharsis\"",
             RateSource::Default,
+            SessionSelector {
+                mood: Some("catharsis".to_owned()),
+                budget_minutes: None,
+            },
         );
         assert_eq!(matched_nothing.items.len(), 0);
         assert!(
@@ -542,6 +576,10 @@ mod tests {
             estimated_minutes: 0.0,
             truncated_at: Some(0),
             rate_source: RateSource::Default,
+            selector: SessionSelector {
+                mood: None,
+                budget_minutes: Some(0),
+            },
             explained_empty: None,
         };
         assert!(cut.explained_empty.is_none());

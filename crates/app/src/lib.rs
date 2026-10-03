@@ -47,6 +47,8 @@ pub mod version;
 pub mod webhook_delivery;
 pub mod webhook_sender;
 pub mod worker;
+// M45-22 (§54): the WIP completion notifier.
+pub mod wip_watch;
 
 use std::process::ExitCode;
 

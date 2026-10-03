@@ -1643,7 +1643,13 @@ const ROUTE_TABLE: &[RouteEntry] = &[
     RouteEntry {
         file: "discovery.rs",
         handler: "update_recipe_route",
-        method: "PATCH",
+        // POST, not PATCH. The route is registered
+        // `.route("/{id}", get(get_recipe_route).post(update_recipe_route))`, and
+        // this row said PATCH — which nothing checked, because the direction test
+        // compared file, path and handler and left the method out of the
+        // comparison entirely. The method is now compared, so the two halves of
+        // ROUTE_TABLE can no longer disagree with the router about what a route is.
+        method: "POST",
         path: "/recipes/{id}",
         audience: Audience::Authenticated,
     },
@@ -2274,6 +2280,265 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         handler: "record_review",
         method: "POST",
         path: "/extensions/source-adapters/{id}/reviews",
+        audience: Audience::Authenticated,
+    },
+    // ------------------------------------------------------------------
+    // M45-22 (§54): the personal concierge. Five routes, all behind a session.
+    //
+    // `render_queue` is Authenticated rather than Public for a reason that is not
+    // about secrecy: it records a session (§54.3) and reads the reader's own
+    // history to exclude already-read works, so an unauthenticated call has no
+    // account to scope any of that to.
+    RouteEntry {
+        file: "concierge.rs",
+        handler: "render_queue",
+        method: "GET",
+        path: "/me/concierge",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "concierge.rs",
+        handler: "list_sessions",
+        method: "GET",
+        path: "/me/concierge/sessions",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "concierge.rs",
+        handler: "list_watches",
+        method: "GET",
+        path: "/me/watches",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "concierge.rs",
+        handler: "put_watch",
+        method: "PUT",
+        path: "/me/watches/{work_id}",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "concierge.rs",
+        handler: "delete_watch",
+        method: "DELETE",
+        path: "/me/watches/{work_id}",
+        audience: Audience::Authenticated,
+    },
+    // ------------------------------------------------------------------
+    // Rows the route walker found once it was made to actually walk.
+    //
+    // Every one of these is a route that has been registered and served for
+    // however long `discovery.rs` has existed, and none of them was in this table.
+    // They went unnoticed because every multi-handler `.route(...)` line only ever
+    // had its FIRST method tabulated: `get(a).post(b)` produced a table row for `a`
+    // and nothing for `b`, and the direction test compared an empty walk against it.
+    //
+    // So this is not new debt — it is old debt that a test which collected nothing
+    // could not see. The comment on each is not needed; the shape is the lesson.
+    RouteEntry {
+        file: "cta.rs",
+        handler: "list",
+        method: "GET",
+        path: "/works/{id}/cta_marks",
+        // Public. The handler takes `MaybeSession` rather than nothing, so the
+        // door is declared; reading the POST side's audience by analogy would be
+        // wrong, because that one does record who the reader is.
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "cta.rs",
+        handler: "retract",
+        method: "DELETE",
+        path: "/works/{id}/cta_marks/me",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "roadmap.rs",
+        handler: "post_arena_vote",
+        method: "POST",
+        path: "/roadmap/arena",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "directory.rs",
+        handler: "create_list",
+        method: "POST",
+        path: "/directory/lists",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "directory.rs",
+        handler: "submit_entry",
+        method: "POST",
+        path: "/directory/entries",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "spoilers.rs",
+        handler: "put_progress",
+        method: "PUT",
+        path: "/works/{id}/progress",
+        // RequirePseud, not RequireSession: a reader's spoiler position belongs to
+        // the pseud that set it, and switching faces must not carry it across.
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "spoilers.rs",
+        handler: "post_warning",
+        method: "POST",
+        path: "/posts/{id}/warnings",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "thread_modes.rs",
+        handler: "put_mode",
+        method: "PUT",
+        path: "/topics/{id}/mode",
+        audience: Audience::Pseudonymous,
+    },
+    // ------------------------------------------------------------------
+    // Rows found by the parenthesis-delimited walk, which sees a `.route(...)`
+    // rustfmt wrapped across lines. Every one of these has been registered and
+    // served for as long as the module existed. They were invisible because the
+    // walk was line-at-a-time: the line carrying `.route(` had no path on it, and
+    // the lines carrying the path had no `.route(` on them.
+    //
+    // So this is not new debt. It is old debt that a walk which collected nothing
+    // could not see, and the count is the honest measure of how much of it there
+    // was: 19 routes across 9 modules, plus one stale duplicate row that claimed
+    // GET for a DELETE route.
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "marketplace.rs",
+        handler: "delete_webhook",
+        method: "DELETE",
+        path: "/me/webhooks",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "federation.rs",
+        handler: "get_instance_theme",
+        method: "GET",
+        path: "/federation/theme",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "federation.rs",
+        handler: "set_theme_visibility",
+        method: "PUT",
+        path: "/federation/theme",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "monetization.rs",
+        handler: "get_work_ai_declaration",
+        method: "GET",
+        path: "/works/{work_id}/ai-declaration",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "quiz.rs",
+        handler: "admin_set_quiz_works",
+        method: "POST",
+        path: "/operator/quiz-works",
+        audience: Audience::Operator,
+    },
+    RouteEntry {
+        file: "settings.rs",
+        handler: "get_rec_engine",
+        method: "GET",
+        path: "/settings/recommendations",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "settings.rs",
+        handler: "patch_rec_engine",
+        method: "PATCH",
+        path: "/settings/recommendations",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "directory.rs",
+        handler: "remove_entry",
+        method: "DELETE",
+        path: "/directory/entries/{id}",
+        audience: Audience::Operator,
+    },
+    RouteEntry {
+        file: "spoilers.rs",
+        handler: "post_draft",
+        method: "POST",
+        path: "/topics/{id}/draft",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "spoilers.rs",
+        handler: "delete_draft",
+        method: "DELETE",
+        path: "/topics/{id}/draft",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "spoilers.rs",
+        handler: "put_warning_pref",
+        method: "PUT",
+        path: "/me/warning-prefs",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "thread_modes.rs",
+        handler: "add_schedule_section",
+        method: "POST",
+        path: "/topics/{id}/schedule",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "thread_modes.rs",
+        handler: "post_wiki_pin",
+        method: "POST",
+        path: "/topics/{id}/wiki-pin",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "thread_modes.rs",
+        handler: "approve_wiki_pin",
+        method: "PUT",
+        path: "/topics/{id}/wiki-pin",
+        audience: Audience::Pseudonymous,
+    },
+    RouteEntry {
+        file: "works.rs",
+        handler: "read_work_status",
+        method: "GET",
+        path: "/works/{id}/reading-status",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "works.rs",
+        handler: "set_work_status",
+        method: "PUT",
+        path: "/works/{id}/reading-status",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "works.rs",
+        handler: "clear_work_status",
+        method: "DELETE",
+        path: "/works/{id}/reading-status",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "works.rs",
+        handler: "get_work_permissions",
+        method: "GET",
+        path: "/works/{id}/permissions",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "works.rs",
+        handler: "put_work_permissions",
+        method: "PUT",
+        path: "/works/{id}/permissions",
         audience: Audience::Authenticated,
     },
     // ------------------------------------------------------------------
@@ -3515,13 +3780,6 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Authenticated,
     },
     RouteEntry {
-        file: "cta.rs",
-        handler: "retract",
-        method: "GET",
-        path: "/works/{id}/cta_marks/me",
-        audience: Audience::Authenticated,
-    },
-    RouteEntry {
         file: "arena.rs",
         handler: "get_arena_next",
         method: "GET",
@@ -4358,64 +4616,126 @@ fn enclosing_fn(lines: &[&str], index: usize) -> Option<(String, bool)> {
 /// This is the *direction* test: it walks the code, not the table.  Any
 /// handler registered in a module but missing from `ROUTE_TABLE` is caught
 /// here, including routes inside nested sub-routers.
-fn collect_registered(module: &str) -> Vec<(String, String, String)> {
+fn collect_registered(module: &str) -> Vec<(String, String, String, String)> {
     let src_path = Path::new("src/routes").join(module);
     let src = fs::read_to_string(&src_path)
         .unwrap_or_else(|_| panic!("cannot read {}: {}", module, src_path.display()));
     let mut routes = Vec::new();
 
-    // Associate every `.route(...)` with the nearest `fn` declared above it, and
-    // keep the ones registered in a `router()` / `*_routes()` function.
+    // A `.route(` call, as SOURCE TEXT with its closing paren.
+    //
+    // The walk used to be line-at-a-time, which meant a call rustfmt had wrapped
+    // across lines was invisible: the line `.route(` had no path on it, and the
+    // lines carrying the path had no `.route(` on them. `settings.rs` alone had
+    // seven such routes, all served, none tabulated, and no failure — because a
+    // walk that misses things and a walk that collects nothing look identical from
+    // outside.
+    //
+    // So a call is delimited by PARENTHESES with a depth counter, not by newlines.
+    // Depth rather than "up to the first `)`" because a handler chain legitimately
+    // contains its own parens: `.route("/x", get(a).post(b))`.
+    let mut calls: Vec<(usize, &str)> = Vec::new();
+    let bytes = src.as_bytes();
+    const NEEDLE: &[u8] = b".route(";
+    let mut i = 0;
+    while i + NEEDLE.len() <= bytes.len() {
+        // Compared as BYTES, not as `src[i..].starts_with(NEEDLE)`: a byte index is
+        // not a char index, and slicing a `&str` at one that splits a multi-byte
+        // character panics. These files are full of `—` and `§` in comments, so
+        // that panic was reachable from ordinary source, not an edge case.
+        if &bytes[i..i + NEEDLE.len()] == NEEDLE {
+            let mut depth = 0_i32;
+            let mut j = i + NEEDLE.len() - 1;
+            let start = j + 1;
+            while j < bytes.len() {
+                match bytes[j] {
+                    b'(' => depth += 1,
+                    b')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                j += 1;
+            }
+            if j >= bytes.len() {
+                // Unbalanced — the file is not valid Rust, so `cargo` says so with a
+                // better message and a line number than this walker can.
+                break;
+            }
+            calls.push((start, &src[start..=j]));
+            i = j + 1;
+            continue;
+        }
+        i += 1;
+    }
+
+    // Associate each call with the nearest `fn` declared above it, and keep the
+    // ones registered in a `router()` / `*_routes()` function.
     //
     // This replaced a brace-counting scanner that walked function bodies. That
     // scanner could not be trusted: braces inside strings and comments moved the
     // depth, so a body could end early or swallow the rest of the file, and the
     // failure mode was silence — it collected 0 routes from all 33 modules and
-    // this test still passed. Scanning backwards for the enclosing declaration
-    // has no depth to get wrong.
+    // this test still passed. Scanning backwards for the enclosing declaration has
+    // no depth to get wrong.
     let lines: Vec<&str> = src.lines().collect();
-    for (idx, line) in lines.iter().enumerate() {
-        if !line.contains(".route(") {
-            continue;
-        }
-        let Some((func, builds_router)) = enclosing_fn(&lines, idx) else {
+    for (start, call) in calls {
+        // ALREADY the 0-based index. `src[..start].lines().count()` counts the
+        // newlines before `start`, and `start` points just past `.route(` — which is
+        // mid-line — so the count is the line `start` sits on, counted from zero.
+        //
+        // The `-1` that used to be here made every one of these calls a line early,
+        // and the symptom was 27 modules reporting "declares a router function but
+        // the walk collected no routes": a walk that looks one line up finds the
+        // previous `.route(` or the `fn` header, and either way attributes the call
+        // to nothing. A module with routes was reported as a module without, which
+        // is the one direction this test is supposed to be incapable of getting
+        // wrong.
+        let line_no = src[..start].lines().count();
+        let Some((func, builds_router)) = enclosing_fn(&lines, line_no) else {
             continue;
         };
         if !builds_router {
             continue;
         }
         let prefix = find_nest_prefix(&src, module, &func);
-        let t = line.trim();
 
-        // .route("path", handler) or .route("path", get(handler))
-        if let Some(route_start) = t.find(".route(") {
-            let after_route = &t[route_start + 7..];
-            if let Some(path_end) = after_route.find('"') {
-                let rest = &after_route[path_end + 1..];
-                if let Some(path_close) = rest.find('"') {
-                    let path = &rest[..path_close];
-                    let after_path = &rest[path_close + 1..];
+        // `call` is the text from just AFTER `.route(` to its closing `)`. It does
+        // not contain `.route(` itself, so there is nothing to re-find: the earlier
+        // version searched for it, got `None`, and `continue`d on every call in the
+        // workspace. That is the same failure mode as the original infinite loop —
+        // a walk that collects nothing — wearing a different bug, and 27 modules
+        // reported "declares a router function but the walk collected no routes",
+        // which is the test correctly reporting its own blindness.
+        let call = call.trim();
+        // .route("path", handler) or .route("path", get(handler).post(other))
+        let Some(path_end) = call.find('"') else {
+            continue;
+        };
+        let rest = &call[path_end + 1..];
+        let Some(path_close) = rest.find('"') else {
+            continue;
+        };
+        let path = &rest[..path_close];
+        let after_path = &rest[path_close + 1..];
 
-                    // Find every handler in the rest: `get(h)`, `post(h)`, and
-                    // any method chain of them on one line.
-                    let handlers = extract_handlers(after_path);
-                    let full_path = if prefix.is_empty() {
-                        path.to_string()
-                    } else if path == "/" {
-                        // A nested router's own root is spelled with the
-                        // trailing slash the table uses (`/recipes/`).
-                        format!("{prefix}/")
-                    } else {
-                        format!("{}{}", prefix, path)
-                    };
-                    for handler in handlers {
-                        routes.push((full_path.clone(), handler, func.clone()));
-                    }
-                }
-            }
+        // Every `(method, handler)` in the rest: `get(h)`, `post(h)`, and any
+        // method chain of them, across however many lines the call spans.
+        for (method, handler) in extract_handlers(after_path) {
+            let full_path = if prefix.is_empty() {
+                path.to_owned()
+            } else if path == "/" {
+                // A nested router's own root is spelled with the trailing slash the
+                // table uses (`/recipes/`).
+                format!("{prefix}/")
+            } else {
+                format!("{prefix}{path}")
+            };
+            routes.push((full_path, handler, method, func.clone()));
         }
-
-        // .nest("prefix", func()) — handled by `find_nest_prefix`.
     }
 
     routes
@@ -4456,55 +4776,113 @@ fn find_nest_prefix(src: &str, _module: &str, func_name: &str) -> String {
 /// `post(a).get(b)` also appears in the wild, so the chain is scanned for every
 /// `method(handler)` pair on the line rather than assuming a fixed order or a
 /// fixed arity.
-fn extract_handlers(s: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    // What follows the path is `, get(handler))` — with a leading comma, which
-    // the previous implementation treated as end-of-route and gave up on, so
-    // every route in every module was skipped and this test passed while
-    // collecting nothing.
+/// The routing methods a `.route(...)` argument list may contain.
+///
+/// Module scope so both readers of a registration agree on the *vocabulary* while
+/// remaining independent in *algorithm*. Sharing the set is right: it is a fact
+/// about axum, not about either implementation. Sharing the parsing would be wrong:
+/// then agreement between them is a tautology rather than evidence.
+const ROUTE_METHODS: [&str; 7] = ["get", "post", "put", "delete", "patch", "head", "options"];
+
+/// Every `(method, handler)` in a route registration's argument list.
+///
+/// `get(render_queue)` is `("get", "render_queue")`. Both halves are returned
+/// because `ROUTE_TABLE` keys on the handler and carries the method as a separate
+/// column, and a checker that has one but not the other can only fail.
+///
+/// **Only [`ROUTE_METHODS`] count.** `.route("/x", get(h).layer(mw))` registers one
+/// handler, and a walker that reports `layer` and `mw` as two more has invented
+/// routes. That is not hypothetical: the first version accepted any
+/// `identifier(identifier)`, and the case list in the termination test is what
+/// caught it.
+fn extract_handlers(s: &str) -> Vec<(String, String)> {
+    //
+    // It returned the *method* names before. That was invisible for as long as the
+    // loop never advanced: the walk collected nothing, `registered_routes_are_tabled`
+    // compared an empty set, and passed. Once the loop was fixed, every route in
+    // every module reported `get` where the table said `get_version` — 500-odd
+    // failures that all pointed at the table and none at the walker.
+    //
+    // So the fix is to return what the table is keyed on.
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    // What follows the path is `, get(handler))` — with a leading comma, which an
+    // earlier implementation treated as end-of-route and gave up on, so every route
+    // in every module was skipped and the test passed while collecting nothing.
     let rest = s.trim_start_matches(|c: char| c == ',' || c.is_whitespace());
 
-    // Each link in the chain is `method(handler)`. Scan left to right; each time
-    // an identifier is followed by `(`, take the identifier as the handler name
-    // and skip past its closing paren.
     let bytes: Vec<char> = rest.chars().collect();
     let mut i = 0;
     while i < bytes.len() {
-        // Read an identifier.
         let start = i;
         while i < bytes.len() && (bytes[i].is_alphanumeric() || bytes[i] == '_') {
             i += 1;
         }
         let ident: String = bytes[start..i].iter().collect();
+        // Step unconditionally, on BOTH non-match branches. A `continue` without
+        // `i += 1` is an infinite loop: every branch either advances `i` or has
+        // consumed an identifier, so a non-identifier character (`(`, `,`, `)`,
+        // whitespace, a quote) leaves `i` where it was and `continue` spins forever.
+        //
+        // This cost a 10-minute hang of `registered_routes_are_tabled` before it was
+        // found, and the SAME defect in a second branch survived the first fix —
+        // each with a comment describing a step the code did not perform. A
+        // `continue` after a non-match is always the branch that needs the step.
         if ident.is_empty() {
-            // Not an identifier character and no progress was made. This `i += 1`
-            // is load-bearing, and removing it hangs the suite: every branch below
-            // either advances `i` or has already consumed an identifier, so a
-            // non-identifier character (`(`, `,`, `)`, whitespace, a quote) leaves
-            // `i` exactly where it was and `continue` spins forever on it.
-            //
-            // It cost a 10-minute hang of `registered_routes_are_tabled` before it
-            // was found. The first version advanced only on a match, which reads
-            // as the tidier shape and is precisely the wrong one — `continue` after
-            // a *non*-match is the case that needs the step.
             i += 1;
             continue;
         }
-        // It is a handler only if immediately followed by `(`.
         if i >= bytes.len() || bytes[i] != '(' {
-            // A bare identifier with no paren: step past it, or the loop below
-            // re-reads the same identifier forever for the same reason.
+            // A bare identifier with no paren.
+            //
+            // UNREACHABLE TODAY, and the `i += 1` is a guard rather than a fix.
+            // The method gate above rejects every identifier that is not a routing
+            // method, and only a routing method can reach here — so a mutation that
+            // deletes this step stays green (measured: mutation R1). It is kept
+            // because the gate is a separate decision from this one: widen the
+            // vocabulary, or wrap a `.route(...)` call so `route` itself lands here,
+            // and the step is what keeps that from becoming a hang.
+            //
+            // The same defect existed in BOTH branches of this function before, each
+            // with a comment describing a step the code did not perform, and each
+            // hung the suite for ten minutes when it did. A `continue` after a
+            // non-match is always the branch that needs the step.
+            i += 1;
             continue;
         }
-        // Skip to the matching `)`.
+        // `ident(` is a candidate link. It is only a ROUTE if `ident` is a routing
+        // method — `.layer(mw)` is a call too, and treating it as a handler is how a
+        // walker invents routes that were never registered.
+        if !ROUTE_METHODS.contains(&ident.as_str()) {
+            i += 1;
+            continue;
+        }
+        // The handler is the first identifier inside the method's parens.
         i += 1;
-        while i < bytes.len() && bytes[i] != ')' {
+        let h_start = i;
+        while i < bytes.len() && (bytes[i].is_alphanumeric() || bytes[i] == '_') {
             i += 1;
         }
-        i += 1; // consume ')'
-        names.push(ident);
+        let handler: String = bytes[h_start..i].iter().collect();
+        // Skip to this call's matching `)`. A bare depth counter rather than a scan
+        // for the next `)`, because a handler whose own arguments contain a paren —
+        // `.route("/x", get(h), fallback(a))` — would otherwise end the link early.
+        let mut depth = 1_i32;
+        while i < bytes.len() && depth > 0 {
+            match bytes[i] {
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                _ => {}
+            }
+            i += 1;
+        }
+        if handler.is_empty() {
+            // `get()` with no argument — a registration with no handler, which is
+            // nonsense but must not be recorded as a handler named "".
+            continue;
+        }
+        pairs.push((ident, handler));
     }
-    names
+    pairs
 }
 
 /// The walk must terminate on real source text, and it must terminate **fast**.
@@ -4555,6 +4933,12 @@ fn the_handler_walk_terminates_on_every_route_line_in_the_workspace() {
             r#".route("/x")"#.to_owned(),
             r#".route("/x", get(h).layer(mw))"#.to_owned(),
             r#".route("/x/{id}", get(handler_name_with_digits_2))"#.to_owned(),
+            // A trailing handler-less argument. Measured, not assumed: adding it
+            // did NOT make the bare-identifier branch's `i += 1` load-bearing,
+            // because the method gate rejects a non-method identifier one branch
+            // earlier. See the note on that branch — the step is there for a caller
+            // the gate has not been widened to admit, not for these cases.
+            r#".route("/x", get(h), fallback)"#.to_owned(),
         ])
         .collect();
 
@@ -4571,20 +4955,20 @@ fn the_handler_walk_terminates_on_every_route_line_in_the_workspace() {
             Some(e) => e,
             None => continue,
         };
-        let handlers = extract_handlers(&quoted[path_end + 1..]);
+        let found = extract_handlers(&quoted[path_end + 1..]);
+        let handlers: Vec<String> = found.iter().map(|(_m, h)| h.clone()).collect();
 
-        // Every identifier followed by `(` in the SAME slice is a handler, by
-        // definition — so the expected set is computed the same way rather than by
-        // a second, cleverer rule that could disagree with the one under test.
-        // The slice matters: `extract_handlers` is handed only what follows the
-        // path, so the expectation is built from that too. Comparing the whole
-        // line would include `route` itself from `.route(` and disagree on every
-        // single case.
+        // The expectation is computed by an INDEPENDENT reader of the same slice,
+        // not by a second copy of the rule under test: every identifier that is the
+        // sole argument of a call spelled `method(identifier)` is a handler. That is
+        // a different rule from the extractor's scan-and-skip, so the two agreeing is
+        // evidence rather than a tautology.
         //
-        // (The first version also wrote `(expected` inside the `filter` closure,
-        // referring to the binding being produced; that does not compile.)
-        let slice = &quoted[path_end + 1..];
-        let expected: Vec<String> = expected_handlers(slice);
+        // `.layer(mw)` and a bare `route("x")` are the cases that make the two rules
+        // diverge in principle, and both are in `cases` above — a test that only fed
+        // the extractor `get(h)` would not notice a walker that reported `layer` or
+        // `mw` as handlers.
+        let expected = expected_handlers(&quoted[path_end + 1..]);
         assert_eq!(
             expected.len(),
             handlers.len(),
@@ -4605,21 +4989,27 @@ fn the_handler_walk_terminates_on_every_route_line_in_the_workspace() {
 /// Written as a separate function because the obvious inline version references
 /// the binding it is producing.
 fn expected_handlers(source: &str) -> Vec<String> {
+    // The independent rule: a handler is the sole identifier argument of a call
+    // spelled `identifier(identifier)` where the outer name is a routing method.
+    //
+    // Deliberately a DIFFERENT implementation from `extract_handlers` — this one
+    // tokenises on parentheses and keeps the token between them; the extractor
+    // scans identifiers and skips a call's body with a depth counter. Two readers
+    // that agree on all the cases is evidence. A copy of the rule under test would
+    // agree by construction and prove nothing.
+    //
+    let tokens: Vec<&str> = source
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .filter(|t| !t.is_empty())
+        .collect();
     let mut names = Vec::new();
-    let bytes: Vec<char> = source.chars().collect();
-    let mut i = 0;
-    while i < bytes.len() {
-        let start = i;
-        while i < bytes.len() && (bytes[i].is_alphanumeric() || bytes[i] == '_') {
-            i += 1;
-        }
-        let ident: String = bytes[start..i].iter().collect();
-        // Step unconditionally. `continue` without `i += 1` is the infinite loop
-        // this file's own comment describes; this second copy has the same shape,
-        // so it gets the same treatment.
-        i += 1;
-        if !ident.is_empty() && i < bytes.len() && bytes[i] == '(' {
-            names.push(ident);
+    for pair in tokens.windows(2) {
+        // `tokens` is punctuation-stripped, so adjacency here means "these two were
+        // separated by exactly one `(`, `,`, whitespace or `)`". Combined with the
+        // METHOD check that is enough: a handler is the token right after a method
+        // name, and `get(x)` / `get( x )` both reduce to `get`, `x`.
+        if ROUTE_METHODS.contains(&pair[0]) {
+            names.push(pair[1].to_owned());
         }
     }
     names
@@ -4672,21 +5062,60 @@ fn registered_routes_are_tabled() {
                 file_name
             ));
         }
-        for (full_path, handler, _func) in registered {
-            // Find matching table entry: same file, path, method, handler
-            let found = table_entries
-                .iter()
-                .any(|(f, p, _m, h)| f == &file_name && p == &full_path && h == &handler);
+        for (full_path, handler, method, _func) in registered {
+            // Same file, path, method AND handler. The method was not compared
+            // before, which let a table row claiming `GET` satisfy a route really
+            // registered as `POST` — and `every_route_has_correct_audience` reads
+            // the same rows, so the two halves of the table disagreed about a route
+            // without either test noticing.
+            let found = table_entries.iter().any(|(f, p, m, h)| {
+                f == &file_name
+                    && p == &full_path
+                    && h == &handler
+                    && m.eq_ignore_ascii_case(&method)
+            });
             if !found {
                 failures.push(format!(
-                    "{}:{} — handler '{}' registered but not in ROUTE_TABLE (path {})",
-                    file_name, full_path, handler, full_path
+                    "{}:{} — {} '{}' registered but not in ROUTE_TABLE (path {})",
+                    file_name,
+                    full_path,
+                    method.to_uppercase(),
+                    handler,
+                    full_path
                 ));
             }
         }
     }
 
+    // Every (file, path, handler) the table claims must ALSO agree with the router
+    // about the method. This is the direction the outward walk does not cover: it
+    // walks from the code and reports what is MISSING, so a row that is present but
+    // WRONG is invisible to it.
+    //
+    // Measured: with the method dropped from the outward comparison, this suite
+    // stayed green while `discovery.rs` `/recipes/{id}` claimed PATCH and the route
+    // is POST (mutation R4). That row sat wrong for as long as the walk collected
+    // nothing, and nothing would have said so when the walk started working — which
+    // is why this check exists rather than the comment above the comparison.
+    for entry in ROUTE_TABLE {
+        let agrees =
+            collect_registered(entry.file)
+                .into_iter()
+                .any(|(path, handler, method, _)| {
+                    path == entry.path
+                        && handler == entry.handler
+                        && method.eq_ignore_ascii_case(entry.method)
+                });
+        if !agrees {
+            failures.push(format!(
+                "{}:{} — ROUTE_TABLE claims {} '{}' but no route registered as \
+                 file+path+method+handler matches it",
+                entry.file, entry.path, entry.method, entry.handler
+            ));
+        }
+    }
+
     if !failures.is_empty() {
-        panic!("Unregistered routes:\n{}", failures.join("\n"));
+        panic!("Route table disagreements:\n{}", failures.join("\n"));
     }
 }

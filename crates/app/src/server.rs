@@ -632,6 +632,12 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // Personal concierge (queues, sessions, WIP watches) — M45-22, §54.
+        .merge(classified(
+            routes::concierge::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // Translation pipeline — M17.
         .merge(classified(
             routes::translation::router(),
