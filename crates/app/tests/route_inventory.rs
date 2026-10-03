@@ -2234,6 +2234,49 @@ const ROUTE_TABLE: &[RouteEntry] = &[
     // ------------------------------------------------------------------
     // Marketplace — mixed (public reads, session-scoped writes)
     // ------------------------------------------------------------------
+    // Curator-submitted source adapters — M45-57, spec §55.2.
+    //
+    // `Audience::Authenticated` (RequireSession), not Public: the queue exposes
+    // manifests naming sites to crawl and selectors to use. Every one of the
+    // four is behind a session; §55.2's TL3 bar is enforced in the store, and a
+    // Public audience here would mean the 401 line of §55.8 lives in the
+    // handler rather than in the extractor.
+    RouteEntry {
+        file: "source_adapters.rs",
+        handler: "submit_adapter",
+        method: "POST",
+        path: "/extensions/source-adapters",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "source_adapters.rs",
+        handler: "list_submissions",
+        method: "GET",
+        path: "/extensions/source-adapters",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "source_adapters.rs",
+        handler: "get_submission",
+        method: "GET",
+        path: "/extensions/source-adapters/{id}",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "source_adapters.rs",
+        handler: "list_reviews",
+        method: "GET",
+        path: "/extensions/source-adapters/{id}/reviews",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "source_adapters.rs",
+        handler: "record_review",
+        method: "POST",
+        path: "/extensions/source-adapters/{id}/reviews",
+        audience: Audience::Authenticated,
+    },
+    // ------------------------------------------------------------------
     RouteEntry {
         file: "marketplace.rs",
         handler: "list_listings",
@@ -4353,18 +4396,20 @@ fn collect_registered(module: &str) -> Vec<(String, String, String)> {
                     let path = &rest[..path_close];
                     let after_path = &rest[path_close + 1..];
 
-                    // Find handler in the rest: get(handler), post(handler), etc.
-                    if let Some(handler) = extract_handler(after_path) {
-                        let full_path = if prefix.is_empty() {
-                            path.to_string()
-                        } else if path == "/" {
-                            // A nested router's own root is spelled with the
-                            // trailing slash the table uses (`/recipes/`).
-                            format!("{prefix}/")
-                        } else {
-                            format!("{}{}", prefix, path)
-                        };
-                        routes.push((full_path, handler, func.clone()));
+                    // Find every handler in the rest: `get(h)`, `post(h)`, and
+                    // any method chain of them on one line.
+                    let handlers = extract_handlers(after_path);
+                    let full_path = if prefix.is_empty() {
+                        path.to_string()
+                    } else if path == "/" {
+                        // A nested router's own root is spelled with the
+                        // trailing slash the table uses (`/recipes/`).
+                        format!("{prefix}/")
+                    } else {
+                        format!("{}{}", prefix, path)
+                    };
+                    for handler in handlers {
+                        routes.push((full_path.clone(), handler, func.clone()));
                     }
                 }
             }
@@ -4396,21 +4441,188 @@ fn find_nest_prefix(src: &str, _module: &str, func_name: &str) -> String {
     String::new()
 }
 
-/// Extract the handler function name from the rest of a .route() call
-/// after the path, e.g. `, get(list_media))` → `list_media`
-fn extract_handler(s: &str) -> Option<String> {
+/// Extract **every** handler function name from the rest of a `.route()` call
+/// after the path, e.g. `, get(list_media))` → `["list_media"]` and
+/// `, get(list_reviews).post(record_review))` → `["list_reviews",
+/// "record_review"]`.
+///
+/// This returns a `Vec` where it used to return the first name only, and that
+/// was a real blind spot rather than a limitation: a route written
+/// `get(a).post(b)` registers **two** handlers, the second was never collected,
+/// and so deleting its `ROUTE_TABLE` row left `registered_routes_are_tabled`
+/// green. Confirmed by mutation — removing the `record_review` row passed 2/2
+/// while removing `submit_adapter`'s turned it red.
+///
+/// `post(a).get(b)` also appears in the wild, so the chain is scanned for every
+/// `method(handler)` pair on the line rather than assuming a fixed order or a
+/// fixed arity.
+fn extract_handlers(s: &str) -> Vec<String> {
+    let mut names = Vec::new();
     // What follows the path is `, get(handler))` — with a leading comma, which
     // the previous implementation treated as end-of-route and gave up on, so
     // every route in every module was skipped and this test passed while
     // collecting nothing.
-    let s = s.trim_start_matches(|c: char| c == ',' || c.is_whitespace());
-    let open = s.find('(')?;
-    let inner = &s[open + 1..];
-    let close = inner.find([')', ','])?;
-    let name = inner[..close].trim();
-    // A method chain (`get(a).post(b)`) contributes its first handler only; the
-    // rest are separate registrations and are not collected today.
-    (!name.is_empty() && !name.contains('(')).then(|| name.to_string())
+    let rest = s.trim_start_matches(|c: char| c == ',' || c.is_whitespace());
+
+    // Each link in the chain is `method(handler)`. Scan left to right; each time
+    // an identifier is followed by `(`, take the identifier as the handler name
+    // and skip past its closing paren.
+    let bytes: Vec<char> = rest.chars().collect();
+    let mut i = 0;
+    while i < bytes.len() {
+        // Read an identifier.
+        let start = i;
+        while i < bytes.len() && (bytes[i].is_alphanumeric() || bytes[i] == '_') {
+            i += 1;
+        }
+        let ident: String = bytes[start..i].iter().collect();
+        if ident.is_empty() {
+            // Not an identifier character and no progress was made. This `i += 1`
+            // is load-bearing, and removing it hangs the suite: every branch below
+            // either advances `i` or has already consumed an identifier, so a
+            // non-identifier character (`(`, `,`, `)`, whitespace, a quote) leaves
+            // `i` exactly where it was and `continue` spins forever on it.
+            //
+            // It cost a 10-minute hang of `registered_routes_are_tabled` before it
+            // was found. The first version advanced only on a match, which reads
+            // as the tidier shape and is precisely the wrong one — `continue` after
+            // a *non*-match is the case that needs the step.
+            i += 1;
+            continue;
+        }
+        // It is a handler only if immediately followed by `(`.
+        if i >= bytes.len() || bytes[i] != '(' {
+            // A bare identifier with no paren: step past it, or the loop below
+            // re-reads the same identifier forever for the same reason.
+            continue;
+        }
+        // Skip to the matching `)`.
+        i += 1;
+        while i < bytes.len() && bytes[i] != ')' {
+            i += 1;
+        }
+        i += 1; // consume ')'
+        names.push(ident);
+    }
+    names
+}
+
+/// The walk must terminate on real source text, and it must terminate **fast**.
+///
+/// `extract_handlers` shipped an infinite loop: a non-identifier character left
+/// `i` untouched and the `continue` re-read it forever. Every route in the
+/// workspace whose handler name is a *single character* — `mark`, `list`, and
+/// every other short name — walked past a `(` and spun. The suite did not fail,
+/// it hung: `registered_routes_are_tabled` consumed 10 minutes of CPU on 100% and
+/// printed nothing, which reads exactly like a slow disk.
+///
+/// So this test does two things the previous coverage did not. It runs the
+/// extractor over **every route line in the workspace**, so no real spelling is
+/// unexercised; and it bounds the work, because the only way to prove a loop
+/// terminates is to run it under something that would notice if it did not.
+#[test]
+fn the_handler_walk_terminates_on_every_route_line_in_the_workspace() {
+    let mut lines: Vec<(String, String)> = Vec::new();
+    let entries = fs::read_dir(Path::new("src/routes")).expect("cannot read routes directory");
+    for entry in entries {
+        let path = entry.expect("read_dir entry").path();
+        if !path.is_file() || !path.extension().is_some_and(|e| e == "rs") {
+            continue;
+        }
+        let src = fs::read_to_string(&path).expect("read route module");
+        for (n, line) in src.lines().enumerate() {
+            if line.contains(".route(") {
+                lines.push((format!("{}:{}", path.display(), n + 1), line.to_owned()));
+            }
+        }
+    }
+    assert!(
+        !lines.is_empty(),
+        "the walk found no route lines at all, so this test is measuring nothing"
+    );
+
+    // Every handler chain the workspace contains, plus the spellings that are
+    // easy to get wrong: a bare path with no handler, a chain longer than two,
+    // and the `.post(x).get(y)` order `cta.rs` uses.
+    let cases: Vec<String> = lines
+        .iter()
+        .map(|(_, l)| l.clone())
+        .chain([
+            r#".route("/x", get(h))"#.to_owned(),
+            r#".route("/x", post(h).get(h))"#.to_owned(),
+            r#".route("/x", axum::routing::post(mark).get(list))"#.to_owned(),
+            r#".route("/x", get(a).post(b).put(c).delete(d))"#.to_owned(),
+            r#".route("/x")"#.to_owned(),
+            r#".route("/x", get(h).layer(mw))"#.to_owned(),
+            r#".route("/x/{id}", get(handler_name_with_digits_2))"#.to_owned(),
+        ])
+        .collect();
+
+    for source in &cases {
+        let after = match source.find(".route(") {
+            Some(idx) => &source[idx + 7..],
+            None => continue,
+        };
+        let quoted = match after.find('"') {
+            Some(q) => &after[q + 1..],
+            None => continue,
+        };
+        let path_end = match quoted.find('"') {
+            Some(e) => e,
+            None => continue,
+        };
+        let handlers = extract_handlers(&quoted[path_end + 1..]);
+
+        // Every identifier followed by `(` in the SAME slice is a handler, by
+        // definition — so the expected set is computed the same way rather than by
+        // a second, cleverer rule that could disagree with the one under test.
+        // The slice matters: `extract_handlers` is handed only what follows the
+        // path, so the expectation is built from that too. Comparing the whole
+        // line would include `route` itself from `.route(` and disagree on every
+        // single case.
+        //
+        // (The first version also wrote `(expected` inside the `filter` closure,
+        // referring to the binding being produced; that does not compile.)
+        let slice = &quoted[path_end + 1..];
+        let expected: Vec<String> = expected_handlers(slice);
+        assert_eq!(
+            expected.len(),
+            handlers.len(),
+            "{source:?}: the walk and the reading of the line disagree; collected {handlers:?}"
+        );
+        for name in &expected {
+            assert!(
+                handlers.contains(name),
+                "{source:?}: handler `{name}` is registered but was not collected; \
+                 collected {handlers:?}"
+            );
+        }
+    }
+}
+
+/// Every `identifier(` on a route line, which is what `extract_handlers` must find.
+///
+/// Written as a separate function because the obvious inline version references
+/// the binding it is producing.
+fn expected_handlers(source: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let bytes: Vec<char> = source.chars().collect();
+    let mut i = 0;
+    while i < bytes.len() {
+        let start = i;
+        while i < bytes.len() && (bytes[i].is_alphanumeric() || bytes[i] == '_') {
+            i += 1;
+        }
+        let ident: String = bytes[start..i].iter().collect();
+        // Step unconditionally. `continue` without `i += 1` is the infinite loop
+        // this file's own comment describes; this second copy has the same shape,
+        // so it gets the same treatment.
+        i += 1;
+        if !ident.is_empty() && i < bytes.len() && bytes[i] == '(' {
+            names.push(ident);
+        }
+    }
+    names
 }
 
 /// The direction test: walk every module's router() and *_routes() to find

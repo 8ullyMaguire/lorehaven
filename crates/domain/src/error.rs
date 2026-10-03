@@ -56,6 +56,13 @@ pub enum ErrorCode {
     InsufficientCredits,
     /// A plugin asked for a capability it was not granted.
     ExtensionPermissionDenied,
+    /// The account is below the trust level this action requires.
+    ///
+    /// Distinct from `ExtensionPermissionDenied`: that one is about a *plugin's*
+    /// capabilities, this is about a *person's* trust level. Reporting a trust
+    /// refusal as a capability refusal tells the reader to go edit a plugin
+    /// manifest when the thing they need to change is their own standing.
+    TrustLevelInsufficient,
     /// Our fault. Details are logged, never returned.
     Internal,
     /// The instance lacks the program this operation needs.
@@ -82,6 +89,7 @@ impl ErrorCode {
             Self::JobFailed => "JOB_FAILED",
             Self::InsufficientCredits => "INSUFFICIENT_CREDITS",
             Self::ExtensionPermissionDenied => "EXTENSION_PERMISSION_DENIED",
+            Self::TrustLevelInsufficient => "TRUST_LEVEL_INSUFFICIENT",
             Self::ConverterUnavailable => "CONVERTER_UNAVAILABLE",
             Self::Internal => "INTERNAL",
             Self::NotImplemented => "NOT_IMPLEMENTED",
@@ -209,6 +217,20 @@ pub enum AppError {
         permission: String,
     },
 
+    /// The account is below the trust level this action requires.
+    ///
+    /// Carries both levels rather than only saying no, because §55.2's bar is a
+    /// trust threshold a reader can look up and work toward. A refusal that
+    /// names neither the level found nor the bar required is not actionable,
+    /// and §0.3 makes thresholds visible by design.
+    #[error("this action requires trust level {required}; this account is at {level}")]
+    TrustLevelInsufficient {
+        /// The trust level the account actually holds.
+        level: i64,
+        /// The trust level the action requires.
+        required: i64,
+    },
+
     /// The instance cannot produce the requested form: the program that would
     /// is not installed (spec §3.3's `CONVERTER_UNAVAILABLE`).
     ///
@@ -248,6 +270,7 @@ impl AppError {
             Self::JobFailed { .. } => ErrorCode::JobFailed,
             Self::InsufficientCredits { .. } => ErrorCode::InsufficientCredits,
             Self::ExtensionPermissionDenied { .. } => ErrorCode::ExtensionPermissionDenied,
+            Self::TrustLevelInsufficient { .. } => ErrorCode::TrustLevelInsufficient,
             Self::ConverterUnavailable { .. } => ErrorCode::ConverterUnavailable,
             Self::Internal(_) => ErrorCode::Internal,
             Self::NotImplemented => ErrorCode::NotImplemented,
@@ -265,7 +288,8 @@ impl AppError {
             Self::AccessDenied
             | Self::MissingScope { .. }
             | Self::ContentRestricted
-            | Self::ExtensionPermissionDenied { .. } => 403,
+            | Self::ExtensionPermissionDenied { .. }
+            | Self::TrustLevelInsufficient { .. } => 403,
             Self::NotFound { .. } => 404,
             Self::Validation { .. } | Self::SourceUnsupported { .. } => 422,
             // The request is well formed and the instance cannot serve it: the
@@ -356,6 +380,7 @@ mod tests {
             ErrorCode::JobFailed,
             ErrorCode::InsufficientCredits,
             ErrorCode::ExtensionPermissionDenied,
+            ErrorCode::TrustLevelInsufficient,
             ErrorCode::Internal,
         ];
         for code in all {
