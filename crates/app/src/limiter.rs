@@ -422,11 +422,20 @@ pub async fn enforce(State(state): State<AppState>, request: Request, next: Next
 
 /// The extra tokens, above the base one, charged for a rejected sign-in.
 ///
-/// Chosen so the spend outruns the refill by a wide margin even on fast
-/// hardware: the auth class refills at a few tokens per second, while a
-/// sequential attacker can complete far fewer password hashes per second than
-/// that. A short run of wrong passwords therefore exhausts the burst, and the
-/// next attempt is refused before any hash is run.
+/// Bounds the *sequential* guesser, which is the case the base one-token limit
+/// cannot touch. At `auth.burst = 10, auth.per_minute = 30` the address bucket
+/// holds 40 tokens and refills at 2/s, while a failed sign-in spends 6. So the
+/// spend outruns the refill — but only while a guess takes less than
+/// `6 / 2 = 3s`. Measured Argon2id verification on this class of hardware is
+/// ~0.39 s, so a real wrong password clears that by roughly 7x.
+///
+/// **The limit is a bound on pace, not on patience.** A client willing to spend
+/// four seconds per attempt is never refused by this bucket at all, because the
+/// refill overtakes the spend. That is a deliberate, stated limit rather than a
+/// hidden one: this bucket bounds what it can, and what it cannot is an account
+/// takeover by an attacker who is not in a hurry. Credential stuffing at scale
+/// is concurrent and is stopped by the base limit; a slow serial guesser needs a
+/// per-account attempt counter or a lockout, which is a different mechanism.
 const FAILED_SIGN_IN_COST: f64 = 5.0;
 
 /// Announce once, and only once, that requests are sharing a bucket because no
@@ -606,13 +615,15 @@ mod tests {
     }
 
     #[test]
-    fn a_sequential_guesser_is_eventually_refused() {
-        // The property the sign-in limit must have, stated without a server:
-        // however slowly a client guesses, the cost of a wrong password must
-        // outrun the refill. A real handler spends ~0.5s per Argon2 hash, so
-        // model a guesser far *slower* than that and require the bucket to run
-        // dry anyway. If this passes, how concurrent the guesser is becomes
-        // irrelevant to whether it is stopped.
+    fn a_sequential_guesser_is_refused_while_it_stays_faster_than_the_refill() {
+        // The property, stated so it is actually true: while a guess costs less
+        // time than the bucket's refill needs to pay for itself, the surcharge
+        // makes the spend outrun the refill, so the burst drains and the next
+        // attempt is refused before any further hash runs.
+        //
+        // A real handler spends ~0.39 s per Argon2id verification (measured on
+        // this class of hardware), so 1 s per guess is the conservative case —
+        // slower than reality, still inside the bound.
         let auth = Limits::default().quota(RouteClass::Auth);
         let address_quota = Quota {
             burst: auth.burst.saturating_mul(4),
@@ -621,9 +632,7 @@ mod tests {
         let mut bucket = Bucket::new(f64::from(address_quota.burst));
         let start = Instant::now();
 
-        // A guesser spending two seconds on each attempt, which is slower than
-        // any real password hash and therefore the conservative case.
-        let per_guess = Duration::from_secs(2);
+        let per_guess = Duration::from_secs(1);
         let cost = 1.0 + FAILED_SIGN_IN_COST;
 
         let mut refused_at = None;
@@ -635,10 +644,44 @@ mod tests {
             }
         }
 
-        let attempt = refused_at.expect("a sequential guesser must eventually be refused");
+        let attempt = refused_at.expect("a guesser inside the bound must be refused");
+        // The address bucket holds 40 tokens and each guess spends 6, so the
+        // burst cannot survive more than 7. Requiring 10 leaves room for the
+        // refill without making the assertion one a weaker limit would also
+        // pass — a cost of 1 (no surcharge) is never refused at any pace.
         assert!(
             attempt <= 10,
             "refused only after {attempt} wrong passwords; the limit is not binding"
+        );
+    }
+
+    #[test]
+    fn the_sign_in_surcharge_is_what_bounds_a_sequential_guesser() {
+        // Without the surcharge the same guesser is never refused, which is what
+        // makes the test above evidence about the surcharge rather than about
+        // the base limit. Paired with it, the two tests together say the
+        // surcharge is load-bearing and the bound is real.
+        let auth = Limits::default().quota(RouteClass::Auth);
+        let address_quota = Quota {
+            burst: auth.burst.saturating_mul(4),
+            per_minute: auth.per_minute.saturating_mul(4),
+        };
+        let mut bucket = Bucket::new(f64::from(address_quota.burst));
+        let start = Instant::now();
+        let per_guess = Duration::from_secs(1);
+
+        let mut refused_at = None;
+        for attempt in 1..=1_000_u32 {
+            let now = start + per_guess * (attempt - 1);
+            if bucket.take_cost(address_quota, now, 1.0).is_err() {
+                refused_at = Some(attempt);
+                break;
+            }
+        }
+        assert!(
+            refused_at.is_none(),
+            "the base one-token limit refuses at attempt {refused_at:?}; \
+             the paired test proves nothing if it refuses on its own"
         );
     }
 
