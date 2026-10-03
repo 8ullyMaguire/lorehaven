@@ -134,6 +134,9 @@ pub async fn record_session(
             .to_string(),
     );
     let work_ids = encode_work_ids(queue);
+    // `session_mood` already returns `Option<&str>`, so `as_deref` was a no-op
+    // here — clippy is right, and the doubled conversion read as though the two
+    // were different shapes.
     let mood = queue.session_mood();
     // `and_then(try_from)`, NOT `try_from(...).ok()` after an `unwrap_or(0)`. The
     // first version did the latter, which turned "the reader stated no budget"
@@ -158,7 +161,7 @@ pub async fn record_session(
         [
             &id,
             account_id,
-            mood.as_deref(),
+            mood,
             budget,
             &work_ids,
             queue.estimated_minutes,
