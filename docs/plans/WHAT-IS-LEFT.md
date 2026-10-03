@@ -1,13 +1,16 @@
 # Lorehaven — what's left
 
-Updated at the start of each turn. Last commit: `430ceaf`; tagged `m45-18-faucet-sink-dashboard`.
+Updated at the start of each turn. Last commit: `2c2849e`; merge `0161c14`.
 
 **Delegation is unavailable in this profile.** A subagent dispatched for step 3 died in
 0.59 s with `HTTP 400: Unable to determine provider for model 'qwen2.5-coder:3b-64k'`. Build
 in the main session.
 
-**lorehaven is gaming-pc only** — it is not cloned on thinkcentre, so the half-and-half host
-split cannot apply to this repo.
+**lorehaven develops on gaming-pc only**, in `~/code-local/rust/lorehaven`. That was true
+on 2026-10-02 and stopped being true on 2026-10-03: `~/code/rust/lorehaven` is a bind/sshfs
+mount of thinkcentre's own checkout, not a gaming-pc copy. The two diverged at M47 and
+have now been merged (see below). thinkcentre is being turned into a plain mirror — one
+development site per repo, which is what stops this recurring.
 
 **`git diff` is intercepted here.** Two invocations returned `No syntactic changes` instead of
 a diff for a file that genuinely had one. Use `diff <(git show HEAD:f) f` to see a real diff.
@@ -65,7 +68,23 @@ to prevent.
 
 **All six gaps (A–G) are now closed.**
 
-## M45-18 — faucet/sink dashboard (in progress)
+## The thinkcentre merge (done, `0161c14`)
+
+Two lineages diverged at `921a59d` (M47). Merged into master, not rebased — both sides
+were published, so merging loses nothing and resetting either one loses a lot.
+
+Carried over that master did **not** have: the taste arena and taste vector were
+production *stubs* on master (`dimension_score` hashed `work_id`+dimension into a
+pseudo-score, `get_admin_centroid` returned a hardcoded `vec![0.5;5]`, and
+`fetch_user_rated_work_vectors` returned nothing) — so every taste vector was empty and
+the recommender learned nothing from any rating, and every arena ballot was a no-op.
+Also `rec_strategy.rs` (516 lines, 8 strategies + RRF), the pawchive/chyoa scraper
+repairs, `dnf.rs`, `routes/external.rs`, migrations 0072/0073, 5 test files.
+
+The plan predicted 2 conflicting files and named the wrong ones. Actual: 4 conflict
+blocks over 3 files, none of which the plan named. The lesson is in "Lessons" below.
+
+## M45-18 — faucet/sink dashboard (done)
 
 Plan: `docs/plans/m45-18-faucet-sink-dashboard.md`.
 
@@ -111,18 +130,19 @@ reference.
 
 ## In flight
 
-- Full SQLite suite on a verified-clean tree (`proc_6ab45cebe2c5`).
-- Both mutation gates on a clean tree, **after** the suite finishes — they edit the source
-  under test, so running them concurrently is what produced the false results this session.
-- Full PostgreSQL suite, last.
+- Full SQLite workspace suite on the merged tree (started 09:48).
+- Full PostgreSQL suite, after SQLite finishes.
 
-**Do not run any of these concurrently, and do not touch the tree while they run.** Four of
-this session's bad results came from doing so.
+**Run these serially and do not touch the tree while they run.** Four bad results in an
+earlier session came from doing otherwise.
 
 ## Also outstanding
 
-- 31 rows in the M45 tracker still marked `planned`. This is the largest remaining pool of
-  named work in the repo.
+- **30 rows in the M45 tracker are still `planned`** (M45-22 … M45-55). This is the largest
+  remaining pool of named work in the repo. M45-18 was in this list while fully shipped;
+  it is now `implemented-fully-tested`, so the count is 30, not 31.
+- Nothing is pushed. `master` carries `0161c14` + `2c2849e` locally; thinkcentre has not
+  been synced, and the mirror conversion has not happened.
 - `preread_reports` exists and is tested, but **no provider is configured**, so nothing
   writes a row in practice. Running an Ollama instance and pointing the adapter at it is the
   last manual step; §23.7's "AI features disabled without configuration" is why that is a
@@ -159,6 +179,30 @@ figure that was not money.
 choice: return unvalidated model output (a chat completion is prose until parsed against a
 schema), send private text without consent, and report a transport failure as an empty
 result (an empty list reads downstream as "the work was assessed and scored nothing").
+
+## Lessons from the merge (2026-10-03)
+
+- **`cargo build` is the conflict resolver git is not.** `fetch_user_rated_work_vectors`
+  came out of the merge as thinkcentre's real *body* with master's *stub signature*
+  (`_db`, `_account_id`, underscore-prefixed because on master the function was a stub and
+  never used them). Text-clean, wrong, and invisible to `git status`. Same class hit
+  master's arena tests: `ArenaCard` gained `vector` and `apply_arena_ballot` a 4th
+  argument, and the tests still called the old shapes.
+- **Never predict a conflict count; count it.** The plan said 2 files and named
+  `limiter.rs` + `docs/handoff.md`. Neither needed manual resolution. The real 4 blocks
+  were in three files the plan did not mention.
+- **A signature change on one side orphans the other side's call sites silently.**
+  Same lesson, different mask: git resolves text, and a call site is text that still
+  parses.
+- **`assert_ne!(1500.0)` is not an assertion.** `apply_arena_ballot_updates_elo` asserted
+  only that Elo *moved*, which passes for a ballot that moves it the **wrong way** —
+  the exact bug the merge existed to fix. It now asserts the direction, with a mirrored
+  test for the other direction. Both proven: flipping the sign turns them red and the
+  original assertion stayed green.
+- **`warnings are denied` turns a dead-code warning into a build failure.** That is
+  usually what you want, but it also means a merged-in helper nobody calls
+  (`limiter::Bucket::take` once `take_cost` landed) blocks the build until it is
+  `#[cfg(test)]` or removed.
 
 ## Lessons from the mutation gates (cost real time, keep these)
 
