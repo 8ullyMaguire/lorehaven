@@ -42,10 +42,33 @@ use serde_json::json;
 /// The preset matters: `development_defaults()` is `curated_boutique`, a
 /// gallery, and a gallery withholds reader-facing capabilities. A test written
 /// against the wrong preset is testing the gate, not the metric.
+///
+/// The quotas are raised because this file's tests share one process-wide
+/// bucket. `limiter::GLOBAL_BUCKETS` is keyed `ip:<class>:<address>`, and a
+/// router driven by `oneshot` carries no `ConnectInfo`, so `client_address`
+/// falls back to the literal `unknown` — every request from every test in this
+/// binary lands on `ip:default:unknown`. With the development defaults that is
+/// one 120-token bucket for ~20 tests, and a test that has not failed on its own
+/// logic fails on 429 instead. This is the same fix `milestone_2.rs` applies,
+/// for the same reason; see commit 975dfa2 for the original diagnosis.
 fn router_for(tdb: &test_support::TestDb, dir: &std::path::Path) -> axum::Router {
     let mut config = Config::development_defaults();
     config.storage.root = dir.to_path_buf();
     config.instance.preset = "open_library".to_owned();
+    // Per-test isolation would be the better fix, but it needs a forwarded
+    // address and a trusted proxy, which is process-global state — a wider
+    // change than this file should make on its own. Raising the ceiling keeps
+    // the limiter honest where it is being tested and out of the way here.
+    for quota in [
+        &mut config.rate_limits.auth,
+        &mut config.rate_limits.write,
+        &mut config.rate_limits.search,
+        &mut config.rate_limits.export,
+        &mut config.rate_limits.default,
+    ] {
+        quota.burst = 1000;
+        quota.per_minute = 6000;
+    }
     server::build_router(AppState::new(config, tdb.db().clone()))
 }
 
