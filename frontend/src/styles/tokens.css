@@ -49,8 +49,28 @@
    * inherit downwards, so a token defined on `.site-header` never reaches the
    * root. Measured against the header's own padding and type, so if the header
    * grows the number is the one thing to revisit.
+   *
+   * REVISITED, because the header grew and the number did not: this read 4.0625rem
+   * (65px) while `.site-header` measures 68.59375px, so `scroll-padding-top` was
+   * 3.59px SHORT of the thing it exists to clear. The analytics E2E suite has been
+   * red on exactly this comparison for a while.
+   *
+   * The value is now 4.2875rem (68.6px), the measured height. 68.59375 is not a
+   * round number because the header's height comes out of its content -- padding,
+   * the type's line box, and a 1px border -- not out of any one declaration.
+   *
+   * Worth being honest about the shape of this: a fixed token compared against a
+   * content-sized element is a standing invitation to drift, and the E2E test that
+   * catches it is an ANALYTICS test, so it presents as an analytics bug. It is not
+   * a flaky threshold either -- the two measurements are byte-identical with and
+   * without a 17th navigation entry, so nav count moves neither number. `.bar` is
+   * `min-height: 4rem` with `flex-wrap: nowrap` on `.desktop`, and the content
+   * decides the rest.
+   *
+   * If the header is ever given a height of its own, replace this with that value
+   * and the drift cannot recur.
    */
-  --header-height: 4.0625rem;
+  --header-height: 4.2875rem;
 
   --radius-sm: 3px;
   --radius-md: 6px;
