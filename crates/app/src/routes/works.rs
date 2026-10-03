@@ -536,6 +536,18 @@ async fn update_work(
             {
                 tracing::warn!(work = %work_id, %error, "failed to record completion event");
             }
+            // §54.5: tell everyone watching this work that it finished — once per
+            // watch, ever. Best-effort alongside the incentive event above, for the
+            // same reason: a notification failure must never fail the edit.
+            //
+            // Gated on the TRANSITION, not on the value. A watch created *after* the
+            // work is already complete is handled by the concierge's own
+            // immediate-notify path; this branch only fires for a work completing
+            // now, so a work whose completion is re-saved as `complete` notifies
+            // nobody.
+            if let Err(error) = crate::wip_watch::notify_completion(state.db(), &work_id).await {
+                tracing::warn!(work = %work_id, %error, "failed to notify WIP watchers");
+            }
         }
         if *completion != "abandoned" && work.completion == "abandoned" {
             if let Err(error) = lorehaven_db::engagement::record_lifecycle_event(

@@ -398,6 +398,190 @@ pub async fn is_complete(db: &Database, work_id: &str) -> Result<bool, sqlx::Err
         .is_some_and(|(c,)| c.eq_ignore_ascii_case("complete")))
 }
 
+/// Estimated minutes for each of `work_ids`, keyed by id.
+///
+/// Word counts live on `chapter_revisions`, not on `works` — the same aggregate
+/// the arena pool query computes. A work with no chapters has **no row here**,
+/// which is how "we do not know how long this is" stays distinguishable from
+/// "zero minutes": `apply_budget` charges those the midpoint of the queue's own
+/// range and marks them, per §54.4.
+///
+/// One query for the whole queue, not one per work. An N+1 on the request path of
+/// a feature nobody can turn off is how it ends up disabled for being slow.
+pub async fn duration_estimates(
+    db: &Database,
+    work_ids: &[String],
+) -> Result<std::collections::HashMap<String, f64>, sqlx::Error> {
+    if work_ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    // One bound parameter per id, with placeholders spelled per dialect. sqlx cannot
+    // bind an array; splicing a literal list into the SQL instead would make an
+    // injection surface out of a length check rather than out of escaping.
+    let placeholders = (1..=work_ids.len())
+        .map(|n| match db.backend() {
+            crate::Backend::Postgres => format!("${n}"),
+            crate::Backend::Sqlite => format!("?{n}"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = sql_owned(
+        db,
+        format!(
+            "SELECT c.work_id, SUM(cr.word_count)
+               FROM chapters c
+               JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+              WHERE c.work_id IN ({placeholders})
+              GROUP BY c.work_id"
+        ),
+        format!(
+            "SELECT c.work_id::text, SUM(cr.word_count)::float8
+               FROM chapters c
+               JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+              WHERE c.work_id IN ({placeholders})
+              GROUP BY c.work_id"
+        ),
+    );
+
+    // The decode type differs per dialect and that is not cosmetic: `SUM()` over an
+    // INTEGER column is an integer on SQLite and the PG arm casts to `::float8`.
+    // One decode type needs a lossy conversion on one engine or a compile error on
+    // the other, so each arm decodes what its own engine returns and both widen
+    // here.
+    let rows: Vec<(String, Option<f64>)> = match db.backend() {
+        crate::Backend::Sqlite => {
+            let mut q = sqlx::query_as::<_, (String, Option<i64>)>(&sql);
+            for id in work_ids {
+                q = q.bind(id);
+            }
+            let raw = q.fetch_all(db.sqlite_pool().expect("sqlite")).await?;
+            raw.into_iter()
+                .map(|(w, n)| (w, n.map(|v| v as f64)))
+                .collect()
+        }
+        crate::Backend::Postgres => {
+            let mut q = sqlx::query_as::<_, (String, Option<f64>)>(&sql);
+            for id in work_ids {
+                q = q.bind(id);
+            }
+            q.fetch_all(db.postgres_pool().expect("postgres")).await?
+        }
+    };
+
+    let mut out = std::collections::HashMap::new();
+    for (work_id, words) in rows {
+        // `SUM` over zero chapters is NULL, and a NULL means "no estimate" — which
+        // §54.4 wants marked rather than rounded into a number. An estimate that
+        // rounds to 0 minutes is treated as unknown for the same reason: reporting
+        // "0 minutes" as a measurement is a claim we cannot back.
+        if let Some(words) = words.filter(|w| *w > 0.0) {
+            let minutes =
+                f64::from(lorehaven_domain::reading::estimate_reading_time(words as u32).minutes);
+            if minutes > 0.0 {
+                out.insert(work_id, minutes);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The reader's own watches, newest first.
+///
+/// Scoped by `account_id` for the same reason `sessions_for` is (§54.6). There is
+/// no un-scoped variant, and that is the point.
+pub async fn watches_for(
+    db: &Database,
+    account_id: &str,
+) -> Result<Vec<(String, String, Option<String>)>, sqlx::Error> {
+    let sql = sql_owned(
+        db,
+        "SELECT work_id, id, notified_at FROM wip_watches
+          WHERE account_id = ?1
+          ORDER BY created_at DESC"
+            .to_string(),
+        "SELECT work_id::text, id::text, notified_at::text FROM wip_watches
+          WHERE account_id = $1::uuid
+          ORDER BY created_at DESC"
+            .to_string(),
+    );
+    fetch_all!(db, &sql, [account_id], (String, String, Option<String>)).await
+}
+
+/// Restrict `ranked` to works carrying `mood`, keeping blend order.
+///
+/// §54.2's mood constraint is a **candidate-set** constraint, applied before the
+/// budget ever sees the list. That ordering is the whole of §54.1: mood decides
+/// what is eligible, time decides how much of the eligible list you get, and
+/// neither overrules the other's order. Apply this after `apply_budget` instead and
+/// the mood silently drops whatever the budget cut — a feature that looks right and
+/// ranks wrongly, in the one place a reader can observe it.
+///
+/// Case-insensitively, on `tn.norm` — the normalised column — rather than
+/// `canonical`, so a mood asked for as "Comfort" matches however it was first
+/// spelled. A mood no candidate carries returns an empty list: the *caller*
+/// decides that is §54.6's explained empty queue, because falling back to the
+/// unfiltered list here would make a refusal impossible to express.
+pub async fn filter_by_mood(
+    db: &Database,
+    ranked: &[String],
+    mood: &str,
+) -> Result<Vec<String>, sqlx::Error> {
+    if ranked.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids = (1..=ranked.len())
+        .map(|n| match db.backend() {
+            crate::Backend::Postgres => format!("${n}"),
+            crate::Backend::Sqlite => format!("?{n}"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let wanted = mood.trim().to_lowercase();
+    let sql = sql_owned(
+        db,
+        format!(
+            "SELECT wt.work_id FROM work_tags wt
+               JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+              WHERE wt.work_id IN ({ids}) AND tn.kind = 'mood' AND tn.norm = ?{n}",
+            n = ranked.len() + 1
+        ),
+        format!(
+            "SELECT wt.work_id::text FROM work_tags wt
+               JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+              WHERE wt.work_id IN ({ids}) AND tn.kind = 'mood' AND tn.norm = ${n}",
+            n = ranked.len() + 1
+        ),
+    );
+    let rows: Vec<(String,)> = match db.backend() {
+        crate::Backend::Sqlite => {
+            let mut q = sqlx::query_as::<_, (String,)>(&sql);
+            for w in ranked {
+                q = q.bind(w);
+            }
+            q.bind(&wanted)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        crate::Backend::Postgres => {
+            let mut q = sqlx::query_as::<_, (String,)>(&sql);
+            for w in ranked {
+                q = q.bind(w);
+            }
+            q.bind(&wanted)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    // Membership as a set, order from `ranked`. A `HashSet` is right here precisely
+    // because the order comes from the blend and not from the database.
+    let carriers: std::collections::HashSet<String> = rows.into_iter().map(|(w,)| w).collect();
+    Ok(ranked
+        .iter()
+        .filter(|w| carriers.contains(*w))
+        .cloned()
+        .collect())
+}
+
 /// Encode a rendered queue's work ids as the stored JSON array.
 ///
 /// Hand-rolled rather than `serde_json::to_string` on a `Vec<String>` because the

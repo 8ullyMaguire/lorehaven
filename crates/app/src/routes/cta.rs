@@ -2,7 +2,7 @@
 // CTA marks (spec §42.2): curators record whether a work carries its own CTA
 // ---------------------------------------------------------------------------
 
-use crate::auth::RequireSession;
+use crate::auth::{MaybeSession, RequireSession};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -73,7 +73,18 @@ async fn mark(
 }
 
 /// GET /works/:id/cta_marks — list all marks on a work.
-async fn list(State(state): State<AppState>, Path(work_id): Path<String>) -> Response {
+///
+/// Takes `MaybeSession` so the route is *declared* public rather than public by
+/// omission. The handler reads nothing about the caller, so there is no reason to
+/// require one — but the route-inventory test treats a handler with no audience
+/// extractor as a failure, and that convention earns its keep: a route nobody
+/// decided anything about should not look like a route somebody did. An anonymous
+/// caller simply gets an empty account and the same marks as everyone else.
+async fn list(
+    State(state): State<AppState>,
+    MaybeSession(_session): MaybeSession,
+    Path(work_id): Path<String>,
+) -> Response {
     match cta_marks_for(state.db(), &work_id).await {
         Ok(marks) => {
             let body: Vec<serde_json::Value> = marks

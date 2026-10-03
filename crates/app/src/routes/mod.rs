@@ -11,6 +11,8 @@ pub mod author_media;
 pub mod browse;
 pub mod collaborators;
 pub mod community;
+// M45-22 (§54): the personal concierge.
+pub mod concierge;
 pub mod cta;
 pub mod curator;
 pub mod dashboard;
