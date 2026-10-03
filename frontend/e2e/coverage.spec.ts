@@ -33,6 +33,7 @@ function who(handle: string, displayName = handle): Who {
 
 const author = who('CovAuthor21');
 const reader = who('CovReader21');
+const conciergeAuthor = who('CovConcierge21');
 
 async function ensureAccount(page: Page, person: Who): Promise<void> {
   await page.goto('/register');
@@ -363,6 +364,71 @@ test('discover: a newly published work appears on the discover surface', async (
   await publish(page, 'The Discoverable Work');
   await page.goto('/discover');
   await expect(page.getByText('The Discoverable Work').first()).toBeVisible({ timeout: 15_000 });
+});
+
+test('concierge: a signed-in reader gets a real queue from the server', async ({ page }) => {
+  // The live counterpart to App.test.ts's jsdom check. That one proves the shell
+  // dispatches /concierge to Concierge.svelte; this proves the page then works
+  // against the actual Axum backend with a real session -- which jsdom mocks away.
+  //
+  // It is the only test in this file that would notice the route existing while
+  // the endpoint behind it 404s, which is the shape of bug this page was shipped
+  // with.
+  test.setTimeout(120_000);
+  await ensureAccount(page, reader);
+
+  // Enough published works for the blend to have something to rank. One work can
+  // be recommended; a queue is not demonstrable with one.
+  await ensureAccount(page, conciergeAuthor);
+  for (const n of [1, 2, 3]) {
+    await publish(page, `A Queued Work ${n}`);
+  }
+
+  await page.goto('/concierge');
+  await expect(page.getByRole('heading', { name: 'Your queue' })).toBeVisible();
+
+  // The nav link, so the page is reachable without typing the path.
+  await expect(page.locator('a[href="/concierge"]').first()).toBeVisible();
+
+  // Either a queue of real works, or an explained empty state -- but NOT a 404,
+  // an error summary, or a skeleton that never resolves. All three of those fail
+  // the wait below, which is the point: the assertion is on what the server said.
+  const workLink = page.locator('ul.queue a').first();
+  const explained = page.locator('.empty.explained');
+  const exhausted = page.locator('.empty.exhausted');
+  // `ErrorSummary` renders `role="alert"` on `.summary`; there is no
+  // `.error-summary` class, so a selector written from the component's FILENAME
+  // would match nothing and this guard would silently never fire.
+  const failed = page.locator('[role=alert]');
+
+  await expect
+    .poll(
+      async () => {
+        if (await failed.count()) return 'error';
+        if (await page.locator('ul.queue a').count()) return 'queue';
+        if (await explained.count()) return 'explained';
+        if (await exhausted.count()) return 'exhausted';
+        return 'pending';
+      },
+      { timeout: 20_000, message: 'the concierge never resolved to a queue or an explained empty' },
+    )
+    .not.toBe('pending');
+
+  if (await explained.count()) {
+    // §54.6: the server's own words, not a generic empty state.
+    await expect(page.locator('.empty-why')).not.toBeEmpty();
+  } else if (!(await exhausted.count())) {
+    await expect(workLink).toBeVisible();
+    // §54.4: the total is derived from the works shown, so it must be present and
+    // numeric rather than blank.
+    await expect(page.locator('.total')).toContainText(/\d+\s*min/);
+  }
+
+  // §54.7's parity case: "No limit" is the default, not a preselected rung, so a
+  // reader who has chosen nothing still gets their discovery feed. Clicking it
+  // re-requests with no budget and must not error.
+  await page.click('button:text-is("No limit")');
+  await expect(failed).toHaveCount(0);
 });
 
 test('search: the search page finds a published work by title', async ({ page }) => {
