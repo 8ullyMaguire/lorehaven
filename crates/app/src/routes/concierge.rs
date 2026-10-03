@@ -110,9 +110,12 @@ pub async fn render_queue(
     //    no selector sees the same works in the same order (§54.7's invariant that
     //    the session layer did not make the default path worse).
     let registry = crate::rec_engine::build_registry(&state.config().discovery);
+    // No `.into()`: `generate_with_registry` already returns `anyhow::Error`, which
+    // is what `AppError::Internal` holds. The conversion was a no-op that clippy
+    // reads as a claim the types differ.
     let ranked = crate::rec_engine::generate_with_registry(db, &registry, &account, CANDIDATE_CAP)
         .await
-        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e.into())))?;
+        .map_err(|e| ApiError(lorehaven_domain::AppError::Internal(e)))?;
 
     // 3. Narrow by mood, in blend order. §54.1: mood constrains the candidate set,
     //    and the ranking inside that set is untouched.

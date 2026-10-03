@@ -170,7 +170,7 @@ pub async fn record_review(
         source_adapters::ReviewError::BadVerdict { verdict } => {
             ApiError(lorehaven_domain::AppError::field(
                 "verdict",
-                &format!("must be approve, reject or abstain; got {verdict:?}"),
+                format!("must be approve, reject or abstain; got {verdict:?}"),
             ))
         }
         source_adapters::ReviewError::Query(q) => {
