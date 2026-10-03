@@ -483,13 +483,27 @@ pub async fn update_arena_weights(
     Ok(())
 }
 
+/// A row in the arena pool: a work's metadata plus the tag weights its taste
+/// vector is built from.
+#[derive(Debug, Clone)]
+pub struct ArenaPoolRow {
+    pub id: String,
+    pub title: String,
+    pub summary: String,
+    pub fandom: String,
+    pub tags: Vec<String>,
+    pub word_count: u32,
+    /// The work's tags with their signed weights, ready for
+    /// `work_vector_from_tags`.
+    pub tag_weights: Vec<(String, i64)>,
+}
+
 /// Get works for arena pool (excluding already-voted works).
-/// Returns (work_id, title, summary, fandom, tags, word_count).
 pub async fn get_arena_pool(
     db: &Database,
     account_id: &str,
     limit: i64,
-) -> Result<Vec<(String, String, String, String, Vec<String>, u32)>, sqlx::Error> {
+) -> Result<Vec<ArenaPoolRow>, sqlx::Error> {
     match db.backend() {
         Backend::Sqlite => {
             let _pool = db.sqlite_pool().ok_or(pool_err())?;
@@ -526,15 +540,24 @@ pub async fn get_arena_pool(
             .bind(limit)
             .fetch_all(db.sqlite_pool().ok_or(pool_err())?)
             .await?;
-            Ok(rows
-                .into_iter()
-                .map(|(id, title, summary, fandom, tags, wc)| {
-                    let tags: Vec<String> = tags
-                        .map(|t| t.split(',').map(|s| s.to_string()).collect())
-                        .unwrap_or_default();
-                    (id, title, summary, fandom, tags, wc as u32)
-                })
-                .collect())
+            let pool = db.sqlite_pool().ok_or(pool_err())?;
+            let mut out = Vec::with_capacity(rows.len());
+            for (id, title, summary, fandom, tags, wc) in rows {
+                let tags: Vec<String> = tags
+                    .map(|t| t.split(',').map(|s| s.to_string()).collect())
+                    .unwrap_or_default();
+                let tag_weights = fetch_work_tag_weights_sqlite(pool, &id).await?;
+                out.push(ArenaPoolRow {
+                    id,
+                    title,
+                    summary,
+                    fandom,
+                    tags,
+                    word_count: wc as u32,
+                    tag_weights,
+                });
+            }
+            Ok(out)
         }
         Backend::Postgres => {
             let rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, i64)>(
@@ -571,15 +594,24 @@ pub async fn get_arena_pool(
             .bind(limit)
             .fetch_all(db.postgres_pool().ok_or(pool_err())?)
             .await?;
-            Ok(rows
-                .into_iter()
-                .map(|(id, title, summary, fandom, tags, wc)| {
-                    let tags: Vec<String> = tags
-                        .map(|t| t.split(',').map(|s| s.to_string()).collect())
-                        .unwrap_or_default();
-                    (id, title, summary, fandom, tags, wc as u32)
-                })
-                .collect())
+            let pool = db.postgres_pool().ok_or(pool_err())?;
+            let mut out = Vec::with_capacity(rows.len());
+            for (id, title, summary, fandom, tags, wc) in rows {
+                let tags: Vec<String> = tags
+                    .map(|t| t.split(',').map(|s| s.to_string()).collect())
+                    .unwrap_or_default();
+                let tag_weights = fetch_work_tag_weights_postgres(pool, &id).await?;
+                out.push(ArenaPoolRow {
+                    id,
+                    title,
+                    summary,
+                    fandom,
+                    tags,
+                    word_count: wc as u32,
+                    tag_weights,
+                });
+            }
+            Ok(out)
         }
     }
 }
@@ -609,19 +641,173 @@ pub async fn recompute_all_taste_vectors(db: &Database) -> Result<(), sqlx::Erro
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-async fn get_admin_centroid(_db: &Database) -> Option<Vec<f64>> {
-    // In a real implementation, this would fetch from config or compute from admin ratings.
-    // For now, return a default neutral centroid.
-    Some(vec![0.5, 0.5, 0.5, 0.5, 0.5])
+async fn get_admin_centroid(db: &Database) -> Option<Vec<f64>> {
+    // The instance taste profile is the admin's own ratings: what they read is
+    // what "good" means for this archive. Averaging the admin's ratings across
+    // works gives the centroid every vector is measured against.
+    //
+    // Only accounts holding the admin role are considered, so an instance with
+    // no admin ratings falls back to neutral rather than inheriting a random
+    // user's taste.
+    let dim_count = taste_vector::DEFAULT_DIMENSIONS.len();
+    let query = match db.backend() {
+        Backend::Sqlite => {
+            "SELECT tv.vector FROM taste_vectors tv
+             JOIN accounts a ON a.id = tv.account_id
+             WHERE a.operator_role = 'admin' AND a.deleted_at IS NULL
+             ORDER BY tv.computed_at DESC"
+        }
+        Backend::Postgres => {
+            "SELECT tv.vector FROM taste_vectors tv
+             JOIN accounts a ON a.id = tv.account_id
+             WHERE a.operator_role = 'admin' AND a.deleted_at IS NULL
+             ORDER BY tv.computed_at DESC"
+        }
+    };
+
+    let rows: Vec<(Option<String>,)> = match db.backend() {
+        Backend::Sqlite => sqlx::query_as(query)
+            .fetch_all(db.sqlite_pool()?)
+            .await
+            .ok()?,
+        Backend::Postgres => sqlx::query_as(query)
+            .fetch_all(db.postgres_pool()?)
+            .await
+            .ok()?,
+    };
+
+    let mut sums = vec![0.0; dim_count];
+    let mut counted = 0usize;
+    for (raw,) in &rows {
+        let Some(vector) = raw.as_deref().and_then(decode_vector) else {
+            continue;
+        };
+        for (slot, value) in sums.iter_mut().zip(vector.iter()) {
+            *slot += value;
+        }
+        counted += 1;
+    }
+
+    if counted == 0 {
+        return None;
+    }
+    Some(sums.iter().map(|sum| sum / counted as f64).collect())
+}
+
+/// Decode a stored taste vector.
+///
+/// The vector is persisted as a JSON array. Anything unparseable is treated as
+/// absent rather than fatal: one corrupt row must not take the recommender down.
+fn decode_vector(raw: &str) -> Option<Vec<f64>> {
+    serde_json::from_str::<Vec<f64>>(raw).ok().filter(|v| !v.is_empty())
+}
+
+/// The weight a star rating carries in a taste vector.
+///
+/// A 5-star rating is a strong positive signal, 1-star a strong negative one,
+/// and 3 stars — the midpoint — is deliberately near-neutral so that "I read
+/// it, it was fine" neither pulls a profile nor pushes it.
+fn star_weight(stars: i64) -> f64 {
+    match stars {
+        1 => -1.0,
+        2 => -0.5,
+        3 => 0.1,
+        4 => 0.5,
+        _ => 1.0,
+    }
 }
 
 async fn fetch_user_rated_work_vectors(
-    _db: &Database,
-    _account_id: &str,
+    db: &Database,
+    account_id: &str,
 ) -> Result<(Vec<Vec<f64>>, Vec<f64>), sqlx::Error> {
-    // Fetch the user's ratings with associated work vectors.
-    // Simplified: return empty for now (full implementation would join ratings with work metadata).
-    Ok((vec![], vec![]))
+    // Each rated work contributes its own taste vector, weighted by how much
+    // the reader liked it. The work's vector comes from its tags via
+    // `work_vector_from_tags`, so the profile is built from the same tag
+    // semantics the arena and recommendations use.
+    let dim_count = taste_vector::DEFAULT_DIMENSIONS.len();
+    let dimensions: Vec<(String, String, f64, f64)> = taste_vector::DEFAULT_DIMENSIONS
+        .iter()
+        .map(|key| ((*key).to_string(), (*key).to_string(), 0.5, 1.0))
+        .collect();
+
+    let rows: Vec<(i64, Vec<(String, i64)>)> = match db.backend() {
+        Backend::Sqlite => {
+            let pool = db.sqlite_pool().ok_or(pool_err())?;
+            let rated = sqlx::query_as::<_, (String, i64)>(
+                "SELECT r.work_id, r.stars FROM rating r
+                 WHERE r.account_id = ? AND r.deleted_at IS NULL",
+            )
+            .bind(account_id)
+            .fetch_all(pool)
+            .await?;
+
+            let mut out = Vec::with_capacity(rated.len());
+            for (work_id, stars) in rated {
+                let tags = fetch_work_tag_weights_sqlite(pool, &work_id).await?;
+                out.push((stars, tags));
+            }
+            out
+        }
+        Backend::Postgres => {
+            let pool = db.postgres_pool().ok_or(pool_err())?;
+            let rated = sqlx::query_as::<_, (String, i64)>(
+                "SELECT r.work_id, r.stars FROM rating r
+                 WHERE r.account_id = $1 AND r.deleted_at IS NULL",
+            )
+            .bind(account_id)
+            .fetch_all(pool)
+            .await?;
+
+            let mut out = Vec::with_capacity(rated.len());
+            for (work_id, stars) in rated {
+                let tags = fetch_work_tag_weights_postgres(pool, &work_id).await?;
+                out.push((stars, tags));
+            }
+            out
+        }
+    };
+
+    let vectors: Vec<Vec<f64>> = rows
+        .iter()
+        .map(|(_, tags)| taste_vector::work_vector_from_tags(&dimensions, tags))
+        .filter(|v| v.len() == dim_count)
+        .collect();
+    let weights: Vec<f64> = rows.iter().map(|(stars, _)| star_weight(*stars)).collect();
+
+    Ok((vectors, weights))
+}
+
+/// A work's tags and their signed weights, for building its taste vector.
+async fn fetch_work_tag_weights_sqlite(
+    pool: &sqlx::SqlitePool,
+    work_id: &str,
+) -> Result<Vec<(String, i64)>, sqlx::Error> {
+    sqlx::query_as::<_, (String, i64)>(
+        "SELECT tn.canonical, COALESCE(wt.weight, 0)
+         FROM work_tags wt
+         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         WHERE wt.work_id = ?",
+    )
+    .bind(work_id)
+    .fetch_all(pool)
+    .await
+}
+
+/// A work's tags and their signed weights, for building its taste vector.
+async fn fetch_work_tag_weights_postgres(
+    pool: &sqlx::PgPool,
+    work_id: &str,
+) -> Result<Vec<(String, i64)>, sqlx::Error> {
+    sqlx::query_as::<_, (String, i64)>(
+        "SELECT tn.canonical, COALESCE(wt.weight, 0)
+         FROM work_tags wt
+         JOIN taxonomy_nodes tn ON tn.id = wt.node_id
+         WHERE wt.work_id = $1",
+    )
+    .bind(work_id)
+    .fetch_all(pool)
+    .await
 }
 
 /// How many live ratings this account has, which is the `old_weight_sum` the

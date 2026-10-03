@@ -12,6 +12,8 @@ use serde_json::json;
 use std::str::FromStr;
 
 use lorehaven_domain::thread_modes::ThreadMode;
+// `ThreadMode::from_str` below is a trait method; without this import in
+// scope it does not resolve.
 use lorehaven_domain::typed_votes::is_moderator;
 
 use crate::auth::{MaybeSession, RequirePseud};

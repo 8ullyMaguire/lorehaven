@@ -557,6 +557,39 @@ pub struct ArenaCard {
     pub excerpt: String,
     /// Dimension this card is designed to vary on (for active learning).
     pub target_dimension: String,
+    /// The work's position on each taste dimension, in the same sort order as
+    /// the `dimensions` passed to [`generate_arena_round`].
+    ///
+    /// Carried on the card rather than recomputed from tags so the arena scores
+    /// a work exactly as the rest of the recommender does. Built with
+    /// [`work_vector_from_tags`].
+    #[serde(default)]
+    pub vector: Vec<f64>,
+}
+
+impl ArenaCard {
+    /// Attach a work's taste vector to a card, leaving everything else alone.
+    #[must_use]
+    pub fn with_vector(mut self, vector: Vec<f64>) -> Self {
+        self.vector = vector;
+        self
+    }
+
+    /// Build a card's vector from its tags, using [`work_vector_from_tags`].
+    ///
+    /// `dimensions` are `(key, label, admin_target, weight)` tuples in the form
+    /// the rest of the taste code uses. The resulting vector is in dimension
+    /// sort order, which is the order [`dimension_score`] and
+    /// [`card_distance`] expect.
+    #[must_use]
+    pub fn with_tag_vector(
+        mut self,
+        dimensions: &[(String, String, f64, f64)],
+        tag_weights: &[(String, i64)],
+    ) -> Self {
+        self.vector = work_vector_from_tags(dimensions, tag_weights);
+        self
+    }
 }
 
 /// An arena round: 4 cards to compare.
@@ -592,10 +625,21 @@ pub struct DimensionElo {
 /// learning picks the dimensions where the model is most uncertain).
 pub fn generate_arena_round(
     pool: &[ArenaCard],
-    _dimensions: &[TasteDimension], // reserved for dimension weighting
+    dimensions: &[TasteDimension],
     target_dimensions: &[String],
 ) -> Option<ArenaRound> {
     if pool.len() < 4 {
+        return None;
+    }
+    // An arena that varies on no known dimension has nothing to teach. Returning
+    // None asks the caller for a profile with dimensions configured, which is a
+    // clearer failure than a round whose four cards are indistinguishable.
+    let targets: Vec<String> = target_dimensions
+        .iter()
+        .filter(|key| dimension_index(dimensions, key).is_some())
+        .cloned()
+        .collect();
+    if targets.is_empty() {
         return None;
     }
 
@@ -610,16 +654,16 @@ pub fn generate_arena_round(
     let group = by_fandom.values().find(|g| g.len() >= 4)?;
 
     // Pick 4 cards that maximize variance on the target dimensions.
-    // Simple greedy: pick the card with highest variance on target dimensions,
-    // then pick 3 more that are most different from the first.
+    // Simple greedy: pick the card with the most extreme position on the first
+    // target dimension, then pick 3 more that are most different from it.
     let mut selected: Vec<&ArenaCard> = Vec::new();
     let mut remaining: Vec<&ArenaCard> = group.clone();
 
     // Start with the card that has the most extreme position on the first
     // target dimension (highest or lowest — either is fine, we want spread).
     if let Some(first) = remaining.iter().max_by(|a, b| {
-        dimension_score(a, &target_dimensions[0])
-            .partial_cmp(&dimension_score(b, &target_dimensions[0]))
+        dimension_score(a, &targets[0], dimensions)
+            .partial_cmp(&dimension_score(b, &targets[0], dimensions))
             .unwrap_or(std::cmp::Ordering::Equal)
     }) {
         selected.push(*first);
@@ -632,8 +676,8 @@ pub fn generate_arena_round(
         let next = remaining
             .iter()
             .max_by(|a, b| {
-                let da = card_distance(a, first, target_dimensions);
-                let db = card_distance(b, first, target_dimensions);
+                let da = card_distance(a, first, &targets, dimensions);
+                let db = card_distance(b, first, &targets, dimensions);
                 da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
             })
             .cloned()?;
@@ -662,10 +706,14 @@ pub fn generate_arena_round(
 /// two cards.
 ///
 /// Returns updated Elo ratings for all dimensions.
+///
+/// `dimensions` is the instance taste profile, used to read each card's score on
+/// the target dimension.
 pub fn apply_arena_ballot(
     elos: &[DimensionElo],
     round: &ArenaRound,
     ballot: &ArenaBallot,
+    dimensions: &[TasteDimension],
 ) -> Vec<DimensionElo> {
     let mut updated: Vec<DimensionElo> = elos.to_vec();
 
@@ -699,8 +747,8 @@ pub fn apply_arena_ballot(
     // Simplified model: the dimension's Elo represents how strongly the
     // reader weights this dimension. A win for the card that scores higher
     // on this dimension → the dimension matters more → Elo up.
-    let best_score = dimension_score(best, &target_dim);
-    let worst_score = dimension_score(worst, &target_dim);
+    let best_score = dimension_score(best, &target_dim, dimensions);
+    let worst_score = dimension_score(worst, &target_dim, dimensions);
 
     if let Some(dim_elo) = updated.iter_mut().find(|d| d.dimension_key == target_dim) {
         let expected = 1.0 / (1.0 + 10f64.powf(-(dim_elo.elo_rating - 1500.0) / 400.0));
@@ -713,26 +761,49 @@ pub fn apply_arena_ballot(
     updated
 }
 
+/// The index of `dimension` in a card's vector.
+///
+/// Vectors are built in dimension-key sort order (see
+/// [`work_vector_from_tags`]), so a dimension's position is found by sorting the
+/// keys the same way. Returns `None` when the instance has no such dimension, in
+/// which case the arena cannot score on it and the caller should skip it rather
+/// than invent a value.
+fn dimension_index(dimensions: &[TasteDimension], dimension: &str) -> Option<usize> {
+    let mut keys: Vec<&str> = dimensions.iter().map(|d| d.key.as_str()).collect();
+    keys.sort_unstable();
+    keys.binary_search(&dimension).ok()
+}
+
 /// Compute a card's score on a given dimension.
 ///
-/// This is a placeholder — in production, this would use the work's actual
-/// dimensional scores (from the taste profile's dimension analysis).
-/// For now, we use a hash of the work_id + dimension as a deterministic
-/// pseudo-score, so the arena can be tested end-to-end.
-fn dimension_score(card: &ArenaCard, dimension: &str) -> f64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    card.work_id.hash(&mut hasher);
-    dimension.hash(&mut hasher);
-    let hash = hasher.finish();
-    (hash % 1000) as f64 / 1000.0
+/// Reads the work's real taste vector. A card with no vector, or one whose
+/// vector predates a dimension being added to the instance, falls back to the
+/// neutral midpoint rather than to noise: an arena round that varies on nothing
+/// in particular still has to be playable, and a deterministic per-work
+/// pseudo-score would make the choices it offers meaningless.
+fn dimension_score(
+    card: &ArenaCard,
+    dimension: &str,
+    dimensions: &[TasteDimension],
+) -> f64 {
+    match dimension_index(dimensions, dimension) {
+        Some(index) => card.vector.get(index).copied().unwrap_or(0.5),
+        None => 0.5,
+    }
 }
 
 /// Compute distance between two cards on the target dimensions.
-fn card_distance(a: &ArenaCard, b: &ArenaCard, dimensions: &[String]) -> f64 {
-    dimensions
+fn card_distance(
+    a: &ArenaCard,
+    b: &ArenaCard,
+    target_dimensions: &[String],
+    dimensions: &[TasteDimension],
+) -> f64 {
+    target_dimensions
         .iter()
-        .map(|d| (dimension_score(a, d) - dimension_score(b, d)).abs())
+        .map(|key| {
+            (dimension_score(a, key, dimensions) - dimension_score(b, key, dimensions)).abs()
+        })
         .sum()
 }
 
@@ -766,6 +837,16 @@ mod arena_tests {
     use super::*;
 
     fn test_card(id: &str, fandom: &str, dim: &str) -> ArenaCard {
+        test_card_at(id, fandom, dim, 0.5)
+    }
+
+    /// A card with an explicit score on `dim`, so the tests drive the real
+    /// `dimension_score` path rather than both sides falling back to neutral.
+    ///
+    /// A single-dimension profile means the vector's first slot *is* that
+    /// dimension's score — see `dimension_index`, which sorts the keys the same
+    /// way `work_vector_from_tags` fills the vector.
+    fn test_card_at(id: &str, fandom: &str, dim: &str, score: f64) -> ArenaCard {
         ArenaCard {
             work_id: id.to_string(),
             title: format!("Work {}", id),
@@ -774,6 +855,7 @@ mod arena_tests {
             word_count: 5000,
             excerpt: "A test excerpt.".to_string(),
             target_dimension: dim.to_string(),
+            vector: vec![score],
         }
     }
 
@@ -806,12 +888,14 @@ mod arena_tests {
 
     #[test]
     fn apply_arena_ballot_updates_elo() {
+        // Work 1 scores high on the dimension and work 4 scores low, so the
+        // ballot has a real preferred direction to act on.
         let round = ArenaRound {
             cards: vec![
-                test_card("1", "fandom_a", "prose"),
-                test_card("2", "fandom_a", "prose"),
-                test_card("3", "fandom_a", "prose"),
-                test_card("4", "fandom_a", "prose"),
+                test_card_at("1", "fandom_a", "prose", 0.9),
+                test_card_at("2", "fandom_a", "prose", 0.5),
+                test_card_at("3", "fandom_a", "prose", 0.5),
+                test_card_at("4", "fandom_a", "prose", 0.1),
             ],
         };
         let elos = vec![DimensionElo {
@@ -824,11 +908,98 @@ mod arena_tests {
             worst_work_id: "4".to_string(),
             reason_tags: vec!["prose".to_string()],
         };
-        let updated = apply_arena_ballot(&elos, &round, &ballot);
+        let dims = vec![TasteDimension {
+            key: "prose".to_string(),
+            label: "Prose".to_string(),
+            admin_target: 0.5,
+            weight: 1.0,
+        }];
+        let updated = apply_arena_ballot(&elos, &round, &ballot, &dims);
         assert_eq!(updated.len(), 1);
         assert_eq!(updated[0].matches_played, 1);
-        // Elo should have changed (either up or down).
-        assert_ne!(updated[0].elo_rating, 1500.0);
+        // The rule, not "the number moved": work 1 scores higher on the
+        // dimension than work 4, so preferring it must raise the Elo. An
+        // `assert_ne!(1500.0)` would also pass for a ballot that moved it the
+        // WRONG way, which is the bug class this merge exists to fix.
+        assert!(
+            updated[0].elo_rating > 1500.0,
+            "preferring the higher-scoring card must raise the dimension Elo, got {}",
+            updated[0].elo_rating
+        );
+    }
+
+    #[test]
+    fn a_ballot_preferring_the_lower_scoring_card_lowers_the_dimension_elo() {
+        // The other direction, so the test above cannot pass on a sign error
+        // that always adds.
+        let round = ArenaRound {
+            cards: vec![
+                test_card_at("1", "fandom_a", "prose", 0.9),
+                test_card_at("2", "fandom_a", "prose", 0.5),
+                test_card_at("3", "fandom_a", "prose", 0.5),
+                test_card_at("4", "fandom_a", "prose", 0.1),
+            ],
+        };
+        let elos = vec![DimensionElo {
+            dimension_key: "prose".to_string(),
+            elo_rating: 1500.0,
+            matches_played: 0,
+        }];
+        // Prefer work 4, the LOW scorer. Elo must fall.
+        let ballot = ArenaBallot {
+            best_work_id: "4".to_string(),
+            worst_work_id: "1".to_string(),
+            reason_tags: vec!["prose".to_string()],
+        };
+        let dims = vec![TasteDimension {
+            key: "prose".to_string(),
+            label: "Prose".to_string(),
+            admin_target: 0.5,
+            weight: 1.0,
+        }];
+        let updated = apply_arena_ballot(&elos, &round, &ballot, &dims);
+        assert!(
+            updated[0].elo_rating < 1500.0,
+            "preferring the lower-scoring card must lower the dimension Elo, got {}",
+            updated[0].elo_rating
+        );
+    }
+
+    #[test]
+    fn a_ballot_naming_an_unconfigured_dimension_leaves_every_elo_untouched() {
+        // The reason names "prose" but the instance's only Elo row is
+        // "pacing", so there is nothing to update. Recorded matches must not
+        // creep, or the weight formula reads a confidence it never earned.
+        let round = ArenaRound {
+            cards: vec![
+                test_card_at("1", "fandom_a", "prose", 0.9),
+                test_card_at("2", "fandom_a", "prose", 0.5),
+                test_card_at("3", "fandom_a", "prose", 0.5),
+                test_card_at("4", "fandom_a", "prose", 0.1),
+            ],
+        };
+        let elos = vec![DimensionElo {
+            dimension_key: "pacing".to_string(),
+            elo_rating: 1500.0,
+            matches_played: 3,
+        }];
+        let ballot = ArenaBallot {
+            best_work_id: "1".to_string(),
+            worst_work_id: "4".to_string(),
+            reason_tags: vec!["prose".to_string()],
+        };
+        let dims = vec![TasteDimension {
+            key: "prose".to_string(),
+            label: "Prose".to_string(),
+            admin_target: 0.5,
+            weight: 1.0,
+        }];
+        let updated = apply_arena_ballot(&elos, &round, &ballot, &dims);
+        assert_eq!(updated[0].elo_rating, 1500.0);
+        assert_eq!(
+            updated[0].matches_played, 3,
+            "a ballot matching no Elo row must not be recorded as played"
+        );
     }
 
     #[test]

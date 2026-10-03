@@ -559,11 +559,96 @@ pub async fn run(
     // the hash on its first check.
     let media_summary = rescue_import_media(state.db(), &item, &stored).await;
 
-    let report_json = report_with_media(&plan, &stored, false, &media_summary);
+    // §32.7.10: carry the source's own tags into the taxonomy. `SourceWork::tags`
+    // was carried un-mapped through the scraper layer for want of a place to put
+    // it; `taxonomy_nodes` and `work_tags` are that place, and without this an
+    // imported Pawchive post arrives with no fandom, no pairing and no themes at
+    // all. Author-supplied labels are taken as written — a source's own tag is
+    // evidence, not a guess to be filtered.
+    let tagged = apply_source_tags(state.db(), &work, &row, &item).await;
+
+    let report_json = report_with_media(&plan, &stored, false, &media_summary, tagged);
 
     finish(state, &row, import_job_id, "completed", &report_json).await?;
     let _ = item_id;
     Ok(())
+}
+
+/// How many tags an import attached, for the job report.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct TaggedCount {
+    applied: usize,
+    skipped: usize,
+}
+
+/// The tag labels worth writing, in order, de-duplicated case-insensitively.
+///
+/// Pure, so the filtering rules are testable without a database: blank labels
+/// and absurdly long ones are dropped, and a label repeated by a source in
+/// different case is written once. A source's own tag is kept even when it
+/// looks like ordinary language — `AM` and `May` are real Pawchive labels, and
+/// second-guessing them here is how a repaired archive ends up losing evidence.
+fn tag_labels(tags: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for raw in tags {
+        let label = raw.trim();
+        if label.is_empty() || label.len() > 100 {
+            continue;
+        }
+        if out.iter().any(|seen| seen.eq_ignore_ascii_case(label)) {
+            continue;
+        }
+        out.push(label.to_owned());
+    }
+    out
+}
+
+/// Attach `work.tags` to the imported work as taxonomy nodes.
+///
+/// Each tag is created on demand (`create_node` is idempotent on the normalised
+/// form) and then linked. Failures are per-tag rather than fatal: a work whose
+/// tags cannot be written is still a work, and losing the whole import over one
+/// rejected label would be worse than importing it untagged.
+async fn apply_source_tags(
+    db: &lorehaven_db::Database,
+    work: &SourceWork,
+    row: &imports::ImportJob,
+    item: &imports::LibraryItem,
+) -> TaggedCount {
+    // The work row only exists once the chapters have been stored. An import
+    // that produced no work has nothing to tag, and the source's labels are
+    // still visible on the library item itself.
+    let Some(work_id) = item.work_id.as_deref() else {
+        return TaggedCount {
+            applied: 0,
+            skipped: work.tags.len(),
+        };
+    };
+    let labels = tag_labels(&work.tags);
+    let mut count = TaggedCount {
+        applied: 0,
+        skipped: work.tags.len() - labels.len(),
+    };
+    for label in &labels {
+        let node = match lorehaven_db::taxonomy::create_node(db, "tag", label).await {
+            Ok(node) => node,
+            Err(error) => {
+                tracing::warn!(import_job_id = %row.id, tag = %label, %error,
+                    "could not create a taxonomy node for an imported tag");
+                count.skipped += 1;
+                continue;
+            }
+        };
+        match lorehaven_db::taxonomy::tag_work(db, work_id, &node.id, 1).await {
+            Ok(_) => count.applied += 1,
+            Err(error) => {
+                tracing::warn!(import_job_id = %row.id, tag = %label, %error,
+                    "could not tag an imported work");
+                count.skipped += 1;
+            }
+        }
+    }
+    count
 }
 
 /// What resolving a source's credential ended in.
@@ -1148,12 +1233,14 @@ async fn finish(
     Ok(())
 }
 
-/// Build the import report JSON, including media rescue stats (§32.7.9).
+/// Build the import report JSON, including media rescue stats (§32.7.9) and
+/// the taxonomy tags applied (§32.7.10).
 fn report_with_media(
     plan: &ImportPlan,
     stored: &[StoredChapter],
     dry_run: bool,
     media: &lorehaven_db::media_resilience::ImportMediaSummary,
+    tagged: TaggedCount,
 ) -> String {
     let base = report(plan, stored, dry_run);
     // Merge the media summary into the existing JSON object.
@@ -1166,6 +1253,16 @@ fn report_with_media(
                 "already_held": media.already_held,
                 "new_references": media.new_references,
                 "unparseable": media.unparseable,
+            }),
+        );
+        // A count of tags written, and of labels declined. Reported so an
+        // import that silently produced an untagged work is visible in the job
+        // row rather than discovered later on the work page.
+        inner.insert(
+            "tags".to_owned(),
+            serde_json::json!({
+                "applied": tagged.applied,
+                "skipped": tagged.skipped,
             }),
         );
     }
@@ -1304,4 +1401,47 @@ fn report(plan: &ImportPlan, stored: &[StoredChapter], dry_run: bool) -> String 
             .collect::<Vec<Value>>(),
     })
     .to_string()
+}
+
+#[cfg(test)]
+mod tag_tests {
+    use super::tag_labels;
+
+    fn owned(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn keeps_pawchive_labels_that_look_like_ordinary_words() {
+        // §32.7.10: a source's own label is evidence. `AM`, `May` and `Anal` are
+        // real Pawchive tags, and a filter that dropped short or ambiguous
+        // labels is how the repaired archive ended up with no tags at all.
+        let labels = tag_labels(&owned(&["AM", "May", "Anal", "OM"]));
+        assert_eq!(labels, owned(&["AM", "May", "Anal", "OM"]));
+    }
+
+    #[test]
+    fn trims_and_drops_blank_labels() {
+        let labels = tag_labels(&owned(&["  F/F  ", "", "   ", "\t\n", "Harry Potter"]));
+        assert_eq!(labels, owned(&["F/F", "Harry Potter"]));
+    }
+
+    #[test]
+    fn de_duplicates_case_insensitively_keeping_first_spelling() {
+        let labels = tag_labels(&owned(&["F/F", "f/f", "F/F", "Fandom"]));
+        assert_eq!(labels, owned(&["F/F", "Fandom"]));
+    }
+
+    #[test]
+    fn drops_labels_too_long_to_be_reasonable() {
+        let long = "x".repeat(101);
+        let ok = "y".repeat(100);
+        let labels = tag_labels(&[long.clone(), ok.clone()]);
+        assert_eq!(labels, owned(&[ok.as_str()]));
+    }
+
+    #[test]
+    fn an_empty_tag_list_yields_nothing() {
+        assert!(tag_labels(&[]).is_empty());
+    }
 }
