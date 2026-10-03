@@ -11,6 +11,8 @@ pub mod caps;
 pub mod category_governance;
 pub mod charging;
 pub mod community;
+// M45-22 (§54): the personal concierge's session selector and budget cut.
+pub mod concierge;
 pub mod consensus;
 pub mod content;
 pub mod coordinates;
