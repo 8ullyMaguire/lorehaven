@@ -268,6 +268,17 @@ pub async fn sessions_for(
           ORDER BY created_at DESC, id DESC
           LIMIT ?2"
             .to_string(),
+        // `budget_minutes` and `truncated_at` are INT4 in migration 0114 and are
+        // decoded into `Option<i32>`, which needs NO cast: INT4 into i32 is the one
+        // narrowing the checker is willing to call correct.
+        //
+        // I widened them to `::int8` on the checker's recommendation -- it reports
+        // "INT4 column into i64" -- and it was wrong about the target. `SessionRow`
+        // declares `Option<i32>`, so `::int8` produced the mirror-image failure:
+        //     Rust type `Option<i32>` (as SQL type `INT4`) is not compatible with
+        //     SQL type `INT8`
+        // The checker infers the Rust type from the SELECT list and could not see
+        // the `FromRow` struct. Read the struct before believing its advice.
         "SELECT id::text, mood, budget_minutes, work_ids, estimated_minutes::float8,
                 truncated_at, rate_source, created_at::text
            FROM concierge_sessions
@@ -298,6 +309,17 @@ pub async fn session_for(
            FROM concierge_sessions
           WHERE account_id = ?1 AND id = ?2"
             .to_string(),
+        // `budget_minutes` and `truncated_at` are INT4 in migration 0114 and are
+        // decoded into `Option<i32>`, which needs NO cast: INT4 into i32 is the one
+        // narrowing the checker is willing to call correct.
+        //
+        // I widened them to `::int8` on the checker's recommendation -- it reports
+        // "INT4 column into i64" -- and it was wrong about the target. `SessionRow`
+        // declares `Option<i32>`, so `::int8` produced the mirror-image failure:
+        //     Rust type `Option<i32>` (as SQL type `INT4`) is not compatible with
+        //     SQL type `INT8`
+        // The checker infers the Rust type from the SELECT list and could not see
+        // the `FromRow` struct. Read the struct before believing its advice.
         "SELECT id::text, mood, budget_minutes, work_ids, estimated_minutes::float8,
                 truncated_at, rate_source, created_at::text
            FROM concierge_sessions

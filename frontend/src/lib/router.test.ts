@@ -22,6 +22,19 @@ describe('routing', () => {
     expect(matchRoute('/notifications').id).toBe('notifications');
   });
 
+  it('resolves the concierge queue (spec §54)', () => {
+    // `Concierge.svelte` shipped with its own passing component tests and NO
+    // route. A component test renders the component directly, so it never asks
+    // whether `/concierge` resolves — which is exactly how a page can be fully
+    // green and unreachable by a user.
+    //
+    // The load-bearing half is below, in `App.svelte`'s render branch: matching the
+    // path without a `{:else if route.id === 'concierge'}` branch sends it to
+    // NotFound, and a resolver test passes either way. So this file checks the
+    // match, and `App` is checked by rendering it.
+    expect(matchRoute('/concierge').id).toBe('concierge');
+  });
+
 
   it('resolves the forum category and topic pages the community hub links to', () => {
     // The hub linked to `/community/forums/<id>` before any view existed, so

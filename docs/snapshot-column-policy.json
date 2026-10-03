@@ -1176,6 +1176,76 @@
       "treatment": "drop_column",
       "why": "When the author made their own declaration, and it is the only column of the pair that is about a person rather than about the work. The posture already says whether the work was declared generated under 'disclose' and 'allow', so the dataset keeps the fact and drops the timestamp -- and the timestamp is the part that carries identity: it is a moment a named author asserted something about their own writing. A snapshot's purpose is aggregate retention (11.16.6), and 'this work is disclosed as generated' is the only part of it an aggregate reader needs. Dropping the column rather than replacing it is deliberate: a bucket or shift of a timestamp invents precision that a re-identification attempt does not need but a reader of the dataset would assume is real.",
       "reviewed_by": "alvaro, 2026-10-02, against spec 11.16 and 51.1"
+    },
+    "concierge_sessions.id": {
+      "treatment": "keep",
+      "why": "The session's own surrogate key. Carries no identity of its own: it is referenced by nothing outside this table and names no person. `keep` rather than `drop_column` because the table's primary key is the only way a row is addressed, and a snapshot that drops it cannot answer 'was this the same render' -- which is the question a reader's own history exists to answer.",
+      "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
+    },
+    "concierge_sessions.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b: rekey_text emits a `snp_` TEXT hash which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous -- the snapshot LOOKS de-identified and is not. This table stores what ONE READER was shown, so dropping or replacing the account would not merely obscure it: it would leave rows that belong to no one and cannot be joined to the reading history that explains them.",
+      "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
+    },
+    "concierge_sessions.mood": {
+      "treatment": "keep",
+      "why": "A §15.8 mood key the reader typed. It is an expression of preference, which is behavioural data about a person -- so this is kept deliberately and is exactly why account_id must be re-keyed rather than dropped: a free-text preference with no owner is harmless, and one attached to a stable id is not. Not replaced: a constant would make every row's mood identical and destroy the column's only value.",
+      "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
+    },
+    "concierge_sessions.budget_minutes": {
+      "treatment": "keep",
+      "why": "Minutes the reader stated they had. Operational metadata, no identity. It is a small integer and so quasi-identifying on its own (a budget of 5 minutes is rare), which is an argument for keeping the ACCOUNT re-keyed rather than for changing this column -- the re-key already removes the join to a person, and perturbing the value would destroy the budget/cut relationship §54.4 exists to expose.",
+      "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
+    },
+    "concierge_sessions.work_ids": {
+      "treatment": "keep",
+      "why": "A JSON array of the work ids the queue returned, in order. The whole research value of this table is the ORDER -- it is a rendering, not a set -- so it is kept verbatim. Work ids are not user ids and carry no identity; the risk this column carries is that it plus a stable account_id would reconstruct one reader's taste profile, which is why the re-key on account_id is the decision that matters here.",
+      "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
+    },
+    "concierge_sessions.estimated_minutes": {
+      "treatment": "keep",
+      "why": "A derived duration total. Arithmetic on word counts; no identity, no free text. `keep` because it is the column that makes a budget cut legible after the fact, and dropping it would leave a truncated queue that cannot be checked against the work ids beside it.",
+      "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
+    },
+    "concierge_sessions.truncated_at": {
+      "treatment": "keep",
+      "why": "An integer index or NULL. No identity. Kept because NULL-vs-0 is a distinction the schema exists to hold ('nothing was cut' is not 'cut at index 0'), and collapsing either to a default would make the table assert something false about §54.4's behaviour.",
+      "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
+    },
+    "concierge_sessions.rate_source": {
+      "treatment": "keep",
+      "why": "Either 'observed' or 'default', CHECK-constrained to those two. No identity. Kept because it distinguishes a queue cut on the reader's own reading speed from one cut on the instance default, which is a difference in how the number was produced rather than in the number.",
+      "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
+    },
+    "concierge_sessions.created_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5: a shared month offset is a LINKABLE IDENTIFIER, so each snapshot uses its own offset, applied inside the snapshot and never recorded. This is an EVENT time -- when the row came into existence -- so shifting it preserves every interval and ordering the dataset exists to answer while denying cross-snapshot row alignment. On concierge_sessions it is load-bearing for a second reason: a session is only interpretable against the moment it was rendered, and a reader's queue changes with the catalogue, so an unshifted timestamp would silently attribute one month's queue to another.",
+      "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
+    },
+    "wip_watches.id": {
+      "treatment": "keep",
+      "why": "The watch's own surrogate key. Names no person and is referenced by nothing outside this table. `keep` because `mark_watched` addresses a watch by id and a snapshot that dropped it could not answer whether a notification had already been sent -- the one fact §54.5's UNIQUE exists to guarantee.",
+      "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
+    },
+    "wip_watches.account_id": {
+      "treatment": "rekey_account",
+      "why": "A UUID foreign key to accounts.id, so it must be re-keyed with snapshot_account -- the SAME derivation accounts.id uses, on the account salt, so the join survives. 11.16.3b: rekey_text emits a `snp_` TEXT hash which cannot be compared with a uuid, so the relationship to accounts is destroyed while every behavioural column still reads as pseudonymous -- the snapshot LOOKS de-identified and is not. This table stores what ONE READER was shown, so dropping or replacing the account would not merely obscure it: it would leave rows that belong to no one and cannot be joined to the reading history that explains them. Here it is sharper still: (account_id, work_id) is the UNIQUE key, so a snapshot that replaced this column with a constant would collapse every watch in the dump into one row and destroy the one-notification-per-watch property the constraint exists to enforce.",
+      "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
+    },
+    "wip_watches.work_id": {
+      "treatment": "keep",
+      "why": "A UUID foreign key to works.id, kept verbatim so a snapshot can join watches to the works being watched. Works are public content and carry no identity. NOT re-keyed: rekey_account would break the join to works, and there is nothing to protect here that works.id does not already expose.",
+      "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
+    },
+    "wip_watches.notified_at": {
+      "treatment": "offset_timestamps",
+      "why": "The moment the notification was written, or NULL while pending. Shifted per snapshot as an event time. NULL must be preserved rather than defaulted: 'nobody has been told yet' and 'told at some invented time' are different facts about §54.5, and only the first is true of this column.",
+      "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
+    },
+    "wip_watches.created_at": {
+      "treatment": "offset_timestamps",
+      "why": "11.16.5 as above: event time, shifted per snapshot so two dumps do not join row-for-row on the fact that a reader opened two WIP works in the same hour. Here it is also the ONLY ordering column, so the offset must preserve ordering -- which shifting does and dropping would not.",
+      "reviewed_by": "alvaro, 2026-10-03, against spec 11.16.3b and 11.16.5 (M45-22 migration 0114)"
     }
   }
 }
