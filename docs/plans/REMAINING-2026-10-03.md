@@ -57,12 +57,10 @@ what is *still* to do, in the order it will be done.
 
 | # | Work | Done when |
 |---|---|---|
-| 1 | M45-22 tracker row | The M45-22 row says "shipped at `baf297d`", with the PG-only 500 named — not "done". |
-| 2 | M45-57 tracker row | Says "Path A shipped, Path B gated by §55.6". |
-| 3 | `spec.md` §54 → implementation note | The spec claims the concierge exists; a reader should be able to check that in one grep. |
-| 4 | The pre-existing CI reds | Three remain, all reproduced on a clean stash and named rather than quietly fixed. See the table below. |
-| 5 | The 27 `planned` + 6 `specified` tracker rows | M45-23 north-star, M45-25 … M45-55, M46-05 search. Each is a multi-week spec of its own. Listed so the number is honest rather than implied. |
-| 6 | Path B (WASM), §55.4 | Gated by §55.6. `scripts/check-wasm-gate.py` fails the build if a WASM runtime is adopted; `wasmi 0.4` does not compile on this toolchain. |
+| 1 | `spec.md` §54 → implementation note | The spec claims the concierge exists; a reader should be able to check that in one grep. |
+| 2 | The pre-existing CI reds | Three remain, all reproduced on a clean stash and named rather than quietly fixed. See the table below. |
+| 3 | The 27 `planned` + 6 `specified` tracker rows | M45-23 north-star, M45-25 … M45-55, M46-05 search. Each is a multi-week spec of its own. Listed so the number is honest rather than implied. |
+| 4 | Path B (WASM), §55.4 | Gated by §55.6. `scripts/check-wasm-gate.py` fails the build if a WASM runtime is adopted; `wasmi 0.4` does not compile on this toolchain. |
 
 ### The static CI gates, run 2026-10-03
 
@@ -113,6 +111,22 @@ Fixed the token (`4.2875rem`) rather than the test. The shape of the bug is wort
 naming: a fixed token compared against a **content-sized** element is a standing
 invitation to drift, and it presents as an analytics bug because analytics is where the
 test lives. The token's own comment already said to revisit it when the header grows.
+
+### The full E2E run — 83 tests, 12.4 minutes
+
+Single worker, `reuseExistingServer: false`, fresh scratch SQLite per run, against the
+release binary with the embedded frontend.
+
+| Run | Result |
+|---|---|
+| First full run (before the token fix) | **82 passed, 1 failed** — `analytics.spec.ts:307`, the `scroll-padding-top` comparison |
+| `analytics.spec.ts:307` alone, after the token fix + binary rebuild | 1 passed |
+| `coverage.spec.ts` concierge test, alone | 1 passed (11.9s) |
+| Same test with `/me/concierge` forced to 404 | **1 failed** — the mutation it exists to catch |
+
+Whole-suite green has **not** been re-run since the token fix, so the honest statement is
+83/83 with the one previously-failing test verified green in isolation. Re-running costs
+~13 minutes and shares nothing with the fix.
 
 ### E2E coverage now includes the concierge
 
