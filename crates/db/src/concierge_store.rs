@@ -54,6 +54,81 @@ macro_rules! exec {
     }};
 }
 
+/// Bind a list of work ids as `Uuid` on PostgreSQL and as text on SQLite.
+///
+/// Exists because the two engines disagree about the TYPE of every id column —
+/// `TEXT` on SQLite, `uuid` on PostgreSQL — and sqlx binds one Rust type per
+/// parameter. Binding the string on PostgreSQL reaches the server as text and it
+/// answers `operator does not exist: uuid = text`, which surfaces as a 500 on one
+/// engine only.
+///
+/// Two ways this failed before it was factored out, and both are worth not
+/// repeating:
+///
+/// - `duration_estimates` bound ids as text and returned 500 on PostgreSQL only,
+///   and only when the list was non-empty — an empty `IN ()` compares nothing, so a
+///   queue with no items passed on both engines and a queue with items did not.
+/// - `filter_by_mond` had the identical line, one function away.
+///
+/// So: parse, and SKIP an id that will not parse rather than binding it as text.
+/// It cannot match a uuid column either way, and skipping keeps one malformed id
+/// from failing a reader's whole queue over a work the blend already returned.
+///
+/// `DB` is the sqlx database parameter rather than a concrete one: naming
+/// `Postgres` here would tie the helper to one arm, and the SQLite arm needs the
+/// text binds it already has. Only the PostgreSQL call sites use it.
+/// Bind a list of work ids as `Uuid` on PostgreSQL and as text on SQLite.
+///
+/// A macro, not a function, and for a mechanical reason: `sqlx::query::QueryAs`
+/// carries its argument type as a third generic parameter, and that type CHANGES
+/// with every `bind`. A function cannot name its own return type after mutating it,
+/// so any signature either loses the argument type (a compile error) or names it
+/// concretely, which pins the helper to one query's row shape. The `exec!` and
+/// `fetch_all!` macros below this one avoid the same wall by being macros.
+///
+/// The behaviour it exists for: every id column is `TEXT` on SQLite and `uuid` on
+/// PostgreSQL, and sqlx binds one Rust type per parameter. Binding the string on
+/// PostgreSQL reaches the server as text and it answers
+/// `operator does not exist: uuid = text` — a 500 on one engine only.
+///
+/// Two occurrences of exactly this line, and both are worth not repeating:
+///
+/// - `duration_estimates` — PostgreSQL-only 500, and only when the list was
+///   non-empty, because an empty `IN ()` compares nothing. A queue with no items
+///   passed on both engines; a queue with items did not.
+/// - `filter_by_mood` — the same line, one function away, so fixing the first was
+///   no evidence at all about the second.
+///
+/// An id that will not parse is bound as NULL rather than as text or omitted: it
+/// cannot match a uuid column either way, and `IN (NULL)` is never true, so it
+/// contributes no rows without failing the query or shifting the other ids'
+/// positions.
+macro_rules! bind_work_ids {
+    ($q:expr, $ids:expr) => {{
+        let mut q = $q;
+        for id in $ids {
+            // Bound as NULL rather than SKIPPED, and that distinction is not a
+            // detail: PostgreSQL binds parameters POSITIONALLY and rejects a message
+            // whose count does not match the statement's — `bind message supplies 1
+            // parameters, but prepared statement requires 2` (08P01). So "do not bind
+            // this one" leaves a hole, and a hole is an error rather than a filter.
+            //
+            // NULL is the right answer anyway. `work_id IN (NULL)` is never true, so
+            // a malformed id contributes no rows without failing the query or
+            // shifting any other id's position — one bad row costs one missing answer
+            // instead of the reader's whole queue.
+            match uuid::Uuid::parse_str(id) {
+                Ok(u) => q = q.bind(u),
+                Err(e) => {
+                    tracing::warn!("unparseable work id {id} contributes no rows: {e}");
+                    q = q.bind(Option::<uuid::Uuid>::None)
+                }
+            }
+        }
+        q
+    }};
+}
+
 /// Fetch every row, decoding into `O`.
 macro_rules! fetch_all {
     ($db:expr, $sql:expr, [$($b:expr),* $(,)?], $out:ty) => {{
@@ -460,10 +535,7 @@ pub async fn duration_estimates(
                 .collect()
         }
         crate::Backend::Postgres => {
-            let mut q = sqlx::query_as::<_, (String, Option<f64>)>(&sql);
-            for id in work_ids {
-                q = q.bind(id);
-            }
+            let q = bind_work_ids!(sqlx::query_as::<_, (String, Option<f64>)>(&sql), work_ids);
             q.fetch_all(db.postgres_pool().expect("postgres")).await?
         }
     };
@@ -563,10 +635,10 @@ pub async fn filter_by_mood(
                 .await?
         }
         crate::Backend::Postgres => {
-            let mut q = sqlx::query_as::<_, (String,)>(&sql);
-            for w in ranked {
-                q = q.bind(w);
-            }
+            // Uuids, not text: `work_tags.work_id` is uuid here. The identical line
+            // one function above is what `duration_estimates` had, and it produced a
+            // PostgreSQL-only 500 — so this line is now the reason the helper exists.
+            let q = bind_work_ids!(sqlx::query_as::<_, (String,)>(&sql), ranked);
             q.bind(&wanted)
                 .fetch_all(db.postgres_pool().expect("postgres"))
                 .await?
