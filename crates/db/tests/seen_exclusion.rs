@@ -189,11 +189,7 @@ impl Reader {
                      position_permille, created_at, updated_at) \
              VALUES (?1#u, ?2#u, 'work', ?3#u, 100, \
              '2026-01-01T00:00:00Z'::timestamptz, '2026-01-01T00:00:00Z'::timestamptz)",
-            &[
-                &uuid::Uuid::new_v4().to_string(),
-                &self.account,
-                work,
-            ],
+            &[&uuid::Uuid::new_v4().to_string(), &self.account, work],
         )
         .await;
     }
@@ -342,7 +338,10 @@ async fn excluding_a_seen_work_does_not_renumber_the_others() {
     // instead of 1/(60+2), and the two surviving works' order would depend on
     // which one the reader had already read.
     assert_eq!(report.blended.len(), 2);
-    assert!(!report.blended.contains(&r.works[0]), "the seen work is dropped");
+    assert!(
+        !report.blended.contains(&r.works[0]),
+        "the seen work is dropped"
+    );
 
     // The surviving order must be the strategy's order with the seen work
     // removed — not a re-sort. `works[1]` was rank 1, `works[2]` rank 2, so

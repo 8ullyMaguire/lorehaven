@@ -781,11 +781,7 @@ fn dimension_index(dimensions: &[TasteDimension], dimension: &str) -> Option<usi
 /// neutral midpoint rather than to noise: an arena round that varies on nothing
 /// in particular still has to be playable, and a deterministic per-work
 /// pseudo-score would make the choices it offers meaningless.
-fn dimension_score(
-    card: &ArenaCard,
-    dimension: &str,
-    dimensions: &[TasteDimension],
-) -> f64 {
+fn dimension_score(card: &ArenaCard, dimension: &str, dimensions: &[TasteDimension]) -> f64 {
     match dimension_index(dimensions, dimension) {
         Some(index) => card.vector.get(index).copied().unwrap_or(0.5),
         None => 0.5,
