@@ -152,6 +152,27 @@ impl CompiledSelectors {
     }
 }
 
+/// Parse and compile a §55.3 manifest in one step.
+///
+/// The pair is one operation for a caller because both halves must hold before
+/// a steward reads the manifest: text that does not parse cannot be reviewed,
+/// and selectors that do not compile cannot work. Reporting them separately
+/// means two round-trips to discover the same submission is unacceptable.
+///
+/// Returns every problem at once, which is what `compile` already does.
+///
+/// Lives here rather than in the HTTP layer so the app crate needs no YAML
+/// dependency, and so the offline submission path and the routes enforce exactly
+/// the same rule — a second parse-and-check in the route would be a second
+/// implementation to keep in step.
+pub fn parse_and_compile(text: &str) -> Result<CompiledSource, Vec<String>> {
+    let manifest: SourceManifest = match serde_yaml::from_str(text) {
+        Ok(m) => m,
+        Err(e) => return Err(vec![format!("not valid YAML for a §55.3 manifest: {e}")]),
+    };
+    manifest.compile()
+}
+
 impl SourceManifest {
     /// Compile every selector and validate the base URL.
     ///

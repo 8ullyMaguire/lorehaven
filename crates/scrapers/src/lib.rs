@@ -49,6 +49,7 @@ pub mod sites;
 pub mod solver;
 // M45-23 (§55.3): the declarative source-adapter manifest and adapter.
 pub mod declarative;
+pub mod declarative_check;
 pub mod source_manifest;
 
 use std::fmt;

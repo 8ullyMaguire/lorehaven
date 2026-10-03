@@ -626,6 +626,12 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // Curator-submitted source adapters (submit, queue, reviews) — M45-57, §55.
+        .merge(classified(
+            routes::source_adapters::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // Translation pipeline — M17.
         .merge(classified(
             routes::translation::router(),

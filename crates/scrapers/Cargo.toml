@@ -19,6 +19,10 @@ regex-lite.workspace = true
 reqwest.workspace = true
 scraper.workspace = true
 serde.workspace = true
+# §55.5's report carries a digest of the manifest text, so two reports of the same
+# submission can be compared and a changed manifest is visible. This is a
+# workspace dependency already, so it is a feature here, not a new package.
+sha2.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 thiserror.workspace = true

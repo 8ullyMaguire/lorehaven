@@ -21,6 +21,7 @@
 //! rather than inlining a `match` at each of the nine call sites, which keeps the
 //! per-arm duplication in one place instead of nine.
 
+use serde::Serialize;
 use sqlx::FromRow;
 
 use crate::{sql_owned, Database};
@@ -127,7 +128,7 @@ macro_rules! fetch_optional {
 pub const APPROVAL_THRESHOLD: i64 = 3;
 
 /// A submission, as stored.
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, Serialize, FromRow)]
 pub struct SubmissionRow {
     pub id: String,
     pub submitter: String,
@@ -141,7 +142,7 @@ pub struct SubmissionRow {
 }
 
 /// One reviewer's verdict.
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, Serialize, FromRow)]
 pub struct ReviewRow {
     pub id: String,
     pub submission_id: String,
@@ -236,6 +237,44 @@ pub async fn submit(
     Ok(id)
 }
 
+/// Either the caller sent a verdict outside the set, or the database did.
+///
+/// Split because the two are different facts about different parties, and
+/// conflating them is how a reviewer's typo becomes a **500**. The first version
+/// returned `sqlx::Error::Protocol` for the bad verdict — a type that means "the
+/// driver and the database disagreed" — and the route, which maps
+/// `sqlx::Error` to `AppError::Internal`, faithfully reported a client mistake as
+/// "something went wrong on our side". The store's own validation was the thing
+/// that made it wrong: it knew the verdict was invalid and expressed that in the
+/// only type the function could return.
+#[derive(Debug)]
+pub enum ReviewError {
+    /// The verdict is not one of `approve`, `reject`, `abstain`.
+    BadVerdict { verdict: String },
+    /// The database refused the write.
+    Query(sqlx::Error),
+}
+
+impl std::fmt::Display for ReviewError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BadVerdict { verdict } => write!(
+                f,
+                "verdict must be approve, reject or abstain; got {verdict:?}"
+            ),
+            Self::Query(e) => write!(f, "recording the review failed: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for ReviewError {}
+
+impl From<sqlx::Error> for ReviewError {
+    fn from(e: sqlx::Error) -> Self {
+        Self::Query(e)
+    }
+}
+
 /// Record a reviewer's verdict.
 ///
 /// The `ON CONFLICT DO NOTHING` is a safety net *under* the table's UNIQUE
@@ -249,14 +288,14 @@ pub async fn record_review(
     reviewer_account: &str,
     verdict: &str,
     note: Option<&str>,
-) -> Result<String, sqlx::Error> {
+) -> Result<String, ReviewError> {
     if !matches!(verdict, "approve" | "reject" | "abstain") {
         // The CHECK constraint would catch this too. Refusing here means the error
         // names the caller's mistake instead of arriving as a driver constraint
         // violation three layers down.
-        return Err(sqlx::Error::Protocol(format!(
-            "verdict must be approve, reject or abstain; got {verdict:?}"
-        )));
+        return Err(ReviewError::BadVerdict {
+            verdict: verdict.to_owned(),
+        });
     }
 
     let sql = sql_owned(
