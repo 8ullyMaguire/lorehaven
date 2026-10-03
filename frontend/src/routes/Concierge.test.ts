@@ -13,7 +13,7 @@ vi.mock('../lib/api', async (importOriginal) => {
   };
 });
 
-import { fetchConciergeQueue, unwatchWork, watchWork } from '../lib/api';
+import { ApiError, fetchConciergeQueue, unwatchWork, watchWork } from '../lib/api';
 
 const QUEUE = {
   session_id: 'session-1',
@@ -188,5 +188,147 @@ describe('Concierge page', () => {
     (fetchConciergeQueue as any).mockResolvedValue({ ...QUEUE, truncated_at: 1 });
     render(Concierge);
     await waitFor(() => expect(screen.getByText(/cut here/)).toBeTruthy());
+  });
+});
+
+describe('Concierge mood refusal (spec §54.2, §54.6)', () => {
+  /**
+   * The vocabulary problem.
+   *
+   * §15.8's moods are author-assigned, so the list of moods a reader can ask for is
+   * whatever this instance's writers have used. It is NOT a field on the queue
+   * response -- the only place it appears is inside the 422 the server returns when
+   * it refuses a mood, which is why this feature reads it out of the error rather
+   * than from a separate endpoint.
+   *
+   * These four tests are the whole feature. Before them, the component declared
+   * `knownMoods` and `moodError`, set `moodError = null`, and rendered neither --
+   * svelte-check caught `knownMoods` as unused. A mood a reader typed was refused
+   * with a red banner and no way forward.
+   */
+
+  /** The 422 the route returns for an unknown mood, built the way the server builds it. */
+  function refusal(requested: string, available: string[]): ApiError {
+    const list = available.length ? available.join(', ') : 'this instance carries no moods yet';
+    const message =
+      available.length === 0
+        ? `no work on this instance carries the mood ${JSON.stringify(requested)}; this instance carries no moods yet`
+        : `no work on this instance carries the mood ${JSON.stringify(requested)}; the moods on this instance are: ${list}`;
+    return new ApiError(422, 'VALIDATION', message, null, { mood: message });
+  }
+
+  it('shows the server\'s own sentence naming the moods that do exist', async () => {
+    (fetchConciergeQueue as any).mockRejectedValue(
+      refusal('melancholy', ['comfort', 'longing']),
+    );
+    render(Concierge);
+
+    // Verbatim, not paraphrased: the message is the server's and it names both what
+    // was asked for and what exists.
+    await waitFor(() =>
+      expect(screen.getAllByText(/the moods on this instance are: comfort, longing/i).length)
+        .toBeGreaterThan(0),
+    );
+  });
+
+  it('offers the available moods as one-click buttons', async () => {
+    (fetchConciergeQueue as any).mockRejectedValue(
+      refusal('melancholy', ['comfort', 'longing']),
+    );
+    render(Concierge);
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'comfort' }).length).toBeGreaterThan(0));
+    expect(screen.getAllByRole('button', { name: 'longing' }).length).toBeGreaterThan(0);
+
+    // Clicking one re-requests WITH that mood. That is the assertion that matters:
+    // the list is not decoration, it is the next move.
+    await screen.getAllByRole('button', { name: 'comfort' })[0].click();
+    await waitFor(() =>
+      expect((fetchConciergeQueue as any).mock.calls.at(-1)[0]).toEqual({ mood: 'comfort' }),
+    );
+  });
+
+  it('does NOT show a red error summary for a refused mood', async () => {
+    (fetchConciergeQueue as any).mockRejectedValue(
+      refusal('melancholy', ['comfort']),
+    );
+    render(Concierge);
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/moods on this instance/i).length).toBeGreaterThan(0),
+    );
+    // A refused mood is the system answering a question, not a failure. ErrorSummary
+    // would tell the reader something broke and offer a retry that cannot help.
+    expect(document.querySelector('[role=alert]')).toBeNull();
+  });
+
+  it('still shows ErrorSummary for a real failure', async () => {
+    // The complement, and the one that keeps the rule above honest: a 500 on the
+    // same request IS a failure and must not be swallowed into the mood path.
+    (fetchConciergeQueue as any).mockRejectedValue(
+      new ApiError(500, 'INTERNAL', 'the queue could not be built'),
+    );
+    render(Concierge);
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/the queue could not be built/i).length).toBeGreaterThan(0),
+    );
+    expect(document.querySelector('[role=alert]')).not.toBeNull();
+    // And no vocabulary was invented from it.
+    expect(screen.queryAllByRole('button', { name: 'comfort' }).length).toBe(0);
+  });
+
+  it('treats a 500 that ALSO carries fieldErrors.mood as a failure, not a refusal', async () => {
+    // Written because widening the status gate to `>= 400` left all 16 tests green.
+    //
+    // The 500 in the previous test carries no field errors, so it cannot tell
+    // "422 about a mood" from "some other status about a mood" -- the two rules are
+    // indistinguishable through it. A server that returns 500 WITH a per-field
+    // message is ordinary (a validation that fails mid-handler, a wrapped upstream
+    // error), and swallowing that into an inline mood sentence with no retry would
+    // hide a real failure behind a helpful-looking message.
+    //
+    // So the fixture carries `fieldErrors.mood` too, and the only thing separating
+    // the two paths is the status.
+    (fetchConciergeQueue as any).mockRejectedValue(
+      new ApiError(500, 'INTERNAL', 'the queue could not be built', null, {
+        mood: 'the mood index is unavailable',
+      }),
+    );
+    render(Concierge);
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/the queue could not be built/i).length).toBeGreaterThan(0),
+    );
+    expect(document.querySelector('[role=alert]')).not.toBeNull();
+    // No vocabulary was learned from a failure.
+    expect(screen.queryAllByRole('button', { name: 'comfort' }).length).toBe(0);
+  });
+
+  it('drops the learned list once a queue succeeds again', async () => {
+    (fetchConciergeQueue as any).mockRejectedValueOnce(
+      refusal('melancholy', ['comfort']),
+    );
+    (fetchConciergeQueue as any).mockResolvedValueOnce(QUEUE);
+    render(Concierge);
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'comfort' }).length).toBeGreaterThan(0));
+
+    // Ask for something the instance does have; the queue comes back.
+    const input = screen.getAllByLabelText(/mood, if you feel like naming one/i)[0] as HTMLInputElement;
+    await input.focus();
+    await (await import('@testing-library/svelte')).fireEvent.input(input, { target: { value: 'longing' } });
+    await (await import('@testing-library/svelte')).fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() =>
+      expect((fetchConciergeQueue as any).mock.calls.at(-1)[0]).toEqual({ mood: 'longing' }),
+    );
+    await waitFor(() =>
+      expect(screen.getAllByText('The Long Gate').length).toBeGreaterThan(0),
+    );
+    // The vocabulary was learned from a refusal about a mood the reader no longer
+    // has selected. Left in place it would sit under the selector indefinitely,
+    // implying the instance offers exactly those two moods.
+    await waitFor(() => expect(screen.queryAllByRole('button', { name: 'comfort' }).length).toBe(0));
   });
 });

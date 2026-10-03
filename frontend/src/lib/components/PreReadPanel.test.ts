@@ -96,7 +96,12 @@ describe('PreReadPanel', () => {
   it('reports a real failure rather than hiding it as not-mine', async () => {
     // The complement of the 404 rule: a 500 is not "not yours" and must not be swallowed
     // into silence, or a broken endpoint would look like a caller who owns nothing.
-    mocked.mockRejectedValue(new ApiError('boom', 'SERVER_ERROR', 500, 'server exploded'));
+    // Argument order matters and the test could not tell: `ApiError` is
+    // (status, code, message, requestId, fieldErrors), so this was constructing
+    // status='boom' and message=500, and the assertion on /server exploded/i
+    // passed only because the string was sitting in `requestId`. svelte-check
+    // caught the type error; the assertion never could.
+    mocked.mockRejectedValue(new ApiError(500, 'SERVER_ERROR', 'server exploded'));
 
     render(PreReadPanel, { workId: 'work-1' });
 
