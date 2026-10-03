@@ -1,106 +1,131 @@
-# Lorehaven — remaining work, 2026-10-03 (updated)
+# Lorehaven — remaining work, 2026-10-03 (end of session)
 
-Rewritten after M45-57 steps 7–8 and M45-22 steps 2–4 landed. Base for this
-revision: `828244f` (tagged `v0.55-source-adapters`). Everything below is what is
-*still* to do, in the order it will be done.
+Base for this revision: `baf297d`, tagged **`v0.56-concierge`**. Everything below is
+what is *still* to do, in the order it will be done.
 
 ## Environment this session needs before anything runs
 
 | Fact | Value |
 |---|---|
 | Toolchain | `export PATH="$HOME/.cargo/bin:$PATH"` **first**. System `rustc` is broken (partial Arch upgrade, libLLVM 22.1 gone). |
-| Docker daemon | `sudo systemctl start docker` — needed before any `sudo docker`. |
-| PostgreSQL | Container `lh-pg-test` on **127.0.0.1:55433**, user `lorehaven`, db `postgres`, password `lorehaven`. Start with `sudo docker start lh-pg-test`. |
-| Test URL | `export LOREHAVEN_TEST_PG_URL='postgres://lorehaven:***@127.0.0.1:55433/postgres'` — **both engines means running the suite twice**, once with this set and once without. |
-| SQLite | Default. `data/lorehaven.sqlite`. |
-| Dev DB | Default is SQLite. To migrate PostgreSQL you must set `LOREHAVEN_DATABASE_URL`; `lorehaven migrate` with no env var silently touches only SQLite. |
+| PostgreSQL | `sudo docker start lh-pg-test`. Container `lh-pg-test` on **127.0.0.1:55433**, user `lorehaven`, db `postgres`, password `lorehaven`. |
+| Test URL | `export LOREHAVEN_TEST_PG_URL='postgres://lorehaven:lorehaven@127.0.0.1:55433/postgres'` — **both engines means running the suite twice**, once with this set and once without. `unset` it before the SQLite run; a leftover value sends every test to a host that does not resolve. |
+| SQLite | Default. Unset the variable above and nothing else is needed. |
+| Frontend | `cd frontend && node node_modules/vitest/vitest.mjs run <file>`. Not `pnpm test`. |
 | btrfs | Metadata DUP pool ~12.6/13.0 GiB. Builds are SLOW, not stalled. Before believing a hang: `ps -eo pid,stat,etime,comm \| awk '$2 ~ /^D/'`. |
-| Mutation runs | One `cargo test` on this suite is ~40 s. Nine mutations do not fit a 300 s cell — run them backgrounded via a script (`/tmp/conc_mut.py` shape), not inline in `execute_code`. |
+| Mutation runs | One `cargo test` on the app suite is ~10 s SQLite, ~190 s PostgreSQL. Seven mutations do not fit a 300 s cell — run them backgrounded via a script, not inline in `execute_code`. |
 
 ## Landed this session
 
-| # | Work | Plan step | Commit | Evidence |
-|---|---|---|---|---|
-| 1 | M45-57 HTTP routes | 7 | `828244f` | `source_adapter_routes.rs` 9/9 on SQLite **and** PostgreSQL |
-| 2 | M45-57 §55.5 automated check | 8 | `828244f` | `declarative_check.rs` 24/24; 10 mutations red |
-| 3 | M45-22 migration 0114 | 2 | `828244f` | 114/114 apply on both engines; `\d concierge_sessions` shows uuid/TIMESTAMPTZ/DOUBLE PRECISION |
-| 4 | M45-22 domain `concierge.rs` | 3 | `276f91c` | 16/16 tests; 12 mutations red |
-| 5 | M45-22 store `concierge_store.rs` | 4 | *this commit* | 13/13 on both engines; 10 mutations proven (see below) |
+| # | Work | Step | Evidence |
+|---|---|---|---|
+| 1 | M45-57 HTTP routes + §55.5 check | 7–8 | `source_adapter_routes.rs` 9/9, `declarative_check.rs` 24/24 |
+| 2 | M45-22 migration 0114 | 2 | 114/114 apply on both engines |
+| 3 | M45-22 domain + store | 3–4 | `concierge_store.rs` 13/13 both engines |
+| 4 | M45-22 routes + WIP notify | 5–6 | `concierge_routes.rs` 11/11 **both engines** |
+| 5 | M45-22 frontend | 7 | `Concierge.test.ts` 11/11 |
+| 6 | `route_inventory` working | — | 3/3, first time green in the file's history |
 
-Three defects found and fixed rather than shipped, each with its own proof:
+### Defects found and fixed, each with its own proof
 
-1. **`extract_handlers` was an infinite loop** (`route_inventory.rs`). A
-   non-identifier character left `i` untouched and `continue` re-read it forever,
-   so the route-inventory test hung at 100 % CPU printing nothing — indistinguishable
-   from a slow disk. Fixed with `i += 1`, plus a test that runs the extractor over
-   every route line in the workspace, because the only way to prove a loop
-   terminates is to run it.
-2. **Routes registered at `/api/v1/api/v1/...`.** The module spelled out the full
-   prefix inside a router already nested under `/api/v1`. Nothing failed to compile
-   and the inventory test passed — table and module agreed on the same wrong
-   string. The symptom was a bare 405 on every call.
-3. **`record_session` recorded "no budget" as a budget of zero.** `i32::try_from(
-   queue.session_budget_minutes().unwrap_or(0)).ok()` turned an absent selector
-   into a stored `0`, which is a *different session* — one saying the reader asked
-   for a zero-minute read. Now `and_then(try_from)`.
+1. **PostgreSQL-only 500: `uuid = text`** in `duration_estimates` and
+   `filter_by_mood`. Both bound work ids as strings, which is *correct* on SQLite
+   (every id column is `TEXT`) and a 500 on PostgreSQL (they are `uuid`). Found
+   **only** by running the suite with `LOREHAVEN_TEST_PG_URL` set. Fixed by
+   `bind_work_ids!`; proved green on SQLite and red on PostgreSQL against a reverted
+   bind.
+2. **The same defect written twice**, one function apart — so fixing the first was no
+   evidence about the second. That is why the macro exists and why
+   `concierge_uuid_binds.rs` covers both call sites.
+3. **`extract_handlers` had an infinite loop fixed in one branch and not the other.**
+   Both branches carried a comment describing a step the code did not perform.
+4. **`extract_handlers` returned METHOD names** where `ROUTE_TABLE` is keyed on
+   HANDLER names. Invisible while the walk collected nothing.
+5. **The route walk was line-at-a-time**, so a route call rustfmt wrapped across lines
+   was invisible. Now parenthesised-delimited. **Found 19 routes across 9 modules that
+   have been registered and served since those modules existed and were never
+   tabulated.**
+6. **§54.7 parity was broken: the concierge served the discovery feed exactly
+   REVERSED.** `render_queue` called `rec_engine::generate_with_registry` (the
+   pluggable path) while the default `rec_mode` is `legacy` and takes `blend()`. Fixed
+   by extracting `discovery::build_candidate_engines` and calling it from both routes.
+7. **Two route-inventory guards are defence-in-depth**, labelled as such in the file:
+   removing either leaves the suite green (measured). Both were proved by corrupting
+   their *subject* instead — a wrong method, a wrong path, a reintroduced duplicate.
 
 ## The list — what is left
 
-| # | Work | Plan step | Done when |
-|---|---|---|---|
-| 6 | M45-22 routes | 5 | `routes/concierge.rs` green on both engines, `ROUTE_TABLE` rows added to `route_inventory.rs` |
-| 7 | M45-22 WIP notify | 6 | 6 named tests; the consume-the-watch test proven red |
-| 8 | M45-22 frontend | 7 | `Concierge.svelte` + tests; **rebuild before test** — a stale `frontend/build` renders every route blank with HTTP 200 |
-| 9 | M45-22 tracker + docs | 8 | tracker row updated with real evidence, not "done" |
-| 10 | M45-57 tracker + docs | 10 | M45-57 row says "Path A shipped, Path B gated" |
+| # | Work | Done when |
+|---|---|---|
+| 1 | M45-22 tracker row | The M45-22 row says "shipped at `baf297d`", with the PG-only 500 named — not "done". |
+| 2 | M45-57 tracker row | Says "Path A shipped, Path B gated by §55.6". |
+| 3 | Wire `Concierge.svelte` into the router | The page exists and is tested but **no route renders it**. Find how `Discover.svelte` is registered and do the same. |
+| 4 | `spec.md` §54 → implementation note | The spec claims the concierge exists; a reader should be able to check that in one grep. |
+| 5 | The pre-existing CI reds | `scripts/check-sqlite-migration-syntax.py --self-test` (5 cases) and `scripts/check-pg-uuid-casts.py` both reproduce on a clean stash. Named in the final report rather than quietly fixed. |
+| 6 | The 27 `planned` + 6 `specified` tracker rows | M45-23 north-star, M45-25 … M45-55, M46-05 search. Each is a multi-week spec of its own. Listed so the number is honest rather than implied. |
+| 7 | Path B (WASM), §55.4 | Gated by §55.6. `scripts/check-wasm-gate.py` fails the build if a WASM runtime is adopted; `wasmi 0.4` does not compile on this toolchain. |
 
-### Step 6 detail — routes
+### Step 3 detail — routing the page
 
-Four endpoints behind `RequireSession`, all under `/api/v1/concierge`:
+`Concierge.svelte` and its test are in `frontend/src/routes/`. Nothing imports it.
+That is deliberate for the test — it renders the component directly — and it means the
+page is **not reachable by a user yet**. Whoever does this should look at how
+`Discover.svelte` is registered and follow it exactly, then add a test that the route
+renders the component, because "the component's tests pass" and "the page loads" are
+different claims and only the second is about the product.
 
-- `GET  /concierge/moods` — §54.2's list. The `SessionSelector::validate` error
-  message already names the available moods, so this route is thin.
-- `POST /concierge/sessions` — render + record. Mood must be validated against
-  `moods_in_use` first; an unknown mood is 422 with the list, **not** a fallback to
-  the unfiltered queue (§54.6's "matches nothing is not a fallback").
-- `GET  /concierge/sessions` — the reader's own, via `sessions_for`.
-- `POST /concierge/watches` / `DELETE /concierge/watches/{work_id}` — §54.5.
+## Out of scope here, on purpose
 
-Wiring already exists: `moods_in_use`, `record_session`, `sessions_for`,
-`add_watch`, `remove_watch`, `is_complete` are all in the store.
-
-### Step 7 detail — WIP notify
-
-The completion path already exists somewhere in the work-completion code. The new
-part is: `pending_watches_for_work` → `notifications::notify` → `mark_watched`.
-The load-bearing test is that a second pass over the same work notifies nobody,
-which requires asserting on `mark_watched`'s boolean rather than on the absence of
-a duplicate row (the UNIQUE constraint makes duplicates impossible anyway).
-
-### Out of scope here, on purpose
-
-- **Path B (WASM), §55.4.** §55.6 gates it. `scripts/check-wasm-gate.py` fails the
-  build if a WASM runtime is adopted; `wasmi 0.4` does not compile on this toolchain.
 - **§36.11 mood journal.** §54 reuses §15.8's mood *vocabulary*; the journal is
   separate work and the plan says so.
-- **The pre-existing CI reds.** `scripts/check-sqlite-migration-syntax.py --self-test`
-  (5 cases) and `scripts/check-pg-uuid-casts.py` both reproduce on a clean stash.
-  Named in the final report rather than quietly fixed or ignored.
-- **The 27 `planned` + 6 `specified` tracker rows** (M45-23 north-star, M45-25 …
-  M45-55, M46-05 search). Each is a multi-week spec of its own. Listed so the
-  number is honest rather than implied.
+- **Operator affinity / theme gravity in the concierge.** Discovery applies both;
+  the concierge does not, because §54 gives it no `sort` parameter. On an instance
+  that has affinities set, the two feeds may legitimately differ. Stated in the code
+  rather than hidden — see `routes/concierge.rs` step 3.
+- **The legacy blend's missing seen-exclusion.** `RecContext.seen`
+  (`rec_engine.rs:66`) only reaches the pluggable path; `blend()` applies none, so a
+  reader is served already-read works. Real, predates §54, and "fix it here" would
+  smuggle a ranking change into a concierge fixture. Recorded in
+  `concierge_routes.rs`'s parity test.
 
 ## Trap log for whoever continues
 
-- sqlx does **not** translate `?1` → `$1` for PostgreSQL. A test fixture that
-  forgets the rewrite reaches the server as a literal `?` and fails with
-  `operator does not exist: ? integer`. Reuse `preread_store.rs`'s `exec` helper.
-- `?1#u` markers: the fold must try `?N#u` **before** `?N`, or the `#u` survives
-  into the SQL as a column named `u`. A doubled `?1#u#u` is the same failure.
-- `work_tags.work_id` has a real FK on PostgreSQL and **none** on SQLite. Tagging
-  a work before inserting it passes on SQLite and fails on PostgreSQL.
-- `works.owner_pseud_id` is NOT NULL and FK-constrained: every work fixture needs
-  its own pseud and account.
-- A per-file SQL helper is a liability. `moods_in_use`'s first version cast
-  `works.id::text = wt.work_id`, which PostgreSQL accepts and returns nothing for —
-  a silently empty list, not an error.
+These are all measured this session, not folklore.
+
+- **sqlx does not translate `?1` → `$1` for PostgreSQL.** Worse:
+  `rewrite_placeholders` (`db/src/lib.rs:462`) renumbers every `?` it meets *in order*
+  and ignores the digits, so `VALUES (?3#t, ?3#t)` becomes `$3, $4` and the statement
+  asks for a bind it was never given (42P18). Use the fold in
+  `concierge_store.rs`'s `exec`, or the slot-aware `exec` in `concierge_routes.rs`.
+- **A repeated slot needs its own bind only if the rewrite expands it.** Bind count
+  and placeholder count must be checked against the *actual* rewrite, not the source.
+- **Bind ids as `Uuid` on PostgreSQL**, never as text: `uuid = text` (42883). And a
+  malformed id must be bound as **NULL, not omitted** — PostgreSQL binds
+  positionally and a mismatched count is 08P01, so "skip this one" is an error rather
+  than a filter.
+- **`rating.id` has no default on PostgreSQL** while SQLite defaults it. Name the
+  column; the row is rejected with 23502 otherwise.
+- **`chapters.current_revision_id` REFERENCES `chapter_revisions(id)`** — insert the
+  chapter with NULL, then the revision, then `UPDATE`. The other order fails on
+  PostgreSQL only.
+- **`chapters.order_key`, not `position`.** Spaced by ten so an insert between two
+  chapters is one write.
+- **`rating.stars`, not `rating.value`.** `pseud_id` is NOT NULL and `updated_at` too.
+- **`chapter_revisions.created_by_pseud_id` is NOT NULL** and FK-constrained.
+- **A scratch PostgreSQL URL must REPLACE the last path segment**, not append:
+  `postgres://…/postgres` + `/lh_…` parses as a unix-socket host and fails with
+  `failed to lookup address information`.
+- **`work_tags.work_id` has a real FK on PostgreSQL and none on SQLite.** Tagging a
+  work before inserting it passes on SQLite and fails on PostgreSQL.
+- **`moods_in_use` and `filter_by_mood` both require `lifecycle = 'published'`, but
+  only the blend requires `visibility = 'public'`.** So a published-but-unlisted work
+  is the one shape where validation sees a mood and the blend never serves it — which
+  is what makes "matched nothing" testable. Lifecycle will NOT do it: it removes the
+  mood from the available list too, and the request comes back 422-unknown.
+- **A per-file SQL helper is a liability.** Three `exec` helpers now exist in this
+  repo and each has a bug fixed in a sibling. One shared helper, or an honest comment
+  saying why not.
+- **`git reset --hard` to an older sha destroys commits that reflog still holds.**
+  I did this while trying to squash WIP commits and lost two; `git reflog` recovered
+  them. Use `reset --soft` and verify with `git diff <sha> HEAD --stat` before
+  committing.
