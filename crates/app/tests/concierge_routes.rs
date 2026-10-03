@@ -118,27 +118,44 @@ async fn exec(tdb: &TestDb, tmpl: &str, binds: &[&str]) {
     // The casts still decide the TYPES, so a bare `?` beside a uuid column is
     // unambiguous. `#i` is `::bigint` rather than `::integer` because `word_count`
     // is BIGINT on PostgreSQL.
-    if pg {
-        let pool = tdb.db().postgres_pool().expect("postgres pool");
-        let mut q = sqlx::query(&out);
-        for b in binds {
-            // A value that parses as a uuid is bound as a uuid; everything else is
-            // text. Decided per BIND, because the cast in the SQL already tells
-            // PostgreSQL which is which and a wrong Rust type here would be a decode
-            // error rather than a coercion.
-            match uuid::Uuid::parse_str(b) {
-                Ok(u) => q = q.bind(u),
-                Err(_) => q = q.bind(*b),
+    // Split on the backend ENUM rather than on the `pg` bool computed above.
+    //
+    // `check-pg-arm-uses-sqlite-pool.py` exists because a `Backend::Postgres` arm
+    // that reaches for `sqlite_pool()` is a silent wrong-database fixture: it runs,
+    // it inserts into the scratch SQLite file, and the assertion then fails on the
+    // wrong engine with no hint that the fixture never reached PostgreSQL. It finds
+    // that by name -- a `sqlite_pool()` call with no enclosing `Postgres` arm
+    // anywhere above it.
+    //
+    // Branching on `pg` was correct and still tripped it, which is the check being
+    // blunt rather than wrong: the invariant it protects is "these two pools are
+    // never confused", and matching on the backend is how that is expressed without
+    // a reader having to trace `pg` back to its source. The bool above remains for
+    // the SQL rewrite, which genuinely is a value and not a pool choice.
+    match tdb.db().backend() {
+        lorehaven_db::Backend::Postgres => {
+            let pool = tdb.db().postgres_pool().expect("postgres pool");
+            let mut q = sqlx::query(&out);
+            for b in binds {
+                // A value that parses as a uuid is bound as a uuid; everything else
+                // is text. Decided per BIND, because the cast in the SQL already
+                // tells PostgreSQL which is which and a wrong Rust type here would be
+                // a decode error rather than a coercion.
+                match uuid::Uuid::parse_str(b) {
+                    Ok(u) => q = q.bind(u),
+                    Err(_) => q = q.bind(*b),
+                }
             }
+            q.execute(pool).await.expect("fixture insert");
         }
-        q.execute(pool).await.expect("fixture insert");
-    } else {
-        let pool = tdb.db().sqlite_pool().expect("sqlite pool");
-        let mut q = sqlx::query(&out);
-        for b in binds {
-            q = q.bind(*b);
+        lorehaven_db::Backend::Sqlite => {
+            let pool = tdb.db().sqlite_pool().expect("sqlite pool");
+            let mut q = sqlx::query(&out);
+            for b in binds {
+                q = q.bind(*b);
+            }
+            q.execute(pool).await.expect("fixture insert");
         }
-        q.execute(pool).await.expect("fixture insert");
     }
 }
 
