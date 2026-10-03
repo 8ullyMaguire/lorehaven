@@ -23,6 +23,8 @@ pub mod canon_agnostic;
 pub mod category_governance;
 pub mod collaboration;
 pub mod community;
+// M45-22 (§54): the concierge's session and WIP-watch store.
+pub mod concierge_store;
 pub mod content;
 pub mod decision_audit;
 pub mod derivative;
