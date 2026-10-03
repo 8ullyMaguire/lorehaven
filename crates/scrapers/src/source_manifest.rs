@@ -297,7 +297,11 @@ fn compile_selectors(s: &Selectors) -> Result<CompiledSelectors, Vec<String>> {
             match Selector::parse(&s.$field) {
                 Ok(sel) => Some(sel),
                 Err(e) => {
-                    problems.push(format!("selectors.{} `{}`: {e}", stringify!($field), s.$field));
+                    problems.push(format!(
+                        "selectors.{} `{}`: {e}",
+                        stringify!($field),
+                        s.$field
+                    ));
                     None
                 }
             }
@@ -426,10 +430,8 @@ auth:
     fn a_manifest_with_a_wrongly_typed_field_is_refused() {
         // `rate_limit_per_second` is a number. A quoted one is a curator's typo,
         // and accepting it as zero would silently mean "no requests".
-        let text = SPEC_EXAMPLE.replace(
-            "rate_limit_per_second: 2",
-            "rate_limit_per_second: \"two\"",
-        );
+        let text =
+            SPEC_EXAMPLE.replace("rate_limit_per_second: 2", "rate_limit_per_second: \"two\"");
         assert!(serde_yaml::from_str::<SourceManifest>(&text).is_err());
     }
 
@@ -508,11 +510,23 @@ auth:
         let m = manifest();
         let origin = Url::parse("https://example-archive.org").unwrap();
 
-        assert!(m.covers(&origin, &Url::parse("https://example-archive.org/works/1").unwrap()));
-        assert!(!m.covers(&origin, &Url::parse("https://elsewhere.example/works/1").unwrap()));
-        assert!(!m.covers(&origin, &Url::parse("http://example-archive.org/works/1").unwrap()));
+        assert!(m.covers(
+            &origin,
+            &Url::parse("https://example-archive.org/works/1").unwrap()
+        ));
+        assert!(!m.covers(
+            &origin,
+            &Url::parse("https://elsewhere.example/works/1").unwrap()
+        ));
+        assert!(!m.covers(
+            &origin,
+            &Url::parse("http://example-archive.org/works/1").unwrap()
+        ));
         // The metadata service, and this instance's own database.
-        assert!(!m.covers(&origin, &Url::parse("http://169.254.169.254/latest").unwrap()));
+        assert!(!m.covers(
+            &origin,
+            &Url::parse("http://169.254.169.254/latest").unwrap()
+        ));
         assert!(!m.covers(&origin, &Url::parse("http://127.0.0.1:5432").unwrap()));
     }
 
@@ -537,7 +551,10 @@ auth:
             }
         );
         // A password in the manifest is not a field that exists.
-        let leaked = text.replace("login_url: \"/login\"", "login_url: \"/login\"\n  password: \"hunter2\"");
+        let leaked = text.replace(
+            "login_url: \"/login\"",
+            "login_url: \"/login\"\n  password: \"hunter2\"",
+        );
         assert!(
             serde_yaml::from_str::<SourceManifest>(&leaked).is_err(),
             "a manifest has nowhere to put a password, and must refuse one"
@@ -555,7 +572,8 @@ auth:
         );
         // And back again, so a stored JSON manifest can be shown to a reviewer
         // as the YAML they submitted.
-        let back: SourceManifest = serde_yaml::from_str(&serde_yaml::to_string(&from_yaml).unwrap()).unwrap();
+        let back: SourceManifest =
+            serde_yaml::from_str(&serde_yaml::to_string(&from_yaml).unwrap()).unwrap();
         assert_eq!(back, from_yaml);
     }
 

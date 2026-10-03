@@ -97,20 +97,18 @@ fn build_cards(
         .unwrap_or_default();
 
     rows.into_iter()
-        .map(|row| {
-            ArenaCard {
-                work_id: row.id,
-                title: row.title,
-                fandom: row.fandom,
-                tags: row.tags,
-                word_count: row.word_count,
-                excerpt: row.summary,
-                target_dimension: target_dimension.clone(),
-                vector: lorehaven_domain::taste_vector::work_vector_from_tags(
-                    &dimension_tuples,
-                    &row.tag_weights,
-                ),
-            }
+        .map(|row| ArenaCard {
+            work_id: row.id,
+            title: row.title,
+            fandom: row.fandom,
+            tags: row.tags,
+            word_count: row.word_count,
+            excerpt: row.summary,
+            target_dimension: target_dimension.clone(),
+            vector: lorehaven_domain::taste_vector::work_vector_from_tags(
+                &dimension_tuples,
+                &row.tag_weights,
+            ),
         })
         .collect()
 }
@@ -204,9 +202,7 @@ async fn post_arena_vote(
     let round = ArenaRound {
         cards: cards
             .into_iter()
-            .filter(|card| {
-                card.work_id == req.best_work_id || card.work_id == req.worst_work_id
-            })
+            .filter(|card| card.work_id == req.best_work_id || card.work_id == req.worst_work_id)
             .collect(),
     };
 

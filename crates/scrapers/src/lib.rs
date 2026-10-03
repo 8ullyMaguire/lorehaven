@@ -47,7 +47,8 @@ pub mod safety;
 pub mod sanitize;
 pub mod sites;
 pub mod solver;
-// M45-23 (§55.3): the declarative source-adapter manifest.
+// M45-23 (§55.3): the declarative source-adapter manifest and adapter.
+pub mod declarative;
 pub mod source_manifest;
 
 use std::fmt;

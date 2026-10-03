@@ -86,6 +86,23 @@ jobs:
       - name: Obsolete timestamp-cast fixer (self-test only)
         run: python3 scripts/fix-timestamptz-binds.py --self-test
 
+      # §55.6's gate. A WASM runtime is not adopted while the sandbox that would
+      # contain it does not exist — Path B's entire security model is §55.4.1's
+      # domain lockdown, and shipping the path first would make every other §21
+      # guarantee conditional on one unexamined function.
+      #
+      # This is a static check rather than only `crates/app/tests/wasm_gate.rs`
+      # because that test runs *after* `cargo build`, and adding `wasmi = "0.4"`
+      # to prove it fires does not compile on this toolchain (1.78 — `panic` is
+      # ambiguous in wasmi 0.4.5). The build died before the test could report
+      # anything, which is a gate reporting the wrong failure. Checking first says
+      # what actually happened.
+      - name: WASM-adoption gate self-test
+        run: python3 scripts/check-wasm-gate.py --self-test
+
+      - name: No WASM runtime adopted (§55.6)
+        run: python3 scripts/check-wasm-gate.py
+
       - name: PostgreSQL arms must not use the SQLite pool
         run: python3 scripts/check-pg-arm-uses-sqlite-pool.py crates
 

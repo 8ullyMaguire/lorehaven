@@ -699,7 +699,9 @@ async fn get_admin_centroid(db: &Database) -> Option<Vec<f64>> {
 /// The vector is persisted as a JSON array. Anything unparseable is treated as
 /// absent rather than fatal: one corrupt row must not take the recommender down.
 fn decode_vector(raw: &str) -> Option<Vec<f64>> {
-    serde_json::from_str::<Vec<f64>>(raw).ok().filter(|v| !v.is_empty())
+    serde_json::from_str::<Vec<f64>>(raw)
+        .ok()
+        .filter(|v| !v.is_empty())
 }
 
 /// The weight a star rating carries in a taste vector.
