@@ -415,6 +415,36 @@ async fn sqlite_template() -> Option<std::path::PathBuf> {
 ///
 /// This is the whole optimisation on the SQLite side: one `copy` syscall pair
 /// instead of 107 migrations.
+/// A `DatabaseConfig` for a test database, with the acquire timeout widened.
+///
+/// WHY THIS EXISTS, measured rather than guessed: `cargo test --workspace` fails
+/// 12-17 tests with
+///
+/// ```text
+/// panicked at crates/test-support/src/lib.rs:575: connect: ...
+/// Caused by: pool timed out while waiting for an open connection
+/// ```
+///
+/// and every one of those suites passes 100% on its own -- at
+/// `--test-threads` 16, 4 and 1, and two suites run concurrently also pass. So it
+/// is not a defect in any suite and not intra-suite contention.
+///
+/// The mechanism is that `cargo test --workspace` runs ~180 test binaries, each
+/// building its OWN `SqlitePool` (every `TestDb` clones a migrated file and opens a
+/// pool over it), with the default `acquire_timeout` of 10s. On this host that is
+/// 30GB of RAM with ~15GB of swap already in use, so pool construction slows enough
+/// that 10s is not enough. The timeout was never wrong for production; it is wrong
+/// for a harness that opens hundreds of pools at once.
+///
+/// So the test harness asks for longer rather than the code being changed, and
+/// rather than the failure being written off as "flaky under load" -- a description
+/// that would have hidden the next real failure of the same shape.
+pub fn test_db_config(url: impl Into<String>) -> lorehaven_db::DatabaseConfig {
+    let mut config = lorehaven_db::DatabaseConfig::new(url);
+    config.acquire_timeout = std::time::Duration::from_secs(60);
+    config
+}
+
 pub async fn cached_sqlite_file(dst: &Path) -> bool {
     match sqlite_template().await {
         Some(template) => std::fs::copy(&template, dst).is_ok(),
@@ -567,7 +597,7 @@ impl TestDb {
                 let _ = std::fs::remove_file(&file);
                 let cloned = cached_sqlite_file(&file).await;
 
-                let db = Database::connect(&DatabaseConfig::new(format!(
+                let db = Database::connect(&test_db_config(format!(
                     "sqlite://{}/lorehaven.sqlite?mode=rwc",
                     dir.display()
                 )))
