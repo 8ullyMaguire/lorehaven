@@ -4489,3 +4489,75 @@ export function fetchEconomyFlows(params: { since?: string; until?: string } = {
   const suffix = qs.toString() ? `?${qs}` : '';
   return apiFetch<EconomyFlows>(`/admin/economy/flows${suffix}`);
 }
+
+// -------------------------------------------------------------------------------------
+// Reader surface — items 14, 27, 33 of the 100-idea audit (spec §57.7 and the audit)
+// -------------------------------------------------------------------------------------
+
+/**
+ * One work as the reader-surface sections receive it.
+ *
+ * `recent_bookmarks` and `similarity` are OPTIONAL and both are omitted by the server
+ * when they do not apply: `recent_bookmarks` only on the leaderboard, `similarity` only
+ * on the rail. They are optional here for the same reason — a client that renders
+ * `0` for a missing `similarity` is showing a score of zero for a work the server never
+ * scored, which reads as "no similarity found" instead of "not scored".
+ */
+export interface SurfaceWork {
+  id: string;
+  title: string;
+  summary: string;
+  completion: string;
+  published_at?: string | null;
+  /** Item 27: distinct PUBLIC bookmarkers inside the window. */
+  recent_bookmarks?: number;
+  /** Item 33: weighted-Jaccard score, always within [0,1] when present. */
+  similarity?: number;
+}
+
+/**
+ * Fetch the newest works in the fandoms this reader has PUBLICLY bookmarked (item 14).
+ *
+ * REQUIRES a session — it answers "new to you", so an anonymous call is refused by the
+ * server rather than answered with everyone else's.
+ *
+ * Resolves to `[]` when the reader has no public bookmarks. It does NOT fall back to
+ * all recent works, and a caller must not add that fallback either: a section that
+ * changes subject when it has no data is a section nobody can learn to read.
+ */
+export function fetchNewInYourFandoms(signal?: AbortSignal): Promise<SurfaceWork[]> {
+  return apiFetch<{ works: SurfaceWork[] }>('/discovery/new-in-your-fandoms', { signal }).then(
+    (page) => page.works,
+  );
+}
+
+/**
+ * The public weekly bookmark leaderboard (item 27).
+ *
+ * No session needed. Counts distinct PUBLIC bookmarkers only — the server-side
+ * `is_public` predicate is the privacy rule and it is why this door is public.
+ *
+ * `windowDays` defaults to the server's seven. A value outside 1..365 is refused with
+ * a 400 rather than clamped, because a clamped window returns a leaderboard that is not
+ * the one the caller asked about.
+ */
+export function fetchMostBookmarked(windowDays?: number, signal?: AbortSignal): Promise<SurfaceWork[]> {
+  const qs = windowDays === undefined ? '' : `?window_days=${encodeURIComponent(windowDays)}`;
+  return apiFetch<{ works: SurfaceWork[] }>(`/discovery/most-bookmarked${qs}`, { signal }).then(
+    (page) => page.works,
+  );
+}
+
+/**
+ * Works most similar to this one (item 33), best first, with the score that ordered them.
+ *
+ * No session needed. Resolves to `[]` when the work has fewer than two tags or nothing
+ * clears the server's honesty floor — and `[]` is the correct answer, not a failure. An
+ * empty rail headed "Similar works" is worse than no rail.
+ */
+export function fetchSimilarWorks(workId: string, signal?: AbortSignal): Promise<SurfaceWork[]> {
+  return apiFetch<{ works: SurfaceWork[] }>(
+    `/works/${encodeURIComponent(workId)}/similar`,
+    { signal },
+  ).then((page) => page.works);
+}

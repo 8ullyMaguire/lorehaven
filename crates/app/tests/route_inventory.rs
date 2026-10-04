@@ -4376,6 +4376,37 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         audience: Audience::Authenticated,
     },
     // ------------------------------------------------------------------
+    // Reader surface — items 14, 27, 33 of the 100-idea audit.
+    //
+    // The three audiences differ, and the difference is the design:
+    // `new_in_your_fandoms` answers "YOURS", so it needs a session; the other two
+    // read only public rows and stay public, because a login wall in front of
+    // published data teaches readers the data is not published — and it would
+    // hide the store's is_public privacy rule from exactly the reader who could
+    // check it.
+    // ------------------------------------------------------------------
+    RouteEntry {
+        file: "reader_surface.rs",
+        handler: "new_in_your_fandoms",
+        method: "GET",
+        path: "/discovery/new-in-your-fandoms",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "reader_surface.rs",
+        handler: "most_bookmarked",
+        method: "GET",
+        path: "/discovery/most-bookmarked",
+        audience: Audience::Public,
+    },
+    RouteEntry {
+        file: "reader_surface.rs",
+        handler: "similar",
+        method: "GET",
+        path: "/works/{work_id}/similar",
+        audience: Audience::Public,
+    },
+    // ------------------------------------------------------------------
     // Monetization — additional routes not in main table (spec §20)
     // ------------------------------------------------------------------
     RouteEntry {
