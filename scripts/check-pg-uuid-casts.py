@@ -35,7 +35,15 @@ TABLE_REF = re.compile(r"\b(?:FROM|INTO|UPDATE|JOIN)\s+(\w+)(?:\s+(?:AS\s+)?(\w+
 # matches with the *column* read as `text`, and the finding is attributed to the
 # wrong column -- which is how a self-test asserting on this case can pass a gate
 # that is not looking at what you think.
-CAST_AFTER = re.compile(r"(?<![:\w])(?:(\w+)\.)?(\w+)\s*=\s*\$\d+::(\w+)")
+CAST_AFTER = re.compile(r"(?<![:\w])(?:(\w+)\.)?(\w+)\s*=\s*\$\d+::(\w+(?:::\w+)*)")
+# A CHAINED cast binds as the LAST type, because that is the one the value has
+# when it reaches the column. `$1::text::uuid` is a uuid; reading only the first
+# `::` saw `text`, compared it against a uuid column, and reported
+# `snapshot_anonymisation.rs:1023 id:: text on accounts` -- a statement that is
+# correct. The text cast is there to accept the Rust String; the uuid cast is
+# what makes it comparable to the column.
+def _last(cast_chain: str) -> str:
+    return cast_chain.split("::")[-1]
 CAST_BEFORE = re.compile(r"\$\d+::(\w+)\s*=\s*(?:(\w+)\.)?(\w+)::(\w+)")
 
 # PostgreSQL type names, mapped to what `text`/`varchar` collapse to. A cast to
@@ -104,10 +112,11 @@ def scan(source: str, types: dict[tuple[str, str], str]) -> list[tuple[int, str,
         for pattern, order in ((CAST_AFTER, "after"), (CAST_BEFORE, "before")):
             for match in pattern.findall(statement):
                 if order == "after":
-                    qualifier, column, cast = match
+                    qualifier, column, cast = match[0], match[1], _last(match[2])
                 else:
-                    # CAST_BEFORE groups as (cast, qualifier, column, _).
-                    cast, qualifier, column, _ = match
+                    # CAST_BEFORE groups as (cast, qualifier, column, cast_chain).
+                    cast, qualifier, column, chain = match
+                    cast = _last(cast)
                 if qualifier:
                     # `p.account_id` belongs to whatever `p` is aliased to. If that
                     # table is unknown, say nothing -- a wrong guess here is how a
@@ -215,6 +224,23 @@ def self_test(root: pathlib.Path) -> int:
         # The SQLite arm is never flagged: it has no $n at all.
         ("sqlite arm ignored", SOURCE_GOOD.split("let sql = db.sql(")[0] + '"WHERE id = ?"', 0),
         ("empty source", "", 0),
+        # A CHAINED bind cast binds as its LAST type. `$1::text::uuid` is a uuid --
+        # the text cast accepts the Rust String, the uuid cast makes it comparable
+        # to the column. Reading only the first `::` reported this correct statement
+        # as `id:: text on accounts`, and that finding had been carried as a
+        # pre-existing CI red through three passes of this work.
+        (
+            "chained bind cast takes its last type",
+            '"SELECT 1 FROM accounts WHERE id = $1::text::uuid"',
+            0,
+        ),
+        # ...and the chain must not become a loophole: a chain ENDING in a cast
+        # that does not match the column is still the defect this gate exists for.
+        (
+            "chained bind cast ending in a wrong type is reported",
+            '"SELECT 1 FROM accounts WHERE id = $1::uuid::text"',
+            1,
+        ),
     ]
     failures = 0
     for name, source, want in cases:
