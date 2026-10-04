@@ -97,9 +97,14 @@ const SQLITE_HITS: &str = r#"SELECT COUNT(*) FROM (
 ///
 /// PostgreSQL rejects an unaliased subquery in `FROM` outright:
 ///
-///     42601 subquery in FROM must have an alias
-///     DETAIL: For example, FROM (SELECT ...) [AS] foo.
+/// ```text
+/// 42601 subquery in FROM must have an alias
+/// DETAIL: For example, FROM (SELECT ...) [AS] foo.
+/// ```
 ///
+/// (`text` and not bare indentation: an indented block in a doc comment is a Rust
+/// code block, so the doctest collected it and rustc read `42601` as an item.
+/// Caught by `cargo test --workspace`, which runs doctests.)
 /// SQLite accepts it. So the PostgreSQL halves carried the alias and the SQLite
 /// halves did not, and every one of the ten tests in `crates/db/tests/hit_rate.rs`
 /// failed on PostgreSQL with that parse error while passing on SQLite -- a defect

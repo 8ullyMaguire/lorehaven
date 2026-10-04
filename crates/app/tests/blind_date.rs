@@ -81,16 +81,36 @@ async fn the_pick_is_stable_across_reloads_on_the_same_day() {
 #[tokio::test]
 async fn a_different_day_gives_a_different_work() {
     // Otherwise the reader gets one blind date forever and the surface is a suggestion
-    // list with extra steps. With 25 works and 25 days the chance of any two days
-    // colliding is low, so this is a real assertion rather than a flaky one — and the
-    // seed includes the date precisely so it holds.
+    // list with extra steps.
+    //
+    // The threshold is **10**, not something near the expected value, and the reason is
+    // arithmetic. 25 days drawing uniformly from 25 works is a birthday problem: the
+    // expected number of distinct works is 25 * (1 - (24/25)^25) ≈ 16.0 with a standard
+    // deviation of about 1.57. Simulated over 200,000 draws:
+    //
+    //     threshold   fail rate
+    //     <= 10          0.018%
+    //     <= 12          1.204%      <- what this test asserted
+    //     <= 14         16.704%
+    //     <= 16         62.805%
+    //
+    // So the original `> 12` sat about 2.5 standard deviations below the mean and failed
+    // on roughly one run in eighty. It was not a logic bug and not order-dependence: it
+    // failed in a full-workspace run and passed when the suite ran alone, because the
+    // outcome depends on the hash of (account id, day), and the fixture generates a fresh
+    // account per run. `blind_date.rs:92` read "got 12 distinct" -- one below the bar.
+    //
+    // 10 still fails if the property genuinely broke -- a seed that ignored the day would
+    // return 1 distinct, and one that varied only slightly would collapse to single
+    // digits -- while costing 0.018% instead of 1.2%. A distribution assertion needs a
+    // threshold on the far tail of the distribution, not near its centre.
     let f = Fixture::build("bd_daily").await;
     f.works("w", 25).await;
     let days: Vec<String> = (1..=25).map(|d| format!("2026-10-{:02}", d)).collect();
     let picks: Vec<Option<String>> = futures_join_all(&f, &days).await;
     let distinct: std::collections::HashSet<&Option<String>> = picks.iter().collect();
     assert!(
-        distinct.len() > 12,
+        distinct.len() > 10,
         "25 days over 25 works should mostly differ, got {} distinct: {picks:?}",
         distinct.len()
     );

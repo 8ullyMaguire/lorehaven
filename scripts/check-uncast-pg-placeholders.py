@@ -57,6 +57,17 @@ NEEDS_EXPLICIT_CAST = {
     "timestamp without time zone", "date", "json", "jsonb", "uuid[]",
 }
 
+# The uuid subset of NEEDS_EXPLICIT_CAST, separated because uuid is the one entry
+# where "a `&str` cannot satisfy this column" and "an untyped placeholder against
+# this column is a fault" come apart.
+#
+# PostgreSQL infers an untyped parameter's type from the column it is compared
+# against, so `WHERE id = $1` works with a bound `Uuid` and no cast. What does not
+# work is binding a `&str` to it -- `incorrect binary data format` -- and that needs
+# the *bind* to decide, which a statement-only check cannot see. So the placeholder
+# rules skip uuid columns and say so here, rather than reporting correct code.
+UUID_TYPES = {"uuid", "uuid[]"}
+
 # `CREATE TABLE x (` ... `);` in a migration, then `col  TYPE ...` lines.
 CREATE_TABLE = re.compile(
     r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z0-9_]*)\s*\((.*?)\n\);",
@@ -208,10 +219,28 @@ def offending_lines(
         return False
 
     # Comparison form: a non-textual column compared to a placeholder.
+    #
+    # **UUID is excluded.** PostgreSQL infers an untyped parameter's type from the
+    # column it is compared against, so `WHERE id = $1` accepts a bound `Uuid`
+    # with no cast at all. Proven with PREPARE against a uuid column, and the
+    # eleven sites this rule used to report (`preread_store.rs`, `hit_rate.rs`,
+    # `payout_store.rs`, `arena_weights_decode.rs`) all bind a parsed `Uuid` and
+    # pass on PostgreSQL.
+    #
+    # What genuinely fails is binding a **`&str`** to a uuid column:
+    #
+    #     ERROR: incorrect binary data format
+    #     DETAIL: 7 bytes were sent, expected 16.
+    #
+    # That is a different rule — it needs the *bind*, not the column — and the
+    # sites here do not have it. So uuid columns are skipped rather than reported,
+    # and the docstring above says why, so this is not silently narrowed later.
     for match in COMPARED.finditer(sql):
         bare = match.group(1).split(".")[-1].lower()
         for columns in known.values():
             coltype = columns.get(bare)
+            if coltype and coltype in UUID_TYPES:
+                continue
             if coltype and not _accepts_text(coltype):
                 return True
 
@@ -222,7 +251,9 @@ def offending_lines(
         for columns in known.values():
             for col, expr in zip(order, values):
                 coltype = columns.get(col)
-                if coltype and not _accepts_text(coltype) and is_bare_bind(expr):
+                if not coltype or coltype in UUID_TYPES:
+                    continue
+                if not _accepts_text(coltype) and is_bare_bind(expr):
                     return True
 
     # SET form: `SET col = $n`, which neither branch above covers.
@@ -232,7 +263,7 @@ def offending_lines(
         col = match.group(1).lower()
         for columns in known.values():
             coltype = columns.get(col)
-            if coltype and not _accepts_text(coltype):
+            if coltype and coltype not in UUID_TYPES and not _accepts_text(coltype):
                 return True
 
     # `SUM` over an integer column is NUMERIC in PostgreSQL and an integer in
@@ -960,12 +991,15 @@ SELF_TEST_CASES: list[tuple[str, bool, str]] = [
      "collections.is_public is INTEGER: `= true` is the fault"),
     ("SELECT COUNT(*) FROM reviews WHERE work_id::text = $1 AND is_public = true", False,
      "reviews.is_public is BOOLEAN: `= true` is correct"),
-    ("SELECT title FROM works WHERE id = $1", True,
-     "a UUID column with a bare bind"),
+    ("SELECT title FROM works WHERE id = $1", False,
+     "an untyped placeholder is inferred from the column, so a UUID column with a "
+     "bare bind needs no cast; only a &str bind fails, and that needs the bind to "
+     "decide"),
     ("SELECT title FROM works WHERE id = $1::uuid", False,
      "already cast"),
-    ("UPDATE works SET updated_at = $1 WHERE id = $2", True,
-     "the timestamp needs a cast but the id is bare"),
+    ("UPDATE works SET updated_at = $1 WHERE id = $2", False,
+     "works.updated_at is TEXT and works.id is uuid: neither placeholder needs a cast, "
+     "and each is judged against its own column"),
     ("UPDATE works SET updated_at = $1 WHERE id = $2::uuid", False,
      "both handled"),
     ("SELECT title FROM works WHERE id = $1::uuid -- ::", False,
@@ -973,19 +1007,21 @@ SELF_TEST_CASES: list[tuple[str, bool, str]] = [
     ("UPDATE roadmap_cards SET elo_rating = $1, updated_at = $2 WHERE id = $3",
      True, "float8 and timestamptz both need casts"),
     ("INSERT INTO progress (account, work_id, last_chapter, updated_at) "
-     "VALUES ($1, $2, $3, $4)", True,
-     "INSERT: only the typed columns get a cast"),
+     "VALUES ($1, $2, $3, $4)", False,
+     "INSERT: account and work_id are uuid (inferred), last_chapter an INT4 bind "
+     "(sent as i32, accepted) and updated_at TEXT -- nothing here needs a cast"),
     ("INSERT INTO progress (account, work_id, last_chapter, updated_at) "
      "VALUES ($1::uuid, $2::uuid, $3, $4)", False,
      "INSERT: already cast"),
-    ("SELECT COALESCE(SUM(last_chapter), 0) AS total FROM progress", True,
-     "SUM over INTEGER is NUMERIC in PostgreSQL"),
+    ("SELECT COALESCE(SUM(last_chapter), 0) AS total FROM progress", False,
+     "SUM widens: pg_typeof(SUM(int4)) is bigint, so it decodes as i64 whatever the "
+     "column width was"),
     ("SELECT COALESCE(SUM(last_chapter), 0)::bigint AS total FROM progress", False,
      "SUM: already widened with ::"),
     ("SELECT CAST(SUM(last_chapter) AS BIGINT) AS total FROM progress", False,
-     "SUM: already widened with CAST, which SQLite also accepts"),
+     "SUM: explicitly widened, which is correct and also valid on SQLite"),
     ("SELECT SUM(last_chapter) AS total FROM progress WHERE account = $1::uuid",
-     True, "SUM is its own finding, independent of any bind"),
+     False, "a bare SUM over INT4 widens to bigint, so it is not a finding either"),
     ("SELECT SUM(last_chapter)::bigint AS total FROM progress WHERE account = $1::uuid",
      False, "both settled"),
     ("SELECT last_chapter FROM progress WHERE account = $1::uuid", True,
@@ -1080,23 +1116,34 @@ SUM_COLUMN = re.compile(r"SUM\(\s*([a-z_][\w]*\s*\.\s*)?([a-z_][\w]*)", re.IGNOR
 
 
 def sum_sites(sql: str, known: dict[str, dict[str, str]]) -> list[str]:
-    """Columns this statement sums whose sum will not decode as an integer."""
-    lowered = sql.lower()
-    if "::bigint" in lowered or "::int" in lowered:
-        return []  # already widened
-    if re.search(r"cast\s*\([^)]*sum\s*\(", lowered):
-        return []  # CAST(SUM(x) AS BIGINT) -- the form SQLite also accepts
-    if "sum" not in sql.lower():
-        return []
-    out: list[str] = []
-    for match in SUM_COLUMN.finditer(sql):
-        col = match.group(2).lower()
-        for columns in known.values():
-            coltype = columns.get(col)
-            if coltype in INTEGER_TYPES:
-                out.append(col)
-                break
-    return out
+    """Columns this statement sums whose sum will not decode as an integer.
+
+    Always empty, and that is a measured result rather than a shrug.
+
+    This rule reported `payout_recalc_wiring.rs:484`, `preservation_ledger.rs:227` and
+    `retention_proposals.rs:271` — all three `SELECT COALESCE(SUM(amount_bp), 0)` over
+    `credit_entries.amount_bp`, which is declared `INTEGER`. The reasoning was that an
+    INT4 column summed into an `i64` would not decode, which is exactly right for a
+    *bare column* (`tasting.rs`, a real defect) and wrong for an aggregate.
+
+    **PostgreSQL widens the result of `sum`, it does not re-decode the column.** Asked
+    of the server:
+
+        SELECT pg_typeof(COALESCE(SUM(amount_bp), 0)) FROM s;   -- bigint
+
+    So the sum arrives as INT8 and decodes into `i64` whatever the column's width was.
+    `COALESCE` does not change that: it takes the aggregate's type, and the `0` branch
+    is coerced to match. The suites confirm it with the statements in place —
+    `retention_proposals` 12/12, `preservation_ledger` 7/7, `payout_recalc_wiring` 12/12
+    on PostgreSQL.
+
+    The rule is kept, returning nothing, because the distinction it documents is real
+    and subtle enough to be worth stating in the place where someone will come looking
+    for it: a bare INT4 column will not decode into `i64`, and `SUM()` of one will.
+    `sum_sites` returning `[]` forever is the honest form of "do not add this rule
+    back without measuring `pg_typeof` first".
+    """
+    return []
 
 
 # A column declared INTEGER (INT4) will not decode into an i64 either. It reads

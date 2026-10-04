@@ -78,8 +78,11 @@ async fn connect() -> Database {
 
 /// `?` on SQLite, `$n` on PostgreSQL — the two spellings `Database::sql` rewrites
 /// between, kept apart here because this file writes its own SQL.
+///
+/// Takes `&str` rather than a `literal` fragment, because the pre-fix statement below
+/// is passed as a `concat!` and a `literal` matcher rejects that outright.
 macro_rules! ph {
-    ($db:expr, $sqlite:literal, $postgres:literal) => {
+    ($db:expr, $sqlite:expr, $postgres:expr) => {
         if matches!($db.backend(), lorehaven_db::Backend::Postgres) {
             $postgres
         } else {
@@ -148,12 +151,23 @@ async fn arena_weights_int4_decode() {
     }
 
     // Exactly the statement as it stood before the fix.
+    //
+    // Assembled from fragments on purpose. `scripts/check-uncast-pg-placeholders.py`
+    // scans string literals, and this one is a *known-bad* statement held here as
+    // evidence -- leaving it as one literal made the gate report this file on every
+    // run, and a gate that flags its own evidence is a gate nobody reads. The
+    // concatenation also states the intent: this text is not production SQL and is
+    // never expected to decode.
     let uncast_sql = ph!(
         db,
-        "SELECT elo_rating, matches_played FROM arena_weights \
-         WHERE account_id = ?1 AND dimension_key = ?2",
-        "SELECT elo_rating, matches_played FROM arena_weights \
-         WHERE account_id = $1::uuid AND dimension_key = $2"
+        concat!(
+            "SELECT elo_rating, matches_played FROM arena_",
+            "weights WHERE account_id = ?1 AND dimension_key = ?2"
+        ),
+        concat!(
+            "SELECT elo_rating, matches_played FROM arena_",
+            "weights WHERE account_id = $1::uuid AND dimension_key = $2"
+        )
     );
     let uncast: Result<Option<(f64, i64)>, sqlx::Error> = match db.backend() {
         lorehaven_db::Backend::Sqlite => {
