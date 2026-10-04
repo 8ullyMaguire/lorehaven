@@ -19,7 +19,7 @@ about a term; the *wired/unwired* column is the finding.
 | specified, not built | 1 | item 7 (Surprise Me) — `/surprise` is a *router id*, no route, no handler |
 | built by an earlier pass | 2 | items 8, 22 — the probe was wrong, not the code |
 | open, Tier 1 remainder | 5 | items 31, 41, 43, 75, 22-preset |
-| next in queue | — | item 9 (reason tags), then 7 (Surprise Me) |
+| next in queue | — | item 7 (Surprise Me), then the Tier 1 remainder |
 | deliberately refused | 3 | item 2 (archive scrape), the streak trio — argued in `100-ideas-scope.md` §1 |
 | not yet assessed | ~72 | see "what I did not touch" at the foot |
 
@@ -89,8 +89,9 @@ already found seven instances of.
 | 2 | ~~**1 — Continue Reading**~~ | DONE — store, route, banner, 8 E2E journeys |
 | 3 | ~~**4 — word count + minutes**~~ | DONE — store `2868b25`, rendering `f124a67` |
 | 4 | **9 — reason tags** | NEXT — the data is already stored and the label is free |
-| 5 | **7 — Surprise Me** | genuinely new query, but small and it serves the diversity budget |
-| 6 | 31, 41, 43, 75, 22-preset | the Tier 1 remainder; all render work over existing columns |
+| 5 | ~~**9 — reason tags**~~ | DONE — the backend already existed; this was pure UI |
+| 6 | **7 — Surprise Me** | genuinely new query, but small and it serves the diversity budget |
+| 7 | 31, 41, 43, 75, 22-preset | the Tier 1 remainder; all render work over existing columns |
 
 Items 1, 4 and 9 are one `reader_surface`-style module: no migrations, no new state,
 one store file, one route set, three components. They should ship as **one** change,
@@ -194,6 +195,77 @@ And a false lead worth recording: my first mutation renamed the SQL alias to
 `word_count_hidden` and the journey still passed. That was CORRECT — serde reads the struct
 field name, not the column name — so an alias rename is not a mutation of the wire format
 at all, and I nearly recorded "the journey does not verify the field" from it.
+
+### DONE — item 9, recommendation reasons ("Why this?")
+
+**Item 9 was not a feature. It was a missing `if`.** Before writing anything I probed the
+running server by hand:
+
+```
+GET /api/v1/discovery           -> {"items":[{"title":"Explaining The Feed",
+                                    "slot_id":"f1f7a2c1-…"}], …}
+GET /api/v1/discovery/slots/f1f7a2c1-…/explanation
+                                -> {"reasons":["taste_tags","popular"], …}
+```
+
+So the route existed, the store wrote a `slot_id` onto every item it served, the
+explanation answered with a real vocabulary — and no element in the frontend called
+either. Every layer was correct and the reader could see none of it. The tracker had it
+as "the data is already stored and the label is free", which was right and understated the
+second half: the label was not free either, it had to be a sentence.
+
+Decisions:
+
+- **`slot_id` is OPTIONAL on `DiscoveryItem`, unlike `word_count` from item 4.** The
+  server warns-and-continues when `record_response` fails, so a slot id is genuinely
+  absent on a healthy server. An `Option` here is a fact about the server, not laziness.
+- **A disclosure, not a tooltip.** A tooltip is invisible until hovered, so "why am I
+  seeing this" stays a question only the reader who thought to ask it will. The reader who
+  most wants to know WHY is the one being recommended most.
+- **Mounted OUTSIDE the `<a>`.** The feed row is one link, so a button inside it is a
+  button inside an anchor: invalid HTML, and in practice the click navigates and the
+  disclosure never opens.
+- **Fetches on click only.** N items × N routes per paint for information most readers
+  never ask for, and it would put a slots-table read on the feed's critical path.
+- **Four states render NOTHING rather than a disabled control**: no slot id, a 404 (§3.3
+  makes "no such slot" and "not yours" indistinguishable, so the client cannot tell them
+  apart either), a signed-out reader, and a request in flight.
+- **404 and 500 are different.** 404 retires the trigger — there is no explanation. A
+  network error does NOT, and offers "try again", because the slot probably exists. All 8
+  mutations confirm the two are kept apart.
+
+**One false lead in the verification itself, and it is the oldest trap on this project.**
+My first E2E mutation pass reported BOTH wiring mutations as survivors. They were not: I
+edited `Discover.svelte`, ran Playwright, and it tested the OLD assets — the release binary
+embeds `frontend/dist` at COMPILE time, so a source edit changes nothing that is served.
+`src` mtime 21:54, `dist` 21:47, binary 21:51: both stale. Every mutation on this project
+costs a `vite build` AND a `cargo build --release`, which is why it runs as a shell script
+rather than an inline loop (which hit the 300s cell limit mid-mutation and left the mount
+tag stripped from the file, which then read as a component defect on the next look).
+
+And then the sweep's BASELINE came back red with the source restored — which is a harness
+fault, not a finding, and had to stop everything. The cause was my own manual Playwright run
+holding port 8173 alongside the script's. The runner now aborts if anything holds the port,
+and reads its verdict from **stdout only**: Node writes
+`ExperimentalWarning: localStorage is not available` to stderr on every vitest run, and a
+scorer that greps `Error:` across both streams called all eight mutations BUILD-ERROR while
+the baseline read PASS. That is the same "scored nothing as a pass" failure this project has
+already paid for twice, and it arrived in a third disguise.
+
+Two test failures that were my fault, not the code's, and both are worth the space:
+
+- **`vi.doMock` in `beforeEach` cannot mock a module the component already imported.** It
+  applies only to imports made AFTER it, so every click reached the real client and four
+  tests failed with "cannot find why-reasons" — which read like component bugs. `vi.mock`
+  is hoisted and is the right tool.
+- **Mocking the wrong layer.** I threw an `ApiError(404)` from the mocked client to test
+  the 404 branch. But the client CATCHES 404s itself and returns `null` — so I had been
+  testing the client's own mapping, and the component's catch-all correctly read my throw
+  as a network failure. Mock the layer the component actually consumes. That client's
+  mapping is real behaviour, so it now has its own file
+  (`SlotExplanationClient.test.ts`): the component test mocks it wholesale, so nothing
+  else in the suite runs its body, and if it stopped swallowing 404s every component test
+  would stay green while the feature rotted.
 
 ## 3. Gates every one of them must clear
 
