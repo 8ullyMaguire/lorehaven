@@ -1,5 +1,17 @@
 # Lorehaven — what's left
 
+> **SUPERSEDED. The current list is `docs/plans/REMAINING-2026-10-03.md`.**
+>
+> This file was last updated at commit `2c2849e` and is kept for the record only.
+> Everything below describes the state at that point and is stale: M45-22 (concierge)
+> and M45-57 (curator source adapters) have since been specified *and built*, so the
+> "In flight" and "Also outstanding" sections below are both out of date.
+>
+> Two closed plan files still link here (`m45-22-concierge.md`,
+> `m45-23-curator-adapters.md`); those references were correct when written and are
+> left alone rather than rewritten, because a plan document is a record of what was
+> decided at the time.
+
 Updated at the start of each turn. Last commit: `2c2849e`; merge `0161c14`.
 
 **Delegation is unavailable in this profile.** A subagent dispatched for step 3 died in
