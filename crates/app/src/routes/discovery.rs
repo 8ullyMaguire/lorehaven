@@ -266,6 +266,17 @@ async fn apply_taste_ordering_and_log(
                 instance_curation:
                     lorehaven_domain::recommendation_transparency::InstanceCuration::NotInvolved,
                 blend_score: (row.score * 1000.0).round() as i64,
+                // Every row in this loop came off the discovery feed, whatever
+                // `row.stage` says. The stage is which *strategy* ranked it; the
+                // mechanism is which *surface* served it, and the north-star
+                // attribution is per surface (§53.5). Writing `row.stage` here
+                // would answer a different question and split one surface's love
+                // across six buckets.
+                mechanism: Some(
+                    lorehaven_domain::recommendation_transparency::SlotMechanism::DiscoveryFeed
+                        .as_str()
+                        .to_string(),
+                ),
             });
         }
 
@@ -801,6 +812,15 @@ async fn get_discovery(
                             InstanceCuration::NotInvolved
                         },
                         blend_score: 0,
+                        // This is the blended feed. One surface, whatever mix of
+                        // engines produced each item -- the per-engine reasons are
+                        // already collected into `claimed`, and the mechanism is the
+                        // surface they were all served from.
+                        mechanism: Some(
+                            lorehaven_domain::recommendation_transparency::SlotMechanism::DiscoveryFeed
+                                .as_str()
+                                .to_string(),
+                        ),
                     })
                 })
                 .collect();

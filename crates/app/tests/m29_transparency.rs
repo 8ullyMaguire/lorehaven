@@ -381,6 +381,11 @@ async fn record_a_slot(db: &Database, pseud: uuid::Uuid, work: &str) -> String {
             instance_curation:
                 lorehaven_domain::recommendation_transparency::InstanceCuration::Involved,
             blend_score: 42,
+            mechanism: Some(
+                lorehaven_domain::recommendation_transparency::SlotMechanism::DiscoveryFeed
+                    .as_str()
+                    .to_string(),
+            ),
         },
     )
     .await
@@ -1236,6 +1241,11 @@ async fn the_explanation_is_the_recorded_row_and_not_a_replay_of_the_blend() {
             instance_curation:
                 lorehaven_domain::recommendation_transparency::InstanceCuration::NotInvolved,
             blend_score: 17,
+            // A synthetic slot, so `unattributed` is the honest mechanism: this
+            // row was never served by any surface. It is also the case that
+            // proves the north-star attribution reports `unattributed` rather
+            // than dropping the row or guessing a surface for it.
+            mechanism: None,
         },
     )
     .await

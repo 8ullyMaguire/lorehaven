@@ -92,6 +92,15 @@ pub struct SlotRecord {
     pub recipe_stage: Option<String>,
     pub instance_curation: InstanceCuration,
     pub blend_score: i64,
+    /// Which mechanism surfaced this slot, for the north-star attribution
+    /// (spec §53.5, migration 0115).
+    ///
+    /// `None` records `NULL`, which the metric reports as its own `unattributed`
+    /// bucket. That is the honest reading for a serve path that genuinely does not
+    /// know -- and it is also what a caller that forgets to set this field produces,
+    /// which is why the attribution tests assert on a named mechanism rather than
+    /// only on the total.
+    pub mechanism: Option<String>,
 }
 
 /// Record one served slot and return its id.
@@ -111,15 +120,20 @@ pub async fn record_slot(db: &Database, rec: &SlotRecord) -> Result<String> {
     let sql = db.sql(
         "INSERT INTO recommendation_slots
            (id, pseud_id, work_id, request_id, position, reasons, taste_signal,
-            seeded_by, recipe_stage, instance_curation, blend_score, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            seeded_by, recipe_stage, instance_curation, blend_score, mechanism, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         // `reasons` is JSONB on PostgreSQL and TEXT on SQLite, and the row is
         // read back as a String, so each arm casts on its own side: the
         // placeholder on PG, nothing on SQLite (which has no :: syntax at all).
+        //
+        // `mechanism` is TEXT on both (migration 0115) so it needs no cast on
+        // either arm. It is written in the SAME statement as `position`, which is
+        // the whole point: a separate write would let a serve path be missed and
+        // leave NULL rows with nothing to tell a reader why.
         "INSERT INTO recommendation_slots
            (id, pseud_id, work_id, request_id, position, reasons, taste_signal,
-            seeded_by, recipe_stage, instance_curation, blend_score, created_at)
-         VALUES (?::uuid, ?::uuid, ?::uuid, ?::uuid, ?, ?::jsonb, ?, ?, ?, ?, ?, ?::timestamptz)",
+            seeded_by, recipe_stage, instance_curation, blend_score, mechanism, created_at)
+         VALUES (?::uuid, ?::uuid, ?::uuid, ?::uuid, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?::timestamptz)",
     );
 
     match db.backend() {
@@ -136,6 +150,7 @@ pub async fn record_slot(db: &Database, rec: &SlotRecord) -> Result<String> {
                 .bind(&rec.recipe_stage)
                 .bind(rec.instance_curation.as_str())
                 .bind(rec.blend_score)
+                .bind(&rec.mechanism)
                 .bind(&now)
                 .execute(db.sqlite_pool().expect("sqlite handle"))
                 .await?;
@@ -153,6 +168,7 @@ pub async fn record_slot(db: &Database, rec: &SlotRecord) -> Result<String> {
                 .bind(&rec.recipe_stage)
                 .bind(rec.instance_curation.as_str())
                 .bind(rec.blend_score)
+                .bind(&rec.mechanism)
                 .bind(&now)
                 .execute(db.postgres_pool().expect("postgres handle"))
                 .await?;
@@ -1250,6 +1266,11 @@ mod tests {
             recipe_stage: None,
             instance_curation: InstanceCuration::NotInvolved,
             blend_score: 0,
+            mechanism: Some(
+                lorehaven_domain::recommendation_transparency::SlotMechanism::DiscoveryFeed
+                    .as_str()
+                    .to_string(),
+            ),
         };
         let json =
             serde_json::to_string(&rec.reasons.iter().map(|r| r.as_str()).collect::<Vec<_>>())

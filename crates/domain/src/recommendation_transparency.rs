@@ -40,6 +40,84 @@ pub enum SlotReason {
     SavedSearch,
 }
 
+/// Which surface surfaced a slot, for the north-star attribution (spec §53.5,
+/// migration 0115).
+///
+/// **Distinct from [`SlotReason`], and the difference is the whole point.** A reason
+/// says *why this work matched* ("its tags fit your profile"); a mechanism says *which
+/// surface put it in front of the reader* ("the discovery feed"). A reader who loves a
+/// work found through discovery has attributed that love to discovery even though the
+/// match itself was `taste_tags` — and the north-star metric is about the surfaces,
+/// because that is what an operator can change.
+///
+/// Conflating them would make the metric uncomputable: `taste_tags` appears in the
+/// search results, the discovery feed and a shelf at once, so a reason-keyed
+/// attribution would triple-count one work and answer a question nobody asked.
+///
+/// The set is deliberately small and closed. Every serve path names exactly one, so
+/// attribution shares always sum to 1.0 across mechanisms *plus* `unattributed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SlotMechanism {
+    /// The recommendation feed (`GET /discover`).
+    DiscoveryFeed,
+    /// A search result page.
+    Search,
+    /// Blind Date's daily pick.
+    BlindDate,
+    /// A shelf, or an explicit "more like this" on a work page.
+    SimilarToShelf,
+    /// Federation: a sister instance's pick.
+    Federated,
+    /// The operator curated this placement.
+    InstanceCuration,
+}
+
+impl SlotMechanism {
+    /// The wire form, which is also what gets persisted in
+    /// `recommendation_slots.mechanism`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SlotMechanism::DiscoveryFeed => "discovery_feed",
+            SlotMechanism::Search => "search",
+            SlotMechanism::BlindDate => "blind_date",
+            SlotMechanism::SimilarToShelf => "similar_to_shelf",
+            SlotMechanism::Federated => "federated",
+            SlotMechanism::InstanceCuration => "instance_curation",
+        }
+    }
+
+    /// Every mechanism, for a caller that has to iterate the vocabulary.
+    pub fn all() -> &'static [SlotMechanism] {
+        &[
+            SlotMechanism::DiscoveryFeed,
+            SlotMechanism::Search,
+            SlotMechanism::BlindDate,
+            SlotMechanism::SimilarToShelf,
+            SlotMechanism::Federated,
+            SlotMechanism::InstanceCuration,
+        ]
+    }
+
+    /// Parse a persisted mechanism. `None` for an unknown string, so a row written
+    /// by a future version degrades to `unattributed` rather than to a guess.
+    ///
+    /// Returning `None` rather than a fallback variant is deliberate: the
+    /// `unattributed` bucket is a reported quantity, and a mechanism this version
+    /// does not know about belongs in it — not folded into whichever existing
+    /// mechanism happens to sort first.
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "discovery_feed" => SlotMechanism::DiscoveryFeed,
+            "search" => SlotMechanism::Search,
+            "blind_date" => SlotMechanism::BlindDate,
+            "similar_to_shelf" => SlotMechanism::SimilarToShelf,
+            "federated" => SlotMechanism::Federated,
+            "instance_curation" => SlotMechanism::InstanceCuration,
+            _ => return None,
+        })
+    }
+}
+
 impl SlotReason {
     /// The wire form, which is also what gets persisted in `reasons`.
     pub fn as_str(self) -> &'static str {

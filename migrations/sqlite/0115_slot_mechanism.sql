@@ -1,0 +1,21 @@
+-- 0115: record the surfacing mechanism on each served slot (M45-23).
+--
+-- The north-star metric (spec §53.5) attributes a loved work to the mechanism that
+-- surfaced it. Until now a slot row recorded *that* a work was served and *where* it
+-- ranked, but not *which* mechanism put it there -- so the attribution had to be
+-- guessed, and every guess was a decision about a ranking signal baked into a metric.
+--
+-- Nullable, deliberately. Historical rows predate the column and the mechanism cannot
+-- be recovered from them: `reasons` is a reader-facing JSON explanation written for a
+-- person, and parsing prose to recover a mechanism would make the metric depend on
+-- how a sentence happens to be phrased. NULL means unattributed, which is honest and
+-- is reported as its own bucket rather than being dropped -- an unattributed loved work
+-- is a fact about the instance, not an error to hide.
+--
+-- Deliberately NOT backfilled from `reasons`. See above.
+--
+-- The write site is `recommendation_slots::record_slot`, the single production INSERT
+-- into this table. `mechanism` is populated in the same statement that writes
+-- `position`, so a serve path cannot be missed and silently produce NULLs forever.
+
+ALTER TABLE recommendation_slots ADD COLUMN mechanism TEXT;
