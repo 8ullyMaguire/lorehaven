@@ -1015,6 +1015,30 @@ def decoded_as_i64(text: str, pos: int) -> bool | None:
     # string.
     before = text[max(0, pos - 200) : pos]
     window = before + "\n" + text[pos : pos + 600]
+
+    # A `#[derive(FromRow)]` struct decodes this statement's rows, and there is NO
+    # annotation at the call site to read. The premise -- "a wide Rust type makes the
+    # site a fault" -- has to be answered from the struct instead.
+    #
+    # This is not hypothetical. `crates/db/src/concierge_store.rs` was reported for
+    # `budget_minutes` and `truncated_at`, both `pub Option<i32>` in `SessionRow`.
+    # The columns ARE in the struct, as i32, so the site is correct -- and I had
+    # already left a comment there saying so, having been misled by this same
+    # finding once. Applying the suggested `::bigint` makes sqlx fail to COMPILE
+    # the query (`Option<i32>` is not compatible with INT8), which is how `::int8`
+    # broke the PostgreSQL suite in an earlier pass. A gate whose advice breaks the
+    # build when followed teaches the reader to ignore the gate.
+    #
+    # So: resolve the struct's field types, and let each reported column be judged
+    # by ITS OWN declared type. A struct that does not name the column at all is
+    # undecidable, which this function's contract says must report.
+    fields = from_row_struct_fields(text)
+    if fields is not None:
+        for column in columns_decoded_by(text, pos):
+            declared = fields.get(column)
+            if declared is not None:
+                return "i64" in declared
+        return None
     # An explicit tuple or scalar annotation naming `i32` settles it.
     if re.search(r":\s*\(?[^)\n]*\bi32\b", window):
         return False
@@ -1039,6 +1063,67 @@ def decoded_as_i64(text: str, pos: int) -> bool | None:
 # FROM and braces where identifiers go; running it is not possible and it is not
 # meant to be.
 TEMPLATE_LITERAL = re.compile(r"\{\}|\{[a-z_]\w*\}")
+
+
+# `#[derive(FromRow)]` and `pub struct` in the same file, so a statement whose rows
+# are decoded by a struct can be judged by that struct's field types. Returns None
+# when the file declares no such struct, which keeps the caller on its existing
+# "undecidable, so report" path rather than guessing.
+FROM_ROW_STRUCT = re.compile(
+    r"#\[derive\((?:[^)]*\bFromRow\b[^)]*)\)\]\s*"
+    r"(?:#\[[^\]]*\]\s*)*"
+    r"(?:pub\s+)?struct\s+(\w+)[^{]*\{",
+    re.MULTILINE,
+)
+FIELD = re.compile(r"pub\s+(\w+)\s*:\s*([^,]+(?:<[^>]*>)?),")
+
+
+def from_row_struct_fields(text: str) -> dict[str, str] | None:
+    """`column -> Rust type` for the first `FromRow` struct in `text`.
+
+    The first, because the overwhelmingly common case is one row struct per store
+    module (`SessionRow`, `TastingRow`, ...). A module with several is judged by its
+    first, which can only cause a missed report -- never a false one, because the
+    caller still reports anything the struct does not name.
+    """
+    match = FROM_ROW_STRUCT.search(text)
+    if match is None:
+        return None
+    start = match.end()
+    depth = 1
+    i = start
+    while i < len(text) and depth:
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+        i += 1
+    body = text[start : i - 1]
+    # A doc comment between fields may contain a colon and a comma.
+    body = re.sub(r"//[^\n]*", "", body)
+    return {name: ty.strip() for name, ty in FIELD.findall(body)}
+
+
+def columns_decoded_by(text: str, pos: int) -> set[str]:
+    """Column names in the SELECT list of the statement at `pos`.
+
+    Best-effort and deliberately narrow: it strips casts (`id::text` -> `id`) and
+    stops at the first clause boundary. Anything it cannot see is simply not in the
+    set, and the caller treats "not named" as undecidable -- so this can only ever
+    turn a report into a non-report when the struct says so.
+    """
+    window = text[pos : pos + 600]
+    end = re.search(r"\b(FROM|WHERE|GROUP|ORDER|LIMIT|HAVING)\b", window, re.IGNORECASE)
+    select = window[: end.start()] if end else window
+    columns = set()
+    for item in select.split(","):
+        item = item.strip().strip('"')
+        item = re.sub(r"\s+AS\s+\w+.*$", "", item, flags=re.IGNORECASE)
+        item = re.sub(r"::\w+(\[\])?", "", item)
+        item = item.split(".")[-1].strip('"')
+        if re.fullmatch(r"\w+", item):
+            columns.add(item)
+    return columns
 
 
 def int4_sites(
