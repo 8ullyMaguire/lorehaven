@@ -6,9 +6,13 @@ import NewInYourFandoms from './NewInYourFandoms.svelte';
 import SimilarWorksRail from './SimilarWorksRail.svelte';
 
 /**
- * A minimal surface work. Only the fields the rails actually read are required, which is
- * the point: `SurfaceWork` makes `recent_bookmarks` and `similarity` optional precisely
- * so a fixture cannot accidentally claim a measurement the server never took.
+ * A minimal surface work.
+ *
+ * `recent_bookmarks` and `similarity` are optional on `SurfaceWork` so a fixture cannot
+ * claim a measurement the server never took. `word_count` is NOT, and this fixture
+ * compiling is the check: the server COALESCEs the aggregate to 0, so "no chapters" is a
+ * true 0 and never an absent field. Making it optional to silence a type error here would
+ * reintroduce the `undefined` the store deliberately does not produce.
  */
 function work(id: string, title: string, extra: Partial<SurfaceWork> = {}): SurfaceWork {
   return {
@@ -16,6 +20,7 @@ function work(id: string, title: string, extra: Partial<SurfaceWork> = {}): Surf
     title,
     summary: 'a summary',
     completion: 'complete',
+    word_count: 0,
     ...extra,
   };
 }
@@ -154,5 +159,76 @@ describe('SimilarWorksRail', () => {
     );
     const { getAllByRole } = render(SimilarWorksRail, { props: { works } });
     expect(getAllByRole('listitem')).toHaveLength(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Item 4: reading time on every rail
+// ---------------------------------------------------------------------------
+
+describe('reading length (item 4)', () => {
+  /**
+   * The count assertion comes FIRST, in the very first test below. Without it, every
+   * "renders no length" assertion here would pass just as well against a component that
+   * renders nothing at all — which is the false green this project has already shipped.
+   */
+  it('shows words and minutes on each rail that renders works', () => {
+    const long = work('w1', 'Long Serial', { word_count: 12_000 });
+    const mb = render(MostBookmarkedThisWeek, { props: { works: [long] } });
+    // "12k", not "12.0k": the formatter keeps one decimal only below 10,000, and a
+    // count that reads "12.0k" implies a precision the number does not have.
+    expect(mb.getAllByTestId('work-length')[0].textContent).toContain('12k words');
+    expect(mb.getAllByTestId('work-length')[0].textContent).toContain('~48 min');
+
+    const feed = render(NewInYourFandoms, { props: { works: [long] } });
+    expect(feed.getAllByTestId('work-length')[0].textContent).toContain('~48 min');
+
+    const rail = render(SimilarWorksRail, { props: { works: [long] } });
+    expect(rail.getAllByTestId('work-length')[0].textContent).toContain('~48 min');
+  });
+
+  it('rounds UP, so a 5.04-minute work does not claim five', () => {
+    // The audit's formula is count / 250. 1260 words is 5.04 minutes: rounding to
+    // nearest says "5 min", which is the direction a reader is hurt in.
+    const { container } = render(MostBookmarkedThisWeek, {
+      props: { works: [work('w1', 'Just Over', { word_count: 1260 })] },
+    });
+    expect(container.textContent).toContain('~6 min');
+    expect(container.textContent).not.toContain('~5 min');
+  });
+
+  /**
+   * 200 words, not 300. 300 / 250 is 1.2 and `ceil(1.2)` is 2, so a 300-word fixture
+   * correctly says "~2 min" — my first version of this test asserted "about a minute"
+   * against it and the code was right and the fixture was wrong. The boundary that
+   * produces one minute is anything up to 250 words.
+   */
+  it('says "about a minute" rather than "~1 min", which reads like a measurement', () => {
+    const { container } = render(MostBookmarkedThisWeek, {
+      props: { works: [work('w1', 'A Drabble', { word_count: 200 })] },
+    });
+    expect(container.textContent).toContain('about a minute');
+    expect(container.textContent).toContain('200 words');
+    expect(container.textContent).not.toContain('~1 min');
+  });
+
+  it('shows "no words yet" for a zero count instead of hiding the length', () => {
+    // 0 is a real value the server computed, not a missing field. Hiding it would make an
+    // unwritten work indistinguishable from one the server failed to measure.
+    const { container } = render(MostBookmarkedThisWeek, {
+      props: { works: [work('w1', 'Unwritten', { word_count: 0 })] },
+    });
+    expect(container.textContent).toContain('no words yet');
+  });
+
+  it('renders no length line at all when the count is absent', () => {
+    // The only case that produces nothing — and it needs an explicit `undefined`, because
+    // the type does not allow a missing `word_count`. This is what a server rollback or an
+    // older instance would look like.
+    const w = work('w1', 'Unmeasured');
+    (w as { word_count?: number }).word_count = undefined;
+    const { container } = render(MostBookmarkedThisWeek, { props: { works: [w] } });
+    expect(container.querySelectorAll('[data-testid=work-length]')).toHaveLength(0);
+    expect(container.textContent).toContain('Unmeasured');
   });
 });

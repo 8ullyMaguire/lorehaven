@@ -5,6 +5,7 @@
    * importable in Svelte 5.
    */
   import type { SurfaceWork } from '../api';
+  import { readingLength } from '../readingLength';
   export type { SurfaceWork };
 </script>
 
@@ -78,6 +79,9 @@
               {percent(work)}
             </span>
           {/if}
+          {#if readingLength(work.word_count)}
+            <span class="length" data-testid="work-length">{readingLength(work.word_count)}</span>
+          {/if}
         </li>
       {/each}
     </ul>
@@ -134,5 +138,12 @@
     color: var(--color-muted);
     font-size: var(--text-sm);
     font-variant-numeric: tabular-nums;
+  }
+
+  .length {
+    margin-left: 0.5rem;
+    font-size: 0.8rem;
+    opacity: 0.7;
+    white-space: nowrap;
   }
 </style>
