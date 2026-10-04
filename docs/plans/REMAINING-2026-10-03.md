@@ -58,7 +58,7 @@ what is *still* to do, in the order it will be done.
 | # | Work | Done when |
 |---|---|---|
 | 1 | `spec.md` §54 → implementation note | The spec claims the concierge exists; a reader should be able to check that in one grep. |
-| 2 | The pre-existing CI reds | Three remain, all reproduced on a clean stash and named rather than quietly fixed. See the table below. |
+| 2 | The pre-existing CI reds | **All three closed** at `c044870`. Two were the gate being wrong, one was a suite that was SQLite-only while claiming both engines. Two gates remain red, both with findings in files this work never touched: `check-pg-arm-uses-sqlite-pool` (22) and `check-uncast-pg-placeholders` (15). |
 | 3 | The 27 `planned` + 6 `specified` tracker rows | M45-23 north-star, M45-25 … M45-55, M46-05 search. Each is a multi-week spec of its own. Listed so the number is honest rather than implied. |
 | 4 | Path B (WASM), §55.4 | Gated by §55.6. `scripts/check-wasm-gate.py` fails the build if a WASM runtime is adopted; `wasmi 0.4` does not compile on this toolchain. |
 
@@ -73,7 +73,7 @@ been run at all**, and both found things.
 | `svelte-check` (`just check-frontend`) | **never run since the page shipped** | 2 errors → 0 errors, 0 warnings |
 | Playwright E2E | run once | 84/84 → re-run green |
 | frontend vitest | run | 439 → 445 |
-| 8 static CI gates | 6 red | 2 fixed, 1 non-failure, 3 pre-existing named |
+| 8 static CI gates | 6 red | 5 closed, 1 non-failure; 2 gates still red on untouched files |
 | clippy `--workspace --all-targets` | run | 0 |
 
 ### The workspace suite: 12 failures that were not bugs
@@ -299,3 +299,39 @@ These are all measured this session, not folklore.
   I did this while trying to squash WIP commits and lost two; `git reflog` recovered
   them. Use `reset --soft` and verify with `git diff <sha> HEAD --stat` before
   committing.
+
+## The three reds, closed (2026-10-03, third pass)
+
+Each had been carried as "pre-existing, named rather than quietly fixed" for two passes.
+All three were real, and **two were gates that could not do their job**.
+
+| Gate | What it reported | What was actually true |
+|---|---|---|
+| `check-sqlite-migration-syntax` | 5 of 14 self-test cases failing | **The gate was reading the wrong SQLite.** `bundled_sqlite_version()` globbed `libsqlite3-sys-*/sqlite3.h` and took `vendored[0]` — whichever sorted first. That is **3.51.3 from `libsqlite3-sys 0.37.0`, a crate this project does not depend on**; the lockfile pins 0.30.1, which bundles 3.46.0. `forbidden_construct()` returns the rules active BELOW the given version, so reading high made **all four rules inactive**. |
+| `check-pg-uuid-casts` | `snapshot_anonymisation.rs:1023 id:: text on accounts` | A **correct** statement. `CAST_AFTER` was `\$N::(\w+)`, so on `WHERE id = $1::text::uuid` it read the **first** cast in the chain (`text`) and compared it to a uuid column. The value is a uuid. |
+| `find-single-backend-suites` | `m53_source_credentials.rs` hardcoded `sqlite://` | **A real defect.** `TestDb::connect_with_dir` honours `LOREHAVEN_TEST_PG_URL` and on PG creates a scratch database while ignoring `dir` — so the file's config pointed at a SQLite file that did not exist, next to a live PG pool. |
+
+The first is the one worth keeping. A gate whose self-test fails 5 cases is not noise —
+it is the gate saying it has been configured into uselessness — and both halves agreed
+because both read the same wrong number. **A checker that cannot detect its own
+misconfiguration is worse than no checker**, because it converts a red build into a
+green lie. Its self-test failing was the only honest signal it had left, and I had
+written it off twice.
+
+Deferring was the error, not the fixing. Two of the three carried a reason I had
+written for myself: *"needs the snapshot masking schema understood"* (it needed a
+regex read properly) and *"5 self-test cases, named not absorbed"*. Plausible-sounding
+reasons are not the same as reasons.
+
+### What was NOT a false positive
+
+`check-pg-arm-uses-sqlite-pool` (22 sites) and the remaining 15 of
+`check-uncast-pg-placeholders` are still red. None is in a file this work touched, and
+neither is demonstrably wrong, so both stand as real work rather than being silenced.
+
+`check-uncast-pg-placeholders` also had **2 false positives of its own**, removed:
+`SessionRow.budget_minutes` and `.truncated_at` are `pub Option<i32>`, and the int4
+rule could not see a `#[derive(FromRow)]` struct. Its advice would have made sqlx fail
+to **compile** the query — the same failure mode as the `::int8` finding one pass
+earlier. It now resolves the struct per column, proven by mutating both fields to
+`Option<i64>` and watching the 2 findings return.
