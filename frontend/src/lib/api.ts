@@ -4509,6 +4509,15 @@ export interface SurfaceWork {
   summary: string;
   completion: string;
   published_at?: string | null;
+  /**
+   * Item 4: total words across the work's CURRENT chapter revisions.
+   *
+   * Required, not optional, because the server COALESCEs the aggregate to 0: a work with
+   * no chapters is 0 words, which is a true answer. Making it optional here would put
+   * `undefined` in front of every caller for a work that simply has no prose yet, and a
+   * card that hides the count for "absent" would then also hide it for 0.
+   */
+  word_count: number;
   /** Item 27: distinct PUBLIC bookmarkers inside the window. */
   recent_bookmarks?: number;
   /** Item 33: weighted-Jaccard score, always within [0,1] when present. */

@@ -5,6 +5,7 @@
    * importable in Svelte 5.
    */
   import type { SurfaceWork } from '../api';
+  import { readingLength } from '../readingLength';
   export type { SurfaceWork };
 </script>
 
@@ -60,6 +61,9 @@
           {:else}
             <span class="title">{work.title}</span>
           {/if}
+          {#if readingLength(work.word_count)}
+            <span class="length" data-testid="work-length">{readingLength(work.word_count)}</span>
+          {/if}
         </li>
       {/each}
     </ul>
@@ -104,5 +108,12 @@
   .title:hover {
     text-decoration: underline;
     text-underline-offset: 2px;
+  }
+
+  .length {
+    margin-left: 0.5rem;
+    font-size: 0.8rem;
+    opacity: 0.7;
+    white-space: nowrap;
   }
 </style>

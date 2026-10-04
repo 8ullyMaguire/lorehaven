@@ -103,6 +103,35 @@
     return `${(count / 1000).toFixed(count < 10000 ? 1 : 0)}k words`;
   }
 
+  /**
+   * Item 4 of the 100-idea audit: estimated reading time.
+   *
+   * ## 250 words a minute, and why that number is not hidden here
+   *
+   * The audit's own formula, and it is the right one: it is the middle of the usual
+   * 200-300 wpm range, so the estimate errs toward SHORT rather than long. A reader who
+   * starts a 40-minute fic on a train and finds it is 55 does not blame the number.
+   *
+   * ## Why < 1 minute is shown at all
+   *
+   * `readingTime` returns `undefined` only when the count is absent, never for a small
+   * value, because "under a minute" is information: it distinguishes a one-shot fic from
+   * something to plan an evening around. The alternative — hiding it — makes a 400-word
+   * drabble and a 900-word scene indistinguishable on the card.
+   *
+   * ## Rounding is UP, not to nearest
+   *
+   * 1,250 words is 5.0 minutes and 1,260 is 5.04. `Math.ceil` says 6 and 6; rounding to
+   * nearest says 5 and 5. The second understates, and a card that says "5 min" for
+   * something that takes six is a promise the reader experiences as a lie. Over-estimating
+   * by a minute costs nothing; under-estimating costs the reader their place on the train.
+   */
+  function readingTime(count?: number): string | undefined {
+    if (count === undefined) return undefined;
+    const minutes = Math.ceil(count / 250);
+    return minutes === 1 ? 'about a minute' : `~${minutes} min`;
+  }
+
   /** Format a metric count for display: 1.2k, 3.4k, etc. */
   function formatCount(n: number): string {
     if (n < 1000) return `${n}`;
@@ -168,6 +197,9 @@
     {/if}
     {#if formatWords(work.wordCount)}
       <MetadataChip label={formatWords(work.wordCount)!} />
+    {/if}
+    {#if readingTime(work.wordCount)}
+      <MetadataChip label={readingTime(work.wordCount)!} />
     {/if}
   </div>
 

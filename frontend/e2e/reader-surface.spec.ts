@@ -330,3 +330,37 @@ test('new in your fandoms: absent for a reader whose only bookmarks are private'
   // test, which uses the same fandom and the same kind of work.
   await expect(page.locator('section[aria-labelledby="new-in-your-fandoms-heading"]')).toHaveCount(0);
 });
+
+/**
+ * Item 4: the leaderboard shows words and estimated reading time.
+ *
+ * This is the assertion that the store column actually REACHES a reader. The store half is
+ * covered by 22 tests on two engines and the render half by 21 component tests, and both
+ * halves can be correct while the number never arrives: the client type is `SurfaceWork`,
+ * the server serialises `word_count`, and a rename on either side leaves every unit test
+ * green. Only a journey that reads the rendered page can see the join.
+ *
+ * `publish` writes a chapter through the editor, so the count comes from a real
+ * `chapter_revisions` row rather than a fixture insert — which means this also proves the
+ * aggregate reaches the CURRENT revision of a chapter the reader just wrote.
+ */
+test('most bookmarked: the card shows words and estimated reading time', async ({ page }) => {
+  await ensureAccount(page, author);
+  const work = await publish(page, 'Rs Length Reported');
+  await bookmark(page.request, { subjectId: work, isPublic: true });
+
+  await page.goto('/discover');
+  const rail = page.locator('section[aria-labelledby="most-bookmarked-heading"]');
+  await expect(rail).toBeVisible();
+
+  const length = rail
+    .locator('li', { hasText: 'Rs Length Reported' })
+    .locator('[data-testid=work-length]');
+  await expect(length).toBeVisible();
+  // "no words yet" would mean the aggregate found nothing, which is the specific failure
+  // this asserts against: a rail that renders a card and no length at all looks identical
+  // to one that renders both.
+  await expect(length).not.toContainText('no words yet');
+  await expect(length).toContainText('words ·');
+  await expect(length).toContainText(/min|minute/);
+});
