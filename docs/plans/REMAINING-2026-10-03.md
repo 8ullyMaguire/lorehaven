@@ -666,3 +666,60 @@ The 13 arithmetic tests call the **real** functions, which are `pub` for that re
 earlier draft re-implemented `median` locally — the same mistake
 `arena_weights_decode.rs` records, where a hand-copied query stayed green while the real
 one in `tasting.rs` had been reverted.
+
+### Step 3 — the route, and a committed fix that was silently lost
+
+`GET /admin/metrics/north-star`, operator-only, registered in `route_inventory.rs` as
+`Audience::Operator` so it is *declared* as well as mounted.
+
+The plan said to copy M45-18's route constraints rather than reinvent them. That route is
+`flows.rs`, and its three constraints are copied with their reasons:
+
+| constraint | why |
+|---|---|
+| **404, not 403** | for an operator view the *existence* is the disclosure — 403 answers "yes, and you may not" |
+| **no per-account detail** | §53.2, asserted at the type level *and* by walking the response body |
+| **no target, no grade** | §53.5: "The number is read, not chased." |
+
+Case 4 of the route tests is the one that cannot be written by copying a sibling: the rule
+is an **absence**, so it is tested by walking every key in the body at every depth and
+banning `target`, `goal`, `grade`, `expected`, `threshold`, `benchmark`. Asserting
+`body["target"]` is absent would pass just as well with a field named `goal_rate`.
+
+#### The lesson that cost the most: a committed fix that was silently lost
+
+The `GROUP BY r.created_at` fix for PostgreSQL's `42803` **was committed**, and then lost:
+
+1. a mutation run reverted it,
+2. `cp` put back a whitespace-different copy,
+3. a later `git checkout` — intended *only* to undo trailing whitespace — restored an
+   **earlier commit's** version, dropping the edit.
+
+Nothing failed. SQLite stayed 7/7, fmt and clippy stayed clean, and `git status` showed a
+clean tree — **because the lost edit was the committed one.**
+
+It surfaced as four 500s from the route test, masked behind "Something went wrong on our
+side". Cost: a detour through `psql` and three temporary diagnostics before running the
+obvious check — *is the fix still in the file?*
+
+> **After any mutation-and-restore cycle, `grep` for the fix.** `git status` clean means
+> "matches HEAD", not "correct". The reason is now written into the source at the fix.
+
+#### Mutation testing is easy to do vacuously
+
+Four attempts to prove the 404 rule, and the first three proved **nothing**:
+
+| # | mutation | outcome |
+|---|---|---|
+| 1 | remove the gate call | did not compile — unused-variable warnings are denied |
+| 2 | `AppError::Forbidden` | no such variant |
+| 3 | `AppError::AccessDenied { resource }` | that variant takes no field |
+| 4 | `AppError::AccessDenied` | **403 → exactly case 1 red, other three green** |
+
+A mutation that does not compile is not a verdict. Check that the run actually executed.
+
+#### One test-helper bug
+
+`account_id_by_handle` decoded `accounts.id` as `String` on both engines; it is **UUID** on
+PostgreSQL, so all four tests 500ed there with a `ColumnDecode` error naming no column.
+Per-engine decode now, the way `flow_dashboard.rs` already does it.
