@@ -89,7 +89,9 @@
 </script>
 
 <section aria-labelledby="flows-heading">
-  <h2 id="flows-heading">Faucets and sinks</h2>
+  <!-- h1, not h2: this page had no top-level heading at all, so it
+       announced to a screen reader as though its title had been lost. -->
+  <h1 id="flows-heading">Faucets and sinks</h1>
 
   {#if loading}
     <Skeleton lines={4} label="Loading the economy" />

@@ -113,16 +113,30 @@ describe('application shell', () => {
     const brand = document.querySelector('header .brand');
     expect(brand?.textContent?.trim()).toBe('Lorehaven');
 
-    for (const label of [
-      'Discover',
-      'Search',
-      'Library',
-      'Write',
-      'Community',
-      'Notifications',
-      'Pseud',
-    ]) {
+    // The four destinations a person arrives to do are plain links in the row.
+    for (const label of ['Discover', 'Search', 'Library', 'Write']) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
+    }
+
+    // The rest live under five menus rather than in one eighteen-link row. The
+    // menu TRIGGERS are always rendered; their contents are not, because a menu
+    // that renders its items when closed is not a menu.
+    const triggers = screen.getAllByTestId('menu-trigger').map((b) => b.textContent?.trim() ?? '');
+    for (const menu of ['Read', 'Write', 'Library', 'Community', 'More']) {
+      expect(triggers).toContain(menu);
+    }
+
+    // The point of the redesign: a reader must not have to scroll a hidden
+    // overflow row to find where things are. Every destination is reachable
+    // from the header, by link or by opening one menu.
+    const inHeader = new Set<string>();
+    for (const a of document.querySelectorAll('header a')) {
+      const href = a.getAttribute('href');
+      if (href) inHeader.add(href);
+    }
+    // Four primary links plus the drawer, which lists all eighteen.
+    for (const href of ['/discover', '/library', '/search', '/write']) {
+      expect(inHeader.has(href)).toBe(true);
     }
   });
 
@@ -135,6 +149,10 @@ describe('application shell', () => {
     mockShell(false);
     render(App);
 
+    // The queue sits in the Library menu now, so the link is not rendered until
+    // the menu opens. Asserting the link exists without opening the menu would
+    // pass on the old header and fail here for the right reason.
+    await fireEvent.click(screen.getAllByTestId('menu-trigger')[2]);
     const link = screen.getAllByRole('link', { name: /your queue/i });
     expect(link.length).toBeGreaterThan(0);
     expect(link[0].getAttribute('href')).toBe('/concierge');
@@ -213,9 +231,16 @@ describe('application shell', () => {
     await waitFor(() => {
       expect(screen.getByText('0.1.0+abc1234')).toBeInTheDocument();
     });
-    // The health panel is rendered from the readiness response.
-    expect(await screen.findByText('sqlite reachable')).toBeInTheDocument();
-    expect(screen.getByText('1 migration(s) applied')).toBeInTheDocument();
+    // Health is summarised on the landing page now rather than listed check by
+    // check, so the assertion is the honest one: when everything passes, the
+    // page says so in one line and names no individual check.
+    //
+    // The earlier version asserted `sqlite reachable` appeared. That was the
+    // reason the landing page opened with a status panel, and a front door that
+    // greets a visitor with a database connection string is the problem this
+    // page was rewritten to fix.
+    expect(await screen.findByText(/all services healthy/)).toBeInTheDocument();
+    expect(screen.queryByText('sqlite reachable')).not.toBeInTheDocument();
   });
 
   it('applies and persists an appearance choice', async () => {

@@ -94,7 +94,7 @@
 </script>
 
 <div class="user-search">
-  <h2>Find people</h2>
+  <h1>Find people</h1>
 
   <form on:submit|preventDefault={runSearch}>
     <div class="row">

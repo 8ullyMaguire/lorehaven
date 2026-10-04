@@ -2,6 +2,7 @@
   import Button from './lib/components/Button.svelte';
   import { clearCopies, copiesUsage } from './lib/offline';
   import Drawer from './lib/components/Drawer.svelte';
+  import NavMenu from './lib/components/NavMenu.svelte';
   import Select from './lib/components/Select.svelte';
   import Account from './routes/Account.svelte';
   import AdminJobs from './routes/AdminJobs.svelte';
@@ -58,27 +59,85 @@
     type ThemePreference,
   } from './lib/theme';
 
-  /** Navigation (Milestone 1). Labels stay plain words, per the theme. */
-  const NAV = [
-    { href: '/discover', label: 'Discover', primary: true },
-    { href: '/concierge', label: 'Your queue' },
-    { href: '/blind-date', label: 'Blind Date' },
-    { href: '/arena', label: 'Arena' },
-    { href: '/search', label: 'Search', primary: true },
-    { href: '/media', label: 'Media', primary: false },
-    { href: '/library', label: 'Library', primary: true },
-    { href: '/library/history', label: 'History', primary: false },
-    { href: '/analytics', label: 'Analytics', primary: false },
-    { href: '/import', label: 'Import', primary: true },
-    { href: '/exports', label: 'Exports', primary: false },
-    { href: '/write', label: 'Write', primary: true },
-    { href: '/community', label: 'Community', primary: false },
-    { href: '/roadmap', label: 'Roadmap', primary: false },
-    { href: '/directory', label: 'Directory', primary: false },
-    { href: '/docs', label: 'Help', primary: false },
-    { href: '/notifications', label: 'Notifications', primary: false },
-    { href: '/pseud', label: 'Pseud', primary: false },
+  /**
+   * Navigation (Milestone 1). Labels stay plain words, per the theme.
+   *
+   * This was EIGHTEEN links in one scrolling row, which read as a wall of
+   * equally-weighted nouns. Nothing in the header was important-looking, so
+   * nothing was. It also overflowed silently: `.desktop` hides its own
+   * scrollbar, so the destinations past the fold simply did not exist as far as
+   * anyone could see.
+   *
+   * Now: FOUR top-level destinations plus two menus. The four are the things
+   * people arrive to do -- find something, read, write, and your own library.
+   * Everything else is a noun that belongs to one of them, so it lives under
+   * one.
+   *
+   * The grouping is chosen by what each destination IS FOR, not by what it is
+   * called. That is why "Search" sits under Read rather than standing alone: a
+   * person looking for a specific work is reading, and a person browsing is
+   * discovering; both are the same job. It is also why Import and Export are
+   * under Write -- they are the two ends of the same task, moving a work in or
+   * out of the archive.
+   *
+   * `FLAT` is the same list flattened, kept for the drawer, so a destination
+   * cannot be added to a group and silently vanish from mobile. One source of
+   * truth, two layouts.
+   */
+  const NAV_GROUPS = [
+    { label: 'Read', items: [
+      { href: '/discover', label: 'Discover' },
+      { href: '/search', label: 'Search' },
+      { href: '/media', label: 'Media' },
+      { href: '/blind-date', label: 'Blind Date' },
+      { href: '/arena', label: 'Arena' },
+    ] },
+    { label: 'Write', items: [
+      { href: '/write', label: 'Write' },
+      { href: '/import', label: 'Import' },
+      { href: '/exports', label: 'Exports' },
+    ] },
+    { label: 'Library', items: [
+      { href: '/library', label: 'Your library' },
+      { href: '/library/history', label: 'Reading history' },
+      { href: '/analytics', label: 'Analytics' },
+      { href: '/concierge', label: 'Your queue' },
+    ] },
+    { label: 'Community', items: [
+      { href: '/community', label: 'Forum' },
+      { href: '/directory', label: 'Directory' },
+      { href: '/roadmap', label: 'Roadmap' },
+    ] },
+    { label: 'More', items: [
+      { href: '/notifications', label: 'Notifications' },
+      { href: '/pseud', label: 'Your pseuds' },
+      { href: '/docs', label: 'Help' },
+    ] },
   ];
+
+  /** The four destinations a person arrives to do. */
+  const PRIMARY = [
+    { href: '/discover', label: 'Discover' },
+    { href: '/library', label: 'Library' },
+    { href: '/search', label: 'Search' },
+    { href: '/write', label: 'Write' },
+  ];
+
+  const FLAT = NAV_GROUPS.flatMap((group) => group.items);
+
+  /**
+   * A destination is current if the path IS it, or is inside it. Exact-match
+   * alone left `/library/history` highlighting nothing, and left `/arena` inert
+   * on a sub-path.
+   */
+  function isCurrent(href: string): boolean {
+    return path === href || path.startsWith(`${href}/`);
+  }
+
+  /** True when any destination in a group is current, so the group says so. */
+  function groupIsCurrent(items: { href: string }[]): boolean {
+    return items.some((item) => isCurrent(item.href));
+  }
 
   let path = $state(window.location.pathname);
   let moreOpen = $state(false);
@@ -203,15 +262,28 @@
       <span class="wordmark">Lorehaven</span>
     </a>
 
+    <!--
+      Four destinations and two menus, where there were eighteen links in one
+      scrolling row. The row hid its own scrollbar, so the destinations past the
+      fold were invisible rather than merely cramped.
+    -->
     <nav class="desktop" aria-label="Main">
-      {#each NAV as item (item.href)}
+      {#each PRIMARY as item (item.href)}
         <a
           href={item.href}
-          aria-current={path === item.href ? 'page' : undefined}
+          aria-current={isCurrent(item.href) ? 'page' : undefined}
           onclick={(event) => onLinkClick(event, item.href)}
         >
           {item.label}
         </a>
+      {/each}
+      {#each NAV_GROUPS as group (group.label)}
+        <NavMenu
+          label={group.label}
+          items={group.items}
+          current={groupIsCurrent(group.items)}
+          onnavigate={(href, event) => handleLinkClick(event, href)}
+        />
       {/each}
     </nav>
 
@@ -260,10 +332,10 @@
 
   <!-- Mobile navigation: four destinations plus everything else behind More. -->
   <nav class="mobile" aria-label="Main">
-    {#each NAV.filter((item) => item.primary) as item (item.href)}
+    {#each PRIMARY as item (item.href)}
       <a
         href={item.href}
-        aria-current={path === item.href ? 'page' : undefined}
+        aria-current={isCurrent(item.href) ? 'page' : undefined}
         onclick={(event) => onLinkClick(event, item.href)}
       >
         {item.label}
@@ -378,9 +450,24 @@
 </footer>
 
 <Drawer title="More" open={moreOpen} onclose={() => (moreOpen = false)}>
+  <!--
+    The same five groups, flat-listed but still headed. Eighteen links in one
+    undifferentiated list is the drawer version of the same problem the header
+    had; the headings cost nothing and let someone find the neighbourhood they
+    are looking for.
+  -->
   <nav class="drawer-nav" aria-label="More destinations">
-    {#each NAV as item (item.href)}
-      <a href={item.href} onclick={(event) => onLinkClick(event, item.href)}>{item.label}</a>
+    {#each NAV_GROUPS as group (group.label)}
+      <h3 class="drawer-group">{group.label}</h3>
+      {#each group.items as item (item.href)}
+        <a
+          href={item.href}
+          aria-current={isCurrent(item.href) ? 'page' : undefined}
+          onclick={(event) => onLinkClick(event, item.href)}
+        >
+          {item.label}
+        </a>
+      {/each}
     {/each}
   </nav>
 
@@ -497,22 +584,21 @@
    * rather than a guess. The overflow scroll is the escape hatch for a
    * narrow window; the items are reachable by keyboard and by tab either way.
    */
+  /* Four links and five menus. `flex-wrap: nowrap` with NO overflow scroll, on
+     purpose: the previous rule set was `overflow-x: auto` with the scrollbar
+     hidden, which meant eighteen links scrolled sideways invisibly and anything
+     past the fold did not exist as far as a reader could tell. If this row ever
+     needs to overflow again it should wrap, not hide. */
   .desktop {
     display: none;
     gap: var(--space-5);
     margin-left: var(--space-5);
     flex: 1;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
+    flex-wrap: wrap;
+    min-width: 0;
   }
 
-  /* A nav that scrolls should not advertise a scrollbar it hides. */
-  .desktop::-webkit-scrollbar {
-    display: none;
-  }
-
-  .desktop a {
+  .desktop > a {
     color: var(--color-muted);
     text-decoration: none;
     font-weight: 600;
@@ -520,13 +606,26 @@
     border-bottom: 2px solid transparent;
   }
 
-  .desktop a:hover {
+  .desktop > a:hover {
     color: var(--color-text);
   }
 
-  .desktop a[aria-current='page'] {
+  .desktop > a[aria-current='page'] {
     color: var(--color-text);
     border-bottom-color: var(--color-accent);
+  }
+
+  .drawer-group {
+    font-family: var(--font-interface);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-muted);
+    margin: var(--space-4) 0 var(--space-1);
+  }
+
+  .drawer-group:first-child {
+    margin-top: 0;
   }
 
   .controls {
