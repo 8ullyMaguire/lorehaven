@@ -184,6 +184,284 @@ fn blind_date_seed(account: &str, today: &str) -> String {
     format!("{hash:016x}")
 }
 
+// -----------------------------------------------------------------------------------------
+// Surprise Me (spec §16.10, audit item 7)
+// -----------------------------------------------------------------------------------------
+
+/// One work for the reader's Surprise Me surface.
+///
+/// ## Why this is not Blind Date with a different seed
+///
+/// §16.10 says the reader "explicitly requests recommendations outside their profile. The
+/// system inverts usual weighting." Blind Date also leaves the profile, but by *ignoring*
+/// it — it has no eligibility clause about taste at all, because it picks by a hash over
+/// everything publishable. Surprise Me's whole job is the opposite: it must go
+/// specifically AWAY from what the feed already serves, so the exclusion has to be
+/// written down. A reseed of Blind Date would be a second random slot, and the discovery
+/// page already has one.
+///
+/// ## The inversion is an EXCLUSION, not a negative score
+///
+/// "Inverts the weighting" could be read as scoring candidates as `-affinity`. That is
+/// worse than useless here: it would rank the *least interesting* work in the catalogue
+/// first, and a reader who clicks it learns nothing and concludes the button is broken.
+///
+/// So the rule is the one that survives contact with a reader: exclude what the profile
+/// already loves, then order the rest arbitrarily-but-stably. The profile narrows the set;
+/// it never ranks within what is left. That is why there is no score column in
+/// `SurpriseCandidate` beyond the one used for ordering.
+///
+/// ## Eligibility, clause by clause
+///
+/// * **published, public, not deleted** — a work nobody can read is not an answer.
+/// * **not bookmarked by this reader** — the same clause Blind Date has, and for the same
+///   reason: showing someone their own save is the mistake every other strategy avoids.
+/// * **not tagged with ANY node the profile weights.** This is the load-bearing clause and
+///   the whole feature. `taste_profiles.signals` is a set of taxonomy node ids, so
+///   "outside the profile" is expressible as "shares no tag with the profile".
+/// * **A profile with no tags must not 404.** A reader who has never rated anything has
+///   signals `{}`, the exclusion matches nothing, and the whole catalogue is eligible.
+///   That is the correct answer — there is no profile to go outside of — and it is why the
+///   `json_each` subquery is inside a `NOT EXISTS` rather than a join. A JOIN would return
+///   zero rows for an empty profile and report "no surprises available", which is a
+///   different and wrong claim.
+///
+/// ## Excluded but NOT: the reader's own works
+///
+/// Blind Date excludes authors the reader has finished. Surprise Me deliberately does not:
+/// the mode is about *taste* distance, and a reader who writes in a genre they do not read
+/// has every right to be surprised by their own back catalogue. Excluding it here would
+/// make the surface return nothing on a small instance, where most of what exists is the
+/// reader's own.
+///
+/// ## Ordering: FNV-1a over (id, seed), ordered in Rust
+///
+/// Same reasoning and same portability constraint as `blind_date_work`: neither engine
+/// has a portable hash function in SQL, and `min_by_key` on a fetched set keeps the
+/// ordering next to its seed. The seed is per (account, day) so a reader who reloads sees
+/// the same surprise rather than a fresh one — a surprise that changes on every refresh is
+/// just a slot machine, and readers stop trusting the button.
+#[derive(Debug, Clone, Serialize)]
+pub struct SurpriseCandidate {
+    pub work_id: String,
+    pub title: String,
+    pub summary: String,
+    /// `true` when the reader has no taste profile at all. Not an error: it is the state
+    /// a brand-new reader is in, and the surface has something to say to them.
+    pub profile_empty: bool,
+}
+
+/// What [`surprise_me_work`] returns: a candidate if there is one, plus the two facts the
+/// caller needs either way.
+///
+/// This exists because `Option<SurpriseCandidate>` threw away `profile_empty` exactly when it
+/// mattered most. The flag describes the READER — "do you have a taste profile?" — but an
+/// `Option` drops it whenever no work is served, so the route filled in `false` and told a
+/// brand-new reader on an empty instance that their profile covered the whole catalogue.
+///
+/// The empty case is a real state, not an error: a self-hosted instance with nothing published
+/// is a legitimate thing to point a reader at, and it has something honest to say. Returning a
+/// struct makes "which reader, which catalogue, which pick" three separate answers rather than
+/// two plus a guess.
+#[derive(Debug, Clone)]
+pub struct SurprisePick {
+    /// The work served, or `None` when nothing eligible exists.
+    pub candidate: Option<SurpriseCandidate>,
+    /// `true` when the reader has no taste profile at all.
+    ///
+    /// Computed independently of the candidate, because it is the one answer that must not
+    /// depend on there being something to serve.
+    pub profile_empty: bool,
+}
+
+/// Pick one work from outside the reader's taste profile.
+///
+/// Returns `Ok(None)` only when the catalogue itself is empty of eligible work, which for
+/// a running instance means there are no published public works at all — not a state any
+/// reader will meet, and one the route reports honestly rather than as an error.
+pub async fn surprise_me_work(db: &Database, account: &str, today: &str) -> Result<SurprisePick> {
+    let seed = blind_date_seed(account, today);
+    // `works.id` is uuid on PostgreSQL and TEXT on SQLite; the subqueries compare
+    // `work_tags.work_id` (TEXT on both) against it, so the id needs casting on the
+    // PostgreSQL side. Same fragment pattern as `blind_date_work`.
+    let id_cast = match db.backend() {
+        crate::Backend::Postgres => "::text",
+        crate::Backend::Sqlite => "",
+    };
+    // COLUMN TYPES, read off the migrations rather than assumed. I got this wrong twice,
+    // in OPPOSITE directions, and both mistakes were invisible on SQLite:
+    //
+    //   column                  SQLite   PostgreSQL
+    //   works.id                TEXT     UUID      0003_works.sql:25
+    //   bookmarks.subject_id    TEXT     UUID      0004_reading.sql:17
+    //   bookmarks.account_id    TEXT     UUID      0004_reading.sql:14
+    //   work_tags.work_id       TEXT     UUID      0011_taxonomy.sql:25
+    //   taxonomy_nodes.id       TEXT     TEXT      0011_taxonomy.sql:5
+    //   taste_profiles.account  TEXT     TEXT      0012_discovery.sql:2
+    //
+    // The consequence is small and worth stating: on PostgreSQL every id except the
+    // taxonomy node is a uuid, so `works.id` and `work_tags.work_id` compare without a cast,
+    // and the ONLY two text-typed values in the query are the taxonomy node id (which is
+    // compared against `json_each`/`json_array_elements_text` output, so it must STAY text)
+    // and the account id in `taste_profiles` (which must stay text, or PostgreSQL raises
+    // `operator does not exist: text = uuid`).
+    //
+    // `{id_cast}` therefore appears on the `w.id` SELECT for decoding into a `String` and
+    // nowhere else. My first version cast `taste_profiles.account` to uuid and
+    // `bookmarks.subject_id` to text; both wrong, both green on SQLite.
+    //
+    // Two dialects, two spellings of the same idea. `json_each` is a SQLite
+    // table-valued function over a JSON object; `json_array_elements_text` is PostgreSQL's
+    // set-returning function over an array. The SIGNALS are an object (a map), so
+    // PostgreSQL wants the key and SQLite wants the value — and the two disagree about
+    // which, which is exactly why this cannot be one literal.
+    //
+    // The profile node ids come from `json_each(signals).value` on SQLite and
+    // `json_array_elements_text(signals::json)` on PostgreSQL, mirroring the existing
+    // `recommend_for_account` query rather than inventing a second reading of the column.
+    let sql = match db.backend() {
+        crate::Backend::Sqlite => format!(
+            r#"
+            SELECT w.id AS id, w.title AS title, w.summary AS summary,
+                   (SELECT COUNT(*) FROM taste_profiles tp,
+                            json_each(COALESCE(tp.signals, '[]'))
+                     WHERE tp.account = '{account}') = 0 AS profile_empty
+            FROM works w
+            WHERE w.lifecycle = 'published'
+              AND w.visibility = 'public'
+              AND w.deleted_at IS NULL
+              AND date(COALESCE(w.published_at, w.created_at)) <= date('{today}')
+              AND w.id NOT IN (
+                  SELECT subject_id FROM bookmarks
+                  WHERE account_id = '{account}' AND subject_type = 'work'
+              )
+              -- THE INVERSION. No work sharing a single tag with the reader's profile.
+              -- `NOT EXISTS`, not `NOT IN`: with an empty profile the inner set is empty
+              -- and this is TRUE for every candidate, which is the correct answer for a
+              -- reader with no profile. `NOT IN` against an empty set is also true, but
+              -- `NOT IN` against a set containing a NULL is NOT -- and node ids are
+              -- nullable in `taste_profiles`, so `NOT IN` would quietly return nothing for
+              -- a reader whose profile holds a null.
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM work_tags wt
+                  WHERE wt.work_id = w.id
+                    AND wt.node_id IN (
+                        SELECT json_each.value FROM taste_profiles tp,
+                        json_each(tp.signals)
+                        WHERE tp.account = '{account}'
+                    )
+              )
+            "#
+        ),
+        crate::Backend::Postgres => format!(
+            r#"
+            SELECT w.id{id_cast} AS id, w.title AS title, w.summary AS summary,
+                   (SELECT COUNT(*) FROM taste_profiles tp,
+                            json_array_elements_text(COALESCE(tp.signals::json, '[]'::json))
+                    WHERE tp.account = '{account}') = 0 AS profile_empty
+            FROM works w
+            WHERE w.lifecycle = 'published'
+              AND w.visibility = 'public'
+              AND w.deleted_at IS NULL
+              AND date(COALESCE(w.published_at, w.created_at)) <= date('{today}')
+              AND w.id NOT IN (
+                  SELECT subject_id FROM bookmarks
+                  WHERE account_id = '{account}'::uuid AND subject_type = 'work'
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM work_tags wt
+                  WHERE wt.work_id = w.id
+                    AND wt.node_id IN (
+                        SELECT json_array_elements_text(tp.signals::json)
+                        FROM taste_profiles tp
+                        WHERE tp.account = '{account}'
+                    )
+              )
+            "#
+        ),
+    };
+    let rows: Vec<(String, String, String, bool)> = match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .fetch_all(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        crate::Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .fetch_all(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    let candidate = rows
+        .into_iter()
+        .min_by_key(|(id, ..)| blind_date_order_key(id, &seed))
+        .map(
+            |(work_id, title, summary, profile_empty)| SurpriseCandidate {
+                work_id,
+                title,
+                summary,
+                profile_empty,
+            },
+        );
+
+    // The flag is the READER's, so it must not depend on there being a pick. The main query
+    // computes it as a column of the candidate row, which means it is unavailable when the
+    // candidate is `None` — and that is precisely the case where the UI needs it, to tell
+    // "your profile covers everything here" from "this instance has nothing published".
+    //
+    // Only computed when there is no candidate: when there is one, the value came out of the
+    // same row as everything else and re-querying could only disagree with it.
+    let profile_empty = match &candidate {
+        Some(c) => c.profile_empty,
+        None => profile_is_empty(db, account).await?,
+    };
+
+    Ok(SurprisePick {
+        candidate,
+        profile_empty,
+    })
+}
+
+/// Whether the reader has no taste signals at all.
+///
+/// A separate query, per engine, because the JSON function differs and because this must be
+/// answerable with no works in the catalogue. Both arms count SIGNALS rather than rows: a
+/// profile row exists with `signals = []` for every brand-new account, and counting rows makes
+/// this answer "you have a profile" for a reader who has never expressed one. The two arms of
+/// this were once different in exactly that way — see
+/// `crates/app/tests/profile_empty_arms_agree.rs`.
+async fn profile_is_empty(db: &Database, account: &str) -> Result<bool> {
+    let sql = match db.backend() {
+        crate::Backend::Sqlite => {
+            r#"SELECT (SELECT COUNT(*) FROM taste_profiles tp,
+                             json_each(COALESCE(tp.signals, '[]'))
+                      WHERE tp.account = ?) = 0"#
+        }
+        crate::Backend::Postgres => {
+            r#"SELECT (SELECT COUNT(*) FROM taste_profiles tp,
+                             json_array_elements_text(COALESCE(tp.signals::json, '[]'::json))
+                      WHERE tp.account = $1) = 0"#
+        }
+    };
+    let row: (bool,) = match db.backend() {
+        crate::Backend::Sqlite => {
+            sqlx::query_as(sql)
+                .bind(account)
+                .fetch_one(db.sqlite_pool().expect("sqlite"))
+                .await?
+        }
+        crate::Backend::Postgres => {
+            sqlx::query_as(sql)
+                .bind(account)
+                .fetch_one(db.postgres_pool().expect("postgres"))
+                .await?
+        }
+    };
+    Ok(row.0)
+}
+
 pub async fn taste_profile_for(db: &Database, account: &str) -> Result<Option<TasteProfile>> {
     let row: Option<(String, String, String)> = match db.backend() {
         crate::Backend::Sqlite => {

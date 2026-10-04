@@ -243,6 +243,91 @@ describe('application shell', () => {
     base.mockRestore();
   });
 
+  /**
+   * The nav entry, and the reason this is a separate test from the route one.
+   *
+   * Removing the nav link leaves every other test green — verified by mutation: the resolver
+   * test passes, the shell render test passes, and the page is still reachable by typing the
+   * URL. Nothing complains. That is a reachable page nobody can find, and it is exactly what
+   * happened during the nav redesign when a menu lost an entry silently.
+   *
+   * Two things this has to get right, both learned from the concierge test above:
+   *
+   *   - `mockShell(false)`, because the nav only renders once health and auth resolve. The
+   *     route test uses `true` and would pass with no navigation on screen at all.
+   *   - OPEN THE MENU. Surprise Me sits in the Read menu, so asserting the link exists
+   *     without opening it passes on the old flat header and fails here for the right reason.
+   *     And by label rather than index: an index silently points at a different menu the
+   *     moment the groups are reordered, and the test then passes for the wrong reason.
+   */
+  it('offers Surprise Me in the navigation', async () => {
+    mockShell(false);
+    render(App);
+
+    const read = await waitFor(() => {
+      const found = screen
+        .getAllByTestId('menu-trigger')
+        .find((b) => b.textContent?.trim() === 'Read');
+      expect(found).toBeDefined();
+      return found!;
+    });
+    await fireEvent.click(read);
+
+    const link = await screen.findAllByRole('link', { name: 'Surprise Me' });
+    expect(link.length).toBeGreaterThan(0);
+    expect(link[0].getAttribute('href')).toBe('/surprise-me');
+  });
+
+  it('routes /surprise-me to the surprise page, not the 404 (item 7)', async () => {
+    // The same gap the concierge test above documents, one surface over. A component test
+    // for `SurpriseMe.svelte` renders the component directly, so its ten passing tests say
+    // nothing about whether a reader can REACH it — and `/surprise-me` existed for a while as
+    // a `RouteId` in a comment in `router.test.ts` and nothing else.
+    //
+    // Two things can go wrong and this catches both: the resolver falls through to not-found,
+    // or it matches but `App.svelte` has no `{:else if route.id === 'surprise-me'}` branch
+    // and renders nothing. `router.test.ts` checks the first; only this checks the second.
+    mockShell(true);
+    const seen: string[] = [];
+    const base = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(typeof input === 'string' ? input : (input as Request).url);
+      seen.push(url);
+      if (url.includes('/health/ready')) return Promise.resolve(json(READY));
+      if (url.includes('/auth/me')) return Promise.resolve(json(ME));
+      if (url.includes('/discovery/surprise-me')) {
+        return Promise.resolve(
+          json({
+            work: {
+              work_id: 'work-surprise-1',
+              title: 'A Work Chosen Against Your Profile',
+              summary: 'Everything here is a genre you already read.',
+            },
+            profile_empty: false,
+          }),
+        );
+      }
+      return Promise.resolve(json(META));
+    });
+
+    window.history.pushState({}, '', '/surprise-me');
+    render(App);
+
+    // The page's own heading. NotFound has none, so this is what proves the shell
+    // dispatched rather than falling through.
+    await waitFor(() =>
+      expect(screen.getAllByText('Surprise Me').length).toBeGreaterThan(0),
+    );
+    await waitFor(() =>
+      expect(screen.getAllByText('A Work Chosen Against Your Profile').length).toBeGreaterThan(0),
+    );
+
+    // And it actually asked the endpoint. A shell that rendered the page with no data would
+    // still show the heading, so the heading alone is not enough.
+    expect(seen.some((u) => u.includes('/discovery/surprise-me'))).toBe(true);
+
+    base.mockRestore();
+  });
+
   it('shows real instance values fetched from the API, not placeholders', async () => {
     mockShell(false);
     render(App);

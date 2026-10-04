@@ -18,6 +18,7 @@
   import ForumSearch from './routes/ForumSearch.svelte';
   import ForumTopic from './routes/ForumTopic.svelte';
   import BlindDate from './routes/BlindDate.svelte';
+  import SurpriseMe from './routes/SurpriseMe.svelte';
   import Discover from './routes/Discover.svelte';
   import Concierge from './routes/Concierge.svelte';
   import Exports from './routes/Exports.svelte';
@@ -97,6 +98,7 @@
       { href: '/search', label: 'Search' },
       { href: '/media', label: 'Media' },
       { href: '/blind-date', label: 'Blind Date' },
+      { href: '/surprise-me', label: 'Surprise Me' },
       { href: '/arena', label: 'Arena' },
     ] },
     // The label is "Create", NOT "Publish". This is not a copy preference.
@@ -418,6 +420,8 @@
     <Concierge />
   {:else if route.id === 'blind-date'}
     <BlindDate />
+  {:else if route.id === 'surprise-me'}
+    <SurpriseMe />
   {:else if route.id === 'arena'}
     <Arena />
   {:else if route.id === 'community'}

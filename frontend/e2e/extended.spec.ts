@@ -217,7 +217,13 @@ test('work: a published work page renders without error', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`/works/${workId}`);
-  await expect(page.getByRole('heading', { name: title })).toBeVisible();
+  // Scoped to `#main` AND to level 1. The Similar Works rail (commit f124a67) renders an
+  // h2 reading `Similar to “<title>”`, and Playwright's `name` is a SUBSTRING match — so this
+  // matched both the work's h1 and the rail's heading and strict mode refused. Pre-existing:
+  // the rail shipped in f124a67 and this journey was never updated, so it has been red since.
+  await expect(
+    page.locator('#main').getByRole('heading', { name: title, level: 1 }),
+  ).toBeVisible();
   await page.waitForLoadState('networkidle');
   expect(errors).toEqual([]);
 });

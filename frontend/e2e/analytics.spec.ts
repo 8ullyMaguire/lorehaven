@@ -183,7 +183,9 @@ test('a reader marks a locally published work finished, and the count moves', as
   // broad, not the page being wrong. Asserting the title also proves the
   // reader found the work the author published.
   await expect(
-    page.locator('#main').getByRole('heading', { name: 'The Analytics Odyssey' }),
+    // Level 1 as well as `#main`: the Similar Works rail renders `Similar to “<title>”` as an
+    // h2 on the work page, and Playwright's `name` is a substring match.
+    page.locator('#main').getByRole('heading', { name: 'The Analytics Odyssey', level: 1 }),
   ).toBeVisible();
 
   // Mark it finished through the work's own reading-status door, the way a
