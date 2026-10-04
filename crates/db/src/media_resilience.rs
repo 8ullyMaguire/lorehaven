@@ -3158,11 +3158,19 @@ pub async fn find_curator_bounty_queue(
 /// The `GROUPED` alias is required on the PostgreSQL arm. PostgreSQL rejects an
 /// unaliased subquery in `FROM`:
 ///
-///     42601 subquery in FROM must have an alias
+/// ```text
+/// 42601 subquery in FROM must have an alias
+/// ```
 ///
 /// SQLite accepts it, so both arms read the same without one and the SQLite tests are
 /// green either way. Aliasing only the PostgreSQL arm keeps the two halves differing
 /// exactly where the dialects do.
+///
+/// Fenced as `text` deliberately. An *indented* block in a doc comment is a Rust code
+/// block, so `cargo test` runs it as a doctest and rustc reads `42601` as an item —
+/// which is how the first version of this comment failed
+/// `media_resilience::count_well_mirrored (line 3161)` while every actual test in the
+/// file passed. Same trap as `hit_rate.rs`; same fix.
 pub async fn count_well_mirrored(db: &Database, min_healthy: i64) -> Result<i64> {
     let sql = sql_owned(
         db,

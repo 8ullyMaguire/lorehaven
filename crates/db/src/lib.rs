@@ -57,6 +57,7 @@ pub mod migrate;
 pub mod moderation;
 pub mod monetization;
 pub mod narration;
+pub mod north_star;
 pub mod notifications;
 pub mod outbox;
 pub mod payout_store;

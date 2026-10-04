@@ -46,6 +46,7 @@ pub mod media_resilience;
 pub mod meta_ranker;
 pub mod moderation;
 pub mod monetization;
+pub mod north_star;
 pub mod orphaning;
 pub mod payouts;
 pub mod permission;
