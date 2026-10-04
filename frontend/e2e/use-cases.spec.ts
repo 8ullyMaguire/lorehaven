@@ -127,8 +127,27 @@ test('1. a visitor lands on the entrance and the instance describes itself', asy
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Read, write, and keep what you love.' })).toBeVisible();
   await expect(page.locator('#instance-heading')).toBeVisible();
-  // The entrance search is deliberately off until the search surface lands.
-  await expect(page.locator('#hero-search')).toBeDisabled();
+
+  // The four ways in are the invitation. Asserted by href rather than by label, so a
+  // copy change to a card's wording does not fail a test that is about structure.
+  const waysIn = page.locator('section:has(h2:text("Four ways in")) a');
+  await expect(waysIn).toHaveCount(4);
+  expect(await waysIn.evaluateAll((els) => els.map((e) => e.getAttribute('href')))).toEqual([
+    '/discover',
+    '/library',
+    '/search',
+    '/write',
+  ]);
+
+  // The DISABLED hero search is gone. It was a placeholder that explained itself at
+  // the top of the page, which is a worse first impression than not having it: a
+  // front door that opens with a field that does nothing.
+  //
+  // Search itself is real and reachable, so the replacement assertion is that the
+  // page links to it rather than stubbing it.
+  await expect(page.locator('#hero-search')).toHaveCount(0);
+  await expect(page.locator('header nav.desktop a[href="/search"]')).toBeVisible();
+
   expect(failures, `console errors: ${failures.join('; ')}`).toEqual([]);
 });
 
@@ -234,15 +253,33 @@ test('12. the work the reader opened appears in their history', async ({ page })
 });
 
 /**
- * Reading history lives at `/library/history`. The only link to it is inside the
- * mobile "More" drawer, which is not rendered at or above 52rem — so on a
- * desktop there is no way to click through to it from anywhere in the site.
- * Marked `fail`: it documents the gap, and turns red when a link is added.
+ * Reading history lives at `/library/history`. This test used to be `fail`-marked
+ * and red by design: the only link to it was inside the mobile "More" drawer, which
+ * is not rendered at or above 52rem, so on a desktop there was no way to click
+ * through to it from anywhere in the site. It documented a gap and was written to
+ * turn red when someone added the link.
+ *
+ * Someone added the link. `/library/history` is now in the header's Shelf menu, so
+ * the test is un-marked and asserts the path a reader actually takes: open the
+ * menu, then click.
+ *
+ * Worth keeping as a click-through rather than a `page.goto`. A goto would pass
+ * while the link stayed unclickable, which is the exact bug this test was written
+ * to catch in the first place.
  */
 test('12b. a signed-in reader can reach reading history from the desktop navigation', async ({ page }) => {
   await ensureAccount(page, reader);
   await page.goto('/');
-  await expect(page.locator('a[href="/library/history"]:visible').first()).toBeVisible({ timeout: 5000 });
+
+  // The menu is closed, so the link must NOT be visible yet. Asserted first: it is
+  // what makes the second half of this test mean something.
+  const link = page.locator('header nav.desktop a[href="/library/history"]');
+  await expect(link).toBeHidden();
+
+  await page.getByTestId('menu-trigger').filter({ hasText: 'Shelf' }).click();
+  await expect(link).toBeVisible();
+  await link.click();
+  await expect(page).toHaveURL(/\/library\/history/);
 });
 
 // ---------------------------------------------------------------------------

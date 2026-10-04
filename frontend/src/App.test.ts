@@ -122,7 +122,7 @@ describe('application shell', () => {
     // menu TRIGGERS are always rendered; their contents are not, because a menu
     // that renders its items when closed is not a menu.
     const triggers = screen.getAllByTestId('menu-trigger').map((b) => b.textContent?.trim() ?? '');
-    for (const menu of ['Read', 'Publish', 'Shelf', 'Forum', 'More']) {
+    for (const menu of ['Read', 'Create', 'Shelf', 'Forum', 'More']) {
       expect(triggers).toContain(menu);
     }
 

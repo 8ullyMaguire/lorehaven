@@ -297,11 +297,22 @@ test('the header stays one row and leaves the viewport to the page', async ({ pa
   expect(measured.height).toBeLessThan(90);
   expect(measured.height / measured.viewport).toBeLessThan(0.15);
 
-  // Sixteen destinations do not fit a 1088px bar at `gap: var(--space-5)`, so
-  // the nav scrolls. That is the intended escape hatch, not a defect -- but it
-  // has to be reachable, so assert it is a scroll container rather than a
-  // silently clipped row.
-  expect(measured.navScrolls).toBe(true);
+  // This used to assert `navScrolls === true`, and the comment explained why:
+  // sixteen destinations do not fit a 1088px bar, so the nav scrolls, and a
+  // scroll container is better than a silently clipped row.
+  //
+  // Both halves of that are now obsolete. The header is four destinations and
+  // five menus, so it does not scroll at the bar's capped width -- measured, not
+  // assumed. And the scroll is no longer silent: `scrollbar-width: none` was
+  // removed, because a hidden overflow is worse than either wrapping or an
+  // honest scrollbar.
+  //
+  // So the assertion inverts. The claim is now that the row FITS, which is the
+  // thing that was previously untrue and unmeasured.
+  expect(
+    measured.navScrolls,
+    'the header row should fit its destinations without scrolling',
+  ).toBe(false);
 });
 
 test('a keyboard user can scroll a target clear of the header', async ({ page }) => {

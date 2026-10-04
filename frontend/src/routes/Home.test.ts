@@ -9,10 +9,11 @@ vi.mock('../lib/api', async (importOriginal) => {
     ...actual,
     fetchInstanceMeta: vi.fn(),
     fetchReadiness: vi.fn(),
+    fetchContinueReading: vi.fn(),
   };
 });
 
-import { fetchInstanceMeta, fetchReadiness } from '../lib/api';
+import { fetchContinueReading, fetchInstanceMeta, fetchReadiness } from '../lib/api';
 
 const META = {
   name: 'Test Haven',
@@ -42,10 +43,29 @@ beforeEach(() => {
   vi.clearAllMocks();
   (fetchInstanceMeta as any).mockResolvedValue(META);
   (fetchReadiness as any).mockResolvedValue(READY);
+  // Defaults to "nothing to continue", which is what an anonymous visitor gets: this
+  // suite renders Home with no session, so the banner must be inert and must NOT turn
+  // these page-level tests into tests of the retention feature.
+  (fetchContinueReading as any).mockResolvedValue(null);
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+/**
+ * The session is module state, so a test that signs in and does not sign out changes
+ * every test after it. This is the same class of bug as a suite that only passes on a
+ * dirtied database: order-dependent green.
+ */
+let sessionRef: { status: string } | null = null;
+beforeEach(async () => {
+  const { session } = await import('../lib/session.svelte');
+  session.status = 'anonymous';
+  sessionRef = session as unknown as { status: string };
+});
+afterEach(() => {
+  if (sessionRef) sessionRef.status = 'anonymous';
 });
 
 describe('Home page', () => {
@@ -161,5 +181,66 @@ describe('Home page', () => {
     );
     // Reading without an account still has to work, so it stays on offer.
     expect(screen.getByRole('link', { name: /Browse without signing in/ })).toBeInTheDocument();
+  });
+
+  /**
+   * WIRING, not behaviour.
+   *
+   * `ContinueReadingBanner.test.ts` proves the component renders a row. It cannot prove
+   * anything about whether Home MOUNTS it, and this project has shipped a feature that
+   * passed every component test while being unreachable: `Concierge.svelte` shipped with
+   * eleven green tests and no route. The same failure one layer up is a component with
+   * green tests and no parent.
+   *
+   * So: assert the component is IN THE TREE. The negative case below is what makes the
+   * positive case meaningful — if the banner were simply never mounted, the "is in the
+   * tree" assertion would fail, which is the point.
+   */
+  it('mounts the continue-reading banner for a signed-in reader', async () => {
+    const { session } = await import('../lib/session.svelte');
+    session.status = 'signed-in';
+    (fetchContinueReading as any).mockResolvedValue({
+      workId: 'work-9',
+      title: 'Stars Fall Softly',
+      positionPermille: 420,
+      percent: 42,
+      chapterId: 'chapter-7',
+      chapterTitle: 'Chapter 7: The Turn',
+      updatedAt: '2026-10-03T10:00:00Z',
+    });
+
+    render(Home);
+    await waitFor(() => expect(screen.getByText('Stars Fall Softly')).toBeInTheDocument());
+    expect(screen.getByTestId('continue-reading-percent').textContent).toContain('42%');
+  });
+
+  /**
+   * The negative case, and it is the one that needed fixing.
+   *
+   * The first version waited for the page's own async work (`Test Haven` appearing) and
+   * then asserted the loader had not been called. That passes whether or not the banner is
+   * mounted, because the loader is called from `onMount` — synchronously on mount — but
+   * the assertion can run BEFORE any mount effect has fired at all. Mutation testing found
+   * it: deleting `signedIn={session.isSignedIn}` from Home left this test green.
+   *
+   * The fix is to wait for the thing that is only true if the component mounted at all.
+   * `hidden` is on the banner node in EVERY state, so its presence proves the component
+   * rendered; and once it is present, `onMount` has already run. That makes "not called"
+   * a statement about a mounted component rather than a race against one.
+   */
+  it('does not even ask for continue-reading when signed out', async () => {
+    const { session } = await import('../lib/session.svelte');
+    session.status = 'anonymous';
+
+    render(Home);
+    // The banner node exists only if the component is mounted. This is the count that
+    // gives the absence assertion below its subject.
+    const banner = await waitFor(() => {
+      const node = screen.getByTestId('continue-reading-banner');
+      expect(node).toBeInTheDocument();
+      return node;
+    });
+    expect(banner.hasAttribute('hidden')).toBe(true);
+    expect(fetchContinueReading).not.toHaveBeenCalled();
   });
 });

@@ -84,8 +84,8 @@ already found seven instances of.
 
 | order | item | why this order |
 |---|---|---|
-| 1 | **11 — DNF UI** | largest gap between built and reachable; a reader who abandons a work has nowhere to record it |
-| 2 | **1 — Continue Reading** | the single highest-impact retention item on the list; three queries over a table that exists |
+| 1 | ~~**11 — DNF UI**~~ | DONE — `2901bc0` |
+| 2 | ~~**1 — Continue Reading**~~ | DONE — store, route, banner, 8 E2E journeys |
 | 3 | **4 — word count + minutes** | one calculation, one component; makes every card more clickable |
 | 4 | **9 — reason tags** | the data is already stored and the label is free |
 | 5 | **7 — Surprise Me** | genuinely new query, but small and it serves the diversity budget |
@@ -102,11 +102,11 @@ not three, because the module boundary is the work.
 Store, route, component, unit tests, E2E journey. A reader can mark a work DNF with one
 of six reasons and a private note. All 8 E2E journeys green after the fix.
 
-### IN PROGRESS — item 1, Continue Reading
+### DONE — item 1, Continue Reading (store + route in `7537035`, banner after it)
 
-**Shipped so far: the store.** `crates/db/src/continue_reading.rs`, 12 tests green on
-SQLite AND PostgreSQL, clippy and rustfmt clean, 9 of 10 mutations caught on both
-engines.
+`crates/db/src/continue_reading.rs` (12 tests, both engines), the route
+`GET /api/v1/continue-reading`, `ContinueReadingBanner.svelte` (8 tests) mounted on the
+homepage, 2 wiring tests in `Home.test.ts`, and `e2e/continue-reading.spec.ts`.
 
 The one design point worth writing down, because the first version got it wrong and a
 test caught it rather than a reader: **progress is per-DEVICE, and there are two of this
@@ -119,16 +119,32 @@ the banner would say "90% through" while quoting chapter 1 from a different devi
 fix is no aggregate at all — group by every selected column and order by `updated_at`, so
 `LIMIT 1` returns one whole row.
 
-**Still to do, in order:**
-1. `routes/continue_reading.rs` — `GET /api/continue-reading`, `MaybeSession`, 404 for
-   an anonymous reader (never an empty banner, which reads as "you have read nothing"
-   when it means "you are not logged in").
-2. `api.ts` — `fetchContinueReading(): Promise<ContinueReading | null>`.
-3. `ContinueReadingBanner.svelte` on the homepage: work title, chapter title, percent,
-   one "Continue" link. Hidden entirely when there is nothing to continue, and a count
-   assertion before the absence assertion — see the lesson in §5.
-4. Component tests, then the Playwright journey in `e2e/continue-reading.spec.ts`,
-   which must fail when the route is forced to 404.
+The route is `RequireSession`, not `MaybeSession`: "where did **you** stop" has no
+anonymous answer, and an empty banner to a stranger reads as "you have read nothing".
+
+Three more defects the mutation gate found, all of the same family — a green build is
+not a working feature:
+
+- **A comment line starting with `#` inside a raw SQL string.** `#` is not a SQL comment
+  introducer. PostgreSQL lexed it as the prefix of the `#>` operator and raised
+  `syntax error at or near "::"` — an error about a type cast, raised from a comment.
+  SQLite ignored it, so the entire SQLite suite was green throughout. Swept the repo: 0
+  more.
+- **`is_public = 1` on PostgreSQL**, where the column is BOOLEAN: `operator does not
+  exist: boolean = integer`. Correct on SQLite, invisible by default.
+- **My own mutation runner produced 14 false survivors** because it ran no tests at all
+  and scored empty output as a pass. It now refuses to score a run that tested nothing,
+  and it asserts that a compile failure is distinguishable from a pass before it is
+  trusted with a result.
+
+And one in the wiring, which is the one that matters:
+
+- **`Home.svelte` wrapped the banner in `{#if session.isSignedIn}` while the comment
+  directly above it said the guard lived in the component.** That contradiction made the
+  signed-out case untestable: with the wrapper the node is not in the DOM when signed out,
+  so "no request was made" had nothing to assert about, and deleting the whole mount point
+  left the test green. Passing `signedIn` as a prop keeps the node mounted and hidden,
+  which is a state a test can pin. All four wiring mutations now go red.
 
 ## 3. Gates every one of them must clear
 

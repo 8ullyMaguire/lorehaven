@@ -80,9 +80,16 @@
    * under Write -- they are the two ends of the same task, moving a work in or
    * out of the archive.
    *
-   * `FLAT` is the same list flattened, kept for the drawer, so a destination
-   * cannot be added to a group and silently vanish from mobile. One source of
-   * truth, two layouts.
+   * ONE source of truth for two layouts: the desktop menus iterate `NAV_GROUPS`
+   * (line ~291) and the mobile drawer iterates the SAME array (line ~471). A
+   * destination added to a group therefore appears in both, and the guarantee
+   * comes from that shared array rather than from a flattened copy.
+   *
+   * There was a `FLAT = NAV_GROUPS.flatMap(...)` here, kept for the drawer. The
+   * drawer never used it -- it iterates `NAV_GROUPS` -- so it was dead, and the
+   * comment claiming it protected mobile was claiming something false. svelte-check
+   * caught it as an unused declaration, which is the only reason it is worth
+   * recording: a comment is not a use.
    */
   const NAV_GROUPS = [
     { label: 'Read', items: [
@@ -92,7 +99,15 @@
       { href: '/blind-date', label: 'Blind Date' },
       { href: '/arena', label: 'Arena' },
     ] },
-    { label: 'Publish', items: [
+    // The label is "Create", NOT "Publish". This is not a copy preference.
+    //
+    // The work editor has a button labelled "Publish", and several E2E suites
+    // reach for it with `button:text-is("Publish")`. Playwright's strict mode
+    // fails on a selector matching two elements, so a nav group called "Publish"
+    // made seven tests fail with `Republish not found` while the application was
+    // working perfectly. Renaming the group fixes the suite; renaming the test
+    // selector would hide the same collision from anyone who writes the next one.
+    { label: 'Create', items: [
       // '/write' is deliberately NOT here: it is one of the four primary links, and
       // listing it under a group too printed the word "Write" twice in one row.
       { href: '/import', label: 'Import a work' },
@@ -125,8 +140,6 @@
     { href: '/search', label: 'Search' },
     { href: '/write', label: 'Write' },
   ];
-
-  const FLAT = NAV_GROUPS.flatMap((group) => group.items);
 
   /**
    * A destination is current if the path IS it, or is inside it. Exact-match
