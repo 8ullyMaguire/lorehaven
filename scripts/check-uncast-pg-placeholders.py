@@ -846,6 +846,11 @@ SCHEMA = {
     "reviews": {"id": "uuid", "work_id": "uuid", "is_public": "boolean"},
     "local_mirrors": {"id": "uuid", "expires_at": "timestamptz", "updated_at": "timestamptz"},
     "rating": {"id": "uuid", "work_id": "uuid", "is_public": "boolean"},
+    # For `DECODE_TEST_CASES`. `generated_content_policy.version` is the real site
+    # this pass fixed: INTEGER, read through an `Option<i32>` and widened by the
+    # caller, which is correct. `arena_weights` is already above.
+    "generated_content_policy": {"id": "text", "posture": "text", "version": "integer",
+                                 "updated_at": "text"},
 }
 
 # Each case is (SQL, should_report, note). The negative cases are the point:
@@ -924,6 +929,70 @@ SELF_TEST_CASES: list[tuple[str, bool, str]] = [
      "an INT4 bind is not a decode, so an INSERT is not a finding"),
 ]
 
+# Cases that drive `columns_decoded_by` through whole Rust source rather than one
+# SQL string, because the bug they cover is in how the window around the literal is
+# read: `pos` points at the opening `"`, so the SELECT list used to start with
+# `"SELECT` and the FIRST column was dropped for every statement. The one-string
+# cases above cannot see it -- they pass the SQL in directly, with no surrounding
+# quote.
+#
+# Each case is (rust_source, should_report, note). `schema` is SCHEMA plus the
+# tables these need.
+DECODE_TEST_CASES: list[tuple[str, bool, str]] = [
+    # The real site. `version` is INTEGER; the PostgreSQL arm decodes `Option<i32>`
+    # and widens with `i64::from`, which is correct and needs no `CAST`.
+    (
+        'pub async fn policy_version(db: &Database) -> Result<i64> {\n'
+        '    let sql = db.sql(\n'
+        '        "SELECT version FROM generated_content_policy WHERE id = ?",\n'
+        '        "SELECT version FROM generated_content_policy WHERE id = $1",\n'
+        '    );\n'
+        '    let version: i64 = match db.backend() {\n'
+        '        Backend::Sqlite => {\n'
+        '            let v: Option<i64> = sqlx::query_scalar(&sql)\n'
+        '                .fetch_optional(db.sqlite_pool().expect("sqlite pool"))\n'
+        '                .await?;\n'
+        '            v.unwrap_or(0)\n'
+        '        }\n'
+        '        Backend::Postgres => {\n'
+        '            let v: Option<i32> = sqlx::query_scalar(&sql)\n'
+        '                .fetch_optional(db.postgres_pool().expect("postgres pool"))\n'
+        '                .await?;\n'
+        '            i64::from(v.unwrap_or(0))\n'
+        '        }\n'
+        '    };\n'
+        '    Ok(version)\n'
+        '}',
+        False,
+        "an Option<i32> decode of an INTEGER column is correct; the first SELECT "
+        "column used to be dropped, so this was reported as undecidable",
+    ),
+    # The same shape, still correct: `Option<i32>` with no explicit turbofish.
+    (
+        'let sql = db.sql(\n'
+        '    "SELECT elo_rating, matches_played FROM arena_weights WHERE account_id = ?",\n'
+        '    "SELECT elo_rating, matches_played FROM arena_weights WHERE account_id = $1::uuid",\n'
+        ');\n'
+        'let row: Option<(f64, i32)> = sqlx::query_as(&sql)\n'
+        '    .fetch_optional(db.postgres_pool().unwrap()).await?;',
+        False,
+        "two INT4 columns both decoded as i32 -- the FIRST was the one dropped",
+    ),
+    # And the fault the rule is for, still caught with the fix in place. An explicit
+    # `i64` decode of an INT4 column is a real PostgreSQL failure, so the fix must
+    # not have silenced the rule.
+    (
+        'let sql = db.sql(\n'
+        '    "SELECT matches_played FROM arena_weights WHERE account_id = ?",\n'
+        '    "SELECT matches_played FROM arena_weights WHERE account_id = $1::uuid",\n'
+        ');\n'
+        'let played: Option<i64> = sqlx::query_scalar(&sql)\n'
+        '    .fetch_optional(db.postgres_pool().unwrap()).await?;',
+        True,
+        "an explicit i64 decode of an INT4 column is still a finding",
+    ),
+]
+
 
 # `SUM` over an integer column is NUMERIC in PostgreSQL and an integer in
 # SQLite, so a row type of `i64` cannot decode it. The error names neither the
@@ -982,11 +1051,34 @@ SELECT_ITEM = re.compile(
 
 
 def decoded_as_i64(text: str, pos: int) -> bool | None:
-    """Does the Rust around this SQL literal decode an integer column into `i64`?
+    """Does the PostgreSQL arm around this SQL literal decode an integer into `i64`?
 
     `None` when the script cannot tell, which the caller must treat as "report
     it" -- an undecidable site is a hypothesis, and a hypothesis that is
     silently dropped is how a real fault survives.
+
+    ## The window must reach the PostgreSQL arm, not stop inside the SQLite one
+
+    `decoded_as_i64` used to look at a fixed 600 characters from the literal. In
+    `generated_content.rs` that window ended *inside the SQLite arm*:
+
+        "SELECT version FROM generated_content_policy WHERE id = $1",   <- literal
+        // ... a 5-line doc comment ...
+        let version: i64 = match db.backend() {
+            Backend::Sqlite => {
+                let v: Option<i64> = ...          <- +572, the LAST thing in the window
+        // 786 chars later:
+            Backend::Postgres => {
+                let v: Option<i32> = ...          <- +828, never seen
+
+    So the only decode type in view was the **SQLite** arm's `i64`, which is correct
+    there -- SQLite has no INT4 -- and the rule reported a fault that exists only in
+    the arm it could not see. The PostgreSQL arm decodes `Option<i32>` and widens
+    with `i64::from`, which is right.
+
+    The fix is to stop looking at a window and start looking at an **arm**. Widen
+    the reach until the enclosing `match db.backend()` has both arms visible, so a
+    decode in either one is evidence and the rule judges the PostgreSQL one.
 
     The rule exists because sqlx will not decode an INT4 into an `i64` on
     PostgreSQL, and will happily do it on SQLite. The fault is therefore a
@@ -1006,15 +1098,10 @@ def decoded_as_i64(text: str, pos: int) -> bool | None:
     round trip. **A gate that cries wolf is a gate that gets disabled**, and this
     one was already on its way there.
     """
-    # The decode type can sit on either side of the literal. `query_scalar` and
-    # its turbofish are usually *before* the SQL (`query_scalar::<_, i32>(&db.sql("
-    # ... "))`) and the binding annotation usually *after* it
-    # (`let x: (String, i32) = ...`). Looking only forward misses the first,
-    # which is how the `milestone_43_federation` site survived one round of this
-    # fix -- the explicit `::<_, i32>` was 40 characters to the left of the
-    # string.
-    before = text[max(0, pos - 200) : pos]
-    window = before + "\n" + text[pos : pos + 600]
+    # Reach far enough to cover a `match db.backend()` with a body in each arm.
+    # 600 characters stopped inside the first arm; 2000 covers the two-arm shape
+    # this codebase uses everywhere, with room for a doc comment above the match.
+    window = arm_window(text, pos, 2000)
 
     # A `#[derive(FromRow)]` struct decodes this statement's rows, and there is NO
     # annotation at the call site to read. The premise -- "a wide Rust type makes the
@@ -1050,12 +1137,39 @@ def decoded_as_i64(text: str, pos: int) -> bool | None:
     # `query_scalar::<_, i32>` is explicit and correct; the absence of a
     # turbofish is not a fault, it is an inference the compiler checks at the
     # `assert_eq!`. Only an explicit `i64` is the fault this rule is about.
+    #
+    # `i64` may sit on either side of the literal, and a `match db.backend()` puts
+    # the two engines' decodes hundreds of characters apart, so each arm is judged
+    # separately: an `i32` in EITHER arm is correct code, because the PostgreSQL arm
+    # is the one that has to be narrow and it is not the arm that said `i64`.
     if "query_scalar" in window:
         if re.search(r"query_scalar::<\s*_,\s*(?:Option<\s*)?i(16|32)\b", window):
             return False
         if not re.search(r"::<\s*_,\s*i64\s*>|as i64|:\s*i64\b", window):
             return False
     return None
+
+
+def arm_window(text: str, pos: int, span: int) -> str:
+    """The text around `pos` out to `span`, or to the end of the enclosing arm.
+
+    `span` is the *maximum* reach. A statement not inside a `match db.backend()`
+    gets the plain window, which is what the pre-existing behaviour was. Inside
+    one, the window is extended only as far as the end of the `Backend::Postgres`
+    arm, so the two engines' bindings are both in view without dragging in the rest
+    of the file.
+    """
+    head = text[max(0, pos - 200) : pos]
+    tail = text[pos : pos + span]
+    pg = tail.find("Backend::Postgres")
+    if pg == -1:
+        return head + "\n" + tail
+    # To the end of the Postgres arm: the next `Backend::`, or the closing of the
+    # match, whichever comes first.
+    rest = tail[pg + len("Backend::Postgres") :]
+    nxt = re.search(r"\bBackend::|\n\s*\}\s*\n", rest)
+    end = pg + len("Backend::Postgres") + (nxt.start() if nxt else len(rest))
+    return head + "\n" + text[pos : pos + end]
 
 
 # A string literal that is a *template* for building a statement, rather than a
@@ -1111,10 +1225,34 @@ def columns_decoded_by(text: str, pos: int) -> set[str]:
     stops at the first clause boundary. Anything it cannot see is simply not in the
     set, and the caller treats "not named" as undecidable -- so this can only ever
     turn a report into a non-report when the struct says so.
+
+    ## The leading quote has to come off before the SELECT list can be read
+
+    `pos` is the offset of the opening `"` of the literal, so the window starts with
+    `"SELECT `. Splitting that on commas makes the first item `"SELECT version` --
+    two words, which is not a bare identifier, so the `\\w+` fullmatch rejects it and
+    the column is **silently dropped**. The first SELECT item was therefore never
+    reported, which is why
+
+        SELECT version FROM generated_content_policy WHERE id = $1
+
+    read as having no columns at all, left `decoded_as_i64` undecidable, and came out
+    of the gate as a finding -- when the surrounding code decodes it correctly:
+
+        Backend::Postgres => { let v: Option<i32> = sqlx::query_scalar(&sql) ... }
+
+    `i32` is right for an `INTEGER` column and `i64::from(v)` widens it for the
+    caller. The site was correct and the checker could not see it.
+
+    `SELECT elo_rating, matches_played` lost its FIRST column the same way, so this
+    was dropping one column per statement rather than only one shape.
     """
     window = text[pos : pos + 600]
     end = re.search(r"\b(FROM|WHERE|GROUP|ORDER|LIMIT|HAVING)\b", window, re.IGNORECASE)
     select = window[: end.start()] if end else window
+    # Strip the literal's opening quote(s) and the SELECT keyword. Without this the
+    # first item is `"SELECT <col>` and never matches a bare identifier.
+    select = re.sub(r"^\W*SELECT\s+", "", select, flags=re.IGNORECASE)
     columns = set()
     for item in select.split(","):
         item = item.strip().strip('"')
@@ -1249,12 +1387,43 @@ def self_test() -> int:
                 failures.append(
                     f"faulty PostgreSQL half not judged -- {note}\n  {source}")
 
+    # Decode-side cases, driven through whole Rust source so the window around the
+    # literal is part of what is under test. Each walks the real scanner, because
+    # `scan` is what applies the arm and comment rules and it is the only thing that
+    # passes the file text and the literal's position to `decoded_as_i64`.
+    for source, should_report, note in DECODE_TEST_CASES:
+        for match in STRING_LIT.finditer(source):
+            if in_line_comment(source, match.start()):
+                continue
+            sql = match.group(1)
+            if not re.search(r"\b(?:SELECT|INSERT|UPDATE|DELETE)\b", sql, re.IGNORECASE):
+                continue
+            if in_sql_pair(source, match.start()) == "sqlite":
+                continue
+            known = {t: SCHEMA[t] for t in tables_in(sql) if t in SCHEMA}
+            if not known:
+                continue
+            reported = bool(int4_sites(sql, known, source, match.start()))
+            if reported != should_report:
+                failures.append(
+                    f"{'false positive' if reported else 'false negative'}: {note}\n"
+                    f"  {sql}")
+            break
+
     for failure in failures:
         print(f"FAIL {failure}")
     if failures:
-        print(f"\n{len(failures)} of {len(SELF_TEST_CASES)} self-test cases failed")
+        print(
+            f"\n{len(failures)} of "
+            f"{len(SELF_TEST_CASES) + len(DECODE_TEST_CASES) + len(ARM_TEST_CASES)} "
+            f"self-test cases failed"
+        )
         return 1
-    print(f"self-test: {len(SELF_TEST_CASES)} cases passed")
+    total = len(SELF_TEST_CASES) + len(DECODE_TEST_CASES) + len(ARM_TEST_CASES)
+    print(f"self-test: {total} cases passed "
+          f"({len(SELF_TEST_CASES)} statement, "
+          f"{len(DECODE_TEST_CASES)} decode, "
+          f"{len(ARM_TEST_CASES)} arm)")
     return 0
 
 

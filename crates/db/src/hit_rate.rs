@@ -91,13 +91,33 @@ const SQLITE_HITS: &str = r#"SELECT COUNT(*) FROM (
     )
 )"#;
 
+/// The two PostgreSQL statements alias their outer derived table (`) shown` and
+/// `) hits`) and the SQLite ones do not, because the dialects disagree about
+/// whether it is required.
+///
+/// PostgreSQL rejects an unaliased subquery in `FROM` outright:
+///
+///     42601 subquery in FROM must have an alias
+///     DETAIL: For example, FROM (SELECT ...) [AS] foo.
+///
+/// SQLite accepts it. So the PostgreSQL halves carried the alias and the SQLite
+/// halves did not, and every one of the ten tests in `crates/db/tests/hit_rate.rs`
+/// failed on PostgreSQL with that parse error while passing on SQLite -- a defect
+/// invisible to the default engine, which is exactly the class this repository's
+/// two-engine rule exists to catch.
+///
+/// Found by `scripts/check-uncast-pg-placeholders.py` reporting `hit_rate.rs`, and
+/// worth recording how: the gate's *reason* was wrong (it flagged an uncast uuid
+/// placeholder, and the bind is indeed a `&str` from `pseud_id.to_string()`), but
+/// running the suite on PostgreSQL is what named the actual fault. A report that is
+/// right about the file and wrong about the reason is still a place to look.
 const POSTGRES_SHOWN: &str = r#"SELECT COUNT(*) FROM (
     SELECT work_id FROM recommendation_slots
     WHERE pseud_id = $1
       AND created_at >= to_timestamp($2)
       AND created_at <  to_timestamp($3)
     GROUP BY work_id
-)"#;
+) shown"#;
 
 const POSTGRES_HITS: &str = r#"SELECT COUNT(*) FROM (
     SELECT rs.work_id
@@ -117,7 +137,7 @@ const POSTGRES_HITS: &str = r#"SELECT COUNT(*) FROM (
           AND st.subject_id = rs.work_id
           AND st.status = 'finished'
     )
-)"#;
+) hits"#;
 
 /// Compute the operator's hit rate over a window.
 ///
