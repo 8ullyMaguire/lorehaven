@@ -19,6 +19,7 @@ about a term; the *wired/unwired* column is the finding.
 | specified, not built | 1 | item 7 (Surprise Me) — `/surprise` is a *router id*, no route, no handler |
 | built by an earlier pass | 2 | items 8, 22 — the probe was wrong, not the code |
 | open, Tier 1 remainder | 5 | items 31, 41, 43, 75, 22-preset |
+| next in queue | — | item 9 (reason tags), then 7 (Surprise Me) |
 | deliberately refused | 3 | item 2 (archive scrape), the streak trio — argued in `100-ideas-scope.md` §1 |
 | not yet assessed | ~72 | see "what I did not touch" at the foot |
 
@@ -86,8 +87,8 @@ already found seven instances of.
 |---|---|---|
 | 1 | ~~**11 — DNF UI**~~ | DONE — `2901bc0` |
 | 2 | ~~**1 — Continue Reading**~~ | DONE — store, route, banner, 8 E2E journeys |
-| 3 | **4 — word count + minutes** | one calculation, one component; makes every card more clickable |
-| 4 | **9 — reason tags** | the data is already stored and the label is free |
+| 3 | ~~**4 — word count + minutes**~~ | DONE — store `2868b25`, rendering `f124a67` |
+| 4 | **9 — reason tags** | NEXT — the data is already stored and the label is free |
 | 5 | **7 — Surprise Me** | genuinely new query, but small and it serves the diversity budget |
 | 6 | 31, 41, 43, 75, 22-preset | the Tier 1 remainder; all render work over existing columns |
 
@@ -145,6 +146,54 @@ And one in the wiring, which is the one that matters:
   so "no request was made" had nothing to assert about, and deleting the whole mount point
   left the test green. Passing `signedIn` as a prop keeps the node mounted and hidden,
   which is a state a test can pin. All four wiring mutations now go red.
+
+### DONE — item 4, word count + reading time (store `2868b25`, rendering `f124a67`)
+
+`SUM(chapter_revisions.word_count)` through `chapters.current_revision_id` — the same join
+`events::work_word_count` already uses, so this is a second READER of a correct aggregate,
+not a second definition of it. All six query arms (three queries, two engines).
+`readingLength()` in one shared module, imported by all three rails.
+
+The audit did not mention the real shape of this item: **`WorkCard` already had a
+`wordCount?: number` prop that no caller ever passed.** The component was written, the
+column was in the database, and nothing connected them. Unreachable, not missing — which is
+why "just render it" was half the work and why `wordCount?` being optional had been hiding
+in plain sight.
+
+`word_count` is `i64`, NOT `Option<i64>`. The aggregate is COALESCEd to 0 in SQL, so "this
+work has no chapters" is 0 words, a true answer. An Option would put `undefined` in front
+of the client for every work without prose, and a card that hides a missing count would
+then also hide a zero.
+
+**The two-engine run paid for itself twice.** Both mutations PASS on SQLite and FAIL only
+on PostgreSQL:
+
+- the `::bigint` cast moved outside the coalesce. `SUM` over INTEGER is `bigint` on SQLite
+  and `numeric` on PostgreSQL, and `COALESCE(x, 0)` over a numeric is still numeric, so the
+  cast belongs on the aggregate;
+- the revisions reached by `cr.chapter_id = c.id` instead of
+  `cr.id = c.current_revision_id` — summing every draft the author ever saved. A heavily
+  revised chapter reports several times its real length and it looks plausible, so nothing
+  downstream would notice.
+
+All three PostgreSQL arms verified separately, since a mutant in one arm is invisible to a
+test that only exercises another. 22 store tests green on both engines.
+
+**Two of my own test fixtures were wrong before the code was.** 300 words / 250 is 1.2 and
+`ceil(1.2)` is 2, so a 300-word work correctly says "~2 min" — I had asserted "about a
+minute" against it. And `12,000` is not `< 10,000`, so the formatter drops the decimal and
+"12k words" is right, not "12.0k". Both were failures in the test, not the formatter, and
+each is now the thing the test documents.
+
+**`#[serde(skip)]` on the store field is the mutation that proves the journey earns its
+place.** Computed, tested on both engines, never serialised: all 22 store tests and all 520
+frontend tests stay GREEN, and the number is simply absent from every page. One E2E journey
+goes red. Nothing else does.
+
+And a false lead worth recording: my first mutation renamed the SQL alias to
+`word_count_hidden` and the journey still passed. That was CORRECT — serde reads the struct
+field name, not the column name — so an alias rename is not a mutation of the wire format
+at all, and I nearly recorded "the journey does not verify the field" from it.
 
 ## 3. Gates every one of them must clear
 
