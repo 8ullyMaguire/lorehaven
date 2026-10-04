@@ -94,6 +94,26 @@ jobs:
       - name: Unaliased FROM subqueries
         run: python3 scripts/check-pg-subquery-alias.py crates
 
+      # Every page must have an <h1>. Three did not: AdminEconomyFlows,
+      # ForumSearch and UserSearch opened with an <h2>, so their heading outline
+      # started at level 2 and the page announced itself as though its title had
+      # gone missing. Visually it reads as a heading styled slightly differently,
+      # which is why it survived review unremarked.
+      #
+      # The self-test pins the shapes that must NOT count as a heading: one
+      # inside a comment, one inside a script string, one inside a style string.
+      # A commented-out <h1> counting here would let a page pass while rendering
+      # no title at all. The checker deliberately does NOT fail a page for having
+      # SEVERAL <h1> elements -- six pages carry one per mutually exclusive
+      # branch -- because deciding whether two headings are branch-exclusive needs
+      # control flow a regex cannot have, and failing working pages is worse than
+      # checking less.
+      - name: Page-heading checker self-test
+        run: python3 scripts/check-page-headings.py --self-test
+
+      - name: Pages have a top-level heading
+        run: python3 scripts/check-page-headings.py
+
       # fix-timestamptz-binds.py is disabled. It assumed the PostgreSQL
       # timestamp columns are TIMESTAMPTZ; they are TEXT, so every cast it
       # added was itself a defect. Only the self-test runs, which keeps the

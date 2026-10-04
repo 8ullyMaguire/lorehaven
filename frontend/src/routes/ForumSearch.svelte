@@ -71,7 +71,7 @@
 </script>
 
 <div class="forum-search">
-  <h2>Search Forums</h2>
+  <h1>Search the forums</h1>
   <form on:submit={submit} class="search-form">
     <div class="row">
       <input

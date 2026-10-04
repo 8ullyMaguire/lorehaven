@@ -60,7 +60,7 @@ function lastParams(): Record<string, any> {
 describe('ForumSearch page', () => {
   it('renders the search form', () => {
     render(ForumSearch);
-    expect(screen.getByText('Search Forums')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Search the forums' })).toBeInTheDocument();
   });
 
   it('shows results after searching', async () => {
