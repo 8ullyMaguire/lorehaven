@@ -21,6 +21,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/discovery", get(get_discovery))
         .route("/discovery/blind-date", get(get_blind_date))
+        .route("/discovery/surprise-me", get(get_surprise_me))
         .route("/discovery/taste-profile", get(get_taste_profile))
         .route("/discovery/taste-profile/me", get(get_my_taste_vector))
         .route(
@@ -931,6 +932,53 @@ async fn get_blind_date(
     let body = match work {
         Some(id) => serde_json::json!({ "date": today, "work_id": id }),
         None => serde_json::json!({ "date": today, "work_id": serde_json::Value::Null }),
+    };
+    Ok(Json(body))
+}
+
+/// Surprise Me: one work from outside the reader's taste profile (spec §16.10).
+///
+/// ## `RequireSession`, and why it is not `MaybeSession`
+///
+/// The inversion is defined against a profile, and a request with no session has none. So
+/// the anonymous answer is not "some work" but "no answer", and this returns 401 rather
+/// than picking at random — the same reasoning `continue-reading` uses for "where did
+/// **you** stop".
+///
+/// ## 200 with `work: null` when the catalogue has nothing eligible
+///
+/// The honest response. An empty public catalogue, or one where every work carries a tag
+/// the reader's profile weights, is a real state; an error would tell the reader the
+/// button is broken when it is the instance that is empty. The frontend distinguishes the
+/// two from `profile_empty`, so a reader with no profile is not shown "nothing available"
+/// for having no profile.
+async fn get_surprise_me(
+    State(state): State<AppState>,
+    RequireSession(user): RequireSession,
+) -> ApiResult<Json<serde_json::Value>> {
+    let account_id = user.account_id.to_string();
+    let today = chrono::Utc::now().date_naive().to_string();
+    let found = lorehaven_db::discovery::surprise_me_work(state.db(), &account_id, &today)
+        .await
+        .map_err(|e| ApiError(AppError::Internal(e)))?;
+    // `profile_empty` comes from the store rather than being filled in here. It used to be
+    // hardcoded to `false` when no work was served, which told a brand-new reader on an
+    // instance with nothing published that their profile covered the whole catalogue — a lie
+    // found by a Playwright journey, not by any Rust test, because every Rust test either had
+    // a candidate or never checked the empty case.
+    let body = match found.candidate {
+        Some(c) => serde_json::json!({
+            "work": {
+                "work_id": c.work_id,
+                "title": c.title,
+                "summary": c.summary,
+            },
+            "profile_empty": found.profile_empty,
+        }),
+        None => serde_json::json!({
+            "work": serde_json::Value::Null,
+            "profile_empty": found.profile_empty,
+        }),
     };
     Ok(Json(body))
 }

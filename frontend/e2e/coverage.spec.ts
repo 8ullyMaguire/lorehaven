@@ -257,7 +257,11 @@ test('reader: a reader changes the font size and it survives a reload', async ({
   await page.goto(`/works/${workId}/chapters/`);
   // Fall back to the work page if the chapter URL shape differs.
   await page.goto(`/works/${workId}`);
-  await expect(page.getByRole('heading', { name: 'The Comfortable Reader' })).toBeVisible();
+  // `#main` + level 1: the Similar Works rail renders `Similar to “<title>”` as an h2, and
+  // Playwright's `name` matches substrings. See extended.spec.ts for the full account.
+  await expect(
+    page.locator('#main').getByRole('heading', { name: 'The Comfortable Reader', level: 1 }),
+  ).toBeVisible();
 });
 
 test('work: the work page shows the chapter the author wrote', async ({ page }) => {
@@ -266,7 +270,9 @@ test('work: the work page shows the chapter the author wrote', async ({ page }) 
   const workId = await publish(page, 'The Visible Chapter');
   await page.goto(`/works/${workId}`);
   // The work page lists chapters by title; clicking one opens the reader.
-  await expect(page.getByRole('heading', { name: 'The Visible Chapter' })).toBeVisible();
+  await expect(
+    page.locator('#main').getByRole('heading', { name: 'The Visible Chapter', level: 1 }),
+  ).toBeVisible();
   await expect(page.locator('.chapters li').first()).toBeVisible();
 });
 
@@ -276,7 +282,9 @@ test('work: a signed-out visitor can read a published work', async ({ page }) =>
   const workId = await publish(page, 'The Public Work');
   await signOut(page);
   await page.goto(`/works/${workId}`);
-  await expect(page.getByRole('heading', { name: 'The Public Work' })).toBeVisible();
+  await expect(
+    page.locator('#main').getByRole('heading', { name: 'The Public Work', level: 1 }),
+  ).toBeVisible();
   await expect(page.locator('.chapters li').first()).toBeVisible();
 });
 
@@ -388,7 +396,14 @@ test('concierge: a signed-in reader gets a real queue from the server', async ({
   await expect(page.getByRole('heading', { name: 'Your queue' })).toBeVisible();
 
   // The nav link, so the page is reachable without typing the path.
-  await expect(page.locator('a[href="/concierge"]').first()).toBeVisible();
+  //
+  // The menu has to be OPENED first. The nav redesign (9ac3a2e-era) grouped links into
+  // dropdown menus, so `a[href="/concierge"]` is not in the DOM until its trigger fires — and
+  // this assertion has been red since, reporting as "the queue is unreachable" when the queue
+  // was rendering fine two lines above.
+  await page.getByRole('button', { name: 'Shelf', exact: true }).first().click();
+  const conciergeLink = page.locator('a[href="/concierge"]').first();
+  await expect(conciergeLink).toBeVisible();
 
   // Either a queue of real works, or an explained empty state -- but NOT a 404,
   // an error summary, or a skeleton that never resolves. All three of those fail

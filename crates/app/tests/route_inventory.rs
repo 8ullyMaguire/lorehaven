@@ -1446,6 +1446,26 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/discovery/blind-date",
         audience: Audience::Authenticated,
     },
+    // Item 7, spec §16.10: one work from outside the reader's taste profile.
+    //
+    // Authenticated rather than public, and not by accident: the query excludes work sharing
+    // a tag with the reader's profile and reads their bookmarks, so the answer is a function
+    // of who is asking. A public call would return a pick shaped by nobody's taste, which is
+    // the same set as Blind Date's and would make the two surfaces indistinguishable.
+    RouteEntry {
+        file: "discovery.rs",
+        handler: "get_surprise_me",
+        method: "GET",
+        path: "/discovery/surprise-me",
+        audience: Audience::Authenticated,
+    },
+    RouteEntry {
+        file: "continue_reading.rs",
+        handler: "continue_reading",
+        method: "GET",
+        path: "/continue-reading",
+        audience: Audience::Authenticated,
+    },
     // ------------------------------------------------------------------
     // Pre-read reports — author-only. §23.7: a report is provider-specific and
     // the author is the only person who may see which provider produced it, or

@@ -22,6 +22,24 @@ describe('routing', () => {
     expect(matchRoute('/notifications').id).toBe('notifications');
   });
 
+  /**
+   * Item 7, Surprise Me.
+   *
+   * This file already records why the assertion has to exist: `Concierge.svelte` shipped with
+   * its own passing component tests and no route, and a component test renders the component
+   * directly so it never asks whether the path resolves. `/surprise-me` was a `RouteId`
+   * comment in this very file and nothing else — a router id is not a route.
+   *
+   * The load-bearing half is the render branch in `App.svelte`, checked in `App.test.ts`;
+   * matching the path without a branch sends it to NotFound while this test still passes.
+   */
+  it('resolves Surprise Me (item 7, spec §16.10)', () => {
+    expect(matchRoute('/surprise-me').id).toBe('surprise-me');
+    // Not a `/discover` slot. Surprise Me has a single serving per request and its own empty
+    // states, so folding it into the feed would make both worse.
+    expect(matchRoute('/surprise-me').id).not.toBe('discover');
+  });
+
   it('resolves the concierge queue (spec §54)', () => {
     // `Concierge.svelte` shipped with its own passing component tests and NO
     // route. A component test renders the component directly, so it never asks

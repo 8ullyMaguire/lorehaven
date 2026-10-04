@@ -16,10 +16,11 @@ about a term; the *wired/unwired* column is the finding.
 | shipped and wired | 3 | items 14, 27, 33 — `d81444c` |
 | shipped, **no UI** | 1 | **item 11 (DNF)** — 3 routes, store, 8 acceptance tests, zero frontend references |
 | built, **never rendered** | 3 | items 1, 4, 9 — data exists, nothing displays it |
-| specified, not built | 1 | item 7 (Surprise Me) — `/surprise` is a *router id*, no route, no handler |
+| specified, not built | 0 | — |
+| just shipped | 1 | item 7 (Surprise Me) — store, route, UI; 2 bugs only the Playwright journey found |
 | built by an earlier pass | 2 | items 8, 22 — the probe was wrong, not the code |
 | open, Tier 1 remainder | 5 | items 31, 41, 43, 75, 22-preset |
-| next in queue | — | item 7 (Surprise Me), then the Tier 1 remainder |
+| next in queue | — | the Tier 1 remainder |
 | deliberately refused | 3 | item 2 (archive scrape), the streak trio — argued in `100-ideas-scope.md` §1 |
 | not yet assessed | ~72 | see "what I did not touch" at the foot |
 
@@ -88,7 +89,6 @@ already found seven instances of.
 | 1 | ~~**11 — DNF UI**~~ | DONE — `2901bc0` |
 | 2 | ~~**1 — Continue Reading**~~ | DONE — store, route, banner, 8 E2E journeys |
 | 3 | ~~**4 — word count + minutes**~~ | DONE — store `2868b25`, rendering `f124a67` |
-| 4 | **9 — reason tags** | NEXT — the data is already stored and the label is free |
 | 5 | ~~**9 — reason tags**~~ | DONE — the backend already existed; this was pure UI |
 | 6 | **7 — Surprise Me** | genuinely new query, but small and it serves the diversity budget |
 | 7 | 31, 41, 43, 75, 22-preset | the Tier 1 remainder; all render work over existing columns |
@@ -266,6 +266,136 @@ Two test failures that were my fault, not the code's, and both are worth the spa
   (`SlotExplanationClient.test.ts`): the component test mocks it wholesale, so nothing
   else in the suite runs its body, and if it stopped swallowing 404s every component test
   would stay green while the feature rotted.
+
+### Item 7 (Surprise Me) — store, route and UI, with two bugs only a browser found
+
+**THE UI EXISTS NOW, and the two bugs below were found by the Playwright journey after 28 unit
+tests were already green.** Both are the same shape: a claim about the reader stated confidently
+when the data did not support it.
+
+**Bug A — a brand-new reader was told their profile covered the whole catalogue.**
+`surprise_me_work` returned `Option<SurpriseCandidate>`, and an `Option` cannot carry
+`profile_empty` when there is no candidate. So the route filled in `false`, and a reader with
+no profile on an instance with nothing published got *"Everything here shares a tag with your
+profile. Surprise Me deliberately steps outside it."* False twice over: they have no profile,
+and there is nothing here. The flag is a property of the **reader**, so it has to be
+answerable with no works in the catalogue — the return type is now `SurprisePick { candidate,
+profile_empty }`, computed by a separate `profile_is_empty` query when there is no candidate,
+and reusing the candidate's own value when there is one (a second query could only disagree
+with it). Two store tests cover it, and the mutation (hardcoding `false` again) turns exactly
+one red.
+
+**Bug B — a failed request printed a confident empty state under the error banner.** The
+component had `{#if error}` as a *sibling* of `{#if loading}…{:else if work}…{:else}`, so on a
+404 the chain fell through and rendered *"everything here shares a tag with your profile"*
+underneath the error summary. `error` is now the first and exclusive branch.
+
+**No Rust test caught Bug A, and that is the point.** Every store test either had a candidate
+to read the flag off or never examined the empty case — the shape the `Option` erased. The
+journey that caught it asserts the *sentence*, not the presence of text, because a page with
+one generic empty message would have passed anything weaker.
+
+**Three ways my own journeys lied, all from the same cause — the scratch database is SHARED
+across journeys, not reset per test:**
+
+| what I asserted | why it was wrong |
+|---|---|
+| "a reader with no profile sees the catalogue-empty message" | an earlier journey in the file had published work, so the catalogue was not empty |
+| "the served pick is the work this test published" | the query picks from every published work; three existed by then |
+| `getByRole('link', { name: 'Surprise Me' })` | matched a work titled *"Surprise Me Eligible Work"* from another journey — strict mode caught it as two elements |
+
+A journey that depends on its position in the file is worse than no journey. What is left is
+what is actually the frontend's claim: the two empty states are worded differently, the served
+card links to the work it names, the nav entry exists, and a failure is visible rather than
+converted into a quiet empty state.
+
+### Earlier — item 7, Surprise Me
+
+`surprise_me_work` in `crates/db/src/discovery.rs`, the route
+`GET /api/v1/discovery/surprise-me`, and `crates/app/tests/surprise_me.rs` — 13 tests
+green on SQLite **and** PostgreSQL, four consecutive runs. Not yet committed with UI.
+
+**The inversion is an EXCLUSION, not a negative score.** §16.10 says "the system inverts
+usual weighting", which could be read as scoring candidates `-affinity` — and that would
+rank the *least* interesting work in the catalogue first, so a reader who clicks learns
+nothing and concludes the button is broken. So: exclude what the profile already loves,
+then order the rest stably. The profile narrows the set; it never ranks within it.
+
+And it is emphatically **not Blind Date with a different seed**. Blind Date leaves the
+profile by *ignoring* it (no taste clause at all); Surprise Me has to go specifically away
+from it, which is the whole feature and is why it needs the tests Blind Date does not.
+
+**The reader's own works are NOT excluded** — the opposite of Blind Date, which excludes
+authors the reader has finished. Surprise Me is about taste distance, and on a small
+instance excluding self-authored work returns nothing at all.
+
+A real bug the tests caught, and the kind that is invisible on one engine:
+
+- **`profile_empty` counted ROWS, not SIGNALS.** A reader whose profile row exists with
+  `signals = []` has a row, so the flag said "you have a profile" while the exclusion
+  correctly treated it as empty. The flag and the exclusion disagreed about the same
+  reader, and the route would have told someone with no taste profile that they had one.
+  Now it counts array elements.
+
+  Three separate failures kept this alive, and the third is the one worth keeping:
+
+  1. **`cargo fmt` silently reverted half the fix.** I corrected the SQLite arm, the tests
+     went green on PostgreSQL, and a later formatting pass reflowed the string literal so my
+     next replacement no longer matched. The arm was left counting rows again with no error
+     anywhere. When a mutation "has no effect", suspect the artefact pipeline and the
+     formatter before suspecting the test.
+  2. **The static checker I wrote to catch this class could not catch it.** I built
+     `scripts/check-query-arm-symmetry.py` to compare the two engine arms of every query,
+     iterated on it eight times, and it exited 0 with the row-count bug present in every
+     state. Its arm-splitting kept landing on the wrong `Backend::` mention — first on a
+     dialect fragment (`=> "::text"`) rather than the query, then on the execute dispatch,
+     so a 12-line SQLite arm and a 13-line PostgreSQL arm never lined up. **I deleted it.**
+     A linter that cannot fail on the defect it was written for is worse than no linter,
+     because the next person cites it as evidence. What actually caught it was running both
+     engines, and what will catch it next time is `crates/app/tests/profile_empty_arms_agree.rs`.
+  3. **My first version of that test duplicated the SQL it was testing.** It re-implemented
+     both arms inline and asserted its own copies agreed — so it passed 4/4 against the
+     broken code. Reverting the arm to counting rows changed nothing it could see. It now
+     calls `surprise_me_work` and reads `profile_empty` off the returned candidate, and
+     reverting the arm turns **2 of 4 red on SQLite**. Verified both directions, then
+     restored.
+
+  **Scope of that test, stated because it looks larger than it is:** the mutation fails 2 of
+  4 on SQLite and passes 4 of 4 on PostgreSQL. That asymmetry is correct — the PostgreSQL arm
+  was always right, so the bug is a SQLite-only defect — but it means a green PostgreSQL run
+  proves *nothing* about it. The header says so, so nobody later reads "4 passed" as
+  coverage it does not provide.
+
+**Four dialect mistakes, all of them mine, and three were opposite guesses about the same
+table.** Read off the migrations rather than assumed:
+
+| column | SQLite | PostgreSQL | what I first wrote |
+|---|---|---|---|
+| `works.id` | TEXT | UUID | cast to text |
+| `bookmarks.subject_id` | TEXT | UUID | cast to **text** → `uuid = text` |
+| `bookmarks.account_id` | TEXT | UUID | cast to uuid (right) |
+| `work_tags.work_id` | TEXT | UUID | cast to text → `uuid = text` |
+| `taxonomy_nodes.id` | TEXT | TEXT | text (right) |
+| `taste_profiles.account` | TEXT | TEXT | cast to **uuid** → `text = uuid` |
+
+So the account id is a uuid in one subquery and text in another, and both are correct — the
+rule is per COLUMN, not per value. `taste_profiles.signals` is a JSON **array**
+(`json_group_array`/`json_agg` in `recompute_taste_profile`), not an object; I assumed a map
+and wrote `jsonb_each_keys`, which PostgreSQL rejected as `cannot call jsonb_each on a
+non-object` before the shape question even arose.
+
+And the fixture bug this project has now hit three times: `bookmarks.is_public` is INTEGER
+on SQLite and BOOLEAN on PostgreSQL. The literal `1` gives 42804, the bound string `'true'`
+gives the same code with "text", and SQLite accepts both. The suite's `exec_with` gained a
+`#b` marker, and the PostgreSQL bind now follows the MARKER rather than the argument value —
+keying on the value would bind a boolean to `work_tags.weight`, whose argument is `"0"`.
+
+**A test I wrote was flaky by construction and I only found it by running three times.**
+`different_readers_see_different_works` asserted `seen.len() == 2` over 20 works. Measured:
+two independent FNV-1a picks over 20 candidates agree **5.15%** of the time — one failure
+per twenty runs. The store promises the SEED differs per reader, not that the ANSWER does;
+a collision is correct behaviour. It now runs twelve readers and asserts they do not ALL
+get the same work, which a constant seed cannot survive by luck (20·(1/20)¹²).
 
 ## 3. Gates every one of them must clear
 

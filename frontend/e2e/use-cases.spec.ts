@@ -132,7 +132,19 @@ test('1. a visitor lands on the entrance and the instance describes itself', asy
   // copy change to a card's wording does not fail a test that is about structure.
   const waysIn = page.locator('section:has(h2:text("Four ways in")) a');
   await expect(waysIn).toHaveCount(4);
-  expect(await waysIn.evaluateAll((els) => els.map((e) => e.getAttribute('href')))).toEqual([
+
+  // The SET is the claim; the ORDER is not. This asserted a hand-kept list in the order
+  // discover/library/search/write, and the landing-page rewrite reordered the cards to
+  // discover/search/library/write — grouping "what you read" before "what you keep", which
+  // was deliberate. The assertion was a second copy of a constant that already lives in
+  // Home.svelte's `PATHS`, so it went stale the moment that array changed and said nothing
+  // about the page when it did.
+  //
+  // Order would be worth pinning if it meant anything to a reader. It does not: these are
+  // four equal invitations in a grid, and a screen reader gets them in DOM order regardless.
+  // What would be wrong is one of them MISSING or pointing somewhere broken, which is what
+  // the count plus the set below actually check.
+  expect((await waysIn.evaluateAll((els) => els.map((e) => e.getAttribute('href')))).sort()).toEqual([
     '/discover',
     '/library',
     '/search',

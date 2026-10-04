@@ -2521,7 +2521,52 @@ export interface DiscoveryItem {
   title?: string;
   author_handle?: string;
   word_count?: number;
+  /**
+   * Item 9: the id of the recorded recommendation slot this item was served as.
+   *
+   * OPTIONAL, and that asymmetry with `word_count` above is deliberate. The server only
+   * sets this when it successfully recorded the response, and it warns-and-continues when
+   * that write fails (`crates/app/src/routes/discovery.rs`, the `Err` arm of
+   * `record_response`). So a slot id is genuinely absent on a healthy server under some
+   * conditions, unlike a word count, which is either computed or the item is not here.
+   *
+   * A missing slot id means "no explanation available", and the UI shows nothing rather
+   * than a disabled control: a "why?" button that never works is worse than no button.
+   */
+  slot_id?: string;
 }
+
+/**
+ * Item 9: why a recommendation appears.
+ *
+ * `reasons` is the server's closed vocabulary (`SlotReason`), so the wire forms are the
+ * lower-snake enum names: `taste_tags`, `popular`, `media_reference_collaborative`,
+ * `strategy`, `reading_history`, `saved_search`. Unknown values are passed through rather
+ * than dropped, because the server normalises and the set may grow.
+ *
+ * This is a READ of the recorded slot, never a recomputation — see
+ * `lorehaven_db::recommendation_slots`'s header. The reason a replay would be wrong is
+ * that `time_decay_strategy` reads the clock inside its scoring query, so it explains a
+ * different ranking than the one the reader actually received.
+ */
+export interface SlotExplanation {
+  slot_id: string;
+  work_id: string;
+  position: number;
+  reasons: string[];
+  blend_score?: number | null;
+  served_at?: string | null;
+}
+
+/** Human wording for one reason code. */
+const SLOT_REASON_LABEL: Record<string, string> = {
+  taste_tags: 'matches tags your reading has weighted',
+  popular: 'popular on this instance',
+  media_reference_collaborative: 'shares media with something you saved',
+  strategy: 'a recommendation strategy chose this',
+  reading_history: 'followed from something you bookmarked',
+  saved_search: 'matches a search you saved',
+};
 
 export interface DiscoveryFeed {
   items: DiscoveryItem[];
@@ -2719,6 +2764,47 @@ export async function fetchBlindDate(signal?: AbortSignal): Promise<BlindDateRes
     { signal },
   );
   return { date: body.date, workId: body.work_id };
+}
+
+/**
+ * Surprise Me: one work from OUTSIDE the reader's taste profile (item 7, §16.10).
+ *
+ * Not Blind Date with a different seed. Blind Date leaves the profile by ignoring it;
+ * this goes specifically away from it, which is the whole feature. The server excludes work
+ * sharing any tag the profile weights, and `profileEmpty` says whether the profile it went
+ * away from had anything in it.
+ *
+ * **`profileEmpty` is load-bearing and is the reason this type is not just `BlindDateResponse`.**
+ * The endpoint returns 200 with `work: null` for two quite different situations: an empty
+ * public catalogue, and a reader whose profile covers the whole catalogue. A UI that treats
+ * both as "nothing to show" tells a reader with strong taste that the button is broken. So
+ * the flag travels with the work and the empty state is worded from it.
+ *
+ * Like Blind Date there is no way to ask for another pick: the endpoint takes no parameters
+ * and re-rolls per request, so the surface stays a small deliberate departure rather than a
+ * catalogue browser.
+ */
+export interface SurpriseMeResponse {
+  work: {
+    workId: string;
+    title: string;
+    summary: string;
+  } | null;
+  /** True when the reader has no taste profile at all, so the pick was unconstrained. */
+  profileEmpty: boolean;
+}
+
+export async function fetchSurpriseMe(signal?: AbortSignal): Promise<SurpriseMeResponse> {
+  const body = await apiFetch<{
+    work: { work_id: string; title: string; summary: string } | null;
+    profile_empty: boolean;
+  }>('/discovery/surprise-me', { signal });
+  return {
+    work: body.work
+      ? { workId: body.work.work_id, title: body.work.title, summary: body.work.summary }
+      : null,
+    profileEmpty: body.profile_empty,
+  };
 }
 
 /**
@@ -3272,6 +3358,33 @@ export interface QuizSkipResponse {
 }
 
 /** Fetch quiz works for onboarding. */
+/**
+ * Item 9: why this item was recommended.
+ *
+ * A slot id the reader does not own is a 404, not a 403 — §3.3 prefers 404 so the id cannot
+ * be probed for the existence of someone else's recommendation. So a 404 here means either
+ * "no such slot" or "not yours", and the caller cannot tell them apart or should not try.
+ *
+ * Returns `null` for a 404 rather than throwing: "no explanation" is a normal outcome for
+ * a feed item whose slot write failed, and it must not become an error toast.
+ */
+export async function fetchSlotExplanation(
+  slotId: string,
+  signal?: AbortSignal,
+): Promise<SlotExplanation | null> {
+  try {
+    return await apiFetch<SlotExplanation>(`/discovery/slots/${slotId}/explanation`, { signal });
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** The label for one reason code, or the code itself if the vocabulary has grown. */
+export function slotReasonLabel(reason: string): string {
+  return SLOT_REASON_LABEL[reason] ?? reason;
+}
+
 export function fetchQuizWorks(signal?: AbortSignal): Promise<{ works: DiscoveryItem[] }> {
   return apiFetch<{ works: DiscoveryItem[] }>('/quiz/works', { signal });
 }
