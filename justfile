@@ -115,6 +115,20 @@ reset-dev:
     cargo run -- migrate
     cargo run -- seed --development
 
+# Reclaim test scratch databases. Safe to run between test runs, NOT during one.
+#
+# 134 of the 182 test files never call `TestDb::cleanup`, and nothing else sweeps
+# `TMPDIR`, so a `cargo test --workspace` leaves ~7000 `lorehaven-*` directories
+# behind. One run reached 29GB on a filesystem that was already 15GB into swap, and
+# that pressure is what made pool construction outrun `acquire_timeout` -- see
+# `test_db_config` in crates/test-support/src/lib.rs for the measurements.
+#
+# The threshold is five minutes, and the sweep is deliberately age-based rather than
+# liveness-based: `std` cannot ask a SQLite file whether anyone has it open, so a
+# five-minute-old-but-running test could lose its directory. Hence "between runs".
+clean-scratch:
+    cargo run -p test-support --example sweep-scratch
+
 clean:
     cargo clean
     rm -rf {{frontend_dir}}/dist
