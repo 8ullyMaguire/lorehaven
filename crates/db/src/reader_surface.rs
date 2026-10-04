@@ -58,11 +58,32 @@ pub struct SurfaceWork {
     pub summary: String,
     pub completion: String,
     pub published_at: Option<String>,
+    /// Item 4 of the 100-idea audit: total words across the work's CURRENT chapter
+    /// revisions. A plain `i64`, not an `Option`, because the aggregate is COALESCEd to 0
+    /// in SQL on both engines — "this work has no chapters yet" is 0 words, which is a
+    /// true answer, not a missing field. An `Option` here would put `undefined` in front of
+    /// the client for every work with no prose, and a card that renders nothing for a
+    /// missing count renders nothing for a zero count too.
+    pub word_count: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recent_bookmarks: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub similarity: Option<f64>,
 }
+
+/// One row of a reader-surface query, in SELECT order.
+///
+/// A `type` alias, not a struct: `sqlx::query_as` decodes positionally into a tuple, and
+/// deriving `FromRow` would pull a trait from the driver for three queries. Clippy asked
+/// for this (`type_complexity`) after `word_count` made the leaderboard tuple seven wide,
+/// and the complaint is fair — four of those elements are bare `String`s whose order is
+/// only recorded here.
+///
+/// Two variants, because the two queries genuinely select different things and pretending
+/// otherwise would mean optional columns a reader has to null-check for no reason.
+type SurfaceRow = (String, String, String, String, Option<String>, i64);
+/// `SurfaceRow` plus `recent_bookmarks`, for the leaderboard only.
+type LeaderboardRow = (String, String, String, String, Option<String>, i64, i64);
 
 impl SurfaceWork {
     fn plain(
@@ -71,6 +92,7 @@ impl SurfaceWork {
         summary: String,
         completion: String,
         published_at: Option<String>,
+        word_count: i64,
     ) -> Self {
         Self {
             id,
@@ -78,6 +100,7 @@ impl SurfaceWork {
             summary,
             completion,
             published_at,
+            word_count,
             recent_bookmarks: None,
             similarity: None,
         }
@@ -110,7 +133,13 @@ pub async fn most_bookmarked_this_week(
     // the comparison operators are lexed as operators even after two slashes.)
     let sql = db.sql(
         "SELECT w.id, w.title, w.summary, w.completion, w.published_at,
-                COUNT(DISTINCT b.account_id) AS recent_bookmarks
+                COUNT(DISTINCT b.account_id) AS recent_bookmarks,
+                COALESCE((
+                  SELECT SUM(cr.word_count)
+                    FROM chapters c
+                    JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                   WHERE c.work_id = w.id AND c.deleted_at IS NULL
+                ), 0) AS word_count
          FROM bookmarks b
          JOIN works w ON w.id = b.subject_id
          WHERE b.subject_type = 'work'
@@ -122,7 +151,13 @@ pub async fn most_bookmarked_this_week(
          ORDER BY recent_bookmarks DESC, w.title ASC
          LIMIT ?2",
         "SELECT w.id::text, w.title, w.summary, w.completion, w.published_at,
-                COUNT(DISTINCT b.account_id) AS recent_bookmarks
+                COUNT(DISTINCT b.account_id) AS recent_bookmarks,
+                COALESCE((
+                  SELECT CAST(SUM(cr.word_count) AS BIGINT)
+                    FROM chapters c
+                    JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                   WHERE c.work_id = w.id AND c.deleted_at IS NULL
+                ), 0) AS word_count
          FROM bookmarks b
          JOIN works w ON w.id = b.subject_id
          WHERE b.subject_type = 'work'
@@ -135,7 +170,8 @@ pub async fn most_bookmarked_this_week(
          LIMIT $2",
     );
 
-    let rows: Vec<(String, String, String, String, Option<String>, i64)> = match db.backend() {
+    // id, title, summary, completion, published_at, recent_bookmarks, word_count
+    let rows: Vec<LeaderboardRow> = match db.backend() {
         Backend::Sqlite => {
             sqlx::query_as(&sql)
                 .bind(window_start)
@@ -154,11 +190,14 @@ pub async fn most_bookmarked_this_week(
 
     Ok(rows
         .into_iter()
-        .map(|(id, title, summary, completion, published_at, count)| {
-            let mut w = SurfaceWork::plain(id, title, summary, completion, published_at);
-            w.recent_bookmarks = Some(count);
-            w
-        })
+        .map(
+            |(id, title, summary, completion, published_at, count, word_count)| {
+                let mut w =
+                    SurfaceWork::plain(id, title, summary, completion, published_at, word_count);
+                w.recent_bookmarks = Some(count);
+                w
+            },
+        )
         .collect())
 }
 
@@ -219,7 +258,13 @@ pub async fn new_in_your_fandoms(
     // `db.sql` borrows both arms, so they must outlive the call -- an inline
     // `&format!(...)` leaves a Cow pointing at a freed temporary.
     let sqlite_arm = format!(
-        "SELECT DISTINCT w.id, w.title, w.summary, w.completion, w.published_at
+        "SELECT DISTINCT w.id, w.title, w.summary, w.completion, w.published_at,
+                COALESCE((
+                  SELECT SUM(cr.word_count)
+                    FROM chapters c
+                    JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                   WHERE c.work_id = w.id AND c.deleted_at IS NULL
+                ), 0) AS word_count
          FROM works w
          JOIN work_tags wt ON wt.work_id = w.id
          WHERE wt.node_id IN ({nodes_sqlite})
@@ -231,7 +276,13 @@ pub async fn new_in_your_fandoms(
          LIMIT {limit}"
     );
     let postgres_arm = format!(
-        "SELECT DISTINCT w.id::text, w.title, w.summary, w.completion, w.published_at
+        "SELECT DISTINCT w.id::text, w.title, w.summary, w.completion, w.published_at,
+                COALESCE((
+                  SELECT CAST(SUM(cr.word_count) AS BIGINT)
+                    FROM chapters c
+                    JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                   WHERE c.work_id = w.id AND c.deleted_at IS NULL
+                ), 0) AS word_count
          FROM works w
          JOIN work_tags wt ON wt.work_id = w.id
          WHERE wt.node_id IN ({nodes_pg})
@@ -249,9 +300,10 @@ pub async fn new_in_your_fandoms(
     // and the other arm then fails with `type mismatch ... expected Sqlite, found
     // Postgres` -- a pool-type error that reads like a database-layer problem and is
     // really a lexical one.
-    let rows: Vec<(String, String, String, String, Option<String>)> = match db.backend() {
+    let rows: Vec<SurfaceRow> = match db.backend() {
         Backend::Sqlite => {
-            let mut q = sqlx::query_as::<_, (String, String, String, String, Option<String>)>(&sql);
+            let mut q =
+                sqlx::query_as::<_, (String, String, String, String, Option<String>, i64)>(&sql);
             for node in &node_ids {
                 q = q.bind(node);
             }
@@ -262,7 +314,8 @@ pub async fn new_in_your_fandoms(
                 .await?
         }
         Backend::Postgres => {
-            let mut q = sqlx::query_as::<_, (String, String, String, String, Option<String>)>(&sql);
+            let mut q =
+                sqlx::query_as::<_, (String, String, String, String, Option<String>, i64)>(&sql);
             for node in &node_ids {
                 q = q.bind(node);
             }
@@ -279,9 +332,11 @@ pub async fn new_in_your_fandoms(
 
     Ok(rows
         .into_iter()
-        .map(|(id, title, summary, completion, published_at)| {
-            SurfaceWork::plain(id, title, summary, completion, published_at)
-        })
+        .map(
+            |(id, title, summary, completion, published_at, word_count)| {
+                SurfaceWork::plain(id, title, summary, completion, published_at, word_count)
+            },
+        )
         .collect())
 }
 
@@ -466,12 +521,26 @@ pub async fn similar_works(db: &Database, work_id: &str, limit: i64) -> Result<V
     // and leaving one of the two interpolated would mean the next reader has to work out
     // which style this function uses.
     let sqlite_arm = format!(
-        "SELECT id, title, summary, completion, published_at FROM works
+        "SELECT id, title, summary, completion, published_at,
+                COALESCE((
+                  SELECT SUM(cr.word_count)
+                    FROM chapters c
+                    JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                   WHERE c.work_id = works.id AND c.deleted_at IS NULL
+                ), 0) AS word_count
+         FROM works
          WHERE id IN ({}) AND lifecycle = 'published' AND deleted_at IS NULL",
         vec!["?"; ids.len()].join(",")
     );
     let postgres_arm = format!(
-        "SELECT id::text, title, summary, completion, published_at FROM works
+        "SELECT id::text, title, summary, completion, published_at,
+                COALESCE((
+                  SELECT CAST(SUM(cr.word_count) AS BIGINT)
+                    FROM chapters c
+                    JOIN chapter_revisions cr ON cr.id = c.current_revision_id
+                   WHERE c.work_id = works.id AND c.deleted_at IS NULL
+                ), 0) AS word_count
+         FROM works
          WHERE id IN ({}) AND lifecycle = 'published' AND deleted_at IS NULL",
         (1..=ids.len())
             .map(|n| format!("${n}::uuid"))
@@ -480,9 +549,10 @@ pub async fn similar_works(db: &Database, work_id: &str, limit: i64) -> Result<V
     );
     let sql = db.sql(&sqlite_arm, &postgres_arm);
 
-    let rows: Vec<(String, String, String, String, Option<String>)> = match db.backend() {
+    let rows: Vec<SurfaceRow> = match db.backend() {
         Backend::Sqlite => {
-            let mut q = sqlx::query_as::<_, (String, String, String, String, Option<String>)>(&sql);
+            let mut q =
+                sqlx::query_as::<_, (String, String, String, String, Option<String>, i64)>(&sql);
             for id in &ids {
                 q = q.bind(id);
             }
@@ -490,7 +560,8 @@ pub async fn similar_works(db: &Database, work_id: &str, limit: i64) -> Result<V
                 .await?
         }
         Backend::Postgres => {
-            let mut q = sqlx::query_as::<_, (String, String, String, String, Option<String>)>(&sql);
+            let mut q =
+                sqlx::query_as::<_, (String, String, String, String, Option<String>, i64)>(&sql);
             for id in &ids {
                 q = match uuid::Uuid::parse_str(id) {
                     Ok(u) => q.bind(u),
@@ -505,12 +576,15 @@ pub async fn similar_works(db: &Database, work_id: &str, limit: i64) -> Result<V
     let scores: HashMap<String, f64> = scored.into_iter().collect();
     let mut out: Vec<SurfaceWork> = rows
         .into_iter()
-        .filter_map(|(id, title, summary, completion, published_at)| {
-            let similarity = scores.get(&id).copied()?;
-            let mut w = SurfaceWork::plain(id, title, summary, completion, published_at);
-            w.similarity = Some(similarity);
-            Some(w)
-        })
+        .filter_map(
+            |(id, title, summary, completion, published_at, word_count)| {
+                let similarity = scores.get(&id).copied()?;
+                let mut w =
+                    SurfaceWork::plain(id, title, summary, completion, published_at, word_count);
+                w.similarity = Some(similarity);
+                Some(w)
+            },
+        )
         .collect();
     out.sort_by(|a, b| {
         b.similarity
