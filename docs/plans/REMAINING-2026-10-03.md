@@ -62,6 +62,105 @@ what is *still* to do, in the order it will be done.
 | 3 | The 27 `planned` + 6 `specified` tracker rows | M45-23 north-star, M45-25 … M45-55, M46-05 search. Each is a multi-week spec of its own. Listed so the number is honest rather than implied. |
 | 4 | Path B (WASM), §55.4 | Gated by §55.6. `scripts/check-wasm-gate.py` fails the build if a WASM runtime is adopted; `wasmi 0.4` does not compile on this toolchain. |
 
+## What was verified, and what had never been run
+
+The 2026-10-03 evening pass ran every gate this project has. Two of them had **never
+been run at all**, and both found things.
+
+| Gate | Before today | Result |
+|---|---|---|
+| `cargo test --workspace` | **never run** | **12–17 failures** → 4052/4052 after two fixes |
+| `svelte-check` (`just check-frontend`) | **never run since the page shipped** | 2 errors → 0 errors, 0 warnings |
+| Playwright E2E | run once | 84/84 → re-run green |
+| frontend vitest | run | 439 → 445 |
+| 8 static CI gates | 6 red | 2 fixed, 1 non-failure, 3 pre-existing named |
+| clippy `--workspace --all-targets` | run | 0 |
+
+### The workspace suite: 12 failures that were not bugs
+
+```
+panicked at crates/test-support/src/lib.rs: connect: connecting to SQLite at ...
+Caused by: pool timed out while waiting for an open connection
+```
+
+Every affected suite passes 100% alone — at `--test-threads` 16, 4 and 1, and two of
+them concurrently also pass. So it was never a defect in any suite, and calling it
+"flaky under load" would have hidden the next real failure of the same shape.
+
+**Cause.** `cargo test --workspace` runs 198 suites; each `TestDb` clones a migrated
+file and opens its own `SqlitePool`. 134 of the 182 test files never call
+`TestDb::cleanup`, and nothing sweeps `TMPDIR`, so one run left **6,925 directories
+totalling 29GB** on a filesystem already 15GB into swap. Pool construction under that
+much pressure outran the 10s `acquire_timeout`.
+
+**Two fixes, in the right order.**
+
+1. `test_db_config()` widens the *test* acquire timeout to 60s. Production defaults
+   untouched. Proven by control at a load high enough to reproduce:
+
+   | `acquire_timeout` | suites failing | pool timeouts | wall |
+   |---|---|---|---|
+   | 10s (default) | 1 of 40 | 1 | 105s |
+   | 60s | 0 of 40 | 0 | 73s |
+
+   The first attempt at that control was worthless and is why the load is 40 and not
+   4: four previously-failing suites run concurrently passed 81/81 **both before and
+   after**, which would have "shown" the change doing nothing.
+
+2. `TestDb` records its `sqlite_dir`; `cleanup()` removes it after closing the pool.
+   Plus `sweep_stale_sqlite()` for the databases a failing test never returns from.
+   Scratch went **29GB → 364MB**.
+
+`sweep_stale_sqlite()` is **age-based, not liveness-based**, and the doc says so: std
+cannot ask a SQLite file whether anyone has it open, whereas the PostgreSQL sweep asks
+`pg_database` about attached backends. It is deliberately **not** wired into the test
+run, because the export-worker and postgres-journey suites idle for minutes and a false
+"dead" would delete a running test's database. A `Drop` impl is the right answer and is
+named rather than attempted.
+
+Its own test caught a bug in it first: "a directory with no database file is dead"
+looked obviously right and is wrong, because `scratch_dir()` and `connect_with_dir()`
+are a moment apart and the first version deleted starting tests' directories. Both
+mutations CAUGHT.
+
+**Not a complete fix, stated plainly.** With 60s the run still lost 2 tests at suite
+131. The leak fix is what closed it — the final run is 198 suites / **4052 passed /
+0 failed / 0 pool timeouts**, at default parallelism, exit 0.
+
+### The type checker: a feature that was designed and never built
+
+`svelte-check` reported `Concierge.svelte:59 'knownMoods' is declared but its value is
+never read`. Following it found a whole unfinished feature rather than one dead
+variable: the component declared `knownMoods` and `moodError`, set `moodError = null`,
+rendered neither, carried a doc comment explaining that §54.2's mood vocabulary "comes
+from the server's validation error instead, which is the only place it appears" — **and
+had no input for a mood at all.** A budget selector and no way to ask for a mood.
+
+Built, with six tests. Three exist because a mutation came back GREEN, and the third is
+the one worth keeping:
+
+| Mutation | Result |
+|---|---|
+| moods not parsed out of the message | 2 failed — CAUGHT |
+| a 500 swallowed into the mood path | 1 failed — CAUGHT |
+| learned list never cleared | 1 failed — CAUGHT |
+| status gate widened `422` → `>= 400` | GREEN → then CAUGHT |
+
+The widened gate was GREEN because the 500 fixture carries no `fieldErrors`, so it
+cannot tell "422 about a mood" from "some other status about a mood". A 500 **with**
+`fieldErrors.mood` is ordinary — a validation failing mid-handler, a wrapped upstream
+error — and swallowing it into an inline mood sentence with no retry hides a real
+failure. So the gate is exact-422, and there is now a test whose 500 carries
+`fieldErrors.mood`.
+
+Also fixed: **12 dead CSS custom properties** in `Concierge.svelte`. `--text-muted`,
+`--border`, `--text`, `--surface-muted`, `--surface-hover` and `--danger` are not defined
+anywhere in `tokens.css`, so every rule using them was silently unstyled. And
+`PreReadPanel.test.ts:99`, the last svelte-check error in the tree, constructed
+`new ApiError('boom', 'SERVER_ERROR', 500, 'server exploded')` against a
+`(status, code, message, requestId)` signature — the assertion passed only because the
+string was sitting in `requestId`.
+
 ### The static CI gates, run 2026-10-03
 
 None of the eight `scripts/check-*.py` gates had been run this session. Six were red.
