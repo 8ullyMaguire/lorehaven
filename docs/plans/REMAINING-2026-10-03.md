@@ -58,7 +58,8 @@ what is *still* to do, in the order it will be done.
 | # | Work | Done when |
 |---|---|---|
 | 1 | `spec.md` §54 → implementation note | The spec claims the concierge exists; a reader should be able to check that in one grep. |
-| 2 | The pre-existing CI reds | **All three closed** at `c044870`. Two were the gate being wrong, one was a suite that was SQLite-only while claiming both engines. Two gates remain red, both with findings in files this work never touched: `check-pg-arm-uses-sqlite-pool` (22) and `check-uncast-pg-placeholders` (15). |
+| 2 | The pre-existing CI reds | **Four of five closed.** `check-sqlite-migration-syntax`, `check-pg-uuid-casts` and `find-single-backend-suites` at `c044870`; `check-pg-arm-uses-sqlite-pool` at `745a5cf`. Three were gates reporting correct code as defective; one was a suite claiming both engines while SQLite-only. |
+| 2b | `check-uncast-pg-placeholders` (15) | **Open, and the findings are very likely wrong.** The rule reads the *column* type and never the *bind*. `preread_store.rs` binds `uuid::Uuid::parse_str(...)` against a `uuid` column -- no cast needed -- and is 12/12 on **both** engines; `generated_content.rs` binds `&str` against a **TEXT** column, where there is nothing to cast. Same shape as the int4 rule fixed earlier in that file. A patch was attempted, worked in isolation, and provably changed nothing, so it was reverted rather than shipped. The fix is to judge the **pair** (bind type against column type), which needs a rewrite rather than a fourth patch on a helper. |
 | 3 | The 27 `planned` + 6 `specified` tracker rows | M45-23 north-star, M45-25 … M45-55, M46-05 search. Each is a multi-week spec of its own. Listed so the number is honest rather than implied. |
 | 4 | Path B (WASM), §55.4 | Gated by §55.6. `scripts/check-wasm-gate.py` fails the build if a WASM runtime is adopted; `wasmi 0.4` does not compile on this toolchain. |
 
@@ -335,3 +336,40 @@ rule could not see a `#[derive(FromRow)]` struct. Its advice would have made sql
 to **compile** the query — the same failure mode as the `::int8` finding one pass
 earlier. It now resolves the struct per column, proven by mutating both fields to
 `Option<i64>` and watching the 2 findings return.
+
+
+## The fourth red, closed (2026-10-03, pass four)
+
+`check-pg-arm-uses-sqlite-pool` had 22 findings. I had twice recorded them as "in files
+this work never touched -- real work rather than noise." **All 22 were wrong**, and the
+gate had been unable to do its job since the commit that introduced it.
+
+`scan()` tracked brace depth treating both `"` and `'` as string delimiters. Rust has no
+single-quoted string literal -- `&'a SqlitePool` is a lifetime. An apostrophe in a `//`
+comment opened a phantom string that closed on the `'` inside a SQL literal 23 lines
+later, swallowing the SQLite arm's braces; depth never returned to zero and the
+depth -> header map went stale for the rest of the file. Every `sqlite_pool()` after that
+point was reported inside `Backend::Postgres =>`.
+
+The gate reported the **one** real defect it was written for (`thread_modes.rs`, in the
+same commit) alongside **18** invented ones -- the true finding was 1 part in 19.
+
+Three smaller blind spots in the same gate: `is_postgres()` was not recognised as a
+backend branch (the spelling 17 test files use); a function's span ran to the next `fn`,
+sweeping in the next function's doc comment; and a file opening its own `Database` from a
+hardcoded `sqlite://` was judged as though it had an unported arm.
+
+The gate now has a 6-case self-test wired into CI before the gate itself, and every fix
+is verified by reverting it. The apostrophe case reads a **verbatim 310-line prefix** of
+the real file, kept as `scripts/fixtures/quote_in_comment.rs`, because three
+hand-written miniatures of that shape all came back *correct* against the broken scanner.
+
+In production the pass also found `retention_proposals.rs` using two sequential
+`if let Some(pool)` blocks -- correct today, and a silent no-op if neither pool matched,
+which is the failure a third backend would inherit. The house idiom is
+`match db.backend()` (1039 arms against these 5 outliers, and that ratio is what
+identified them as the anomaly). Converted, along with
+`preservation_ledger.rs::seed_work`, which does run on both engines.
+
+Verified: SQLite 59/59 across the retention and preservation suites; **PostgreSQL 52/52**,
+plus `preservation_ledger` 7/7 on PostgreSQL.
