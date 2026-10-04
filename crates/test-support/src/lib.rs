@@ -57,6 +57,15 @@ pub struct TestDb {
     applied_all: Vec<String>,
     pg_admin: Option<Database>,
     pg_name: Option<String>,
+    /// The SQLite scratch directory this database's file lives in, if any.
+    ///
+    /// Held so [`TestDb::cleanup`] can remove it. Without it a workspace run
+    /// leaves every test's database behind: `cargo test --workspace` leaves ~7000
+    /// `lorehaven-*` directories under `TMPDIR` totalling 29GB, because nothing
+    /// else ever deletes them and `std::env::temp_dir()` is not swept.
+    ///
+    /// `None` on PostgreSQL, which drops a database rather than a directory.
+    sqlite_dir: Option<PathBuf>,
 }
 
 fn sanitize(tag: &str) -> String {
@@ -411,17 +420,13 @@ async fn sqlite_template() -> Option<std::path::PathBuf> {
     SQLITE_TEMPLATE.get().map(|(_, p)| p.clone())
 }
 
-/// A SQLite database file at `dst` with every migration applied, from the cache.
-///
-/// This is the whole optimisation on the SQLite side: one `copy` syscall pair
-/// instead of 107 migrations.
 /// A `DatabaseConfig` for a test database, with the acquire timeout widened.
 ///
 /// WHY THIS EXISTS, measured rather than guessed: `cargo test --workspace` fails
 /// 12-17 tests with
 ///
 /// ```text
-/// panicked at crates/test-support/src/lib.rs:575: connect: ...
+/// panicked at crates/test-support/src/lib.rs:605: connect: ...
 /// Caused by: pool timed out while waiting for an open connection
 /// ```
 ///
@@ -439,12 +444,38 @@ async fn sqlite_template() -> Option<std::path::PathBuf> {
 /// So the test harness asks for longer rather than the code being changed, and
 /// rather than the failure being written off as "flaky under load" -- a description
 /// that would have hidden the next real failure of the same shape.
+///
+/// Proven by control at a load high enough to reproduce it, 40 suites run
+/// concurrently:
+///
+/// | `acquire_timeout` | suites failing | pool timeouts | wall |
+/// |---|---|---|---|
+/// | 10s (default) | 1 | 1 | 105s |
+/// | 60s (this) | 0 | 0 | 73s |
+///
+/// The first attempt at that proof was worthless and is the reason the load is 40
+/// and not 4: four previously-failing suites run concurrently passed 81/81 BOTH
+/// before and after, which would have "shown" the change doing nothing. Reproduce
+/// the failure before you claim a fix removes it.
+///
+/// NOT a complete fix. At 131 suites the default-parallelism run still lost 2 tests
+/// to this, so 60s raises the ceiling rather than removing it. What actually bounds
+/// it is the harness leaking every scratch database: a workspace run leaves ~7000
+/// `lorehaven-*` directories under `TMPDIR` totalling 29GB, because `TestDb` has no
+/// `Drop` and never removes its directory. Reclaimed by hand here. A `Drop` that
+/// deletes a directory a still-running test holds a handle to would be a worse bug,
+/// so that wants a shared template directory plus an atexit sweep, not a naive
+/// `remove_dir_all`.
 pub fn test_db_config(url: impl Into<String>) -> lorehaven_db::DatabaseConfig {
     let mut config = lorehaven_db::DatabaseConfig::new(url);
     config.acquire_timeout = std::time::Duration::from_secs(60);
     config
 }
 
+/// A SQLite database file at `dst` with every migration applied, from the cache.
+///
+/// This is the whole optimisation on the SQLite side: one `copy` syscall pair
+/// instead of 107 migrations.
 pub async fn cached_sqlite_file(dst: &Path) -> bool {
     match sqlite_template().await {
         Some(template) => std::fs::copy(&template, dst).is_ok(),
@@ -572,6 +603,7 @@ impl TestDb {
                         db,
                         pg_admin: Some(admin),
                         pg_name: Some(name),
+                        sqlite_dir: None,
                     };
                 }
 
@@ -585,6 +617,7 @@ impl TestDb {
                     db,
                     pg_admin: Some(admin),
                     pg_name: Some(name),
+                    sqlite_dir: None,
                 }
             }
             _ => {
@@ -623,6 +656,7 @@ impl TestDb {
                     db,
                     pg_admin: None,
                     pg_name: None,
+                    sqlite_dir: Some(dir.to_path_buf()),
                 }
             }
         }
@@ -895,14 +929,132 @@ impl TestDb {
 
     /// Close the database and drop the scratch PostgreSQL database if one
     /// was created.
+    /// Release the database and remove what it left on disk.
+    ///
+    /// The pool is closed FIRST, because on SQLite the open file and its `-wal` /
+    /// `-shm` siblings are what make `remove_dir_all` fail on Windows, and because
+    /// a directory removed under a live pool is a use-after-free that happens to
+    /// work on Linux and nowhere else.
+    ///
+    /// Best-effort by design: a fixture that fails mid-test may never reach this,
+    /// which is what [`sweep_stale_sqlite`] is for.
     pub async fn cleanup(self) {
-        self.db.close().await;
-        if let (Some(admin), Some(name)) = (self.pg_admin, self.pg_name) {
+        let Self {
+            db,
+            pg_admin,
+            pg_name,
+            sqlite_dir,
+            ..
+        } = self;
+        db.close().await;
+        if let (Some(admin), Some(name)) = (pg_admin, pg_name) {
             let _ = sqlx::query(&format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
                 .execute(admin.postgres_pool().expect("postgres admin pool"))
                 .await;
             admin.close().await;
         }
+        if let Some(dir) = sqlite_dir {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+/// Remove SQLite scratch directories no live process is using.
+///
+/// The counterpart to [`TestDb::cleanup`], for the databases a test never returns
+/// from. 48 of the 182 test files call `cleanup`; the rest leave a directory
+/// behind every run, and `std::env::temp_dir()` is not swept by anything, so a
+/// `cargo test --workspace` leaves roughly 7000 of them totalling about 29GB.
+///
+/// ## THIS IS AGE-BASED, NOT LIVENESS-BASED, and that is a real limitation
+///
+/// [`sweep_stale_databases`] decides for PostgreSQL by asking `pg_database` whether
+/// anyone is attached, which is authoritative. There is no equivalent question to
+/// ask a SQLite file from `std`, so this falls back to modification time with a
+/// generous five-minute threshold.
+///
+/// The consequence is stated rather than hidden: a test that runs longer than five
+/// minutes AND has not written to its database in that time could have its
+/// directory removed underneath it. That is not hypothetical -- the export-worker
+/// and PostgreSQL-journey suites idle for minutes at a time -- so the failure mode
+/// is real and this function is **not** wired into the test run for that reason.
+///
+/// It is exposed for an operator to run deliberately (`just clean-scratch`, or by
+/// hand between runs), which is where a five-minute threshold costs nothing. Wiring
+/// it in automatically needs a real liveness signal first: hold an exclusive lock
+/// on a sidecar file for the lifetime of the `TestDb`, or have `TestDb::drop` do the
+/// removal, which is the better fix and the reason this is a stopgap.
+///
+/// Best-effort and quiet. A directory that cannot be removed is somebody else's.
+pub fn sweep_stale_sqlite() -> usize {
+    let temp = std::env::temp_dir();
+    let Ok(entries) = std::fs::read_dir(&temp) else {
+        return 0;
+    };
+    let mut removed = 0usize;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !(name.starts_with("lorehaven-test-") || name.starts_with("lorehaven-")) {
+            continue;
+        }
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if sqlite_dir_looks_live(&path) {
+            continue;
+        }
+        if std::fs::remove_dir_all(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// Whether this scratch database looks like something is still using it.
+///
+/// See [`sweep_stale_sqlite`] for why this is a heuristic and not a question with
+/// an authoritative answer. The bias is one way on purpose: calling a live database
+/// dead leaves a directory behind, which the next run reclaims, while calling a dead
+/// one live only delays cleanup.
+fn sqlite_dir_looks_live(dir: &Path) -> bool {
+    let file = dir.join("lorehaven.sqlite");
+    let Ok(options) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&file)
+    else {
+        // No database file at all. A directory in that state is either abandoned or
+        // one a fixture has created but not yet connected to -- `scratch_dir()` makes
+        // the directory and `connect_with_dir` opens the database a moment later, so
+        // this window is REAL and short, and treating it as dead deletes the
+        // directory out from under a starting test.
+        //
+        // So the DIRECTORY's own mtime is the fallback: it is fresh for a fixture
+        // mid-setup and old for anything abandoned.
+        return match std::fs::metadata(dir).and_then(|m| m.modified()) {
+            Ok(modified) => {
+                std::time::SystemTime::now()
+                    .duration_since(modified)
+                    .unwrap_or_default()
+                    < std::time::Duration::from_secs(300)
+            }
+            Err(_) => true,
+        };
+    };
+    let Ok(meta) = options.metadata() else {
+        return true;
+    };
+    drop(options);
+    match meta.modified() {
+        Ok(modified) => {
+            let age = std::time::SystemTime::now()
+                .duration_since(modified)
+                .unwrap_or_default();
+            age < std::time::Duration::from_secs(300)
+        }
+        Err(_) => true,
     }
 }
 
@@ -1327,6 +1479,47 @@ mod tests {
     /// A property test rather than a single pair, because the two calls here
     /// are adjacent and an implementation that only collided under
     /// concurrency would pass them.
+    /// `cleanup` must actually remove the directory, since that is the whole point
+    /// of recording it on the struct. A test that only checks `cleanup` runs would
+    /// pass with a `remove_dir_all` that silently does nothing.
+    #[tokio::test]
+    async fn cleanup_removes_the_sqlite_scratch_directory() {
+        let dir = super::scratch_dir("cleanup-removes-dir");
+        let tdb = super::TestDb::connect_with_dir("cleanup-removes-dir", &dir).await;
+        let recorded = tdb
+            .sqlite_dir
+            .clone()
+            .expect("a SQLite TestDb records its directory");
+        assert!(
+            recorded.is_dir(),
+            "the scratch directory exists while in use"
+        );
+        assert!(
+            recorded.join("lorehaven.sqlite").is_file(),
+            "and holds the database"
+        );
+
+        tdb.cleanup().await;
+
+        assert!(
+            !recorded.exists(),
+            "cleanup left {recorded:?} behind -- this is the leak that put 29GB in TMPDIR"
+        );
+    }
+
+    /// The sweep must not remove a directory that was touched moments ago, which is
+    /// the conservative side of its heuristic and the reason it is safe to run.
+    #[test]
+    fn the_sweep_leaves_a_fresh_directory_alone() {
+        let dir = scratch_dir("sweep-leaves-fresh");
+        let removed = super::sweep_stale_sqlite();
+        assert!(
+            dir.exists(),
+            "the sweep removed a directory created seconds ago ({removed} removed overall)"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn scratch_dir_is_unique_per_call_not_per_tag() {
         let mut seen = std::collections::HashSet::new();
