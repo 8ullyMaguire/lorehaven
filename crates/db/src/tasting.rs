@@ -1076,10 +1076,26 @@ async fn existing_match_state(
     // while `tasting_samples.account_id` and `tasting_responses.account_id` are
     // plain TEXT on both engines (0099). Same shape, opposite type — which is why
     // the fix for the 500s was per-query and not a blanket one.
+    // `matches_played` is `INTEGER`, which is INT8 on SQLite (no width) and INT4 on
+    // PostgreSQL, and sqlx checks the width rather than widening. Decoding it as
+    // `i64` compiles, passes every SQLite test, and fails on the first row of the
+    // PostgreSQL leg:
+    //
+    //     mismatched types; Rust type `i64` (as SQL type `INT8`)
+    //     is not compatible with SQL type `INT4`
+    //
+    // Confirmed against sqlx-postgres 0.8.6 directly: `INT4 -> i64` is
+    // `ColumnDecode`, `INT4 -> i32` is `Ok`. So the column is cast on the way out
+    // and the pair stays `(f64, i64)` for the caller, which is the shape
+    // `record_match` below expects.
+    //
+    // `CAST(... AS BIGINT)` rather than `::bigint`: the `::` form is PostgreSQL
+    // only, and this statement is spelled once and run on both backends.
     let sql = db.sql(
         "SELECT elo_rating, matches_played FROM arena_weights
          WHERE account_id = ? AND dimension_key = ?",
-        "SELECT elo_rating, matches_played FROM arena_weights
+        "SELECT elo_rating, CAST(matches_played AS BIGINT) AS matches_played
+         FROM arena_weights
          WHERE account_id = $1::uuid AND dimension_key = $2",
     );
     let row: Option<(f64, i64)> = match db.backend() {
