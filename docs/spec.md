@@ -10486,3 +10486,85 @@ every other §21 guarantee conditional on one unexamined function.
 - A declarative manifest cannot raise its own rate above the host's applied
   rate.
 - No `wasmi` dependency exists while §55.6's gate is unmet.
+
+---
+
+## 56 WIP adoption, closure notes, and lineage
+
+Gaps review C4. A work whose author stopped is the archive's most common failure, and
+today §8.8 *reports* the fact (`active | slow | dormant | concluded`) while leaving the
+reader and the adopting author with nothing to act on. This section supplies the action.
+
+Three clauses, in the order they matter. The first is a promise; the second is a mechanism;
+the third is a prohibition.
+
+### 56.1 An adoption offer is an ask, never a transfer
+
+A work marked `abandoned` (§8.2) may be offered for adoption. An adopting author takes on
+*authorship of the next chapter*; they never take ownership of the original author's work.
+
+- **Ownership does not move.** `works.owner_pseud_id` is unchanged by adoption, permanently
+  and irreversibly. The adopting pseud is recorded as a *contributor* on subsequent
+  revisions, never as an owner.
+- The original author may withdraw an adoption offer at any time, with no notice period.
+- Adoption requires the adopting pseud to hold the trust level that publishing requires
+  (§19.4). Adoption is a publishing act and is gated identically.
+- A work already `complete` is not adoptable. There is nothing to continue.
+
+### 56.2 Closure notes are first-class and credited
+
+When an author concludes a work — whether completing it or marking it `abandoned` — they
+may publish a **closure note**: a short statement of what happened to the story and why.
+
+- The note is **versioned with the work**, not with the author, and is revision-restorable
+  like any other revision (§8.5).
+- The note is credited: its author pseudonym is shown, and a closure note earns the same
+  credit as a chapter. It is not "metadata".
+- **A closure note is optional and never a precondition.** A work may conclude with no
+  note. This is stated because the obvious failure is a publish flow that refuses to
+  conclude a work until the author has written a note, which turns a courtesy into a tax.
+- A closure note may be edited by its author afterwards; each edit is a new revision.
+
+### 56.3 Lineage is a fact about revisions, not a story about people
+
+When a work changes hands, who wrote what is a question the archive must answer exactly.
+
+- Every revision records its `author_pseud_id`. Lineage is *derived* from that column — it
+  is never hand-written, and there is no "lineage" field an author can fill in.
+- A work's reader-facing contributor list is ordered by **first contribution**, so an
+  adopting author does not leapfrog the person who wrote chapter one.
+- **Lineage never affects ranking, credits, awards or trust.** §8.8 says derived activity
+  status is information and never a penalty; the same rule governs who contributed.
+  A work adopted by a stranger is the same work, and the adopting author's contributions
+  earn exactly what the original author's did.
+
+### 56.4 What this deliberately does not do
+
+- **No automatic abandonment.** Nothing marks a work `abandoned` without the author or an
+  operator doing it. §8.8's derived `dormant` is a *reading*, not a state change.
+- **No transfer of ownership, ever.** See 56.1. There is no route that can move
+  `owner_pseud_id` because of adoption.
+- **No paywall on the archive.** An adopting author is not compensated by a share of
+  anything; §0.3 and the standing rule against bought trust.
+- **No lineage ranking.** See 56.3.
+
+### Acceptance
+
+- Adopting a work does not change `works.owner_pseud_id`, and the test asserts the column
+  value before and after.
+- An author can withdraw an open adoption offer, and the offer is then not listable.
+- Adoption is refused below the publishing trust level, and the refusal names the bar.
+- A work with `completion = 'complete'` cannot be adopted.
+- A work may conclude with **no** closure note; the conclude path succeeds without one.
+- A closure note's author is shown, and it earns credit equal to a chapter.
+- Editing a closure note creates a new revision; restoring it creates another.
+- The contributor list is ordered by first contribution, so an adopter is not first for a
+  work they joined after chapter one.
+- Two works adopted by the same pseud rank identically in search and recommendations,
+  which is what 56.3's "lineage never affects ranking" means in a test.
+
+### Prior art already in the schema
+
+`works.completion` already carries `abandoned` and `hiatus` (§8.2), and
+`works.owner_pseud_id` already belongs to the *pseud* (ADR 0003, §8's "pseud switching does
+not change ownership"). 56.1 follows from the schema rather than adding to it.
