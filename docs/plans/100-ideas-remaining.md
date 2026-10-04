@@ -95,6 +95,41 @@ Items 1, 4 and 9 are one `reader_surface`-style module: no migrations, no new st
 one store file, one route set, three components. They should ship as **one** change,
 not three, because the module boundary is the work.
 
+## 2a. Progress log
+
+### DONE — item 11, DNF (commit `2901bc0`)
+
+Store, route, component, unit tests, E2E journey. A reader can mark a work DNF with one
+of six reasons and a private note. All 8 E2E journeys green after the fix.
+
+### IN PROGRESS — item 1, Continue Reading
+
+**Shipped so far: the store.** `crates/db/src/continue_reading.rs`, 12 tests green on
+SQLite AND PostgreSQL, clippy and rustfmt clean, 9 of 10 mutations caught on both
+engines.
+
+The one design point worth writing down, because the first version got it wrong and a
+test caught it rather than a reader: **progress is per-DEVICE, and there are two of this
+reader's rows.** `0004_reading` declares two partial unique indexes — one for
+`device_id IS NOT NULL`, one for `IS NULL` — so a reader with a laptop and a phone has
+two rows per work. The first query aggregated with `MAX(position_permille)`, which is the
+**furthest** position, not the **last** one, and aggregating `MAX(updated_at)` and
+`MAX(position_permille)` independently let them disagree about which row they came from:
+the banner would say "90% through" while quoting chapter 1 from a different device. The
+fix is no aggregate at all — group by every selected column and order by `updated_at`, so
+`LIMIT 1` returns one whole row.
+
+**Still to do, in order:**
+1. `routes/continue_reading.rs` — `GET /api/continue-reading`, `MaybeSession`, 404 for
+   an anonymous reader (never an empty banner, which reads as "you have read nothing"
+   when it means "you are not logged in").
+2. `api.ts` — `fetchContinueReading(): Promise<ContinueReading | null>`.
+3. `ContinueReadingBanner.svelte` on the homepage: work title, chapter title, percent,
+   one "Continue" link. Hidden entirely when there is nothing to continue, and a count
+   assertion before the absence assertion — see the lesson in §5.
+4. Component tests, then the Playwright journey in `e2e/continue-reading.spec.ts`,
+   which must fail when the route is forced to 404.
+
 ## 3. Gates every one of them must clear
 
 The existing pattern is `crates/db/tests/reader_surface_t1.rs` plus a Playwright

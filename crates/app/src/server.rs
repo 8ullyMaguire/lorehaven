@@ -355,6 +355,15 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // Item 1 of the 100-idea audit. Its own merge, because `classified` takes ONE
+        // tree: passing two routers to it was a four-argument call to a three-argument
+        // function. Default class rather than Read, because the handler is gated by
+        // RequireSession and the store is a single indexed lookup by account.
+        .merge(classified(
+            routes::continue_reading::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // Gap C step 5 — author-only pre-read reports. Write class because the router
         // carries a DELETE (provider withdrawal); §32.6's "never on the public work page"
         // is enforced inside the handlers, not by the route class.

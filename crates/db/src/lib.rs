@@ -26,6 +26,7 @@ pub mod community;
 // M45-22 (§54): the concierge's session and WIP-watch store.
 pub mod concierge_store;
 pub mod content;
+pub mod continue_reading;
 pub mod decision_audit;
 pub mod derivative;
 pub mod directory;
