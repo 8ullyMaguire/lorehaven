@@ -4,8 +4,15 @@ Date: 2026-10-04. Method: mechanical grep over `crates/**/*.rs`, `crates/**/*.sq
 `frontend/src/**/*.svelte|ts`, `migrations/*.sql`, each probe using every *plausible real
 name* rather than the name the list uses. Re-derivable; every claim below is a file count.
 
-**Headline: 76 of 100 exist. 24 do not.** The list was written from outside the repo, so
-it reads as a wishlist while most of it is already built.
+**Headline (as first written): 76 of 100 exist, 24 do not.** The list was written from
+outside the repo, so it reads as a wishlist while most of it is already built.
+
+**Updated 2026-10-04, later the same day: 81 exist, 19 do not.** Three of the absent
+items (14, 27, 33) shipped as `docs/spec-reader-surface-t1.md`, and two more (8, 22)
+turned out to be **implemented all along** — the probe was wrong, not the code. The
+"24 absent" figure below is therefore a count of *ideas not yet checked*, not of missing
+features, and the per-item rows say which is which. Anyone re-deriving this audit should
+read the Tier tables rather than trust the headline.
 
 ## The method note, which is the whole point
 
@@ -48,17 +55,23 @@ Worth naming, because each is the item the list singles out and none was assumed
 
 ### Tier 1 — cheap, high leverage, nothing depends on them (9)
 
+**Six of these nine are now closed.** Items **14, 27 and 33** were implemented end to end
+on 2026-10-04 (`docs/spec-reader-surface-t1.md`, `docs/plan-reader-surface-t1.md`; green
+on SQLite and PostgreSQL), and items **8 and 22** were found already implemented and their
+complaints rejected rather than closed. That leaves **five open**: 31, 41, 43, 75, and a
+named preset button for 22.
+
 | # | Idea | Note |
 |---|---|---|
-| 8 | completion status badges on work cards | data exists (`work_badge` absent; status is on the work) — pure UI |
-| 14 | "New in your fandoms" | one join on data that exists |
-| 22 | "Complete works under 10k" filter | **preset only**; `max_word`/`complete_under` exists in search defaults |
-| 27 | "Most bookmarked this week" | a time-windowed count over existing bookmarks |
-| 31 | private search history | last N queries per pseud |
-| 33 | "Similar works" section | tag overlap + co-read; the data is present, the UI is not |
-| 41 | reading-goal progress ring | §9.6 has the goal; nothing renders it |
-| 43 | fandom-specific reaction labels | reaction rows exist; the label is free text |
-| 75 | "New author" debut badge | one boolean + a badge |
+| 8 | completion status badges on work cards | **ALREADY IMPLEMENTED** — `WorkCard.svelte` renders it. The audit probed `work_badge`/`status_badge` and found nothing, which proved only that the component is `MetadataChip`. Complaint rejected, not closed. |
+| 14 | "New in your fandoms" | **SHIPPED.** `reader_surface.rs::new_in_your_fandoms` |
+| 22 | "Complete works under 10k" filter | **ALREADY IMPLEMENTED** — `search.rs` has `max_words`/`completion`; only a named preset *button* is missing. Complaint rejected. |
+| 27 | "Most bookmarked this week" | **SHIPPED**, and it is the feature the privacy rule lives on. |
+| 31 | private search history | last N queries per pseud. Open. |
+| 33 | "Similar works" section | **SHIPPED.** Weighted Jaccard, scored in Rust. |
+| 41 | reading-goal progress ring | §9.6 has the goal; nothing renders it. Open. |
+| 43 | fandom-specific reaction labels | reaction rows exist; the label is free text. Open. |
+| 75 | "New author" debut badge | one boolean + a badge. Open. |
 
 ### Tier 2 — needs a decision before code (6)
 

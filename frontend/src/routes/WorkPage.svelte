@@ -31,11 +31,12 @@
       type ReviewView,
       type WorkMediaReferenceView,
   } from '../lib/api';
-  import { ApiError } from '../lib/api';
+  import { ApiError, fetchSimilarWorks, type SurfaceWork } from '../lib/api';
   import { describeCompletion, describeLifecycle, describeRating, describeVisibility } from '../lib/labels';
   import { handleLinkClick } from '../lib/router';
   import { session } from '../lib/session.svelte.ts';
   import DiscussLink from '../lib/components/DiscussLink.svelte';
+  import SimilarWorksRail from '../lib/components/SimilarWorksRail.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import NotePanel from '../lib/components/NotePanel.svelte';
   import Rating from '../lib/components/Rating.svelte';
@@ -71,6 +72,28 @@
   let reviewPublic = $state(false);
   let reviewError = $state<unknown>(null);
 
+  /**
+   * Item 33 of the 100-idea audit -- the similar-works rail.
+   *
+   * Loaded alongside everything else on the work page, and allowed to fail on its own:
+   * the rail is an addition to this page, not the page. A failure leaves it empty, and
+   * empty is a state the rail already handles by rendering nothing, so a 500 here costs
+   * the reader one recommendation rather than the work they came to read.
+   */
+  let similar = $state<SurfaceWork[]>([]);
+  let similarLoading = $state(true);
+
+  async function loadSimilar() {
+    similarLoading = true;
+    try {
+      similar = await fetchSimilarWorks(workId);
+    } catch {
+      similar = [];
+    } finally {
+      similarLoading = false;
+    }
+  }
+
   const authorView = $derived(work !== null && isAuthorWork(work) ? (work as AuthorWork) : null);
   const firstChapterId = $derived(work && work.chapters.length > 0 ? work.chapters[0].id : null);
 
@@ -105,6 +128,7 @@
       }
       void loadGallery();
       void loadMediaRefs();
+      void loadSimilar();
     } catch (failure) {
       // Paywall: a priced work returns 403 CONTENT_RESTRICTED for non-buyers.
       // Fetch public pricing so we can render a buy screen.
@@ -422,6 +446,21 @@
       <p class="note">Sign in to write a review.</p>
     {/if}
   </section>
+
+  <!--
+    Item 33 of the 100-idea audit: the highest-intent discovery moment on the site. A
+    reader has just finished this, and this is the last thing on the page -- so it is
+    placed after the review panel and the notes rather than above them, where it would
+    push the work's own content down.
+
+    It is a PUBLIC rail (the server counts only public rows), so it renders signed out
+    too, and it is allowed to be empty: the component renders nothing in that case.
+  -->
+  <SimilarWorksRail
+    works={similar}
+    loading={similarLoading}
+    subjectTitle={work.title}
+  />
 
   {#if session.isSignedIn}
     <NotePanel subjectType="work" subjectId={workId} signedIn={session.isSignedIn} />

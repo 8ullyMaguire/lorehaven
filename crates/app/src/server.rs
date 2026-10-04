@@ -345,6 +345,16 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // Items 14, 27 and 33 of the 100-idea audit. Default class: the router carries one
+        // per-reader read (item 14, gated inside its handler by RequireSession) and two
+        // reads over public rows. Classing the whole tree as Read would understate the
+        // per-reader one; classing it as Write would make two public reads require a
+        // session the router does not actually demand.
+        .merge(classified(
+            routes::reader_surface::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // Gap C step 5 — author-only pre-read reports. Write class because the router
         // carries a DELETE (provider withdrawal); §32.6's "never on the public work page"
         // is enforced inside the handlers, not by the route class.
