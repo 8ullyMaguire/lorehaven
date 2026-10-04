@@ -2810,6 +2810,16 @@ const ROUTE_TABLE: &[RouteEntry] = &[
         path: "/admin/economy/flows",
         audience: Audience::Operator,
     },
+    // Same shape and the same reason: `RequireSession` plus an internal
+    // `require_operator`, so a non-operator gets 404 rather than a 403 that would confirm
+    // this instance measures its own discovery quality.
+    RouteEntry {
+        file: "north_star.rs",
+        handler: "get_north_star",
+        method: "GET",
+        path: "/admin/metrics/north-star",
+        audience: Audience::Operator,
+    },
     RouteEntry {
         file: "admin.rs",
         handler: "record_admin_action",

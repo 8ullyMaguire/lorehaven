@@ -666,6 +666,16 @@ pub fn build_router(state: AppState) -> Router {
             RouteClass::Default,
             &state,
         ))
+        // Separate `classified` rather than a second router in the merge above: the two
+        // views are both `Default`, and one `classified` call takes exactly one router.
+        // Merging them would have put the metric behind the economy view's classification
+        // by accident, which is the kind of wiring error that no test notices until a
+        // request is rate-limited against the wrong bucket.
+        .merge(classified(
+            routes::north_star::router(),
+            RouteClass::Default,
+            &state,
+        ))
         // M21 skeleton — spec revision 2026-09-14: monetization, gifts,
         // content subscriptions, saved-search alerts, ai_training assertion.
         .merge(classified(
