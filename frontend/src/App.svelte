@@ -92,18 +92,21 @@
       { href: '/blind-date', label: 'Blind Date' },
       { href: '/arena', label: 'Arena' },
     ] },
-    { label: 'Write', items: [
-      { href: '/write', label: 'Write' },
-      { href: '/import', label: 'Import' },
-      { href: '/exports', label: 'Exports' },
+    { label: 'Publish', items: [
+      // '/write' is deliberately NOT here: it is one of the four primary links, and
+      // listing it under a group too printed the word "Write" twice in one row.
+      { href: '/import', label: 'Import a work' },
+      { href: '/exports', label: 'Export your library' },
     ] },
-    { label: 'Library', items: [
-      { href: '/library', label: 'Your library' },
+    { label: 'Shelf', items: [
+      // '/library' is a primary link; naming it here again would print "Library"
+      // twice in one row. What a reader wants from a shelf is what is ON it, so
+      // the group holds the parts of the library that are not the library.
       { href: '/library/history', label: 'Reading history' },
-      { href: '/analytics', label: 'Analytics' },
       { href: '/concierge', label: 'Your queue' },
+      { href: '/analytics', label: 'Your analytics' },
     ] },
-    { label: 'Community', items: [
+    { label: 'Forum', items: [
       { href: '/community', label: 'Forum' },
       { href: '/directory', label: 'Directory' },
       { href: '/roadmap', label: 'Roadmap' },
@@ -568,7 +571,7 @@
   }
 
   /*
-   * The desktop nav scrolls sideways rather than wrapping.
+   * The desktop nav stays on ONE row. Do not "fix" this by wrapping.
    *
    * It used to `flex-wrap: wrap`, which is correct for a handful of items and
    * wrong for sixteen: at 1280px the row wrapped to three lines, and because
@@ -577,25 +580,47 @@
    * analytics E2E run, where Playwright could not click a control the header
    * was sitting on top of.
    *
-   * Wrapping was never a good fallback here: a header that changes height with
+   * Wrapping is never a good fallback here: a header that changes height with
    * its content cannot have a correct `scroll-padding-top`, because the number
    * is a function of how many items fit. Pinning it to one row makes the header
    * a fixed height, which is what lets `--header-height` be a true constant
-   * rather than a guess. The overflow scroll is the escape hatch for a
-   * narrow window; the items are reachable by keyboard and by tab either way.
+   * rather than a guess.
+   *
+   * So the escape hatch for a narrow window is NOT wrapping and NOT a hidden
+   * scrollbar -- it is the overflow scroll, kept visible this time. It used to
+   * be `overflow-x: auto` with `scrollbar-width: none`, which meant eighteen
+   * links scrolled sideways invisibly and anything past the fold simply did not
+   * exist as far as a reader could tell. Hiding the affordance while keeping the
+   * overflow is worse than either alternative.
+   *
+   * Nine items now instead of eighteen, so the scroll is a safety margin rather
+   * than a daily path. Where the old row overflowed, the new one wraps the
+   * MENU PANELS downward instead -- they are absolutely positioned, so they do
+   * not affect this row's height at all.
    */
-  /* Four links and five menus. `flex-wrap: nowrap` with NO overflow scroll, on
-     purpose: the previous rule set was `overflow-x: auto` with the scrollbar
-     hidden, which meant eighteen links scrolled sideways invisibly and anything
-     past the fold did not exist as far as a reader could tell. If this row ever
-     needs to overflow again it should wrap, not hide. */
   .desktop {
     display: none;
-    gap: var(--space-5);
-    margin-left: var(--space-5);
+    /* --space-3, not --space-5. Measured at the bar's capped width (1088px) with
+       the controls showing, the row needed 689px and had 569px: 120px missing at
+       --space-5, 48px still missing at --space-4. The bar is a width-capped
+       container, so this does not improve with a wider window -- the space simply
+       is not there. Nine items at --space-3 is 8 gaps, which closes it with room
+       to spare before the scrollbar is ever needed. */
+    gap: var(--space-3);
+    margin-left: var(--space-3);
     flex: 1;
-    flex-wrap: wrap;
-    min-width: 0;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    /* Visible, unlike the previous version: if this row ever scrolls again, the
+       reader can see that it does. */
+    scrollbar-width: thin;
+    padding-bottom: var(--space-1);
+  }
+
+  /* The brand, the row and the controls must not be squeezed by a long row. */
+  .desktop > a,
+  .desktop :global(.menu) {
+    flex: 0 0 auto;
   }
 
   .desktop > a {
