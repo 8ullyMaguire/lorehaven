@@ -227,10 +227,14 @@
     border-bottom: 2px solid transparent;
     color: var(--color-muted);
     cursor: pointer;
+    /* No horizontal padding: the row is width-capped (see App.svelte), so
+       horizontal padding on a trigger is charged directly against the space the
+       nine items share. Vertical padding is what gives the trigger its box height,
+       and that has to match a plain link beside it. */
     padding: var(--space-2) 0;
     display: inline-flex;
     align-items: center;
-    gap: var(--space-2);
+    gap: var(--space-1);
   }
 
   .trigger:hover,

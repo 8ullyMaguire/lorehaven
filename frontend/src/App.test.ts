@@ -122,9 +122,22 @@ describe('application shell', () => {
     // menu TRIGGERS are always rendered; their contents are not, because a menu
     // that renders its items when closed is not a menu.
     const triggers = screen.getAllByTestId('menu-trigger').map((b) => b.textContent?.trim() ?? '');
-    for (const menu of ['Read', 'Write', 'Library', 'Community', 'More']) {
+    for (const menu of ['Read', 'Publish', 'Shelf', 'Forum', 'More']) {
       expect(triggers).toContain(menu);
     }
+
+    /**
+     * The regression that made this row overflow: "Write" and "Library" were both
+     * a primary link AND a menu trigger, so the row read Discover, Library,
+     * Search, Write, Read, Write, Library, Community, More -- the same word twice,
+     * twice over. Asserting the absence is the only way to catch a duplicate
+     * label, because asserting the presence passes either way.
+     */
+    const labels = [
+      ...[...document.querySelectorAll('nav.desktop > a')].map((a) => a.textContent?.trim()),
+      ...triggers,
+    ];
+    expect(labels.length).toBe(new Set(labels).size);
 
     // The point of the redesign: a reader must not have to scroll a hidden
     // overflow row to find where things are. Every destination is reachable
@@ -152,7 +165,13 @@ describe('application shell', () => {
     // The queue sits in the Library menu now, so the link is not rendered until
     // the menu opens. Asserting the link exists without opening the menu would
     // pass on the old header and fail here for the right reason.
-    await fireEvent.click(screen.getAllByTestId('menu-trigger')[2]);
+    // By label, not by index: an index silently points at a different menu the
+    // moment the groups are reordered, and the test would then pass for the wrong
+    // reason.
+    const shelf = screen
+      .getAllByTestId('menu-trigger')
+      .find((b) => b.textContent?.trim() === 'Shelf')!;
+    await fireEvent.click(shelf);
     const link = screen.getAllByRole('link', { name: /your queue/i });
     expect(link.length).toBeGreaterThan(0);
     expect(link[0].getAttribute('href')).toBe('/concierge');
