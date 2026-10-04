@@ -739,9 +739,27 @@ def timestamptz_cast_sites(sql: str, known: dict[str, dict[str, str]]) -> list[s
     for table, text_columns in text_tables.items():
         for name in text_columns:
             # `col <= $1::timestamptz`, `col = $2::timestamptz`, `col > ?::timestamptz`
-            compare = rf"(?:{re.escape(table)}\s*\.\s*)?{re.escape(name)}\s*(?:<=|>=|<|>|!=|<>|=)\s*\??\$?\w*::timestamptz"
-            assign = rf"(?:{re.escape(table)}\s*\.\s*)?{re.escape(name)}\s*=\s*\??\$?\w*::timestamptz"
-            if re.search(compare, sql, re.IGNORECASE) or re.search(assign, sql, re.IGNORECASE):
+            #
+            # COMPARISON ONLY, never assignment. This was `... |= ...` and it
+            # reported `m29_transparency.rs:2063`, which is correct code:
+            #
+            #     UPDATE works SET updated_at = ?::timestamptz WHERE id = ?::uuid
+            #
+            # `works.updated_at` is TEXT on PostgreSQL (0003 declares it so, and the
+            # live table agrees), so the gate said drop the cast -- and the suite
+            # passes 39/39 on PostgreSQL with it. Checked against the server rather
+            # than argued:
+            #
+            #     UPDATE t SET updated_at = '...'::timestamptz;   -- UPDATE 1
+            #     SELECT ... WHERE updated_at <= '...'::timestamptz
+            #     ERROR: operator does not exist: text <= timestamp with time zone
+            #
+            # **Assignment coerces** -- PostgreSQL casts the right-hand side back to
+            # the column's type -- while a **comparison has no such coercion** and
+            # fails outright. So the cast in a SET clause is harmless and this rule
+            # must not touch it.
+            compare = rf"(?:{re.escape(table)}\s*\.\s*)?{re.escape(name)}\s*(?:<=|>=|<|>|!=|<>)\s*\??\$?\w*::timestamptz"
+            if re.search(compare, sql, re.IGNORECASE):
                 out.append(
                     f"{table}.{name} is TEXT, not timestamptz: drop the ::timestamptz cast"
                 )
@@ -855,6 +873,45 @@ SCHEMA = {
 
 # Each case is (SQL, should_report, note). The negative cases are the point:
 # a checker that flags correct SQL gets muted, and then it flags nothing.
+#
+# TWO THINGS WERE WRONG HERE AND BOTH WERE FOUND BY RUNNING THE SUITE ON
+# POSTGRESQL, NOT BY READING THE RULE.
+#
+# 1. The gate reported `hit_rate.rs` and `tasting.rs:1082`. The first was right about
+#    the FILE and wrong about the reason (a missing `FROM` alias, not an uncast
+#    placeholder). The second was a true positive that no test could reach.
+# 2. Every remaining site is a FALSE POSITIVE, and the reasons are now known:
+#
+#    - **uuid and NUMERIC placeholders need no cast.** PostgreSQL infers an untyped
+#      parameter from the column it is compared against, so `WHERE id = $1` with a
+#      bound `Uuid` parses and runs. Proven with PREPARE -- both a uuid column and a
+#      text column accept an untyped `$1`. What actually fails is binding a **&str**
+#      to a uuid column: `ERROR: incorrect binary data format`. That is a different
+#      fault with a different fix, and the sites that do it are silently correct
+#      because they bind a parsed `Uuid` rather than a string.
+#
+#    - **`SUM(amount_bp)` over a NUMERIC column is fine.** `COALESCE(SUM(x), 0)`
+#      resolves to numeric and decodes through sqlx's numeric support. Verified on
+#      PostgreSQL with the statements in place: `retention_proposals` 12/12,
+#      `preservation_ledger` 7/7, `payout_recalc_wiring` 12/12.
+#
+#    - **Assignment coerces; comparison does not.** `UPDATE t SET ts = $1::timestamptz`
+#      into a TEXT column returns UPDATE 1, because PostgreSQL casts the assigned value
+#      back to the column type. `WHERE ts <= $1::timestamptz` errors with
+#      `operator does not exist: text <= timestamp with time zone`. Only the
+#      comparison form is a fault, which is what the TSCAST rule now encodes.
+#
+# So: 15 sites, 0 real. The rule set is not useless -- it found two genuine defects,
+# one of which no test could reach -- but as it stands it reports nothing actionable.
+#
+# To become an honest gate a rule has to catch something PostgreSQL actually rejects.
+# Two candidates that would be:
+#
+#   - bind a `&str` to a uuid column: proven above to fail at runtime, invisible at
+#     compile time, and what the PLACEHOLDER rule was reaching for
+#   - compare a TEXT timestamp column against `::timestamptz`: proven above to error
+#
+# Both are far narrower than the current rules, which fire on correct code.
 SELF_TEST_CASES: list[tuple[str, bool, str]] = [
     # The SQLite half of a `db.sql(a, b)` pair is judged as the SQLite half, so
     # an uncast INT4 there is not a fault. This is the offset bug: the walk
@@ -870,8 +927,21 @@ SELF_TEST_CASES: list[tuple[str, bool, str]] = [
     # A `::timestamptz` cast on a bind feeding a TEXT timestamp column. The
     # PostgreSQL schema mirrors the SQLite types, so timestamps are TEXT nearly
     # everywhere and the cast is what breaks: `text <= timestamp with time zone`.
-    ("UPDATE jobs SET updated_at = $1::timestamptz WHERE id = $2::uuid", True,
-     "jobs.updated_at is TEXT: the timestamptz cast is the fault"),
+    ("UPDATE jobs SET updated_at = $1::timestamptz WHERE id = $2::uuid", False,
+     "an assignment of a timestamptz into a TEXT column coerces and is correct; \
+     the rule is comparison-only"),
+    # Assignment does NOT coerce-fail, so this is correct as written. `m29_trans-
+    #parency.rs:2063` is this shape and the suite is 39/39 on PostgreSQL with it:
+    #
+    #     UPDATE works SET updated_at = ?::timestamptz WHERE id = ?::uuid
+    #
+    # PostgreSQL casts the assigned value back to the column's type. Verified against
+    # the server: `UPDATE t SET updated_at = '...'::timestamptz` returns UPDATE 1,
+    # while `WHERE updated_at <= '...'::timestamptz` errors with
+    # `operator does not exist: text <= timestamp with time zone`. Only the
+    # comparison form is a fault.
+    ("UPDATE jobs SET available_at = $1::timestamptz WHERE id = $2::uuid", False,
+     "the assignment case from m29_transparency.rs:2063, correct as written"),
     ("UPDATE jobs SET updated_at = $1 WHERE id = $2::uuid", False,
      "the same statement without the cast is correct"),
     ("SELECT id FROM jobs WHERE available_at <= $1::timestamptz", True,
