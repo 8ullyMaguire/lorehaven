@@ -451,3 +451,132 @@ which rustdoc collects as a *Rust* code block — so `cargo test --workspace` ra
 doctest and rustc read `42601` as an item. Fenced as ```` ```text ````. Worth recording
 because the only reason it was caught is that the full-workspace run was happening anyway,
 which is the argument for keeping doing it.
+
+---
+
+## Sixth pass — the same defect twice, and a gate that could not see its own input
+
+Two PostgreSQL defects, found by a working gate, plus two silent gates that had been
+reporting nothing while looking healthy.
+
+### `analytics.rs` — a masked 500 on every reader's own reading totals
+
+`READING_TOTALS_POSTGRES` had two unaliased subqueries in `FROM`:
+
+```
+42601 subquery in FROM must have an alias
+DETAIL: For example, FROM (SELECT ...) [AS] foo.
+```
+
+SQLite accepts it. So the statement compiled, all 13 SQLite tests passed, and a reader
+asking for their own reading totals got HTTP 500 on PostgreSQL. Four `analytics_gate`
+tests were red for this — `an_own_metric_is_reachable_at_its_own_level`,
+`the_response_states_the_floor_and_the_definition`,
+`the_response_never_contains_a_credential_or_an_identifier`, and
+`a_gallery_instance_withholds_the_community_surface`.
+
+This is the **third** occurrence of this fault in the repository, after `hit_rate.rs`.
+Now `scripts/check-pg-subquery-alias.py`, with a self-test.
+
+**Diagnosis cost is the real lesson.** `ApiError::Internal` reports "Something went wrong
+on our side" and nothing else, and `RUST_LOG=debug` on the failing test produced no output
+at all. What resolved it was asking the server directly — `psql` reproduced `42601` on the
+exact `words_read` subquery — because nothing in the test output could say it.
+
+**The checker took four passes, and the self-test is what caught each:**
+
+| # | Defect | Symptom |
+|---|---|---|
+| 1 | `if not CLAUSE_END.match(after)` | empty input is not a clause keyword, so end-of-statement read as **exempt** — a false negative on the simplest possible fault |
+| 2 | added `AS\b` to fix #1 | vetoed a **real** alias: `FROM (VALUES (0),(1)) AS seq(value)`. Replaced with a positive `ALIAS_TOKEN`: an alias, or a finding. No negatives |
+| 3 | `EXTRACT(EPOCH FROM (...))` | the `FROM` belongs to the function. 2 of the first 6 findings |
+| 4 | `ON` is a bare identifier | `FROM (...) JOIN (...) ON true` read the second operand as aliased. An alias is a **name**, not a keyword |
+
+The gate then reported **the file it had just repaired**, because my explanation of the
+fix was written as SQL `--` comments inside the PostgreSQL arm. SQL-comment stripping
+exists so a fix can explain itself in place; the explanation moved to a doc comment above
+the const, where it belongs. The self-test routes through `scan`'s own preprocessing, so
+that case cannot pass while the gate still reports it.
+
+Final: 13 findings → 0. Self-test 10/10.
+
+### `spoilers.rs` — TEXT compared against timestamptz, and a schema reader with a hole
+
+`list_due_scheduled_posts` bound `$1::timestamptz` against `forum_posts.scheduled_at`,
+which migration 0041 declares **TEXT**:
+
+```
+HINT:  No operator matches the given name and argument types.
+```
+
+Confirmed against the server rather than inferred: `text <= timestamptz` errors, and the
+same comparison with `$1::text` returns the row. Same defect class as
+`fix-timestamptz-binds.py` — the fixer that is *disabled* precisely because the timestamp
+columns here are TEXT. This call site survived it because it was never on the fixer's
+list. `$1::text` is the fix.
+
+It was the one function in `spoilers.rs` with **no test at all**, which is why thirteen
+passing M34 tests never saw it: they call `schedule_post`, which *writes* the column with
+no cast and no comparison. The new test asserts the comparison, including `<=` rather
+than `<`, since a cast silently moves that boundary. SQLite 19/19; PG confirmation below.
+
+### Why a working gate found it
+
+`check-uncast-pg-placeholders.py` had been reporting this all along, but its schema
+reader only parsed `CREATE TABLE`, so it never saw the column. Same shape of bug as the
+checker's own documented history, one level down: **a checker that reads its own input
+too narrowly reports nothing and says nothing.**
+
+`load_schema` now handles `ALTER TABLE ... ADD COLUMN` — how every column added after its
+table's own migration arrives. Found by writing migration 0115
+(`recommendation_slots.mechanism`) and asking the schema what it thought: `None`.
+
+That surfaced two more sites, and the second is the more interesting one:
+
+| site | verdict |
+|---|---|
+| `spoilers.rs:353` | **real defect**, fixed above |
+| `canon_agnostic.rs:304` | **false positive** — the code was right |
+
+`canon_agnostic` decodes into `CanonRowPostgres`, which declares both columns `Option<i32>`
+with a doc comment explaining exactly why (sqlx checks INT4's width). `decoded_as_i64`
+could not read a tuple alias, so it returned "cannot tell", which its own contract says
+must report. Added `tuple_alias_fields`: positional, resolving the Postgres-named alias.
+
+Two errors of my own inside that, both **silent** — no exception, just a wrong answer:
+
+- tested `column in INT4_COLUMNS`, but that tuple holds *types* (`integer`, `smallint`),
+  not column names — always False, so it reported the site anyway.
+- then `_KNOWN_SCHEMA`, a name that does not exist. Would have raised `NameError`.
+
+Both were found by calling the function directly rather than reading the diff. The schema
+is now threaded through `decoded_as_i64` as a parameter rather than closed over.
+
+Result: 2 sites → 0, self-test 34/34, **306** tables read.
+
+### A third silent gate
+
+`check-pg-uuid-casts.py` printed **nothing** when clean, which is indistinguishable from a
+checker that has stopped reading its input. It now reports what it read: 499 files, 2225
+columns.
+
+### Correction: a claim in this session was not supported by the command shown
+
+I reported "`just check`: all static CI gates green". **`just` is not installed on this
+host** — the recipe could not have run. The gates are real and each has now been run
+directly, but the claim was not backed by the command cited.
+
+Run individually, all 16 green; `cargo fmt --check` clean; `clippy -D warnings` clean.
+
+### Verification
+
+| gate | result |
+|---|---|
+| `analytics_gate` on **PostgreSQL** | **13/13** (270.6s), was 9/13 |
+| `analytics_gate` gate mutation | aliases removed → gate reports both sites |
+| `canon_agnostic_store` on PostgreSQL | **12/12** (271.7s) — confirms the false positive |
+| `milestone_34_spoilers` on SQLite | **19/19** (was 18) |
+| `milestone_34_spoilers` on PostgreSQL | see below |
+| `hit_rate`, `migration_catalogue` on SQLite | 10/10, 6/6 |
+| E2E (Playwright, release binary) | **84/84** (13.4m) |
+| static gates | 16/16, fmt clean, clippy 0 |
