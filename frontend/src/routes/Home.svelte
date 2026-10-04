@@ -1,5 +1,6 @@
 <script lang="ts">
   import Skeleton from '../lib/components/Skeleton.svelte';
+  import ContinueReadingBanner from '../lib/components/ContinueReadingBanner.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import { handleLinkClick } from '../lib/router';
   import { session } from '../lib/session.svelte';
@@ -95,6 +96,23 @@
   );
   let healthy = $derived(readiness !== null && problems.length === 0);
 </script>
+
+<!--
+  Item 1 of the 100-idea audit. Above the hero, not below it: the point is that a
+  returning reader sees where they stopped BEFORE they start scrolling for it.
+
+  `signedIn` is passed rather than wrapped in an `{#if}` here, so the decision to make no
+  request at all lives in ONE place — the component — instead of being duplicated at every
+  call site. A caller that forgets the guard still gets no request, which is the failure
+  mode that matters.
+
+  An `{#if session.isSignedIn}` wrapper was here first, directly contradicting the comment
+  above it, and it made the signed-out case untestable: with the wrapper, the banner node
+  is not in the DOM at all when signed out, so "no request was made" had nothing to be
+  asserted about. Passing the flag keeps the node mounted and hidden, which is a state a
+  test can actually pin.
+-->
+<ContinueReadingBanner signedIn={session.isSignedIn} />
 
 <section class="hero">
   <p class="eyebrow">A self-hosted home for fanfiction</p>

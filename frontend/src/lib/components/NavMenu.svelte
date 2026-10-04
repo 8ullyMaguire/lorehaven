@@ -146,8 +146,18 @@
   function onFocusOut(event: FocusEvent) {
     if (!open) return;
     const next = event.relatedTarget as Node | null;
+    // Read `currentTarget` ONCE, into a local, and narrow it there.
+    //
+    // `event.currentTarget` is typed `EventTarget | null`: `instanceof Node` on that is a
+    // type error on the left-hand side, and `.contains` does not exist on `EventTarget`, so
+    // svelte-check rejected both. A local also fixes the shape of the bug this handler is
+    // actually about -- reading `currentTarget` twice in one handler is fine here because
+    // there is no await, but it is the exact expression that goes null the moment one is
+    // added.
+    const region = event.currentTarget;
+    if (!(region instanceof Node)) return;
     // Focus left the whole header region: close, but do not yank it back.
-    if (!next || !event.currentTarget instanceof Node || !event.currentTarget.contains(next)) {
+    if (!next || !region.contains(next)) {
       close(false);
     }
   }

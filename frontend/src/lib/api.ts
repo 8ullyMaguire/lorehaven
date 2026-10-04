@@ -4665,6 +4665,68 @@ export function setMyDnf(
   });
 }
 
+/**
+ * One "Continue Reading" banner row: where this reader stopped.
+ *
+ * Both `positionPermille` and `percent` are present because they are not redundant. The
+ * server owns the rounding and the clamping, and a caller that needs the raw value — "page
+ * 12 of 340", or a slider — should not re-derive it from a number that has already lost
+ * precision. Sending only the percentage would make the raw value unrecoverable.
+ */
+export interface ContinueReading {
+  workId: string;
+  title: string;
+  /** 0..1000, unrounded. NOT clamped on the wire — see `percent`. */
+  positionPermille: number;
+  /** Whole percent, already clamped to 0..=100 by the server. */
+  percent: number;
+  chapterId: string | null;
+  chapterTitle: string | null;
+  /** RFC 3339. When this reader last wrote this row. */
+  updatedAt: string;
+}
+
+/**
+ * The reader's most recently touched unfinished work, or `null` when there is none.
+ *
+ * `null` is a real state, not an error: a reader who finished everything, or never opened
+ * anything, should see no banner. So a 404 resolves to `null` rather than throwing, while
+ * every other status still throws — the alternative is a reader being shown "nothing to
+ * continue" because the server was down, which is a lie told by a timeout.
+ *
+ * A 401 is NOT swallowed. "You are not logged in" and "you have nothing to continue" both
+ * mean "no banner", but only one of them should skip the request, and only the client knows
+ * whether it has a session.
+ */
+export async function fetchContinueReading(signal?: AbortSignal): Promise<ContinueReading | null> {
+  try {
+    const raw = await apiFetch<ContinueReadingWire>("/continue-reading", { signal });
+    return {
+      workId: raw.work_id,
+      title: raw.title,
+      positionPermille: raw.position_permille,
+      percent: raw.percent,
+      chapterId: raw.chapter_id,
+      chapterTitle: raw.chapter_title,
+      updatedAt: raw.updated_at,
+    };
+  } catch (err) {
+    if (isNotFound(err)) return null;
+    throw err;
+  }
+}
+
+/** The snake_case shape the route actually emits. Never leaves this file. */
+interface ContinueReadingWire {
+  work_id: string;
+  title: string;
+  position_permille: number;
+  percent: number;
+  chapter_id: string | null;
+  chapter_title: string | null;
+  updated_at: string;
+}
+
 export function clearMyDnf(workId: string): Promise<void> {
   return apiFetch<void>(`/works/${encodeURIComponent(workId)}/dnf`, { method: 'DELETE' });
 }
