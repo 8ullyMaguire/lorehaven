@@ -44,6 +44,7 @@
   import KudosButton from '../lib/components/KudosButton.svelte';
   import ReadingStatusControl from '../lib/components/ReadingStatusControl.svelte';
   import ResumePrompt from '../lib/components/ResumePrompt.svelte';
+  import DnfPanel from '../lib/components/DnfPanel.svelte';
   import Skeleton from '../lib/components/Skeleton.svelte';
 
   interface GalleryItem {
@@ -446,6 +447,14 @@
       <p class="note">Sign in to write a review.</p>
     {/if}
   </section>
+
+  <!--
+    Item 11 of the 100-idea audit. The whole server side shipped in M45-21 and nothing
+    referenced it; this is the missing half. Placed above the similar-works rail because a
+    DNF mark is something the reader records about what they just read, while the rail is
+    what they look at afterwards.
+  -->
+  <DnfPanel workId={workId} signedIn={session.isSignedIn} />
 
   <!--
     Item 33 of the 100-idea audit: the highest-intent discovery moment on the site. A
