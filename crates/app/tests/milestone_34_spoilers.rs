@@ -742,6 +742,131 @@ async fn scheduling_the_same_post_twice_moves_the_time_rather_than_failing() {
     assert_eq!(at.as_deref(), Some("2026-07-02T10:00:00Z"));
 }
 
+/// Insert an extra forum post in `topic` and return its id.
+///
+/// `seed_world` creates one post; the due-date test needs four distinguishable ones, and
+/// threading a count through `seed_world` would mean a parameter every other caller has
+/// to pass. `author_pseud` reuses an existing pseud's id, so the row satisfies the same
+/// foreign keys `seed_world` satisfies.
+async fn insert_post(h: &Db, topic: &str, author_pseud: &str, tag: &str) -> String {
+    let id = uuid::Uuid::new_v4().to_string();
+    let body = format!("post {tag}");
+    match h.db().backend() {
+        lorehaven_db::Backend::Sqlite => {
+            sqlx::query(
+                "INSERT INTO forum_posts (id, topic_id, author_pseud, body, created_at)
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(&id)
+            .bind(topic)
+            .bind(author_pseud)
+            .bind(&body)
+            .bind("2026-01-01T00:00:00Z")
+            .execute(h.db().sqlite_pool().expect("sqlite"))
+            .await
+            .expect("insert extra post");
+        }
+        lorehaven_db::Backend::Postgres => {
+            sqlx::query(
+                "INSERT INTO forum_posts (id, topic_id, author_pseud, body, created_at)
+                 VALUES ($1, $2, $3, $4, $5)",
+            )
+            .bind(&id)
+            .bind(topic)
+            .bind(author_pseud)
+            .bind(&body)
+            .bind("2026-01-01T00:00:00Z")
+            .execute(h.db().postgres_pool().expect("postgres"))
+            .await
+            .expect("insert extra post");
+        }
+    }
+    id
+}
+
+#[tokio::test]
+async fn listing_due_scheduled_posts_selects_only_past_unpublished_ones() {
+    // `list_due_scheduled_posts` was the one M34 function with no test at all, and its
+    // PostgreSQL arm bound `$1::timestamptz` against a column declared TEXT
+    // (migration 0041). PostgreSQL rejects that comparison outright:
+    //
+    //     HINT: No operator matches the given name and argument types.
+    //
+    // so this returned an error on PostgreSQL and worked on SQLite, which is why the
+    // thirteen tests above never saw it -- they call `schedule_post`, which writes the
+    // same column with no cast and no comparison.
+    //
+    // The fix is `$1::text`, and this test is what makes that fix load-bearing: revert
+    // the cast and this fails on PostgreSQL while every other test in this file still
+    // passes. It is deliberately a comparison test rather than an assertion about the
+    // returned IDs alone, because the ordering boundary (`<=`, not `<`) is the part a
+    // cast silently changes.
+    let h = Db::new("due-scheduled").await;
+    let w = seed_world(&h).await;
+
+    // Three more posts in the same topic, so the only thing that distinguishes them is
+    // `scheduled_at`. An UPDATE against rows that were never inserted would match
+    // nothing and the test would pass for the wrong reason -- which is how a test in
+    // this file once hid a missing function entirely.
+    let due = insert_post(&h, &w.topic, &w.post, "due").await;
+    let boundary = insert_post(&h, &w.topic, &w.post, "boundary").await;
+    let later = insert_post(&h, &w.topic, &w.post, "later").await;
+    for (post, at) in [
+        (&due, Some("2026-06-01T09:00:00Z")),
+        (&boundary, Some("2026-06-15T12:00:00Z")),
+        (&later, Some("2026-07-01T09:00:00Z")),
+        // `w.post` is left NULL, which `IS NOT NULL` must exclude.
+        (&w.post, None),
+    ] {
+        // Each arm returns its own engine's `QueryResult`, so the two are different
+        // types and a single `match` cannot bind them. Comparing inside the arms is the
+        // fix -- the alternative, `let n = match ... { 1 } else { 0 }`, is arithmetic on
+        // a boolean.
+        let rows = match h.db().backend() {
+            lorehaven_db::Backend::Sqlite => {
+                sqlx::query("UPDATE forum_posts SET published = 0, scheduled_at = ? WHERE id = ?")
+                    .bind(at)
+                    .bind(post)
+                    .execute(h.db().sqlite_pool().expect("sqlite"))
+                    .await
+                    .expect("seed scheduled_at")
+                    .rows_affected()
+            }
+            lorehaven_db::Backend::Postgres => {
+                sqlx::query("UPDATE forum_posts SET published = 0, scheduled_at = $1 WHERE id = $2")
+                    .bind(at)
+                    .bind(post)
+                    .execute(h.db().postgres_pool().expect("postgres"))
+                    .await
+                    .expect("seed scheduled_at")
+                    .rows_affected()
+            }
+        };
+        assert_eq!(rows, 1, "the seed must actually reach a row: {post} {at:?}");
+    }
+
+    let now = "2026-06-15T12:00:00Z";
+    let ids = sp::list_due_scheduled_posts(h.db(), now, 10)
+        .await
+        .expect("list due scheduled posts");
+
+    assert_eq!(
+        ids.len(),
+        2,
+        "only the two posts at or before `now` are due: {ids:?}"
+    );
+    assert!(ids.contains(&due), "the past post is due: {ids:?}");
+    assert!(
+        ids.contains(&boundary),
+        "`scheduled_at <= now` includes the boundary, not `<`: {ids:?}"
+    );
+    assert!(!ids.contains(&later), "a future post is not due: {ids:?}");
+    assert!(
+        !ids.contains(&w.post),
+        "an unscheduled post is never due: {ids:?}"
+    );
+}
+
 #[tokio::test]
 async fn scheduling_a_post_that_does_not_exist_is_a_no_op_not_an_error() {
     let h = Db::new("scheduled-missing").await;
