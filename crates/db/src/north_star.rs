@@ -85,7 +85,22 @@ fn loved_works_sql(pg: bool) -> String {
     // Two fragments, one per alias, so neither can leak into the other's scope.
 
     //
-    // ## `r.created_at` is in the GROUP BY, and PostgreSQL insists
+    // ## Do not "restore" this file from git without re-reading it
+    //
+    // This fix was committed, then lost. A mutation run reverted it, `cp` put a
+    // whitespace-different copy back, and a later `git checkout` — intended only to undo
+    // trailing whitespace — silently restored an *earlier commit's* version, dropping the
+    // `r.created_at` from the GROUP BY. Nothing failed: SQLite stayed 7/7, fmt and clippy
+    // stayed clean, and `git status` showed a clean tree, because the lost edit was the
+    // committed one.
+    //
+    // It surfaced as four 500s from the route test, all masked behind "Something went wrong
+    // on our side", and cost a detour through psql and three temporary diagnostics before
+    // the obvious check — *is the fix still in the file?* — was finally run.
+    //
+    // So: after any mutation-and-restore cycle, `grep` for the fix rather than trusting
+    // `git status`. A clean tree means "matches HEAD", not "correct".
+    //
     //
     // The correlated subquery above references `r.created_at`, which is a bare column of
     // the outer query. Grouping only by `r.work_id` leaves it ungrouped, and PostgreSQL
@@ -115,7 +130,7 @@ fn loved_works_sql(pg: bool) -> String {
           WHERE r.deleted_at IS NULL
             AND r.stars >= 4
             AND r.created_at >= ? AND r.created_at <= ?
-          GROUP BY r.work_id",
+          GROUP BY r.work_id, r.created_at",
         cast = cast,
     )
 }
