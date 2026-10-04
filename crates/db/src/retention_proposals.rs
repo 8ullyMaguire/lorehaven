@@ -339,32 +339,46 @@ pub async fn create_proposal(
               tallied_at, created_at, updated_at, version)
          VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6, 'open', NULL, $7, $8, 1)",
     );
-    if let Some(pool) = db.sqlite_pool() {
-        sqlx::query(&sql)
-            .bind(id.to_string())
-            .bind(proposed_mode.as_str())
-            .bind(source_key)
-            .bind(rationale)
-            .bind(opened_by.to_string())
-            .bind(closes_at)
-            .bind(&now)
-            .bind(&now)
-            .execute(pool)
-            .await?;
-    }
-    if let Some(pool) = db.postgres_pool() {
-        sqlx::query(&sql)
-            .bind(id.to_string())
-            .bind(proposed_mode.as_str())
-            .bind(source_key)
-            .bind(rationale)
-            .bind(opened_by.to_string())
-            .bind(closes_at)
-            .bind(&now)
-            .bind(&now)
-            .execute(pool)
-            .await?;
-    }
+    // One `match`, not two `if let Some(pool)` blocks.
+    //
+    // The two options are mutually exclusive by construction, so the sequential
+    // form happened to work -- and it silently did NOTHING when neither matched.
+    // That is the failure a third backend would inherit: a write that vanishes with
+    // no error at all. `match` cannot be that shape, because an unhandled variant
+    // is a compile error.
+    //
+    // This is also the idiom the rest of `crates/db/src` uses -- 1039
+    // `match db.backend()` arms against these five outliers -- which is why
+    // `scripts/check-pg-arm-uses-sqlite-pool.py` is right that a function reaching
+    // for a pool while naming no backend is worth a finding.
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(id.to_string())
+                .bind(proposed_mode.as_str())
+                .bind(source_key)
+                .bind(rationale)
+                .bind(opened_by.to_string())
+                .bind(closes_at)
+                .bind(&now)
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(id.to_string())
+                .bind(proposed_mode.as_str())
+                .bind(source_key)
+                .bind(rationale)
+                .bind(opened_by.to_string())
+                .bind(closes_at)
+                .bind(&now)
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
+        }
+    };
     proposal(db, &id.to_string())
         .await?
         .ok_or_else(|| anyhow!("the proposal {id} was written and then could not be read back"))
@@ -451,24 +465,38 @@ pub async fn cast_vote(
          ON CONFLICT (proposal_id, account_id) DO UPDATE SET support = excluded.support,
                                                           cast_at   = excluded.cast_at",
     );
-    if let Some(pool) = db.sqlite_pool() {
-        sqlx::query(&sql)
-            .bind(proposal_id)
-            .bind(account.to_string())
-            .bind(i64::from(support))
-            .bind(&now)
-            .execute(pool)
-            .await?;
-    }
-    if let Some(pool) = db.postgres_pool() {
-        sqlx::query(&sql)
-            .bind(proposal_id)
-            .bind(account.to_string())
-            .bind(i64::from(support))
-            .bind(&now)
-            .execute(pool)
-            .await?;
-    }
+    // One `match`, not two `if let Some(pool)` blocks.
+    //
+    // The two options are mutually exclusive by construction, so the sequential
+    // form happened to work -- and it silently did NOTHING when neither matched.
+    // That is the failure a third backend would inherit: a write that vanishes with
+    // no error at all. `match` cannot be that shape, because an unhandled variant
+    // is a compile error.
+    //
+    // This is also the idiom the rest of `crates/db/src` uses -- 1039
+    // `match db.backend()` arms against these five outliers -- which is why
+    // `scripts/check-pg-arm-uses-sqlite-pool.py` is right that a function reaching
+    // for a pool while naming no backend is worth a finding.
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(proposal_id)
+                .bind(account.to_string())
+                .bind(i64::from(support))
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(proposal_id)
+                .bind(account.to_string())
+                .bind(i64::from(support))
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
+        }
+    };
     Ok(())
 }
 
@@ -601,26 +629,31 @@ pub async fn close_proposal(
           WHERE id = $4::uuid AND ({clause})"
     );
     let sql = db.sql(&sqlite_sql, &postgres_sql);
-    let affected = if let Some(pool) = db.sqlite_pool() {
-        sqlx::query(&sql)
+    // A `match` on `db.backend()`, which is what the rest of this file uses.
+    //
+    // The `if let Some(pool) = ... else if let ... else` shape it replaces named an
+    // explicit `else` fallback -- `Vec::new()` -- for a pool that did not exist. That
+    // was correct: nothing vanished silently. What `match` adds is that the fallback
+    // cannot be reached by accident, because `Backend` has exactly two variants and
+    // an unhandled one is a compile error. The `else` was dead code that read as
+    // live code.
+    let affected = match db.backend() {
+        Backend::Sqlite => sqlx::query(&sql)
             .bind(state.as_str())
             .bind(&now)
             .bind(&now)
             .bind(proposal_id)
-            .execute(pool)
+            .execute(db.sqlite_pool().expect("handle"))
             .await?
-            .rows_affected()
-    } else if let Some(pool) = db.postgres_pool() {
-        sqlx::query(&sql)
+            .rows_affected(),
+        Backend::Postgres => sqlx::query(&sql)
             .bind(state.as_str())
             .bind(&now)
             .bind(&now)
             .bind(proposal_id)
-            .execute(pool)
+            .execute(db.postgres_pool().expect("handle"))
             .await?
-            .rows_affected()
-    } else {
-        0
+            .rows_affected(),
     };
     Ok(affected > 0)
 }
@@ -662,30 +695,44 @@ pub async fn record_change(
              (id, from_mode, to_mode, source_key, actor, reason, decided_at)
          VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6, $7::text)",
     );
-    if let Some(pool) = db.sqlite_pool() {
-        sqlx::query(&sql)
-            .bind(id.to_string())
-            .bind(from_mode.map(BodyMode::as_str))
-            .bind(to_mode.as_str())
-            .bind(source_key)
-            .bind(actor.to_string())
-            .bind(reason)
-            .bind(&now)
-            .execute(pool)
-            .await?;
-    }
-    if let Some(pool) = db.postgres_pool() {
-        sqlx::query(&sql)
-            .bind(id.to_string())
-            .bind(from_mode.map(BodyMode::as_str))
-            .bind(to_mode.as_str())
-            .bind(source_key)
-            .bind(actor.to_string())
-            .bind(reason)
-            .bind(&now)
-            .execute(pool)
-            .await?;
-    }
+    // One `match`, not two `if let Some(pool)` blocks.
+    //
+    // The two options are mutually exclusive by construction, so the sequential
+    // form happened to work -- and it silently did NOTHING when neither matched.
+    // That is the failure a third backend would inherit: a write that vanishes with
+    // no error at all. `match` cannot be that shape, because an unhandled variant
+    // is a compile error.
+    //
+    // This is also the idiom the rest of `crates/db/src` uses -- 1039
+    // `match db.backend()` arms against these five outliers -- which is why
+    // `scripts/check-pg-arm-uses-sqlite-pool.py` is right that a function reaching
+    // for a pool while naming no backend is worth a finding.
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(id.to_string())
+                .bind(from_mode.map(BodyMode::as_str))
+                .bind(to_mode.as_str())
+                .bind(source_key)
+                .bind(actor.to_string())
+                .bind(reason)
+                .bind(&now)
+                .execute(db.sqlite_pool().expect("sqlite handle"))
+                .await?;
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(id.to_string())
+                .bind(from_mode.map(BodyMode::as_str))
+                .bind(to_mode.as_str())
+                .bind(source_key)
+                .bind(actor.to_string())
+                .bind(reason)
+                .bind(&now)
+                .execute(db.postgres_pool().expect("postgres handle"))
+                .await?;
+        }
+    };
     Ok(PolicyChange {
         id: id.to_string(),
         from_mode,
@@ -711,18 +758,25 @@ pub async fn list_changes(db: &Database, source_key: Option<&str>) -> Result<Vec
            FROM retention_policy_changes
           WHERE source_key IS NOT DISTINCT FROM $1 ORDER BY decided_at DESC",
     );
-    let rows: Vec<ChangeRow> = if let Some(pool) = db.sqlite_pool() {
-        sqlx::query_as(&sql)
-            .bind(source_key)
-            .fetch_all(pool)
-            .await?
-    } else if let Some(pool) = db.postgres_pool() {
-        sqlx::query_as(&sql)
-            .bind(source_key)
-            .fetch_all(pool)
-            .await?
-    } else {
-        Vec::new()
+    // A `match` on `db.backend()`, carrying the same fallback the `else` arm had.
+    //
+    // The `if let Some(pool) = ... else if let ... else` shape was correct: it named
+    // an explicit fallback for a pool that did not exist, so nothing could vanish
+    // silently. What `match` adds is that it cannot be extended by accident -- a new
+    // backend variant becomes a compile error rather than a silent default.
+    let rows: Vec<ChangeRow> = match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query_as(&sql)
+                .bind(source_key)
+                .fetch_all(db.sqlite_pool().expect("sqlite handle"))
+                .await?
+        }
+        Backend::Postgres => {
+            sqlx::query_as(&sql)
+                .bind(source_key)
+                .fetch_all(db.postgres_pool().expect("postgres handle"))
+                .await?
+        }
     };
     Ok(rows
         .into_iter()
