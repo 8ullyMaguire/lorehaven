@@ -73,6 +73,20 @@ named preset button for 22.
 | 43 | fandom-specific reaction labels | reaction rows exist; the label is free text. Open. |
 | 75 | "New author" debut badge | one boolean + a badge. Open. |
 
+**Next action for the five open Tier 1 items.** None needs a migration, and all five are
+query-or-render work over columns that exist: 31 (`search_history` per pseud — new table,
+last N), 41 (render §9.6's goal as a ring), 43 (reaction label is already free text; a
+validation rule for instance-vocabulary is the whole feature), 75 (one boolean on
+`pseuds`), 22-preset (a button that sets the two params `search.rs` already accepts). They
+share one seam — a second consumer of existing columns — and would ship as one
+`reader_surface` module extension rather than five separate migrations.
+
+**Why these five and not the Tier 2 items.** Tier 2 (items 8–13, 15–21) is mostly
+*already* in the tree with a missing render path, which is the same failure as items 8 and
+22: an audit that lists it as missing is auditing the wrong layer. Before Tier 2 is
+scheduled, the same component-level probe has to run, or the tier will be double-counted.
+
+
 ### Tier 2 — needs a decision before code (6)
 
 | # | Idea | Decision |
