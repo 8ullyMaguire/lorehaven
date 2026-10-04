@@ -142,13 +142,24 @@ def check(root: pathlib.Path, paths: list[str]) -> int:
         print(f"no migrations under {root / MIGRATIONS} -- cannot verify casts")
         return 2
     failures = 0
+    scanned = 0
     for rel in paths:
         for path in sorted(root.glob(rel)):
+            scanned += 1
             for line, table, column in scan(path.read_text(), types):
                 print(f"{path.relative_to(root)}:{line}: {column} on {table} "
                       f"does not match the cast the statement applies")
                 failures += 1
-    return 1 if failures else 0
+    if failures:
+        return 1
+    # Say so on success. This gate printed nothing at all when clean, which makes it
+    # indistinguishable from a checker that has stopped reading its input -- the
+    # failure mode every other checker in this directory documents having hit. The
+    # line names the paths it actually opened so a glob that matches nothing is
+    # visible rather than silent.
+    print(f"OK: every uuid cast matches its column type "
+          f"({scanned} file(s), {len(types)} columns from {MIGRATIONS})")
+    return 0
 
 
 # A whole statement, so the check cannot pass by reading only part of one.

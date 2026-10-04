@@ -88,8 +88,34 @@ LAST_COLUMN = re.compile(
 )
 
 
+# `ALTER TABLE t ADD COLUMN c TYPE`, which is how every column added after the
+# table's own migration actually arrives. Without this the schema silently omits
+# every such column, and a checker reading the schema then judges a statement
+# against a table that does not exist yet.
+#
+# Found by writing migration 0115 (`recommendation_slots.mechanism`) and asking the
+# schema what it thought: `None`, because `ALTER TABLE ADD COLUMN` is not a
+# `CREATE TABLE` body. Same shape of bug as the parse-drift this file already
+# documents -- a checker that reads its own input too narrowly reports nothing and
+# says nothing, which is the failure nobody notices.
+ADD_COLUMN = re.compile(
+    r"ALTER\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z0-9_]*)\s+"
+    r"ADD\s+(?:COLUMN\s+)?([a-z_][a-z0-9_]*)\s+([A-Za-z][A-Za-z0-9_ ]*?(?:\([^)]*\))?)"
+    r"(?=\s*(?:,|;|$))",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
 def load_schema(migrations: pathlib.Path) -> dict[str, dict[str, str]]:
-    """table -> {column: postgres type}, read from the PostgreSQL migrations."""
+    """table -> {column: postgres type}, read from the PostgreSQL migrations.
+
+    Both `CREATE TABLE` and `ALTER TABLE ... ADD COLUMN`, because a column added after
+    its table's migration is otherwise invisible here -- and an invisible column is
+    worse than a wrong one, because every rule that consults the schema silently
+    skips it. `DROP COLUMN` is deliberately not handled: a dropped column still
+    reading as present only makes a checker noisier, never quieter, and this
+    repository does not drop columns in a migration.
+    """
     schema: dict[str, dict[str, str]] = {}
     for path in sorted(migrations.glob("*.sql")):
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -107,6 +133,14 @@ def load_schema(migrations: pathlib.Path) -> dict[str, dict[str, str]]:
                 # redeclared by a later migration that retypes columns, and the
                 # schema the database actually has is the last one applied.
                 columns[col.group(1).lower()] = coltype
+        # Later in the same file than CREATE_TABLE, and again last-writer-wins, so a
+        # migration that retypes via ADD COLUMN overrides the declared type.
+        for match in ADD_COLUMN.finditer(text):
+            table, col = match.group(1).lower(), match.group(2).lower()
+            coltype = " ".join(match.group(3).split()).lower()
+            for noise in ("not null", "null", "primary key", "unique", "default"):
+                coltype = re.sub(rf"\b{noise}\b.*", "", coltype).strip()
+            schema.setdefault(table, {})[col] = coltype
     return schema
 
 
@@ -1167,7 +1201,11 @@ SELECT_ITEM = re.compile(
 )
 
 
-def decoded_as_i64(text: str, pos: int) -> bool | None:
+def decoded_as_i64(
+    text: str,
+    pos: int,
+    known: dict[str, dict[str, str]] | None = None,
+) -> bool | None:
     """Does the PostgreSQL arm around this SQL literal decode an integer into `i64`?
 
     `None` when the script cannot tell, which the caller must treat as "report
@@ -1243,6 +1281,31 @@ def decoded_as_i64(text: str, pos: int) -> bool | None:
             if declared is not None:
                 return "i64" in declared
         return None
+    # A named tuple alias (`CanonRowPostgres`) is the other decode-type spelling, and
+    # it is positional: the nth SELECT item is the nth tuple element. Resolving it is
+    # what stops the rule reporting `canon_agnostic.rs`, whose code is correct and
+    # whose `canon_agnostic_store` suite passes on PostgreSQL.
+    tuple_fields = tuple_alias_fields(text, pos)
+    if tuple_fields is not None:
+        literal = STRING_LIT.match(text, pos)
+        select_list = (
+            re.split(r"\bFROM\b", literal.group(1), maxsplit=1, flags=re.IGNORECASE)[0]
+            if literal
+            else ""
+        )
+        items = [m.group(2).lower() for m in SELECT_ITEM.finditer(select_list)]
+        # `INT4_COLUMNS` holds *types* (`integer`, `smallint`), not column names, so
+        # "is this position narrow" is a question about the schema. Reading it the
+        # other way -- `column in INT4_COLUMNS` -- is silently always False, which is
+        # why the first version of this returned None and still reported the site.
+        narrow = int4_sites(literal.group(1) if literal else "", known or {}, "", 0)
+        for n, column in enumerate(items):
+            if column not in narrow:
+                continue
+            declared = tuple_fields.get(str(n))
+            if declared is not None:
+                return "i64" in declared
+        return None
     # An explicit tuple or scalar annotation naming `i32` settles it.
     if re.search(r":\s*\(?[^)\n]*\bi32\b", window):
         return False
@@ -1307,6 +1370,92 @@ FROM_ROW_STRUCT = re.compile(
     re.MULTILINE,
 )
 FIELD = re.compile(r"pub\s+(\w+)\s*:\s*([^,]+(?:<[^>]*>)?),")
+
+
+# `type CanonRowPostgres = (i64, String, bool, Option<String>, Option<i32>, ...);`
+# and its use as `let row: Option<CanonRowPostgres> = ...`. A tuple alias is a decode
+# type exactly as a struct is, and it is the other half of the answer when no
+# `#[derive(FromRow)]` struct exists.
+TUPLE_ALIAS = re.compile(r"^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\(", re.MULTILINE)
+
+
+def tuple_alias_fields(text: str, pos: int) -> dict[str, str] | None:
+    """`column -> Rust type` for the tuple alias the PostgreSQL arm decodes into.
+
+    Positional: a tuple names no columns, so the nth SELECT item is matched against the
+    nth element of the alias. That is why this is a separate function from
+    `from_row_struct_fields` and why it needs the statement's own SELECT list.
+
+    ## Why this exists
+
+    `canon_agnostic.rs` was reported for `unexplained_names` and `word_count` as
+    "INT4 column into i64". The code is correct: `CanonRowPostgres` declares both as
+    `Option<i32>`, with a doc comment explaining precisely why (`sqlx` checks INT4's
+    width, and `i64` fails to decode). `canon_agnostic_store` passes on PostgreSQL.
+
+    The checker could not see it because `decoded_as_i64` had no way to read a tuple
+    alias -- it resolved `#[derive(FromRow)]` structs and nothing else -- so it
+    returned "cannot tell", which its own contract says must report. A checker that
+    reports correct code is worse than one that stays quiet: this function's
+    docstring records that `::int8` advice was once followed and broke a build.
+
+    ## Why the ARM is resolved, not just any alias
+
+    `CanonRowSqlite` also exists, declaring both fields `Option<i64>` -- which is right
+    there, because SQLite has no INT4 width. Picking whichever alias comes first in the
+    file would read the SQLite one and reproduce the original false positive exactly.
+    So the name must say Postgres, or the use must be inside the `Backend::Postgres`
+    arm. `arm_window` has already bounded `text` to the two-arm match by the time this
+    runs, so requiring the Postgres marker in the name or the enclosing arm is
+    sufficient and neither alone is safe.
+    """
+    window = arm_window(text, pos, 2000)
+    if not re.search(r"Backend::Postgres", window) and not re.search(
+        r"[Pp]ostgres", window
+    ):
+        return None
+    uses = re.findall(
+        r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\(", text
+    )
+    # Only aliases that look like a per-dialect row type, and only ones the window
+    # actually references: `CanonRowPostgres`, `SessionRowPostgres`, `Row`+`Pg`.
+    for name in uses:
+        if "pg" not in name.lower() and "postgres" not in name.lower():
+            continue
+        if name not in window:
+            continue
+        decl = TUPLE_ALIAS.search(text, 0, text.find(f"type {name}"))
+        if decl is None or decl.group(1) != name:
+            # `text.find(f"type {name}")` can land past the declaration if the type is
+            # referenced first; fall back to a direct search for the declaration.
+            decl = re.search(rf"type\s+{re.escape(name)}\s*=\s*\(", text)
+            if decl is None:
+                continue
+        start = decl.end()
+        depth = 1
+        j = start
+        while j < len(text) and depth:
+            if text[j] == "(":
+                depth += 1
+            elif text[j] == ")":
+                depth -= 1
+            j += 1
+        body = re.sub(r"//[^\n]*", "", text[start : j - 1])
+        parts, depth, cur = [], 0, ""
+        for ch in body:
+            if ch in "<([":
+                depth += 1
+            elif ch in ">)]":
+                depth -= 1
+            if ch == "," and depth == 0:
+                parts.append(cur.strip())
+                cur = ""
+            else:
+                cur += ch
+        if cur.strip():
+            parts.append(cur.strip())
+        return {str(n): ty for n, ty in enumerate(parts)}
+    return None
 
 
 def from_row_struct_fields(text: str) -> dict[str, str] | None:
@@ -1397,7 +1546,7 @@ def int4_sites(
     # The fault needs a wide decode. When the file text is available and shows
     # an `i32` (or a cast, or an inferred scalar), this column is not a fault at
     # all and reporting it is noise. When it cannot tell, it still reports.
-    if text and decoded_as_i64(text, pos) is False:
+    if text and decoded_as_i64(text, pos, known) is False:
         return []
     if not re.search(r"\$\d+", sql) and "?" in sql:
         # `?` is the SQLite spelling. A statement with neither `$n` nor `?` binds
