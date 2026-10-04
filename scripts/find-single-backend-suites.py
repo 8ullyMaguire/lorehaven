@@ -41,6 +41,10 @@ DUAL_CLAIM = re.compile(
 # what m29_transparency.rs looks like now that it is fixed. Flagging it would be
 # the same false positive this script exists to end, one level up.
 SELECTOR = re.compile(r'LOREHAVEN_TEST_PG_URL')
+# A real database-opening call in code. `TestDb` covers the harness; the
+# `lorehaven_db::` paths cover a suite that opens its own pool.
+OPENS_A_DATABASE = re.compile(r"\bTestDb\b|lorehaven_db::(Database|connect)|\bDatabase::connect\b")
+
 HARD_SQLITE = re.compile(
     r'Database::connect\(&?\s*(?:config|self\.config|\w*config)\s*\.database\s*\)'
     r'|config\.database\s*=\s*DatabaseConfig::new\(\s*format!\(\s*\n?\s*"sqlite://'
@@ -100,6 +104,25 @@ def main(argv: list[str]) -> int:
         if not claims_dual_backend(header):
             honest += 1
             continue
+        # A file that opens NO DATABASE cannot be a single-backend suite, whatever
+        # its header says. `crates/domain/tests/canon_class.rs` claims 50.3's
+        # "reproducible on both engines" and means the ALGORITHM is engine-
+        # independent -- it calls `classify()` on strings and never touches a pool.
+        # Demanding a backend selector there is asking for wiring that has no
+        # meaning, and the only ways to satisfy it are to add a pointless database
+        # or to delete the true claim.
+        #
+        # So the check applies only to files that actually open one. The test for
+        # that is a real API call in CODE, not a mention: `query_fields_characters.rs`
+        # names `Database::sql` in a comment explaining that the runtime rewrites
+        # `?` positionally, and matching prose as wiring is the exact mistake this
+        # script's own comment warns about two paragraphs below.
+        if not OPENS_A_DATABASE.search(strip_comments(text)):
+            honest += 1
+            if verbose:
+                print(f"  ok  {rel} (opens no database; the claim is about the algorithm)")
+            continue
+
         claimed += 1
                 # A file that routes through the selector is a dual-backend file even
         # if it also names a sqlite:// fallback. The match must be on CODE, not
