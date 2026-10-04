@@ -4561,3 +4561,129 @@ export function fetchSimilarWorks(workId: string, signal?: AbortSignal): Promise
     { signal },
   ).then((page) => page.works);
 }
+
+// ---------------------------------------------------------------------------
+// DNF — item 11 of the 100-idea audit
+//
+// The whole server side shipped in M45-21 (0073_dnf_reasons.sql, crates/db/src/dnf.rs,
+// three routes, crates/db/tests/m45_21_dnf.rs) and nothing in the frontend referenced
+// it. These are the first callers.
+//
+// `isPublic` is the reader's own choice and defaults to FALSE, because a DNF mark is a
+// reader's private disposition toward a work and 0073 made that the default for a
+// reason. `note` is the private free text; the structured `reason` is the part that can
+// ever be aggregated, and only when the author has set `allow_dnf_feedback`.
+export type DnfReason =
+  | 'not_my_taste'
+  | 'triggering'
+  | 'slow_pacing'
+  | 'abandoned_by_author'
+  | 'dropped_other'
+  | 'other';
+
+/**
+ * The six reasons, with the labels `DnfReason::label()` in crates/domain/src/dnf.rs.
+ *
+ * Duplicated here because the server does not expose a reason catalogue and adding one
+ * for six static strings would be a round trip to learn nothing. The labels are
+ * asserted against the Rust source in `DnfPanel.test.ts`, so a rename on either side
+ * turns a test red rather than silently changing what a reader sees.
+ */
+export const DNF_REASONS: ReadonlyArray<{ value: DnfReason; label: string; hint: string }> = [
+  { value: 'not_my_taste', label: 'Not my taste', hint: 'The premise or the voice was not for you.' },
+  { value: 'triggering', label: 'Triggering content', hint: 'Something in it hit too close.' },
+  { value: 'slow_pacing', label: 'Too slow', hint: 'It lost you before it got going.' },
+  {
+    value: 'abandoned_by_author',
+    label: 'Author abandoned it',
+    hint: 'The author stopped updating.',
+  },
+  { value: 'dropped_other', label: 'Dropped for another reason', hint: 'None of the others fit.' },
+  { value: 'other', label: 'Other', hint: 'Tell yourself why, in the note below.' },
+];
+
+export interface DnfRecord {
+  id: string;
+  account_id: string;
+  pseud_id: string;
+  work_id: string;
+  reason: DnfReason;
+  note: string | null;
+  is_public: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One row of the work's public aggregate, from `GET /works/{id}/dnf/reasons`. */
+export interface DnfReasonCount {
+  reason: DnfReason;
+  count: number;
+}
+
+/**
+ * Whether an error is a 404 from the server, as opposed to a transport failure or a
+ * 5xx.
+ *
+ * `ApiError.status` is `0` for `REQUEST_ABORTED` and `NETWORK_UNAVAILABLE`, so a
+ * truthiness check on the field is wrong: `if (err.status)` is true for 0's negation
+ * being false only by accident, and `err.status && ...` reads as "has a status". Both
+ * a `0` and a real `404` must be distinguishable, so this compares exactly.
+ */
+function isNotFound(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 404;
+}
+
+/**
+ * The caller's own DNF record for a work, or `null` when they have not marked it.
+ *
+ * `null` is a real state here and not an error: the work page needs to distinguish
+ * "this reader has not marked it" from "the request failed". So this resolves to
+ * `null` on 404 rather than throwing, while every other status still throws — a reader
+ * who sees "you have not marked this" when the server was down has been told a lie.
+ */
+export async function fetchMyDnf(workId: string, signal?: AbortSignal): Promise<DnfRecord | null> {
+  try {
+    return await apiFetch<DnfRecord>(`/works/${encodeURIComponent(workId)}/dnf`, { signal });
+  } catch (err) {
+    if (isNotFound(err)) return null;
+    throw err;
+  }
+}
+
+export function setMyDnf(
+  workId: string,
+  reason: DnfReason,
+  options: { note?: string | null; isPublic?: boolean } = {},
+): Promise<DnfRecord> {
+  return apiFetch<DnfRecord>(`/works/${encodeURIComponent(workId)}/dnf`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      reason,
+      note: options.note ?? null,
+      is_public: options.isPublic ?? false,
+    }),
+  });
+}
+
+export function clearMyDnf(workId: string): Promise<void> {
+  return apiFetch<void>(`/works/${encodeURIComponent(workId)}/dnf`, { method: 'DELETE' });
+}
+
+/**
+ * The work's PUBLIC aggregate. Empty when the author has not enabled DNF feedback or
+ * nobody has marked it, and empty is the correct answer in both cases.
+ */
+export function fetchDnfReasons(
+  workId: string,
+  signal?: AbortSignal,
+): Promise<DnfReasonCount[]> {
+  return apiFetch<{ work_id: string; reasons: DnfReasonCount[] }>(
+    `/works/${encodeURIComponent(workId)}/dnf/reasons`,
+    { signal },
+  ).then((page) => page.reasons);
+}
+
+/** Everything the caller's own pseud has marked. */
+export function fetchMyDnfList(signal?: AbortSignal): Promise<DnfRecord[]> {
+  return apiFetch<DnfRecord[]>('/me/dnf', { signal });
+}
