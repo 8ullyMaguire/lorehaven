@@ -27,6 +27,7 @@
 use std::path::PathBuf;
 
 use lorehaven_db::preservation::{self, LedgerOutcome};
+use lorehaven_db::Backend;
 use lorehaven_domain::economy::TxnType;
 use lorehaven_domain::preservation::PreservationState;
 use test_support::TestDb;
@@ -77,29 +78,34 @@ async fn seed_work(db: &lorehaven_db::Database, account: &str, title: &str) -> S
         "INSERT INTO pseuds (id, account_id, handle, display_name, created_at, updated_at)
          VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)",
     );
-    if let Some(pool) = db.sqlite_pool() {
-        sqlx::query(&sql)
-            .bind(&pseud_id)
-            .bind(account)
-            .bind(&handle)
-            .bind(&handle)
-            .bind(now)
-            .bind(now)
-            .execute(pool)
-            .await
-            .expect("insert pseud");
-    }
-    if let Some(pool) = db.postgres_pool() {
-        sqlx::query(&sql)
-            .bind(&pseud_id)
-            .bind(account)
-            .bind(&handle)
-            .bind(&handle)
-            .bind(now)
-            .bind(now)
-            .execute(pool)
-            .await
-            .expect("insert pseud");
+    // One `match`, not two `if let Some(pool)` blocks. `TestDb` hands out a
+    // SQLite pool OR a PostgreSQL pool, never both, so the sequential form happened
+    // to run exactly once -- and silently inserted NOTHING if neither matched.
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(&pseud_id)
+                .bind(account)
+                .bind(&handle)
+                .bind(&handle)
+                .bind(now)
+                .bind(now)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await
+                .expect("insert pseud");
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(&pseud_id)
+                .bind(account)
+                .bind(&handle)
+                .bind(&handle)
+                .bind(now)
+                .bind(now)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await
+                .expect("insert pseud");
+        }
     }
     let work_id = uuid::Uuid::new_v4().to_string();
     let sql = db.sql(
@@ -108,27 +114,32 @@ async fn seed_work(db: &lorehaven_db::Database, account: &str, title: &str) -> S
         "INSERT INTO works (id, owner_pseud_id, title, lifecycle, visibility, created_at, updated_at)
          VALUES ($1::uuid, $2::uuid, $3, 'published', 'public', $4, $5)",
     );
-    if let Some(pool) = db.sqlite_pool() {
-        sqlx::query(&sql)
-            .bind(&work_id)
-            .bind(&pseud_id)
-            .bind(title)
-            .bind(now)
-            .bind(now)
-            .execute(pool)
-            .await
-            .expect("insert work");
-    }
-    if let Some(pool) = db.postgres_pool() {
-        sqlx::query(&sql)
-            .bind(&work_id)
-            .bind(&pseud_id)
-            .bind(title)
-            .bind(now)
-            .bind(now)
-            .execute(pool)
-            .await
-            .expect("insert work");
+    // One `match`, not two `if let Some(pool)` blocks. `TestDb` hands out a
+    // SQLite pool OR a PostgreSQL pool, never both, so the sequential form happened
+    // to run exactly once -- and silently inserted NOTHING if neither matched.
+    match db.backend() {
+        Backend::Sqlite => {
+            sqlx::query(&sql)
+                .bind(&work_id)
+                .bind(&pseud_id)
+                .bind(title)
+                .bind(now)
+                .bind(now)
+                .execute(db.sqlite_pool().expect("sqlite"))
+                .await
+                .expect("insert work");
+        }
+        Backend::Postgres => {
+            sqlx::query(&sql)
+                .bind(&work_id)
+                .bind(&pseud_id)
+                .bind(title)
+                .bind(now)
+                .bind(now)
+                .execute(db.postgres_pool().expect("postgres"))
+                .await
+                .expect("insert work");
+        }
     }
     work_id
 }

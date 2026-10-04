@@ -103,6 +103,9 @@ jobs:
       - name: No WASM runtime adopted (§55.6)
         run: python3 scripts/check-wasm-gate.py
 
+      - name: SQLite-pool-in-Postgres-arm checker self-test
+        run: python3 scripts/check-pg-arm-uses-sqlite-pool.py --self-test
+
       - name: PostgreSQL arms must not use the SQLite pool
         run: python3 scripts/check-pg-arm-uses-sqlite-pool.py crates
 
