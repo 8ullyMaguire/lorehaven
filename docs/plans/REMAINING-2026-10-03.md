@@ -374,3 +374,80 @@ identified them as the anomaly). Converted, along with
 
 Verified: SQLite 59/59 across the retention and preservation suites; **PostgreSQL 52/52**,
 plus `preservation_ledger` 7/7 on PostgreSQL.
+
+## The fifth red, closed (2026-10-04, pass nine)
+
+The last of the pre-existing CI reds. `check-uncast-pg-placeholders` reported **15 sites**
+and the standing note said they were "very likely wrong" — which was right, and the way to
+settle it was to stop reasoning about PostgreSQL and ask it.
+
+**Two of the fifteen were real defects. Both are fixed, and both are invisible to the
+default engine.**
+
+`hit_rate.rs` — the two PostgreSQL windowed metrics ended their outer `FROM` at a bare `)`.
+PostgreSQL rejects an unaliased subquery outright (`42601 subquery in FROM must have an
+alias`); SQLite accepts it. **10 tests red on PostgreSQL, green on SQLite.** The gate named
+the *file* and gave the wrong *reason* (it called it an uncast placeholder), which is still
+worth acting on: a report that is right about the file and wrong about the reason is a place
+to look, and it is a cheaper use of the tool than either trusting or dismissing it.
+
+`tasting.rs:1082` — `existing_match_state` decoded `arena_weights.matches_played` (INTEGER,
+so INT8 on SQLite and INT4 on PostgreSQL) as part of an `Option<(f64, i64)>`:
+
+    mismatched types; Rust type `i64` (as SQL type `INT8`)
+    is not compatible with SQL type `INT4`
+
+**No test could have caught this.** The statement sits behind
+`if (next - current).abs() < f64::EPSILON { return Ok(false) }` on the way in from
+`POST /api/v1/tasting/respond`, so `arena` 4/4 and `tasting_menu` 14/14 both pass on
+PostgreSQL *with the bug in place*. Found by reading, confirmed by a direct probe, and the
+reason it matters is the shape: this is the third defect in this repo that sat behind a
+guard or an early return and therefore could not be found by the suite that covers it.
+
+**The other thirteen were all false positives, each for a reason worth writing down:**
+
+| rule | assumption | what PostgreSQL actually does |
+|---|---|---|
+| placeholder | a uuid column needs a cast | an untyped `$n` is **inferred** from the column — `PREPARE` accepts it. Only a `&str` bind fails (`incorrect binary data format`), and that needs the *bind* to decide |
+| `SUM` | an INT4 summed into `i64` will not decode | `pg_typeof(COALESCE(SUM(amount_bp), 0))` is **`bigint`** — `sum()` widens. A bare *column* read into `i64` does fail; the aggregate is not the same trap |
+| timestamptz | `::timestamptz` into a TEXT column is a fault | **assignment coerces** (`UPDATE 1`), **comparison does not** (`operator does not exist: text <= timestamp with time zone`) |
+
+Gate: **15 → 0**, self-test **34/34** with a case for each side of each distinction. Proven
+still live rather than merely silenced: reverting the `tasting.rs` cast makes the gate fire
+on it again. The `SUM` rule and the uuid skip are left in the file, disabled and explained,
+because a rule that found two real defects earns its keep and deleting one without a
+replacement that catches the same bug trades a known quantity for a guess.
+
+### Two lessons worth more than the fixes
+
+**A regression test that copies the query proves only that PostgreSQL behaves like
+PostgreSQL.** The first version of `crates/db/tests/arena_weights_decode.rs` hand-copied
+the pre-fix and post-fix statements and asserted the first one fails. It stayed green while
+the real query in `tasting.rs` had already been reverted. The assertion that catches
+regression is a `read_to_string` of the module — verified by reverting the fix: green, then
+red with `src/tasting.rs no longer casts matches_played`.
+
+**A distribution assertion needs a threshold on the tail, not near the mean.**
+`blind_date.rs` asserted `distinct.len() > 12` over 25 days drawn from 25 works. That is a
+birthday problem — mean 16.0, sd 1.57 — so the bar sat ~2.5σ low and failed **1.2%** of
+runs. It read as order-dependence, because it failed in a full-workspace run and passed
+alone; it is not. The outcome depends on a hash of (account id, day) and the fixture mints
+a fresh account per run. Simulated over 200,000 draws:
+
+| threshold | fail rate |
+|---|---|
+| ≤ 10 | 0.018% |
+| ≤ 12 | **1.204%** ← what it asserted |
+| ≤ 14 | 16.704% |
+| ≤ 16 | 62.805% |
+
+Threshold 10 now, 20/20 green after, and the tree grepped for the same shape — one
+instance, which is why it survived to be found by a failing gate.
+
+### The trap that bit me while fixing my own fix
+
+The `hit_rate.rs` fix carried the PostgreSQL error text as an **indented** doc-comment block,
+which rustdoc collects as a *Rust* code block — so `cargo test --workspace` ran it as a
+doctest and rustc read `42601` as an item. Fenced as ```` ```text ````. Worth recording
+because the only reason it was caught is that the full-workspace run was happening anyway,
+which is the argument for keeping doing it.
