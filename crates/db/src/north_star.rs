@@ -115,7 +115,7 @@ fn loved_works_sql(pg: bool) -> String {
           WHERE r.deleted_at IS NULL
             AND r.stars >= 4
             AND r.created_at >= ? AND r.created_at <= ?
-          GROUP BY r.work_id, r.created_at",
+          GROUP BY r.work_id",
         cast = cast,
     )
 }

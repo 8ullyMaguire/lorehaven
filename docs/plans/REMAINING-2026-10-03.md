@@ -580,3 +580,89 @@ Run individually, all 16 green; `cargo fmt --check` clean; `clippy -D warnings` 
 | `hit_rate`, `migration_catalogue` on SQLite | 10/10, 6/6 |
 | E2E (Playwright, release binary) | **84/84** (13.4m) |
 | static gates | 16/16, fmt clean, clippy 0 |
+
+---
+
+## M45-23 implemented — steps 2 and 4, with three more PostgreSQL-only defects
+
+Step 1 (record the mechanism at serve time) shipped at `v0.58`: migration 0115, the
+`mechanism` field on `SlotRecord`, `SlotMechanism` in the domain, and both serve paths in
+`discovery.rs` populating it. Steps 2 and 4 are done; step 3 (the route) is not.
+
+### The three defects
+
+All three passed on SQLite and failed only on PostgreSQL. All three were reproduced with
+`psql` **before** being fixed, not inferred from the error string.
+
+| # | error | cause | fix |
+|---|---|---|---|
+| 1 | `operator does not exist: text <= timestamp with time zone` | the correlated subquery compares `recommendation_slots.created_at` (TIMESTAMPTZ) against `rating.created_at` (TEXT) | cast the **TEXT** side |
+| 2 | `42803 subquery uses ungrouped column "r.created_at" from outer query` | `GROUP BY r.work_id` leaves the correlated reference ungrouped | `GROUP BY r.work_id, r.created_at` |
+| 3 | `42883 operator does not exist: timestamp with time zone >= text` | the slot-count window filter bound bare `$1`/`$2` against a TIMESTAMPTZ column | `$1::timestamptz` |
+
+Note the direction of #1. `spoilers.rs` — fixed earlier in this same pass — had the
+**mirror image**: `$1::timestamptz` bound against a TEXT column. The rule that settles
+both: **cast the TEXT side to `timestamptz`, never the reverse.** The column's own type
+decides what the other side may be.
+
+#3 looked arbitrary until the two columns were read side by side:
+
+```
+reading_status.updated_at         TEXT          -- a bare $1 works
+recommendation_slots.created_at   TIMESTAMPTZ   -- a bare $1 is 42883
+```
+
+### Two errors of my own, both silent
+
+- **One SQL fragment shared between two alias scopes.** The correlated subquery aliases its
+  table `s2`; the outer join aliases `s`. A single `cmp` fragment mentioning `s` produced
+  `AND s2.created_at <= ... AND s.created_at <= ...` with `s` out of scope inside the
+  subquery. SQLite reported `near "s": syntax error` — the least informative message a SQL
+  engine has. Found by **printing the generated statement**, because `s` is a legal alias
+  everywhere else in the query.
+- **`unattributed` was in `by_mechanism` *and* a top-level field.** That double-counted it,
+  so `shares_account_for_everything()` failed on a metric that was arithmetically correct.
+  The invariant is "mechanisms **plus** unattributed"; putting unattributed inside the
+  mechanisms breaks its own definition.
+
+### And the doctest trap, twice, in consecutive passes
+
+`media_resilience.rs` — my fix comment quoted the `42601` error as an **indented** doc
+block, which rustdoc collects as a *Rust* code block, so `cargo test` ran it as a doctest
+and rustc read `42601` as an item:
+
+```
+test crates/db/src/media_resilience.rs - media_resilience::count_well_mirrored (line 3161) ... FAILED
+```
+
+Identical to the `hit_rate.rs` trap from the previous pass, one commit earlier — where I
+had already written down how to avoid it. Knowing the rule and applying it are separate
+skills; fencing the block was the whole fix.
+
+### Five FK failures that named nothing
+
+`FOREIGN KEY constraint failed` names no column. Every test had minted its **own** account
+with a slightly different label from the seed's, so each rating referenced an account that
+did not exist. The error sent me looking at `works` and at primary keys first. What found
+it was an explicit per-target existence check:
+
+```
+FK target missing: accounts a6b5b79b-… is not in the table
+```
+
+The account now comes from the seed, so a test cannot invent a second one.
+
+### Verification
+
+| gate | SQLite | PostgreSQL |
+|---|---|---|
+| `north_star` (7 plan cases) | **7/7** | **7/7** (110.3s) |
+| `north_star_arithmetic` (13 degenerate inputs) | **13/13** | n/a (pure) |
+| workspace `cargo test` | see below | — |
+| doctests | clean | — |
+| fmt, clippy `-D warnings` | clean | — |
+
+The 13 arithmetic tests call the **real** functions, which are `pub` for that reason. An
+earlier draft re-implemented `median` locally — the same mistake
+`arena_weights_decode.rs` records, where a hand-copied query stayed green while the real
+one in `tasting.rs` had been reverted.
