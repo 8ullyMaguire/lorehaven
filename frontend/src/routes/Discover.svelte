@@ -20,6 +20,7 @@
   } from '../lib/api';
   import { handleLinkClick } from '../lib/router';
   import { session } from '../lib/session.svelte.ts';
+  import WhyRecommended from '../lib/components/WhyRecommended.svelte';
   import Button from '../lib/components/Button.svelte';
   import ErrorSummary from '../lib/components/ErrorSummary.svelte';
   import MostBookmarkedThisWeek from '../lib/components/MostBookmarkedThisWeek.svelte';
@@ -188,6 +189,15 @@
             <span class="feed-work">{item.title ?? item.work_id}{#if item.title && item.author_handle}&nbsp;·{/if}{#if item.author_handle}&nbsp;by {item.author_handle}{/if}</span>
             {#if item.title}<span class="feed-title">{item.title}</span>{/if}
           </a>
+          <!--
+            Item 9: why this appeared. OUTSIDE the <a>, deliberately.
+
+            The whole row is one link, so a button inside it is a button inside an anchor:
+            invalid HTML, and in practice the click navigates and the disclosure never
+            opens. It also breaks cmd-click-to-open-in-new-tab for the work itself. A
+            sibling is the only shape where both controls do their own job.
+          -->
+          <WhyRecommended slotId={item.slot_id} />
         </li>
       {/each}
     </ul>
@@ -221,6 +231,13 @@
     border-radius: 0.5rem;
     color: var(--text-muted);
   }
+  .feed li {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
   .feed {
     list-style: none;
     padding: 0;
