@@ -434,6 +434,32 @@ pub struct ReadingTotals {
     pub reading_seconds: i64,
 }
 
+/// The `per_work` and `gaps` aliases on the PostgreSQL arm are **required**, not
+/// decorative. PostgreSQL rejects an unaliased subquery in `FROM` outright:
+///
+/// ```text
+/// 42601 subquery in FROM must have an alias
+/// DETAIL: For example, FROM (SELECT ...) [AS] foo.
+/// ```
+///
+/// SQLite accepts it, so the SQLite arm below is correct without them and the whole
+/// statement compiled, passed all 13 SQLite tests, and returned a masked 500 to the
+/// reader on PostgreSQL -- because `ApiError::Internal` reports "Something went wrong
+/// on our side" and nothing else. The four failing tests in `analytics_gate` could not
+/// say why, and neither could a `RUST_LOG=debug` run of them, which is what made this
+/// expensive to find.
+///
+/// This is the **second** occurrence of this exact fault in this repository; the first
+/// was `hit_rate.rs`, where a checker that had flagged the right file for the wrong
+/// reason sent someone to look. Same shape, same dialect, same invisible-to-SQLite
+/// signature. `scripts/check-pg-subquery-alias.py` now catches it mechanically, and its
+/// self-test pins the three shapes that are *not* faults:
+///
+/// ```text
+/// FROM (VALUES (0), (1)) AS seq(value)   -- a column-list alias IS an alias
+/// EXTRACT(EPOCH FROM (a - b))            -- EXTRACT's FROM is not a FROM clause
+/// -- FROM (SELECT ...)                    -- a SQL comment is not code
+/// ```
 const READING_TOTALS_SQLITE: &str = "SELECT
      (SELECT COUNT(*) FROM reading_status rs
         WHERE rs.account_id = ?
@@ -475,7 +501,7 @@ const READING_TOTALS_POSTGRES: &str = "SELECT
                  WHERE c.work_id = rp.subject_id) AS word_total
           FROM reading_progress rp
          WHERE rp.account_id = $3::uuid
-           AND rp.subject_type = 'work')) AS words_read,
+           AND rp.subject_type = 'work') per_work) AS words_read,
      (SELECT COALESCE(CAST(SUM(LEAST(gap, 1800)) AS BIGINT), 0) FROM (
         SELECT EXTRACT(EPOCH FROM (nxt.created_at::timestamptz - prev.created_at::timestamptz)) AS gap
           FROM reading_progress prev
@@ -484,7 +510,7 @@ const READING_TOTALS_POSTGRES: &str = "SELECT
            AND nxt.subject_id = prev.subject_id
            AND nxt.created_at > prev.created_at
          WHERE prev.account_id = $4::uuid
-           AND prev.subject_type = 'work')) AS reading_seconds";
+           AND prev.subject_type = 'work') gaps) AS reading_seconds";
 
 /// The caller's own reading totals.
 ///

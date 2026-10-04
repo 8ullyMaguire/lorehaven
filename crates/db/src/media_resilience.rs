@@ -3154,6 +3154,15 @@ pub async fn find_curator_bounty_queue(
 // ---------------------------------------------------------------------------
 
 /// Count media references that have at least `min_healthy` healthy links.
+///
+/// The `GROUPED` alias is required on the PostgreSQL arm. PostgreSQL rejects an
+/// unaliased subquery in `FROM`:
+///
+///     42601 subquery in FROM must have an alias
+///
+/// SQLite accepts it, so both arms read the same without one and the SQLite tests are
+/// green either way. Aliasing only the PostgreSQL arm keeps the two halves differing
+/// exactly where the dialects do.
 pub async fn count_well_mirrored(db: &Database, min_healthy: i64) -> Result<i64> {
     let sql = sql_owned(
         db,
@@ -3166,7 +3175,7 @@ pub async fn count_well_mirrored(db: &Database, min_healthy: i64) -> Result<i64>
             SELECT m.id FROM media_references m
             LEFT JOIN availability_links al ON al.media_reference_id = m.id AND al.status = 'healthy'
             GROUP BY m.id HAVING COUNT(al.id) >= $1
-        )".to_string(),
+        ) GROUPED".to_string(),
     );
     let row: (i64,) = match db.backend() {
         Backend::Sqlite => {

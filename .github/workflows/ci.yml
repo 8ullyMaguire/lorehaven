@@ -79,6 +79,21 @@ jobs:
       - name: UUID casts against TEXT columns
         run: python3 scripts/check-pg-uuid-casts.py
 
+      # An unaliased subquery in FROM is rejected outright by PostgreSQL
+      # (`42601 subquery in FROM must have an alias`) and accepted by SQLite, so
+      # the statement compiles, every SQLite test passes, and the reader gets a
+      # masked 500 on the other engine. Three live occurrences: `hit_rate.rs`
+      # (ten tests red on PostgreSQL) and `analytics.rs` (four `analytics_gate`
+      # tests 500ing), plus `media_resilience.rs`. The self-test pins the three
+      # shapes that are NOT faults — a column-list alias, `EXTRACT(EPOCH FROM
+      # (...))`, and a `FROM` inside a SQL comment — each of which this checker
+      # reported before the self-test existed.
+      - name: Subquery-alias checker self-test
+        run: python3 scripts/check-pg-subquery-alias.py --self-test
+
+      - name: Unaliased FROM subqueries
+        run: python3 scripts/check-pg-subquery-alias.py crates
+
       # fix-timestamptz-binds.py is disabled. It assumed the PostgreSQL
       # timestamp columns are TIMESTAMPTZ; they are TEXT, so every cast it
       # added was itself a defect. Only the self-test runs, which keeps the

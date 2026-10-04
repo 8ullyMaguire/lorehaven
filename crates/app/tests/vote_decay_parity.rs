@@ -189,7 +189,7 @@ async fn sql_weight(
                 // table reads as a fresh vote -- the curve is never exercised.
                 // A fractional multiplier is the only way to express a
                 // fractional age on this engine.
-                "SELECT {expr} FROM (SELECT (NOW() - (($1::double precision) * INTERVAL '1 second')) AS voted_at)"
+                "SELECT {expr} FROM (SELECT (NOW() - (($1::double precision) * INTERVAL '1 second')) AS voted_at) clk"
             ))
             // `voted_at` is in the PAST, so the multiplier is positive. The
             // age expression is `NOW() - voted_at`; a negative multiplier
