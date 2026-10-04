@@ -86,14 +86,34 @@ def bundled_sqlite_version() -> tuple[int, int, int]:
         )
 
     # The bundled amalgamation's version is in the crate's own Cargo.toml only
-    # as a source dependency, so read the vendored header when it is present.
+    # as a source dependency, so read the vendored header -- for THE CRATE THE
+    # LOCKFILE NAMES, and no other.
+    #
+    # This glob used to be `libsqlite3-sys-*/sqlite3.h` and take `vendored[0]`,
+    # which silently read whichever version sorted first. On this machine that is
+    # 3.51.3 from libsqlite3-sys 0.37.0 -- a crate this project does not depend on --
+    # while the locked 0.30.1 bundles 3.46.0.
+    #
+    # The failure was invisible and total. `forbidden_construct()` returns the rules
+    # that apply BELOW the given version, so a too-high reading makes every rule
+    # inactive: the gate reported a clean tree over migrations it would have
+    # rejected, and its own self-test failed 5 of its cases with "not reported,
+    # expected reported". Both the gate and its test were reporting the same wrong
+    # number, so neither could catch it -- a checker that cannot detect its own
+    # misconfiguration.
+    #
+    # The version is a property of ONE crate, so the crate is selected by the
+    # version already parsed above rather than by directory order.
+    pinned = match.group(1)
     vendored = list(Path.home().glob(
-        ".cargo/registry/src/*/libsqlite3-sys-*/sqlite3/sqlite3.h"
+        f".cargo/registry/src/*/libsqlite3-sys-{pinned}/sqlite3/sqlite3.h"
     ))
     if not vendored:
         raise SystemExit(
-            "libsqlite3-sys is in the lockfile but its bundled sqlite3.h is not "
-            "on disk: run `cargo fetch` first, or this gate cannot pin a version"
+            f"libsqlite3-sys {pinned} is in the lockfile but its bundled sqlite3.h "
+            f"is not on disk: run `cargo fetch` first, or this gate cannot pin a "
+            f"version. (A DIFFERENT libsqlite3-sys on disk does not help -- this "
+            f"gate reads only the version the lockfile names.)"
         )
 
     header = vendored[0].read_text(encoding="utf-8", errors="replace")
