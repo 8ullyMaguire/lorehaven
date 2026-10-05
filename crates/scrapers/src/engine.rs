@@ -425,8 +425,25 @@ impl BodyGuard {
 /// the phrase `Just a moment` is a page about a moment, not a wall.
 #[must_use]
 pub fn is_bot_challenge(status: u16, headers: &[(&str, String)], body: &str) -> bool {
-    let refused = matches!(status, 403 | 429 | 503 | 525);
-    if !refused {
+    // A status ALONE is never proof of a wall. Every status in this list is
+    // also what an ordinary outage looks like, and reading one as "refused as
+    // automated traffic" tells the reader the wrong thing about their own
+    // import.
+    //
+    // Measured 2026-10-05 against live AO3: a Cloudflare `525` body is
+    // `<title>archiveofourown.org | 525: SSL handshake failed</title>` with NO
+    // `cf-mitigated`, NO `chlray` in `server-timing`, and none of the three
+    // body markers. It is Cloudflare failing to reach AO3's origin — a
+    // transient outage, and one that hits roughly 1 request in 4 from this
+    // host. Before this check required corroboration, those 525s were reported
+    // as `Blocked` ("refused the request as automated"), which is both false
+    // and unactionable: nothing about the reader's request caused it.
+    //
+    // `503` is treated the same way. A genuine Cloudflare challenge always
+    // carries `cf-mitigated: challenge` or a challenge marker, so requiring
+    // corroboration costs nothing on a real wall and stops an outage from
+    // being reported as a policy decision.
+    if !matches!(status, 403 | 429 | 503 | 525) {
         return false;
     }
     let header = |name: &str| -> Option<&str> {
@@ -464,6 +481,28 @@ mod tests {
 
     fn headers(pairs: &[(&'static str, &str)]) -> Vec<(&'static str, String)> {
         pairs.iter().map(|(k, v)| (*k, (*v).to_owned())).collect()
+    }
+
+    #[test]
+    fn a_cloudflare_525_is_an_outage_not_a_wall() {
+        // Captured verbatim from live AO3 on 2026-10-05. Cloudflare could not
+        // complete an SSL handshake with AO3's origin. No challenge header, no
+        // challenge marker, and the body says exactly what happened.
+        const OUTAGE: &str = "<title>archiveofourown.org | 525: SSL handshake failed</title>";
+        assert!(
+            !is_bot_challenge(525, &[], OUTAGE),
+            "a 525 with no challenge signal is a transient outage and must not be \
+             reported to the reader as their request being refused"
+        );
+        // The same reasoning applies to 503: Cloudflare's own maintenance and
+        // upstream-error pages look like this.
+        assert!(!is_bot_challenge(503, &[], "<title>503 Service Temporarily Unavailable</title>"));
+        // A 525 that DOES carry a challenge header is still a wall.
+        assert!(is_bot_challenge(
+            525,
+            &[("cf-mitigated", "challenge".to_owned())],
+            OUTAGE
+        ));
     }
 
     #[test]

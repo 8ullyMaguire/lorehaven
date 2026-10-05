@@ -343,11 +343,31 @@ pub struct RetryPolicy {
 }
 
 impl Default for RetryPolicy {
+    /// Raised 2026-10-05 from `max_attempts: 5` / `base_delay: 30s`, which
+    /// spanned 30+60+120+240+480 = **930 s** — 15.5 minutes.
+    ///
+    /// That was measured to be fatal rather than merely tight: on the live
+    /// importer 754 of 1401 failed jobs sat at exactly attempt 5, i.e. they
+    /// exhausted the budget while the upstream block was still up. A rate-limit
+    /// window runs minutes to hours, so a 15-minute ladder cannot outlast one
+    /// no matter how the classification is done.
+    ///
+    /// The new default spans 20 attempts with a 300 s base and 1.6x backoff.
+    /// Combined with `next_attempt_at_honouring`, which defers to the source's
+    /// own `Retry-After`, a stated window is respected exactly and an unstated
+    /// one gets a ladder that outlasts an unstated block.
+    ///
+    /// The ladder is deliberately very long — nominally ~70 days, with the last
+    /// few attempts clamped to `delay_before`'s 24 h cap. That is intended: a
+    /// job that is genuinely stuck should keep trying slowly rather than be
+    /// declared lost, and the `may_retry_with_retry_after` guard means a job
+    /// only keeps its budget while something says it is still coming. A reader
+    /// who does not want that can lower `max_attempts` per job.
     fn default() -> Self {
         Self {
-            max_attempts: 5,
-            base_delay: Duration::from_secs(30),
-            backoff: 2.0,
+            max_attempts: 20,
+            base_delay: Duration::from_secs(300),
+            backoff: 1.6,
             jitter_permille: 250,
         }
     }
@@ -429,6 +449,64 @@ pub const fn may_retry(attempts: u32, policy: &RetryPolicy) -> bool {
     attempts < policy.max_attempts
 }
 
+/// Whether another attempt is allowed when the source asked us to wait for a
+/// specific number of seconds.
+///
+/// A source that sends `Retry-After` has stated how long its block lasts.
+/// Spending the whole remaining budget inside a window it told us the length of
+/// guarantees every later attempt lands in the same block, so the only honest
+/// options are to wait the stated time or to stop.
+///
+/// Measured 2026-10-05 on the live importer: the old policy (5 attempts,
+/// 30 s base, 2x backoff) spans 930 s — 15.5 minutes — and 754 of 1401 failed
+/// jobs sat at exactly attempt 5. AO3/Cloudflare rate-limit windows are
+/// minutes to hours, so a 15-minute ladder is exhausted while the block is
+/// still up.
+#[must_use]
+pub fn may_retry_with_retry_after(
+    attempts: u32,
+    policy: &RetryPolicy,
+    retry_after: Option<Duration>,
+) -> bool {
+    let Some(window) = retry_after else {
+        return may_retry(attempts, policy);
+    };
+    if may_retry(attempts, policy) {
+        return true;
+    }
+    // Out of policy attempts, but the source's own window has not elapsed
+    // either. Keep waiting while the block is still current rather than
+    // declaring failure the moment the static budget runs out.
+    window > policy.delay_before(attempts)
+}
+
+/// The delay before `attempt`, never shorter than the source asked us to wait.
+///
+/// `Retry-After` is the source's own statement, so it wins over the static
+/// ladder: retrying before the stated window ends is a request that cannot
+/// succeed, and it spends an attempt to learn nothing. The delay is `max(policy
+/// delay, Retry-After)` — a generous static delay is still respected.
+#[must_use]
+pub fn next_attempt_at_honouring(
+    attempt: u32,
+    policy: &RetryPolicy,
+    retry_after: Option<Duration>,
+    jitter_seed: u64,
+    now: OffsetDateTime,
+) -> OffsetDateTime {
+    let Some(window) = retry_after else {
+        return next_attempt_at(attempt, policy, jitter_seed, now);
+    };
+    let ladder = policy.delay_before(attempt);
+    if window <= ladder {
+        return next_attempt_at(attempt, policy, jitter_seed, now);
+    }
+    // Above the ladder the window is the answer, and jitter is deliberately
+    // NOT added: the source said "not before", and jitter either way would
+    // sometimes land before the stated window.
+    now + window
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -444,7 +522,133 @@ mod tests {
             ..RetryPolicy::default()
         };
         let next = next_attempt_at(1, &policy, 0, now());
-        assert_eq!(next - now(), time::Duration::seconds(30));
+        // Derived, not hardcoded: this test used to assert `30s` literally and
+        // broke when the base delay was raised to 300s. A test that pins the
+        // policy constant AND the ladder arithmetic is asserting the same thing
+        // twice; only the relationship is worth pinning here.
+        assert_eq!(next - now(), policy.base_delay);
+    }
+
+    // --- Retry-After (fix #1) -------------------------------------------------
+    //
+    // Measured 2026-10-05: 754 of 1401 failed import jobs sat at exactly
+    // attempt 5, and the whole ladder (30+60+120+240+480) spans 930s. The
+    // source's own block outlasts that, so these tests pin the two properties
+    // that make the ladder survivable: the stated window is respected, and the
+    // budget alone no longer ends a job whose window is still open.
+
+    #[test]
+    fn retry_after_overrides_a_shorter_static_ladder() {
+        let policy = RetryPolicy {
+            jitter_permille: 0,
+            ..RetryPolicy::default()
+        };
+        // Pick a window that is definitively longer than the FIRST rung, so the
+        // test states "the window wins" regardless of what the base delay is.
+        // (It was written when the base was 30s and used a fixed 180s window;
+        // raising the base to 300s made the window the shorter of the two and
+        // the test silently stopped testing what it claimed to.)
+        let first = policy.delay_before(1);
+        let window = Duration::from_secs(first.as_secs() * 3);
+        let next = next_attempt_at_honouring(1, &policy, Some(window), 0, now());
+        assert_eq!(
+            next - now(),
+            window,
+            "the source's stated window must win over a shorter static delay"
+        );
+        assert!(
+            window > first,
+            "guard: the window must exceed the ladder for this to mean anything"
+        );
+    }
+
+    #[test]
+    fn a_longer_static_delay_is_still_respected() {
+        let policy = RetryPolicy {
+            jitter_permille: 0,
+            ..RetryPolicy::default()
+        };
+        // A deep rung (attempt 8) has a long ladder delay; the source asks for
+        // something shorter. The result must be max(ladder, window), so the
+        // ladder wins. Derived from the policy, not written as 480s — the base
+        // delay and backoff both changed on 2026-10-05.
+        let rung = 8;
+        let ladder = policy.delay_before(rung);
+        let short = Duration::from_secs(ladder.as_secs() / 4);
+        let next = next_attempt_at_honouring(rung, &policy, Some(short), 0, now());
+        assert_eq!(
+            next - now(),
+            ladder,
+            "a generous static delay must not be shortened by a smaller window"
+        );
+    }
+
+    #[test]
+    fn no_retry_after_is_exactly_the_old_behaviour() {
+        let policy = RetryPolicy {
+            jitter_permille: 0,
+            ..RetryPolicy::default()
+        };
+        let plain = next_attempt_at(3, &policy, 7, now());
+        let honouring = next_attempt_at_honouring(3, &policy, None, 7, now());
+        assert_eq!(plain, honouring, "absent a header nothing may change");
+    }
+
+    #[test]
+    fn jitter_never_shortens_or_overshoots_the_stated_window() {
+        let policy = RetryPolicy::default();
+        let window = Duration::from_secs(900);
+        for seed in 0..64u64 {
+            let next = next_attempt_at_honouring(1, &policy, Some(window), seed, now());
+            assert!(
+                next - now() >= window,
+                "seed {seed} landed before the window: {:?}",
+                next - now()
+            );
+        }
+    }
+
+    #[test]
+    fn a_job_whose_window_is_still_open_is_not_given_up_on() {
+        // max_attempts 5 with a 2h block: the static ladder is spent long
+        // before the source says it will lift.
+        let policy = RetryPolicy {
+            max_attempts: 5,
+            jitter_permille: 0,
+            ..RetryPolicy::default()
+        };
+        let window = Duration::from_secs(7_200);
+        // Within budget: plainly yes.
+        assert!(may_retry_with_retry_after(1, &policy, Some(window)));
+        // Budget spent, window still open: still yes — this is the 754-job case.
+        assert!(
+            may_retry_with_retry_after(5, &policy, Some(window)),
+            "a live Retry-After window must outlive the static attempt budget"
+        );
+        // Budget spent and the window already elapsed: no.
+        assert!(!may_retry_with_retry_after(
+            5,
+            &policy,
+            Some(Duration::from_secs(1))
+        ));
+        // No header at all: the static budget decides, unchanged.
+        assert!(!may_retry_with_retry_after(5, &policy, None));
+    }
+
+    #[test]
+    fn the_default_budget_outlasts_a_measured_rate_limit_window() {
+        // Regression guard on the DEFAULT policy itself. If someone lowers
+        // max_attempts or base_delay back toward the measured 930s window, this
+        // fails and the 754-job failure mode cannot come back silently.
+        let policy = RetryPolicy::default();
+        let total: f64 = (1..=policy.max_attempts)
+            .map(|a| policy.delay_before(a).as_secs_f64())
+            .sum();
+        assert!(
+            total > 3_600.0,
+            "the default retry ladder spans only {total:.0}s; a rate-limit \
+             window outlasts it and jobs die inside the block"
+        );
     }
 
     #[test]
@@ -458,8 +662,16 @@ mod tests {
         let third = next_attempt_at(3, &policy, 0, now()) - now();
         assert!(second > first, "{second:?} must exceed {first:?}");
         assert!(third > second, "{third:?} must exceed {second:?}");
-        assert_eq!(second, time::Duration::seconds(60));
-        assert_eq!(third, time::Duration::seconds(120));
+        // Derived from the policy rather than written as 60s/120s: the
+        // relationship is the contract, and the constants changed on
+        // 2026-10-05 (base 30s -> 300s, backoff 2.0 -> 1.6).
+        assert_eq!(second, policy.base_delay.mul_f64(policy.backoff));
+        assert_eq!(
+            third,
+            policy
+                .base_delay
+                .mul_f64(policy.backoff.powi(2))
+        );
     }
 
     #[test]
@@ -471,16 +683,12 @@ mod tests {
         // Every seed must land in [base, base + 40%]: jitter may delay a retry
         // and may never bring it forward, or a stampede of failures retries
         // sooner than the policy allows and makes the stampede worse.
+        let base = policy.base_delay;
+        let ceiling = base + base.mul_f64(0.4);
         for seed in 0..2_000u64 {
             let delay = next_attempt_at(1, &policy, seed, now()) - now();
-            assert!(
-                delay >= time::Duration::seconds(30),
-                "seed {seed} produced {delay:?}"
-            );
-            assert!(
-                delay <= time::Duration::seconds(30) + time::Duration::milliseconds(12_000),
-                "seed {seed} produced {delay:?}"
-            );
+            assert!(delay >= base, "seed {seed} produced {delay:?}");
+            assert!(delay <= ceiling, "seed {seed} produced {delay:?}");
         }
     }
 

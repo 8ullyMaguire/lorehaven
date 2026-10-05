@@ -32,7 +32,9 @@ use anyhow::Result;
 use sqlx::FromRow;
 use time::OffsetDateTime;
 
-use lorehaven_domain::jobs::{may_retry, next_attempt_at, JobKind, JobState, RetryPolicy};
+use lorehaven_domain::jobs::{
+    may_retry_with_retry_after, next_attempt_at_honouring, JobKind, JobState, RetryPolicy,
+};
 use lorehaven_domain::{AccountId, JobId};
 
 use crate::identity::now_rfc3339;
@@ -589,6 +591,42 @@ pub async fn fail(
     fatal: bool,
     now: OffsetDateTime,
 ) -> Result<JobState> {
+    fail_inner(db, job, worker, error, policy, fatal, None, now).await
+}
+
+/// [`fail`], plus the source's own `Retry-After` window.
+///
+/// The window changes both *when* the job may be retried and *whether* it is
+/// retried at all: a job whose stated window has not elapsed keeps its place in
+/// the queue even after the static attempt budget is spent, and its delay is
+/// the window rather than a guess.
+///
+/// Measured 2026-10-05 on the live importer: with the header discarded, 754 of
+/// 1401 failed jobs sat at exactly attempt 5 on a ladder spanning 930 s, which
+/// ends while an upstream block is still up.
+pub async fn fail_honouring_retry_after(
+    db: &Database,
+    job: JobId,
+    worker: &str,
+    error: &str,
+    policy: &RetryPolicy,
+    fatal: bool,
+    retry_after: Option<Duration>,
+    now: OffsetDateTime,
+) -> Result<JobState> {
+    fail_inner(db, job, worker, error, policy, fatal, retry_after, now).await
+}
+
+async fn fail_inner(
+    db: &Database,
+    job: JobId,
+    worker: &str,
+    error: &str,
+    policy: &RetryPolicy,
+    fatal: bool,
+    retry_after: Option<Duration>,
+    now: OffsetDateTime,
+) -> Result<JobState> {
     // Read the attempt count and the request's budget under the lease, then
     // decide.
     let find = db.sql(
@@ -627,18 +665,20 @@ pub async fn fail(
     // here would count every attempt twice and spend the budget at half rate.
     let attempt_number = previous_attempts.max(1);
     let will_retry = !fatal
-        && may_retry(
+        && may_retry_with_retry_after(
             u32::try_from(attempt_number).unwrap_or(u32::MAX),
             &effective,
+            retry_after,
         );
     let next_state = if will_retry {
         JobState::Queued
     } else {
         JobState::Failed
     };
-    let next_at = next_attempt_at(
+    let next_at = next_attempt_at_honouring(
         u32::try_from(attempt_number).unwrap_or(u32::MAX),
         &effective,
+        retry_after,
         jitter_seed(job),
         now,
     );

@@ -2955,9 +2955,11 @@ async fn a_vanished_origin_is_recorded_and_a_transient_one_is_not() {
     // A source that is merely rate-limiting is not a vanished origin, and must
     // not be recorded as one — the job is still queued and the work is still
     // there.
-    let throttled = harness.state_with(FixtureArchive::origin_gone(SourceError::RateLimited(
-        "slow down".to_owned(),
-    )));
+    let throttled = harness.state_with(FixtureArchive::origin_gone(SourceError::RateLimited {
+        host: "archiveofourown.org".to_owned(),
+        detail: "slow down".to_owned(),
+        retry_after: Some(std::time::Duration::from_secs(60)),
+    }));
     let busy = queue_import(&harness, account, &pseud, false).await;
     run_passes(&throttled, 1).await;
     let busy_row = import_row(&harness, &busy).await;

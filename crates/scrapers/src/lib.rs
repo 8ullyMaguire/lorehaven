@@ -43,6 +43,8 @@ pub mod registry;
 pub mod robots;
 
 pub use robots::{FetchClass, RobotsPosture};
+
+use std::time::Duration;
 pub mod safety;
 pub mod sanitize;
 pub mod sites;
@@ -479,8 +481,31 @@ pub enum SourceError {
     #[error("authentication required: {0}")]
     AuthRequired(String),
     /// The source asked us to slow down.
-    #[error("rate limited by the source: {0}")]
-    RateLimited(String),
+    ///
+    /// A STRUCT, not a string, and that is the point of the 2026-10-05 change:
+    /// this variant was a bare `String`, so the host and the `Retry-After`
+    /// window were formatted into the message and then lost. Two consequences,
+    /// both measured on the live importer:
+    ///
+    /// * the retry delay came from a static ladder instead of the window the
+    ///   source actually stated, so jobs burned their whole budget inside a
+    ///   block that had not lifted (754 of 1401 failures sat at exactly
+    ///   attempt 5, on a ladder spanning 930 s);
+    /// * `ao3` and `archive.org` 429s landed in one bucket, though only one of
+    ///   them is reachable by waiting.
+    ///
+    /// `host` names the upstream that refused, so an operator can tell an AO3
+    /// block from an Internet Archive one. `retry_after` is the parsed
+    /// `Retry-After`, if the source sent one.
+    #[error("rate limited by {host}: {detail}")]
+    RateLimited {
+        /// The upstream host that refused, e.g. `archiveofourown.org`.
+        host: String,
+        /// Human-readable detail, never the parsed window.
+        detail: String,
+        /// The source's stated wait, when it sent one.
+        retry_after: Option<Duration>,
+    },
     /// The URL was rejected before any request was made.
     #[error("refused to fetch: {0}")]
     Refused(String),
@@ -498,7 +523,7 @@ impl SourceError {
     pub const fn is_transient(&self) -> bool {
         matches!(
             self,
-            Self::Network(_) | Self::RateLimited(_) | Self::Blocked
+            Self::Network(_) | Self::RateLimited { .. } | Self::Blocked
         )
     }
 
@@ -523,7 +548,7 @@ impl SourceError {
             Self::Parse(_) => "parse",
             Self::Unsupported(_) => "unsupported",
             Self::AuthRequired(_) => "auth_required",
-            Self::RateLimited(_) => "rate_limited",
+            Self::RateLimited { .. } => "rate_limited",
             Self::Refused(_) => "refused",
             Self::Internal(_) => "internal",
         }
@@ -1125,7 +1150,12 @@ mod tests {
     fn error_categories_drive_the_right_decision() {
         // Transient: worth the retry.
         assert!(SourceError::Network("reset".into()).is_transient());
-        assert!(SourceError::RateLimited("slow down".into()).is_transient());
+        assert!(SourceError::RateLimited {
+            host: "archiveofourown.org".into(),
+            detail: "slow down".into(),
+            retry_after: Some(Duration::from_secs(60)),
+        }
+        .is_transient());
         assert!(SourceError::Blocked.is_transient());
         // Not transient: a retry would fail identically.
         assert!(!SourceError::NotFound.is_transient());

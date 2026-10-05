@@ -102,6 +102,22 @@ impl WorkerOptions {
 pub enum HandlerError {
     /// The attempt failed and may be tried again.
     Transient(String),
+    /// The source asked us to wait for a specific time.
+    ///
+    /// Kept apart from [`HandlerError::Transient`] so the queue can use the
+    /// source's own `Retry-After` as the delay instead of a static ladder.
+    ///
+    /// Measured 2026-10-05: with the header discarded and a fixed ladder of
+    /// 30/60/120/240/480 s, 754 of 1401 failed import jobs exhausted their
+    /// budget at attempt 5 while the upstream block was still up. The delay a
+    /// source states is the only one that is certainly long enough.
+    RateLimited {
+        /// The message shown to an operator; carries the host, so an AO3 block
+        /// is distinguishable from an archive.org one.
+        message: String,
+        /// The stated wait, when the source sent a parseable `Retry-After`.
+        retry_after: Option<std::time::Duration>,
+    },
     /// The attempt failed in a way retrying cannot fix.
     Fatal(String),
     /// The job was cancelled, and the handler noticed between units of work.
@@ -111,7 +127,9 @@ pub enum HandlerError {
 impl std::fmt::Display for HandlerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Transient(message) | Self::Fatal(message) => write!(f, "{message}"),
+            Self::Transient(message)
+            | Self::Fatal(message)
+            | Self::RateLimited { message, .. } => write!(f, "{message}"),
             Self::Cancelled => f.write_str("cancelled"),
         }
     }
@@ -124,8 +142,19 @@ impl HandlerError {
     #[must_use]
     pub fn message(&self) -> String {
         match self {
-            Self::Transient(message) | Self::Fatal(message) => message.clone(),
+            Self::Transient(message)
+            | Self::Fatal(message)
+            | Self::RateLimited { message, .. } => message.clone(),
             Self::Cancelled => "cancelled".to_owned(),
+        }
+    }
+
+    /// The source's stated wait, when it sent a usable `Retry-After`.
+    #[must_use]
+    pub fn retry_after(&self) -> Option<std::time::Duration> {
+        match self {
+            Self::RateLimited { retry_after, .. } => *retry_after,
+            _ => None,
         }
     }
 }
@@ -449,6 +478,33 @@ impl Worker {
                 // forever.
                 jobs::close_attempt(state.db(), job, worker, "cancelled", None).await?;
                 Ok(JobState::Cancelled)
+            }
+            Err(HandlerError::RateLimited {
+                message,
+                retry_after,
+            }) => {
+                // The source stated a window. Defer to it: both the delay and
+                // the decision to keep trying, so a job cannot be declared lost
+                // while the source says the block is still up.
+                let next = jobs::fail_honouring_retry_after(
+                    state.db(),
+                    job,
+                    worker,
+                    &message,
+                    &self.inner.options.policy,
+                    false,
+                    retry_after,
+                    OffsetDateTime::now_utc(),
+                )
+                .await?;
+                tracing::warn!(
+                    job = %job,
+                    error = %message,
+                    retry_after_secs = ?retry_after.map(|d| d.as_secs()),
+                    state = next.as_str(),
+                    "job rate limited; retry deferred to the source's window"
+                );
+                Ok(next)
             }
             Err(HandlerError::Transient(message)) => {
                 let next = jobs::fail(

@@ -849,8 +849,15 @@ fn preview_error(error: lorehaven_scrapers::SourceError) -> ApiError {
         }),
         // Rate limiting, blocking and network faults are all "the source is not
         // answering us right now", which is what `SourceUnavailable` means.
-        E::RateLimited(_) => ApiError(AppError::SourceUnavailable {
-            domain: "the source".to_owned(),
+        //
+        // The message names the host, because "the source" is not actionable
+        // when there are two: an `archiveofourown.org` block and an
+        // `archive.org` block have different remedies and were previously
+        // indistinguishable in the reader's face.
+        E::RateLimited {
+            host, detail, ..
+        } => ApiError(AppError::SourceUnavailable {
+            domain: format!("the source ({host}): {detail}; this import will retry"),
         }),
         E::Blocked => ApiError(AppError::SourceUnavailable {
             domain: "the source (it refused the request as automated traffic)".to_owned(),

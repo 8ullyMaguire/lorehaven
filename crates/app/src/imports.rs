@@ -833,9 +833,19 @@ fn classify(error: lorehaven_scrapers::SourceError, source_key: &str) -> Handler
         )),
         // Blocked and rate-limited are the same instruction to us: wait. A
         // retry budget is the queue's job, not this function's.
-        E::RateLimited(message) => {
-            HandlerError::Transient(format!("{source_key} is rate limiting us: {message}"))
-        }
+        //
+        // 2026-10-05: the source's own `Retry-After` now travels with the
+        // error instead of being formatted into the message and dropped. The
+        // queue uses it as the actual delay, so a stated window is honoured
+        // exactly rather than approximated by a static ladder.
+        E::RateLimited {
+            host,
+            detail,
+            retry_after,
+        } => HandlerError::RateLimited {
+            message: format!("{source_key} ({host}) is rate limiting us: {detail}"),
+            retry_after,
+        },
         E::Blocked => HandlerError::Transient(format!(
             "{source_key} refused the request as automated; it may pass on a later attempt"
         )),

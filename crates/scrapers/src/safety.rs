@@ -1180,10 +1180,16 @@ impl SafeFetcher {
                 return Err(SourceError::NotFound);
             }
             if status == 429 {
-                let retry = reply.retry_after.as_deref().unwrap_or("unspecified");
-                return Err(SourceError::RateLimited(format!(
-                    "{host} asked us to wait: retry-after {retry}"
-                )));
+                // The host and the stated window are now carried on the error
+                // rather than formatted into a message and dropped. Measured
+                // 2026-10-05: with them discarded, the retry delay came from a
+                // static 930s ladder and 754 of 1401 failed jobs exhausted the
+                // budget while the block was still up.
+                return Err(SourceError::RateLimited {
+                    host: host.clone(),
+                    detail: format!("status 429; retry-after {}", reply.retry_after.as_deref().unwrap_or("unspecified")),
+                    retry_after: parse_retry_after(reply.retry_after.as_deref()),
+                });
             }
             if status == 401 || status == 403 {
                 // A 403 from a challenge wall is an operational block, not a bad
@@ -2086,6 +2092,31 @@ fn sniff_charset(body: &[u8]) -> Option<String> {
     None
 }
 
+/// Parse a `Retry-After` header into a wait.
+///
+/// RFC 9110 allows two forms: delay-seconds (`120`) and an HTTP-date
+/// (`Wed, 21 Oct 2015 07:28:00 GMT`). Only the numeric form is honoured here,
+/// deliberately: an HTTP-date needs the request time to resolve, and a rate
+/// limiter that sent one is rare enough that guessing a short wait is worse
+/// than treating it as unspecified.
+///
+/// A value that does not parse is `None`, never a panic and never zero — zero
+/// would mean "retry immediately", which is the opposite of what an
+/// unparseable header should do.
+pub(crate) fn parse_retry_after(raw: Option<&str>) -> Option<Duration> {
+    let text = raw?.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let secs: u64 = text.parse().ok()?;
+    // Zero is a legitimate value but a useless instruction; treat a
+    // sub-second window as unspecified so the static ladder applies.
+    if secs == 0 {
+        return None;
+    }
+    Some(Duration::from_secs(secs))
+}
+
 /// Find a byte substring, without pulling in a search crate for eight lines.
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || haystack.len() < needle.len() {
@@ -2878,18 +2909,69 @@ mod tests {
         assert_eq!(encode_form(&mut empty), "");
     }
 
+    #[test]
+    fn a_numeric_retry_after_is_honoured_exactly() {
+        assert_eq!(
+            parse_retry_after(Some("120")),
+            Some(Duration::from_secs(120)),
+            "delay-seconds is the common form and must be exact"
+        );
+        assert_eq!(
+            parse_retry_after(Some(" 3600 ")),
+            Some(Duration::from_secs(3600))
+        );
+    }
+
+    #[test]
+    fn an_unusable_retry_after_is_unspecified_never_zero() {
+        // RFC 9110 also allows an HTTP-date. It needs the request time to
+        // resolve, so it is treated as unspecified rather than guessed.
+        assert_eq!(
+            parse_retry_after(Some("Wed, 21 Oct 2015 07:28:00 GMT")),
+            None
+        );
+        // Zero must never become "retry immediately", which is the opposite of
+        // what a rate limiter asked for.
+        assert_eq!(parse_retry_after(Some("0")), None);
+        assert_eq!(parse_retry_after(Some("")), None);
+        assert_eq!(parse_retry_after(Some("   ")), None);
+        assert_eq!(parse_retry_after(Some("-5")), None);
+        assert_eq!(parse_retry_after(Some("soon")), None);
+        assert_eq!(parse_retry_after(None), None);
+    }
+
     #[tokio::test]
     async fn the_fixture_fetcher_records_what_was_asked_for() {
         let fetcher = FixtureFetcher::new()
             .with_page("https://example.com/a", "<html>a</html>")
-            .with_failure("broken", SourceError::RateLimited("slow".into()));
+            .with_failure(
+                "broken",
+                SourceError::RateLimited {
+                    host: "example.com".into(),
+                    detail: "slow".into(),
+                    retry_after: Some(Duration::from_secs(30)),
+                },
+            );
 
         let page = fetcher.get("https://example.com/a").await.unwrap();
         assert_eq!(page.body, "<html>a</html>");
         assert_eq!(page.final_url, "https://example.com/a");
 
         let error = fetcher.get("https://example.com/broken").await.unwrap_err();
-        assert!(matches!(error, SourceError::RateLimited(_)));
+        assert!(matches!(error, SourceError::RateLimited { .. }));
+        // The whole point of fix #2: the host and the window survive the trip
+        // out of the fetcher instead of only existing in a message string.
+        if let SourceError::RateLimited {
+            host,
+            retry_after,
+            ..
+        } = &error
+        {
+            assert_eq!(host, "example.com");
+            assert_eq!(*retry_after, Some(Duration::from_secs(30)));
+        } else {
+            panic!("expected a rate-limited error, got {error:?}");
+        }
 
         let missing = fetcher
             .get("https://example.com/missing")
