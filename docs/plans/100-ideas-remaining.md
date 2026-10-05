@@ -41,24 +41,24 @@ about a term; the *wired/unwired* column is the finding.
 |---|---|---|
 | **shipped AND wired** | **8** | items 1, 4, 7, 9, 11, 14, 27, 33 |
 | built by an earlier pass | 2 | items 8, 22 — the probe was wrong, not the code |
-| **shipped from `requirements.csv`** | **1** | M45-51 subject access + erasure (`9f9995f`) |
+| **shipped from `requirements.csv`** | **2** | M45-51 subject access + erasure (`9f9995f`), M45-53 import visibility (`da3dfe2`, `ded795a`) |
 | **open, Tier 1 remainder** | **5** | items 31, 41, 43, 75, 22-preset |
-| next in queue | — | item 31 |
+| next in queue | — | item 31, or M45-39 (the two external-dependency rows) |
 | deliberately refused | 3 | item 2 (archive scrape), the streak trio — argued in `100-ideas-scope.md` §1 |
 | not yet assessed | ~72 | see "what I did not touch" at the foot |
 
-## The 27 `planned` rows in `requirements.csv`, and how they were sorted
+## The 26 `planned` rows in `requirements.csv`, and how they were sorted
 
 The CSV is the canonical inventory (703 rows: 120 `implemented-verified-e2e`, 312
 `implemented-fully-tested`, 239 `implemented-locally-tested`, 4 `unsupported`, 1
-`evaluated-and-rejected`, **27 `planned`**). Grouping the 27 by what they need:
+`evaluated-and-rejected`, **26 `planned`**). Grouping them by what they need:
 
 | group | count | ids |
 |---|---|---|
-| new query/store | 24 | M45-25, 26, 27, 29, 30, 32, 33, 34, 36, 37, 38, 40, 41, 42, 43, 44, 45, 46, 47, 48, 50, 52, 54, 55 |
+| new query/store | 22 | M45-25, 26, 27, 29, 30, 32, 33, 34, 36, 37, 38, 40, 41, 42, 43, 44, 45, 46, 47, 48, 50, 52, 54, 55 |
 | migrations | 1 | M45-28 |
 | external dependencies | 2 | M45-39 (ActivityPub), M45-53 (scraping providers) |
-| **done since** | **−1** | M45-51 shipped as `9f9995f` |
+| **done since** | **−2** | M45-51 (`9f9995f`), M45-53 (`da3dfe2`, `ded795a`) |
 
 **No `planned` row has render work left in it.** Item 9 was the last one where data existed
 and nothing displayed it. Every remaining row is a feature, which is why this queue is going
@@ -70,12 +70,18 @@ first because its correctness stake per unit of work was the highest: both halve
 where a silent bug is a real harm, and the measurement showed the erasure half was already 99%
 present as schema.
 
-**M45-53 (import visibility default) should be next.** It is flagged "biggest reputational and
-copyright risk" in its own notes, and it is a *visibility default* — the exact class of bug this
-project has now shipped four times (`is_public` dropped from a query, invisible on one engine;
-`profile_empty` unable to survive an empty result; a nav link present but unreachable; a
-`slot_id` written by the server and read by nobody). M45-39 was rejected for now because it
-needs ActivityPub and mutual backup before any code, which is the shape that goes wrong quietly.
+**M45-53 is closed** (`da3dfe2`, `ded795a`), and its closing is the pattern to follow for the
+rest: **measure before building.** It was flagged "biggest reputational and copyright risk" and
+turned out to be already satisfied — `body_for` filters `account_id` inside the query, its
+signature leaves a route nowhere else to put an account, and the injection-verified test predated
+the requirement. `library_items` has no visibility column at all, so there was no default to get
+wrong. What shipped was the *gate* (`scripts/check-library-visibility.py`) so the property stops
+depending on every route happening to take the session account, plus runtime proof on the
+metadata routes.
+
+**M45-39 is next**, and it is the first of the two rows that need an external protocol
+(ActivityPub for account `Move`, a dead-man's-switch export). Neither M45-28 (migrations) nor
+the 22 new-query rows have a spec section either, so each still needs spec + plan first.
 
 **The "no UI" and "never rendered" rows are gone because those items are now rendered.**
 Every row above was re-probed against the tree on 2026-10-05 rather than carried forward —
